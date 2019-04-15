@@ -6,6 +6,45 @@
 #include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
 
+// Note [What is CuDNNWrapper good for?]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Suppose you are writing a kernel that calls into CuDNN, and
+// you need a cudnnHandle_t to pass to the kernel call.  How should
+// you go about getting one of those handles?  You'd prefer not
+// to make a new cudnnHandle_t every call; this can be somewhat
+// expensive (1-2%, according to some measurements in TensorFlow.)
+// But cudnnHandle_t is not thread-safe, so we can't just have
+// a single global cudnnHandle_t that everyone uses.
+//
+// Thus, the most common method in Caffe2 for getting a CuDNN handle
+// is to get a per-thread, per-stream CuDNN handle from CUDAContext
+// (which knows what the current thread and stream are).  The idiomatic
+// way to do this in Caffe2 today is to make a CuDNNWrapper and then call
+// inline_cudnn_handle(), although you didn't really need the
+// CuDNNWrapper at all (you could have gotten it directly from
+// CUDAContext.)
+//
+// So, what's all this business about CuDNNWrapper?  In theory, it was
+// designed with a more specialized use-case in mind, where you need to
+// make multiple calls to CuDNN in parallel; e.g., when manually
+// computing group convolution.  By using with_cudnn_state(), you can
+// get separate cudnnHandle_t and CUDA stream per parallel thread of
+// execution, and run all of the cuDNN calls in parallel.  CuDNNWrapper
+// handles the business of synchronizing with the stream prior to this
+// call.
+//
+// (By the way, this is why no such CUBLASWrapper exists; there isn't
+// ever any reason you need to call cublas in parallel, since most
+// cublas operations have batched variants.)
+//
+// Now, that's the theory... in practice, this is only ever used when
+// multiple operators are run in parallel, and not to actually
+// parallelize multiple CuDNN calls (for example, group convolution is
+// now supported natively in CuDNN.)  So... while the kit provided here
+// might be useful for someone else in the future, it's not really used
+// now.  So we might consider deleting it, or unifying this mechanism
+// with PyTorch's own CuDNN handle pool.  (which is it's own thing.)
+
 namespace caffe2 {
 
 class CuDNNWrapper;
@@ -24,8 +63,7 @@ struct CuDNNWorkspace {
   void* get(size_t nbytes) {
     if (nbytes_ < nbytes) {
       reset();
-      auto data_and_deleter = CUDAContext::New(nbytes);
-      data_ = {data_and_deleter.first, data_and_deleter.second};
+      data_ = CUDAContext::New(nbytes);
       nbytes_ = nbytes;
     }
     CAFFE_ENFORCE_GE(nbytes_, nbytes);
@@ -33,12 +71,12 @@ struct CuDNNWorkspace {
   }
 
   void reset() {
-    data_ = nullptr;
+    data_.clear();
     nbytes_ = 0;
   }
 
  private:
-  std::unique_ptr<void, MemoryDeleter> data_{nullptr, NoDelete};
+  at::DataPtr data_{nullptr, nullptr, &NoDelete, at::Device(CUDA)};
   size_t nbytes_{0};
 };
 
@@ -49,7 +87,7 @@ struct CuDNNWorkspace {
 class CuDNNState {
  public:
   explicit CuDNNState(size_t gpu_id) : gpu_id_(gpu_id) {
-    DeviceGuard g(gpu_id_);
+    CUDAGuard g(gpu_id_);
     CUDNN_ENFORCE(cudnnCreate(&cudnn_handle_));
     CUDA_ENFORCE(cudaEventCreate(&before_));
     CUDA_ENFORCE(cudaEventCreate(&after_));
@@ -58,7 +96,7 @@ class CuDNNState {
   }
 
   ~CuDNNState() noexcept {
-    DeviceGuard g(gpu_id_);
+    CUDAGuard g(gpu_id_);
     CUDNN_CHECK(cudnnDestroy(cudnn_handle_));
     CUDA_CHECK(cudaStreamDestroy(stream_));
     CUDA_CHECK(cudaEventDestroy(after_));
@@ -89,7 +127,7 @@ class CuDNNState {
   cudaStream_t stream_{nullptr};
   CuDNNWorkspace workspace_;
   size_t gpu_id_{0};
-  DISABLE_COPY_AND_ASSIGN(CuDNNState);
+  C10_DISABLE_COPY_AND_ASSIGN(CuDNNState);
 };
 
 /**
@@ -122,9 +160,9 @@ class CuDNNWrapper {
   void with_cudnn_state(size_t state_idx, F&& f) {
     CAFFE_ENFORCE(
         state_idx < CAFFE2_COMPILE_TIME_MAX_CUDNN_STATES, "Invalid state_idx");
-    auto& sync_state = cudnn_states()[context_->cuda_gpu_id()][state_idx];
+    auto& sync_state = cudnn_states()[context_->device_id()][state_idx];
 
-    DeviceGuard dg(context_->cuda_gpu_id());
+    CUDAGuard dg(context_->device_id());
 
     // We need to serialize execution on the CuDNNState as we can't
     // allow multiple threads to race through the cudaEventRecord
@@ -132,7 +170,7 @@ class CuDNNWrapper {
     // execution)
     std::lock_guard<std::mutex> g(sync_state.mutex);
     if (!sync_state.state.get()) {
-      sync_state.state.reset(new CuDNNState(context_->cuda_gpu_id()));
+      sync_state.state.reset(new CuDNNState(context_->device_id()));
     }
     CHECK_NOTNULL(sync_state.state.get())->execute(context_->cuda_stream(), f);
   }
@@ -150,10 +188,10 @@ class CuDNNWrapper {
 
   using PerGPUCuDNNStates = std::array<
       std::array<SyncedCuDNNState, CAFFE2_COMPILE_TIME_MAX_CUDNN_STATES>,
-      CAFFE2_COMPILE_TIME_MAX_GPUS>;
+      C10_COMPILE_TIME_MAX_GPUS>;
   static PerGPUCuDNNStates& cudnn_states();
 
-  DISABLE_COPY_AND_ASSIGN(CuDNNWrapper);
+  C10_DISABLE_COPY_AND_ASSIGN(CuDNNWrapper);
 };
 
 }; // namespace caffe2

@@ -16,12 +16,12 @@ class FloorOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-    auto* Y = Output(0);
-    Y->ResizeLike(X);
+
+    auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
     const float* Xdata = X.template data<float>();
     float* Ydata = Y->template mutable_data<float>();
-    for (int i = 0; i < X.size(); ++i) {
+    for (int i = 0; i < X.numel(); ++i) {
       Ydata[i] = std::floor(Xdata[i]);
     }
     return true;

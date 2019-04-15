@@ -537,7 +537,7 @@ class Seq2SeqModelCaffe2(object):
                     if batch_obj_name in ['encoder_inputs', 'decoder_inputs']:
                         dev = core.DeviceOption(caffe2_pb2.CPU)
                     else:
-                        dev = core.DeviceOption(caffe2_pb2.CUDA, i)
+                        dev = core.DeviceOption(workspace.GpuDeviceType, i)
                     workspace.FeedBlob(name, batch_obj_value, device_option=dev)
 
         if forward_only:

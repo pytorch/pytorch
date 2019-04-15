@@ -30,10 +30,10 @@ struct ProxyPrinter {
         int16_t,
         int64_t,
         double,
-        char>>::call(this, tensor->meta());
+        char>>::call(this, tensor->dtype());
   }
 
-  const Tensor<CPUContext>* tensor;
+  const Tensor* tensor;
   TensorPrinter* tensorPrinter;
 };
 }
@@ -52,7 +52,7 @@ SmartTensorPrinter::SmartTensorPrinter(
     int limit)
     : tensorPrinter_(tensor_name, file_name, limit) {}
 
-void SmartTensorPrinter::Print(const Tensor<CPUContext>& tensor) {
+void SmartTensorPrinter::Print(const Tensor& tensor) {
   ProxyPrinter printer;
 
   printer.tensor = &tensor;
@@ -71,7 +71,7 @@ SmartTensorPrinter& SmartTensorPrinter::DefaultTensorPrinter() {
 #endif
 }
 
-void SmartTensorPrinter::PrintTensor(const Tensor<CPUContext>& tensor) {
+void SmartTensorPrinter::PrintTensor(const Tensor& tensor) {
   DefaultTensorPrinter().Print(tensor);
 }
 }

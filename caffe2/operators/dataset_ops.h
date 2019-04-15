@@ -123,7 +123,7 @@ class TreeWalker {
     return prevOffsets_[lengthIdx(fieldId)];
   }
 
-  std::vector<TIndex> fieldDim(int fieldId) const;
+  std::vector<int64_t> fieldDim(int fieldId) const;
 
   void* fieldPtr(int fieldId) const;
 
@@ -134,12 +134,12 @@ class TreeWalker {
     Field(TreeWalker& walker, int fieldId)
         : walker_(walker), fieldId_(fieldId) {}
 
-    inline std::vector<TIndex> dim() const {
+    inline std::vector<int64_t> dim() const {
       return walker_.fieldDim(fieldId_);
     }
 
-    inline TIndex size() const {
-      TIndex size = 1;
+    inline int64_t size() const {
+      int64_t size = 1;
       for (const auto d : dim()) {
         size *= d;
       }
@@ -147,7 +147,7 @@ class TreeWalker {
     }
 
     inline const TypeMeta& meta() const {
-      return walker_.input(fieldId_).meta();
+      return walker_.input(fieldId_).dtype();
     }
 
     inline void* ptr() const {
@@ -191,13 +191,13 @@ class TreeWalker {
 
 using SharedTensorVectorPtr = std::shared_ptr<std::vector<TensorCPU>>;
 
-template <class Context>
-using TensorVectorPtr = std::unique_ptr<std::vector<Tensor<Context>>>;
+using TensorVectorPtr = std::unique_ptr<std::vector<Tensor>>;
 
 class SharedTensorVectorPtrSerializer : public BlobSerializerBase {
  public:
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       BlobSerializerBase::SerializationAcceptor acceptor) override;
 };

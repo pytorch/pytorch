@@ -12,14 +12,25 @@ caffe2_binary_target("db_throughput.cc")
 
 
 if (USE_CUDA)
-  caffe2_binary_target("inspect_gpus.cc")
-  target_link_libraries(inspect_gpus ${CUDA_LIBRARIES})
-  caffe2_binary_target("print_core_object_sizes.cc")
+  caffe2_binary_target("inspect_gpu.cc")
+  target_link_libraries(inspect_gpu ${CUDA_LIBRARIES})
+  caffe2_binary_target("print_core_object_sizes_gpu.cc")
 
   if (BUILD_TEST)
     # Core overhead benchmark
-    caffe2_binary_target("core_overhead_benchmark.cc")
-    target_link_libraries(core_overhead_benchmark benchmark ${CUDA_curand_LIBRARY})
+    caffe2_binary_target("core_overhead_benchmark_gpu.cc")
+    target_link_libraries(core_overhead_benchmark_gpu benchmark ${CUDA_curand_LIBRARY})
+  endif()
+endif()
+
+if (USE_ROCM)
+  caffe2_hip_binary_target("hip/inspect_gpu.cc")
+  caffe2_hip_binary_target("hip/print_core_object_sizes_gpu.cc")
+
+  if (BUILD_TEST)
+    # Core overhead benchmark
+    caffe2_hip_binary_target("hip/core_overhead_benchmark_gpu.cc")
+    target_link_libraries(core_overhead_benchmark_gpu benchmark)
   endif()
 endif()
 
@@ -43,13 +54,17 @@ endif()
 if (USE_OPENCV)
   caffe2_binary_target("make_image_db.cc")
   target_link_libraries(make_image_db ${OpenCV_LIBS})
+  caffe2_binary_target("convert_image_to_tensor.cc")
+  target_link_libraries(convert_image_to_tensor ${OpenCV_LIBS})
 endif()
 
 if (USE_OBSERVERS)
-  add_executable(caffe2_benchmark "caffe2_benchmark.cc" "benchmark_helper.cc")
-  target_link_libraries(caffe2_benchmark  ${Caffe2_MAIN_LIBS})
-  target_link_libraries(caffe2_benchmark ${Caffe2_MODULES})
-  install(TARGETS caffe2_benchmark DESTINATION bin)
+  caffe2_binary_target(caffe2_benchmark "caffe2_benchmark.cc" "benchmark_helper.cc")
+endif()
+
+if (USE_OBSERVERS AND USE_OPENCV)
+  caffe2_binary_target("convert_and_benchmark.cc")
+  target_link_libraries(convert_and_benchmark ${OpenCV_LIBS})
 endif()
 
 # ---[ tutorials

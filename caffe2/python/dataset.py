@@ -48,8 +48,7 @@ class _DatasetReader(Reader):
                 content.field_names(),
                 batch_size=self.batch_size,
                 enforce_batch_size=self.enforce_batch_size)
-            if type(fields) is core.BlobReference:
-                fields = [fields]
+            fields = core.output_to_list(fields)
             return (read_net.IsEmpty([fields[0]]), fields)
 
     def reset(self, net):
@@ -73,7 +72,7 @@ class _DatasetRandomReader(Reader):
         if self.cursor is None:
             self.cursor = init_net.CreateTreeCursor(
                 [],
-                [self.name],
+                init_net.NextScopedBlob(self.name),
                 fields=self.dataset.fields)
 
     def reset(self, net):
@@ -106,14 +105,19 @@ class _DatasetRandomReader(Reader):
         self.indices = indices
 
     def read(self, read_net):
+        assert self.cursor, 'setup_ex not called'
+        assert self.indices, 'sort_and_shuffle not called'
+        assert self.offsets, 'computeoffset not called'
+        content = self.dataset.content()
         with core.NameScope(read_net.NextName(self.name)):
             fields = read_net.ReadRandomBatch(
                 [self.cursor, self.indices, self.offsets] + (
-                    self.dataset.content().field_blobs()),
-                self.dataset.content().field_names(),
+                    content.field_blobs()),
+                content.field_names(),
                 batch_size=self.batch_size,
                 enforce_batch_size=self.enforce_batch_size,
                 loop_over=self.loop_over)
+            fields = core.output_to_list(fields)
             return (read_net.IsEmpty([fields[0]]), fields)
 
 

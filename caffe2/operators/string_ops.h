@@ -2,7 +2,7 @@
 #define CAFFE2_OPERATORS_STRING_OPS_H_
 
 #include "caffe2/core/operator.h"
-#include "caffe2/operators/elementwise_op.h"
+#include "caffe2/operators/elementwise_ops.h"
 
 namespace caffe2 {
 
@@ -19,11 +19,13 @@ struct ForEach {
   explicit ForEach(OperatorBase& op) : functor(op) {}
 
   template <typename In, typename Out, typename Context>
-  void operator()(int n, const In* in, Out* out, Context* /*c*/) {
+  bool operator()(int n, const In* in, Out* out, Context* /*c*/) {
     for (int i = 0; i < n; ++i) {
       out[i] = functor(in[i]);
     }
+    return true;
   }
+
   Functor functor;
 };
 
@@ -39,11 +41,12 @@ class StringJoinOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  StringJoinOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit StringJoinOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         delimiter_(
-            OperatorBase::GetSingleArgument<std::string>("delimiter", ",")),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 0)) {
+            this->template GetSingleArgument<std::string>("delimiter", ",")),
+        axis_(this->template GetSingleArgument<int>("axis", 0)) {
     CAFFE_ENFORCE(axis_ == 0 || axis_ == 1);
   }
 

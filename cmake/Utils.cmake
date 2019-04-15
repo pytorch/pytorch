@@ -113,42 +113,19 @@ function(caffe_parse_header_single_define LIBNAME HDR_PATH VARNAME)
   endif()
 endfunction()
 
-##############################################################################
-# Helper function to automatically generate __init__.py files where python
-# sources reside but there are no __init__.py present.
-function(caffe_autogen_init_py_files)
-  if (CAFFE2_AUTOGEN_INIT_PY_ALREADY_RUN)
-    message(STATUS
-        "A previous caffe2 cmake run already created the __init__.py files.")
-    return()
-  endif()
-  file(GLOB_RECURSE all_python_files RELATIVE ${PROJECT_SOURCE_DIR}
-       "${PROJECT_SOURCE_DIR}/caffe2/*.py")
-  set(python_paths_need_init_py)
-  foreach(python_file ${all_python_files})
-    get_filename_component(python_path ${python_file} PATH)
-    string(REPLACE "/" ";" path_parts ${python_path})
-    set(rebuilt_path ${CMAKE_BINARY_DIR})
-    foreach(path_part ${path_parts})
-      set(rebuilt_path "${rebuilt_path}/${path_part}")
-      list(APPEND python_paths_need_init_py ${rebuilt_path})
-    endforeach()
-  endforeach()
-  list(REMOVE_DUPLICATES python_paths_need_init_py)
-  # Since the _pb2.py files are yet to be created, we will need to manually
-  # add them to the list.
-  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe)
-  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe/proto)
-  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe2/proto)
-
-  foreach(tmp ${python_paths_need_init_py})
-    if(NOT EXISTS ${tmp}/__init__.py)
-      # message(STATUS "Generate " ${tmp}/__init__.py)
-      file(WRITE ${tmp}/__init__.py "")
-    endif()
-  endforeach()
-  set(CAFFE2_AUTOGEN_INIT_PY_ALREADY_RUN TRUE CACHE INTERNAL
-      "Helper variable to record if autogen_init_py is already run or not.")
+################################################################################################
+# Parses a version string that might have values beyond major, minor, and patch
+# and set version variables for the library.
+# Usage:
+#   caffe2_parse_version_str(<library_name> <version_string>)
+function(caffe2_parse_version_str LIBNAME VERSIONSTR)
+  string(REGEX REPLACE "^([0-9]+).*$" "\\1" ${LIBNAME}_VERSION_MAJOR "${VERSIONSTR}")
+  string(REGEX REPLACE "^[0-9]+\\.([0-9]+).*$" "\\1" ${LIBNAME}_VERSION_MINOR  "${VERSIONSTR}")
+  string(REGEX REPLACE "[0-9]+\\.[0-9]+\\.([0-9]+).*$" "\\1" ${LIBNAME}_VERSION_PATCH "${VERSIONSTR}")
+  set(${LIBNAME}_VERSION_MAJOR ${${LIBNAME}_VERSION_MAJOR} ${ARGN} PARENT_SCOPE)
+  set(${LIBNAME}_VERSION_MINOR ${${LIBNAME}_VERSION_MINOR} ${ARGN} PARENT_SCOPE)
+  set(${LIBNAME}_VERSION_PATCH ${${LIBNAME}_VERSION_PATCH} ${ARGN} PARENT_SCOPE)
+  set(${LIBNAME}_VERSION "${${LIBNAME}_VERSION_MAJOR}.${${LIBNAME}_VERSION_MINOR}.${${LIBNAME}_VERSION_PATCH}" PARENT_SCOPE)
 endfunction()
 
 ###
@@ -188,6 +165,25 @@ function(dedent outvar text)
 endfunction()
 
 
+function(pycmd_no_exit outvar exitcode cmd)
+  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
+  if ("${PYTHON_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python")
+  else()
+    set(_python_exe "${PYTHON_EXECUTABLE}")
+  endif()
+  # run the actual command
+  execute_process(
+    COMMAND "${_python_exe}" -c "${cmd}"
+    RESULT_VARIABLE _exitcode
+    OUTPUT_VARIABLE _output)
+  # Remove supurflous newlines (artifacts of print)
+  string(STRIP "${_output}" _output)
+  set(${outvar} "${_output}" PARENT_SCOPE)
+  set(${exitcode} "${_exitcode}" PARENT_SCOPE)
+endfunction()
+
+
 ###
 # Helper function to run `python -c "<cmd>"` and capture the results of stdout
 #
@@ -204,17 +200,8 @@ endfunction()
 #
 function(pycmd outvar cmd)
   dedent(_dedent_cmd "${cmd}")
-  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if ("${PYTHON_EXECUTABLE}" STREQUAL "")
-    set(_python_exe "python")
-  else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
-  endif()
-  # run the actual command
-  execute_process(
-    COMMAND "${_python_exe}" -c "${_dedent_cmd}"
-    RESULT_VARIABLE _exitcode
-    OUTPUT_VARIABLE _output)
+  pycmd_no_exit(_output _exitcode "${_dedent_cmd}")
+
   if(NOT ${_exitcode} EQUAL 0)
     message(ERROR " Failed when running python code: \"\"\"\n${_dedent_cmd}\n\"\"\"")
     message(FATAL_ERROR " Python command failed with error code: ${_exitcode}")

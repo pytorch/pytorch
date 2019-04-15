@@ -21,8 +21,8 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(INPUT);
   const auto& filter = Input(FILTER);
   auto* Y = Output(0);
-  const int image_ndim = X.ndim() - 2;
-  CAFFE_ENFORCE_EQ(X.ndim() + image_ndim, filter.ndim());
+  const int image_ndim = X.dim() - 2;
+  CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
   shape.C = X.dim32(1);
@@ -55,7 +55,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     kernel_dims_size *= kernel_[i];
   }
 
-  shape.X_dims.assign(X.dims().cbegin() + 1, X.dims().cend());
+  shape.X_dims.assign(X.sizes().cbegin() + 1, X.sizes().cend());
   shape.kernel_size = shape.C / group_ * kernel_dims_size;
   lc_op_util::SetColumnBufferShape(
       shape.N,
@@ -81,7 +81,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const T* bias_data = nullptr;
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(bias.ndim(), image_ndim + 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), image_ndim + 1);
     for (int i = 0; i < image_ndim; ++i) {
       CAFFE_ENFORCE_EQ(bias.dim32(i), output_image_dims[i]);
     }
@@ -114,8 +114,8 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       kernel_.size(),
       2,
       "Only 2d locally connected op is supported for NHWC storage type.");
-  const int image_ndim = X.ndim() - 2;
-  CAFFE_ENFORCE_EQ(X.ndim() + image_ndim, filter.ndim());
+  const int image_ndim = X.dim() - 2;
+  CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
   shape.C = X.dim32(3);
@@ -158,7 +158,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const T* bias_data = nullptr;
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(bias.ndim(), image_ndim + 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), image_ndim + 1);
     for (int i = 0; i < image_ndim; ++i) {
       CAFFE_ENFORCE_EQ(bias.dim32(i), output_image_dims[i]);
     }
@@ -189,9 +189,9 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
     const T* filter_data,
     const T* bias_data,
     T* Y_data,
-    Tensor<Context>* column_buffer,
-    Tensor<Context>* column_transposed_buffer,
-    Tensor<Context>* Y_transposed_buffer) {
+    Tensor* column_buffer,
+    Tensor* column_transposed_buffer,
+    Tensor* Y_transposed_buffer) {
   const int input_stride = shape.C / group_ * shape.input_image_size;
   const int column_stride = shape.kernel_size * shape.output_image_size;
   column_buffer->Resize(shape.column_dims);
@@ -246,7 +246,7 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
-  math::GemmBatched(
+  math::GemmStridedBatched(
       CblasNoTrans,
       CblasNoTrans,
       shape.output_image_size * group_,
@@ -255,9 +255,12 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
       shape.kernel_size,
       1.0f,
       filter_data,
+      shape.M / group_ * shape.kernel_size,
       column_transposed_buffer->template data<T>(),
+      shape.kernel_size * shape.N,
       0.0f,
       Y_transposed_buffer_data,
+      shape.M / group_ * shape.N,
       &context_);
   if (bias_data != nullptr) {
     math::Gemm<T, Context>(
@@ -289,9 +292,9 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
     const T* filter_data,
     const T* bias_data,
     T* Y_data,
-    Tensor<Context>* column_buffer,
-    Tensor<Context>* column_transposed_buffer,
-    Tensor<Context>* Y_transposed_buffer) {
+    Tensor* column_buffer,
+    Tensor* column_transposed_buffer,
+    Tensor* Y_transposed_buffer) {
   const int input_stride = shape.C * shape.input_image_size;
   const int column_stride = shape.kernel_size * shape.output_image_size;
   column_buffer->Resize(shape.column_dims);
@@ -325,7 +328,7 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
-  math::GemmBatched(
+  math::GemmStridedBatched(
       CblasNoTrans,
       CblasTrans,
       shape.output_image_size,
@@ -334,9 +337,12 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
       shape.kernel_size,
       1.0f,
       column_transposed_buffer->template data<T>(),
+      shape.N * shape.kernel_size,
       filter_data,
+      shape.kernel_size * shape.M,
       0.0f,
       Y_transposed_buffer_data,
+      shape.N * shape.M,
       &context_);
   math::Transpose(
       shape.Y_transposed_dims.size(),
@@ -366,9 +372,9 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(INPUT);
   const auto& filter = Input(FILTER);
   const auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
-  const int image_ndim = X.ndim() - 2;
-  CAFFE_ENFORCE_EQ(X.ndim() + image_ndim, filter.ndim());
+
+  const int image_ndim = X.dim() - 2;
+  CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
 
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
@@ -392,7 +398,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     kernel_dims_size *= kernel_[i];
   }
 
-  shape.X_dims.assign(X.dims().cbegin() + 1, X.dims().cend());
+  shape.X_dims.assign(X.sizes().cbegin() + 1, X.sizes().cend());
   shape.kernel_size = shape.C / group_ * kernel_dims_size;
   lc_op_util::SetColumnBufferShape(
       shape.N,
@@ -413,7 +419,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       &shape.Y_transposed_dims,
       &shape.Y_axes);
 
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
   const T* X_data = X.template data<T>();
   const T* filter_data = filter.template data<T>();
   const T* dY_data = dY.template data<T>();
@@ -421,15 +427,18 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   T* dX_data = nullptr;
   T* dbias_data = nullptr;
   if (OutputSize() == 3 || (no_bias_ && OutputSize() == 2)) {
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     dX_data = dX->template mutable_data<T>();
   }
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    std::vector<int> dbias_dims = output_image_dims;
+    std::vector<int64_t> dbias_dims;
+    std::copy(
+        output_image_dims.cbegin(),
+        output_image_dims.cend(),
+        std::back_inserter(dbias_dims));
     dbias_dims.push_back(shape.M);
-    dbias->Resize(dbias_dims);
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, dbias_dims, at::dtype<T>());
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
         shape.N, &bias_multiplier_);
     dbias_data = dbias->template mutable_data<T>();
@@ -454,13 +463,13 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(INPUT);
   const auto& filter = Input(FILTER);
   const auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
+
   CAFFE_ENFORCE_EQ(
       kernel_.size(),
       2,
       "Only 2d locally connected op is supported for NHWC storage type.");
-  const int image_ndim = X.ndim() - 2;
-  CAFFE_ENFORCE_EQ(X.ndim() + image_ndim, filter.ndim());
+  const int image_ndim = X.dim() - 2;
+  CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
   shape.C = X.dim32(3);
@@ -499,7 +508,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       &shape.Y_transposed_dims,
       &shape.Y_axes);
 
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
   const T* X_data = X.template data<T>();
   const T* filter_data = filter.template data<T>();
   const T* dY_data = dY.template data<T>();
@@ -507,15 +516,18 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   T* dX_data = nullptr;
   T* dbias_data = nullptr;
   if (OutputSize() == 3 || (no_bias_ && OutputSize() == 2)) {
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     dX_data = dX->template mutable_data<T>();
   }
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    std::vector<int> dbias_dims = output_image_dims;
+    std::vector<int64_t> dbias_dims;
+    std::copy(
+        output_image_dims.cbegin(),
+        output_image_dims.cend(),
+        std::back_inserter(dbias_dims));
     dbias_dims.push_back(shape.M);
-    dbias->Resize(dbias_dims);
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, dbias_dims, at::dtype<T>());
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
         shape.N, &bias_multiplier_);
     dbias_data = dbias->template mutable_data<T>();
@@ -544,9 +556,9 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
     T* dfilter_data,
     T* dX_data,
     T* dbias_data,
-    Tensor<Context>* column_buffer,
-    Tensor<Context>* column_transposed_buffer,
-    Tensor<Context>* dY_transposed_buffer) {
+    Tensor* column_buffer,
+    Tensor* column_transposed_buffer,
+    Tensor* dY_transposed_buffer) {
   const int input_stride = shape.C * shape.input_image_size;
   const int column_stride = shape.kernel_size * shape.output_image_size;
   column_buffer->Resize(shape.column_dims);
@@ -612,7 +624,7 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
       &context_);
 
   // Gradient respect to filter.
-  math::GemmBatched(
+  math::GemmStridedBatched(
       CblasNoTrans,
       CblasTrans,
       shape.output_image_size * group_,
@@ -621,9 +633,12 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
       shape.N,
       1.0f,
       dY_transposed_buffer_data,
+      shape.M / group_ * shape.N,
       column_transposed_buffer->template data<T>(),
+      shape.N * shape.kernel_size,
       0.0f,
       dfilter_data,
+      shape.M / group_ * shape.kernel_size,
       &context_);
 
   if (dbias_data != nullptr) {
@@ -642,7 +657,7 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
 
   if (dX_data != nullptr) {
     // Gradient respect to X.
-    math::GemmBatched(
+    math::GemmStridedBatched(
         CblasTrans,
         CblasNoTrans,
         shape.output_image_size * group_,
@@ -651,9 +666,12 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
         shape.M / group_,
         1.0f,
         filter_data,
+        shape.kernel_size * shape.M / group_,
         dY_transposed_buffer_data,
+        shape.M / group_ * shape.N,
         0.0f,
         column_transposed_buffer->template mutable_data<T>(),
+        shape.kernel_size * shape.N,
         &context_);
     math::Transpose(
         shape.column_transposed_dims.size(),
@@ -714,9 +732,9 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
     T* dfilter_data,
     T* dX_data,
     T* dbias_data,
-    Tensor<Context>* column_buffer,
-    Tensor<Context>* column_transposed_buffer,
-    Tensor<Context>* dY_transposed_buffer) {
+    Tensor* column_buffer,
+    Tensor* column_transposed_buffer,
+    Tensor* dY_transposed_buffer) {
   const int input_stride = shape.C * shape.input_image_size;
   const int column_stride = shape.kernel_size * shape.output_image_size;
   column_buffer->Resize(shape.column_dims);
@@ -760,7 +778,7 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
       &context_);
 
   // Gradient respect to filter.
-  math::GemmBatched(
+  math::GemmStridedBatched(
       CblasTrans,
       CblasNoTrans,
       shape.output_image_size,
@@ -769,9 +787,12 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
       shape.N,
       1.0f,
       dY_transposed_buffer_data,
+      shape.M * shape.N,
       column_transposed_buffer->template data<T>(),
+      shape.N * shape.kernel_size,
       0.0f,
       dfilter_data,
+      shape.M * shape.kernel_size,
       &context_);
 
   if (dbias_data != nullptr) {
@@ -790,7 +811,7 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
 
   if (dX_data != nullptr) {
     // Gradient respect to X.
-    math::GemmBatched(
+    math::GemmStridedBatched(
         CblasNoTrans,
         CblasNoTrans,
         shape.output_image_size,
@@ -799,9 +820,12 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         shape.M,
         1.0f,
         dY_transposed_buffer_data,
+        shape.N * shape.M,
         filter_data,
+        shape.M * shape.kernel_size,
         0.0f,
         column_transposed_buffer->template mutable_data<T>(),
+        shape.N * shape.kernel_size,
         &context_);
     math::Transpose(
         shape.column_transposed_dims.size(),

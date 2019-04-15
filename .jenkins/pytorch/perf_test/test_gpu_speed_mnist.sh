@@ -12,13 +12,16 @@ test_gpu_speed_mnist () {
 
   cd examples/mnist
 
-  pip install -r requirements.txt
+  pip install -q -r requirements.txt
 
   # Download data
   python main.py --epochs 0
 
   SAMPLE_ARRAY=()
   NUM_RUNS=$1
+
+  # Needs warm up to get accurate number
+  python main.py --epochs 1 --no-log
 
   for (( i=1; i<=$NUM_RUNS; i++ )) do
     runtime=$(get_runtime_of_command python main.py --epochs 1 --no-log)

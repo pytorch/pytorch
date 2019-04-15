@@ -2,26 +2,35 @@
 
 #include <algorithm>
 
+#include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator_gradient.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/tensor_int8.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
-CAFFE2_DEFINE_int(
+#include "caffe2/core/operator_c10wrapper.h"
+
+C10_DEFINE_int(
     caffe2_operator_max_engine_name_length,
     10,
     "Maximum engine name length to be stored");
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_disable_implicit_engine_preference,
     false,
     "If set, disable implicit engine preferences. This is useful for unit "
     "testing and debugging cases.");
+C10_DEFINE_bool(
+    caffe2_operator_throw_if_fp_exceptions,
+    false,
+    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID, "
+    "FE_OVERFLOW) are detected when running any operator.");
 
 namespace caffe2 {
 
@@ -31,7 +40,9 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
       device_option_(
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),
+      input_size_(operator_def.input_size()),
       event_(caffe2::make_unique<Event>(device_option_)) {
+  static GlobalInitIsCalledGuard guard;
   for (const string& input_str : operator_def.input()) {
     auto* blob = ws->GetBlob(input_str);
     CAFFE_ENFORCE(
@@ -52,7 +63,48 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   type_ = operator_def.type();
 }
 
-vector<TensorShape> OperatorBase::InputTensorShapes() {
+namespace {
+int compute_input_size_(const std::vector<c10::IValue>& inputs) {
+  if (inputs.empty()) {
+    return 0;
+  }
+  if (inputs[0].isTensorList()) {
+    // if the first input is a tensor list, we get input tensors by indexing
+    // into that list. currently, this means that only tensors from that list
+    // are accessible as inputs. any hypothetical input tensors that come after
+    // the list are not accessible.
+    return inputs[0].toTensorListRef().size();
+  }
+  // it's not a tensor list. Count the number of tensor inputs and return them.
+  size_t num_tensor_inputs = 0;
+  bool found_nontensor = false;
+  for (const auto& input : inputs) {
+    if (input.isTensor()) {
+      AT_ASSERTM(
+          !found_nontensor,
+          "All tensor arguments must come before non-tensor arguments");
+      ++num_tensor_inputs;
+    } else {
+      found_nontensor = true;
+    }
+  }
+  return num_tensor_inputs;
+}
+} // namespace
+
+OperatorBase::OperatorBase(
+    const c10::FunctionSchema& fn_schema,
+    std::vector<c10::IValue> inputs,
+    std::vector<at::Tensor> outputs)
+    : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
+      newstyle_inputs_(std::move(inputs)),
+      newstyle_outputs_(std::move(outputs)),
+      input_size_(compute_input_size_(newstyle_inputs_)) {
+  input_tensors_.resize(input_size_);
+  output_tensors_.resize(newstyle_outputs_.size());
+}
+
+vector<TensorShape> OperatorBase::InputTensorShapes() const {
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
     tps.push_back(GetTensorShapeOfBlob(blob));
@@ -69,13 +121,16 @@ PerOpEnginePrefType& g_per_op_engine_pref() {
 
 GlobalEnginePrefType& g_global_engine_pref() {
   static auto* g_global_engine_pref_ =
-      new GlobalEnginePrefType{{DeviceType::CUDA, {"CUDNN"}}};
+      new GlobalEnginePrefType{{CUDA, {"CUDNN"}}, {HIP, {"MIOPEN"}}};
   return *g_global_engine_pref_;
 }
 
 unique_ptr<OperatorBase> TryCreateOperator(
-    const string& key, const OperatorDef& operator_def, Workspace* ws) {
-  const auto& type = operator_def.device_option().device_type();
+    const string& key,
+    const OperatorDef& operator_def,
+    Workspace* ws) {
+  const auto& type_proto = operator_def.device_option().device_type();
+  const auto& type = ProtoToType(static_cast<DeviceTypeProto>(type_proto));
   CAFFE_ENFORCE(
       gDeviceTypeRegistry()->count(type),
       "Device type ",
@@ -99,7 +154,9 @@ unique_ptr<OperatorBase> _CreateOperator(
     Workspace* ws) {
   static StaticLinkingProtector g_protector;
   const auto& op_type = operator_def.type();
-  const auto& device_type = operator_def.device_option().device_type();
+  const auto& device_type_proto = operator_def.device_option().device_type();
+  const auto& device_type =
+      ProtoToType(static_cast<DeviceTypeProto>(device_type_proto));
 
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // first, check with OpSchema if the operator is legal.
@@ -146,7 +203,8 @@ unique_ptr<OperatorBase> _CreateOperator(
             << engine;
     auto op = TryCreateOperator(key, operator_def, ws);
     if (op) {
-      if (engine.size() <= FLAGS_caffe2_operator_max_engine_name_length) {
+      if (engine.size() <=
+          (unsigned)FLAGS_caffe2_operator_max_engine_name_length) {
         op->annotate_engine(engine);
       } else {
         op->annotate_engine(
@@ -243,9 +301,11 @@ void SetEnginePref(
 
 void SetOpEnginePref(
     const std::string& op_type,
-    const CaffeMap<int, EnginePrefType>& op_pref) {
+    const CaffeMap<DeviceType, EnginePrefType>& op_pref) {
   for (const auto& device_pref_pair : op_pref) {
-    const auto& device_type = device_pref_pair.first;
+    const auto& device_type_proto = device_pref_pair.first;
+    const auto& device_type =
+        ProtoToType(static_cast<DeviceTypeProto>(device_type_proto));
     CAFFE_ENFORCE(
         gDeviceTypeRegistry()->count(device_type),
         "Device type ",
@@ -282,29 +342,37 @@ unique_ptr<OperatorBase> CreateOperator(
   }
 }
 
-std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry() {
-  static std::map<int32_t, OperatorRegistry*> g_device_type_registry;
+std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry() {
+  static std::map<DeviceType, OperatorRegistry*> g_device_type_registry;
   return &g_device_type_registry;
 }
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     CPUOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
-CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CPU, CPUOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(CPU, CPUOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
-CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CUDA, CUDAOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(CUDA, CUDAOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
+    HIPOperatorRegistry,
+    OperatorBase,
+    const OperatorDef&,
+    Workspace*);
+CAFFE_REGISTER_DEVICE_TYPE(HIP, HIPOperatorRegistry);
+
+C10_DEFINE_REGISTRY(
     GradientRegistry,
     GradientMakerBase,
-    const OperatorDef&, const vector<GradientWrapper>&);
+    const OperatorDef&,
+    const vector<GradientWrapper>&);
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
@@ -441,7 +509,7 @@ TensorShapes InferBlobShapesAndTypes(
           CaffeMap<string, string> grads_to_params =
               GradientMakerBase::MatchGradsToParams(op);
 
-          for (int i = 0; i < out.size(); i++) {
+          for (size_t i = 0; i < out.size(); i++) {
             if (out[i].unknown_shape()) {
               std::string gradout = op.output(i);
 
@@ -470,7 +538,7 @@ TensorShapes InferBlobShapesAndTypes(
         return tps;
       }
 
-      if (out.size() != op.output_size()) {
+      if (out.size() != (unsigned)op.output_size()) {
         if (op.type() == "Slice") {
           CAFFE_ENFORCE(
               out.size() == 0,
@@ -486,7 +554,7 @@ TensorShapes InferBlobShapesAndTypes(
               out.size());
         }
       } else {
-        for (int i = 0; i < out.size(); i++) {
+        for (size_t i = 0; i < out.size(); i++) {
           blob_desc[op.output(i)] = out[i];
         }
       }
@@ -509,6 +577,13 @@ TensorShapes InferBlobShapesAndTypes(
   return tps;
 }
 
+void LoadInt8TensorInfoOfBlob(float* scale, float* offset, const Blob* b) {
+  const int8::Int8TensorCPU* i8tc =
+      static_cast<const int8::Int8TensorCPU*>(b->GetRaw());
+  *scale = i8tc->scale;
+  *offset = i8tc->zero_point;
+}
+
 TensorShape GetTensorShapeOfBlob(const Blob* b) {
   TypeCall type_fun = GetTypeCallFunction(b->meta().id());
   TensorInfoCall tensor_info_fun = GetTensorInfoFunction(b->meta().id());
@@ -518,11 +593,9 @@ TensorShape GetTensorShapeOfBlob(const Blob* b) {
     tp.set_data_type(TypeMetaToDataType(type_fun(b->GetRaw())));
   }
   if (tensor_info_fun) {
-    bool _shares_data;
     size_t _capacity;
     DeviceOption _device;
-    auto shape =
-        tensor_info_fun(b->GetRaw(), &_shares_data, &_capacity, &_device);
+    auto shape = tensor_info_fun(b->GetRaw(), &_capacity, &_device);
     for (auto d : shape) {
       tp.add_dims(d);
     }
@@ -547,15 +620,40 @@ TensorShapes InferBlobShapesAndTypesFromWorkspace(
 }
 
 TensorShapes InferBlobShapesAndTypesFromMap(
-    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const CaffeMap<std::string, std::vector<int64_t>>& blob_dimensions,
     const vector<NetDef*>& nets) {
   CaffeMap<string, TensorShape> blob_desc;
   // Populate shapes from known blobs
   for (const auto& blob : blob_dimensions) {
     TensorShape tp;
     for (auto d : blob.second) {
-      CAFFE_ENFORCE_GT(d, 0);
+      CAFFE_ENFORCE_GE(d, 0, blob.first);
       tp.add_dims(d);
+    }
+    blob_desc[blob.first] = tp;
+  }
+  return InferBlobShapesAndTypes(blob_desc, nets);
+}
+
+TensorShapes InferBlobShapesAndTypesFromMap(
+    const CaffeMap<std::string, std::vector<int64_t>>& blob_dimensions,
+    const CaffeMap<std::string, TensorProto_DataType>& blob_types,
+    const vector<NetDef*>& nets) {
+  CaffeMap<string, TensorShape> blob_desc;
+  // Populate shapes from known blobs
+  for (const auto& blob : blob_dimensions) {
+    TensorShape tp;
+    for (auto d : blob.second) {
+      CAFFE_ENFORCE_GE(d, 0, blob.first);
+      tp.add_dims(d);
+    }
+    auto blob_type = blob_types.find(blob.first);
+    if (blob_type == blob_types.end()) {
+      LOG(WARNING) << "Missing type of " << blob.first
+                   << "; assuming to be UNDEFINED";
+      tp.set_data_type(TensorProto_DataType_UNDEFINED);
+    } else {
+      tp.set_data_type(blob_type->second);
     }
     blob_desc[blob.first] = tp;
   }
@@ -581,17 +679,16 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
   auto Check = [&](const Blob& blob, std::string blob_name) {
     TensorInfoCall tensor_info_fun = GetTensorInfoFunction(blob.meta().id());
     if (tensor_info_fun) {
-      bool _shares_data;
       size_t _capacity;
       DeviceOption blob_device;
       tensor_info_fun(
           const_cast<Blob&>(blob).GetRaw(),
-          &_shares_data,
           &_capacity,
           &blob_device);
 
-      if (blob_device.device_type() == CUDA &&
-          blob_device.cuda_gpu_id() != op_device.cuda_gpu_id()) {
+      if ((blob_device.device_type() == PROTO_CUDA ||
+           blob_device.device_type() == PROTO_HIP) &&
+          blob_device.device_id() != op_device.device_id()) {
         mismatches[blob_name] = std::make_pair(op_device, blob_device);
       }
     }
@@ -619,7 +716,23 @@ std::set<std::string> GetRegisteredOperators() {
     all_keys.emplace(name);
   }
 
+  // HIP operators
+  for (const auto& name : HIPOperatorRegistry()->Keys()) {
+    all_keys.emplace(name);
+  }
+
   return all_keys;
+}
+
+static std::function<void(const OperatorDef&)> OperatorLogger =
+    [](const OperatorDef&) { return; };
+
+void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer) {
+  OperatorLogger = tracer;
+}
+
+std::function<void(const OperatorDef&)> GetOperatorLogger() {
+  return OperatorLogger;
 }
 
 }  // namespace caffe2

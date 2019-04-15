@@ -27,5 +27,5 @@ matrix:
     include:
         env: LINT_CHECK
         python: "2.7"
-        install: pip install flake8
+        install: pip install flake8-mypy
         script: flake8

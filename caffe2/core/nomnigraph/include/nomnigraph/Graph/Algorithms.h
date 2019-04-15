@@ -19,6 +19,7 @@
 #include "nomnigraph/Graph/BinaryMatchImpl.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Graph/TarjansImpl.h"
+#include "nomnigraph/Graph/TopoSort.h"
 
 namespace nom {
 namespace algorithm {
@@ -179,6 +180,31 @@ dominanceFrontierMap(G* g, typename G::NodeRef source = nullptr) {
     }
   }
   return domFrontierMap;
+}
+
+/// \brief Induces edges on a subgraph by connecting all nodes
+/// that are connected in the original graph.
+template <typename SubgraphType>
+void induceEdges(SubgraphType* sg) {
+  for (auto& node : sg->getNodes()) {
+    // We can scan only the inEdges
+    for (auto& inEdge : node->getInEdges()) {
+      if (sg->hasNode(inEdge->tail())) {
+        sg->addEdge(inEdge);
+      }
+    }
+  }
+}
+
+/// \brief Create subgraph object from graph.
+template <typename GraphType>
+typename GraphType::SubgraphType createSubgraph(GraphType* g) {
+  typename GraphType::SubgraphType subgraph;
+  for (auto& node : g->getMutableNodes()) {
+    subgraph.addNode(node);
+  }
+  induceEdges(&subgraph);
+  return subgraph;
 }
 
 } // namespace algorithm

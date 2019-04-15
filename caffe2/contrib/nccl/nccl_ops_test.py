@@ -21,7 +21,7 @@ dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/nccl:nccl_ops')
 def gpu_device(i):
     device_option = caffe2_pb2.DeviceOption()
     device_option.device_type = caffe2_pb2.CUDA
-    device_option.cuda_gpu_id = i
+    device_option.device_id = i
     return device_option
 
 
@@ -38,7 +38,7 @@ def benchmark(ws, net, warmups=5, iters=100):
     return after - before
 
 
-@unittest.skipIf(not workspace.has_gpu_support, "NCCL only on GPU")
+@unittest.skipIf(not workspace.has_cuda_support, "NCCL only on CUDA GPU")
 class NCCLOpsTest(hu.HypothesisTestCase):
     @given(n=st.integers(min_value=2, max_value=workspace.NumCudaDevices()),
            m=st.integers(min_value=1, max_value=1000),

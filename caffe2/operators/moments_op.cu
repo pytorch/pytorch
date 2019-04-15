@@ -4,6 +4,7 @@
 #include <functional>
 
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/fixed_divisor.h"
 
 namespace caffe2 {
 
@@ -11,35 +12,34 @@ namespace {
 
 template <typename T, int D>
 __global__ void ComputeMomentsGradientCUDAKernel(
-    const int dX_size,
-    const SimpleArray<int, D> dY_strides,
-    const SimpleArray<int, D> dX_dims,
+    const int X_size,
+    const SimpleArray<int, D> Y_strides,
+    const SimpleArray<FixedDivisor<int>, D> X_dims,
     const T scale,
     const T* dmean,
     const T* dvariance,
     const T* X,
     const T* mean,
     T* dX) {
-  CUDA_1D_KERNEL_LOOP(dX_index, dX_size) {
-    int dY_index = 0;
-    int dX_index_val = dX_index;
+  CUDA_1D_KERNEL_LOOP(X_index, X_size) {
+    int Y_index = 0;
+    int X_index_val = X_index;
 #pragma unroll
     for (int i = D - 1; i >= 0; --i) {
-      dY_index += dY_strides.data[i] == 0
-          ? 0
-          : (dX_index_val % dX_dims.data[i]) * dY_strides.data[i];
-      dX_index_val /= dX_dims.data[i];
+      int d;
+      X_dims.data[i].DivMod(X_index_val, &X_index_val, &d);
+      Y_index += d * Y_strides.data[i];
     }
 #if __CUDA_ARCH__ >= 350
-    dX[dX_index] =
-        (__ldg(dmean + dY_index) +
-         static_cast<T>(2) * (__ldg(X + dX_index) - __ldg(mean + dY_index)) *
-             __ldg(dvariance + dY_index)) *
+    dX[X_index] =
+        (__ldg(dmean + Y_index) +
+         static_cast<T>(2) * (__ldg(X + X_index) - __ldg(mean + Y_index)) *
+             __ldg(dvariance + Y_index)) *
         scale;
 #else
-    dX[dX_index] = (dmean[dY_index] +
-                    static_cast<T>(2) * (X[dX_index] - mean[dY_index]) *
-                        dvariance[dY_index]) *
+    dX[X_index] = (dmean[Y_index] +
+                   static_cast<T>(2) * (X[X_index] - mean[Y_index]) *
+                       dvariance[Y_index]) *
         scale;
 #endif
   }
@@ -47,35 +47,38 @@ __global__ void ComputeMomentsGradientCUDAKernel(
 
 template <typename T, int D>
 void ComputeMomentsGradientCUDAImpl(
-    const int* dY_dims,
-    const int* dX_dims,
+    const int* Y_dims,
+    const int* X_dims,
     const T* dmean,
     const T* dvariance,
     const T* X,
     const T* mean,
     T* dX,
     CUDAContext* context) {
-  SimpleArray<int, D> dY_strides_array;
-  SimpleArray<int, D> dX_dims_array;
+  SimpleArray<int, D> Y_strides_array;
+  SimpleArray<FixedDivisor<int>, D> X_dims_array;
   int cur_stride = 1;
   for (int i = D - 1; i >= 0; --i) {
-    dY_strides_array.data[i] = dY_dims[i] == 1 ? 0 : cur_stride;
-    dX_dims_array.data[i] = dX_dims[i];
-    cur_stride *= dY_dims[i];
+    if (X_dims[i] == 0) {
+      return;
+    }
+    Y_strides_array.data[i] = Y_dims[i] == 1 ? 0 : cur_stride;
+    X_dims_array.data[i] = FixedDivisor<int>(X_dims[i]);
+    cur_stride *= Y_dims[i];
   }
-  const int dY_size =
-      std::accumulate(dY_dims, dY_dims + D, 1, std::multiplies<int>());
-  const int dX_size =
-      std::accumulate(dX_dims, dX_dims + D, 1, std::multiplies<int>());
-  const T scale = static_cast<T>(dY_size) / static_cast<T>(dX_size);
+  const int Y_size =
+      std::accumulate(Y_dims, Y_dims + D, 1, std::multiplies<int>());
+  const int X_size =
+      std::accumulate(X_dims, X_dims + D, 1, std::multiplies<int>());
+  const T scale = static_cast<T>(Y_size) / static_cast<T>(X_size);
   ComputeMomentsGradientCUDAKernel<T, D>
-      <<<CAFFE_GET_BLOCKS(dX_size),
+      <<<CAFFE_GET_BLOCKS(X_size),
          CAFFE_CUDA_NUM_THREADS,
          0,
          context->cuda_stream()>>>(
-          dX_size,
-          dY_strides_array,
-          dX_dims_array,
+          X_size,
+          Y_strides_array,
+          X_dims_array,
           scale,
           dmean,
           dvariance,

@@ -1,6 +1,6 @@
 #include "context.h"
 
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 
 #include <gloo/types.h>
 

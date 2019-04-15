@@ -1,5 +1,0 @@
-numpy: 1.14
-pin_run_as_build:
-  numpy:
-    min_pin: x.x
-    max_pin: x.x

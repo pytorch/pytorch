@@ -11,7 +11,7 @@ from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
 
-@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
+@unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class SoftmaxTest(hu.HypothesisTestCase):
     @given(size=st.integers(8, 20),
            input_channels=st.integers(1, 3),

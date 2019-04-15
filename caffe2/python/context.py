@@ -9,7 +9,7 @@ import threading
 import six
 
 
-class ContextInfo(object):
+class _ContextInfo(object):
     def __init__(self, cls, allow_default, arg_name):
         self.cls = cls
         self.allow_default = allow_default
@@ -39,12 +39,12 @@ class ContextInfo(object):
         return self._stack[-1]
 
 
-class ContextManager(object):
+class _ContextRegistry(object):
     def __init__(self):
         self._ctxs = {}
 
     def register(self, ctx_info):
-        assert isinstance(ctx_info, ContextInfo)
+        assert isinstance(ctx_info, _ContextInfo)
         assert (ctx_info.cls not in self._ctxs), (
             'Context %s already registered' % ctx_info.cls)
         self._ctxs[ctx_info.cls] = ctx_info
@@ -54,23 +54,23 @@ class ContextManager(object):
         return self._ctxs[cls]
 
 
-_CONTEXT_MANAGER = ContextManager()
+_CONTEXT_REGISTRY = _ContextRegistry()
 
 
-def context_manager():
-    global _CONTEXT_MANAGER
-    return _CONTEXT_MANAGER
+def _context_registry():
+    global _CONTEXT_REGISTRY
+    return _CONTEXT_REGISTRY
 
 
 def __enter__(self):
     if self._prev_enter is not None:
         self._prev_enter()
-    context_manager().get(self._ctx_class).enter(self)
+    _context_registry().get(self._ctx_class).enter(self)
     return self
 
 
 def __exit__(self, *args):
-    context_manager().get(self._ctx_class).exit(self)
+    _context_registry().get(self._ctx_class).exit(self)
     if self._prev_exit is not None:
         self._prev_exit(*args)
 
@@ -84,8 +84,8 @@ def __call__(self, func):
 
 
 @classmethod
-def current(cls, value=None, required=True):
-    return get_active_context(cls, value, required)
+def _current(cls, value=None, required=True):
+    return _get_active_context(cls, value, required)
 
 
 class define_context(object):
@@ -97,20 +97,25 @@ class define_context(object):
         assert not hasattr(cls, '_ctx_class'), (
             '%s parent class (%s) already defines context.' % (
                 cls, cls._ctx_class))
-        context_manager().register(
-            ContextInfo(cls, self.allow_default, self.arg_name))
+        cls._ctx_class = cls
+
+        _context_registry().register(
+            _ContextInfo(cls, self.allow_default, self.arg_name)
+        )
+
         cls._prev_enter = cls.__enter__ if hasattr(cls, '__enter__') else None
         cls._prev_exit = cls.__exit__ if hasattr(cls, '__exit__') else None
-        cls._ctx_class = cls
+
         cls.__enter__ = __enter__
         cls.__exit__ = __exit__
         cls.__call__ = __call__
-        cls.current = current
+        cls.current = _current
+
         return cls
 
 
-def get_active_context(cls, val=None, required=True):
-    ctx_info = context_manager().get(cls)
+def _get_active_context(cls, val=None, required=True):
+    ctx_info = _context_registry().get(cls)
     if val is not None:
         assert isinstance(val, cls), (
             'Wrong context type. Expected: %s, got %s.' % (cls, type(val)))

@@ -1,19 +1,19 @@
-#include "Types.h"
+#include <ATen/cudnn/Types.h>
 
 #include <ATen/ATen.h>
 
 namespace at { namespace native {
 
 cudnnDataType_t getCudnnDataType(const at::Tensor& tensor) {
-  if (tensor.type().scalarType() == at::kFloat) {
+  if (tensor.scalar_type() == at::kFloat) {
     return CUDNN_DATA_FLOAT;
-  } else if (tensor.type().scalarType() == at::kDouble) {
+  } else if (tensor.scalar_type() == at::kDouble) {
     return CUDNN_DATA_DOUBLE;
-  } else if (tensor.type().scalarType() == at::kHalf) {
+  } else if (tensor.scalar_type() == at::kHalf) {
     return CUDNN_DATA_HALF;
   }
   std::string msg("getCudnnDataType() not supported for ");
-  msg += at::toString(tensor.type().scalarType());
+  msg += toString(tensor.scalar_type());
   throw std::runtime_error(msg);
 }
 

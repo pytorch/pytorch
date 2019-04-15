@@ -42,18 +42,18 @@ class LearningRateAdaptionOp final : public Operator<Context> {
  public:
   LearningRateAdaptionOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        lr_alpha_(OperatorBase::GetSingleArgument<float>("lr_alpha", 0.01f)),
-        normalized_lr_adaption_(OperatorBase::GetSingleArgument<bool>(
+        lr_alpha_(this->template GetSingleArgument<float>("lr_alpha", 0.01f)),
+        normalized_lr_adaption_(this->template GetSingleArgument<bool>(
             "normalized_lr_adaption",
             true)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(Input(LR).size() == 1);
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(EFFGRAD).size());
+    CAFFE_ENFORCE(Input(LR).numel() == 1);
+    CAFFE_ENFORCE(Input(GRAD).numel() == Input(EFFGRAD).numel());
     Output(OUTPUT_LR)->ResizeLike(Input(LR));
     lr_update<Context>(
-        Input(GRAD).size(),
+        Input(GRAD).numel(),
         Input(GRAD).template data<T>(),
         Input(EFFGRAD).template data<T>(),
         Input(LR).template data<T>(),

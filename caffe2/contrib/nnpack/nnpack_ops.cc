@@ -13,11 +13,13 @@
 #include "caffe2/utils/math.h"
 #include "nnpack.h"
 
-CAFFE2_DEFINE_int(
-    caffe2_nnpack_num_threads, 1,
+C10_DEFINE_int(
+    caffe2_nnpack_num_threads,
+    1,
     "The number of nnpack pthreadpool threads.");
-CAFFE2_DEFINE_bool(
-    caffe2_nnpack_use_mkl_num_threads, true,
+C10_DEFINE_bool(
+    caffe2_nnpack_use_mkl_num_threads,
+    true,
     "If MKL is built, this sets nnpack to use the same number of threads as "
     "MKL does. This overrides caffe2_nnpack_num_threads if set.");
 
@@ -122,14 +124,14 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
     const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
     const int M = filter.dim32(0);
 
-    CAFFE_ENFORCE(X.ndim() == 4, "Input dim should be 4");
-    CAFFE_ENFORCE(filter.ndim(), 4);
+    CAFFE_ENFORCE(X.dim() == 4, "Input dim should be 4");
+    CAFFE_ENFORCE(filter.dim(), 4);
     CAFFE_ENFORCE(C % this->group_ == 0, "");
     CAFFE_ENFORCE(M % this->group_ == 0, "");
     CAFFE_ENFORCE(filter.dim32(1) == C / this->group_, "");
     CAFFE_ENFORCE(filter.dim32(2) == this->kernel_h(), "");
     CAFFE_ENFORCE(filter.dim32(3) == this->kernel_w(), "");
-    CAFFE_ENFORCE(bias.size() == M, "");
+    CAFFE_ENFORCE(bias.numel() == M, "");
 
     ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
     const int oH = Y->dim32(2), oW = Y->dim32(3);
@@ -178,8 +180,8 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
             kernel_size,
             output_subsample,
             X.template data<float>() + g * H * W * (C / group_),
-            filter.template data<float>() + filter.size() / group_ * g,
-            bias.template data<float>() + bias.size() / group_ * g,
+            filter.template data<float>() + filter.numel() / group_ * g,
+            bias.template data<float>() + bias.numel() / group_ * g,
             Y->template mutable_data<float>() + g * oH * oW * (M / group_),
             nnpack_threadpool(),
             nullptr);
@@ -197,8 +199,8 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
             padding,
             kernel_size,
             X.template data<float>() + g * H * W * (C / group_),
-            filter.template data<float>() + filter.size() / group_ * g,
-            bias.template data<float>() + bias.size() / group_ * g,
+            filter.template data<float>() + filter.numel() / group_ * g,
+            bias.template data<float>() + bias.numel() / group_ * g,
             Y->template mutable_data<float>() + g * oH * oW * (M / group_),
             nnpack_threadpool(),
             nullptr);
@@ -249,7 +251,7 @@ class NNPACKMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
   bool RunOnDeviceWithOrderNCHW() override {
     auto& X = Input(0);
     auto* Y = Output(0);
-    CAFFE_ENFORCE(X.ndim() == 4, "");
+    CAFFE_ENFORCE(X.dim() == 4, "");
     const int H = X.dim32(2), W = X.dim32(3);
     ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, X.dim32(1));
     std::vector<int> pads(
@@ -304,7 +306,7 @@ class NNPACKReluOp final : public Operator<CPUContext> {
     auto* Y = Output(0);
     const auto status = nnp_relu_output(
         1,
-        X.size(),
+        X.numel(),
         X.template data<float>(),
         Y->template mutable_data<float>(),
         0.0,
@@ -330,7 +332,7 @@ class NNPACKLeakyReluOp final : public LeakyReluOp<float, CPUContext> {
     auto* Y = Output(0);
     const auto status = nnp_relu_output(
         1,
-        X.size(),
+        X.numel(),
         X.template data<float>(),
         Y->template mutable_data<float>(),
         alpha_,

@@ -1,14 +1,17 @@
-#include "torch/csrc/utils/python_arg_parser.h"
+#include <torch/csrc/utils/python_arg_parser.h>
 
-#include <stdexcept>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Layout.h>
+#include <torch/csrc/utils/invalid_arguments.h>
+#include <torch/csrc/utils/python_strings.h>
+
+#include <ATen/ATen.h>
+
 #include <sstream>
+#include <stdexcept>
+#include <string>
 #include <unordered_map>
-
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/utils/invalid_arguments.h"
-
-using namespace at;
+#include <vector>
 
 namespace torch {
 
@@ -18,18 +21,36 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"int64_t", ParameterType::INT64},
   {"double", ParameterType::DOUBLE},
   {"TensorList", ParameterType::TENSOR_LIST},
-  {"IntList", ParameterType::INT_LIST},
+  {"IntArrayRef", ParameterType::INT_LIST},
   {"Generator", ParameterType::GENERATOR},
   {"bool", ParameterType::BOOL},
   {"Storage", ParameterType::STORAGE},
   {"PyObject*", ParameterType::PYOBJECT},
   {"ScalarType", ParameterType::SCALARTYPE},
-  {"optional<ScalarType>", ParameterType::SCALARTYPE},
   {"Layout", ParameterType::LAYOUT},
   {"Device", ParameterType::DEVICE},
   {"std::string", ParameterType::STRING},
 };
 
+// TODO: remove this. This is a temporary list of functions that allow Python
+// numbers to bind to Tensors. Some binary ops have separate Tensor and Scalar
+// overloads and binding to the Tensor overload with a number of a different
+// type will trigger a type error.
+//
+// If you modify this, you will need to adjust the blacklist in
+// tools/pyi/gen_pyi.py (and add hardcoded signatures for these
+// functions.)
+static bool should_allow_numbers_as_tensors(const std::string& name) {
+  static std::unordered_set<std::string> allowed = {
+    "add", "add_", "add_out",
+    "div", "div_", "div_out",
+    "mul", "mul_", "mul_out",
+    "sub", "sub_", "sub_out",
+  };
+  return allowed.find(name) != allowed.end();
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   : optional(false)
   , allow_none(false)
@@ -83,13 +104,14 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
 bool FunctionParameter::check(PyObject* obj) {
   switch (type_) {
     case ParameterType::TENSOR: {
-      return THPVariable_Check(obj);
+      return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkDouble(obj));
     }
     case ParameterType::SCALAR:
+      if (PyComplex_Check(obj)) {
+        return true;
+      }
+      // fallthrough
     case ParameterType::DOUBLE: {
-      // NOTE: we don't currently accept most NumPy types as Scalars. np.float64
-      // is okay because it's a subclass of PyFloat. We may want to change this
-      // in the future.
       if (THPUtils_checkDouble(obj)) {
         return true;
       }
@@ -105,16 +127,16 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       if (THPVariable_Check(obj)) {
         auto& var = ((THPVariable*)obj)->cdata;
-        return at::isIntegralType(var.type().scalarType()) && !var.requires_grad() && var.dim() == 0;
+        return at::isIntegralType(var.scalar_type()) && !var.requires_grad() && var.dim() == 0;
       }
       return false;
     }
-    case ParameterType::TENSOR_LIST: return PyTuple_Check(obj) || PyList_Check(obj);
+    case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
         return true;
       }
-      // if a size is specified (e.g. IntList[2]) we also allow passing a single int
+      // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
       return size > 0 && THPUtils_checkLong(obj);
     }
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
@@ -150,14 +172,46 @@ std::string FunctionParameter::type_name() const {
   }
 }
 
-static inline at::optional<int64_t> parse_as_integer(const std::string& s) {
-  if (s.empty()) return at::nullopt;
+static inline c10::optional<int64_t> parse_as_integer(const std::string& s) {
+  if (s.empty())
+    return c10::nullopt;
   char *str_end;
   long ans = strtol(s.c_str(), &str_end, 0);
   // *str_end == 0 if the entire string was parsed as an integer.
-  return (*str_end == 0) ? at::optional<int64_t>(ans) : at::nullopt;
+  return (*str_end == 0) ? c10::optional<int64_t>(ans) : c10::nullopt;
 }
 
+/*
+Parse default value of IntArrayRef declared at native_functions.yaml
+
+There are two kinds of default values:
+1. IntArrayRef[2] x=1 (where size=2, value={1,1}
+2. IntArrayRef x={1,2,3} (where size=3, value={1,2,3}, note that there cannot be space after comma since native_parse.py uses ', ' to split args)
+*/
+static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int64_t size) {
+  size_t n = s.size();
+
+  if (s.empty()) return std::vector<int64_t>();
+
+  // case 1. s is an int (e.g., s=2)
+  if (s[0] != '{') {
+    return std::vector<int64_t>(size, std::stol(s));
+  }
+
+  // case 2. s is a list of dims (e.g., s={1,2})
+
+  // since already checked left brace '{' above, here only checks right brace '}'
+  AT_CHECK(s[n - 1] == '}', "Default value of IntArrayRef is missing right brace '}', found ", s[n - 1]);
+
+  auto args = std::vector<int64_t>();
+  std::istringstream ss(s.substr(1, s.length() - 2)); // exclude '{' and '}'
+  std::string tok;
+
+  while(std::getline(ss, tok, ',')) {
+    args.emplace_back(std::stol(tok));
+  }
+  return args;
+}
 
 void FunctionParameter::set_default_str(const std::string& str) {
   if (str == "None") {
@@ -174,18 +228,15 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::DOUBLE) {
     default_double = atof(str.c_str());
   } else if (type_ == ParameterType::SCALAR) {
-    if (str == "None") {
-      // This is a bit awkward, but convenient for clamp which takes Scalars,
-      // but allows None.
-      default_scalar = Scalar(NAN);
-    } else {
+    if (str != "None") {
       // we sometimes rely on integer-vs-float values, e.g. with arange.
-      auto as_integer = parse_as_integer(str);
-      default_scalar = Scalar(as_integer.value_or(atof(str.c_str())));
+      const auto as_integer = parse_as_integer(str);
+      default_scalar = as_integer.has_value() ? at::Scalar(as_integer.value()) :
+                                                at::Scalar(atof(str.c_str()));
     }
   } else if (type_ == ParameterType::INT_LIST) {
     if (str != "None") {
-      default_intlist.assign(size, std::stoi(str));
+      default_intlist = parse_intlist_args(str, size);
     }
   } else if (type_ == ParameterType::SCALARTYPE) {
     if (str == "None") {
@@ -229,6 +280,8 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
   }
   name = fmt.substr(0, open_paren);
 
+  bool allow_numbers_as_tensors = should_allow_numbers_as_tensors(name);
+
   auto last_offset = open_paren + 1;
   auto next_offset = last_offset;
   bool keyword_only = false;
@@ -236,7 +289,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
   while (!done) {
     auto offset = fmt.find(", ", last_offset);
     if (offset == std::string::npos) {
-      offset = fmt.find(")", last_offset);
+      offset = fmt.find(')', last_offset);
       done = true;
       next_offset = offset + 1;
     } else {
@@ -255,6 +308,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
       keyword_only = true;
     } else {
       params.emplace_back(param_str, keyword_only);
+      params.back().allow_numbers_as_tensors = allow_numbers_as_tensors;
     }
   }
 
@@ -378,8 +432,8 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
   ssize_t arg_pos = 0;
   bool allow_varargs_intlist = false;
 
-  // if there is a single positional IntList argument, i.e. expand(..), view(...),
-  // allow a var-args style IntList, so expand(5,3) behaves as expand((5,3))
+  // if there is a single positional IntArrayRef argument, i.e. expand(..), view(...),
+  // allow a var-args style IntArrayRef, so expand(5,3) behaves as expand((5,3))
   if (max_pos_args == 1 && params[0].type_ == ParameterType::INT_LIST) {
     allow_varargs_intlist = true;
   }
@@ -397,6 +451,13 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     PyObject* obj = nullptr;
     bool is_kwd = false;
     if (arg_pos < nargs) {
+      // extra positional args given after single positional IntArrayRef arg
+      if (param.keyword_only) {
+        if (raise_exception) {
+          extra_args(*this, nargs);
+        }
+        return false;
+      }
       obj = PyTuple_GET_ITEM(args, arg_pos);
     } else if (kwargs) {
       obj = PyDict_GetItem(kwargs, param.python_name);
@@ -462,7 +523,7 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
  , traceable(traceable)
 {
   for (auto& fmt : fmts) {
-    signatures_.push_back(FunctionSignature(fmt));
+    signatures_.emplace_back(fmt);
   }
   for (auto& signature : signatures_) {
     if (signature.max_args > max_args) {

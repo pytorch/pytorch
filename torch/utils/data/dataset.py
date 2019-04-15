@@ -51,7 +51,7 @@ class ConcatDataset(Dataset):
     on-the-fly manner.
 
     Arguments:
-        datasets (iterable): List of datasets to be concatenated
+        datasets (sequence): List of datasets to be concatenated
     """
 
     @staticmethod
@@ -73,6 +73,10 @@ class ConcatDataset(Dataset):
         return self.cumulative_sizes[-1]
 
     def __getitem__(self, idx):
+        if idx < 0:
+            if -idx > len(self):
+                raise ValueError("absolute value of index should not exceed dataset length")
+            idx = len(self) + idx
         dataset_idx = bisect.bisect_right(self.cumulative_sizes, idx)
         if dataset_idx == 0:
             sample_idx = idx
@@ -88,6 +92,13 @@ class ConcatDataset(Dataset):
 
 
 class Subset(Dataset):
+    """
+    Subset of a dataset at specified indices.
+
+    Arguments:
+        dataset (Dataset): The whole Dataset
+        indices (sequence): Indices in the whole set selected for subset
+    """
     def __init__(self, dataset, indices):
         self.dataset = dataset
         self.indices = indices
@@ -101,15 +112,14 @@ class Subset(Dataset):
 
 def random_split(dataset, lengths):
     """
-    Randomly split a dataset into non-overlapping new datasets of given lengths
-    ds
+    Randomly split a dataset into non-overlapping new datasets of given lengths.
 
     Arguments:
         dataset (Dataset): Dataset to be split
-        lengths (iterable): lengths of splits to be produced
+        lengths (sequence): lengths of splits to be produced
     """
     if sum(lengths) != len(dataset):
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
-    indices = randperm(sum(lengths))
+    indices = randperm(sum(lengths)).tolist()
     return [Subset(dataset, indices[offset - length:offset]) for offset, length in zip(_accumulate(lengths), lengths)]

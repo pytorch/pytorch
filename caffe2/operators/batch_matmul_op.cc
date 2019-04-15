@@ -13,6 +13,7 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
   if (!broadcast) {
     const auto ndim = in[0].dims_size();
     CAFFE_ENFORCE_GE(ndim, 2);
+    CAFFE_ENFORCE_GE(in[1].dims_size(), 2);
     int a_dim0;
     int b_dim1;
     if (helper.GetSingleArgument<int>("trans_a", 0)) {
@@ -27,16 +28,16 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
       b_dim1 = in[1].dims(ndim - 1);
     }
 
-    auto output_dims = vector<TIndex>{in[0].dims().begin(), in[0].dims().end()};
+    auto output_dims = vector<int64_t>{in[0].dims().begin(), in[0].dims().end()};
     output_dims[ndim - 2] = a_dim0;
     output_dims[ndim - 1] = b_dim1;
 
     return vector<TensorShape>{
-        CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
+        CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
   } else {
     auto ndims_A = in[0].dims_size();
     auto ndims_B = in[1].dims_size();
-    std::vector<TIndex> dims_A(ndims_A), dims_B(ndims_B);
+    std::vector<int64_t> dims_A(ndims_A), dims_B(ndims_B);
     for (int i = 0; i < ndims_A; ++i) {
       dims_A[i] = in[0].dims(i);
     }
@@ -66,7 +67,7 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
       N = dims_B[ndims_B - 1];
     }
 
-    std::vector<TIndex> new_dims;
+    std::vector<int64_t> new_dims;
     if (ndims_A >= ndims_B) {
       new_dims.assign(dims_A.begin(), dims_A.end() - 2);
     } else {
@@ -82,7 +83,7 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
       new_dims.push_back(1);
     }
     return vector<TensorShape>{
-        CreateTensorShape(vector<TIndex>{new_dims}, in[0].data_type())};
+        CreateTensorShape(vector<int64_t>{new_dims}, in[0].data_type())};
   }
 }
 
@@ -141,7 +142,8 @@ two diemnsional, it behaves like normal matrix multiplication.
         "Pass 1 to allow broadcasting of dimensions. Behavior is the same as numpy.matmul. Gradient is currently not supported when running in broadcast mode.")
     .TensorInferenceFunction(TensorInferenceForBatchMatMul)
     .CostInferenceFunction(
-        OpSchema::CostInferenceFunctionType(CostInferenceForBatchMatMul));
+        OpSchema::CostInferenceFunctionType(CostInferenceForBatchMatMul))
+    .InheritOnnxSchema();
 
 class GetBatchMatMulGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -172,13 +174,6 @@ class GetBatchMatMulGradient : public GradientMakerBase {
     auto trans_b_arg = vector<Argument>{MakeArgument<int>("trans_b", 1)};
     auto trans_both_arg = vector<Argument>{MakeArgument<int>("trans_a", 1),
                                            MakeArgument<int>("trans_b", 1)};
-
-    if (ArgumentHelper::HasArgument(Def(), "use_scratch")) {
-      no_trans_arg.push_back(MakeArgument<int>("use_scratch", 1));
-      trans_a_arg.push_back(MakeArgument<int>("use_scratch", 1));
-      trans_b_arg.push_back(MakeArgument<int>("use_scratch", 1));
-      trans_both_arg.push_back(MakeArgument<int>("use_scratch", 1));
-    }
 
     if (trans_a) {
       if (trans_b) {

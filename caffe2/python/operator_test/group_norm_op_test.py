@@ -2,16 +2,18 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+
+from hypothesis import given
+import hypothesis.strategies as st
 import numpy as np
 
-from caffe2.python import core
-from hypothesis import given
-
-import caffe2.python.hypothesis_test_util as hu
-import hypothesis.strategies as st
+import unittest
 
 
-class TestGroupNormOp(hu.HypothesisTestCase):
+class TestGroupNormOp(serial.SerializedTestCase):
     def group_norm_nchw_ref(self, X, gamma, beta, group, epsilon):
         dims = X.shape
         N = dims[0]
@@ -40,10 +42,11 @@ class TestGroupNormOp(hu.HypothesisTestCase):
         Y = gamma * (X - mu) / std + beta
         return [Y.reshape(dims), mu.reshape(N, G), (1.0 / std).reshape(N, G)]
 
-    @given(N=st.integers(1, 5), G=st.integers(1, 5), D=st.integers(2, 2),
-           H=st.integers(2, 5), W=st.integers(2, 5),
-           epsilon=st.floats(min_value=1e-5, max_value=1e-4),
-           order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
+    @serial.given(
+        N=st.integers(1, 5), G=st.integers(1, 5), D=st.integers(1, 5),
+        H=st.integers(2, 5), W=st.integers(2, 5),
+        epsilon=st.floats(min_value=1e-5, max_value=1e-4),
+        order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
     def test_group_norm_2d(
             self, N, G, D, H, W, epsilon, order, gc, dc):
         op = core.CreateOperator(
@@ -143,3 +146,7 @@ class TestGroupNormOp(hu.HypothesisTestCase):
         inputs = [X, gamma, beta]
         for i in range(len(inputs)):
             self.assertGradientChecks(gc, op, inputs, i, [0])
+
+
+if __name__ == "__main__":
+    unittest.main()

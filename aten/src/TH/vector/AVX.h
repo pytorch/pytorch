@@ -1,7 +1,7 @@
 #ifndef TH_AVX_H
 #define TH_AVX_H
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 #include <stddef.h>
 
 TH_API void THDoubleVector_copy_AVX(double *y, const double *x, const ptrdiff_t n);

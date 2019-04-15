@@ -1,5 +1,6 @@
 import threading
 import torch
+from torch.cuda._utils import _get_device_index
 
 
 def get_a_var(obj):
@@ -18,6 +19,20 @@ def get_a_var(obj):
 
 
 def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
+    r"""Applies each `module` in :attr:`modules` in parallel on arguments
+    contained in :attr:`inputs` (positional) and :attr:`kwargs_tup` (keyword)
+    on each of :attr:`devices`.
+
+    Args:
+        modules (Module): modules to be parallelized
+        inputs (tensor): inputs to the modules
+        devices (list of int or torch.device): CUDA devices
+
+    :attr:`modules`, :attr:`inputs`, :attr:`kwargs_tup` (if given), and
+    :attr:`devices` (if given) should all have same length. Moreover, each
+    element of :attr:`inputs` can either be a single object as the only argument
+    to a module, or a collection of positional arguments.
+    """
     assert len(modules) == len(inputs)
     if kwargs_tup is not None:
         assert len(modules) == len(kwargs_tup)
@@ -27,7 +42,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
         assert len(modules) == len(devices)
     else:
         devices = [None] * len(modules)
-
+    devices = list(map(lambda x: _get_device_index(x, True), devices))
     lock = threading.Lock()
     results = {}
     grad_enabled = torch.is_grad_enabled()
@@ -38,6 +53,9 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
             device = get_a_var(input).get_device()
         try:
             with torch.cuda.device(device):
+                # this also avoids accidental slicing of `input` if it is a Tensor
+                if not isinstance(input, (list, tuple)):
+                    input = (input,)
                 output = module(*input, **kwargs)
             with lock:
                 results[i] = output

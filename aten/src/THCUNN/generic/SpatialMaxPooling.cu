@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialMaxPooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialMaxPooling.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 void THNN_(SpatialMaxPooling_updateOutput)(
            THCState *state,

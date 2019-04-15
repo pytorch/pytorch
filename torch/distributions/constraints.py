@@ -19,7 +19,6 @@ The following constraints are implemented:
 """
 
 import torch
-from torch.distributions.utils import batch_tril
 
 __all__ = [
     'Constraint',
@@ -27,8 +26,10 @@ __all__ = [
     'dependent',
     'dependent_property',
     'greater_than',
+    'greater_than_eq',
     'integer_interval',
     'interval',
+    'half_open_interval',
     'is_dependent',
     'less_than',
     'lower_cholesky',
@@ -57,6 +58,9 @@ class Constraint(object):
         whether each event in value satisfies this constraint.
         """
         raise NotImplementedError
+
+    def __repr__(self):
+        return self.__class__.__name__[1:] + '()'
 
 
 class _Dependent(Constraint):
@@ -109,6 +113,11 @@ class _IntegerInterval(Constraint):
     def check(self, value):
         return (value % 1 == 0) & (self.lower_bound <= value) & (value <= self.upper_bound)
 
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(lower_bound={}, upper_bound={})'.format(self.lower_bound, self.upper_bound)
+        return fmt_string
+
 
 class _IntegerLessThan(Constraint):
     """
@@ -120,6 +129,11 @@ class _IntegerLessThan(Constraint):
     def check(self, value):
         return (value % 1 == 0) & (value <= self.upper_bound)
 
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(upper_bound={})'.format(self.upper_bound)
+        return fmt_string
+
 
 class _IntegerGreaterThan(Constraint):
     """
@@ -130,6 +144,11 @@ class _IntegerGreaterThan(Constraint):
 
     def check(self, value):
         return (value % 1 == 0) & (value >= self.lower_bound)
+
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(lower_bound={})'.format(self.lower_bound)
+        return fmt_string
 
 
 class _Real(Constraint):
@@ -150,6 +169,27 @@ class _GreaterThan(Constraint):
     def check(self, value):
         return self.lower_bound < value
 
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(lower_bound={})'.format(self.lower_bound)
+        return fmt_string
+
+
+class _GreaterThanEq(Constraint):
+    """
+    Constrain to a real half line `[lower_bound, inf)`.
+    """
+    def __init__(self, lower_bound):
+        self.lower_bound = lower_bound
+
+    def check(self, value):
+        return self.lower_bound <= value
+
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(lower_bound={})'.format(self.lower_bound)
+        return fmt_string
+
 
 class _LessThan(Constraint):
     """
@@ -160,6 +200,11 @@ class _LessThan(Constraint):
 
     def check(self, value):
         return value < self.upper_bound
+
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(upper_bound={})'.format(self.upper_bound)
+        return fmt_string
 
 
 class _Interval(Constraint):
@@ -172,6 +217,28 @@ class _Interval(Constraint):
 
     def check(self, value):
         return (self.lower_bound <= value) & (value <= self.upper_bound)
+
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(lower_bound={}, upper_bound={})'.format(self.lower_bound, self.upper_bound)
+        return fmt_string
+
+
+class _HalfOpenInterval(Constraint):
+    """
+    Constrain to a real interval `[lower_bound, upper_bound)`.
+    """
+    def __init__(self, lower_bound, upper_bound):
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
+
+    def check(self, value):
+        return (self.lower_bound <= value) & (value < self.upper_bound)
+
+    def __repr__(self):
+        fmt_string = self.__class__.__name__[1:]
+        fmt_string += '(lower_bound={}, upper_bound={})'.format(self.lower_bound, self.upper_bound)
+        return fmt_string
 
 
 class _Simplex(Constraint):
@@ -188,7 +255,7 @@ class _LowerTriangular(Constraint):
     Constrain to lower-triangular square matrices.
     """
     def check(self, value):
-        value_tril = batch_tril(value)
+        value_tril = value.tril()
         return (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
 
 
@@ -197,12 +264,10 @@ class _LowerCholesky(Constraint):
     Constrain to lower-triangular square matrices with positive diagonals.
     """
     def check(self, value):
-        value_tril = batch_tril(value)
+        value_tril = value.tril()
         lower_triangular = (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
 
-        n = value.size(-1)
-        diag_mask = torch.eye(n, n, out=value.new(n, n))
-        positive_diagonal = (value * diag_mask > (diag_mask - 1)).min(-1)[0].min(-1)[0]
+        positive_diagonal = (value.diagonal(dim1=-2, dim2=-1) > 0).min(-1)[0]
         return lower_triangular & positive_diagonal
 
 
@@ -215,7 +280,7 @@ class _PositiveDefinite(Constraint):
         batch_shape = value.unsqueeze(0).shape[:-2]
         # TODO: replace with batched linear algebra routine when one becomes available
         # note that `symeig()` returns eigenvalues in ascending order
-        flattened_value = value.contiguous().view((-1,) + matrix_shape)
+        flattened_value = value.reshape((-1,) + matrix_shape)
         return torch.stack([v.symeig(eigenvectors=False)[0][:1] > 0.0
                             for v in flattened_value]).view(batch_shape)
 
@@ -240,9 +305,11 @@ real = _Real()
 real_vector = _RealVector()
 positive = _GreaterThan(0.)
 greater_than = _GreaterThan
+greater_than_eq = _GreaterThanEq
 less_than = _LessThan
 unit_interval = _Interval(0., 1.)
 interval = _Interval
+half_open_interval = _HalfOpenInterval
 simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()

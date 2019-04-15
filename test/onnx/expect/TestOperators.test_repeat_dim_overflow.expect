@@ -1,6 +1,6 @@
-ir_version: 3
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "0.3"
+producer_version: "1.1"
 graph {
   node {
     output: "1"
@@ -9,7 +9,20 @@ graph {
       name: "value"
       t {
         dims: 4
-        data_type: INT64
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000\003\000\000\000\000\000\000\000\004\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "2"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 4
+        data_type: 7
         raw_data: "\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000"
       }
       type: TENSOR
@@ -17,26 +30,13 @@ graph {
   }
   node {
     input: "0"
-    input: "1"
-    output: "2"
+    input: "2"
+    output: "3"
     op_type: "Reshape"
   }
   node {
-    output: "3"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 4
-        data_type: INT64
-        raw_data: "\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000\003\000\000\000\000\000\000\000\004\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "2"
     input: "3"
+    input: "1"
     output: "4"
     op_type: "Tile"
   }
@@ -45,7 +45,7 @@ graph {
     name: "0"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 1
@@ -61,7 +61,7 @@ graph {
     name: "4"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 1
@@ -81,5 +81,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 9
 }

@@ -1,40 +1,42 @@
 #include <torch/nn/modules/linear.h>
 
-#include <ATen/ATen.h>
+#include <torch/types.h>
+#include <torch/utils.h>
 
 #include <cmath>
 #include <cstdint>
 
 namespace torch {
 namespace nn {
+LinearOptions::LinearOptions(int64_t in, int64_t out) : in_(in), out_(out) {}
 
-Linear::Linear(size_t features_in, size_t features_out)
-    : in_(features_in), out_(features_out) {}
+LinearImpl::LinearImpl(LinearOptions options) : options(options) {
+  reset();
+}
 
-void Linear::reset() {
-  weight_ =
-      register_parameter("weight", at::CPU(at::kFloat).empty({out_, in_}));
-  bias_ = register_parameter("bias", at::CPU(at::kFloat).empty(out_));
+void LinearImpl::reset() {
+  weight =
+      register_parameter("weight", torch::empty({options.out_, options.in_}));
+  if (options.with_bias_) {
+    bias = register_parameter("bias", torch::empty(options.out_));
+  }
 
-  const auto stdv = 1.0 / std::sqrt(weight_.size(1));
-  for (auto& p : parameters()) {
-    p.second.data().uniform_(-stdv, stdv);
+  const auto stdv = 1.0 / std::sqrt(weight.size(1));
+  NoGradGuard no_grad;
+  for (auto& p : this->parameters()) {
+    p.uniform_(-stdv, stdv);
   }
 }
 
-variable_list Linear::forward(variable_list input) {
-  auto x = input[0];
-  if (x.ndimension() == 2 && with_bias_) {
-    // Fused op is marginally faster
-    AT_ASSERT(x.size(1) == weight_.size(1));
-    return variable_list({at::addmm(bias_, x, weight_.t())});
-  }
+void LinearImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha << "torch::nn::Linear(in=" << options.in_
+         << ", out=" << options.out_ << ", with_bias=" << options.with_bias_
+         << ")";
+}
 
-  auto output = x.matmul(weight_.t());
-  if (with_bias_) {
-    output += bias_;
-  }
-  return variable_list({output});
+Tensor LinearImpl::forward(const Tensor& input) {
+  AT_ASSERT(!options.with_bias_ || bias.defined());
+  return torch::linear(input, weight, bias);
 }
 } // namespace nn
 } // namespace torch

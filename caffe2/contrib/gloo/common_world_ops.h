@@ -119,7 +119,7 @@ class CreateCommonWorld final : public Operator<Context> {
       signalFailure(ws_->GetBlob(status_blob_), ex);
       return false;
     } else {
-      throw ex;
+      throw;
     }
   }
 
@@ -208,7 +208,7 @@ class CloneCommonWorld final : public Operator<Context> {
       signalFailure(ws_->GetBlob(status_blob_), ex);
       return false;
     } else {
-      throw ex;
+      throw;
     }
   }
 

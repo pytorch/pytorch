@@ -1,9 +1,18 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
-#include <ATen/ATen.h>
+#include <torch/csrc/python_headers.h>
+#include <c10/core/ScalarType.h>
 
-namespace torch { namespace tensor {
+namespace c10 {
+struct Device;
+}
+
+namespace at {
+struct Type;
+class Tensor;
+} // namespace at
+
+namespace torch { namespace tensors {
 
 // Initializes the Python tensor type objects: torch.FloatTensor,
 // torch.DoubleTensor, etc. and binds them in their containing modules.
@@ -23,4 +32,7 @@ void py_set_default_dtype(PyObject* dtype_obj);
 // returned value will be a VariableType instance.
 at::Type& get_default_tensor_type();
 
-}} // namespace torch::tensor
+// Gets the ScalarType for the default tensor type.
+at::ScalarType get_default_scalar_type();
+
+}} // namespace torch::tensors

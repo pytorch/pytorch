@@ -11,8 +11,9 @@ template <class Context>
 class LastNWindowCollectorOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LastNWindowCollectorOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit LastNWindowCollectorOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         numToCollect_(
             OperatorBase::GetSingleArgument<int>("num_to_collect", -1)) {
     CAFFE_ENFORCE_GT(numToCollect_, 0);
@@ -35,23 +36,22 @@ class LastNWindowCollectorOp : public Operator<Context> {
     auto* output = Output(LAST_N);
     const auto& input = Input(DATA);
 
-    CAFFE_ENFORCE_GE(input.ndim(), 1);
-    bool output_initialized = output->size() > 0 &&
+    CAFFE_ENFORCE_GE(input.dim(), 1);
+    bool output_initialized = output->numel() > 0 &&
         (static_cast<std::shared_ptr<std::vector<TensorCPU>>*>(
-             output->raw_mutable_data(input.meta()))[0] != nullptr);
+             output->raw_mutable_data(input.dtype()))[0] != nullptr);
     if (output_initialized) {
-      CAFFE_ENFORCE_EQ(output->ndim(), input.ndim());
-      for (size_t i = 1; i < input.ndim(); ++i) {
-        CAFFE_ENFORCE_EQ(output->dim(i), input.dim(i));
+      CAFFE_ENFORCE_EQ(output->dim(), input.dim());
+      for (size_t i = 1; i < input.dim(); ++i) {
+        CAFFE_ENFORCE_EQ(output->size(i), input.size(i));
       }
     }
 
-    auto dims = input.dims();
-    auto num_entries = dims[0];
+    auto num_entries = input.sizes()[0];
 
     if (OutputSize() > NUM_VISITED) {
       auto* num_visited_tensor = Output(NUM_VISITED);
-      CAFFE_ENFORCE_EQ(1, num_visited_tensor->size());
+      CAFFE_ENFORCE_EQ(1, num_visited_tensor->numel());
       auto* num_visited = num_visited_tensor->template mutable_data<int64_t>();
       if (!output_initialized) {
         *num_visited = 0;
@@ -60,33 +60,43 @@ class LastNWindowCollectorOp : public Operator<Context> {
       *num_visited += num_entries;
     }
 
-    dims[0] = numToCollect_;
-    output->Reserve(dims, &context_);
+    if (!output_initialized) {
+      auto dims = input.sizes().vec();
+      dims[0] = 0;
+      output->Resize(dims);
+      // pass meta to output
+      output->raw_mutable_data(input.dtype());
+      output->ReserveSpace(numToCollect_);
+    }
 
     if (num_entries == 0) {
       if (!output_initialized) {
         // Get both shape and meta
-        output->CopyFrom(input, &context_);
+        output->CopyFrom(input, true /*async*/);
       }
       return true;
     }
 
     auto num_to_copy = std::min<int32_t>(num_entries, numToCollect_);
-    auto output_batch_size = output_initialized ? output->dim(0) : 0;
-    dims[0] = std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
-    if (output_batch_size < numToCollect_) {
-      output->Resize(dims);
+    auto output_batch_size = output_initialized ? output->size(0) : 0;
+    auto output_num =
+        std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
+
+    // output_num is >= output_batch_size
+    if (output_num > output_batch_size) {
+      output->ExtendTo(output_num, 50);
     }
+
     auto* output_data =
-        static_cast<char*>(output->raw_mutable_data(input.meta()));
+        static_cast<char*>(output->raw_mutable_data(input.dtype()));
 
     auto* next = Output(NEXT);
-    CAFFE_ENFORCE_EQ(0, next->ndim());
+    CAFFE_ENFORCE_EQ(0, next->dim());
     auto* next_data = next->template mutable_data<int32_t>();
     if (!output_initialized) {
       *next_data = 0;
     }
-    CAFFE_ENFORCE_LT(*next_data, output->dim(0));
+    CAFFE_ENFORCE_LT(*next_data, output->size(0));
 
     auto block_size = input.size_from_dim(1);
     auto block_bytesize = block_size * input.itemsize();
@@ -94,8 +104,8 @@ class LastNWindowCollectorOp : public Operator<Context> {
 
     if (num_entries > numToCollect_) {
       // just copy the last N rows
-      context_.template CopyItems<Context, Context>(
-          input.meta(),
+      context_.CopyItemsSameDevice(
+          input.dtype(),
           num_to_copy * block_size,
           input_data + (num_entries - numToCollect_) * block_bytesize,
           output_data);
@@ -105,14 +115,14 @@ class LastNWindowCollectorOp : public Operator<Context> {
     auto start = *next_data;
     auto first_chunk_size =
         std::min<size_t>(num_to_copy + start, numToCollect_) - start;
-    context_.template CopyItems<Context, Context>(
-        input.meta(),
+    context_.CopyItemsSameDevice(
+        input.dtype(),
         first_chunk_size * block_size,
         input_data,
         output_data + start * block_bytesize);
 
-    context_.template CopyItems<Context, Context>(
-        input.meta(),
+    context_.CopyItemsSameDevice(
+        input.dtype(),
         (num_to_copy - first_chunk_size) * block_size,
         input_data + first_chunk_size * block_bytesize,
         output_data);

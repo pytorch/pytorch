@@ -20,18 +20,6 @@ def _get_thnn_function_backend():
 
 def _initialize_backend():
     from .._functions.thnn import _all_functions as _thnn_functions
-    from .._functions.rnn import RNN, \
-        RNNTanhCell, RNNReLUCell, GRUCell, LSTMCell
-    from .._functions.dropout import Dropout, FeatureDropout
-
-    backend.register_function('RNN', RNN)
-    backend.register_function('RNNTanhCell', RNNTanhCell)
-    backend.register_function('RNNReLUCell', RNNReLUCell)
-    backend.register_function('LSTMCell', LSTMCell)
-    backend.register_function('GRUCell', GRUCell)
-    backend.register_function('Dropout', Dropout)
-    backend.register_function('Dropout2d', FeatureDropout)
-    backend.register_function('Dropout3d', FeatureDropout)
     for cls in _thnn_functions:
         name = cls.__name__
         backend.register_function(name, cls)

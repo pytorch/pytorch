@@ -1,5 +1,5 @@
-#include "../THCTensorMathCompareT.cuh"
-#include "THCTensor.hpp"
-#include "THCStream.hpp"
-#include "../generic/THCTensorMathCompareT.cu"
-#include "../THCGenerateByteType.h"
+#include <THC/THCTensorMathCompareT.cuh>
+#include <THC/THCTensor.hpp>
+
+#include <THC/generic/THCTensorMathCompareT.cu>
+#include <THC/THCGenerateByteType.h>

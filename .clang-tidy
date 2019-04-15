@@ -1,41 +1,34 @@
 ---
-# NOTE: there must be no spaces before the '-', so put the comma first.
+# NOTE there must be no spaces before the '-', so put the comma first.
 Checks: '
-  *
-  ,modernize-*
-  ,clang-analyzer-*
-  ,-clang-diagnostic-*
-  ,-hicpp-no-array-decay
-  ,-fuchsia-*
-  ,-google-readability-namespace-comments
-  ,-llvm-namespace-comment
-  ,-google-readability-todo
-  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
-  ,-cert-err60-cpp
-  ,-llvm-header-guard
-  ,-cppcoreguidelines-special-member-functions
-  ,-misc-unused-parameters
-  ,-hicpp-braces-around-statements
-  ,-hicpp-special-member-functions
-  ,-readability-braces-around-statements
-  ,-modernize-use-default-member-init
-  ,-google-runtime-references
-  ,-cppcoreguidelines-pro-type-vararg
-  ,-google-readability-braces-around-statements
-  ,-google-build-using-namespace
-  ,-hicpp-vararg
-  ,-hicpp-explicit-conversions
-  ,-performance-unnecessary-value-param
-  ,-google-runtime-references
-  ,-cppcoreguidelines-pro-type-static-cast-downcast
-  ,-cppcoreguidelines-pro-bounds-constant-array-index
-  ,-cert-err58-cpp
-  ,-modernize-make-unique
+  -*
+  ,bugprone-*
+  ,-bugprone-forward-declaration-namespace
+  ,-bugprone-macro-parentheses
+  ,cppcoreguidelines-*
+  ,-cppcoreguidelines-interfaces-global-init
   ,-cppcoreguidelines-owning-memory
-  ,-readability-named-parameter
+  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
+  ,-cppcoreguidelines-pro-bounds-constant-array-index
+  ,-cppcoreguidelines-pro-bounds-pointer-arithmetic
+  ,-cppcoreguidelines-pro-type-cstyle-cast
+  ,-cppcoreguidelines-pro-type-reinterpret-cast
+  ,-cppcoreguidelines-pro-type-static-cast-downcast
+  ,-cppcoreguidelines-pro-type-union-access
+  ,-cppcoreguidelines-pro-type-vararg
+  ,-cppcoreguidelines-special-member-functions
+  ,hicpp-exception-baseclass
+  ,hicpp-avoid-goto
+  ,modernize-*
+  ,-modernize-return-braced-init-list
+  ,-modernize-use-auto
+  ,-modernize-use-default-member-init
+  ,-modernize-use-using
+  ,performance-*
+  ,-performance-noexcept-move-constructor
   '
-WarningsAsErrors: ''
-HeaderFilterRegex: 'torch/csrc/'
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'torch/csrc/.*'
 AnalyzeTemporaryDtors: false
 CheckOptions:
 ...

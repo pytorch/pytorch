@@ -12,10 +12,11 @@ template <class Context>
 class BatchBoxCoxOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  BatchBoxCoxOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit BatchBoxCoxOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         min_block_size_(
-            OperatorBase::GetSingleArgument<int>("min_block_size", 256)) {}
+            this->template GetSingleArgument<int>("min_block_size", 256)) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float, double>>::call(this, Input(DATA));
@@ -27,8 +28,8 @@ class BatchBoxCoxOp final : public Operator<Context> {
  protected:
   template <typename T>
   void BoxCoxNaive(
-      TIndex N,
-      TIndex D,
+      int64_t N,
+      int64_t D,
       const T* data_ptr,
       const T* lambda1_ptr,
       const T* lambda2_ptr,
@@ -38,7 +39,7 @@ class BatchBoxCoxOp final : public Operator<Context> {
 #ifdef CAFFE2_USE_MKL
   template <typename T>
   void BoxCoxNonzeroLambda(
-      TIndex D,
+      int64_t D,
       const T* data_ptr,
       const T* lambda1,
       const T* lambda2,
@@ -47,7 +48,7 @@ class BatchBoxCoxOp final : public Operator<Context> {
 
   template <typename T>
   void BoxCoxZeroLambda(
-      TIndex D,
+      int64_t D,
       const T* data_ptr,
       const T* lambda2,
       T k_eps,

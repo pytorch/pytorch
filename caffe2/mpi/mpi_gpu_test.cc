@@ -5,8 +5,10 @@
 #include "caffe2/mpi/mpi_common.h"
 #include <gtest/gtest.h>
 
-CAFFE2_DEFINE_string(
-    caffe_test_root, "gen/", "The root of the caffe test folder.");
+C10_DEFINE_string(
+    caffe_test_root,
+    "gen/",
+    "The root of the caffe test folder.");
 
 namespace caffe2 {
 
@@ -55,7 +57,6 @@ TEST(MPITest, TestMPIBroadcast) {
   arg->set_f(rank);
   int size;
   MPI_Comm_size(MPI_COMM_WORLD, &size);
-
   for (int root = 0; root < size; ++root) {
     net_def.mutable_op(2)->mutable_arg(0)->set_i(root);
     Workspace ws;
@@ -63,10 +64,10 @@ TEST(MPITest, TestMPIBroadcast) {
     EXPECT_NE(nullptr, net.get());
     EXPECT_TRUE(net->Run());
     // Let's test the value.
-    auto& X = ws.GetBlob("X")->Get<TensorCUDA>();
-    TensorCPU X_cpu(X);
-    EXPECT_EQ(X.size(), 10);
-    for (int i = 0; i < X.size(); ++i) {
+    auto& X = ws.GetBlob("X")->Get<Tensor>();
+    Tensor X_cpu(X, CPU);
+    EXPECT_EQ(X.numel(), 10);
+    for (int i = 0; i < X.numel(); ++i) {
       EXPECT_EQ(X_cpu.data<float>()[i], root);
     }
   }
@@ -131,10 +132,10 @@ TEST(MPITest, TestMPIReduce) {
     if (rank == root) {
       // Let's test the value.
       auto& X = ws.GetBlob("X_reduced")->Get<TensorCUDA>();
-      EXPECT_EQ(X.size(), 10);
+      EXPECT_EQ(X.numel(), 10);
       int expected_result = size * (size - 1) / 2;
-      TensorCPU X_cpu(X);
-      for (int i = 0; i < X.size(); ++i) {
+      Tensor X_cpu(X, CPU);
+      for (int i = 0; i < X.numel(); ++i) {
         EXPECT_EQ(X_cpu.data<float>()[i], expected_result);
       }
     }
@@ -190,17 +191,17 @@ TEST(MPITest, TestMPIAllgather) {
   EXPECT_TRUE(net->Run());
   // Let's test the value.
   auto& X = ws.GetBlob("X")->Get<TensorCUDA>();
-  TensorCPU X_cpu(X);
-  EXPECT_EQ(X.size(), 20);
-  for (int i = 0; i < X.size(); ++i) {
+  Tensor X_cpu(X, CPU);
+  EXPECT_EQ(X.numel(), 20);
+  for (int i = 0; i < X.numel(); ++i) {
     EXPECT_EQ(X_cpu.data<float>()[i], rank);
   }
   auto& X_gathered = ws.GetBlob("X_gathered")->Get<TensorCUDA>();
-  EXPECT_EQ(X_gathered.size(), 20 * size);
-  EXPECT_EQ(X_gathered.dim(0), 2 * size);
-  EXPECT_EQ(X_gathered.dim(1), 10);
-  TensorCPU X_gathered_cpu(X_gathered);
-  for (int i = 0; i < X_gathered.size(); ++i) {
+  EXPECT_EQ(X_gathered.numel(), 20 * size);
+  EXPECT_EQ(X_gathered.size(0), 2 * size);
+  EXPECT_EQ(X_gathered.size(1), 10);
+  Tensor X_gathered_cpu(X_gathered, CPU);
+  for (int i = 0; i < X_gathered.numel(); ++i) {
     EXPECT_EQ(X_gathered_cpu.data<float>()[i], i / 20);
   }
 }
@@ -253,16 +254,16 @@ TEST(MPITest, TestMPIAllreduce) {
   EXPECT_TRUE(net->Run());
   // Let's test the value.
   auto& X = ws.GetBlob("X")->Get<TensorCUDA>();
-  EXPECT_EQ(X.size(), 10);
-  TensorCPU X_cpu(X);
-  for (int i = 0; i < X.size(); ++i) {
+  EXPECT_EQ(X.numel(), 10);
+  Tensor X_cpu(X, CPU);
+  for (int i = 0; i < X.numel(); ++i) {
     EXPECT_EQ(X_cpu.data<float>()[i], rank);
   }
   auto& X_reduced = ws.GetBlob("X_reduced")->Get<TensorCUDA>();
-  EXPECT_EQ(X_reduced.size(), 10);
+  EXPECT_EQ(X_reduced.numel(), 10);
   int expected_result = size * (size - 1) / 2;
-  TensorCPU X_reduced_cpu(X_reduced);
-  for (int i = 0; i < X_reduced.size(); ++i) {
+  Tensor X_reduced_cpu(X_reduced, CPU);
+  for (int i = 0; i < X_reduced.numel(); ++i) {
     EXPECT_EQ(X_reduced_cpu.data<float>()[i], expected_result);
   }
 }
@@ -314,10 +315,10 @@ TEST(MPITest, TestInPlaceMPIAllreduce) {
   EXPECT_NE(nullptr, net.get());
   EXPECT_TRUE(net->Run());
   auto& X_reduced = ws.GetBlob("X")->Get<TensorCUDA>();
-  EXPECT_EQ(X_reduced.size(), 10);
+  EXPECT_EQ(X_reduced.numel(), 10);
   int expected_result = size * (size - 1) / 2;
-  TensorCPU X_reduced_cpu(X_reduced);
-  for (int i = 0; i < X_reduced.size(); ++i) {
+  Tensor X_reduced_cpu(X_reduced, CPU);
+  for (int i = 0; i < X_reduced.numel(); ++i) {
     EXPECT_EQ(X_reduced_cpu.data<float>()[i], expected_result);
   }
 }

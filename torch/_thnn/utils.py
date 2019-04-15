@@ -1,9 +1,14 @@
-import os
-import itertools
-import importlib
+try:
+    # when compiling a cffi extension, this works. When compiling
+    # torch itself, it doesn't work because the parent module can't
+    # yet be imported. However that's fine because we don't need it in
+    # that case.
+    from .._utils_internal import get_file_path
 
-THNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THNN.h')
-THCUNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THCUNN.h')
+    THNN_H_PATH = get_file_path('torch', 'include', 'THNN', 'generic', 'THNN.h')
+    THCUNN_H_PATH = get_file_path('torch', 'include', 'THCUNN', 'generic', 'THCUNN.h')
+except Exception as e:
+    pass
 
 
 def _unpickle_backend(backend_name):
@@ -86,14 +91,14 @@ def parse_header(path):
     generic_functions = []
     for l, c in lines:
         if l.startswith('TH_API void THNN_'):
-            fn_name = l.lstrip('TH_API void THNN_')
+            fn_name = l[len('TH_API void THNN_'):]
             if fn_name[0] == '(' and fn_name[-2] == ')':
                 fn_name = fn_name[1:-2]
             else:
                 fn_name = fn_name[:-1]
             generic_functions.append(Function(fn_name))
         elif l.startswith('THC_API void THNN_'):
-            fn_name = l.lstrip('THC_API void THNN_')
+            fn_name = l[len('THC_API void THNN_'):]
             if fn_name[0] == '(' and fn_name[-2] == ')':
                 fn_name = fn_name[1:-2]
             else:

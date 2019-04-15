@@ -51,7 +51,7 @@ inline int64_t infer_ft_complex_to_real_onesided_size(int64_t complex_size,
     std::ostringstream ss;
     ss << "expected real signal size " << expected_size << " is incompatible "
        << "with onesided complex frequency size " << complex_size;
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
 }
 

@@ -1,38 +1,52 @@
-#include <cmath>
+#include "caffe2/operators/swish_op.h"
 
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/elementwise_op.h"
-#include "caffe2/operators/swish_op.h"
 
 namespace caffe2 {
 
+namespace {
+
 template <typename T>
-__global__ void SwishKernel(const int N, const T* x, T* y) {
+__global__ void SwishCUDAKernel(const int N, const T* X, T* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    y[i] = x[i] / (1. + exp(-x[i]));
+#if __CUDA_ARCH__ >= 350
+    Y[i] = __ldg(X + i) / (T(1) + exp(-__ldg(X + i)));
+#else
+    Y[i] = X[i] / (T(1) + exp(-X[i]));
+#endif
   }
 }
 
 template <typename T>
-__global__ void
-SwishGradientKernel(const int N, const T* x, const T* y, const T* dy, T* dx) {
+__global__ void SwishGradientCUDAKernel(
+    const int N,
+    const T* X,
+    const T* Y,
+    const T* dY,
+    T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    dx[i] = dy[i] * (y[i] + (1. - y[i]) / (1. + exp(-x[i])));
+#if __CUDA_ARCH__ >= 350
+    dX[i] = __ldg(dY + i) *
+        (__ldg(Y + i) + (T(1) - __ldg(Y + i)) / (T(1) + exp(-__ldg(X + i))));
+#else
+    dX[i] = dY[i] * (Y[i] + (T(1) - Y[i]) / (T(1) + exp(-X[i])));
+#endif
   }
 }
 
-struct SwishCUDAFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CUDAContext* device_context) {
-    SwishKernel<T>
-        <<<CAFFE_GET_BLOCKS(n),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           device_context->cuda_stream()>>>(n, x, y);
-    return;
-  }
-};
+} // namespace
+
+template <>
+template <typename T>
+bool SwishFunctor<CUDAContext>::
+operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
+  SwishCUDAKernel<T>
+      <<<CAFFE_GET_BLOCKS(N),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(N, X, Y);
+  return true;
+}
 
 template <>
 template <typename T>
@@ -50,7 +64,7 @@ bool SwishGradientOp<CUDAContext>::DoRunWithType() {
   const T* y = Yin.template data<T>();
   const T* dy = DYin.template data<T>();
   T* dx = DXout->template mutable_data<T>();
-  SwishGradientKernel<T>
+  SwishGradientCUDAKernel<T>
       <<<CAFFE_GET_BLOCKS(n),
          CAFFE_CUDA_NUM_THREADS,
          0,
@@ -68,6 +82,7 @@ REGISTER_CUDA_OPERATOR(
     UnaryElementwiseOp<
         TensorTypes<float, double>,
         CUDAContext,
-        SwishCUDAFunctor>);
+        SwishFunctor<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(SwishGradient, SwishGradientOp<CUDAContext>);
+
 } // namespace caffe2

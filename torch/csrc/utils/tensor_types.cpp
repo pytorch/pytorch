@@ -1,10 +1,10 @@
 #include <Python.h>
 
-#include "tensor_types.h"
+#include <torch/csrc/utils/tensor_types.h>
 
-#include "torch/csrc/autograd/generated/VariableType.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/tensor/python_tensor.h"
+#include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/tensor/python_tensor.h>
 
 #include <sstream>
 #include <unordered_map>
@@ -16,11 +16,11 @@ namespace torch { namespace utils {
 
 static const char* backend_to_string(const at::Type& type) {
   switch (type.backend()) {
-    case at::kCPU: return "torch";
-    case at::kCUDA: return "torch.cuda";
-    case at::kSparseCPU: return "torch.sparse";
-    case at::kSparseCUDA: return "torch.cuda.sparse";
-    default: throw std::runtime_error("Unimplemented backend");
+    case at::Backend::CPU: return "torch";
+    case at::Backend::CUDA: return "torch.cuda";
+    case at::Backend::SparseCPU: return "torch.sparse";
+    case at::Backend::SparseCUDA: return "torch.cuda.sparse";
+    default: AT_ERROR("Unimplemented backend ", type.backend());
   }
 }
 
@@ -40,7 +40,7 @@ at::Type& type_from_string(const std::string& str) {
   const std::unordered_map<std::string, Type*>* map = nullptr;
 
   if (str == "torch.Tensor") {
-    return torch::tensor::get_default_tensor_type();
+    return torch::tensors::get_default_tensor_type();
   }
 
   if (std::mismatch(cuda_prefix.begin(), cuda_prefix.end(), str.begin()).first == cuda_prefix.end()) {
@@ -72,11 +72,11 @@ std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
   // can't easily iterate over enum classes
   std::vector<Backend> backends = { Backend::CPU, Backend::CUDA, Backend::SparseCPU, Backend::SparseCUDA };
   std::vector<ScalarType> scalar_types = { ScalarType::Byte, ScalarType::Char, ScalarType::Double, ScalarType::Float,
-                                           ScalarType::Int, ScalarType::Long, ScalarType::Short, ScalarType::Half};
+                                           ScalarType::Int, ScalarType::Long, ScalarType::Short, ScalarType::Half, ScalarType::Bool};
   for (auto& backend : backends) {
     for (auto& scalar_type : scalar_types) {
-      // there is no sparse half types.
-      if (scalar_type == ScalarType::Half && (backend == Backend::SparseCUDA || backend == Backend::SparseCPU)) {
+      // there are no sparse half or bool types.
+      if ((scalar_type == ScalarType::Half || scalar_type == ScalarType::Bool) && (backend == Backend::SparseCUDA || backend == Backend::SparseCPU)) {
         continue;
       }
       ret.emplace_back(std::make_pair(backend, scalar_type));

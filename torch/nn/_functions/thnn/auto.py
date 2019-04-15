@@ -3,7 +3,7 @@ from collections import defaultdict
 
 import torch
 from torch._thnn.utils import parse_header, THNN_H_PATH
-from torch.autograd.function import Function, InplaceFunction, once_differentiable
+from torch.autograd.function import Function, InplaceFunction
 from torch._thnn import type2backend
 from .auto_double_backwards import double_backwards_fns
 from .auto_symbolic import symbolic_fns
@@ -275,14 +275,12 @@ def _generate_function_classes(scope_dict):
         'IndexLinear',
         'SpatialFullConvolution',
         'SpatialConvolutionMM',
-        'SparseLinear',
         'TemporalConvolution',
         'SpatialAveragePooling',
         'SpatialMaxPooling',
         'SpatialDilatedMaxPooling',
         'SpatialMaxUnpooling',
         'SpatialAdaptiveMaxPooling',
-        'SpatialAdaptiveAveragePooling',
         'VolumetricAveragePooling',
         'VolumetricMaxPooling',
         'VolumetricMaxUnpooling',
@@ -305,13 +303,8 @@ def _generate_function_classes(scope_dict):
     }
     name_remap = {
         'TemporalConvolution': 'Conv1d',
-        'TemporalReflectionPadding': 'ReflectionPad1d',
-        'TemporalReplicationPadding': 'ReplicationPad1d',
         'SpatialDilatedConvolution': 'DilatedConv2d',
         'SpatialMaxUnpooling': 'MaxUnpool2d',
-        'SpatialReflectionPadding': 'ReflectionPad2d',
-        'SpatialReplicationPadding': 'ReplicationPad2d',
-        'VolumetricReplicationPadding': 'ReplicationPad3d',
         'VolumetricMaxUnpooling': 'MaxUnpool3d',
         'HardTanh': 'Hardtanh',
         'HardShrink': 'Hardshrink',

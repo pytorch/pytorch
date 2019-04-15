@@ -1,1 +1,0 @@
-libcudart ${cuda:Major}.${cuda:Minor} cuda-cudart-${cuda:Major}-${cuda:Minor}

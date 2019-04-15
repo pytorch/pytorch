@@ -1,5 +1,4 @@
 import torch
-import importlib
 import warnings
 from collections import defaultdict
 
@@ -33,9 +32,9 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
             raise RuntimeError("Cannot cast sparse tensor to dense tensor")
         new_module_name = dtype.__module__.replace('.sparse', '')
         new_values_type_name = new_module_name + '.' + dtype.__name__
-        new_values = self._values().type(new_values_type_name, non_blocking)
+        new_values = torch._values(self).type(new_values_type_name, non_blocking)
         new_indices_type_name = new_module_name + '.LongTensor'
-        new_indices = self._indices().type(new_indices_type_name, non_blocking)
+        new_indices = torch._indices(self).type(new_indices_type_name, non_blocking)
         return dtype(new_indices, new_values, self.size())
     if dtype.is_sparse:
         raise RuntimeError("Cannot cast dense tensor to sparse tensor")
@@ -68,8 +67,8 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
     with torch.cuda.device(device):
         if self.is_sparse:
             new_type = getattr(torch.cuda.sparse, self.__class__.__name__)
-            indices = self._indices().cuda(device, non_blocking)
-            values = self._values().cuda(device, non_blocking)
+            indices = torch._indices(self).cuda(device, non_blocking)
+            values = torch._values(self).cuda(device, non_blocking)
             return new_type(indices, values, self.size())
         else:
             new_type = getattr(torch.cuda, self.__class__.__name__)
@@ -87,18 +86,67 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
     return kwargs['async']
 
 
+# Note [Don't serialize hooks]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Since time immemorial, we have serialized the backward hooks associated with
+# variables.  This kind of half-worked--Python can pickle global functions
+# (but not closures!)--but there were problems.
+#
+#   - It's fragile.  If you serialize a backward hook into a saved
+#     model, and then you rename the function associated with the hook,
+#     now your saved model is broken and you can't load it anymore.
+#
+#   - It's not actually used.  The standard recommendation is to
+#     serialize the *state_dict* of a model, not the model itself
+#     (since this is more stable to code changes affecting the model
+#     serialization), and the state dict saves "data" only, thus
+#     stripping the the backward hooks.  In some cases, hooks are
+#     essential to the well-functioning of a model (e.g., DDP),
+#     but DDP already manages readding the hooks!
+#
+#   - We didn't serialize them in many cases.  Prior to #10220, we
+#     were dropping backward hooks in ForkingPickler.  We "fixed" this
+#     to be convenient with other serialization sites, but lack of
+#     serializing backward hooks wasn't actually the root cause of
+#     the bug.
+#
+# With these cases in mind, we have decided that a better strategy
+# is to just NOT serialize hooks at all.
+#
+# Since this is a BC-breaking change, we should warn when we previously
+# serialized a hook, but no longer do so. This will be done by adding a special
+# sentinel property to hooks will be used to suppress this warning. If a hook
+# has the property _torch_serialize_ignore, we will not emit a warning if we
+# attempt to serialize a Tensor with this hook attached to it.
+#
+# By the way, when _backward_hooks is skipped, we must give an EMPTY
+# OrderedDict(), if you pass a None you'll run afoul #12219.
+
+
 def _rebuild_tensor(storage, storage_offset, size, stride):
-    class_name = storage.__class__.__name__.replace('Storage', 'Tensor')
-    module = importlib.import_module(storage.__module__)
-    tensor_class = getattr(module, class_name)
-    return tensor_class().set_(storage, storage_offset, size, stride)
+    # first construct a tensor with the correct dtype/device
+    t = torch.tensor([], dtype=storage.dtype, device=storage.device)
+    return t.set_(storage, storage_offset, size, stride)
 
 
 def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks):
     tensor = _rebuild_tensor(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
+    # NB: This line exists only for backwards compatibility; the
+    # general expectation is that backward_hooks is an empty
+    # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
     return tensor
+
+
+def _rebuild_parameter(data, requires_grad, backward_hooks):
+    param = torch.nn.Parameter(data, requires_grad)
+    # NB: This line exists only for backwards compatibility; the
+    # general expectation is that backward_hooks is an empty
+    # OrderedDict.  See Note [Don't serialize hooks]
+    param._backward_hooks = backward_hooks
+
+    return param
 
 
 def _import_dotted_name(name):
@@ -156,8 +204,8 @@ def _flatten_sparse_tensors(tensors):
         A tuple of two contiguous 1D buffers, one containing input tensors'
         indices and the other containing the values.
     """
-    flat_indices = _flatten_dense_tensors([t._indices() for t in tensors])
-    flat_values = _flatten_dense_tensors([t._values() for t in tensors])
+    flat_indices = _flatten_dense_tensors([torch._indices(t) for t in tensors])
+    flat_values = _flatten_dense_tensors([torch._values(t) for t in tensors])
     return flat_indices, flat_values
 
 
@@ -199,8 +247,8 @@ def _unflatten_sparse_tensors(flat, tensors):
         flat.
     """
     flat_indices, flat_values = flat
-    indices = _unflatten_dense_tensors(flat_indices, [t._indices() for t in tensors])
-    values = _unflatten_dense_tensors(flat_values, [t._values() for t in tensors])
+    indices = _unflatten_dense_tensors(flat_indices, [torch._indices(t) for t in tensors])
+    values = _unflatten_dense_tensors(flat_values, [torch._values(t) for t in tensors])
     outputs = []
     for t, i, v in zip(tensors, indices, values):
         outputs.append(t.new(i, v, t.size()))
@@ -245,8 +293,8 @@ def _take_tensors(tensors, size_limit):
     for tensor in tensors:
         t = tensor.type()
         if tensor.is_sparse:
-            indices = tensor._indices()
-            values = tensor._values()
+            indices = torch._indices(tensor)
+            values = torch._values(tensor)
             size = indices.numel() * indices.element_size() + values.numel() * values.element_size()
         else:
             size = tensor.numel() * tensor.element_size()
@@ -259,3 +307,13 @@ def _take_tensors(tensors, size_limit):
     for buf, _ in buf_dict.values():
         if len(buf) > 0:
             yield buf
+
+
+# annotation decorator to get annotations in a way that is compatible
+# with both Python 2 and 3
+def annotate(ret, **kwargs):
+    def dec(fun):
+        fun.__annotations__ = dict(kwargs)
+        fun.__annotations__['return'] = ret
+        return fun
+    return dec

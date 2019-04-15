@@ -81,7 +81,7 @@ class BrewTest(unittest.TestCase):
         workspace.RunNetOnce(model.net)
 
         out = workspace.FetchBlob("out_tanh")
-        self.assertAlmostEqual(out.mean(), 0.46211711)
+        self.assertAlmostEqual(out.mean(), np.tanh(0.5), places=5)
 
     def test_validate(self):
         model = ModelHelper(name="test_model")
@@ -325,4 +325,4 @@ class BrewGPUTest(unittest.TestCase):
         workspace.RunNetOnce(model.net)
 
         out = workspace.FetchBlob("out_tanh")
-        self.assertAlmostEqual(out.mean(), 0.46211711)
+        self.assertAlmostEqual(out.mean(), np.tanh(0.5), places=5)

@@ -3,6 +3,10 @@
 #include <string>
 #include <functional>
 
+#include "c10/util/Registry.h"
+#include "caffe2/core/common.h"
+#include "caffe2/proto/caffe2_pb.h"
+
 namespace caffe2 {
 
 class Blob;
@@ -39,17 +43,56 @@ class BlobSerializerBase {
    *     serailizer can use it to save blob in several chunks
    *     acceptor should be thread-safe
    */
-  virtual void Serialize(const Blob& blob, const std::string& name,
-                        SerializationAcceptor acceptor) = 0;
+  virtual void Serialize(
+      const void* pointer,
+      TypeMeta typeMeta,
+      const std::string& name,
+      SerializationAcceptor acceptor) = 0;
 
   virtual void SerializeWithChunkSize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const std::string& name,
       SerializationAcceptor acceptor,
       int /*chunk_size*/) {
     // Base implementation.
-    Serialize(blob, name, acceptor);
+    Serialize(pointer, typeMeta, name, acceptor);
   }
 };
+
+// The Blob serialization registry and serializer creator functions.
+C10_DECLARE_TYPED_REGISTRY(
+    BlobSerializerRegistry,
+    TypeIdentifier,
+    BlobSerializerBase,
+    std::unique_ptr);
+#define REGISTER_BLOB_SERIALIZER(id, ...) \
+  C10_REGISTER_TYPED_CLASS(BlobSerializerRegistry, id, __VA_ARGS__)
+// Creates an operator with the given operator definition.
+inline unique_ptr<BlobSerializerBase> CreateSerializer(TypeIdentifier id) {
+  return BlobSerializerRegistry()->Create(id);
+}
+
+
+/**
+ * @brief BlobDeserializerBase is an abstract class that deserializes a blob
+ * from a BlobProto or a TensorProto.
+ */
+class CAFFE2_API BlobDeserializerBase {
+ public:
+  virtual ~BlobDeserializerBase() {}
+
+  // Deserializes from a BlobProto object.
+  virtual void Deserialize(const BlobProto& proto, Blob* blob) = 0;
+};
+
+C10_DECLARE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
+#define REGISTER_BLOB_DESERIALIZER(name, ...) \
+  C10_REGISTER_CLASS(BlobDeserializerRegistry, name, __VA_ARGS__)
+// Creates an operator with the given operator definition.
+inline unique_ptr<BlobDeserializerBase> CreateDeserializer(const string& type) {
+  return BlobDeserializerRegistry()->Create(type);
+}
+
 
 } // namespace caffe2

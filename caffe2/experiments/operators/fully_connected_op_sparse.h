@@ -1,3 +1,19 @@
+/**
+ * Copyright (c) 2016-present, Facebook, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #ifndef CAFFE2_OPERATORS_FULLY_CONNECTED_OP_SPARSE_H_
 #define CAFFE2_OPERATORS_FULLY_CONNECTED_OP_SPARSE_H_
 
@@ -16,8 +32,8 @@ template<int N>
 using Shape = std::array<int, N>;
 
 template<int N>
-const std::vector<TIndex>& shape(Shape<N> vs) {
-  static thread_local std::vector<TIndex> cache;
+const std::vector<int64_t>& shape(Shape<N> vs) {
+  static thread_local std::vector<int64_t> cache;
   cache.resize(vs.size());
   for (auto i = 0; i < vs.size(); ++i) {
     cache[i] = vs[i];
@@ -25,11 +41,11 @@ const std::vector<TIndex>& shape(Shape<N> vs) {
   return cache;
 }
 
-inline const std::vector<TIndex>& shape(int i) {
+inline const std::vector<int64_t>& shape(int i) {
   return shape<1>(Shape<1>({i}));
 }
 
-inline const std::vector<TIndex>& shape(int i, int j) {
+inline const std::vector<int64_t>& shape(int i, int j) {
   return shape<2>(Shape<2>({i, j}));
 }
 
@@ -90,18 +106,18 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
     const auto& jw = Input(3);
     // Notice that we do not need to transpose b
     const auto& b = Input(4);
-    auto* Yt = Output(0); //transposed Y
+    // transposed Y
     // here we assume X is k-by-m
-    CAFFE_ENFORCE_EQ(Xt.ndim(), 2);
-    CAFFE_ENFORCE_EQ(b.ndim(), 1);
+    CAFFE_ENFORCE_EQ(Xt.dim(), 2);
+    CAFFE_ENFORCE_EQ(b.dim(), 1);
     // batch size
-    int K = Xt.ndim() > 1 ? Xt.dim32(0) : 1;
+    int K = Xt.dim() > 1 ? Xt.dim32(0) : 1;
     // Feature dimension
-    int M = Xt.size() / K;
+    int M = Xt.numel() / K;
     // number of outputs.
     int N = iw.dim32(0)-1;
     CAFFE_ENFORCE_EQ(N, b.dim32(0));
-    Yt->Resize(shape(N, M));
+    auto* Yt = Output(0, shape(N, M), at::dtype<T>());
 
     // Y' = W * X';
     Sparse_mm<T, Context>(
@@ -109,7 +125,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
       jw.template data<int>(), N, K, M, Xt.template data<T>(),
       Yt->template mutable_data<T>(), &context_);
     // Add bias term
-    if (bias_multiplier_.size() != M) {
+    if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(shape(M));
       math::Set<T, Context>(
@@ -124,7 +140,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
   }
 
  protected:
-  Tensor<Context> bias_multiplier_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
 };
 
 

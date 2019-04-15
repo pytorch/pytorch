@@ -15,98 +15,15 @@
 
 #include <torch/csrc/utils/hash.h>
 
-#include "ProcessGroup.hpp"
-#include "Store.hpp"
-#include "Types.hpp"
-#include "Utils.hpp"
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAEvent.h>
+#include <c10/cuda/CUDAStream.h>
+#endif
 
-namespace c10d {
-
-// AlgorithmKey is a const identifier for a Gloo algorithm.
-//
-// It captures the set of participating devices, the source device,
-// destination device, source rank, destination rank, reduction type
-// (if applicable), etcetera. This key is used to cache instances of a
-// Gloo algorithm for reuse. The number of cached instances can vary
-// over time and is agreed upon between all processes in the group.
-//
-// When we're dealing with multiple entries per key, it is also used
-// to broadcast the number of entries such that all processes agree.
-//
-struct AlgorithmKey {
-  bool operator==(const AlgorithmKey& other) const {
-    return (collectiveType == other.collectiveType) && (type == other.type) &&
-        (devices == other.devices) && (srcSizes == other.srcSizes) &&
-        (dstSizes == other.dstSizes) && (srcRank == other.srcRank) &&
-        (dstRank == other.dstRank) && (srcTensor == other.srcTensor) &&
-        (dstTensor == other.dstTensor) && (reduceOp == other.reduceOp);
-  }
-
-  CollectiveType collectiveType = CollectiveType::UNUSED;
-  at::Type* type = nullptr;
-  std::vector<int> devices;
-  std::vector<std::vector<int64_t>> srcSizes;
-  std::vector<std::vector<int64_t>> dstSizes;
-  int srcRank = -1;
-  int dstRank = -1;
-  int srcTensor = -1;
-  int dstTensor = -1;
-  ReduceOp reduceOp = ReduceOp::UNUSED;
-
-  // This function is called by torch::hash<AlgorithmKey>
-  static std::size_t hash(const AlgorithmKey& k) {
-    return torch::get_hash(
-        k.collectiveType,
-        k.type,
-        k.devices,
-        k.srcSizes,
-        k.dstSizes,
-        k.srcRank,
-        k.dstRank,
-        k.srcTensor,
-        k.dstTensor,
-        k.reduceOp);
-  }
-};
-
-// AlgorithmEntry is the state associated with a single algorithm instance.
-//
-// Keeping Gloo algorithms around for reuse is a win, since most of
-// them end up allocating some memory, constructing them takes some
-// time, and they may do some I/O (to setup communication buffers
-// between processes). Also, until it supports executing on arbitrary
-// memory, we need to hold on to memory that we instantiated the
-// algorithm with. The lifecycle of memory in ATen is arbitrary, so to
-// do caching, this entry holds on to memory that we copy to/from.
-//
-// Every unique call (in terms of number of tensors, tensor types,
-// tensor sizes, etc.) gets its own entry. In the future we may extend
-// this to allow multiple entries per unique call, to better exploit
-// parallelism for calls with the same signature.
-//
-struct AlgorithmEntry {
-  AlgorithmKey key;
-  std::unique_ptr<::gloo::Algorithm> algorithm;
-  std::vector<at::Tensor> src;
-  std::vector<at::Tensor> dst;
-  std::function<void()> run;
-
-  // Used to synchronize between calling thread and worker threads.
-  std::mutex m;
-  std::condition_variable cv;
-  bool busy = false;
-
-  // Default constructor must be specified.
-  AlgorithmEntry() = default;
-
-  // Must not be copyable.
-  // This is implied by the std::unique_ptr member field, but serves
-  // as documentation in case it ever is removed.
-  AlgorithmEntry& operator=(const AlgorithmEntry&) = delete;
-  AlgorithmEntry(const AlgorithmEntry&) = delete;
-};
-
-} // namespace c10d
+#include <c10d/ProcessGroup.hpp>
+#include <c10d/Store.hpp>
+#include <c10d/Types.hpp>
+#include <c10d/Utils.hpp>
 
 namespace c10d {
 
@@ -135,39 +52,71 @@ namespace c10d {
 //
 class ProcessGroupGloo : public ProcessGroup {
  public:
-  class WorkGloo : public ProcessGroup::Work {
+  // AsyncWork is the Gloo specific superclass for asynchronous work items.
+  // We can split asynchronous work into 3 phases:
+  // 1) Sanity checks and prepare input (e.g. memcpy)
+  // 2) Run operation on background thread
+  // 3) Synchronize with completion on foreground thread
+  //
+  // There is state to be shared between these 3 phases and all of this state
+  // is captured in the AsyncWork class and its derivatives.
+  //
+  // Note: while we are porting operations to use new style collectives, there
+  // is a split between operations using the existing caching approach and
+  // operations using the new AsyncWork base class. Over time we will port
+  // all operations and perform needed cleanup.
+  //
+  class AsyncWork : public ProcessGroup::Work {
    public:
-    explicit WorkGloo();
-    virtual ~WorkGloo();
+    static void execute(std::shared_ptr<AsyncWork> work) {
+      std::exception_ptr eptr;
+      try {
+        work->run();
+      } catch (...) {
+        eptr = std::current_exception();
+      }
+      work->finish(eptr);
+    }
 
-    // Checks if request has completed. Non-blocking operation.
-    bool isCompleted() const override;
-
-    // Returns if the work completed successfully.
-    // If false, the exception function can be called to get details.
-    bool isSuccess() const override;
-
-    // Waits until request completes. Blocking operation.
-    // Returns false if the work completed with an exception.
-    bool wait() override;
-
-    // Returns exception if wait() returned false.
-    const std::exception& exception() const override;
+    virtual void run() = 0;
 
    protected:
-    void finish();
-    void finishWithException(const ::gloo::Exception& ex);
-
-    std::mutex m_;
-    std::condition_variable cv_;
-    std::atomic<bool> completed_;
-
-    // Use pointer to ::gloo::Exception because it doesn't have a
-    // default constructor and constructing an empty std::unique_ptr
-    // is probably cheaper (this is highly speculative).
-    std::unique_ptr<::gloo::Exception> ex_;
-
     friend class ProcessGroupGloo;
+  };
+
+  // For send and recv operations there is no need to pass them to the
+  // thread pool as they are entirely completed by the device thread.
+  // This work object is used to synchronize completion of the send or
+  // recv operation. It keeps a reference to the tensor it is
+  // operating on to prevent it from being deallocated while the
+  // operation is still in flight.
+  class SendWork : public ProcessGroup::Work {
+   public:
+    explicit SendWork(
+        at::Tensor& tensor,
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
+
+    void wait() override;
+
+   protected:
+    at::Tensor tensor_;
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
+  };
+
+  class RecvWork : public ProcessGroup::Work {
+   public:
+    explicit RecvWork(
+        at::Tensor& tensor,
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
+
+    int sourceRank() const override;
+
+    void wait() override;
+
+   protected:
+    at::Tensor tensor_;
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
+    int srcRank_;
   };
 
   struct Options {
@@ -186,51 +135,82 @@ class ProcessGroupGloo : public ProcessGroup {
 
   virtual ~ProcessGroupGloo();
 
-  std::shared_ptr<Work> broadcast(
-      std::vector<at::Tensor>& data,
+  std::shared_ptr<ProcessGroup::Work> broadcast(
+      std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  std::shared_ptr<Work> allreduce(
+  std::shared_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
- protected:
-  using KeyType = AlgorithmKey;
-  using EntryType = std::unique_ptr<AlgorithmEntry>;
-  using HashType = torch::hash<AlgorithmKey>;
-  using WorkType = std::tuple<AlgorithmEntry*, std::shared_ptr<WorkGloo>>;
+  std::shared_ptr<ProcessGroup::Work> reduce(
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) override;
 
+  std::shared_ptr<ProcessGroup::Work> allgather(
+      std::vector<std::vector<at::Tensor>>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> gather(
+      std::vector<std::vector<at::Tensor>>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const GatherOptions& opts = GatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> scatter(
+      std::vector<at::Tensor>& outputs,
+      std::vector<std::vector<at::Tensor>>& inputs,
+      const ScatterOptions& opts = ScatterOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors,
+      int dstRank,
+      int tag) override;
+
+  std::shared_ptr<ProcessGroup::Work> recv(
+      std::vector<at::Tensor>& tensors,
+      int srcRank,
+      int tag) override;
+
+  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+      std::vector<at::Tensor>& tensors,
+      int tag) override;
+
+  std::shared_ptr<ProcessGroup::Work> barrier(
+      const BarrierOptions& opts = BarrierOptions()) override;
+
+ protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
   std::vector<std::shared_ptr<::gloo::Context>> contexts_;
   std::vector<std::thread> threads_;
   bool stop_;
 
-  void runLoop(void);
+  // Incremented for every collective we kick off.
+  // The value is used as tag for collective operations. Collectives are kicked
+  // off in identical order across processes. Therefore the tag can be used
+  // to match up operations during concurrent execution.
+  uint32_t collectiveCounter_;
 
-  void runSingle(WorkType work);
+  // Returns next collective tag to use (uses collectiveCounter_).
+  uint32_t nextTag();
 
-  void createAlgorithm(AlgorithmEntry& entry);
+  // Entrypoint for worker threads.
+  void runLoop(int workerIndex);
 
-  template <typename T>
-  void createAllreduce(AlgorithmEntry& entry);
+  // Queue work to run on worker thread.
+  void enqueue(std::shared_ptr<AsyncWork> work);
 
-  template <typename T>
-  void createBroadcast(AlgorithmEntry& entry);
-
-  // Construct creates AlgorithmEntry for specified key.
-  EntryType construct(const KeyType& key);
-
-  // Checkout constructs new AlgorithmEntry or returns existing one.
-  AlgorithmEntry* checkout(const KeyType& key);
-
-  std::unordered_map<KeyType, EntryType, HashType> cache_;
-
-  std::shared_ptr<Work> enqueue(AlgorithmEntry* entry);
-
-  std::deque<WorkType> queue_;
-  std::mutex queueMutex_;
-  std::condition_variable queueProduceCV_;
-  std::condition_variable queueConsumeCV_;
+  // Keep both a queue of pending work, and a vector with in progress work.
+  // Both of these can only be mutated when holding the queue lock.
+  // We keep both around instead of just the queue, so we can grab a weak_ptr
+  // to all in progress and pending work when executing a barrier.
+  // When executing a barrier, we need to ensure that all prior work
+  // has completed before completing itself.
+  std::deque<std::shared_ptr<AsyncWork>> workQueue_;
+  std::vector<std::shared_ptr<AsyncWork>> workInProgress_;
+  std::mutex workMutex_;
+  std::condition_variable workProduceCV_;
+  std::condition_variable workConsumeCV_;
 };
 
 } // namespace c10d

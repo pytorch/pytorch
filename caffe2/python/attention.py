@@ -346,9 +346,9 @@ def apply_soft_coverage_attention(
     )
 
     # [encoder_length, batch_size, encoder_output_dim]
-    decoder_hidden_encoder_outputs_sum = model.net.Add(
+    decoder_hidden_encoder_outputs_sum_tmp = model.net.Add(
         [weighted_encoder_outputs, weighted_decoder_hidden_state],
-        s(scope, 'decoder_hidden_encoder_outputs_sum'),
+        s(scope, 'decoder_hidden_encoder_outputs_sum_tmp'),
         broadcast=1,
     )
     # [batch_size, encoder_length]
@@ -374,8 +374,8 @@ def apply_soft_coverage_attention(
 
     # [encoder_length, batch_size, encoder_output_dim]
     decoder_hidden_encoder_outputs_sum = model.net.Add(
-        [decoder_hidden_encoder_outputs_sum, scaled_coverage_weights],
-        decoder_hidden_encoder_outputs_sum,
+        [decoder_hidden_encoder_outputs_sum_tmp, scaled_coverage_weights],
+        s(scope, 'decoder_hidden_encoder_outputs_sum'),
     )
 
     # [batch_size, encoder_length, 1]

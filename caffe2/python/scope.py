@@ -71,6 +71,12 @@ def DeviceScope(scope, node_name=None):
     if old_scope and old_scope.HasField('node_name') and \
             not new_scope.HasField('node_name'):
         new_scope.node_name = old_scope.node_name
+
+    # nested scope should inherit the extra_info and merged it with new extra_info
+    if old_scope and hasattr(old_scope, 'extra_info'):
+        new_scope.extra_info.extend(old_scope.extra_info)
+    new_scope.extra_info.sort()
+
     _threadlocal_scope.devicescope = new_scope
     try:
         yield
@@ -78,6 +84,23 @@ def DeviceScope(scope, node_name=None):
         assert _threadlocal_scope.devicescope == new_scope, \
             "The device scope is changed from outside DeviceScope() calls."
         _threadlocal_scope.devicescope = old_scope
+
+
+@contextlib.contextmanager
+def EmptyNameScope():
+    """
+    Allow users to 'disable' the name scope behaviour.
+
+    This sets the CurrentNameScope() to None, so that the field is
+    not set in CreateOperator(...), etc.
+    """
+    old_scope = CurrentNameScope()
+    try:
+        _threadlocal_scope.namescope = ''
+        yield
+    finally:
+        _threadlocal_scope.namescope = old_scope
+        return
 
 
 @contextlib.contextmanager

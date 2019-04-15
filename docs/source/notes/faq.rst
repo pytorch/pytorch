@@ -99,7 +99,7 @@ My data loader workers return identical random numbers
 -------------------------------------------------------
 You are likely using other libraries to generate random numbers in the dataset.
 For example, NumPy's RNG is duplicated when worker subprocesses are started via
-``fork``. See :class:`torch.utils.data.DataLoader`'s document for how to
+``fork``. See :class:`torch.utils.data.DataLoader`'s documentation for how to
 properly set up random seeds in workers with its :attr:`worker_init_fn` option.
 
 .. _pack-rnn-unpack-with-data-parallelism:
@@ -124,10 +124,10 @@ write::
     class MyModule(nn.Module):
         # ... __init__, other methods, etc.
 
-        # padding_input is of shape [B x T x *] (batch_first mode) and contains
+        # padded_input is of shape [B x T x *] (batch_first mode) and contains
         # the sequences sorted by lengths
-        # B is the batch size
-        # T is max sequence length
+        #   B is the batch size
+        #   T is max sequence length
         def forward(self, padded_input, input_lengths):
             total_length = padded_input.size(1)  # get the max sequence length
             packed_input = pack_padded_sequence(padded_input, input_lengths,

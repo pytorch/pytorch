@@ -3,29 +3,39 @@
 # that all the results look right. In default, it is disabled unless you
 # explicitly want to run it.
 
-from caffe.proto import caffe_pb2
 from google.protobuf import text_format
 import numpy as np
 import os
-from caffe2.python import caffe_translator, utils, workspace, test_util
 import sys
+
+CAFFE_FOUND = False
+try:
+    from caffe.proto import caffe_pb2
+    from caffe2.python import caffe_translator
+    CAFFE_FOUND = True
+except Exception as e:
+    # Safeguard so that we only catch the caffe module not found exception.
+    if ("'caffe'" in str(e)):
+        print(
+            "PyTorch/Caffe2 now requires a separate installation of caffe. "
+            "Right now, this is not found, so we will skip the caffe "
+            "translator test.")
+
+from caffe2.python import utils, workspace, test_util
 import unittest
 
-
-@unittest.skipIf(not os.path.exists('data/testdata/caffe_translator'),
-                 'No testdata existing for the caffe translator test. Exiting.')
 def setUpModule():
+    # Do nothing if caffe and test data is not found
+    if not (CAFFE_FOUND and os.path.exists('data/testdata/caffe_translator')):
+        return
     # We will do all the computation stuff in the global space.
     caffenet = caffe_pb2.NetParameter()
     caffenet_pretrained = caffe_pb2.NetParameter()
-    text_format.Merge(
-        open('data/testdata/caffe_translator/deploy.prototxt').read(), caffenet
-    )
-    caffenet_pretrained.ParseFromString(
-        open(
-            'data/testdata/caffe_translator/bvlc_reference_caffenet.caffemodel')
-        .read()
-    )
+    with open('data/testdata/caffe_translator/deploy.prototxt') as f:
+        text_format.Merge(f.read(), caffenet)
+    with open('data/testdata/caffe_translator/'
+              'bvlc_reference_caffenet.caffemodel') as f:
+        caffenet_pretrained.ParseFromString(f.read())
     for remove_legacy_pad in [True, False]:
         net, pretrained_params = caffe_translator.TranslateModel(
             caffenet, caffenet_pretrained, is_test=True,
@@ -45,6 +55,10 @@ def setUpModule():
         workspace.RunNetOnce(net.SerializeToString())
 
 
+@unittest.skipIf(not CAFFE_FOUND,
+                 'No Caffe installation found.')
+@unittest.skipIf(not os.path.exists('data/testdata/caffe_translator'),
+                 'No testdata existing for the caffe translator test. Exiting.')
 class TestNumericalEquivalence(test_util.TestCase):
     def testBlobs(self):
         names = [

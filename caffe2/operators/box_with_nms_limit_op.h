@@ -6,6 +6,8 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
+C10_DECLARE_CAFFE2_OPERATOR(BoxWithNMSLimit)
+
 namespace caffe2 {
 
 // C++ implementation of function insert_box_results_with_nms_and_limit()
@@ -13,23 +15,25 @@ template <class Context>
 class BoxWithNMSLimitOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  BoxWithNMSLimitOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit BoxWithNMSLimitOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         score_thres_(
-            OperatorBase::GetSingleArgument<float>("score_thresh", 0.05)),
-        nms_thres_(OperatorBase::GetSingleArgument<float>("nms", 0.3)),
+            this->template GetSingleArgument<float>("score_thresh", 0.05)),
+        nms_thres_(this->template GetSingleArgument<float>("nms", 0.3)),
         detections_per_im_(
-            OperatorBase::GetSingleArgument<int>("detections_per_im", 100)),
+            this->template GetSingleArgument<int>("detections_per_im", 100)),
         soft_nms_enabled_(
-            OperatorBase::GetSingleArgument<bool>("soft_nms_enabled", false)),
-        soft_nms_method_str_(OperatorBase::GetSingleArgument<std::string>(
+            this->template GetSingleArgument<bool>("soft_nms_enabled", false)),
+        soft_nms_method_str_(this->template GetSingleArgument<std::string>(
             "soft_nms_method",
             "linear")),
         soft_nms_sigma_(
-            OperatorBase::GetSingleArgument<float>("soft_nms_sigma", 0.5)),
-        soft_nms_min_score_thres_(OperatorBase::GetSingleArgument<float>(
+            this->template GetSingleArgument<float>("soft_nms_sigma", 0.5)),
+        soft_nms_min_score_thres_(this->template GetSingleArgument<float>(
             "soft_nms_min_score_thres",
-            0.001)) {
+            0.001)),
+        rotated_(this->template GetSingleArgument<bool>("rotated", false)) {
     CAFFE_ENFORCE(
         soft_nms_method_str_ == "linear" || soft_nms_method_str_ == "gaussian",
         "Unexpected soft_nms_method");
@@ -56,6 +60,9 @@ class BoxWithNMSLimitOp final : public Operator<Context> {
   float soft_nms_sigma_ = 0.5;
   // Lower-bound on updated scores to discard boxes
   float soft_nms_min_score_thres_ = 0.001;
+  // Set for RRPN case to handle rotated boxes. Inputs should be in format
+  // [ctr_x, ctr_y, width, height, angle (in degrees)].
+  bool rotated_{false};
 };
 
 } // namespace caffe2

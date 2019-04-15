@@ -1,8 +1,8 @@
-#include "torch/csrc/autograd/functions/utils.h"
+#include <torch/csrc/autograd/functions/utils.h>
 
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <sstream>
 #include <vector>
@@ -10,7 +10,7 @@
 namespace torch { namespace autograd {
 
 variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
-                           function_constructor ctr) {
+                           const function_constructor& ctr) {
   variable_list result;
   result.reserve(outputs.size());
   if (!any_variable_requires_grad(inputs)) {
@@ -29,7 +29,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
         autograd::create_gradient_edge(variable, grad_fn);
         result.push_back(std::move(variable));
       } else {
-        grad_fn->bump_inputs();
+        grad_fn->add_input_metadata(Function::undefined_input());
         result.emplace_back();
       }
     }
@@ -50,7 +50,7 @@ void check_input_variables(const char* name, const variable_list& inputs, int ar
   for (int i = 0; i < required_args; ++i) {
     if (!inputs[i].defined()) {
       std::stringstream ss;
-      ss << name << ": expected Variable at argument " << i << " (got None)";
+      ss << name << ": expected Tensor at argument " << i << " (got None)";
       throw std::runtime_error(ss.str());
     }
   }

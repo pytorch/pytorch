@@ -3,15 +3,13 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import numpy as np
-
-from hypothesis import given
-import hypothesis.strategies as st
-
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 import hypothesis.extra.numpy as hnp
+import hypothesis.strategies as st
+import numpy as np
 
 
 @st.composite
@@ -53,7 +51,7 @@ def merge_id_lists_ref(*args):
     return merged_lengths, merged_values
 
 
-class TestMergeIdListsOp(hu.HypothesisTestCase):
+class TestMergeIdListsOp(serial.SerializedTestCase):
     def test_merge_id_lists_ref(self):
         # Verify that the reference implementation is correct!
         lengths_0 = np.array([3, 0, 4], dtype=np.int32)
@@ -69,8 +67,7 @@ class TestMergeIdListsOp(hu.HypothesisTestCase):
         np.testing.assert_array_equal(merged_lengths, expected_lengths)
         np.testing.assert_array_equal(merged_values, expected_values)
 
-    @given(inputs=id_list_batch(),
-           **hu.gcs_cpu_only)
+    @serial.given(inputs=id_list_batch(), **hu.gcs_cpu_only)
     def test_merge_id_lists_op(self, inputs, gc, dc):
         num_inputs = int(len(inputs) / 2)
         op = core.CreateOperator(

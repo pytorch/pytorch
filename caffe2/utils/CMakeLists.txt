@@ -1,47 +1,73 @@
-# ---[ GPU files
-# ------[ cuDNN
-file(GLOB_RECURSE tmp *_cudnn.cc)
-set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
-# ------[ general GPU
-file(GLOB_RECURSE tmp *_gpu.cc)
-set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
-# ------[ CUDA sources
-file(GLOB_RECURSE tmp *.cu)
-set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
-# exclude test files
-file(GLOB_RECURSE tmp *_test.cc)
-exclude(Caffe2_GPU_SRCS "${Caffe2_GPU_SRCS}" ${tmp})
-
-# ---[ CPU files.
-file(GLOB_RECURSE tmp *.cc)
-set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
-# exclude test files and gpu files
-file(GLOB_RECURSE tmp *_test.cc)
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${tmp})
-exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${Caffe2_GPU_SRCS})
+list(APPEND Caffe2_CPU_SRCS
+  utils/bench_utils.cc
+  utils/cpuid.cc
+  utils/math/broadcast.cc
+  utils/math/elementwise.cc
+  utils/math/reduce.cc
+  utils/math/transpose.cc
+  utils/math/utils.cc
+  utils/math_cpu.cc
+  utils/murmur_hash3.cc
+  utils/proto_convert.cc
+  utils/proto_utils.cc
+  utils/proto_wrap.cc
+  utils/signal_handler.cc
+  utils/smart_tensor_printer.cc
+  utils/string_utils.cc
+  utils/threadpool/ThreadPool.cc)
 
 # ---[ threadpool/pthreadpool* is a local modification of the NNPACK
 # pthreadpool with a very similar interface. Neither NNPACK, nor this
 # thread pool supports Windows.
-if (MSVC)
-  file(GLOB_RECURSE tmp pthreadpool*)
-  exclude(Caffe2_CPU_SRCS "${Caffe2_CPU_SRCS}" ${tmp})
+if (NOT MSVC)
+  set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
+          utils/threadpool/pthreadpool.cc
+          utils/threadpool/pthreadpool_impl.cc
+          )
 endif()
 
-# ---[ GPU test files
-file(GLOB_RECURSE tmp *_gpu_test.cc)
-set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} ${tmp})
+set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}
+        utils/math/broadcast.cu
+        utils/math/elementwise.cu
+        utils/math/reduce.cu
+        utils/math/transpose.cu
+        utils/math_gpu.cu
+        )
 
-# ---[ CPU test files
-file(GLOB_RECURSE tmp *_test.cc)
-set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS} ${tmp})
-exclude(Caffe2_CPU_TEST_SRCS "${Caffe2_CPU_TEST_SRCS}" ${Caffe2_GPU_TEST_SRCS})
+set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS}
+        utils/math/hip/broadcast.hip
+        utils/math/hip/elementwise.hip
+        utils/math/hip/reduce.hip
+        utils/math/hip/transpose.hip
+        utils/hip/math_gpu.hip
+        )
 
-# ---[ Send the lists to the parent scope.
+set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS}
+        utils/fixed_divisor_test.cc
+        utils/math_test.cc
+        utils/fatal_signal_asan_no_sig_test.cc
+        utils/simple_queue_test.cc
+        utils/proto_utils_test.cc
+        utils/cpuid_test.cc
+        utils/smart_tensor_printer_test.cc
+        utils/cast_test.cc
+        )
+
+set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS}
+        utils/math_gpu_test.cc
+        )
+
+set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS}
+        utils/hip/math_gpu_test.cc
+        utils/hip/math_blas_gpu_test.cc
+        )
+
+# TODO Once all source files are defined inside the local c10_utils_xxx targets,
+# it should be the job of the parent CMakeLists.txt to decide what to do with the target (i.e. link it to caffe2)
+# instead of us locally adding it to Caffe2_xxx variables.
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
 set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} PARENT_SCOPE)
+set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} PARENT_SCOPE)
 set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS} PARENT_SCOPE)
 set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} PARENT_SCOPE)
-
-# ---[ Printing stack traces requires dladdr
-
+set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS} PARENT_SCOPE)

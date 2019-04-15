@@ -1,8 +1,7 @@
 import torch
 from . import nccl
-from torch._utils import _accumulate, _take_tensors, _flatten_dense_tensors, \
-    _flatten_sparse_tensors, _unflatten_dense_tensors, \
-    _unflatten_sparse_tensors, _reorder_tensors_as
+from torch._utils import _take_tensors, _flatten_dense_tensors, \
+    _unflatten_dense_tensors, _reorder_tensors_as
 
 
 def broadcast(tensor, devices):
@@ -100,6 +99,8 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
         A tuple of tensors containing an elementwise sum of each group of
         inputs, placed on the ``destination`` device.
     """
+    # TODO: When `len(inputs) == 1` and all inputs are on `destination`, just
+    #       return `inputs`.
     dense_tensors = [[] for _ in inputs]  # shape (num_gpus, num_tensors)
     output = []
     ref_order = []
@@ -118,7 +119,11 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     for chunks in zip(*itrs):
         flat_tensors = [_flatten_dense_tensors(chunk) for chunk in chunks]
         flat_result = reduce_add(flat_tensors, destination)
-        output.extend(_unflatten_dense_tensors(flat_result, chunks[0]))
+        for t in _unflatten_dense_tensors(flat_result, chunks[0]):
+            # The unflattened tensors do not share storage, and we don't expose
+            # base flat tensor anyways, so give them different version counters.
+            # See NOTE [ Version Counter in comm.*_coalesced ]
+            output.append(t.data)
     return tuple(_reorder_tensors_as(output, ref_order))
 
 
@@ -139,24 +144,7 @@ def scatter(tensor, devices, chunk_sizes=None, dim=0, streams=None):
         A tuple containing chunks of the ``tensor``, spread across given
         ``devices``.
     """
-    if chunk_sizes is None:
-        chunks = tensor.chunk(len(devices), dim)
-    else:
-        assert sum(chunk_sizes) == tensor.size(dim), "given chunk sizes " \
-            "don't sum up to the tensor's size (sum(chunk_sizes) == {}, but " \
-            "expected {})".format(sum(chunk_sizes), tensor.size(dim))
-        assert min(chunk_sizes) > 0, "got a negative chunk_size"
-        chunks = [tensor.narrow(dim, start - size, size)
-                  for start, size in zip(_accumulate(chunk_sizes), chunk_sizes)]
-    chunks = tuple(chunk.contiguous() for chunk in chunks)
-    # TODO: copy to a pinned buffer first (if copying from CPU)
-    if streams is None:
-        streams = [None] * len(devices)
-    outputs = []
-    for device, chunk, stream in zip(devices, chunks, streams):
-        with torch.cuda.device(device), torch.cuda.stream(stream):
-            outputs.append(chunk.cuda(device, non_blocking=True))
-    return tuple(outputs)
+    return tuple(torch._C._scatter(tensor, devices, chunk_sizes, dim, streams))
 
 
 def gather(tensors, dim=0, destination=None):
@@ -174,30 +162,4 @@ def gather(tensors, dim=0, destination=None):
         A tensor located on ``destination`` device, that is a result of
         concatenating ``tensors`` along ``dim``.
     """
-    total_size = 0
-    expected_size = list(tensors[0].size())
-    for tensor in tensors:
-        assert tensor.is_cuda, "gather expects all inputs to be on GPUs"
-        expected_size[dim] = tensor.size(dim)
-        if list(tensor.size()) != expected_size:
-            got = 'x'.join(str(x) for x in tensor.size())
-            expected = 'x'.join(str(x) for x in expected_size)
-            raise ValueError("gather got an input of invalid size: got {}, "
-                             "but expected {}".format(got, expected))
-        total_size += tensor.size(dim)
-    expected_size[dim] = total_size
-    expected_size = torch.Size(expected_size)
-    if destination is None:
-        destination = torch.cuda.current_device()
-    if destination == -1:
-        result = tensors[0].new().cpu().resize_(expected_size)
-    else:
-        result = tensors[0].new(expected_size, device=destination)
-
-    chunk_start = 0
-    # TODO: if copying to CPU, allocate a pinned buffer, do async copies to it,
-    # and copy it to regular memory
-    for tensor in tensors:
-        result.narrow(dim, chunk_start, tensor.size(dim)).copy_(tensor, True)
-        chunk_start += tensor.size(dim)
-    return result
+    return torch._C._gather(tensors, dim, destination)

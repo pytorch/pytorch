@@ -2,15 +2,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import numpy as np
-from hypothesis import given
-import hypothesis.strategies as st
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+import hypothesis.strategies as st
+import numpy as np
 
 
-class TestConditionalOp(hu.HypothesisTestCase):
-    @given(rows_num=st.integers(1, 10000), **hu.gcs_cpu_only)
+class TestConditionalOp(serial.SerializedTestCase):
+    @serial.given(rows_num=st.integers(1, 10000), **hu.gcs_cpu_only)
     def test_conditional(self, rows_num, gc, dc):
         op = core.CreateOperator(
             "Conditional", ["condition", "data_t", "data_f"], "output"

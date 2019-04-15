@@ -11,18 +11,18 @@ template <typename T, class Context, class Engine = DefaultEngine>
 class MatMulOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  MatMulOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        axis_a_(OperatorBase::GetSingleArgument<int>("axis_a", 1)),
-        axis_b_(OperatorBase::GetSingleArgument<int>("axis_b", 1)),
-        trans_a_(OperatorBase::GetSingleArgument<int>("trans_a", 0)),
-        trans_b_(OperatorBase::GetSingleArgument<int>("trans_b", 0)) {}
+  template <class... Args>
+  explicit MatMulOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        axis_a_(this->template GetSingleArgument<int>("axis_a", 1)),
+        axis_b_(this->template GetSingleArgument<int>("axis_b", 1)),
+        trans_a_(this->template GetSingleArgument<int>("trans_a", 0)),
+        trans_b_(this->template GetSingleArgument<int>("trans_b", 0)) {}
   ~MatMulOp() {}
 
   bool RunOnDevice() override {
     const auto& A = Input(0);
     const auto& B = Input(1);
-    auto* Y = Output(0);
 
     const auto canonical_axis_a = A.canonical_axis_index(axis_a_);
     const auto canonical_axis_b = B.canonical_axis_index(axis_b_);
@@ -50,7 +50,7 @@ class MatMulOp final : public Operator<Context> {
     }
 
     auto dimErrorString = [&]() {
-      return MakeString(
+      return c10::str(
           "Dimension mismatch: ",
           trans_a_ ? "trans(A): " : "A: ",
           a_dim0,
@@ -66,8 +66,8 @@ class MatMulOp final : public Operator<Context> {
 
     Y_shape_cache_[0] = a_dim0;
     Y_shape_cache_[1] = b_dim1;
-    Y->Resize(Y_shape_cache_);
-    CAFFE_ENFORCE(a_dim0 * b_dim1 == Y->size(), dimErrorString());
+    auto* Y = Output(0, Y_shape_cache_, at::dtype<T>());
+    CAFFE_ENFORCE(a_dim0 * b_dim1 == Y->numel(), dimErrorString());
     // Y = A * B
     math::Gemm<T, Context, Engine>(
         trans_a_ ? CblasTrans : CblasNoTrans,
@@ -92,7 +92,7 @@ class MatMulOp final : public Operator<Context> {
  protected:
   // A local vector to cache the output shape so we don't need to recreate
   // a vector object every time we run Run().
-  vector<TIndex> Y_shape_cache_{0, 0};
+  vector<int64_t> Y_shape_cache_{0, 0};
   int axis_a_{1};
   int axis_b_{1};
   bool trans_a_;

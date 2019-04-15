@@ -9,27 +9,26 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
       OutputSize(),
       "The number of tensors of the input and the output must be the same.");
   auto& weights = Input(0);
-  int batch_size = weights.dim(0);
-  int weights_dim = weights.dim(1);
-  auto* out_idx = Output(0);
+  int batch_size = weights.size(0);
+  int weights_dim = weights.size(1);
 
   if (batch_size > 0 && weights_dim > 0) {
     cum_mass_.resize(weights_dim);
     const float* mat_weights = weights.template data<float>();
     const float* mat_values = nullptr;
-    out_idx->Resize(batch_size, 1);
+    auto* out_idx = Output(0, {batch_size, 1}, at::dtype<int>());
     int* output_indices = out_idx->template mutable_data<int>();
     float* output_values = nullptr;
 
     if (InputSize() == 2) {
       auto& values = Input(1);
       CAFFE_ENFORCE_EQ(
-          weights.dims(),
-          values.dims(),
+          weights.sizes(),
+          values.sizes(),
           "The sampling weights tensor and the sampling values tensor must have the same dimensions.");
       mat_values = values.template data<float>();
-      auto* out_value = Output(1);
-      out_value->Resize(batch_size, 1);
+
+      auto* out_value = Output(1, {batch_size, 1}, at::dtype<float>());
       output_values = out_value->template mutable_data<float>();
     }
 
@@ -57,11 +56,9 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
       }
     }
   } else {
-    out_idx->Resize(0);
-    out_idx->template mutable_data<int>();
+    auto* out_idx = Output(0, {0}, at::dtype<int>());
     if (OutputSize() == 2) {
-      auto* out_value = Output(1);
-      out_value->Resize(0);
+      auto* out_value = Output(1, {0}, at::dtype<float>());
       out_value->template mutable_data<float>();
     }
   }
@@ -85,33 +82,33 @@ OPERATOR_SCHEMA(WeightedSample)
     .SetDoc(R"DOC(
 The operator performs sampling based on the input sampling weights for
 each batch. All weights must be non-negative numbers.
-The input is a 2-D tensor (Tensor<float>) of size (batch_size x weights_dim).
+The input is a 2-D tensor (Tensor) of size (batch_size x weights_dim).
 For each batch, an index is randomly sampled from the distribution given by
 the weights of the corresponding batch.
-The output is a 1-D tensor (Tensor<int>) of size (batch_size x 1) and
+The output is a 1-D tensor (Tensor) of size (batch_size x 1) and
 contains the index(es) of the sampled output.
 )DOC")
     .Input(
         0,
         "sampling_weights",
-        "A 2-D Tensor<float> of size (batch_size x weights_dim)."
+        "A 2-D Tensor of size (batch_size x weights_dim)."
         "All weights must be non-negative numbers.")
     .Input(
         1,
         "sampling_values",
-        "An optional 2-D Tensor<float> of size (batch_size x weights_dim)."
+        "An optional 2-D Tensor of size (batch_size x weights_dim)."
         "Its values correspond to the sampling weights.")
     .Output(
         0,
         "sampled_indexes",
         "The output tensor contains index(es) sampled from distribution given"
         "by the weight vector(s) in the input tensor"
-        "The output is a 1-D Tensor<int> of size (batch_size x 1)")
+        "The output is a 1-D Tensor of size (batch_size x 1)")
     .Output(
         1,
         "sampled_values",
         "The output tensor contains value(s) selected by the sampled index(es)"
-        "It is a 1-D Tensor<float> of size (batch_size x 1)");
+        "It is a 1-D Tensor of size (batch_size x 1)");
 
 SHOULD_NOT_DO_GRADIENT(WeightedSample);
 } // namespace caffe2

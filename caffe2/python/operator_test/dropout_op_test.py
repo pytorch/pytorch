@@ -10,11 +10,12 @@ import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
-class TestDropout(hu.HypothesisTestCase):
+class TestDropout(serial.SerializedTestCase):
 
-    @given(X=hu.tensor(),
+    @serial.given(X=hu.tensor(),
            in_place=st.booleans(),
            ratio=st.floats(0, 0.999),
            engine=st.sampled_from(["", "CUDNN"]),
@@ -24,7 +25,7 @@ class TestDropout(hu.HypothesisTestCase):
         # TODO(lukeyeager): enable this path when the GPU path is fixed
         if in_place:
             # Skip if trying in-place on GPU
-            assume(not (gc.device_type == caffe2_pb2.CUDA and engine == ''))
+            assume(not (gc.device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP} and engine == ''))
             # If in-place on CPU, don't compare with GPU
             dc = dc[:1]
 
@@ -52,7 +53,7 @@ class TestDropout(hu.HypothesisTestCase):
         # TODO(lukeyeager): enable this path when the op is fixed
         if in_place:
             # Skip if trying in-place on GPU
-            assume(gc.device_type != caffe2_pb2.CUDA)
+            assume(gc.device_type not in {caffe2_pb2.CUDA, caffe2_pb2.HIP})
             # If in-place on CPU, don't compare with GPU
             dc = dc[:1]
         is_test = not output_mask

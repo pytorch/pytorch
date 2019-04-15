@@ -12,11 +12,12 @@
 
 #include "caffe2/core/init.h"
 
-CAFFE2_DEFINE_int(
-    caffe2_omp_num_threads, 0,
+C10_DEFINE_int(
+    caffe2_omp_num_threads,
+    0,
     "The number of openmp threads. 0 to use default value. "
     "Does not have effect if OpenMP is disabled.");
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_mkl_num_threads,
     0,
     "The number of mkl threads. 0 to use default value. If set, "
