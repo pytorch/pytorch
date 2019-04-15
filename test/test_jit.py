@@ -9783,8 +9783,8 @@ a")
 
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'foo')
-            args = fn.__getattr__('forward').schema().arguments
-            returns = fn.__getattr__('forward').schema().returns
+            args = fn.__getattr__('forward').schema.arguments
+            returns = fn.__getattr__('forward').schema.returns
             self.assertEqual(str(args[0].type), pair[1])
             self.assertEqual(str(args[1].type), "Tuple[Tensor, Tensor]")
             self.assertEqual(str(returns[0].type), "Tuple[{}, {}]".format(pair[1], pair[1]))
