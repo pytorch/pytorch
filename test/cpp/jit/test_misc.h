@@ -806,10 +806,12 @@ void testProfiler() {
 
   auto g = build_lstm();
   auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
-  ArgumentSpec spec(false, last(stack, stack.size()), stack.size());
 
   auto& opt_graph = *g.get();
-  setInputTypes(opt_graph, spec);
+  ArgumentSpecCreator arg_spec_creator(opt_graph);
+  ArgumentSpec spec =
+      arg_spec_creator.create(autograd::GradMode::is_enabled(), stack);
+  arg_spec_creator.setInputTypes(opt_graph, spec);
   auto pr = ProfilingRecord::instrumentGraph(g);
   Code cd(pr->profiled_graph_);
   InterpreterState is{cd};
