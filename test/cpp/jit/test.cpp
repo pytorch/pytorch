@@ -40,12 +40,15 @@ namespace jit {
   _(ControlFlow)                   \
   _(CreateAutodiffSubgraphs)       \
   _(CustomOperators)               \
+  _(CustomOperatorAliasing)        \
+  _(IValueKWargs)                  \
   _(Differentiate)                 \
   _(DifferentiateWithRequiresGrad) \
   _(DynamicDAG)                    \
   _(FromQualString)                \
   _(InternedStrings)               \
   _(IValue)                        \
+  _(PassManagement)                \
   _(Proto)                         \
   _(RegisterFusionCachesKernel)    \
   _(SchemaParser)                  \
@@ -64,7 +67,8 @@ namespace jit {
   _(NoneSchemaMatch)               \
   _(ClassParser)                   \
   _(PeepholeOptimize)              \
-  _(RecordFunction)
+  _(RecordFunction)                \
+  _(ModuleDefine)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

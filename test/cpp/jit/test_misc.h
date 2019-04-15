@@ -16,6 +16,7 @@
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/interpreter.h"
+#include "torch/csrc/jit/pass_manager.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
@@ -40,6 +41,7 @@
 #include "ATen/core/ivalue.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
+#include "torch/jit.h"
 
 #include "onnx/onnx_pb.h"
 
@@ -369,11 +371,10 @@ static const auto cf_examples = R"JIT(
     return a
 )JIT";
 void testControlFlow() {
-  auto cu = std::make_shared<script::Module>();
-  script::defineMethodsInModule(
-      cu, cf_examples, script::nativeResolver, c10::nullopt);
+  auto cu = compile(cf_examples);
+
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu->get_method(name).graph();
+    auto graph = cu->get_function(name).graph();
     Code code(graph);
     InterpreterState interp(code);
     interp.run(stack);
@@ -576,12 +577,11 @@ void testTopologicalIndex() {
 }
 
 void invokeTestRecordFunction(at::Tensor& t) {
-  autograd::profiler::GetPackedInputsCallback inputs_cb =
-    [t]() {
-      Stack st;
-      pack(st, t);
-      return st;
-    };
+  autograd::profiler::GetPackedInputsCallback inputs_cb = [t]() {
+    Stack st;
+    pack(st, t);
+    return st;
+  };
   autograd::profiler::RecordFunction guard("test", inputs_cb);
   t.add_(torch::ones_like(t));
 }
@@ -605,15 +605,15 @@ void invokeTestRecordFunctionNested() {
 
 void testRecordFunction() {
   std::vector<std::vector<int64_t>> input_sizes;
-  autograd::profiler::pushCallback([&input_sizes](
-      const autograd::profiler::RecordFunction& fn) {
-    for (const auto& input : fn.inputs()) {
-      if (input.isTensor()) {
-        std::vector<int64_t> t = input.toTensor().sizes().vec();
-        input_sizes.push_back(t);
-      }
-    }
-  });
+  autograd::profiler::pushCallback(
+      [&input_sizes](const autograd::profiler::RecordFunction& fn) {
+        for (const auto& input : fn.inputs()) {
+          if (input.isTensor()) {
+            std::vector<int64_t> t = input.toTensor().sizes().vec();
+            input_sizes.push_back(t);
+          }
+        }
+      });
 
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   invokeTestRecordFunction(t);
@@ -625,14 +625,15 @@ void testRecordFunction() {
 
   // test nested RecordFunctions
   std::vector<std::string> nested_names;
-  autograd::profiler::pushCallback([&nested_names](
-      const autograd::profiler::RecordFunction& fn) {
-    nested_names.push_back(getFullName(&fn));
-  });
+  autograd::profiler::pushCallback(
+      [&nested_names](const autograd::profiler::RecordFunction& fn) {
+        nested_names.push_back(getFullName(&fn));
+      });
 
   {
     autograd::profiler::RecordFunction guard("outer");
-    invokeTestRecordFunctionNested();;
+    invokeTestRecordFunctionNested();
+    ;
   }
 
   autograd::profiler::popCallback();
@@ -672,7 +673,7 @@ void testAutogradProfiler() {
 void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
-          "test::test_none() -> int?",
+          "prim::test_none() -> int?",
           [](const Node* node) {
             return [](Stack& stack) {
               push(stack, IValue());
@@ -680,7 +681,7 @@ void testNoneSchemaMatch() {
             };
           }),
       Operator(
-          "test::is_none(int? a) -> bool",
+          "prim::is_none(int? a) -> bool",
           [](const Node* node) {
             return [](Stack& stack) {
               IValue a = pop(stack);
@@ -700,8 +701,8 @@ void testNoneSchemaMatch() {
 
   auto r = std::make_shared<Graph>();
   auto& g = *r;
-  auto opt_int = g.insert(Symbol::fromQualString("test::test_none"), {});
-  auto out_bool = g.insert(Symbol::fromQualString("test::is_none"), {opt_int});
+  auto opt_int = g.insert(Symbol::fromQualString("prim::test_none"), {});
+  auto out_bool = g.insert(Symbol::fromQualString("prim::is_none"), {opt_int});
   g.registerOutput(out_bool);
   ConstantPropagation(r);
 
@@ -709,6 +710,44 @@ void testNoneSchemaMatch() {
   // checking that constant propagation ran wo/failure
   AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
 }
+
+void testModuleDefine() {
+  auto m = std::make_shared<script::Module>();
+  m->register_parameter("foo", torch::ones({}), false);
+  m->define(R"(
+    def add_it(self, x, b : int = 4):
+      return self.foo + x + b
+  )");
+  auto result = m->run_method("add_it", torch::ones({}));
+  AT_ASSERT(result.toTensor().item<float>() == 6)
+}
+
+static int testPassValue = 0;
+void fakePass(std::shared_ptr<Graph>& g) {
+  testPassValue++;
+  return;
+}
+
+RegisterPass p(fakePass);
+
+void testPassManagement() {
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  script::parseIR(
+      R"IR(
+graph(%a):
+  return (%a))IR",
+      &*graph);
+
+  std::vector<IValue> stack = {IValue(torch::randn({22}, at::kCPU))};
+  auto run = [&](std::shared_ptr<Graph>& graph, std::vector<IValue> stack) {
+    GraphExecutor executor(graph);
+    executor.run(stack);
+    return stack;
+  };
+  run(graph, stack);
+  AT_ASSERT(testPassValue);
+}
+
 } // namespace test
 } // namespace jit
 } // namespace torch

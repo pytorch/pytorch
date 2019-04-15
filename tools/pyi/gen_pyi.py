@@ -72,6 +72,7 @@ blacklist = [
     'tensordot',
     'norm',
     'split',
+    'unique_consecutive',
     # These are handled specially by python_arg_parser.cpp
     'add',
     'add_',
@@ -239,11 +240,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
                 if a.get('kwarg_only', False) and render_kw_only_separator:
                     python_args.append('*')
                     render_kw_only_separator = False
-                try:
-                    python_args.append(arg_to_type_hint(a))
-                except Exception:
-                    print("Error while processing function %s" % fname)
-                    raise
+                python_args.append(arg_to_type_hint(a))
 
         if is_tensor:
             if 'self: Tensor' in python_args:

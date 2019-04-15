@@ -67,21 +67,20 @@ static DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
   return ctx;
 }
 
-static DeviceType getATenDeviceType(const DLContext& ctx) {
+static Device getATenDevice(const DLContext& ctx) {
   switch (ctx.device_type) {
     case DLDeviceType::kDLCPU:
-      return DeviceType::CPU;
+      return at::Device(DeviceType::CPU);
     case DLDeviceType::kDLGPU:
-      return DeviceType::CUDA;
+      return at::Device(DeviceType::CUDA, ctx.device_id);
     case DLDeviceType::kDLOpenCL:
-      return DeviceType::OPENCL;
+      return at::Device(DeviceType::OPENCL, ctx.device_id);
     case DLDeviceType::kDLROCM:
-      return DeviceType::HIP;
+      return at::Device(DeviceType::HIP, ctx.device_id);
     default:
       throw std::logic_error(
           "Unsupported device_type: " + std::to_string(ctx.device_type));
   }
-  return DeviceType::CPU; // impossible
 }
 
 ScalarType toScalarType(const DLDataType& dtype) {
@@ -173,7 +172,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
 }
 
 Tensor fromDLPack(const DLManagedTensor* src) {
-  DeviceType device_type = getATenDeviceType(src->dl_tensor.ctx);
+  Device device = getATenDevice(src->dl_tensor.ctx);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   auto deleter = [src](void* self) {
     src->deleter(const_cast<DLManagedTensor*>(src));
@@ -182,7 +181,7 @@ Tensor fromDLPack(const DLManagedTensor* src) {
     return at::from_blob(src->dl_tensor.data,
         IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
         deleter,
-        at::device(device_type).dtype(stype));
+        at::device(device).dtype(stype));
   }
 
   return at::from_blob(
@@ -190,6 +189,6 @@ Tensor fromDLPack(const DLManagedTensor* src) {
       IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
       IntArrayRef(src->dl_tensor.strides, src->dl_tensor.ndim),
       deleter,
-      at::device(device_type).dtype(stype));
+      at::device(device).dtype(stype));
 }
 } // namespace at

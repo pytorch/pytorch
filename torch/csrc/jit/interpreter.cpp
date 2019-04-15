@@ -309,36 +309,6 @@ struct PreprocessGraph {
   size_t n_outputs;
 };
 
-// Sometimes we want to pass things that are not tensors.  Instead of
-// coming up with some "superclass" for tensor, which is annoying since
-// 99% of values are at::Tensor, we instead we create a fake subclass of
-// TensorImpl that can be subclassed to hold arbitrary things
-// Note: this is currently unused but will probably be useful in the future,
-// so we keep it around
-struct ContainerTensor : public at::TensorImpl {
- public:
-  ContainerTensor()
-      : TensorImpl(
-            at::UndefinedTensorId(),
-            caffe2::TypeMeta(),
-            nullptr,
-            /* is_variable */ false) {}
-
-  ~ContainerTensor() override = default;
-  at::IntArrayRef sizes() const override {
-    throw std::runtime_error("sizes() on ContainerTensor");
-  }
-  at::IntArrayRef strides() const override {
-    throw std::runtime_error("strides() on ContainerTensor");
-  }
-  int64_t dim() const override {
-    throw std::runtime_error("dim() on ContainerTensor");
-  }
-  const at::Storage& storage() const override {
-    throw std::runtime_error("storage() on ContainerTensor");
-  }
-};
-
 // We need some lists for inputs and outputs. To keep all the memory
 // contiguous we allocate a single vector and use offsets into the vector
 // which are stored in the ListHandle struct

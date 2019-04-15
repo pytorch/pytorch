@@ -83,6 +83,11 @@ GetNumNUMANodes = C.get_num_numa_nodes
 GetBlobNUMANode = C.get_blob_numa_node
 GetBlobSizeBytes = C.get_blob_size_bytes
 
+
+def FillRandomNetworkInputs(net, input_dims, input_types):
+    C.fill_random_network_inputs(net.Proto().SerializeToString(), input_dims, input_types)
+
+
 def _GetFreeFlaskPort():
     """Get a free flask port."""
     # We will prefer to use 5000. If not, we will then pick a random port.
