@@ -69,21 +69,30 @@ def _parse_arg(value, desc):
         return value
     if desc == 'v' or not _is_value(value):
         return value
-    if value.node().kind() != 'onnx::Constant':
-        raise RuntimeError("ONNX symbolic expected a constant value in the trace")
-    tval = value.node()['value']
-    if desc == 'i':
-        return int(tval)
-    elif desc == 'f':
-        return float(tval)
-    elif desc == 'b':
-        return bool(tval)
-    elif desc == 't':
-        return tval
-    elif desc == 'is':
-        return [int(v) for v in tval]
-    else:
-        raise RuntimeError("Casting constants to `{}` is not implemented".format(desc))
+    if value.node().kind() == 'onnx::Constant':
+        tval = value.node()['value']
+        if desc == 'i':
+            return int(tval)
+        elif desc == 'f':
+            return float(tval)
+        elif desc == 't':
+            return tval
+        elif desc == 'is':
+            return [int(v) for v in tval]
+        else:
+            raise RuntimeError("ONNX symbolic doesn't know to interpret Constant node")
+    elif value.node().kind() == 'prim::ListConstruct':
+        if desc == 'is':
+            for v in value.node().inputs():
+                if v.node().kind() != 'onnx::Constant':
+                    raise RuntimeError("Failed to export an ONNX attribute, "
+                                       "since it's not constant, please try to make "
+                                       "things (e.g., kernel size) static if possible")
+            return [int(v.node()['value']) for v in value.node().inputs()]
+        else:
+            raise RuntimeError("ONNX symbolic doesn't know to interpret ListConstruct node")
+
+    raise RuntimeError("Unexpected node type: {}".format(value.node().kind()))
 
 
 def _maybe_get_const(value, desc):
@@ -384,6 +393,13 @@ def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
 
+def _slice_op(g, input, axes, starts, ends):
+    assert len(starts) == len(ends)
+    if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807:
+        return input
+    return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
+
+
 def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
         if dim is None:
@@ -425,14 +441,18 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i')
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v')
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
                   offsets,
                   scale_grad_by_freq,
                   mode,
-                  sparse):
+                  sparse,
+                  per_sample_weights):
+    if not per_sample_weights.node().mustBeNone():
+        raise RuntimeError('Unsupported: ONNX export of embedding_bag '
+                           'with per_sample_weights')
     return g.op("ATen",
                 embedding_matrix,
                 indices,
@@ -520,7 +540,8 @@ def select(g, self, dim, index):
         # of Gather in caffe2. We need to change this as soon as possible.
         # TODO: this breaks if index == -1
         index_val = _parse_arg(index, 'i')
-        slice_node = g.op("Slice", self, axes_i=[dim], starts_i=[index_val], ends_i=[index_val + 1])
+        slice_node = _slice_op(g, self, axes=[dim],
+                               starts=[index_val], ends=[index_val + 1])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
         return g.op("Gather", self, index, axis_i=dim)
@@ -679,7 +700,7 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
                                 kernel_shape_i=[1],
                                 strides_i=[1])
     # convert indices to have non-flattened indices values
-    s = g.op("Slice", flattened_indices, axes_i=[2], starts_i=[0], ends_i=[1])
+    s = _slice_op(g, flattened_indices, axes=[2], starts=[0], ends=[1])
     indices = sub(g, indices, s)
     return r, indices
 
@@ -709,7 +730,7 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
                                 kernel_shape_i=[1, 1],
                                 strides_i=[1, 1])
     # convert indices to have non-flattened indices values
-    s = g.op("Slice", flattened_indices, axes_i=[2, 3], starts_i=[0, 0], ends_i=[1, 1])
+    s = _slice_op(g, flattened_indices, axes=[2, 3], starts=[0, 0], ends=[1, 1])
     indices = sub(g, indices, s)
     return r, indices
 
@@ -739,7 +760,7 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
                                 kernel_shape_i=[1, 1, 1],
                                 strides_i=[1, 1, 1])
     # convert indices to have non-flattened indices values
-    s = g.op("Slice", flattened_indices, axes_i=[2, 3, 4], starts_i=[0, 0, 0], ends_i=[1, 1, 1])
+    s = _slice_op(g, flattened_indices, axes=[2, 3, 4], starts=[0, 0, 0], ends=[1, 1, 1])
     indices = sub(g, indices, s)
     return r, indices
 
@@ -1289,50 +1310,49 @@ scalar_type_to_onnx = [
 ]
 
 
-@parse_args('v', 'i', 'v', 'v', 'b')
-def zeros(g, sizes, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v')
+def zeros(g, sizes, dtype, layout, device):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
+                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'b')
-def zeros_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v')
+def zeros_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
+                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'b')
-def ones(g, sizes, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v')
+def ones(g, sizes, dtype, layout, device):
     return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
+                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'b')
-def ones_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v')
+def ones_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
+                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-def full(g, sizes, value, dtype, layout, device, pin_memory=False):
+def full(g, sizes, value, dtype, layout, device):
     const_value = _maybe_get_const(value, 't')
     if _is_value(const_value):
-        tmp = zeros(sizes, dtype, layout, device, pin_memory=pin_memory)
+        tmp = zeros(sizes, dtype, layout, device)
         return add(tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = _get_const(dtype, 'i', 'dtype')
-        pin_memory = _get_const(pin_memory, 'b', 'pin_memory')
         return g.op("ConstantOfShape", sizes,
-                    value_t=torch.tensor([const_value], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
+                    value_t=torch.tensor([const_value], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v', 'b')
-def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'f', 'i', 'v', 'v')
+def full_like(g, input, fill_value, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor([fill_value], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
+                value_t=torch.tensor([fill_value], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
@@ -1349,7 +1369,7 @@ def slice(g, self, dim, start, end, step):
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
         dim = _parse_arg(dim, 'i')
-        return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+        return _slice_op(g, self, axes=[dim], starts=[start], ends=[end])
 
 
 @parse_args('v', 'f', 'f')
@@ -1392,11 +1412,6 @@ def to(g, self, *args):
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
     elif len(args) == 5:
         # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
-        dtype = _get_const(args[0], 'i', 'dtype')
-        # Layout and device are ignored
-        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
-    elif len(args) == 6:
-        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool) -> Tensor
         dtype = _get_const(args[0], 'i', 'dtype')
         # Layout and device are ignored
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
@@ -1705,7 +1720,7 @@ def isnan(g, input):
 
 @parse_args('v', 'i', 'i', 'i')
 def narrow(g, input, dim, start, length):
-    return g.op("Slice", input, axes_i=[dim], starts_i=[start], ends_i=[start + length])
+    return _slice_op(g, input, axes=[dim], starts=[start], ends=[start + length])
 
 
 def argmax(g, input, dim, keepdim):

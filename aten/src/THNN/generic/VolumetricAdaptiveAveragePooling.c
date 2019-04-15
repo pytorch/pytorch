@@ -105,7 +105,7 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
 
 
   THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
-		"non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
+                "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   if (input->dim() == 5)
   {

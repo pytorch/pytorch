@@ -179,8 +179,6 @@ class ProcessGroupGloo : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  std::unordered_map<int, int> getGroupRank() override;
-
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
   std::vector<std::shared_ptr<::gloo::Context>> contexts_;

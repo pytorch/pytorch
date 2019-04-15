@@ -421,16 +421,14 @@ Value* emitBuiltinCall(
         return emitBuiltinNode(*matched_schema, loc, graph, name);
       }
     }
-    for (Method* method : builtin_functions) {
-      if (auto result = try_emit_call_to(
+    for (Function* method : builtin_functions) {
+      if (auto result = method->try_emit_call(
               graph,
               loc,
-              *method,
               self,
               inputs,
               attributes,
               failure_messages,
-              nullptr,
               allow_conversions)) {
         return result;
       }

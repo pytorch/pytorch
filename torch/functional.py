@@ -5,10 +5,11 @@ from itertools import product
 import warnings
 
 __all__ = [
-    'btriunpack',
     'broadcast_tensors',
     'btrifact',
     'btrifact_with_info',
+    'btrisolve',
+    'btriunpack',
     'cartesian_prod',
     'chain_matmul',
     'einsum',
@@ -27,6 +28,7 @@ __all__ = [
     'tensordot',
     'trtrs',
     'unique',
+    'unique_consecutive',
 ]
 
 
@@ -385,6 +387,9 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
+del torch.unique_dim
+
+
 def unique(input, sorted=True, return_inverse=False, dim=None):
     r"""Returns the unique scalar elements of the input tensor as a 1-D tensor.
 
@@ -446,6 +451,67 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
         return output, inverse_indices
     else:
         return output
+
+
+def unique_consecutive(input, return_inverse=False, return_counts=False, dim=None):
+    r"""Eliminates all but the first element from every consecutive group of equivalent elements.
+
+    .. note:: This function is different from :func:`torch.unique` in the sense that this function
+        only eliminates consecutive duplicate values. This semantics is similar to `std::unique`
+        in C++.
+
+    Arguments:
+        input (Tensor): the input tensor
+        return_inverse (bool): Whether to also return the indices for where
+            elements in the original input ended up in the returned unique list.
+        return_counts (bool): Whether to also return the counts for each unique
+            element.
+        dim (int): the dimension to apply unique. If ``None``, the unique of the
+            flattened input is returned. default: ``None``
+
+    Returns:
+        (Tensor, Tensor (optional), Tensor (optional)): A tensor or a tuple of tensors containing
+
+            - **output** (*Tensor*): the output list of unique scalar elements.
+            - **inverse_indices** (*Tensor*): (optional) if
+              :attr:`return_inverse` is True, there will be an additional
+              returned tensor (same shape as input) representing the indices
+              for where elements in the original input map to in the output;
+              otherwise, this function will only return a single tensor.
+            - **counts** (*Tensor*): (optional) if
+              :attr:`return_counts` is True, there will be an additional
+              returned tensor (same shape as output or output.size(dim),
+              if dim was specified) representing the number of occurrences
+              for each unique value or tensor.
+
+    Example::
+
+        >>> x = torch.tensor([1, 1, 2, 2, 3, 1, 1, 2])
+        >>> output = torch.unique_consecutive(x)
+        >>> output
+        tensor([1, 2, 3, 1, 2])
+
+        >>> output, inverse_indices = torch.unique_consecutive(x, return_inverse=True)
+        >>> output
+        tensor([1, 2, 3, 1, 2])
+        >>> inverse_indices
+        tensor([0, 0, 1, 1, 2, 3, 3, 4])
+
+        >>> output, counts = torch.unique_consecutive(x, return_counts=True)
+        >>> output
+        tensor([1, 2, 3, 1, 2])
+        >>> counts
+        tensor([2, 2, 1, 2, 1])
+    """
+    output, inverse_indices, counts = torch._C._VariableFunctions.unique_consecutive(
+        input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
+    if return_inverse and return_counts:
+        return output, inverse_indices, counts
+    if return_inverse:
+        return output, inverse_indices
+    if return_counts:
+        return output, counts
+    return output
 
 
 def tensordot(a, b, dims=2):
@@ -819,6 +885,22 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
                   "removed in the next release. Please use torch.lu_unpack instead.", stacklevel=2)
     return lu_unpack(LU_data=LU_data, LU_pivots=LU_pivots,
                      unpack_data=unpack_data, unpack_pivots=unpack_pivots)
+
+
+def btrisolve(b, LU_data, LU_pivots, out=None):
+    r"""Solves the system of equations :math:`Ax = b` using the partially pivoted LU
+    factorization of :math:`A` given by :attr:`LU_data` and :attr:`LU_pivots`.
+
+    For more information regarding :func:`torch.btrisolve`, please check
+    :func:`torch.lu_solve`.
+
+    .. warning::
+        :func:`torch.btrisolve` is deprecated in favour of :func:`torch.lu_solve` and will be
+        removed in the next release. Please use :func:`torch.lu_solve` instead.
+    """
+    warnings.warn("torch.btrisolve is deprecated in favour of torch.lu_solve and will be "
+                  "removed in the next release. Please use torch.lu_solve instead.", stacklevel=2)
+    return torch.lu_solve(b, LU_data=LU_data, LU_pivots=LU_pivots, out=out)
 
 
 def lu(A, pivot=True, get_infos=False, out=None):

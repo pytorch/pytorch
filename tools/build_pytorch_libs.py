@@ -160,10 +160,10 @@ def run_cmake(version,
         PYTHON_EXECUTABLE=escape_path(sys.executable),
         PYTHON_LIBRARY=escape_path(cmake_python_library),
         PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
-        BUILDING_WITH_TORCH_LIBS="ON",
+        BUILDING_WITH_TORCH_LIBS=os.getenv("BUILDING_WITH_TORCH_LIBS", "ON"),
         TORCH_BUILD_VERSION=version,
         CMAKE_BUILD_TYPE=build_type,
-        BUILD_TORCH="ON",
+        BUILD_TORCH=os.getenv("BUILD_TORCH", "ON"),
         BUILD_PYTHON=build_python,
         BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS", "ON"),
         BUILD_BINARY=check_env_flag('BUILD_BINARY'),
@@ -219,7 +219,6 @@ def run_cmake(version,
         cmake_defines(cmake_args,
                       CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
                       CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
-    pprint(cmake_args)
     for env_var_name in my_env:
         if env_var_name.startswith('gh'):
             # github env vars use utf-8, on windows, non-ascii code may
@@ -236,6 +235,7 @@ def run_cmake(version,
     # 1. https://cmake.org/cmake/help/latest/manual/cmake.1.html#synopsis
     # 2. https://stackoverflow.com/a/27169347
     cmake_args.append(base_dir)
+    pprint(cmake_args)
     check_call(cmake_args, cwd=build_dir, env=my_env)
 
 
@@ -258,17 +258,18 @@ def build_caffe2(version,
                   build_dir,
                   my_env)
     if IS_WINDOWS:
+        build_cmd = ['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--']
         if USE_NINJA:
             # sccache will fail if all cores are used for compiling
             j = max(1, multiprocessing.cpu_count() - 1)
             if max_jobs is not None:
                 j = min(int(max_jobs), j)
-            check_call(['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--', '-j', str(j)],
-                       cwd=build_dir, env=my_env)
+            build_cmd += ['-j', str(j)]
+            check_call(build_cmd, cwd=build_dir, env=my_env)
         else:
             j = max_jobs or str(multiprocessing.cpu_count())
-            check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={} /maxcpucount:{}'.format(build_type, j)],
-                       cwd=build_dir, env=my_env)
+            build_cmd += ['/maxcpucount:{}'.format(j)]
+            check_call(build_cmd, cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
             ninja_cmd = ['ninja', 'install']

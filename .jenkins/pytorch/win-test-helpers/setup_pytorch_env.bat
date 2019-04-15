@@ -41,7 +41,7 @@ set NUMBAPRO_NVVM=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\nvvm\b
 
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     pushd %TMP_DIR_WIN%\build
-    python %TMP_DIR_WIN%\ci_scripts\download_image.py %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z
+    python %SCRIPT_HELPERS_DIR%\download_image.py %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z
     :: 7z: -aos skips if exists because this .bat can be called multiple times
     7z x %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z -aos
     popd

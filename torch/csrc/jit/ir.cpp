@@ -382,20 +382,8 @@ void Node::lint() const {
       break;
     case prim::PythonOp: {
       // Python operator cconv is correct
-      size_t n_scalars = 0, n_tensors = 0;
       auto* value = static_cast<const PythonOp*>(this);
-      for (auto c : value->cconv) {
-        if (c == 'c') {
-          n_scalars++;
-        } else if (c == 'd') {
-          n_tensors++;
-        } else {
-          AT_ASSERT(0);
-        }
-        AT_ASSERT(static_cast<bool>(value->pyobj));
-      }
-      AT_ASSERT(n_scalars == value->scalar_args.size());
-      AT_ASSERT(n_tensors == inputs_.size());
+      value->lint_python();
       break;
     }
     case prim::Eval:
@@ -812,19 +800,19 @@ bool Node::isNondeterministic() const {
       "aten::poisson(Tensor self, Generator? generator) -> Tensor",
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
-      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
       "aten::rand_like(Tensor self) -> Tensor",
-      "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::rand_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
+      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
       "aten::randint_like(Tensor self, int high) -> Tensor",
       "aten::randint_like(Tensor self, int low, int high) -> Tensor",
-      "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
       "aten::randn_like(Tensor self) -> Tensor",
-      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-      "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
+      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::randperm(int n, *, int? dtype, int? layout, Device? device) -> Tensor"};
 
   if (nondeterministic_ops.find(this) == nullptr) {
     return false;
@@ -846,10 +834,17 @@ bool Node::hasSideEffects() const {
     case prim::SetAttr:
     case aten::warn:
     case prim::AddStatValue:
-     case prim::TimePoint:
+    case prim::TimePoint:
       return true;
   }
-  return false;
+  // All other builtin ops are known to be safe.
+  // see [custom operator aliasing]
+  if (kind_.is_aten() || kind_.is_prim() || kind_.is_onnx()) {
+    return false;
+  }
+
+  // Custom ops may have arbitrary side effects
+  return true;
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and
@@ -1461,20 +1456,6 @@ std::vector<Value*> inlineCallTo(
   }
 
   return outputs;
-}
-
-PythonOp* defaultAllocPythonOp(Graph* g) {
-  throw std::runtime_error(
-      "Trying to allocate a Python object without python bindings loaded");
-}
-std::atomic<decltype(&defaultAllocPythonOp)> alloc_python_op;
-
-// patched in when python bindings are loaded
-PythonOp* allocPythonOp(Graph* g) {
-  return alloc_python_op.load()(g);
-}
-void setAllocPythonOp(PythonOp* (*v)(Graph* g)) {
-  alloc_python_op.store(v);
 }
 
 } // namespace jit

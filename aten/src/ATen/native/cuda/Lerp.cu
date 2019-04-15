@@ -13,7 +13,8 @@ void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, c
          const scalar_t& self_val,
          const scalar_t& end_val,
          const scalar_t& weight_val) {
-        ret_val = self_val + weight_val * (end_val - self_val);
+        ret_val = (weight_val < 0.5) ?
+            self_val + weight_val * (end_val - self_val) : end_val - (end_val - self_val) * (1 - weight_val);
       });
 }
 
@@ -25,7 +26,8 @@ void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, s
          scalar_t& ret_val,
          const scalar_t& self_val,
          const scalar_t& end_val) {
-        ret_val = self_val + weight_val * (end_val - self_val);
+        ret_val = (weight_val < 0.5) ?
+            self_val + weight_val * (end_val - self_val) : end_val - (end_val - self_val) * (1 - weight_val);
       });
 }
 } // namespace

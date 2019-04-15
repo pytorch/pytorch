@@ -85,8 +85,10 @@ inline LongTensor flatten_indices(const Tensor& indices, IntArrayRef full_size, 
       indices_mult_cpu_vec[i] = mult;
       mult *= full_size[i];
     }
-    auto indices_mult_cpu = indices.dispatch_type().cpu()
-                                   .tensorFromBlob(indices_mult_cpu_vec.data(), /*size=*/{sparse_dim, 1});
+    auto indices_mult_cpu = at::from_blob(
+        indices_mult_cpu_vec.data(),
+        /*size=*/{sparse_dim, 1},
+        indices.options().device(kCPU));
     // NB: must be blocking because this blob may be freed after this closure,
     //     and non_blocking copy will see garbage.
     auto indices_mult = indices_mult_cpu.to(indices.device(), /*non_blocking=*/false);
