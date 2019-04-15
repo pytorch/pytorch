@@ -458,6 +458,104 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenFallbackKernelWithoutTen
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
+c10::optional<Tensor> called_arg2;
+c10::optional<int64_t> called_arg3;
+c10::optional<std::string> called_arg4;
+
+void kernelWithOptInputWithoutOutput(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+  called = true;
+  called_arg2 = arg2;
+  called_arg3 = arg3;
+  called_arg4 = arg4;
+}
+
+TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> ()", kernel<decltype(kernelWithOptInputWithoutOutput), &kernelWithOptInputWithoutOutput>(), dispatchKey(TensorType1()));
+  auto op = c10::Dispatcher::singleton().findSchema("_test::opt_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  called = false;
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), c10::IValue(), std::string("text"));
+  EXPECT_EQ(0, outputs.size());
+
+  EXPECT_TRUE(called);
+  EXPECT_TRUE(called_arg2.has_value());
+  EXPECT_EQ(called_arg2->type_id(), TensorType2());
+  EXPECT_FALSE(called_arg3.has_value());
+  EXPECT_TRUE(called_arg4.has_value());
+  EXPECT_EQ(*called_arg4, "text");
+
+  called = false;
+  outputs = callOp(*op, dummyTensor(TensorType1()), c10::IValue(), 4, c10::IValue());
+  EXPECT_EQ(0, outputs.size());
+
+  EXPECT_TRUE(called);
+  EXPECT_FALSE(called_arg2.has_value());
+  EXPECT_TRUE(called_arg3.has_value());
+  EXPECT_EQ(*called_arg3, 4);
+  EXPECT_FALSE(called_arg4.has_value());
+}
+
+c10::optional<Tensor> kernelWithOptInputWithOutput(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+  called = true;
+  called_arg2 = arg2;
+  called_arg3 = arg3;
+  called_arg4 = arg4;
+  return arg2;
+}
+
+TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> Tensor?", kernel<decltype(kernelWithOptInputWithOutput), &kernelWithOptInputWithOutput>(), dispatchKey(TensorType1()));
+  auto op = c10::Dispatcher::singleton().findSchema("_test::opt_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  called = false;
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), c10::IValue(), std::string("text"));
+  EXPECT_EQ(1, outputs.size());
+  EXPECT_EQ(TensorType2(), outputs[0].toTensor().type_id());
+
+  EXPECT_TRUE(called);
+  EXPECT_TRUE(called_arg2.has_value());
+  EXPECT_EQ(called_arg2->type_id(), TensorType2());
+  EXPECT_FALSE(called_arg3.has_value());
+  EXPECT_TRUE(called_arg4.has_value());
+  EXPECT_EQ(*called_arg4, "text");
+
+  called = false;
+  outputs = callOp(*op, dummyTensor(TensorType1()), c10::IValue(), 4, c10::IValue());
+  EXPECT_EQ(1, outputs.size());
+  EXPECT_TRUE(outputs[0].isNone());
+
+  EXPECT_TRUE(called);
+  EXPECT_FALSE(called_arg2.has_value());
+  EXPECT_TRUE(called_arg3.has_value());
+  EXPECT_EQ(*called_arg3, 4);
+  EXPECT_FALSE(called_arg4.has_value());
+}
+
+std::tuple<c10::optional<Tensor>, c10::optional<int64_t>, c10::optional<std::string>>
+kernelWithOptInputWithMultipleOutputs(Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+  return std::make_tuple(arg2, arg3, arg4);
+}
+
+TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> (Tensor?, int?, str?)", kernel<decltype(kernelWithOptInputWithMultipleOutputs), &kernelWithOptInputWithMultipleOutputs>(), dispatchKey(TensorType1()));
+  auto op = c10::Dispatcher::singleton().findSchema("_test::opt_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), c10::IValue(), std::string("text"));
+  EXPECT_EQ(3, outputs.size());
+  EXPECT_EQ(TensorType2(), outputs[0].toTensor().type_id());
+  EXPECT_TRUE(outputs[1].isNone());
+  EXPECT_EQ("text", outputs[2].toString()->string());
+
+  outputs = callOp(*op, dummyTensor(TensorType1()), c10::IValue(), 4, c10::IValue());
+  EXPECT_EQ(3, outputs.size());
+  EXPECT_TRUE(outputs[0].isNone());
+  EXPECT_EQ(4, outputs[1].toInt());
+  EXPECT_TRUE(outputs[2].isNone());
+}
+
 std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, ArrayRef<Tensor> arg3) {
   return {};
 }
