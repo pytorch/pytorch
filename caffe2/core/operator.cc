@@ -7,6 +7,7 @@
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator_gradient.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/tensor_int8.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 
@@ -574,6 +575,13 @@ TensorShapes InferBlobShapesAndTypes(
     tpnew->set_name(kv.first);
   }
   return tps;
+}
+
+void LoadInt8TensorInfoOfBlob(float* scale, float* offset, const Blob* b) {
+  const int8::Int8TensorCPU* i8tc =
+      static_cast<const int8::Int8TensorCPU*>(b->GetRaw());
+  *scale = i8tc->scale;
+  *offset = i8tc->zero_point;
 }
 
 TensorShape GetTensorShapeOfBlob(const Blob* b) {

@@ -1,6 +1,6 @@
 from __future__ import print_function
 import unittest
-from common_utils import TestCase, run_tests, download_file
+from common_utils import TestCase, run_tests
 import tempfile
 import torch
 import re
@@ -10,7 +10,7 @@ import subprocess
 import inspect
 
 try:
-    import mypy
+    import mypy  # noqa: F401
     HAVE_MYPY = True
 except ImportError:
     HAVE_MYPY = False

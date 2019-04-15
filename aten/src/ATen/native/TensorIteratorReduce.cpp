@@ -35,7 +35,7 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
   auto& dst = iter.tensor(0);
   auto buffer_shape = DimVector(dst.sizes());
   buffer_shape.insert(buffer_shape.begin(), max_threads);
-  auto buffer = at::empty(buffer_shape, dst.type());
+  auto buffer = at::empty(buffer_shape, dst.options());
 
   std::unique_ptr<bool[]> written(new bool[max_threads]);
   std::fill(written.get(), written.get() + max_threads, false);

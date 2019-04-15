@@ -109,5 +109,17 @@ struct NonZeroOp
   }
 };
 
+template <>
+struct NonZeroOp<bool>
+{
+  NonZeroOp() {}
+  __host__ __device__ bool operator()(bool lhs) const {
+    return lhs != false;
+  }
+};
+
 #include <THC/generic/THCTensorMath.cu>
 #include <THC/THCGenerateAllTypes.h>
+
+#include <THC/generic/THCTensorMath.cu>
+#include <THC/THCGenerateBoolType.h>

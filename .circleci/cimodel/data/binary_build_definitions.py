@@ -108,15 +108,23 @@ def gen_build_env_list(smoke):
     return newlist
 
 
-def add_build_entries(jobs_dict, phase, smoke):
+def predicate_exclude_nonlinux_and_libtorch(config):
+    return config.os == "linux" and (config.smoke or config.pydistro != "libtorch")
+
+
+def add_build_entries(jobs_dict, phase, smoke, filter_predicate=lambda x: True):
 
     configs = gen_build_env_list(smoke)
-    for conf_options in configs:
+    for conf_options in filter(filter_predicate, configs):
         jobs_dict[conf_options.gen_build_name(phase)] = conf_options.gen_yaml_tree(phase)
 
 
 def add_binary_build_specs(jobs_dict):
     add_build_entries(jobs_dict, "build", False)
+
+
+def add_binary_build_tests(jobs_dict):
+    add_build_entries(jobs_dict, "test", False, predicate_exclude_nonlinux_and_libtorch)
 
 
 def add_binary_build_uploads(jobs_dict):
@@ -160,19 +168,6 @@ def get_nightly_uploads():
     return mylist
 
 
-def predicate_exclude_nonlinux_and_libtorch(config):
-    return config.os == "linux" and (config.smoke or config.pydistro != "libtorch")
-
-
-def add_binary_build_tests(jobs_dict):
-
-    configs = gen_build_env_list(False)
-    filtered_configs = filter(predicate_exclude_nonlinux_and_libtorch, configs)
-
-    for conf_options in filtered_configs:
-        jobs_dict[conf_options.gen_build_name("test")] = conf_options.gen_yaml_tree("test")
-
-
 def gen_schedule_tree(cron_timing):
     return [{
         "schedule": {
@@ -195,12 +190,10 @@ def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
         build_name = build_config.gen_build_name("build")
         jobs_list.append(build_name)
 
-    d = OrderedDict(
+    jobs_dict[toplevel_key] = OrderedDict(
         triggers=gen_schedule_tree(cron_schedule),
         jobs=jobs_list,
     )
-
-    jobs_dict[toplevel_key] = d
 
     graph = visualization.generate_graph(get_root(smoke, toplevel_key))
     graph.draw(toplevel_key + "-config-dimensions.png", prog="twopi")
