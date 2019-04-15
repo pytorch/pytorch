@@ -17,8 +17,8 @@
 namespace torch {
 namespace jit {
 namespace script {
-struct Module;
-struct Method;
+struct CompilationUnit;
+struct Function;
 }
 } // namespace jit
 } // namespace torch
@@ -1100,19 +1100,19 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
-using ::torch::jit::script::Module;
-using ::torch::jit::script::Method;
+using ::torch::jit::script::CompilationUnit;
+using ::torch::jit::script::Function;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public Type {
   // Create a user type and register it globally.
   static ClassTypePtr create(
       const std::string& name,
-      std::shared_ptr<Module> module);
+      std::shared_ptr<CompilationUnit> module);
 
   // Create a type representing a Module,
   // These do not have methods, and are not globally registered
-  static ClassTypePtr createModuleType();
+  static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
 
   // returns nullptr if there is no type with that name
   static ClassTypePtr get(const std::string& name);
@@ -1168,8 +1168,11 @@ struct CAFFE2_API ClassType : public Type {
     return attributeNames_[slot];
   }
 
-  Method* getMethod(const std::string& name) const;
-  std::vector<Method*> methods() const;
+  Function* getMethod(const std::string& name) const;
+  CompilationUnit& compilation_unit();
+  const CompilationUnit& compilation_unit() const;
+  std::vector<Function*> methods() const;
+
 
   const std::string& name() const {
     return typename_;
@@ -1226,10 +1229,10 @@ struct CAFFE2_API ClassType : public Type {
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(std::string name, std::shared_ptr<Module> module)
+  ClassType(std::string name, std::shared_ptr<CompilationUnit> cu)
       : Type(TypeKind::ClassType),
         typename_(std::move(name)),
-        module_(std::move(module)) {}
+        compilation_unit_(std::move(cu)) {}
 
   // Name of type (note that this has to be globally unique).
   std::string typename_;
@@ -1243,7 +1246,7 @@ struct CAFFE2_API ClassType : public Type {
   std::vector<std::string> attributeNames_;
   std::vector<TypePtr> attributeTypes_;
   // Holds method attributes
-  std::shared_ptr<Module> module_;
+  std::shared_ptr<CompilationUnit> compilation_unit_;
 
 };
 } // namespace c10

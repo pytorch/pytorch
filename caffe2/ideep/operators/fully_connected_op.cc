@@ -1,28 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
 
-USE_IDEEP_DEF_ALIASES();
-
-static inline itensor::dims CanonicalDims(itensor::dims adims, int32_t axis) {
-  CAFFE_ENFORCE(axis < (int32_t)adims.size(), "Invalid axis!");
-  CAFFE_ENFORCE(axis > (int32_t)-adims.size(), "Invalid axis!");
-  if (adims.size() == 2 || axis == 1) {
-    return adims;
-  }
-  if (axis < 0) {
-    axis += (int32_t)adims.size();
-  }
-
-  auto dim0 = std::accumulate(
-      adims.begin(),
-      adims.begin() + axis,
-      1,
-      std::multiplies<itensor::dim_t>());
-  auto dim1 = std::accumulate(
-      adims.begin() + axis, adims.end(), 1, std::multiplies<itensor::dim_t>());
-  return itensor::dims({dim0, dim1});
-}
+namespace {
 
 class IDEEPFullyConnectedOp final : public IDEEPOperator {
  public:
@@ -32,7 +12,8 @@ class IDEEPFullyConnectedOp final : public IDEEPOperator {
   IDEEPFullyConnectedOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
-        axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)) {}
+        axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
+        training_mode_(OperatorBase::GetSingleArgument<int>("training_mode", 0)) {}
   ~IDEEPFullyConnectedOp() override {}
 
   bool RunOnDevice() override {
@@ -46,16 +27,45 @@ class IDEEPFullyConnectedOp final : public IDEEPOperator {
       X_in.reshape(X_dims);
     }
 
-    itensor filter_in = filter;
-    auto filter_dims = CanonicalDims(filter_in.get_dims(), axis_w_);
-    if (filter_in.get_dims() != filter_dims) {
-      filter_in.reshape(filter_dims);
+    if (training_mode_) {
+      op_key_.clear();
+      filter_ = filter;
+      auto filter_dims = CanonicalDims(filter_.get_dims(), axis_w_);
+      if (filter_.get_dims() != filter_dims) {
+        filter_.reshape(filter_dims);
+      }
+
+      if (InputSize() > BIAS) {
+        bias_ = Input(BIAS);
+      }
+    } else {
+      if (cached_X_descriptor_ != X.get_descriptor()) {
+        op_key_.clear();
+        cached_X_descriptor_ = X.dup_descriptor();
+      }
+
+      if (cached_weights_descriptor_ != filter.get_descriptor()) {
+        op_key_.clear();
+        cached_weights_descriptor_ = filter.dup_descriptor();
+
+        filter_ = filter.has_scale() ? filter.to_public() : filter;
+        auto filter_dims = CanonicalDims(filter_.get_dims(), axis_w_);
+        if (filter_.get_dims() != filter_dims) {
+          filter_.reshape(filter_dims);
+        }
+
+        if (InputSize() > BIAS) {
+          const auto& bias = Input(BIAS);
+          bias_ = bias.has_scale() ? bias.to_public() : bias;
+        }
+      }
     }
 
     if (InputSize() > BIAS) {
-      ideep::inner_product_forward::compute(X_in, filter_in, Input(BIAS), *Y);
+      ideep::inner_product_forward::compute(
+          op_key_, X_in, filter_, bias_, *Y);
     } else {
-      ideep::inner_product_forward::compute(X_in, filter_in, *Y);
+      ideep::inner_product_forward::compute(op_key_, X_in, filter_, *Y);
     }
 
     return true;
@@ -64,6 +74,11 @@ class IDEEPFullyConnectedOp final : public IDEEPOperator {
  private:
   size_t axis_{1};
   size_t axis_w_{1};
+  bool training_mode_;
+
+  ikey op_key_;
+  itensor filter_, bias_;
+  itensor::descriptor cached_X_descriptor_, cached_weights_descriptor_;
 
   INPUT_TAGS(INPUT, FILTER, BIAS);
   OUTPUT_TAGS(OUTPUT);
@@ -128,4 +143,4 @@ class IDEEPFullyConnectedGradientOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(FC, IDEEPFullyConnectedOp);
 REGISTER_IDEEP_OPERATOR(FCGradient, IDEEPFullyConnectedGradientOp);
 
-} // namespace caffe2
+} // namespace

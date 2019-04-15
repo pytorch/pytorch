@@ -16,6 +16,10 @@ matrix:
         python: "3.6"
         dist: xenial
         script: cd .circleci && ./ensure-consistency.py
+      - name: "Ensure no tabs"
+        python: "2.7"
+        script:
+          - (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
       - name: "Python 2.7 Lint"
         python: "2.7"
         install: pip install flake8

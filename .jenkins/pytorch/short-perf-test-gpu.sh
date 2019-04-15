@@ -7,7 +7,9 @@ pushd .jenkins/pytorch/perf_test
 
 echo "Running GPU perf test for PyTorch..."
 
-pip install -q awscli
+# Trying to uninstall PyYAML can cause problem. Workaround according to:
+# https://github.com/pypa/pip/issues/5247#issuecomment-415571153
+pip install -q awscli --ignore-installed PyYAML
 
 # Set multipart_threshold to be sufficiently high, so that `aws s3 cp` is not a multipart read
 # More info at https://github.com/aws/aws-cli/issues/2321

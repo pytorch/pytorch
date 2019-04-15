@@ -17,7 +17,7 @@ workspace.GlobalInit(
         "caffe2",
         "--caffe2_omp_num_threads=11",
         # Increase this threshold to test acc16 with randomly generated data
-        "--caffe2_dnnlowp_acc16_density_threshold=0.9",
+        "--caffe2_dnnlowp_acc16_density_threshold=0.5",
     ]
 )
 
