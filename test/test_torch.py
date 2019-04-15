@@ -2661,9 +2661,15 @@ class _TestTorchMixin(object):
         qr = r.quantize_linear(scale, zero_point)
         self.assertEqual(qr.q_scale(), scale)
         self.assertEqual(qr.q_zero_point(), zero_point)
+        self.assertTrue(qr.is_quantized)
+        self.assertFalse(r.is_quantized)
         rqr = qr.dequantize()
         for i in range(num_elements):
             self.assertEqual(r[i], rqr[i])
+        # Testing item
+        r = torch.ones(1, dtype=torch.float)
+        qr = r.quantize_linear(scale, zero_point)
+        self.assertEqual(qr.item(), 1)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
@@ -3013,6 +3019,20 @@ class _TestTorchMixin(object):
         self.assertIs(torch.float64, x.dtype)
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
+
+    def test_bool_tensor_comparison_ops(self):
+        a = torch.tensor([True, False, True, False, True, False], dtype=torch.bool)
+        b = torch.tensor([True, False, True, True, True, True], dtype=torch.bool)
+        for device in torch.testing.get_all_device_types():
+            self.assertEqual(a == b, torch.tensor([1, 1, 1, 0, 1, 0], dtype=torch.uint8))
+            self.assertEqual(a != b, torch.tensor([0, 0, 0, 1, 0, 1], dtype=torch.uint8))
+            self.assertEqual(a < b, torch.tensor([0, 0, 0, 1, 0, 1], dtype=torch.uint8))
+            self.assertEqual(a > b, torch.tensor([0, 0, 0, 0, 0, 0], dtype=torch.uint8))
+            self.assertEqual(a >= b, torch.tensor([1, 1, 1, 0, 1, 0], dtype=torch.uint8))
+            self.assertEqual(a <= b, torch.tensor([1, 1, 1, 1, 1, 1], dtype=torch.uint8))
+            self.assertEqual(a > False, torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
+            self.assertEqual(a == torch.tensor(True, dtype=torch.bool), torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
+            self.assertEqual(a == torch.tensor(0, dtype=torch.bool), torch.tensor([0, 1, 0, 1, 0, 1], dtype=torch.uint8))
 
     def test_bool_tensor_value_change(self):
         for device in torch.testing.get_all_device_types():
@@ -10645,6 +10665,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             run_test(torch.device('cuda'))
 
     def test_unique_dim(self):
+        self.assertFalse(hasattr(torch, 'unique_dim'))
+        torch.unique_dim = torch._C._VariableFunctions.unique_dim
+
         def run_test(dtype=torch.float, device=torch.device('cpu')):
             x = torch.tensor([[[1., 1.],
                                [0., 1.],
@@ -10698,7 +10721,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim0, x_unique)
             self.assertEqual(expected_inverse_dim0, x_inverse)
 
-            x_unique, _, x_counts = torch._unique_dim2_temporary_will_remove_soon(
+            x_unique, _, x_counts = torch.unique_dim(
                 x,
                 return_inverse=False,
                 return_counts=True,
@@ -10706,7 +10729,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim0, x_unique)
             self.assertEqual(expected_counts_dim0, x_counts)
 
-            x_unique, x_inverse, x_counts = torch._unique_dim2_temporary_will_remove_soon(
+            x_unique, x_inverse, x_counts = torch.unique_dim(
                 x,
                 return_inverse=True,
                 return_counts=True,
@@ -10726,7 +10749,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim1, x_unique)
             self.assertEqual(expected_inverse_dim1, x_inverse)
 
-            x_unique, _, x_counts = torch._unique_dim2_temporary_will_remove_soon(
+            x_unique, _, x_counts = torch.unique_dim(
                 x,
                 return_inverse=False,
                 return_counts=True,
@@ -10734,7 +10757,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim1, x_unique)
             self.assertEqual(expected_counts_dim1, x_counts)
 
-            x_unique, x_inverse, x_counts = torch._unique_dim2_temporary_will_remove_soon(
+            x_unique, x_inverse, x_counts = torch.unique_dim(
                 x,
                 return_inverse=True,
                 return_counts=True,
@@ -10754,7 +10777,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_inverse_dim2, x_inverse)
 
-            x_unique, _, x_counts = torch._unique_dim2_temporary_will_remove_soon(
+            x_unique, _, x_counts = torch.unique_dim(
                 x,
                 return_inverse=False,
                 return_counts=True,
@@ -10762,7 +10785,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_counts_dim2, x_counts)
 
-            x_unique, x_inverse, x_counts = torch._unique_dim2_temporary_will_remove_soon(
+            x_unique, x_inverse, x_counts = torch.unique_dim(
                 x,
                 return_inverse=True,
                 return_counts=True,

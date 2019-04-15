@@ -24,7 +24,7 @@ bool isEqual(const CompleteArgumentInfo& ti, const autograd::Variable& v) {
       isEqual(ti.strides(), v.strides());
 }
 
-autograd::Variable var(at::Type& t, at::IntArrayRef sizes, bool requires_grad) {
+autograd::Variable var(at::DeprecatedTypeProperties& t, at::IntArrayRef sizes, bool requires_grad) {
   return autograd::make_variable(at::rand(sizes, t.options()), requires_grad);
 }
 autograd::Variable undef() {

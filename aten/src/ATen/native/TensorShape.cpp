@@ -304,7 +304,7 @@ Tensor as_strided(const Tensor& self, IntArrayRef size, IntArrayRef stride, opti
   AT_CHECK(
       tid == CPUTensorId() || tid == CUDATensorId(),
       "as_strided is only implemented for strided CPU and CUDA tensors.");
-  auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), tid, false);
+  auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), tid);
   setStrided(result, size, stride, storage_offset);
   return result;
 }
