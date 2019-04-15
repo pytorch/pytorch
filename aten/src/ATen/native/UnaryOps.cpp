@@ -94,6 +94,11 @@ Tensor& _fill__cpu(Tensor& self, Scalar value) {
     unary_kernel(*iter, [=](at::Half a) -> at::Half { return fill_value; });
     return self;
   }
+  if (iter->dtype() == at::ScalarType::Bool) {
+    bool fill_value = value.to<bool>();
+    unary_kernel(*iter, [=](bool a) -> bool { return fill_value; });
+    return self;
+  }
   fill_stub(iter->device_type(), *iter, value);
   return self;
 }
