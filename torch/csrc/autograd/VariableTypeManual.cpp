@@ -16,12 +16,6 @@ VariableType::VariableType(Context* context, TypeExtendedInterface* baseType)
   str = std::string("Variable[") + baseType->toString() + "]";
 }
 
-ScalarType VariableType::scalarType() const {
-  return baseType->scalarType();
-}
-caffe2::TypeMeta VariableType::typeMeta() const {
-  return baseType->typeMeta();
-}
 Backend VariableType::backend() const {
   return baseType->backend();
 }
@@ -83,7 +77,7 @@ struct VariableTypeRegistry {
 
 struct VariableHooks : public at::VariableHooksInterface {
   VariableHooks(at::VariableHooksArgs) {}
-  void registerVariableTypeFor(at::LegacyTypeDispatch*, at::Backend, at::ScalarType) const override;
+  void registerVariableTypeFor(at::LegacyTypeDispatch*, at::Backend) const override;
   at::Type& getVariableTypeFromBaseType(const at::Type&) const override;
 };
 
@@ -117,8 +111,8 @@ static VariableTypeRegistry registry;
 REGISTER_VARIABLE_HOOKS(VariableHooks)
 
 // Pre-condition: backend/scalar_type is a valid type in the type_registry
-void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend, at::ScalarType scalar_type) const {
-  auto* baseType = context->getNonVariableTypeRaw(backend, scalar_type);
+void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend) const {
+  auto* baseType = context->getNonVariableTypeRaw(backend, ScalarType::Undefined);
   register_variable_type_for(static_cast<at::TypeExtendedInterface*>(baseType));
 }
 
@@ -141,13 +135,11 @@ namespace {
 std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
   auto& context = at::globalContext();
   std::vector<Type*> res;
-  res.reserve(backends.size() * static_cast<int>(ScalarType::NumOptions));
+  res.reserve(backends.size());
   for (auto p : backends) {
-    for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
-      if (baseType) {
-        res.emplace_back(VariableType::getVariableTypeFromBaseType(*baseType));
-      }
+    auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), ScalarType::Undefined);
+    if (baseType) {
+      res.emplace_back(VariableType::getVariableTypeFromBaseType(*baseType));
     }
   }
   return res;

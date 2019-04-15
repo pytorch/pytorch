@@ -47,8 +47,7 @@ struct unique_type_checker {
 };
 
 std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
-  auto & type = tensor.dispatch_type();
-  if (type.is_cuda() && tensor.get_device() != devices[0])
+  if (tensor.is_cuda() && tensor.get_device() != devices[0])
     throw std::runtime_error("device of broadcasted tensor must appear as the "
                              "first on devices list");
   std::vector<Tensor> tensors;
@@ -66,15 +65,15 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
 #else
   {
 #endif
-    if (type.is_cuda()) {
+    if (tensor.is_cuda()) {
       tensors.push_back(tensor);
     }
-    IntArrayRef loop_devices = type.is_cuda() ? devices.slice(1) : devices;
+    IntArrayRef loop_devices = tensor.is_cuda() ? devices.slice(1) : devices;
     for (auto device : loop_devices) {
       _device_guard.set_index(device);
       tensors.push_back(tensor.to(
           kCUDA,
-          type.scalarType(),
+          tensor.scalar_type(),
           /*non_blocking*/true,
           /*copy*/true));
     }

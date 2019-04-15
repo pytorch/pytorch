@@ -115,7 +115,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
   if (PyFloat_Check(obj)) {
     // this is always guaranteed to be a floating-point type, and makes it more
     // convenient to write e.g. torch.tensor(0.) than torch.tensor(0., dtype=torch.Tensor.dtype).
-    return torch::tensors::get_default_tensor_type().scalarType();
+    return torch::tensors::get_default_scalar_type();
   }
   if (THPUtils_checkLong(obj)) {
     return ScalarType::Long;
@@ -144,7 +144,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     auto length = PySequence_Length(obj);
     if (length < 0) throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
-    if (length == 0) return torch::tensors::get_default_tensor_type().scalarType();
+    if (length == 0) return torch::tensors::get_default_scalar_type();
     for (int i = 0; i < length; ++i) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       if (!handle) throw python_error();
