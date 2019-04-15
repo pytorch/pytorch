@@ -357,8 +357,18 @@ struct C10_API TensorOptions {
       case Layout::Strided:
         switch (device().type()) {
           case DeviceType::CPU:
+            // This is a hack to make TensorOptions based dispatch work for
+            // complex backends.
+            // TODO: Find a better solution and extend it to other backends that
+            // share the same Layout and DeviceType
+            if (isComplexType(typeMetaToScalarType(dtype()))) {
+              return ComplexCPUTensorId();
+            }
             return CPUTensorId();
           case DeviceType::CUDA:
+            if (isComplexType(typeMetaToScalarType(dtype()))) {
+              return ComplexCUDATensorId();
+            }
             return CUDATensorId();
           case DeviceType::MKLDNN:
             return MKLDNNTensorId();
