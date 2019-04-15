@@ -27,9 +27,8 @@ def load_derivatives(path, declarations):
 
     return autograd_functions
 
-
 # How do you feel about pasting declaration inside autograd function...
-def create_autograd_function(name, derivatives, args_with_derivatives, not_differentiable_args_names,
+def create_autograd_function(name, derivatives, args_with_derivatives, non_differentiable_arg_names,
                              signature, declaration, output_differentiability):
     op = to_camel_case(name) + 'Backward'
     op = op.replace('ForwardBackward', 'Backward')
@@ -144,26 +143,26 @@ def process_definition(defn, declarations_by_signature):
 
         # Set up the derivative information
         derivatives = []
-        not_differentiable_args_names = []
+        non_differentiable_arg_names = []
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
             derivative = create_derivative(declaration['arguments'], declaration['returns'],
                                            declaration['name'], formula, names)
-            if formula.lower().strip() == 'not_differentiable':
+            if formula.lower().strip() == 'non_differentiable':
                 assert not sum([type(var_name) == list
                                 for var_name in derivative['var_names']]), \
                     "Variable names associated to a formula should be a flat list"
-                not_differentiable_args_names += derivative['var_names']
+                non_differentiable_arg_names += derivative['var_names']
             else:
                 derivatives.append(derivative)
-        args_with_derivatives = list(filter(lambda x: x['name'] not in not_differentiable_args_names,
+        args_with_derivatives = list(filter(lambda x: x['name'] not in non_differentiable_arg_names,
                                             args_with_derivatives))
 
         # Test to see if the use of 'grads' makes sense.
         check_grad_usage(defn_name, declaration, derivatives)
 
-        return derivatives, args_with_derivatives, not_differentiable_args_names
+        return derivatives, args_with_derivatives, non_differentiable_arg_names
 
     def unzip(xs):
         return zip(*xs)
@@ -206,8 +205,8 @@ def process_definition(defn, declarations_by_signature):
                                'Declarations.yaml ({})'
                                .format(i, defn_name, x, y))
 
-    derivatives, args_with_derivatives, not_differentiable_args_names = set_up_derivatives(defn_name, defn, canonical)
-    return create_autograd_function(defn_name, derivatives, args_with_derivatives, not_differentiable_args_names,
+    derivatives, args_with_derivatives, non_differentiable_arg_names = set_up_derivatives(defn_name, defn, canonical)
+    return create_autograd_function(defn_name, derivatives, args_with_derivatives, non_differentiable_arg_names,
                                     signature, canonical, output_differentiability)
 
 
