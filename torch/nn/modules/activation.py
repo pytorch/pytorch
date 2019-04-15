@@ -744,6 +744,10 @@ class MultiheadAttention(Module):
             incremental_state: if provided, previous time steps are cashed
             need_weights: output attn_output_weights
             static_kv: key and value are static
+            attn_mask: if provided, the values are added to attn_output_weights.         
+                 For exampel, adding -inf and passing softmax function later 
+                 will filter out the original attn_output_weights values.    
+                 Adding zeros to attn_output_weights changes nothing.
 
         Outputs of forward function
             attn_output: [target length, batch size, embed dim]
