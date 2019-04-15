@@ -1,4 +1,5 @@
 #include <ATen/core/op_registration/op_registration.h>
+#include <torch/csrc/jit/script/function_schema_parser.h>
 
 namespace c10 {
 
@@ -54,6 +55,10 @@ private:
   bool has_kernel_;
   bool owns_registration_;
 };
+
+void RegisterOperators::registerOp_(const std::string& schemaStr, detail::KernelRegistrationConfig&& config) {
+  registerOp_(torch::jit::parseSchema(schemaStr), std::move(config));
+}
 
 void RegisterOperators::registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config) {
   AT_CHECK(!config.dispatch_key.has_value() || config.kernel_func != nullptr,
