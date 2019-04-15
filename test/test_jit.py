@@ -9811,7 +9811,7 @@ a")
                 return a + b + c
 
         # TODO: this should be supported but is difficult to parse
-        with self.assertRaisesRegex(RuntimeError, "Return type line"):
+        with self.assertRaisesRegex(RuntimeError, "Number of type annotations"):
             @torch.jit.script
             def fn(a, # type: Tensor
                    b,
