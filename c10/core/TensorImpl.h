@@ -868,7 +868,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // NOTE: `shallow_copy_from()` does not copy the AutogradMeta pointer
   // because it is unique for each Variable.
   // yf225 TODO: fix comment regarding version_counter
-  // yf225 TODO: add comment why we don't copy is_variable_
   virtual void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) {
     type_id_ = impl->type_id();
     set_storage(impl->storage());

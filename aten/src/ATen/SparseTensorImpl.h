@@ -218,7 +218,6 @@ public:
   // NOTE: `shallow_copy_from()` does not copy the AutogradMeta pointer
   // because it is unique for each Variable.
   // yf225 TODO: fix comment regarding version_counter
-  // yf225 TODO: add comment why we don't copy is_variable_
   void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
     AT_ASSERT(impl->is_sparse());
     auto sparse_impl = static_cast<SparseTensorImpl*>(impl.get());
