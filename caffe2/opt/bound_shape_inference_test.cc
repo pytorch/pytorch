@@ -214,6 +214,40 @@ TEST(BoundShapeInference, ConcatMissingInput) {
       {spec.max_batch_size, 2, 60});
 }
 
+TEST(BoundShapeInference, ConcatInferInputBackwards) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Concat",
+      "",
+      {"I0", "I1"},
+      {"Cout", "split_info"},
+      {MakeArgument<int>("axis", 1)}));
+  net.add_op()->CopyFrom(
+      CreateOperatorDef("FCTransposed", "", {"Cout", "W0", "B0"}, {"Y"}, {}));
+  BoundShapeSpec spec(20, 1000);
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "I0",
+      makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60}));
+  shape_map.emplace(
+      "W0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {101, 16}));
+  shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape, "I0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60});
+  verifyShapeInfo(
+      out_shape, "Cout", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 101});
+  verifyShapeInfo(
+      out_shape, "Y", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
+  verifyShapeInfo(
+      out_shape,
+      "I1",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size, 101 - 60});
+}
+
 TEST(BoundShapeInference, Split) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(

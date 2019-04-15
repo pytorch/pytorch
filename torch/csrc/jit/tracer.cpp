@@ -408,7 +408,6 @@ void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
   addInputs(n, name, at::typeMetaToScalarType(options.dtype()));
   addInputs(n, name, options.layout());
   addInputs(n, name, options.device());
-  addInputs(n, name, options.pinned_memory());
 }
 
 void addInputs(Node* n, const char* name, at::IntArrayRef value) {
@@ -438,6 +437,7 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
 void addInputs(Node* n, const char* name, const ArrayRef<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
+
 void addInputs(Node* n, const char* name, const std::vector<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }

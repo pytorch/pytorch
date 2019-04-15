@@ -25,7 +25,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   if (weights && THTensor_(nElement)(weights) != n_classes) {
     THDescBuff s1 = THTensor_(sizeDesc)(weights);
     THError("weight tensor should be defined either for all %d classes or no classes"
-	    " but got weight tensor of shape: %s", n_classes, s1.str);
+            " but got weight tensor of shape: %s", n_classes, s1.str);
   }
 
   if (reduction == Reduction::None && n_dims == 2) {
@@ -39,8 +39,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
       int cur_target = THLongTensor_fastGetLegacy1dNoScalars(target, i);
 
       if (cur_target == ignore_index) {
-	THTensor_(fastSet1d)(output, i, 0.0f);
-	continue;
+        THTensor_(fastSet1d)(output, i, 0.0f);
+        continue;
       }
       if (cur_target >= 0 && cur_target < n_classes) {
           scalar_t cur_weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;

@@ -11,6 +11,10 @@
  * >    .op("myfunc(Tensor a) -> Tensor", [] (Tensor a) -> Tensor {...});
  */
 
+// This intentionally tests a deprecated API
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 using c10::RegisterOperators;
 using c10::FunctionSchema;
 using c10::Argument;
@@ -791,3 +795,5 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
 }
 
 }
+
+#pragma GCC diagnostic pop

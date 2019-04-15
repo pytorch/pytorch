@@ -8,26 +8,6 @@ graph {
     op_type: "Slice"
     attribute {
       name: "axes"
-      ints: 0
-      type: INTS
-    }
-    attribute {
-      name: "ends"
-      ints: 9223372036854775807
-      type: INTS
-    }
-    attribute {
-      name: "starts"
-      ints: 0
-      type: INTS
-    }
-  }
-  node {
-    input: "1"
-    output: "2"
-    op_type: "Slice"
-    attribute {
-      name: "axes"
       ints: 1
       type: INTS
     }
@@ -60,7 +40,7 @@ graph {
     }
   }
   output {
-    name: "2"
+    name: "1"
     type {
       tensor_type {
         elem_type: 1
