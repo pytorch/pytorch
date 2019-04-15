@@ -89,7 +89,7 @@ if which sccache > /dev/null; then
   sccache --zero-stats
   function sccache_epilogue() {
     echo '=================== sccache compilation log ==================='
-    python $(dirname "${BASH_SOURCE[0]}")/print_sccache_log.py ~/sccache_error.log
+    python "$(dirname "${BASH_SOURCE[0]}")/print_sccache_log.py" ~/sccache_error.log
     echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
     sccache --show-stats
     sccache --stop-server || true
