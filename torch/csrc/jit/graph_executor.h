@@ -46,7 +46,7 @@ struct TORCH_API GraphExecutor {
 TORCH_API void runRequiredPasses(const std::shared_ptr<Graph>& g);
 
 TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
-std::shared_ptr<Graph> lastExecutedOptimizedGraph();
+TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 
 namespace detail {
 

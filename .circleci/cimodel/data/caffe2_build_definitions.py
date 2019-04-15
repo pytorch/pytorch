@@ -9,7 +9,7 @@ from cimodel.lib.conf_tree import Ver
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 
-DOCKER_IMAGE_VERSION = 253
+DOCKER_IMAGE_VERSION = 266
 
 
 CONFIG_HIERARCHY = [
