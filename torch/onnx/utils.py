@@ -344,7 +344,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         # TODO: Don't allocate a in-memory string for the protobuf
         defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
         if export_params:
-            proto, export_map = graph._export_onnx(params_dict, opset_version, defer_weight_export, operator_export_type, strip_doc_string)
+            proto, export_map = graph._export_onnx(params_dict, opset_version, defer_weight_export, operator_export_type,
+                                                   strip_doc_string)
         else:
             proto, export_map = graph._export_onnx({}, opset_version, False, operator_export_type, strip_doc_string)
 
