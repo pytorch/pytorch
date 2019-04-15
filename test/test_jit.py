@@ -252,6 +252,7 @@ def enable_cpu_fuser(fn):
             torch._C._jit_override_can_fuse_on_cpu(False)
     return wrapper
 
+
 # note: not re-entrant, use unnested only
 @contextmanager
 def disable_autodiff_subgraph_inlining(enabled=True):

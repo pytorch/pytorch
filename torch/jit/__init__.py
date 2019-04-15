@@ -982,7 +982,7 @@ if _enabled:
     # This is necessary because nn.Module defines forward as a method. If we
     # did nothing __getattr__ would not be called. Instead we'd get nn.Module.forward
     # which always throws an exception.
-    class _CachedForward:
+    class _CachedForward(object):
         def __get__(self, obj, cls):
             return self.__getattr__('forward')
 
