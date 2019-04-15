@@ -37,7 +37,7 @@ def dont_wipe_extensions_build_folder(func):
     func.dont_wipe = True
     return func
 
-
+'''
 class TestCppExtension(common.TestCase):
     def setUp(self):
         test_name = self.id().split(".")[-1]
@@ -621,7 +621,7 @@ class TestCppExtension(common.TestCase):
             self.assertEqual(module.get().dtype, torch.float16)
         finally:
             torch.set_default_dtype(initial_default)
-
+'''
 
 class TestMSNPUTensor(common.TestCase):
     @classmethod
