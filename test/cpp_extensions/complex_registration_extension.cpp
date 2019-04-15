@@ -28,7 +28,7 @@ namespace at {
 struct CPUComplexFloatType : public at::CPUTypeDefault {
   CPUComplexFloatType()
       : CPUTypeDefault(
-            CPUTensorId(),
+            ComplexCPUTensorId(),
             /*is_variable=*/false,
             /*is_undefined=*/false) {}
 
@@ -49,7 +49,7 @@ struct ComplexHooks : public at::ComplexHooksInterface {
   ComplexHooks(ComplexHooksArgs) {}
   void registerComplexTypes(Context* context) const override {
     context->registerType(
-        Backend::CPU, ScalarType::ComplexFloat, new CPUComplexFloatType());
+        Backend::ComplexCPU, ScalarType::ComplexFloat, new CPUComplexFloatType());
   }
 };
 
@@ -62,7 +62,7 @@ caffe2::TypeMeta CPUComplexFloatType::typeMeta() const {
 }
 
 Backend CPUComplexFloatType::backend() const {
-  return Backend::CPU;
+  return Backend::ComplexCPU;
 }
 
 const char* CPUComplexFloatType::toString() const {
