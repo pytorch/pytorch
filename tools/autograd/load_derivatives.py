@@ -37,7 +37,7 @@ def create_autograd_function(name, derivatives, args_with_derivatives, non_diffe
         'op': op,
         'declaration': declaration,
         'args_with_derivatives': args_with_derivatives,
-        'not_differentiable_args_names': not_differentiable_args_names,
+        'non_differentiable_arg_names': non_differentiable_arg_names,
         'signature': signature,
         'derivatives': derivatives,
         'saved_inputs': all_saved_variables(derivatives, 'saved_inputs'),
