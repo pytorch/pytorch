@@ -10779,7 +10779,7 @@ a")
             test_shape_prop(torch.tensor(0.5))
             graph = test_shape_prop.graph_for(torch.tensor(0.5))
             # Shape analysis of z should propagate through if statement
-            FileCheck().check("Long(*, *)").run(graph)
+            FileCheck().check("Long(*, *)").check("prim::If").run(graph)
 
     def test_partial_returns(self):
         with self.assertRaisesRegex(RuntimeError, "does not return on all paths"):

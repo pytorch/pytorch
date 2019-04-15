@@ -1166,35 +1166,6 @@ struct to_ir {
     return v;
   }
 
-  // If one block exits and the other does not, propagate all variables set
-  // in the non exit block, so that below, `a` will escape scope.
-  // if ...:
-  //   a =
-  // else:
-  //   return 1
-  void emitOneExitBlock(
-      Block* exit_b,
-      Block* other_b,
-      const std::shared_ptr<Environment>& save,
-      const SourceRange& range) {
-    // ordered set, because we want deterministic graph output
-    std::set<std::string> mutated_variables;
-    for (auto& v : save->definedVariables()) {
-      mutated_variables.insert(v);
-    }
-    WithInsertPoint guard(graph->block()->nodes().front());
-    auto b_val = graph->insertNode(graph->create(prim::Bottom, {}, 1))
-                     ->output()
-                     ->setType(BottomType::get());
-    for (const auto& x : mutated_variables) {
-      auto new_v = save->getVar(x, range);
-      other_b->registerOutput(new_v);
-      exit_b->registerOutput(b_val);
-      environment_stack->setVar(
-          range, x, other_b->owningNode()->addOutput()->setType(new_v->type()));
-    }
-  }
-
   void emitIfElseBlocks(Value* cond_value, const If& stmt) {
     Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
     n->addInput(cond_value);
@@ -1208,18 +1179,10 @@ struct to_ir {
     auto save_false = emitSingleIfBranch(
         false_block, stmt.falseBranch(), bool_info.false_refinements_);
 
-    if (exit_blocks.count(true_block) && exit_blocks.count(false_block)) {
+    bool true_exits = exit_blocks.count(true_block);
+    bool false_exits = exit_blocks.count(false_block);
+    if (true_exits && false_exits) {
       exit_blocks.insert(n->owningBlock());
-      return;
-    }
-
-    if (exit_blocks.count(true_block) || exit_blocks.count(false_block)) {
-      if (exit_blocks.count(true_block)) {
-        emitOneExitBlock(true_block, false_block, save_false, stmt.range());
-      } else {
-        emitOneExitBlock(false_block, true_block, save_true, stmt.range());
-      }
-      return;
     }
 
     // In python, every variable assigned in an if statement escapes
@@ -1249,20 +1212,29 @@ struct to_ir {
     std::set<std::string> mutated_variables;
 
     for (auto& v : save_true->definedVariables()) {
-      if (save_false->findInAnyFrame(v)) {
+      if (save_false->findInAnyFrame(v) || false_exits) {
         mutated_variables.insert(v);
       }
     }
     for (auto& v : save_false->definedVariables()) {
-      if (save_true->findInAnyFrame(v)) {
+      if (save_true->findInAnyFrame(v) || true_exits) {
         mutated_variables.insert(v);
       }
     }
 
+    WithInsertPoint guard(graph->block()->nodes().front());
+    auto b_val = graph->insertNode(graph->create(prim::Bottom, {}, 1))
+                     ->output()
+                     ->setType(BottomType::get());
+
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
-      auto tv = save_true->getVar(x, stmt.range());
-      auto fv = save_false->getVar(x, stmt.range());
+      auto tv = save_true->findInAnyFrame(x)
+          ? save_true->getVar(x, stmt.range())
+          : b_val;
+      auto fv = save_false->findInAnyFrame(x)
+          ? save_false->getVar(x, stmt.range())
+          : b_val;
       auto unified = unifyTypes(tv->type(), fv->type());
 
       // attempt to unify the types. we allow variables to be set to different
