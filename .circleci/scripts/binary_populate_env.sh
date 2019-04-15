@@ -24,7 +24,7 @@ configs=($BUILD_ENVIRONMENT)
 export PACKAGE_TYPE="${configs[0]}"
 export DESIRED_PYTHON="${configs[1]}"
 export DESIRED_CUDA="${configs[2]}"
-export DESIRED_GCC_ABI="${configs[3]}"
+export DESIRED_DEVTOOLSET="${configs[3]}"
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
   export BUILD_PYTHONLESS=1
 fi
@@ -39,8 +39,8 @@ else
 fi
 
 # Upload to parallel folder for gcc abis
-if [[ "$DESIRED_GCC_ABI" == 'gccabi1' ]]; then
-  export PIP_UPLOAD_FOLDER='nightly/gccabi1/'
+if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
+  export PIP_UPLOAD_FOLDER='nightly/devtoolset7/'
   if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
     echo "We don't handle conda builds with gcc ABI of 1, since we don't"
     echo "want to add a new package name to the conda builds"
@@ -65,7 +65,7 @@ export DESIRED_PYTHON="$DESIRED_PYTHON"
 export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="$LIBTORCH_VARIANT"
 export BUILD_PYTHONLESS="$BUILD_PYTHONLESS"
-export DESIRED_GCC_ABI="$DESIRED_GCC_ABI"
+export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
 
 export DATE="$DATE"
 export NIGHTLIES_DATE_PREAMBLE=1.1.0.dev

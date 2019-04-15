@@ -23,6 +23,7 @@ LINKING_DIMENSIONS = [
     "static",
 ]
 
+
 DEPS_INCLUSION_DIMENSIONS = [
     "with-deps",
     "without-deps",
@@ -59,7 +60,7 @@ CONFIG_TREE_DATA = OrderedDict(
 )
 
 
-GCC_ABI_VERSIONS = [0, 1]
+DEVTOOLSET_VERSIONS = [3, 7]
 
 
 class TopLevelNode(ConfigNode):
@@ -94,16 +95,16 @@ class PackageFormatConfigNode(ConfigNode):
 
     def get_children(self):
         if self.find_prop("os_name") == "linux" and self.find_prop("package_format") != "conda":
-            return [LinuxGccConfigNode(self, v) for v in GCC_ABI_VERSIONS]
+            return [LinuxGccConfigNode(self, v) for v in DEVTOOLSET_VERSIONS]
         else:
             return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]
 
 
 class LinuxGccConfigNode(ConfigNode):
-    def __init__(self, parent, gcc_abi_version):
-        super(LinuxGccConfigNode, self).__init__(parent, "GCC_ABI=" + str(gcc_abi_version))
+    def __init__(self, parent, devtoolset_version):
+        super(LinuxGccConfigNode, self).__init__(parent, "DEVTOOLSET=" + str(devtoolset_version))
 
-        self.props["gcc_abi_version"] = gcc_abi_version
+        self.props["devtoolset_version"] = devtoolset_version
 
     def get_children(self):
         return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]

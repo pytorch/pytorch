@@ -19,7 +19,7 @@ binary_linux_build: &binary_linux_build
       command: |
         set -ex
         source /env
-        if [[ "$DESIRED_GCC_ABI" == 'gccabi1' ]]; then
+        if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
           /builder/upgrade_gcc_abi.sh
         else
           echo "Not upgrading gcc version"

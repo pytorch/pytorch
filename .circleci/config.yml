@@ -654,7 +654,7 @@ binary_linux_build: &binary_linux_build
       command: |
         set -ex
         source /env
-        if [[ "$DESIRED_GCC_ABI" == 'gccabi1' ]]; then
+        if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
           /builder/upgrade_gcc_abi.sh
         else
           echo "Not upgrading gcc version"
@@ -1535,282 +1535,282 @@ jobs:
 ##############################################################################
 # Binary build specs individual job specifications
 ##############################################################################
-  binary_linux_manywheel_2.7m_cpu_gccabi0_build:
+  binary_linux_manywheel_2.7m_cpu_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7mu_cpu_gccabi0_build:
+  binary_linux_manywheel_2.7mu_cpu_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.5m_cpu_gccabi0_build:
+  binary_linux_manywheel_3.5m_cpu_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.6m_cpu_gccabi0_build:
+  binary_linux_manywheel_3.6m_cpu_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cpu_gccabi0_build:
+  binary_linux_manywheel_3.7m_cpu_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7m_cu80_gccabi0_build:
+  binary_linux_manywheel_2.7m_cu80_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7mu_cu80_gccabi0_build:
+  binary_linux_manywheel_2.7mu_cu80_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.5m_cu80_gccabi0_build:
+  binary_linux_manywheel_3.5m_cu80_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.6m_cu80_gccabi0_build:
+  binary_linux_manywheel_3.6m_cu80_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cu80_gccabi0_build:
+  binary_linux_manywheel_3.7m_cu80_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7m_cu90_gccabi0_build:
+  binary_linux_manywheel_2.7m_cu90_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7mu_cu90_gccabi0_build:
+  binary_linux_manywheel_2.7mu_cu90_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.5m_cu90_gccabi0_build:
+  binary_linux_manywheel_3.5m_cu90_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.6m_cu90_gccabi0_build:
+  binary_linux_manywheel_3.6m_cu90_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cu90_gccabi0_build:
+  binary_linux_manywheel_3.7m_cu90_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7m_cu100_gccabi0_build:
+  binary_linux_manywheel_2.7m_cu100_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7mu_cu100_gccabi0_build:
+  binary_linux_manywheel_2.7mu_cu100_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.5m_cu100_gccabi0_build:
+  binary_linux_manywheel_3.5m_cu100_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.6m_cu100_gccabi0_build:
+  binary_linux_manywheel_3.6m_cu100_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cu100_gccabi0_build:
+  binary_linux_manywheel_3.7m_cu100_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7m_cpu_gccabi1_build:
+  binary_linux_manywheel_2.7m_cpu_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7mu_cpu_gccabi1_build:
+  binary_linux_manywheel_2.7mu_cpu_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.5m_cpu_gccabi1_build:
+  binary_linux_manywheel_3.5m_cpu_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.6m_cpu_gccabi1_build:
+  binary_linux_manywheel_3.6m_cpu_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cpu_gccabi1_build:
+  binary_linux_manywheel_3.7m_cpu_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7m_cu80_gccabi1_build:
+  binary_linux_manywheel_2.7m_cu80_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7mu_cu80_gccabi1_build:
+  binary_linux_manywheel_2.7mu_cu80_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.5m_cu80_gccabi1_build:
+  binary_linux_manywheel_3.5m_cu80_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.6m_cu80_gccabi1_build:
+  binary_linux_manywheel_3.6m_cu80_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cu80_gccabi1_build:
+  binary_linux_manywheel_3.7m_cu80_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7m_cu90_gccabi1_build:
+  binary_linux_manywheel_2.7m_cu90_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7mu_cu90_gccabi1_build:
+  binary_linux_manywheel_2.7mu_cu90_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.5m_cu90_gccabi1_build:
+  binary_linux_manywheel_3.5m_cu90_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.6m_cu90_gccabi1_build:
+  binary_linux_manywheel_3.6m_cu90_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cu90_gccabi1_build:
+  binary_linux_manywheel_3.7m_cu90_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7m_cu100_gccabi1_build:
+  binary_linux_manywheel_2.7m_cu100_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_2.7mu_cu100_gccabi1_build:
+  binary_linux_manywheel_2.7mu_cu100_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.5m_cu100_gccabi1_build:
+  binary_linux_manywheel_3.5m_cu100_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.6m_cu100_gccabi1_build:
+  binary_linux_manywheel_3.6m_cu100_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_manywheel_3.7m_cu100_gccabi1_build:
+  binary_linux_manywheel_3.7m_cu100_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
@@ -1927,58 +1927,58 @@ jobs:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cpu_gccabi0_build:
+  binary_linux_libtorch_2.7m_cpu_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu80_gccabi0_build:
+  binary_linux_libtorch_2.7m_cu80_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu90_gccabi0_build:
+  binary_linux_libtorch_2.7m_cu90_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_gccabi0_build:
+  binary_linux_libtorch_2.7m_cu100_devtoolset3_build:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset3"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cpu_gccabi1_build:
+  binary_linux_libtorch_2.7m_cpu_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu80_gccabi1_build:
+  binary_linux_libtorch_2.7m_cu80_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda80"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu90_gccabi1_build:
+  binary_linux_libtorch_2.7m_cu90_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda90"
     <<: *binary_linux_build
 
-  binary_linux_libtorch_2.7m_cu100_gccabi1_build:
+  binary_linux_libtorch_2.7m_cu100_devtoolset7_build:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
     docker:
       - image: "soumith/manylinux-cuda100"
     <<: *binary_linux_build
@@ -2033,301 +2033,301 @@ jobs:
 # These are the smoke tests run right after the build, before the upload.
 # If these fail, the upload doesn't happen.
 ##############################################################################
-  binary_linux_manywheel_2.7m_cpu_gccabi0_test:
+  binary_linux_manywheel_2.7m_cpu_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7mu_cpu_gccabi0_test:
+  binary_linux_manywheel_2.7mu_cpu_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.5m_cpu_gccabi0_test:
+  binary_linux_manywheel_3.5m_cpu_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.6m_cpu_gccabi0_test:
+  binary_linux_manywheel_3.6m_cpu_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cpu_gccabi0_test:
+  binary_linux_manywheel_3.7m_cpu_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7m_cu80_gccabi0_test:
+  binary_linux_manywheel_2.7m_cu80_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 gccabi0"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *binary_linux_test
-
-  binary_linux_manywheel_2.7mu_cu80_gccabi0_test:
-    environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.5m_cu80_gccabi0_test:
+  binary_linux_manywheel_2.7mu_cu80_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.6m_cu80_gccabi0_test:
+  binary_linux_manywheel_3.5m_cu80_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cu80_gccabi0_test:
+  binary_linux_manywheel_3.6m_cu80_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7m_cu90_gccabi0_test:
+  binary_linux_manywheel_3.7m_cu80_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 devtoolset3"
+      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *binary_linux_test
+
+  binary_linux_manywheel_2.7m_cu90_devtoolset3_test:
+    environment:
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7mu_cu90_gccabi0_test:
+  binary_linux_manywheel_2.7mu_cu90_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.5m_cu90_gccabi0_test:
+  binary_linux_manywheel_3.5m_cu90_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.6m_cu90_gccabi0_test:
+  binary_linux_manywheel_3.6m_cu90_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cu90_gccabi0_test:
+  binary_linux_manywheel_3.7m_cu90_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7m_cu100_gccabi0_test:
+  binary_linux_manywheel_2.7m_cu100_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7mu_cu100_gccabi0_test:
+  binary_linux_manywheel_2.7mu_cu100_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.5m_cu100_gccabi0_test:
+  binary_linux_manywheel_3.5m_cu100_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.6m_cu100_gccabi0_test:
+  binary_linux_manywheel_3.6m_cu100_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cu100_gccabi0_test:
+  binary_linux_manywheel_3.7m_cu100_devtoolset3_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7m_cpu_gccabi1_test:
+  binary_linux_manywheel_2.7m_cpu_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7mu_cpu_gccabi1_test:
+  binary_linux_manywheel_2.7mu_cpu_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.5m_cpu_gccabi1_test:
+  binary_linux_manywheel_3.5m_cpu_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.6m_cpu_gccabi1_test:
+  binary_linux_manywheel_3.6m_cpu_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cpu_gccabi1_test:
+  binary_linux_manywheel_3.7m_cpu_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7m_cu80_gccabi1_test:
+  binary_linux_manywheel_2.7m_cu80_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 gccabi1"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *binary_linux_test
-
-  binary_linux_manywheel_2.7mu_cu80_gccabi1_test:
-    environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.5m_cu80_gccabi1_test:
+  binary_linux_manywheel_2.7mu_cu80_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.6m_cu80_gccabi1_test:
+  binary_linux_manywheel_3.5m_cu80_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cu80_gccabi1_test:
+  binary_linux_manywheel_3.6m_cu80_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7m_cu90_gccabi1_test:
+  binary_linux_manywheel_3.7m_cu80_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *binary_linux_test
+
+  binary_linux_manywheel_2.7m_cu90_devtoolset7_test:
+    environment:
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7mu_cu90_gccabi1_test:
+  binary_linux_manywheel_2.7mu_cu90_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.5m_cu90_gccabi1_test:
+  binary_linux_manywheel_3.5m_cu90_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.6m_cu90_gccabi1_test:
+  binary_linux_manywheel_3.6m_cu90_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cu90_gccabi1_test:
+  binary_linux_manywheel_3.7m_cu90_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7m_cu100_gccabi1_test:
+  binary_linux_manywheel_2.7m_cu100_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_2.7mu_cu100_gccabi1_test:
+  binary_linux_manywheel_2.7mu_cu100_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.5m_cu100_gccabi1_test:
+  binary_linux_manywheel_3.5m_cu100_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.6m_cu100_gccabi1_test:
+  binary_linux_manywheel_3.6m_cu100_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
 
-  binary_linux_manywheel_3.7m_cu100_gccabi1_test:
+  binary_linux_manywheel_3.7m_cu100_devtoolset7_test:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2481,204 +2481,204 @@ jobs:
 ##############################################################################
 # Binary build uploads
 ##############################################################################
-  binary_linux_manywheel_2.7m_cpu_gccabi0_upload:
+  binary_linux_manywheel_2.7m_cpu_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7mu_cpu_gccabi0_upload:
+  binary_linux_manywheel_2.7mu_cpu_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.5m_cpu_gccabi0_upload:
+  binary_linux_manywheel_3.5m_cpu_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.6m_cpu_gccabi0_upload:
+  binary_linux_manywheel_3.6m_cpu_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.7m_cpu_gccabi0_upload:
+  binary_linux_manywheel_3.7m_cpu_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7m_cu80_gccabi0_upload:
+  binary_linux_manywheel_2.7m_cu80_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7mu_cu80_gccabi0_upload:
+  binary_linux_manywheel_2.7mu_cu80_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.5m_cu80_gccabi0_upload:
+  binary_linux_manywheel_3.5m_cu80_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.6m_cu80_gccabi0_upload:
+  binary_linux_manywheel_3.6m_cu80_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.7m_cu80_gccabi0_upload:
+  binary_linux_manywheel_3.7m_cu80_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7m_cu90_gccabi0_upload:
+  binary_linux_manywheel_2.7m_cu90_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7mu_cu90_gccabi0_upload:
+  binary_linux_manywheel_2.7mu_cu90_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.5m_cu90_gccabi0_upload:
+  binary_linux_manywheel_3.5m_cu90_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.6m_cu90_gccabi0_upload:
+  binary_linux_manywheel_3.6m_cu90_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.7m_cu90_gccabi0_upload:
+  binary_linux_manywheel_3.7m_cu90_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7m_cu100_gccabi0_upload:
+  binary_linux_manywheel_2.7m_cu100_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7mu_cu100_gccabi0_upload:
+  binary_linux_manywheel_2.7mu_cu100_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.5m_cu100_gccabi0_upload:
+  binary_linux_manywheel_3.5m_cu100_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.6m_cu100_gccabi0_upload:
+  binary_linux_manywheel_3.6m_cu100_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.7m_cu100_gccabi0_upload:
+  binary_linux_manywheel_3.7m_cu100_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7m_cpu_gccabi1_upload:
+  binary_linux_manywheel_2.7m_cpu_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7mu_cpu_gccabi1_upload:
+  binary_linux_manywheel_2.7mu_cpu_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.5m_cpu_gccabi1_upload:
+  binary_linux_manywheel_3.5m_cpu_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.6m_cpu_gccabi1_upload:
+  binary_linux_manywheel_3.6m_cpu_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.7m_cpu_gccabi1_upload:
+  binary_linux_manywheel_3.7m_cpu_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7m_cu80_gccabi1_upload:
+  binary_linux_manywheel_2.7m_cu80_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7mu_cu80_gccabi1_upload:
+  binary_linux_manywheel_2.7mu_cu80_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.5m_cu80_gccabi1_upload:
+  binary_linux_manywheel_3.5m_cu80_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.6m_cu80_gccabi1_upload:
+  binary_linux_manywheel_3.6m_cu80_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.7m_cu80_gccabi1_upload:
+  binary_linux_manywheel_3.7m_cu80_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7m_cu90_gccabi1_upload:
+  binary_linux_manywheel_2.7m_cu90_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7mu_cu90_gccabi1_upload:
+  binary_linux_manywheel_2.7mu_cu90_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.5m_cu90_gccabi1_upload:
+  binary_linux_manywheel_3.5m_cu90_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.6m_cu90_gccabi1_upload:
+  binary_linux_manywheel_3.6m_cu90_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.7m_cu90_gccabi1_upload:
+  binary_linux_manywheel_3.7m_cu90_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7m_cu100_gccabi1_upload:
+  binary_linux_manywheel_2.7m_cu100_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_2.7mu_cu100_gccabi1_upload:
+  binary_linux_manywheel_2.7mu_cu100_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.5m_cu100_gccabi1_upload:
+  binary_linux_manywheel_3.5m_cu100_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.6m_cu100_gccabi1_upload:
+  binary_linux_manywheel_3.6m_cu100_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_manywheel_3.7m_cu100_gccabi1_upload:
+  binary_linux_manywheel_3.7m_cu100_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
     <<: *binary_linux_upload
 
   binary_linux_conda_2.7_cpu_upload:
@@ -2761,44 +2761,44 @@ jobs:
       BUILD_ENVIRONMENT: "conda 3.7 cu100"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cpu_gccabi0_upload:
+  binary_linux_libtorch_2.7m_cpu_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu80_gccabi0_upload:
+  binary_linux_libtorch_2.7m_cu80_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu90_gccabi0_upload:
+  binary_linux_libtorch_2.7m_cu90_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_gccabi0_upload:
+  binary_linux_libtorch_2.7m_cu100_devtoolset3_upload:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset3"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cpu_gccabi1_upload:
+  binary_linux_libtorch_2.7m_cpu_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu80_gccabi1_upload:
+  binary_linux_libtorch_2.7m_cu80_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu90_gccabi1_upload:
+  binary_linux_libtorch_2.7m_cu90_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset7"
     <<: *binary_linux_upload
 
-  binary_linux_libtorch_2.7m_cu100_gccabi1_upload:
+  binary_linux_libtorch_2.7m_cu100_devtoolset7_upload:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
     <<: *binary_linux_upload
 
   binary_macos_wheel_2.7_cpu_upload:
@@ -2849,301 +2849,301 @@ jobs:
 ##############################################################################
 # Smoke test specs individual job specifications
 ##############################################################################
-  smoke_linux_manywheel_2.7m_cpu_gccabi0:
+  smoke_linux_manywheel_2.7m_cpu_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7mu_cpu_gccabi0:
+  smoke_linux_manywheel_2.7mu_cpu_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.5m_cpu_gccabi0:
+  smoke_linux_manywheel_3.5m_cpu_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.6m_cpu_gccabi0:
+  smoke_linux_manywheel_3.6m_cpu_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.7m_cpu_gccabi0:
+  smoke_linux_manywheel_3.7m_cpu_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7m_cu80_gccabi0:
+  smoke_linux_manywheel_2.7m_cu80_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 gccabi0"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_manywheel_2.7mu_cu80_gccabi0:
-    environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.5m_cu80_gccabi0:
+  smoke_linux_manywheel_2.7mu_cu80_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.6m_cu80_gccabi0:
+  smoke_linux_manywheel_3.5m_cu80_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.7m_cu80_gccabi0:
+  smoke_linux_manywheel_3.6m_cu80_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7m_cu90_gccabi0:
+  smoke_linux_manywheel_3.7m_cu80_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 devtoolset3"
+      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_manywheel_2.7m_cu90_devtoolset3:
+    environment:
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7mu_cu90_gccabi0:
+  smoke_linux_manywheel_2.7mu_cu90_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.5m_cu90_gccabi0:
+  smoke_linux_manywheel_3.5m_cu90_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.6m_cu90_gccabi0:
+  smoke_linux_manywheel_3.6m_cu90_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.7m_cu90_gccabi0:
+  smoke_linux_manywheel_3.7m_cu90_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7m_cu100_gccabi0:
+  smoke_linux_manywheel_2.7m_cu100_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7mu_cu100_gccabi0:
+  smoke_linux_manywheel_2.7mu_cu100_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.5m_cu100_gccabi0:
+  smoke_linux_manywheel_3.5m_cu100_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.6m_cu100_gccabi0:
+  smoke_linux_manywheel_3.6m_cu100_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.7m_cu100_gccabi0:
+  smoke_linux_manywheel_3.7m_cu100_devtoolset3:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 gccabi0"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset3"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7m_cpu_gccabi1:
+  smoke_linux_manywheel_2.7m_cpu_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7mu_cpu_gccabi1:
+  smoke_linux_manywheel_2.7mu_cpu_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.5m_cpu_gccabi1:
+  smoke_linux_manywheel_3.5m_cpu_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.6m_cpu_gccabi1:
+  smoke_linux_manywheel_3.6m_cpu_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.7m_cpu_gccabi1:
+  smoke_linux_manywheel_3.7m_cpu_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cpu gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cpu devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7m_cu80_gccabi1:
+  smoke_linux_manywheel_2.7m_cu80_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 gccabi1"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_manywheel_2.7mu_cu80_gccabi1:
-    environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu80 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.5m_cu80_gccabi1:
+  smoke_linux_manywheel_2.7mu_cu80_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu80 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.6m_cu80_gccabi1:
+  smoke_linux_manywheel_3.5m_cu80_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu80 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.7m_cu80_gccabi1:
+  smoke_linux_manywheel_3.6m_cu80_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu80 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7m_cu90_gccabi1:
+  smoke_linux_manywheel_3.7m_cu80_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu80 devtoolset7"
+      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_manywheel_2.7m_cu90_devtoolset7:
+    environment:
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu90 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7mu_cu90_gccabi1:
+  smoke_linux_manywheel_2.7mu_cu90_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu90 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.5m_cu90_gccabi1:
+  smoke_linux_manywheel_3.5m_cu90_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu90 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.6m_cu90_gccabi1:
+  smoke_linux_manywheel_3.6m_cu90_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu90 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.7m_cu90_gccabi1:
+  smoke_linux_manywheel_3.7m_cu90_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu90 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7m_cu100_gccabi1:
+  smoke_linux_manywheel_2.7m_cu100_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_2.7mu_cu100_gccabi1:
+  smoke_linux_manywheel_2.7mu_cu100_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 2.7mu cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.5m_cu100_gccabi1:
+  smoke_linux_manywheel_3.5m_cu100_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.5m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.6m_cu100_gccabi1:
+  smoke_linux_manywheel_3.6m_cu100_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.6m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_manywheel_3.7m_cu100_gccabi1:
+  smoke_linux_manywheel_3.7m_cu100_devtoolset7:
     environment:
-      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "manywheel 3.7m cu100 devtoolset7"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -3269,272 +3269,272 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cpu_gccabi0_shared-with-deps:
+  smoke_linux_libtorch_2.7m_cpu_devtoolset3_shared-with-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset3"
       LIBTORCH_VARIANT: "shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cpu_gccabi0_shared-without-deps:
+  smoke_linux_libtorch_2.7m_cpu_devtoolset3_shared-without-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset3"
       LIBTORCH_VARIANT: "shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cpu_gccabi0_static-with-deps:
+  smoke_linux_libtorch_2.7m_cpu_devtoolset3_static-with-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset3"
       LIBTORCH_VARIANT: "static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cpu_gccabi0_static-without-deps:
+  smoke_linux_libtorch_2.7m_cpu_devtoolset3_static-without-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset3"
       LIBTORCH_VARIANT: "static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu80_gccabi0_shared-with-deps:
+  smoke_linux_libtorch_2.7m_cu80_devtoolset3_shared-with-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 devtoolset3"
       LIBTORCH_VARIANT: "shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu80_gccabi0_shared-without-deps:
+  smoke_linux_libtorch_2.7m_cu80_devtoolset3_shared-without-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 devtoolset3"
       LIBTORCH_VARIANT: "shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu80_gccabi0_static-with-deps:
+  smoke_linux_libtorch_2.7m_cu80_devtoolset3_static-with-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 gccabi0"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 devtoolset3"
       LIBTORCH_VARIANT: "static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu80_gccabi0_static-without-deps:
+  smoke_linux_libtorch_2.7m_cu80_devtoolset3_static-without-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 gccabi0"
-      LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu90_gccabi0_shared-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 gccabi0"
-      LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu90_gccabi0_shared-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 gccabi0"
-      LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu90_gccabi0_static-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 gccabi0"
-      LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu90_gccabi0_static-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 gccabi0"
-      LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu100_gccabi0_shared-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gccabi0"
-      LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu100_gccabi0_shared-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gccabi0"
-      LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu100_gccabi0_static-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gccabi0"
-      LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu100_gccabi0_static-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gccabi0"
-      LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cpu_gccabi1_shared-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gccabi1"
-      LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cpu_gccabi1_shared-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gccabi1"
-      LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cpu_gccabi1_static-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gccabi1"
-      LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cpu_gccabi1_static-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu gccabi1"
-      LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu80_gccabi1_shared-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 gccabi1"
-      LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu80_gccabi1_shared-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 gccabi1"
-      LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu80_gccabi1_static-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 gccabi1"
-      LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu80_gccabi1_static-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 devtoolset3"
       LIBTORCH_VARIANT: "static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda80"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu90_gccabi1_shared-with-deps:
+  smoke_linux_libtorch_2.7m_cu90_devtoolset3_shared-with-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset3"
       LIBTORCH_VARIANT: "shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu90_gccabi1_shared-without-deps:
+  smoke_linux_libtorch_2.7m_cu90_devtoolset3_shared-without-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset3"
       LIBTORCH_VARIANT: "shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu90_gccabi1_static-with-deps:
+  smoke_linux_libtorch_2.7m_cu90_devtoolset3_static-with-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset3"
       LIBTORCH_VARIANT: "static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu90_gccabi1_static-without-deps:
+  smoke_linux_libtorch_2.7m_cu90_devtoolset3_static-without-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset3"
       LIBTORCH_VARIANT: "static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda90"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu100_gccabi1_shared-with-deps:
+  smoke_linux_libtorch_2.7m_cu100_devtoolset3_shared-with-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset3"
       LIBTORCH_VARIANT: "shared-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu100_gccabi1_shared-without-deps:
+  smoke_linux_libtorch_2.7m_cu100_devtoolset3_shared-without-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset3"
       LIBTORCH_VARIANT: "shared-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu100_gccabi1_static-with-deps:
+  smoke_linux_libtorch_2.7m_cu100_devtoolset3_static-with-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset3"
       LIBTORCH_VARIANT: "static-with-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_libtorch_2.7m_cu100_gccabi1_static-without-deps:
+  smoke_linux_libtorch_2.7m_cu100_devtoolset3_static-without-deps:
     environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 gccabi1"
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset3"
+      LIBTORCH_VARIANT: "static-without-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
+      LIBTORCH_VARIANT: "shared-with-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
+      LIBTORCH_VARIANT: "shared-without-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
+      LIBTORCH_VARIANT: "static-with-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset7"
+      LIBTORCH_VARIANT: "static-without-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cu80_devtoolset7_shared-with-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 devtoolset7"
+      LIBTORCH_VARIANT: "shared-with-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cu80_devtoolset7_shared-without-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 devtoolset7"
+      LIBTORCH_VARIANT: "shared-without-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cu80_devtoolset7_static-with-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 devtoolset7"
+      LIBTORCH_VARIANT: "static-with-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cu80_devtoolset7_static-without-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu80 devtoolset7"
+      LIBTORCH_VARIANT: "static-without-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda80"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cu90_devtoolset7_shared-with-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset7"
+      LIBTORCH_VARIANT: "shared-with-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda90"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cu90_devtoolset7_shared-without-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset7"
+      LIBTORCH_VARIANT: "shared-without-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda90"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cu90_devtoolset7_static-with-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset7"
+      LIBTORCH_VARIANT: "static-with-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda90"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cu90_devtoolset7_static-without-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset7"
+      LIBTORCH_VARIANT: "static-without-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda90"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      LIBTORCH_VARIANT: "shared-with-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      LIBTORCH_VARIANT: "shared-without-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
+      LIBTORCH_VARIANT: "static-with-deps"
+      DOCKER_IMAGE: "soumith/manylinux-cuda100"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
+    <<: *smoke_linux_test
+
+  smoke_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps:
+    environment:
+      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset7"
       LIBTORCH_VARIANT: "static-without-deps"
       DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -3721,22 +3721,22 @@ workflows:
       - caffe2_py2_system_macos10_13_build
 
       # Binary builds (subset, to smoke test that they'll work)
-      - binary_linux_manywheel_2.7mu_cpu_gccabi0_build
-      - binary_linux_manywheel_3.7m_cu100_gccabi0_build
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cu100_devtoolset3_build
       - binary_linux_conda_2.7_cpu_build
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3.6_cu90_build
-      - binary_linux_libtorch_2.7m_cu80_gccabi0_build
+      - binary_linux_libtorch_2.7m_cu80_devtoolset3_build
       - binary_macos_wheel_3.6_cpu_build
       - binary_macos_conda_2.7_cpu_build
       - binary_macos_libtorch_2.7_cpu_build
 
-      - binary_linux_manywheel_2.7mu_cpu_gccabi0_test:
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_2.7mu_cpu_gccabi0_build
-      - binary_linux_manywheel_3.7m_cu100_gccabi0_test:
+            - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cu100_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.7m_cu100_gccabi0_build
+            - binary_linux_manywheel_3.7m_cu100_devtoolset3_build
       - binary_linux_conda_2.7_cpu_test:
           requires:
             - binary_linux_conda_2.7_cpu_build
@@ -3757,46 +3757,46 @@ workflows:
               only:
                 - master
     jobs:
-      - smoke_linux_manywheel_2.7m_cpu_gccabi0
-      - smoke_linux_manywheel_2.7mu_cpu_gccabi0
-      - smoke_linux_manywheel_3.5m_cpu_gccabi0
-      - smoke_linux_manywheel_3.6m_cpu_gccabi0
-      - smoke_linux_manywheel_3.7m_cpu_gccabi0
-      - smoke_linux_manywheel_2.7m_cu80_gccabi0
-      - smoke_linux_manywheel_2.7mu_cu80_gccabi0
-      - smoke_linux_manywheel_3.5m_cu80_gccabi0
-      - smoke_linux_manywheel_3.6m_cu80_gccabi0
-      - smoke_linux_manywheel_3.7m_cu80_gccabi0
-      - smoke_linux_manywheel_2.7m_cu90_gccabi0
-      - smoke_linux_manywheel_2.7mu_cu90_gccabi0
-      - smoke_linux_manywheel_3.5m_cu90_gccabi0
-      - smoke_linux_manywheel_3.6m_cu90_gccabi0
-      - smoke_linux_manywheel_3.7m_cu90_gccabi0
-      - smoke_linux_manywheel_2.7m_cu100_gccabi0
-      - smoke_linux_manywheel_2.7mu_cu100_gccabi0
-      - smoke_linux_manywheel_3.5m_cu100_gccabi0
-      - smoke_linux_manywheel_3.6m_cu100_gccabi0
-      - smoke_linux_manywheel_3.7m_cu100_gccabi0
-      - smoke_linux_manywheel_2.7m_cpu_gccabi1
-      - smoke_linux_manywheel_2.7mu_cpu_gccabi1
-      - smoke_linux_manywheel_3.5m_cpu_gccabi1
-      - smoke_linux_manywheel_3.6m_cpu_gccabi1
-      - smoke_linux_manywheel_3.7m_cpu_gccabi1
-      - smoke_linux_manywheel_2.7m_cu80_gccabi1
-      - smoke_linux_manywheel_2.7mu_cu80_gccabi1
-      - smoke_linux_manywheel_3.5m_cu80_gccabi1
-      - smoke_linux_manywheel_3.6m_cu80_gccabi1
-      - smoke_linux_manywheel_3.7m_cu80_gccabi1
-      - smoke_linux_manywheel_2.7m_cu90_gccabi1
-      - smoke_linux_manywheel_2.7mu_cu90_gccabi1
-      - smoke_linux_manywheel_3.5m_cu90_gccabi1
-      - smoke_linux_manywheel_3.6m_cu90_gccabi1
-      - smoke_linux_manywheel_3.7m_cu90_gccabi1
-      - smoke_linux_manywheel_2.7m_cu100_gccabi1
-      - smoke_linux_manywheel_2.7mu_cu100_gccabi1
-      - smoke_linux_manywheel_3.5m_cu100_gccabi1
-      - smoke_linux_manywheel_3.6m_cu100_gccabi1
-      - smoke_linux_manywheel_3.7m_cu100_gccabi1
+      - smoke_linux_manywheel_2.7m_cpu_devtoolset3
+      - smoke_linux_manywheel_2.7mu_cpu_devtoolset3
+      - smoke_linux_manywheel_3.5m_cpu_devtoolset3
+      - smoke_linux_manywheel_3.6m_cpu_devtoolset3
+      - smoke_linux_manywheel_3.7m_cpu_devtoolset3
+      - smoke_linux_manywheel_2.7m_cu80_devtoolset3
+      - smoke_linux_manywheel_2.7mu_cu80_devtoolset3
+      - smoke_linux_manywheel_3.5m_cu80_devtoolset3
+      - smoke_linux_manywheel_3.6m_cu80_devtoolset3
+      - smoke_linux_manywheel_3.7m_cu80_devtoolset3
+      - smoke_linux_manywheel_2.7m_cu90_devtoolset3
+      - smoke_linux_manywheel_2.7mu_cu90_devtoolset3
+      - smoke_linux_manywheel_3.5m_cu90_devtoolset3
+      - smoke_linux_manywheel_3.6m_cu90_devtoolset3
+      - smoke_linux_manywheel_3.7m_cu90_devtoolset3
+      - smoke_linux_manywheel_2.7m_cu100_devtoolset3
+      - smoke_linux_manywheel_2.7mu_cu100_devtoolset3
+      - smoke_linux_manywheel_3.5m_cu100_devtoolset3
+      - smoke_linux_manywheel_3.6m_cu100_devtoolset3
+      - smoke_linux_manywheel_3.7m_cu100_devtoolset3
+      - smoke_linux_manywheel_2.7m_cpu_devtoolset7
+      - smoke_linux_manywheel_2.7mu_cpu_devtoolset7
+      - smoke_linux_manywheel_3.5m_cpu_devtoolset7
+      - smoke_linux_manywheel_3.6m_cpu_devtoolset7
+      - smoke_linux_manywheel_3.7m_cpu_devtoolset7
+      - smoke_linux_manywheel_2.7m_cu80_devtoolset7
+      - smoke_linux_manywheel_2.7mu_cu80_devtoolset7
+      - smoke_linux_manywheel_3.5m_cu80_devtoolset7
+      - smoke_linux_manywheel_3.6m_cu80_devtoolset7
+      - smoke_linux_manywheel_3.7m_cu80_devtoolset7
+      - smoke_linux_manywheel_2.7m_cu90_devtoolset7
+      - smoke_linux_manywheel_2.7mu_cu90_devtoolset7
+      - smoke_linux_manywheel_3.5m_cu90_devtoolset7
+      - smoke_linux_manywheel_3.6m_cu90_devtoolset7
+      - smoke_linux_manywheel_3.7m_cu90_devtoolset7
+      - smoke_linux_manywheel_2.7m_cu100_devtoolset7
+      - smoke_linux_manywheel_2.7mu_cu100_devtoolset7
+      - smoke_linux_manywheel_3.5m_cu100_devtoolset7
+      - smoke_linux_manywheel_3.6m_cu100_devtoolset7
+      - smoke_linux_manywheel_3.7m_cu100_devtoolset7
       - smoke_linux_conda_2.7_cpu
       - smoke_linux_conda_3.5_cpu
       - smoke_linux_conda_3.6_cpu
@@ -3813,38 +3813,38 @@ workflows:
       - smoke_linux_conda_3.5_cu100
       - smoke_linux_conda_3.6_cu100
       - smoke_linux_conda_3.7_cu100
-      - smoke_linux_libtorch_2.7m_cpu_gccabi0_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cpu_gccabi0_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cpu_gccabi0_static-with-deps
-      - smoke_linux_libtorch_2.7m_cpu_gccabi0_static-without-deps
-      - smoke_linux_libtorch_2.7m_cu80_gccabi0_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cu80_gccabi0_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cu80_gccabi0_static-with-deps
-      - smoke_linux_libtorch_2.7m_cu80_gccabi0_static-without-deps
-      - smoke_linux_libtorch_2.7m_cu90_gccabi0_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cu90_gccabi0_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cu90_gccabi0_static-with-deps
-      - smoke_linux_libtorch_2.7m_cu90_gccabi0_static-without-deps
-      - smoke_linux_libtorch_2.7m_cu100_gccabi0_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cu100_gccabi0_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cu100_gccabi0_static-with-deps
-      - smoke_linux_libtorch_2.7m_cu100_gccabi0_static-without-deps
-      - smoke_linux_libtorch_2.7m_cpu_gccabi1_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cpu_gccabi1_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cpu_gccabi1_static-with-deps
-      - smoke_linux_libtorch_2.7m_cpu_gccabi1_static-without-deps
-      - smoke_linux_libtorch_2.7m_cu80_gccabi1_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cu80_gccabi1_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cu80_gccabi1_static-with-deps
-      - smoke_linux_libtorch_2.7m_cu80_gccabi1_static-without-deps
-      - smoke_linux_libtorch_2.7m_cu90_gccabi1_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cu90_gccabi1_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cu90_gccabi1_static-with-deps
-      - smoke_linux_libtorch_2.7m_cu90_gccabi1_static-without-deps
-      - smoke_linux_libtorch_2.7m_cu100_gccabi1_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cu100_gccabi1_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cu100_gccabi1_static-with-deps
-      - smoke_linux_libtorch_2.7m_cu100_gccabi1_static-without-deps
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_shared-with-deps
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_shared-without-deps
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_static-with-deps
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_static-without-deps
+      - smoke_linux_libtorch_2.7m_cu80_devtoolset3_shared-with-deps
+      - smoke_linux_libtorch_2.7m_cu80_devtoolset3_shared-without-deps
+      - smoke_linux_libtorch_2.7m_cu80_devtoolset3_static-with-deps
+      - smoke_linux_libtorch_2.7m_cu80_devtoolset3_static-without-deps
+      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_shared-with-deps
+      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_shared-without-deps
+      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_static-with-deps
+      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_static-without-deps
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_shared-with-deps
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_shared-without-deps
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_static-with-deps
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_static-without-deps
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps
+      - smoke_linux_libtorch_2.7m_cu80_devtoolset7_shared-with-deps
+      - smoke_linux_libtorch_2.7m_cu80_devtoolset7_shared-without-deps
+      - smoke_linux_libtorch_2.7m_cu80_devtoolset7_static-with-deps
+      - smoke_linux_libtorch_2.7m_cu80_devtoolset7_static-without-deps
+      - smoke_linux_libtorch_2.7m_cu90_devtoolset7_shared-with-deps
+      - smoke_linux_libtorch_2.7m_cu90_devtoolset7_shared-without-deps
+      - smoke_linux_libtorch_2.7m_cu90_devtoolset7_static-with-deps
+      - smoke_linux_libtorch_2.7m_cu90_devtoolset7_static-without-deps
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps
       - smoke_macos_wheel_2.7_cpu
       - smoke_macos_wheel_3.5_cpu
       - smoke_macos_wheel_3.6_cpu
@@ -3867,46 +3867,46 @@ workflows:
               only:
                 - master
     jobs:
-      - binary_linux_manywheel_2.7m_cpu_gccabi0_build
-      - binary_linux_manywheel_2.7mu_cpu_gccabi0_build
-      - binary_linux_manywheel_3.5m_cpu_gccabi0_build
-      - binary_linux_manywheel_3.6m_cpu_gccabi0_build
-      - binary_linux_manywheel_3.7m_cpu_gccabi0_build
-      - binary_linux_manywheel_2.7m_cu80_gccabi0_build
-      - binary_linux_manywheel_2.7mu_cu80_gccabi0_build
-      - binary_linux_manywheel_3.5m_cu80_gccabi0_build
-      - binary_linux_manywheel_3.6m_cu80_gccabi0_build
-      - binary_linux_manywheel_3.7m_cu80_gccabi0_build
-      - binary_linux_manywheel_2.7m_cu90_gccabi0_build
-      - binary_linux_manywheel_2.7mu_cu90_gccabi0_build
-      - binary_linux_manywheel_3.5m_cu90_gccabi0_build
-      - binary_linux_manywheel_3.6m_cu90_gccabi0_build
-      - binary_linux_manywheel_3.7m_cu90_gccabi0_build
-      - binary_linux_manywheel_2.7m_cu100_gccabi0_build
-      - binary_linux_manywheel_2.7mu_cu100_gccabi0_build
-      - binary_linux_manywheel_3.5m_cu100_gccabi0_build
-      - binary_linux_manywheel_3.6m_cu100_gccabi0_build
-      - binary_linux_manywheel_3.7m_cu100_gccabi0_build
-      - binary_linux_manywheel_2.7m_cpu_gccabi1_build
-      - binary_linux_manywheel_2.7mu_cpu_gccabi1_build
-      - binary_linux_manywheel_3.5m_cpu_gccabi1_build
-      - binary_linux_manywheel_3.6m_cpu_gccabi1_build
-      - binary_linux_manywheel_3.7m_cpu_gccabi1_build
-      - binary_linux_manywheel_2.7m_cu80_gccabi1_build
-      - binary_linux_manywheel_2.7mu_cu80_gccabi1_build
-      - binary_linux_manywheel_3.5m_cu80_gccabi1_build
-      - binary_linux_manywheel_3.6m_cu80_gccabi1_build
-      - binary_linux_manywheel_3.7m_cu80_gccabi1_build
-      - binary_linux_manywheel_2.7m_cu90_gccabi1_build
-      - binary_linux_manywheel_2.7mu_cu90_gccabi1_build
-      - binary_linux_manywheel_3.5m_cu90_gccabi1_build
-      - binary_linux_manywheel_3.6m_cu90_gccabi1_build
-      - binary_linux_manywheel_3.7m_cu90_gccabi1_build
-      - binary_linux_manywheel_2.7m_cu100_gccabi1_build
-      - binary_linux_manywheel_2.7mu_cu100_gccabi1_build
-      - binary_linux_manywheel_3.5m_cu100_gccabi1_build
-      - binary_linux_manywheel_3.6m_cu100_gccabi1_build
-      - binary_linux_manywheel_3.7m_cu100_gccabi1_build
+      - binary_linux_manywheel_2.7m_cpu_devtoolset3_build
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build
+      - binary_linux_manywheel_3.5m_cpu_devtoolset3_build
+      - binary_linux_manywheel_3.6m_cpu_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cpu_devtoolset3_build
+      - binary_linux_manywheel_2.7m_cu80_devtoolset3_build
+      - binary_linux_manywheel_2.7mu_cu80_devtoolset3_build
+      - binary_linux_manywheel_3.5m_cu80_devtoolset3_build
+      - binary_linux_manywheel_3.6m_cu80_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cu80_devtoolset3_build
+      - binary_linux_manywheel_2.7m_cu90_devtoolset3_build
+      - binary_linux_manywheel_2.7mu_cu90_devtoolset3_build
+      - binary_linux_manywheel_3.5m_cu90_devtoolset3_build
+      - binary_linux_manywheel_3.6m_cu90_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cu90_devtoolset3_build
+      - binary_linux_manywheel_2.7m_cu100_devtoolset3_build
+      - binary_linux_manywheel_2.7mu_cu100_devtoolset3_build
+      - binary_linux_manywheel_3.5m_cu100_devtoolset3_build
+      - binary_linux_manywheel_3.6m_cu100_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cu100_devtoolset3_build
+      - binary_linux_manywheel_2.7m_cpu_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cpu_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cpu_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cpu_devtoolset7_build
+      - binary_linux_manywheel_2.7m_cu80_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cu80_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cu80_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cu80_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cu80_devtoolset7_build
+      - binary_linux_manywheel_2.7m_cu90_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cu90_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cu90_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cu90_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cu90_devtoolset7_build
+      - binary_linux_manywheel_2.7m_cu100_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cu100_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cu100_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cu100_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
       - binary_linux_conda_2.7_cpu_build
       - binary_linux_conda_3.5_cpu_build
       - binary_linux_conda_3.6_cpu_build
@@ -3923,14 +3923,14 @@ workflows:
       - binary_linux_conda_3.5_cu100_build
       - binary_linux_conda_3.6_cu100_build
       - binary_linux_conda_3.7_cu100_build
-      - binary_linux_libtorch_2.7m_cpu_gccabi0_build
-      - binary_linux_libtorch_2.7m_cu80_gccabi0_build
-      - binary_linux_libtorch_2.7m_cu90_gccabi0_build
-      - binary_linux_libtorch_2.7m_cu100_gccabi0_build
-      - binary_linux_libtorch_2.7m_cpu_gccabi1_build
-      - binary_linux_libtorch_2.7m_cu80_gccabi1_build
-      - binary_linux_libtorch_2.7m_cu90_gccabi1_build
-      - binary_linux_libtorch_2.7m_cu100_gccabi1_build
+      - binary_linux_libtorch_2.7m_cpu_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cu80_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cu90_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cu100_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cu80_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cu90_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_build
       - binary_macos_wheel_2.7_cpu_build
       - binary_macos_wheel_3.5_cpu_build
       - binary_macos_wheel_3.6_cpu_build
@@ -3944,126 +3944,126 @@ workflows:
 ##############################################################################
 # Nightly tests
 ##############################################################################
-      - binary_linux_manywheel_2.7m_cpu_gccabi0_test:
+      - binary_linux_manywheel_2.7m_cpu_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_2.7m_cpu_gccabi0_build
-      - binary_linux_manywheel_2.7mu_cpu_gccabi0_test:
+            - binary_linux_manywheel_2.7m_cpu_devtoolset3_build
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_2.7mu_cpu_gccabi0_build
-      - binary_linux_manywheel_3.5m_cpu_gccabi0_test:
+            - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build
+      - binary_linux_manywheel_3.5m_cpu_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.5m_cpu_gccabi0_build
-      - binary_linux_manywheel_3.6m_cpu_gccabi0_test:
+            - binary_linux_manywheel_3.5m_cpu_devtoolset3_build
+      - binary_linux_manywheel_3.6m_cpu_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.6m_cpu_gccabi0_build
-      - binary_linux_manywheel_3.7m_cpu_gccabi0_test:
+            - binary_linux_manywheel_3.6m_cpu_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cpu_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.7m_cpu_gccabi0_build
-      - binary_linux_manywheel_2.7m_cu80_gccabi0_test:
+            - binary_linux_manywheel_3.7m_cpu_devtoolset3_build
+      - binary_linux_manywheel_2.7m_cu80_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_2.7m_cu80_gccabi0_build
-      - binary_linux_manywheel_2.7mu_cu80_gccabi0_test:
+            - binary_linux_manywheel_2.7m_cu80_devtoolset3_build
+      - binary_linux_manywheel_2.7mu_cu80_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_2.7mu_cu80_gccabi0_build
-      - binary_linux_manywheel_3.5m_cu80_gccabi0_test:
+            - binary_linux_manywheel_2.7mu_cu80_devtoolset3_build
+      - binary_linux_manywheel_3.5m_cu80_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.5m_cu80_gccabi0_build
-      - binary_linux_manywheel_3.6m_cu80_gccabi0_test:
+            - binary_linux_manywheel_3.5m_cu80_devtoolset3_build
+      - binary_linux_manywheel_3.6m_cu80_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.6m_cu80_gccabi0_build
-      - binary_linux_manywheel_3.7m_cu80_gccabi0_test:
+            - binary_linux_manywheel_3.6m_cu80_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cu80_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.7m_cu80_gccabi0_build
-      - binary_linux_manywheel_2.7m_cu90_gccabi0_test:
+            - binary_linux_manywheel_3.7m_cu80_devtoolset3_build
+      - binary_linux_manywheel_2.7m_cu90_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_2.7m_cu90_gccabi0_build
-      - binary_linux_manywheel_2.7mu_cu90_gccabi0_test:
+            - binary_linux_manywheel_2.7m_cu90_devtoolset3_build
+      - binary_linux_manywheel_2.7mu_cu90_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_2.7mu_cu90_gccabi0_build
-      - binary_linux_manywheel_3.5m_cu90_gccabi0_test:
+            - binary_linux_manywheel_2.7mu_cu90_devtoolset3_build
+      - binary_linux_manywheel_3.5m_cu90_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.5m_cu90_gccabi0_build
-      - binary_linux_manywheel_3.6m_cu90_gccabi0_test:
+            - binary_linux_manywheel_3.5m_cu90_devtoolset3_build
+      - binary_linux_manywheel_3.6m_cu90_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.6m_cu90_gccabi0_build
-      - binary_linux_manywheel_3.7m_cu90_gccabi0_test:
+            - binary_linux_manywheel_3.6m_cu90_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cu90_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.7m_cu90_gccabi0_build
-      - binary_linux_manywheel_2.7m_cu100_gccabi0_test:
+            - binary_linux_manywheel_3.7m_cu90_devtoolset3_build
+      - binary_linux_manywheel_2.7m_cu100_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_2.7m_cu100_gccabi0_build
-      - binary_linux_manywheel_2.7mu_cu100_gccabi0_test:
+            - binary_linux_manywheel_2.7m_cu100_devtoolset3_build
+      - binary_linux_manywheel_2.7mu_cu100_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_2.7mu_cu100_gccabi0_build
-      - binary_linux_manywheel_3.5m_cu100_gccabi0_test:
+            - binary_linux_manywheel_2.7mu_cu100_devtoolset3_build
+      - binary_linux_manywheel_3.5m_cu100_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.5m_cu100_gccabi0_build
-      - binary_linux_manywheel_3.6m_cu100_gccabi0_test:
+            - binary_linux_manywheel_3.5m_cu100_devtoolset3_build
+      - binary_linux_manywheel_3.6m_cu100_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.6m_cu100_gccabi0_build
-      - binary_linux_manywheel_3.7m_cu100_gccabi0_test:
+            - binary_linux_manywheel_3.6m_cu100_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cu100_devtoolset3_test:
           requires:
-            - binary_linux_manywheel_3.7m_cu100_gccabi0_build
-      - binary_linux_manywheel_2.7m_cpu_gccabi1_test:
+            - binary_linux_manywheel_3.7m_cu100_devtoolset3_build
+      - binary_linux_manywheel_2.7m_cpu_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_2.7m_cpu_gccabi1_build
-      - binary_linux_manywheel_2.7mu_cpu_gccabi1_test:
+            - binary_linux_manywheel_2.7m_cpu_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_2.7mu_cpu_gccabi1_build
-      - binary_linux_manywheel_3.5m_cpu_gccabi1_test:
+            - binary_linux_manywheel_2.7mu_cpu_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cpu_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_3.5m_cpu_gccabi1_build
-      - binary_linux_manywheel_3.6m_cpu_gccabi1_test:
+            - binary_linux_manywheel_3.5m_cpu_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cpu_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_3.6m_cpu_gccabi1_build
-      - binary_linux_manywheel_3.7m_cpu_gccabi1_test:
+            - binary_linux_manywheel_3.6m_cpu_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cpu_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_3.7m_cpu_gccabi1_build
-      - binary_linux_manywheel_2.7m_cu80_gccabi1_test:
+            - binary_linux_manywheel_3.7m_cpu_devtoolset7_build
+      - binary_linux_manywheel_2.7m_cu80_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_2.7m_cu80_gccabi1_build
-      - binary_linux_manywheel_2.7mu_cu80_gccabi1_test:
+            - binary_linux_manywheel_2.7m_cu80_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cu80_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_2.7mu_cu80_gccabi1_build
-      - binary_linux_manywheel_3.5m_cu80_gccabi1_test:
+            - binary_linux_manywheel_2.7mu_cu80_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cu80_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_3.5m_cu80_gccabi1_build
-      - binary_linux_manywheel_3.6m_cu80_gccabi1_test:
+            - binary_linux_manywheel_3.5m_cu80_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cu80_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_3.6m_cu80_gccabi1_build
-      - binary_linux_manywheel_3.7m_cu80_gccabi1_test:
+            - binary_linux_manywheel_3.6m_cu80_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cu80_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_3.7m_cu80_gccabi1_build
-      - binary_linux_manywheel_2.7m_cu90_gccabi1_test:
+            - binary_linux_manywheel_3.7m_cu80_devtoolset7_build
+      - binary_linux_manywheel_2.7m_cu90_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_2.7m_cu90_gccabi1_build
-      - binary_linux_manywheel_2.7mu_cu90_gccabi1_test:
+            - binary_linux_manywheel_2.7m_cu90_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cu90_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_2.7mu_cu90_gccabi1_build
-      - binary_linux_manywheel_3.5m_cu90_gccabi1_test:
+            - binary_linux_manywheel_2.7mu_cu90_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cu90_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_3.5m_cu90_gccabi1_build
-      - binary_linux_manywheel_3.6m_cu90_gccabi1_test:
+            - binary_linux_manywheel_3.5m_cu90_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cu90_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_3.6m_cu90_gccabi1_build
-      - binary_linux_manywheel_3.7m_cu90_gccabi1_test:
+            - binary_linux_manywheel_3.6m_cu90_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cu90_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_3.7m_cu90_gccabi1_build
-      - binary_linux_manywheel_2.7m_cu100_gccabi1_test:
+            - binary_linux_manywheel_3.7m_cu90_devtoolset7_build
+      - binary_linux_manywheel_2.7m_cu100_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_2.7m_cu100_gccabi1_build
-      - binary_linux_manywheel_2.7mu_cu100_gccabi1_test:
+            - binary_linux_manywheel_2.7m_cu100_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cu100_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_2.7mu_cu100_gccabi1_build
-      - binary_linux_manywheel_3.5m_cu100_gccabi1_test:
+            - binary_linux_manywheel_2.7mu_cu100_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cu100_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_3.5m_cu100_gccabi1_build
-      - binary_linux_manywheel_3.6m_cu100_gccabi1_test:
+            - binary_linux_manywheel_3.5m_cu100_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cu100_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_3.6m_cu100_gccabi1_build
-      - binary_linux_manywheel_3.7m_cu100_gccabi1_test:
+            - binary_linux_manywheel_3.6m_cu100_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cu100_devtoolset7_test:
           requires:
-            - binary_linux_manywheel_3.7m_cu100_gccabi1_build
+            - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
       - binary_linux_conda_2.7_cpu_test:
           requires:
             - binary_linux_conda_2.7_cpu_build
@@ -4126,166 +4126,166 @@ workflows:
       #      - binary_linux_libtorch_2.7m_cu100_build
 
       # Nightly uploads
-      - binary_linux_manywheel_2.7m_cpu_gccabi0_upload:
+      - binary_linux_manywheel_2.7m_cpu_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7m_cpu_gccabi0_test
-      - binary_linux_manywheel_2.7mu_cpu_gccabi0_upload:
+            - binary_linux_manywheel_2.7m_cpu_devtoolset3_test
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7mu_cpu_gccabi0_test
-      - binary_linux_manywheel_3.5m_cpu_gccabi0_upload:
+            - binary_linux_manywheel_2.7mu_cpu_devtoolset3_test
+      - binary_linux_manywheel_3.5m_cpu_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.5m_cpu_gccabi0_test
-      - binary_linux_manywheel_3.6m_cpu_gccabi0_upload:
+            - binary_linux_manywheel_3.5m_cpu_devtoolset3_test
+      - binary_linux_manywheel_3.6m_cpu_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.6m_cpu_gccabi0_test
-      - binary_linux_manywheel_3.7m_cpu_gccabi0_upload:
+            - binary_linux_manywheel_3.6m_cpu_devtoolset3_test
+      - binary_linux_manywheel_3.7m_cpu_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.7m_cpu_gccabi0_test
-      - binary_linux_manywheel_2.7m_cu80_gccabi0_upload:
+            - binary_linux_manywheel_3.7m_cpu_devtoolset3_test
+      - binary_linux_manywheel_2.7m_cu80_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7m_cu80_gccabi0_test
-      - binary_linux_manywheel_2.7mu_cu80_gccabi0_upload:
+            - binary_linux_manywheel_2.7m_cu80_devtoolset3_test
+      - binary_linux_manywheel_2.7mu_cu80_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7mu_cu80_gccabi0_test
-      - binary_linux_manywheel_3.5m_cu80_gccabi0_upload:
+            - binary_linux_manywheel_2.7mu_cu80_devtoolset3_test
+      - binary_linux_manywheel_3.5m_cu80_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.5m_cu80_gccabi0_test
-      - binary_linux_manywheel_3.6m_cu80_gccabi0_upload:
+            - binary_linux_manywheel_3.5m_cu80_devtoolset3_test
+      - binary_linux_manywheel_3.6m_cu80_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.6m_cu80_gccabi0_test
-      - binary_linux_manywheel_3.7m_cu80_gccabi0_upload:
+            - binary_linux_manywheel_3.6m_cu80_devtoolset3_test
+      - binary_linux_manywheel_3.7m_cu80_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.7m_cu80_gccabi0_test
-      - binary_linux_manywheel_2.7m_cu90_gccabi0_upload:
+            - binary_linux_manywheel_3.7m_cu80_devtoolset3_test
+      - binary_linux_manywheel_2.7m_cu90_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7m_cu90_gccabi0_test
-      - binary_linux_manywheel_2.7mu_cu90_gccabi0_upload:
+            - binary_linux_manywheel_2.7m_cu90_devtoolset3_test
+      - binary_linux_manywheel_2.7mu_cu90_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7mu_cu90_gccabi0_test
-      - binary_linux_manywheel_3.5m_cu90_gccabi0_upload:
+            - binary_linux_manywheel_2.7mu_cu90_devtoolset3_test
+      - binary_linux_manywheel_3.5m_cu90_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.5m_cu90_gccabi0_test
-      - binary_linux_manywheel_3.6m_cu90_gccabi0_upload:
+            - binary_linux_manywheel_3.5m_cu90_devtoolset3_test
+      - binary_linux_manywheel_3.6m_cu90_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.6m_cu90_gccabi0_test
-      - binary_linux_manywheel_3.7m_cu90_gccabi0_upload:
+            - binary_linux_manywheel_3.6m_cu90_devtoolset3_test
+      - binary_linux_manywheel_3.7m_cu90_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.7m_cu90_gccabi0_test
-      - binary_linux_manywheel_2.7m_cu100_gccabi0_upload:
+            - binary_linux_manywheel_3.7m_cu90_devtoolset3_test
+      - binary_linux_manywheel_2.7m_cu100_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7m_cu100_gccabi0_test
-      - binary_linux_manywheel_2.7mu_cu100_gccabi0_upload:
+            - binary_linux_manywheel_2.7m_cu100_devtoolset3_test
+      - binary_linux_manywheel_2.7mu_cu100_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7mu_cu100_gccabi0_test
-      - binary_linux_manywheel_3.5m_cu100_gccabi0_upload:
+            - binary_linux_manywheel_2.7mu_cu100_devtoolset3_test
+      - binary_linux_manywheel_3.5m_cu100_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.5m_cu100_gccabi0_test
-      - binary_linux_manywheel_3.6m_cu100_gccabi0_upload:
+            - binary_linux_manywheel_3.5m_cu100_devtoolset3_test
+      - binary_linux_manywheel_3.6m_cu100_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.6m_cu100_gccabi0_test
-      - binary_linux_manywheel_3.7m_cu100_gccabi0_upload:
+            - binary_linux_manywheel_3.6m_cu100_devtoolset3_test
+      - binary_linux_manywheel_3.7m_cu100_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.7m_cu100_gccabi0_test
-      - binary_linux_manywheel_2.7m_cpu_gccabi1_upload:
+            - binary_linux_manywheel_3.7m_cu100_devtoolset3_test
+      - binary_linux_manywheel_2.7m_cpu_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7m_cpu_gccabi1_test
-      - binary_linux_manywheel_2.7mu_cpu_gccabi1_upload:
+            - binary_linux_manywheel_2.7m_cpu_devtoolset7_test
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7mu_cpu_gccabi1_test
-      - binary_linux_manywheel_3.5m_cpu_gccabi1_upload:
+            - binary_linux_manywheel_2.7mu_cpu_devtoolset7_test
+      - binary_linux_manywheel_3.5m_cpu_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.5m_cpu_gccabi1_test
-      - binary_linux_manywheel_3.6m_cpu_gccabi1_upload:
+            - binary_linux_manywheel_3.5m_cpu_devtoolset7_test
+      - binary_linux_manywheel_3.6m_cpu_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.6m_cpu_gccabi1_test
-      - binary_linux_manywheel_3.7m_cpu_gccabi1_upload:
+            - binary_linux_manywheel_3.6m_cpu_devtoolset7_test
+      - binary_linux_manywheel_3.7m_cpu_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.7m_cpu_gccabi1_test
-      - binary_linux_manywheel_2.7m_cu80_gccabi1_upload:
+            - binary_linux_manywheel_3.7m_cpu_devtoolset7_test
+      - binary_linux_manywheel_2.7m_cu80_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7m_cu80_gccabi1_test
-      - binary_linux_manywheel_2.7mu_cu80_gccabi1_upload:
+            - binary_linux_manywheel_2.7m_cu80_devtoolset7_test
+      - binary_linux_manywheel_2.7mu_cu80_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7mu_cu80_gccabi1_test
-      - binary_linux_manywheel_3.5m_cu80_gccabi1_upload:
+            - binary_linux_manywheel_2.7mu_cu80_devtoolset7_test
+      - binary_linux_manywheel_3.5m_cu80_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.5m_cu80_gccabi1_test
-      - binary_linux_manywheel_3.6m_cu80_gccabi1_upload:
+            - binary_linux_manywheel_3.5m_cu80_devtoolset7_test
+      - binary_linux_manywheel_3.6m_cu80_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.6m_cu80_gccabi1_test
-      - binary_linux_manywheel_3.7m_cu80_gccabi1_upload:
+            - binary_linux_manywheel_3.6m_cu80_devtoolset7_test
+      - binary_linux_manywheel_3.7m_cu80_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.7m_cu80_gccabi1_test
-      - binary_linux_manywheel_2.7m_cu90_gccabi1_upload:
+            - binary_linux_manywheel_3.7m_cu80_devtoolset7_test
+      - binary_linux_manywheel_2.7m_cu90_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7m_cu90_gccabi1_test
-      - binary_linux_manywheel_2.7mu_cu90_gccabi1_upload:
+            - binary_linux_manywheel_2.7m_cu90_devtoolset7_test
+      - binary_linux_manywheel_2.7mu_cu90_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7mu_cu90_gccabi1_test
-      - binary_linux_manywheel_3.5m_cu90_gccabi1_upload:
+            - binary_linux_manywheel_2.7mu_cu90_devtoolset7_test
+      - binary_linux_manywheel_3.5m_cu90_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.5m_cu90_gccabi1_test
-      - binary_linux_manywheel_3.6m_cu90_gccabi1_upload:
+            - binary_linux_manywheel_3.5m_cu90_devtoolset7_test
+      - binary_linux_manywheel_3.6m_cu90_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.6m_cu90_gccabi1_test
-      - binary_linux_manywheel_3.7m_cu90_gccabi1_upload:
+            - binary_linux_manywheel_3.6m_cu90_devtoolset7_test
+      - binary_linux_manywheel_3.7m_cu90_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.7m_cu90_gccabi1_test
-      - binary_linux_manywheel_2.7m_cu100_gccabi1_upload:
+            - binary_linux_manywheel_3.7m_cu90_devtoolset7_test
+      - binary_linux_manywheel_2.7m_cu100_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7m_cu100_gccabi1_test
-      - binary_linux_manywheel_2.7mu_cu100_gccabi1_upload:
+            - binary_linux_manywheel_2.7m_cu100_devtoolset7_test
+      - binary_linux_manywheel_2.7mu_cu100_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_2.7mu_cu100_gccabi1_test
-      - binary_linux_manywheel_3.5m_cu100_gccabi1_upload:
+            - binary_linux_manywheel_2.7mu_cu100_devtoolset7_test
+      - binary_linux_manywheel_3.5m_cu100_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.5m_cu100_gccabi1_test
-      - binary_linux_manywheel_3.6m_cu100_gccabi1_upload:
+            - binary_linux_manywheel_3.5m_cu100_devtoolset7_test
+      - binary_linux_manywheel_3.6m_cu100_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.6m_cu100_gccabi1_test
-      - binary_linux_manywheel_3.7m_cu100_gccabi1_upload:
+            - binary_linux_manywheel_3.6m_cu100_devtoolset7_test
+      - binary_linux_manywheel_3.7m_cu100_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_manywheel_3.7m_cu100_gccabi1_test
+            - binary_linux_manywheel_3.7m_cu100_devtoolset7_test
       - binary_linux_conda_2.7_cpu_upload:
           context: org-member
           requires:
@@ -4350,38 +4350,38 @@ workflows:
           context: org-member
           requires:
             - binary_linux_conda_3.7_cu100_test
-      - binary_linux_libtorch_2.7m_cpu_gccabi0_upload:
+      - binary_linux_libtorch_2.7m_cpu_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_libtorch_2.7m_cpu_gccabi0_build
-      - binary_linux_libtorch_2.7m_cu80_gccabi0_upload:
+            - binary_linux_libtorch_2.7m_cpu_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cu80_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_libtorch_2.7m_cu80_gccabi0_build
-      - binary_linux_libtorch_2.7m_cu90_gccabi0_upload:
+            - binary_linux_libtorch_2.7m_cu80_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cu90_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_libtorch_2.7m_cu90_gccabi0_build
-      - binary_linux_libtorch_2.7m_cu100_gccabi0_upload:
+            - binary_linux_libtorch_2.7m_cu90_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cu100_devtoolset3_upload:
           context: org-member
           requires:
-            - binary_linux_libtorch_2.7m_cu100_gccabi0_build
-      - binary_linux_libtorch_2.7m_cpu_gccabi1_upload:
+            - binary_linux_libtorch_2.7m_cu100_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_libtorch_2.7m_cpu_gccabi1_build
-      - binary_linux_libtorch_2.7m_cu80_gccabi1_upload:
+            - binary_linux_libtorch_2.7m_cpu_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cu80_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_libtorch_2.7m_cu80_gccabi1_build
-      - binary_linux_libtorch_2.7m_cu90_gccabi1_upload:
+            - binary_linux_libtorch_2.7m_cu80_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cu90_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_libtorch_2.7m_cu90_gccabi1_build
-      - binary_linux_libtorch_2.7m_cu100_gccabi1_upload:
+            - binary_linux_libtorch_2.7m_cu90_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_upload:
           context: org-member
           requires:
-            - binary_linux_libtorch_2.7m_cu100_gccabi1_build
+            - binary_linux_libtorch_2.7m_cu100_devtoolset7_build
       - binary_macos_wheel_2.7_cpu_upload:
           context: org-member
           requires:

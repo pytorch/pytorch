@@ -9,7 +9,7 @@ import cimodel.lib.visualization as visualization
 
 
 class Conf(object):
-    def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, gcc_abi_version):
+    def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, devtoolset_version):
 
         self.os = os
         self.cuda_version = cuda_version
@@ -17,12 +17,12 @@ class Conf(object):
         self.parms = parms
         self.smoke = smoke
         self.libtorch_variant = libtorch_variant
-        self.gcc_abi_version = gcc_abi_version
+        self.devtoolset_version = devtoolset_version
 
     def gen_build_env_parms(self):
         elems = [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.cuda_version)]
-        if self.gcc_abi_version is not None:
-            elems.append("gccabi" + str(self.gcc_abi_version))
+        if self.devtoolset_version is not None:
+            elems.append("devtoolset" + str(self.devtoolset_version))
         return elems
 
     def gen_docker_image(self):
@@ -107,7 +107,7 @@ def gen_build_env_list(smoke):
             [c.find_prop("pyver")],
             c.find_prop("smoke"),
             c.find_prop("libtorch_variant"),
-            c.find_prop("gcc_abi_version"),
+            c.find_prop("devtoolset_version"),
         )
         newlist.append(conf)
 
