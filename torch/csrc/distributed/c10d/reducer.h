@@ -139,4 +139,8 @@ class Reducer {
   std::vector<std::vector<int64_t>> backward_stats_;
 };
 
+std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+    const std::vector<at::Tensor>& tensors,
+    std::vector<size_t> bucket_size);
+
 } // namespace c10d
