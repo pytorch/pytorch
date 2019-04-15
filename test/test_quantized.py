@@ -1,8 +1,10 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 import torch.jit
 import numpy as np
 import unittest
-from caffe2.python import core
+# from caffe2.python import core
 from common_utils import TestCase, run_tests
 
 
@@ -10,7 +12,8 @@ def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
 
 
-@unittest.skipIf("Relu_ENGINE_DNNLOWP" not in core._REGISTERED_OPERATORS, "fbgemm-based Caffe2 ops are not linked")
+@unittest.skip("Skipping due to the protobuf dependency in the CI's")
+# @unittest.skipIf("Relu_ENGINE_DNNLOWP" not in core._REGISTERED_OPERATORS, "fbgemm-based Caffe2 ops are not linked")
 class TestQuantized(TestCase):
     def test_relu(self):
         a = (torch.tensor([4, 6, 1, 10], dtype=torch.uint8), 0.01, 5)
@@ -41,6 +44,26 @@ graph(%x : (Tensor, float, int)):
   %1 : (Tensor, float, int) = c10::quantized_relu(%x)
   return (%1)
 ''')
+
+
+class TestQuantizedRelu(unittest.TestCase):
+    """Tests the correctness of the quantized::relu op."""
+    def test_qrelu(self):
+        relu = torch.ops.quantized.relu
+
+        X_tensor = np.arange(0, 10, dtype=np.uint8)
+        scale = 255.0
+        zero_point = 5
+
+        Y_tensor = X_tensor.copy()
+        Y_tensor[X_tensor < zero_point] = zero_point
+
+        X = (torch.from_numpy(X_tensor), scale, zero_point)
+
+        Y_hat = relu(*X)
+        Y_hat_tensor = Y_hat[0].numpy()
+
+        np.testing.assert_equal(Y_tensor, Y_hat_tensor)
 
 
 if __name__ == '__main__':
