@@ -68,6 +68,7 @@ struct Function;
 ///
 ///                               Interface
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// yf225 TODO: fix these comments
 /// `Variable` inherits from `Tensor` and thus its API is a superset of that of
 /// `Tensor`. This means you can perform all the usual mathematical and other
 /// operations you can perform on `Tensor`s also on `Variable`s. Furthermore,
@@ -88,6 +89,7 @@ struct TORCH_API Variable : public at::Tensor {
   // Factory Functions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+  // yf225 TODO: do we still need them to be friend functions?
   // NOTE: These factory functions have to be friends to access the
   // Variable's `impl_`. As a side effect, it allows us to keep them in the class.
 
@@ -164,6 +166,7 @@ struct TORCH_API Variable : public at::Tensor {
   // NOTE: Assignment operators to Tensor come for free from the constructors.
 
   // yf225 TODO: add these back! (or should we?) But use them in as few places as possible!
+  // yf225 TODO: write note that this API's semantics has changed (to be more similar to Python API)
   // const at::Tensor& data() const noexcept;
   // at::Tensor& data() noexcept;
 
