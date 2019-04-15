@@ -34,6 +34,9 @@ RangeEventList& getEventList() {
 }
 
 void mark(std::string name, bool include_cuda /* = true */) {
+  if (state == ProfilerState::Disabled) {
+    return;
+  }
   if (state == ProfilerState::NVTX) {
     cuda_stubs->nvtxMarkA(name.c_str());
   } else {
@@ -46,6 +49,9 @@ void mark(std::string name, bool include_cuda /* = true */) {
 }
 
 void pushRangeImpl(const StringView& name, const char* msg="", int64_t sequence_nr=-1) {
+  if (state == ProfilerState::Disabled) {
+    return;
+  }
   if (state == ProfilerState::NVTX) {
     if(sequence_nr >= 0) {
       std::stringstream s;
@@ -68,6 +74,9 @@ void pushRange(std::string name) {
 }
 
 void popRange() {
+  if (state == ProfilerState::Disabled) {
+    return;
+  }
   if (state == ProfilerState::NVTX) {
     cuda_stubs->nvtxRangePop();
   } else {

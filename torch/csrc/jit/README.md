@@ -370,21 +370,21 @@ As the trace runs, individual operators create Nodes in the Graph being traced t
 torch::jit::Node* node = nullptr;
 std::shared_ptr<jit::tracer::TracingState> tracer_state;
 if (jit::tracer::isTracing()) {
-	tracer_state = jit::tracer::getTracingState();
-	at::Symbol op_name;
-	op_name = jit::Symbol::fromQualString("aten::__ilshift__");
-	node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
-	jit::tracer::recordSourceLocation(node);
-	jit::tracer::addInputs(node, "self", self);
-	jit::tracer::addInputs(node, "other", other);
-	tracer_state->graph->insertNode(node);
+        tracer_state = jit::tracer::getTracingState();
+        at::Symbol op_name;
+        op_name = jit::Symbol::fromQualString("aten::__ilshift__");
+        node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+        jit::tracer::recordSourceLocation(node);
+        jit::tracer::addInputs(node, "self", self);
+        jit::tracer::addInputs(node, "other", other);
+        tracer_state->graph->insertNode(node);
 
-	jit::tracer::setTracingState(nullptr);
+        jit::tracer::setTracingState(nullptr);
 }
 TypeDefault::__ilshift__(self, other);
 if (tracer_state) {
-	jit::tracer::setTracingState(std::move(tracer_state));
-	jit::tracer::addOutput(node, self);
+        jit::tracer::setTracingState(std::move(tracer_state));
+        jit::tracer::addOutput(node, self);
 }
 ```
 
@@ -412,15 +412,15 @@ Our frontends produce ASTs in the form of Tree objects. Trees are similar to [s-
 
 ```
  (-
-	(+
-	  (variable (ident x))
-	  (variable (ident y)))
-	(apply
-	  (.
-		(variable (ident z))
-		(ident sigmoid))
-	  (list)
-	  (list))))
+        (+
+          (variable (ident x))
+          (variable (ident y)))
+        (apply
+          (.
+                (variable (ident z))
+                (ident sigmoid))
+          (list)
+          (list))))
 ```
 
 This is printed in s-expression style with `(kind ...)` representing compound trees and `string_value` representing strings.
@@ -454,16 +454,16 @@ The typical way to traverse a tree is to `switch` on the kind and then construct
 ```cpp
 switch (tree.kind()) {
   case TK_VAR:
-  	auto var = Var(tree); // construct tree-view
-	return environment_stack->getSugaredVar(var.name());
+          auto var = Var(tree); // construct tree-view
+        return environment_stack->getSugaredVar(var.name());
   case '.': {
-	auto select = Select(tree); // construct tree-view
-	auto sv = emitSugaredExpr(select.value(), 1);
-	return sv->attr(select.range(), method, select.selector().name());
+        auto select = Select(tree); // construct tree-view
+        auto sv = emitSugaredExpr(select.value(), 1);
+        return sv->attr(select.range(), method, select.selector().name());
   }
   case TK_APPLY: {
-	auto apply = Apply(tree); // construct tree-view
-	return emitApplyExpr(apply, n_binders);
+        auto apply = Apply(tree); // construct tree-view
+        return emitApplyExpr(apply, n_binders);
   } break;
 
 ```
@@ -507,7 +507,7 @@ Tokens are either keywords (`def`), operators (`+`), literals (`3.4`), or identi
 
 ```cpp
 if (lexer.nextIf('+')) {
-	// handle + ...
+        // handle + ...
 }
 ```
 
@@ -650,10 +650,10 @@ using Operation = std::function<int(Stack&)>;
 
 // schema: example_add(Tensor a, Tensor b) -> Tensor
 int example_add(Stack& stack) {
-	Tensor a, b;
-	// stack before: ? ? ? a b <- back
-	pop(stack, a, b); //Templated helper function
-	                  // that pops a, b and converts them to tensor
+        Tensor a, b;
+        // stack before: ? ? ? a b <- back
+        pop(stack, a, b); //Templated helper function
+                          // that pops a, b and converts them to tensor
     push(stack, a + b);
     // stack after:
     // ? ? ? c <- back
@@ -1126,7 +1126,7 @@ As a more involved example, the following TorchScript snippet:
 ```python
 @torch.jit.script
 def foo(a : Tensor, b : Tensor):
-	c = 2 * b
+        c = 2 * b
   a += 1
   if a.max() > 4:
     r = a[0]

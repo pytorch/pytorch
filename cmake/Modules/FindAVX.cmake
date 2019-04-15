@@ -19,7 +19,7 @@ SET(AVX2_CODE "
   {
     __m256i a = {0};
     a = _mm256_abs_epi16(a);
-    __m256 x;
+    __m256i x;
     _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
     return 0;
   }
