@@ -9606,7 +9606,7 @@ a")
             self.assertEqual(str(returns[0].type), "Tuple[{}, {}]".format(pair[1], pair[1]))
 
     def test_bad_multiline_annotations(self):
-        with self.assertRaisesRegex(RuntimeError, "Could not parse"):
+        with self.assertRaisesRegex(RuntimeError, "Return type line"):
             @torch.jit.script
             def fn(a, # type: Tensor
                    b, # type: Tensor
@@ -9617,13 +9617,23 @@ a")
 
                 return a + b + c
 
-        with self.assertRaisesRegex(RuntimeError, "Could not parse"):
+        with self.assertRaisesRegex(RuntimeError, "Return type line"):
             @torch.jit.script
             def fn(a, # type: Tensor
                    b,
                    c  # type: Tensor
                    ):
                 # type: (int, int, int) -> Tensor
+                return a + b + c
+
+        # TODO: this should be supported but is difficult to parse
+        with self.assertRaisesRegex(RuntimeError, "Return type line"):
+            @torch.jit.script
+            def fn(a, # type: Tensor
+                   b,
+                   c  # type: Tensor
+                   ):
+                # type: (...) -> Tensor
                 return a + b + c
 
 
