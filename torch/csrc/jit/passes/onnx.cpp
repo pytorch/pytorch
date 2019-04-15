@@ -171,7 +171,8 @@ void BlockToONNX(
   torch::autograd::SymbolicContext ctx{};
   ctx.block = new_block;
   py::object onnx = py::module::import("torch.onnx");
-  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic");
+  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic_helper");
+  py::object onnx_registry = py::module::import("torch.onnx.symbolic_registry");
 
   // Returns a node that n maps to in the new graph
   auto envFn = [&env](Value* n) -> Value* {
