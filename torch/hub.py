@@ -7,6 +7,7 @@ import shutil
 import sys
 import tempfile
 import torch
+import warnings
 import zipfile
 
 if sys.version_info[0] == 2:
