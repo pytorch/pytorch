@@ -16,6 +16,23 @@ namespace {
 using ParamMap = std::map<std::string, at::Tensor>;
 using ValueToParamPairMap = std::map<Value*, std::pair<std::string, at::Tensor>>;
 
+std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap =
+{
+  // Only conversion of ONNX numeric types is included here.
+  // Unsigned ONNX types are mapped to the next higher signed
+  // ScalarType type.
+  {1, at::kFloat},
+  {2, at::kByte},
+  {3, at::kChar},
+  {4, at::kInt},
+  {5, at::kShort},
+  {6, at::kInt},
+  {7, at::kLong},
+  {10, at::kFloat},
+  {11, at::kDouble},
+  {12, at::kLong},
+};
+
 ValueToParamPairMap buildValueToParamsMap(Block* b, const ParamMap& paramsDict) {
   ValueToParamPairMap valsToParamsMap;
   for(auto& input : b->inputs()) {
@@ -96,6 +113,15 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(const Node* node, std::vector<a
     updated_val = inputTensorValues[0].permute(node->is(attr::perm));
     return c10::optional<at::Tensor>(updated_val);
   }
+  else if (node->kind() == onnx::Cast) {
+    assert(inputTensorValues.size() == 1);
+    if (node->hasAttributeS("to") &&
+        onnxTypeToScalarTypeMap.find(node->i(attr::to)) != onnxTypeToScalarTypeMap.end()) {
+      updated_val = inputTensorValues[0].to(onnxTypeToScalarTypeMap[node->i(attr::to)]);
+      return c10::optional<at::Tensor>(updated_val);
+    }
+    return c10::nullopt;
+  }
   else {
     return c10::nullopt;
   }
@@ -149,6 +175,16 @@ bool areNodeInputsConstant(Node* node, const ValueToParamPairMap& valsToParamsMa
         [&valsToParamsMap](Value* v) { return isConstant(v, valsToParamsMap); });
 }
 
+std::vector<Node*> getOnnxConstParents(Node* node) {
+  std::vector<Node*> parentNodes;
+  for (auto val : node->inputs()) {
+    if (val->node()->kind() == onnx::Constant) {
+      parentNodes.push_back(val->node());
+    }
+  }
+  return parentNodes;
+}
+
 } // Anonymous namespace
 
 // This method updates the block in-place to fold all the one-time 
@@ -189,7 +225,17 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
     newSourceNodeOutput->inferTypeFrom(updatedVal);
     node->outputs().at(0)->replaceAllUsesWith(newSourceNodeOutput);
 
+    // Next we remove the current node that has been replaced by
+    // an initializer. But before we start de-wiring this node,
+    // we check if any parents of this nodes were onnx::Constant
+    // and remove them first (following proper sequence as shown
+    // below), and then remove the current node. If the parent was
+    // an initializer (not onnx::Constant) then they are all removed
+    // by eraseUnusedBlockInputs() call (below) outside the loop.
+    auto onnxConstParents = getOnnxConstParents(node);
     node->removeAllInputs();
+    std::for_each(onnxConstParents.begin(), onnxConstParents.end(),
+                  [](Node* n){ n->destroy(); });
     it.destroyCurrent();
   }
   eraseUnusedValuesFromMap(valsToParamsMap);

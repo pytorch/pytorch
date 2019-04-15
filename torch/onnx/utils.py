@@ -146,7 +146,7 @@ def _split_tensor_list_constants(g, block):
                 node.output().replaceAllUsesWith(lc)
 
 
-def _optimize_graph(graph, operator_export_type):
+def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False):
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_dce(graph)
@@ -157,7 +157,8 @@ def _optimize_graph(graph, operator_export_type):
     # into a trace where we previously recorded constants
     # use constant prop to maintain our current level of onnx support
     # without implementing symbolics for all of them
-    torch._C._jit_pass_constant_propagation(graph)
+    if _disable_torch_constant_prop is False:
+        torch._C._jit_pass_constant_propagation(graph)
     _split_tensor_list_constants(graph, graph)
     # run dce to eliminate dead parts of the graph that might have been
     # left behind by things like symbolic_override
@@ -230,7 +231,8 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False,
-                    _retain_param_name=False, do_constant_folding=False):
+                    _retain_param_name=False, do_constant_folding=False,
+                    _disable_torch_constant_prop=False):
     from torch.onnx.symbolic import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -263,7 +265,8 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
                 if i >= user_input_num:
                     inp.setUniqueName(param_names[i - user_input_num])
 
-    graph = _optimize_graph(graph, operator_export_type)
+    graph = _optimize_graph(graph, operator_export_type,
+                            _disable_torch_constant_prop=_disable_torch_constant_prop)
 
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
