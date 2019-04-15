@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <typeinfo>
 
 namespace torch {
 namespace autograd {
@@ -86,7 +87,11 @@ void Variable::backward(
 }
 
 void Variable::set_data(const at::Tensor &new_data) {
-  AT_ASSERT(type_id() == new_data.type_id());
+  // yf225 TODO: what we want to express here is:
+  // If new_data is of different type of TensorImpl (e.g. TensorImpl vs. SparseTensorImpl vs. OpaqueTensorImpl<T> vs. QTensorImpl), then it's not ok to call set_data(...)
+  // otherwise, it's ok
+  typeid(this->unsafeGetTensorImpl()) == typeid(new_data.unsafeGetTensorImpl());
+  // AT_ASSERT(type_id() == new_data.type_id());
 
   // Resets gradient accumulator if metadata is out of date
   Variable::AutogradMeta* autograd_meta = get_autograd_meta();
