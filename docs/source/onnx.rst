@@ -212,10 +212,10 @@ To confirm whether the operator is standardized or not, please check the
 If the operator is an ATen operator, which means you can find the declaration
 of the function in ``torch/csrc/autograd/generated/VariableType.h``
 (available in generated code in PyTorch install dir), you should add the symbolic
-function in ``torch/onnx/symbolic.py`` and follow the instructions listed as below:
+function in ``torch/onnx/symbolic_opset<version>.py`` and follow the instructions listed as below:
 
-* Define the symbolic function in
-  `torch/onnx/symbolic.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic.py>`_.
+* Define the symbolic function in ``torch/onnx/symbolic_opset<version>.py``, for example
+  `torch/onnx/symbolic_opset9.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic_opset9.py>`_.
   Make sure the function has the same name as the ATen operator/function
   defined in ``VariableType.h``.
 * The first parameter is always the exported ONNX graph.
@@ -303,7 +303,7 @@ The ONNX graph C++ definition is in ``torch/csrc/jit/ir.h``.
 Here is an example of handling missing symbolic function for ``elu`` operator.
 We try to export the model and see the error message as below::
 
-    UserWarning: ONNX export failed on elu because torch.onnx.symbolic.elu does not exist
+    UserWarning: ONNX export failed on elu because torch.onnx.symbolic_opset9.elu does not exist
     RuntimeError: ONNX export failed: Couldn't export operator elu
 
 The export fails because PyTorch does not support exporting ``elu`` operator.
@@ -311,7 +311,7 @@ We find ``virtual Tensor elu(const Tensor & input, Scalar alpha, bool inplace) c
 in ``VariableType.h``. This means ``elu`` is an ATen operator.
 We check the `ONNX operator list <http://https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_,
 and confirm that ``Elu`` is standardized in ONNX.
-We add the following lines to ``symbolic.py``::
+We add the following lines to ``symbolic_opset9.py``::
 
     def elu(g, input, alpha, inplace=False):
         return g.op("Elu", input, alpha_f=_scalar(alpha))
@@ -319,7 +319,7 @@ We add the following lines to ``symbolic.py``::
 Now PyTorch is able to export ``elu`` operator.
 
 There are more examples in
-`symbolic.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic.py>`_,
+`symbolic_opset9.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic_opset9.py>`_,
 `tensor.py <https://github.com/pytorch/pytorch/blob/99037d627da68cdf53d3d0315deceddfadf03bba/torch/autograd/_functions/tensor.py#L24>`_,
 `padding.py <https://github.com/pytorch/pytorch/blob/99037d627da68cdf53d3d0315deceddfadf03bba/torch/nn/_functions/padding.py#L8>`_.
 

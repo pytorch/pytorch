@@ -1469,6 +1469,14 @@ class TestCaffe2Backend(unittest.TestCase):
 
         self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3)
 
+    def test_topk(self):
+        class TopKModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.topk(input, 3)
+        model = TopKModel()
+        x = torch.arange(1., 6.)
+        self.run_model_test(TopKModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
 
 # a bit of metaprogramming to set up all the rnn tests
 

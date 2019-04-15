@@ -549,6 +549,14 @@ class TestOperators(TestCase):
         x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
         self.assertONNX(lambda x: torch.nonzero(x), x)
 
+    def test_topk(self):
+        x = torch.arange(1., 6., requires_grad=True)
+        self.assertONNX(lambda x: torch.topk(x, 3), x)
+
+    def test_topk_opset10(self):
+        x = torch.arange(1., 6., requires_grad=True)
+        self.assertONNX(lambda x: torch.topk(x, 3), x, opset_version=10)
+
     def test_master_opset(self):
         x = torch.randn(2, 3).float()
         y = torch.randn(2, 3).float()

@@ -58,3 +58,8 @@ def _run_symbolic_method(*args, **kwargs):
 def is_in_onnx_export():
     from torch.onnx import utils
     return utils.is_in_onnx_export()
+
+
+def register_custom_op_symbolic(symbolic_name, symbolic_fn):
+    from torch.onnx import utils
+    return utils.register_custom_op_symbolic(symbolic_name, symbolic_fn)

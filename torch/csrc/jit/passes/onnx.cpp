@@ -290,13 +290,10 @@ void BlockToONNX(
 
   auto callPySymbolicMethod = [&](ConcretePythonOp* op) {
     // Test if there is a symbolic function; bail if there is not
-    auto pyobj = py::handle(op->pyobj.get());
-    auto func = op->autogradFunction();
-    if (func) {
-      pyobj = func->get();
-    }
-
-    if (!py::hasattr(pyobj, "symbolic")) {
+    std::string domain = "";
+    py::object opset = onnx_symbolic.attr("_export_onnx_opset_version");
+    if (onnx_registry.attr("is_registered_op")(op->name(), domain, opset) !=
+        Py_True) {
       cloneNode(op);
       return;
     }
@@ -331,8 +328,10 @@ void BlockToONNX(
     // Call the symbolic function
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
+    py::object symbolic_fn =
+        onnx.attr("get_registered_op")(op->name(), domain, opset);
     py::object raw_output = onnx.attr("_run_symbolic_method")(
-        op->name(), pyobj.attr("symbolic"), py_symbolic_args);
+        op->name(), symbolic_fn, py_symbolic_args);
 
     processSymbolicOutput(op->name(), op, raw_output);
   };
