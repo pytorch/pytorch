@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <torch/csrc/jit/script/schema_type_parser.h>
+#include <c10/util/string_utils.h>
 
 #include <functional>
 #include <memory>
@@ -86,7 +87,7 @@ struct SchemaParser {
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
       type = ListType::create(type);
-      N = std::stoll(L.expect(TK_NUMBER).text());
+      N = c10::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
       if (container && alias_info) {
@@ -153,9 +154,9 @@ struct SchemaParser {
           n = L.expect(TK_NUMBER).text();
         if (kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
             n.find('e') != std::string::npos) {
-          return std::stod(n);
+          return c10::stod(n);
         } else {
-          int64_t v = std::stoll(n);
+          int64_t v = c10::stoll(n);
           return v;
         }
     }

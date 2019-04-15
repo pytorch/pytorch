@@ -2,8 +2,11 @@
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
 #include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/script/strtod.h>
 #include <algorithm>
 #include <clocale>
+#include <cstring>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -160,19 +163,7 @@ struct SharedParserData {
     TC_FORALL_TOKEN_KINDS(ADD_CASE)
 #undef ADD_CASE
   }
-#ifdef _WIN32
-  static double strtod_c(const char* str, char** end) {
-    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
-    static _locale_t loc = _create_locale(LC_ALL, "C");
-    return _strtod_l(str, end, loc);
-  }
-#else
-  static double strtod_c(const char* str, char** end) {
-    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
-    static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
-    return strtod_l(str, end, loc);
-  }
-#endif
+
   // 1. skip whitespace
   // 2. handle comment or newline
   //
@@ -186,7 +177,7 @@ struct SharedParserData {
       return false;
     const char* startptr = str.c_str() + start;
     char* endptr;
-    strtod_c(startptr, &endptr);
+    torch::jit::script::strtod_c(startptr, &endptr);
     *len = endptr - startptr;
     return *len > 0;
   }
@@ -478,7 +469,7 @@ struct Lexer {
             indent_stack.pop_back();
             next_tokens.emplace_back(TK_DEDENT, r.range);
             if (indent_stack.size() == 0) {
-              reportError("invalid indent level " + std::to_string(depth), r);
+              reportError("invalid indent level " + c10::guts::to_string(depth), r);
             }
           }
           return; // We've already queued the tokens
