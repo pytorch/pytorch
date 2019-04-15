@@ -646,6 +646,7 @@ std::string generateKernel(
       has_half_tensor = true;
     } else {
       body << format("${access} = ${node};\n", env);
+      kernelVectorBody << format("${node}.store(t${formal}.data + t${formal}_offset);\n", env);
     }
   }
 

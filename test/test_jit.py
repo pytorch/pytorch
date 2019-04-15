@@ -1786,9 +1786,10 @@ graph(%x : Tensor,
         bn = BNTest().eval()
         with torch.no_grad():
             input = torch.randn(20, 2048).float()
-            bn(input)
+            out = bn(input)
+            ref_out = torch.relu(bn.bn(input))
 
-            torch.testing.assert_allclose(bn(input), torch.relu(bn.bn(input)))
+            torch.testing.assert_allclose(out, ref_out)
 
     def test_trace_c10_ops(self):
         class MyModel(torch.nn.Module):
