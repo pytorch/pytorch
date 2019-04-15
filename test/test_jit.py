@@ -42,7 +42,7 @@ from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing import FileCheck
-from torch._C import TensorType, parse_ir
+from torch._C import TensorType, parse_ir, _propagate_shapes, _jit_python_print
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional, Tuple
@@ -220,7 +220,7 @@ def get_grad_executor(plan_state, diff_graph_idx=None):
             pass
         else:
             raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
-    grad_executors = list(plan_state.code.grad_executors())
+    grad_executors = list(plan_state.code.grad_executor_states())
     return grad_executors[diff_graph_idx or 0]
 
 
@@ -229,8 +229,8 @@ def backward_graph(script_module, diff_graph_idx=None):
         raise RuntimeError('Expected ScriptModule')
     ge_state = script_module.get_debug_state()
     fwd_plan = get_execution_plan(ge_state)
-    grad_executor = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx)
-    bwd_plan = get_execution_plan(grad_executor.get_debug_state())
+    grad_executor_state = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx)
+    bwd_plan = get_execution_plan(grad_executor_state)
     # Running JIT passes requires that we own the graph (with a shared_ptr).
     # The debug state struct does not own its graph so we make a copy of it.
     return bwd_plan.graph.copy()
@@ -251,6 +251,22 @@ def enable_cpu_fuser(fn):
         finally:
             torch._C._jit_override_can_fuse_on_cpu(False)
     return wrapper
+
+
+# note: not re-entrant, use unnested only
+@contextmanager
+def disable_autodiff_subgraph_inlining(enabled=True):
+    torch._C._debug_set_autodiff_subgraph_inlining(not enabled)
+    yield
+    torch._C._debug_set_autodiff_subgraph_inlining(True)
+
+
+# helper function to get sum of List[Tensor]
+def _sum_of_list(tensorlist):
+    s = 0
+    for t in tensorlist:
+        s += t.sum()
+    return s
 
 
 class JitTestCase(TestCase):
@@ -525,11 +541,8 @@ class JitTestCase(TestCase):
         else:
             recording_inputs = reference_tensors
 
-        if isinstance(func, torch._C.Graph):
-            ge = torch._C.GraphExecutor(func, optimize)
-        else:
-            ge = torch.jit.trace(func, input_tensors, optimize=optimize, check_tolerance=check_tolerance,
-                                 _force_outplace=_force_outplace)
+        ge = torch.jit.trace(func, input_tensors, optimize=optimize, check_tolerance=check_tolerance,
+                             _force_outplace=_force_outplace)
 
         if export_import:
             ge = self.getExportImportCopy(ge)
@@ -1425,7 +1438,7 @@ graph(%x : Tensor,
             return MyInplaceFn.apply(x)
 
         x = torch.randn(5, 5)
-        ge = torch._C.GraphExecutor(fn, (x,), lambda var: '', _force_outplace=True)
+        ge = torch.jit.trace(fn, (x,), _force_outplace=True, check_trace=False)
         with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
             ge(x)
 
@@ -1841,7 +1854,7 @@ graph(%x : Tensor,
             return a * b / (a - b) + b
         V = Variable
         a, b = V(torch.rand(1)), V(torch.rand(1))
-        ge = torch._C.GraphExecutor(foo, (a, b), lambda var: '')
+        ge = torch.jit.trace(foo, (a, b))
         a, b = V(torch.rand(1), requires_grad=True), V(
             torch.rand(1), requires_grad=True)
         r, = ge(a, b)
@@ -2627,7 +2640,7 @@ graph(%x : Tensor,
         def foo(x, y):
             return 2 * x + y
 
-        r, _ = foo._python_print()
+        r, _ = _jit_python_print(foo)
         mod = torch.jit.ScriptModule()
         torch._C._jit_import_methods(mod, "op_version_set = 0\n{}".format(r), [])
         self.assertExpected(mod.graph.pretty_print())
@@ -2916,7 +2929,7 @@ class TestScript(JitTestCase):
             def bar(x):
                 return foo(x, y=x)
         ''')
-        self.assertTrue('*' in cu.module._get_method('foo').pretty_print_schema())
+        self.assertTrue('*' in str(cu.module._get_method('foo').schema))
         with self.assertRaisesRegex(RuntimeError, "not provided"):
             torch.jit.CompilationUnit('''
                 def foo(x, *, y) -> Tuple[Tensor, Tensor]:
@@ -2936,7 +2949,7 @@ class TestScript(JitTestCase):
             def foo():
                 return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
 
-            pp, table = foo._get_method('forward').python_print()
+            pp, table = _jit_python_print(foo)
             ppv = "op_version_set = 0\n{}".format(pp)
             sm = torch.jit.ScriptModule()
             torch._C._jit_import_methods(sm, ppv, table)
@@ -3505,6 +3518,38 @@ a")
             for i in range(len(script_funs)):
                 self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))
 
+    def test_module_copy_with_attributes(self):
+        class Vocabulary(torch.jit.ScriptModule):
+            def __init__(self, vocab_list):
+                super(Vocabulary, self).__init__()
+                self._vocab = torch.jit.Attribute(vocab_list, List[str])
+                self.some_idx = torch.jit.Attribute(2, int)
+                self.idx = torch.jit.Attribute(
+                    {word: i for i, word in enumerate(vocab_list)}, Dict[str, int]
+                )
+
+            @torch.jit.script_method
+            def lookup_indices_1d(self, values):
+                # type: (List[str]) -> List[int]
+                result = torch.jit.annotate(List[int], [])
+                # Direct list iteration not supported
+                for i in range(len(values)):
+                    value = values[i]
+                    result.append(self.idx.get(value, self.some_idx))
+                return result
+
+            @torch.jit.script_method
+            def forward(self, values):
+                # type: (List[List[str]]) -> List[List[int]]
+                result = torch.jit.annotate(List[List[int]], [])
+                # Direct list iteration not supported
+                for i in range(len(values)):
+                    result.append(self.lookup_indices_1d(values[i]))
+                return result
+
+        v = Vocabulary(list('uabcdefg'))
+        v.copy()
+
     def test_tuple_to_opt_list(self):
         @torch.jit.script
         def foo(x):
@@ -3686,8 +3731,8 @@ a")
         # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
         self.run_pass('constant_propagation', func.graph)
         self.run_pass('constant_propagation', func2.graph)
-        g = func._get_method('forward').propagate_shapes((torch.zeros(1, 1, 1, 1, 4),), False)
-        g2 = func2._get_method('forward').propagate_shapes((torch.zeros(1, 1, 1, 1, 4),), False)
+        g = _propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
+        g2 = _propagate_shapes(func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         self.assertTrue(g.findNode("aten::sum").output().type().kind()
                         == "DimensionedTensorType")
         self.assertTrue(g2.findNode("aten::sum").output().type().kind()
@@ -3704,10 +3749,20 @@ a")
         @torch.jit.script
         def func2(x, y):
             return torch.cat((x, x), y)
+        with disable_autodiff_subgraph_inlining():
 
-        x = torch.rand([2, 2])
-        y = torch.tensor(1)
-        self.assertEqual(func2(x, y), torch.cat((x, x), y))
+            x = torch.rand([2, 2]).requires_grad_()
+            y = torch.tensor(1)
+
+            output = func2(x, y)
+            output_ref = torch.cat((x, x), y)
+            self.assertEqual(output, output_ref)
+
+            self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::cat'], [])
+
+            grad = torch.autograd.grad(output.sum(), x)
+            grad_ref = torch.autograd.grad(output_ref.sum(), x)
+            self.assertEqual(grad, grad_ref)
 
     def test_cat_lifts(self):
         @torch.jit.script
@@ -3724,6 +3779,70 @@ a")
 
         for g in [foo.graph, foo2.graph, foo3.graph]:
             FileCheck().check("int =").check("ListConstruct").check("aten::cat").run(str(g))
+
+    @unittest.skipIf(PY2, "Requires python 3")
+    def test_stack(self):
+        @torch.jit.script
+        def func(x):
+            return torch.stack((x, x), dim=1)
+        x = torch.rand(10, 10)
+        self.assertEqual(func(x), torch.stack((x, x), dim=1))
+
+        @torch.jit.script
+        def func2(x, y):
+            return torch.stack((x, y), dim=0)
+
+        with disable_autodiff_subgraph_inlining():
+            x = torch.randn([2, 2]).requires_grad_()
+            y = torch.randn([2, 2]).requires_grad_()
+
+            output = func2(x, y)
+            output_ref = torch.stack((x, y), 0)
+            self.assertEqual(output, output_ref)
+
+            self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::stack'], [])
+
+            grads = torch.autograd.grad(output.sum(), (x, y))
+            grads_ref = torch.autograd.grad(output_ref.sum(), (x, y))
+            self.assertEqual(grads, grads_ref)
+
+    def test_unbind(self):
+        @torch.jit.script
+        def func(x, y):
+            # type: (Tensor, int) -> List[Tensor]
+            return torch.unbind(x, y)
+        with disable_autodiff_subgraph_inlining():
+            x = torch.rand([2, 2]).requires_grad_()
+            y = 0
+            outputs = func(x, y)
+            outputs_ref = torch.unbind(x, dim=y)
+            self.assertEqual(outputs, outputs_ref)
+
+            self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [])
+
+            grad = torch.autograd.grad(_sum_of_list(outputs), x)
+            grad_ref = torch.autograd.grad(_sum_of_list(outputs_ref), x)
+            self.assertEqual(grad, grad_ref)
+
+    def test_meshgrid(self):
+        @torch.jit.script
+        def func(a):
+            # type: (List[Tensor]) -> List[Tensor]
+            return torch.meshgrid(a)
+        with disable_autodiff_subgraph_inlining():
+            a = torch.tensor([1.0, 2, 3]).requires_grad_()
+            b = torch.tensor([1.0, 2, 3, 4]).requires_grad_()
+            inputs = [a, b]
+
+            outputs_ref = torch.meshgrid(inputs)
+            outputs = func(inputs)
+            self.assertEqual(outputs, outputs_ref)
+
+            self.assertAutodiffNode(func.graph_for(inputs), True, ['aten::meshgrid'], [])
+
+            grads = torch.autograd.grad(_sum_of_list(outputs), inputs)
+            grads_ref = torch.autograd.grad(_sum_of_list(outputs_ref), inputs)
+            self.assertEqual(grads, grads_ref)
 
     def test_list_literal(self):
         def reassign():
@@ -4388,8 +4507,8 @@ a")
                 torch.mul(x, y, out=z)
                 return z
 
-            graph = test._get_method('forward').propagate_shapes(
-                (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
+            graph = _propagate_shapes(test.graph,
+                                      (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
             self.assertTrue(next(graph.outputs()).type() == TensorType.get())
         out_op_graph_input()
 
@@ -4408,7 +4527,7 @@ a")
                 return after_resize_alias
 
             self.run_pass('constant_propagation', test.graph)
-            g = test._get_method('forward').propagate_shapes((torch.zeros(1, 1),), False)
+            g = _propagate_shapes(test.graph, (torch.zeros(1, 1),), False)
             resize_node = g.findNode("aten::resize_")
             # first input and output of b.resize_ is b
             self.assertTrue(next(resize_node.inputs()).type() == TensorType.get())
@@ -4432,7 +4551,7 @@ a")
 
             g = test.graph
             self.run_pass('constant_propagation', g)
-            g = test._get_method('forward').propagate_shapes((torch.zeros(1, 1),), False)
+            g = _propagate_shapes(test.graph, (torch.zeros(1, 1),), False)
 
             # x doesn't alias a resized op so it shouldn't be set to base Tensor type
             self.assertTrue(next(g.inputs()).type() != TensorType.get())
@@ -4487,7 +4606,7 @@ a")
 
         x = torch.randn(3, 1, 5, requires_grad=True)
         fn = torch.jit.script(fn)
-        graph = fn._get_method('forward').propagate_shapes((x,), False)
+        graph = _propagate_shapes(fn.graph, (x,), False)
         a = next(graph.outputs()).type().kind()
         self.assertTrue(next(graph.outputs()).type().kind() != 'TensorType')
 
@@ -4497,7 +4616,7 @@ a")
             return x + y
 
         x, y = torch.rand(3, 4, dtype=torch.float), torch.rand(3, 4, dtype=torch.double)
-        graph = fn._get_method('forward').propagate_shapes((x, y), False)
+        graph = _propagate_shapes(fn.graph, (x, y), False)
         FileCheck().check('Double(*, *) = aten::add').run(graph)
 
     def test_shape_prop_promote_scalar_arg(self):
@@ -4506,7 +4625,7 @@ a")
             return math.pi + x
 
         x = torch.zeros(3, 4, dtype=torch.long)
-        graph = fn._get_method('forward').propagate_shapes((x,), False)
+        graph = _propagate_shapes(fn.graph, (x,), False)
         FileCheck().check('Long(*, *) = aten::add').run(graph)
 
     def test_integral_shape_inference(self):
@@ -5668,14 +5787,13 @@ a")
         def func2(t, t_ref):
             return t.to(t_ref)
 
-        func2.debug_disable_autodiff_subgraph_inlining()
-
-        t_ref = torch.tensor(4).double()
-        out_ref = t.to(t_ref)
-        out = func2(t, t_ref)
-        grad_ref = torch.autograd.grad(out_ref.sum(), t)
-        grad = torch.autograd.grad(out.sum(), t)
-        self.assertEqual(grad_ref, grad)
+        with disable_autodiff_subgraph_inlining():
+            t_ref = torch.tensor(4).double()
+            out_ref = t.to(t_ref)
+            out = func2(t, t_ref)
+            grad_ref = torch.autograd.grad(out_ref.sum(), t)
+            grad = torch.autograd.grad(out.sum(), t)
+            self.assertEqual(grad_ref, grad)
 
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
     def test_tensor_number_math_cuda(self):
@@ -7081,7 +7199,7 @@ a")
             return torch.cat(c)
 
         b = torch.zeros(2, 4)
-        test_list._get_method('forward').propagate_shapes((b,), False)
+        _propagate_shapes(test_list.graph, (b,), False)
 
     def test_if_supertype(self):
         @torch.jit.script
@@ -7098,7 +7216,7 @@ a")
         b = torch.zeros(2, 4, dtype=torch.long)
         c = torch.zeros(2, 4, dtype=torch.float)
 
-        graph = tensor_unifying._get_method('forward').propagate_shapes((a, b, c), False)
+        graph = _propagate_shapes(tensor_unifying.graph, (a, b, c), False)
         if_outputs = list(graph.findNode("prim::If").outputs())
         self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
         self.assertTrue(if_outputs[1].type().str() == "Tensor")
@@ -7393,7 +7511,7 @@ a")
             def foo(self, input):
                 self.call_foo(input)
 
-        with self.assertRaisesRegex(RuntimeError, 'called recursively involving'):
+        with self.assertRaisesRegex(RuntimeError, 'called recursively'):
             M()
 
     def test_script_kwargs_fn_call(self):
@@ -8230,7 +8348,7 @@ a")
                 return x, x
         ''')
 
-        self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+        self.assertExpected(str(cu.__getattr__('foo').schema))
 
     def test_parser_type_annotations_comment(self):
         cu = torch.jit.CompilationUnit('''
@@ -8239,7 +8357,7 @@ a")
                 return x, x
         ''')
 
-        self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+        self.assertExpected(str(cu.__getattr__('foo').schema))
 
     def test_parser_type_annotations_unknown_type(self):
         with self.assertRaisesRegex(RuntimeError, r'Unknown type name Foo'):
@@ -9458,7 +9576,7 @@ a")
             # type: (Tensor, Tuple[Tensor, Tensor, Tensor], Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tensor
             return x
 
-        self.assertExpected(foo.__getattr__('forward').pretty_print_schema())
+        self.assertExpected(str(foo.__getattr__('forward').schema))
 
     def test_annotated_script_method(self):
         class SM(torch.jit.ScriptModule):
@@ -9469,7 +9587,7 @@ a")
 
         sm = SM()
 
-        self.assertExpected(sm.__getattr__('forward').pretty_print_schema())
+        self.assertExpected(str(sm.__getattr__('forward').schema))
 
     def test_annotated_script_fn_return_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "but is actually of type"):
@@ -9563,7 +9681,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             cu = torch.jit.CompilationUnit(self.format_code(code, pair))
-            test_str.append(cu.__getattr__('foo').pretty_print_schema())
+            test_str.append(str(cu.__getattr__('foo').schema))
         self.assertExpected("\n".join(test_str))
 
     #  String frontend , Python 3-style type annotations , Script method
@@ -9580,7 +9698,7 @@ a")
         for pair in self.type_input_return_pairs():
             tm = TestModule()
             tm.define(self.format_code(code, pair))
-            test_str.append(tm.__getattr__('foo').pretty_print_schema())
+            test_str.append(str(tm.__getattr__('foo').schema))
         self.assertExpected("\n".join(test_str))
 
     #  String frontend , MyPy-style type comments , Script function
@@ -9593,7 +9711,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             cu = torch.jit.CompilationUnit(self.format_code(code, pair))
-            test_str.append(cu.__getattr__('foo').pretty_print_schema())
+            test_str.append(str(cu.__getattr__('foo').schema))
         self.assertExpected("\n".join(test_str))
 
     #  String frontend , MyPy-style type comments , Script method
@@ -9612,7 +9730,7 @@ a")
         for pair in self.type_input_return_pairs():
             tm = TestModule()
             tm.define(self.format_code(code, pair))
-            test_str.append(tm.__getattr__('foo').pretty_print_schema())
+            test_str.append(str(tm.__getattr__('foo').schema))
         self.assertExpected("\n".join(test_str))
 
     # Helper function to eval Python3 code without causing a syntax error for
@@ -9644,7 +9762,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'foo')
-            test_str.append(fn.__getattr__('forward').pretty_print_schema())
+            test_str.append(str(fn.__getattr__('forward').schema))
         self.assertExpected("\n".join(test_str))
 
     #  Python AST Frontend , Python 3-style type annotations , Script method
@@ -9666,7 +9784,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'instance')
-            test_str.append(fn.__getattr__('foo').pretty_print_schema())
+            test_str.append(str(fn.__getattr__('foo').schema))
         self.assertExpected("\n".join(test_str))
 
     #  Python AST Frontend , MyPy-style type comments , Script function
@@ -9683,7 +9801,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'foo')
-            test_str.append(fn.__getattr__('forward').pretty_print_schema())
+            test_str.append(str(fn.__getattr__('forward').schema))
         self.assertExpected("\n".join(test_str))
 
     #  Python AST Frontend , MyPy-style type comments , Script method
@@ -9702,7 +9820,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'instance')
-            test_str.append(fn.__getattr__('foo').pretty_print_schema())
+            test_str.append(str(fn.__getattr__('foo').schema))
         self.assertExpected("\n".join(test_str))
 
     def test_method_casts_script(self):
@@ -10895,7 +11013,7 @@ a")
         self.assertEqual(m.some_state, torch.zeros(1) + 100)
 
         # Export and ensure ignored code not present
-        pp, constants = m._python_print()
+        pp, constants = _jit_python_print(m._get_method('forward'))
         printed = torch.jit.ScriptModule()
         ppv = "op_version_set = 0\n{}".format(pp)
         torch._C._jit_import_methods(printed, ppv, constants)
@@ -11901,10 +12019,16 @@ EXCLUDE_SCRIPT = {
 # chunk returns a list in scripting and we don't unpack the list,
 # Thus it won't be replaced by ConstantChunk and run AD.
 # It's explicitly checked in test_chunk_constant_script_ad
+# Similary for split, it's replaced by split_with_sizes in tracing,
+# but we don't have AD formula for aten::split(Tensor, int[], int),
+# an op registered in JIT so AD is not triggered in scripting.
 EXCLUDE_SCRIPT_AD_CHECK = {
     'test_chunk',
     'test_chunk_dim',
     'test_chunk_dim_neg0',
+    'test_split_size_list',
+    'test_split_size_list_dim',
+    'test_split_size_list_dim_neg0',
 }
 
 EXCLUDE_PYTHON_PRINT = {
@@ -11940,17 +12064,11 @@ def partial_apply_nontensors(fn, args, **kwargs):
 
 
 # create a trace function from input fn
-#
-# disable_autodiff_subgraph_inlining:
-#   Don't inline autodiff subgraphs so we can test autodiff
-def create_traced_fn(self, fn,
-                     disable_autodiff_subgraph_inlining=False):
+def create_traced_fn(self, fn):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         traced = torch.jit.trace(fn_tensors, inputs_tensors)
         self.assertExportImport(traced.graph, inputs_tensors)
-        if disable_autodiff_subgraph_inlining:
-            traced.debug_disable_autodiff_subgraph_inlining()
         output = traced(*inputs_tensors)
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)
         return output
@@ -11995,8 +12113,7 @@ def get_script_args(args):
 # create a script function from (name, func_type, output_process_fn),
 # returns a function takes in (args, kwargs) and runs the compiled function and
 # then applies the post process fn to the outputs
-def create_script_fn(self, method_name, func_type, output_process_fn,
-                     disable_autodiff_subgraph_inlining=False):
+def create_script_fn(self, method_name, func_type, output_process_fn):
     def script_fn(*args, **kwargs):
         formals, tensors, actuals = get_script_args(args)
         kwargs_str = ''
@@ -12014,8 +12131,6 @@ def create_script_fn(self, method_name, func_type, output_process_fn,
         script = script_template.format(', '.join(formals), call)
 
         CU = torch.jit.CompilationUnit(script)
-        if disable_autodiff_subgraph_inlining:
-            CU.the_method.debug_disable_autodiff_subgraph_inlining()
         self.assertExportImport(CU.the_method.graph, tensors)
         output = output_process_fn(CU.the_method(*tensors))
         script_fn.last_graph = CU.the_method.graph_for(*tensors)
@@ -12126,11 +12241,11 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
     # TODO: It is better if we can test directly on graphs instead of the current
     # end-to-end fashion.
     def _perform_ad_subgraph_slicing(self, fn, *input_sizes):
-        ge = torch.jit.script(fn)
-        ge.debug_disable_autodiff_subgraph_inlining()
-        inputs = [torch.randn(size, requires_grad=True) for size in input_sizes]
-        ge(*inputs)
-        return ge.graph_for(*inputs)
+        with disable_autodiff_subgraph_inlining():
+            ge = torch.jit.script(fn)
+            inputs = [torch.randn(size, requires_grad=True) for size in input_sizes]
+            ge(*inputs)
+            return ge.graph_for(*inputs)
 
     def assertGraphSize(self, graph, size):
         self.assertEqual(len(list(graph.nodes())), size)
@@ -12142,9 +12257,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             return (x1, x2)
 
         input = torch.rand(6, 10).requires_grad_()
-        func.debug_disable_autodiff_subgraph_inlining()
-        output = func(input)
-        self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
+        with disable_autodiff_subgraph_inlining():
+            output = func(input)
+            self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
 
     def test_simple_merge(self):
         # o --> o
@@ -12727,53 +12842,51 @@ def add_autograd_test(
                     return output_process_fn(output)
 
                 check_types = test_name not in EXCLUDE_TYPE_CHECK
+                with disable_autodiff_subgraph_inlining():
+                    if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
+                        # Test with disable_autodiff_subgraph_inlining, which forces the graph
+                        # to contain DifferentiableGraph nodes whenever possible. This allows us
+                        # to test autodiff; we assume that autograd is correct and use autodiff for backprop
+                        should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
 
-                if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
-                    # Test with disable_autodiff_subgraph_inlining, which forces the graph
-                    # to contain DifferentiableGraph nodes whenever possible. This allows us
-                    # to test autodiff; we assume that autograd is correct and use autodiff for backprop
-                    should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
-                    if test_name not in EXCLUDE_TRACED:
-                        traced_fn = create_traced_fn(self, fn, disable_autodiff_subgraph_inlining=True)
+                        if test_name not in EXCLUDE_TRACED:
+                            traced_fn = create_traced_fn(self, fn)
 
-                        check_against_reference(self, traced_fn,
-                                                fn, (self_variable,) + args_variable, kwargs_variable,
-                                                check_types=check_types)
-                        self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
+                            check_against_reference(self, traced_fn,
+                                                    fn, (self_variable,) + args_variable, kwargs_variable,
+                                                    check_types=check_types)
+                            self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
-                    if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
-                        script_fn = create_script_fn(self, name, 'method', output_process_fn,
-                                                     disable_autodiff_subgraph_inlining=True)
-                        check_against_reference(self, script_fn,
-                                                fn, (self_variable,) + args_variable, kwargs_variable,
-                                                check_types=check_types)
+                        if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
+                            script_fn = create_script_fn(self, name, 'method', output_process_fn)
+                            check_against_reference(self, script_fn,
+                                                    fn, (self_variable,) + args_variable, kwargs_variable,
+                                                    check_types=check_types)
 
-                        self.assertAutodiffNode(script_fn.last_graph,
-                                                should_autodiff_node and test_name not in EXCLUDE_SCRIPT_AD_CHECK,
-                                                autodiff_nodes,
-                                                fusible_nodes)
+                            self.assertAutodiffNode(script_fn.last_graph,
+                                                    should_autodiff_node and test_name not in EXCLUDE_SCRIPT_AD_CHECK,
+                                                    autodiff_nodes,
+                                                    fusible_nodes)
 
-                # functional interface tests
-                if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
-                    def fn(*inputs, **kwargs):
-                        output = getattr(torch, name)(*inputs, **kwargs)
-                        return output_process_fn(output)
+                    # functional interface tests
+                    if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
+                        def fn(*inputs, **kwargs):
+                            output = getattr(torch, name)(*inputs, **kwargs)
+                            return output_process_fn(output)
 
-                    f_args_variable = (self_variable,) + args_variable
-                    f_args_tensor = (self_tensor,) + args_tensor
+                        f_args_variable = (self_variable,) + args_variable
+                        f_args_tensor = (self_tensor,) + args_tensor
 
-                    if not is_inplace and test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self,
-                                                create_traced_fn(self, fn,
-                                                                 disable_autodiff_subgraph_inlining=True),
-                                                fn, f_args_variable, kwargs_variable, check_types=check_types)
+                        if not is_inplace and test_name not in EXCLUDE_TRACED:
+                            check_against_reference(self,
+                                                    create_traced_fn(self, fn),
+                                                    fn, f_args_variable, kwargs_variable, check_types=check_types)
 
-                    if not is_inplace and test_name not in EXCLUDE_SCRIPT:
-                        check_against_reference(self,
-                                                create_script_fn(self, name, 'functional', output_process_fn,
-                                                                 disable_autodiff_subgraph_inlining=True),
-                                                fn, f_args_variable, kwargs_variable,
-                                                check_types=check_types)
+                        if not is_inplace and test_name not in EXCLUDE_SCRIPT:
+                            check_against_reference(self,
+                                                    create_script_fn(self, name, 'functional', output_process_fn),
+                                                    fn, f_args_variable, kwargs_variable,
+                                                    check_types=check_types)
 
                 # alias annotation testing
                 if is_inplace and test_name not in EXCLUDE_SCRIPT:
@@ -12831,11 +12944,11 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
         should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
         if test_name not in EXCLUDE_SCRIPT:
             def run_test():
-                script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn,
-                                             disable_autodiff_subgraph_inlining=should_autodiff_node)
-                check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
-                # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
-                self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
+                with disable_autodiff_subgraph_inlining(should_autodiff_node):
+                    script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn)
+                    check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
+                    # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
+                    self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
             if test_name in EXCLUDE_PYTHON_PRINT:
                 with self.disableModuleHook():

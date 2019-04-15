@@ -1525,8 +1525,4 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
   return work;
 }
 
-std::unordered_map<int, int> ProcessGroupGloo::getGroupRank() {
-  throw std::runtime_error("ProcessGroupGloo does not support getGroupRank");
-}
-
 } // namespace c10d
