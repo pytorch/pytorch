@@ -86,7 +86,8 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
     // be nullptr if you had a tensor of some type, in which case you can
     // skip initializign aten_type(), but TestAutograd.test_type_conversions
     // seems to violate this property (for whatever reason.)
-    if (&var.dispatch_type() == self->aten_type()) {
+    if (&var.dispatch_type() == self->aten_type() &&
+        var.scalar_type() == static_cast<ScalarType>(self->scalar_type)) {
       Py_RETURN_TRUE;
     }
   }
