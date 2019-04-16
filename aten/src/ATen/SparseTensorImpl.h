@@ -189,7 +189,7 @@ public:
    */
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
     auto impl = c10::make_intrusive<SparseTensorImpl>(type_id(), dtype());
-    copy_tensor_metadata(this, impl.get());
+    copy_tensor_metadata(/*src_impl=*/this, /*dest_impl=*/impl.get());
 
     // Sparse-specific fields
     impl->sparse_dim_ = sparse_dim();
@@ -208,7 +208,7 @@ public:
    */
   void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
     AT_ASSERT(impl->is_sparse());
-    copy_tensor_metadata(impl.get(), this);
+    copy_tensor_metadata(/*src_impl=*/impl.get(), /*dest_impl=*/this);
 
     // Sparse-specific fields
     auto sparse_impl = static_cast<SparseTensorImpl*>(impl.get());
