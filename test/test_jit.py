@@ -3298,14 +3298,16 @@ a")
 
         for dtype in [torch.float, torch.double]:
             @torch.jit.script
-            def func(a, b: float):
+            def func(a, b):
+                # type: (Tensor, float) -> Tensor
                 return (a * 2) ** b
 
             a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
             func(a, 1).backward()
 
             @torch.jit.script
-            def func(a: float, b):
+            def func(a, b):
+                # type: (float, Tensor) -> Tensor
                 return a ** (b * 2 + 1)
 
             a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
