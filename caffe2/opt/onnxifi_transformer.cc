@@ -136,17 +136,17 @@ void getWeightsAndInputs(
 
 void collectInputsAndOutputs(
     const OperatorDef& op,
-    std::set<std::string>& inputs,
-    std::set<std::string>& outputs) {
+    std::set<std::string>* inputs,
+    std::set<std::string>* outputs) {
   for (const auto& blob : op.input()) {
-    inputs.emplace(blob);
+    inputs->emplace(blob);
   }
   for (const auto& blob : op.output()) {
-    outputs.emplace(blob);
+    outputs->emplace(blob);
   }
 }
 
-void unrollIfOps(NetDef* net) {
+void fetchInputsToIfOpsSubnet(NetDef* net) {
   NetDef clone(*net);
   clone.clear_op();
   for (auto& op : net->op()) {
@@ -157,13 +157,13 @@ void unrollIfOps(NetDef* net) {
       if (helper.HasSingleArgumentOfType<NetDef>("then_net")) {
         auto then_net = helper.GetSingleArgument<NetDef>("then_net", NetDef());
         for (const auto& nested_op : then_net.op()) {
-          collectInputsAndOutputs(nested_op, subnet_inputs, subnet_outputs);
+          collectInputsAndOutputs(nested_op, &subnet_inputs, &subnet_outputs);
         }
       }
       if (helper.HasSingleArgumentOfType<NetDef>("else_net")) {
         auto else_net = helper.GetSingleArgument<NetDef>("else_net", NetDef());
         for (const auto& nested_op : else_net.op()) {
-          collectInputsAndOutputs(nested_op, subnet_inputs, subnet_outputs);
+          collectInputsAndOutputs(nested_op, &subnet_inputs, &subnet_outputs);
         }
       }
       for (const std::string& blob : subnet_inputs) {
@@ -1023,7 +1023,7 @@ void OnnxifiTransformer::transform(
   onnxifi_op_id_ = 0;
 
   // Unroll If ops
-  unrollIfOps(pred_net);
+  fetchInputsToIfOpsSubnet(pred_net);
 
   std::unordered_set<std::string> weights(
       weight_names.begin(), weight_names.end());
