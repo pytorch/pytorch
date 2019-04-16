@@ -4,6 +4,7 @@ from test_pytorch_common import TestCase, run_tests
 import torch
 import torch.onnx
 from torch.onnx import utils
+from torch.onnx.symbolic import _set_opset_version
 
 import io
 
@@ -33,6 +34,7 @@ class TestUtilityFuns(TestCase):
                 b = torch.transpose(a, 1, 0)
                 return b + x
 
+        _set_opset_version(9)
         x = torch.ones(3, 2)
         graph, _, __ = utils._model_to_graph(TransposeModule(), (x, ), None,
                                              do_constant_folding=True,
@@ -50,6 +52,7 @@ class TestUtilityFuns(TestCase):
                 b = torch.narrow(a, 0, 0, 1)
                 return b + x
 
+        _set_opset_version(9)
         x = torch.ones(1, 3)
         graph, _, __ = utils._model_to_graph(SliceModule(), (x, ), None,
                                              do_constant_folding=True,
@@ -67,6 +70,7 @@ class TestUtilityFuns(TestCase):
                 b = torch.unsqueeze(a, 0)
                 return b + x
 
+        _set_opset_version(9)
         x = torch.ones(1, 2, 3)
         graph, _, __ = utils._model_to_graph(UnsqueezeModule(), (x, ), None,
                                              do_constant_folding=True,
@@ -85,6 +89,7 @@ class TestUtilityFuns(TestCase):
                 c = torch.cat((a, b), 0)
                 return b + c
 
+        _set_opset_version(9)
         x = torch.ones(2, 3)
         graph, _, __ = utils._model_to_graph(ConcatModule(), (x, ), None,
                                              do_constant_folding=True,
@@ -104,6 +109,7 @@ class TestUtilityFuns(TestCase):
             def forward(self, input, initial_state):
                 return self.mygru(input, initial_state)
 
+        _set_opset_version(9)
         input = torch.randn(5, 3, 7)
         h0 = torch.randn(1, 3, 3)
         graph, _, __ = utils._model_to_graph(GruNet(), (input, h0), None,
@@ -123,6 +129,7 @@ class TestUtilityFuns(TestCase):
             def forward(self, A):
                 return torch.matmul(A, torch.transpose(self.B, -1, -2))
 
+        _set_opset_version(9)
         A = torch.randn(2, 3)
         graph, _, __ = utils._model_to_graph(MatMulNet(), (A), None,
                                              do_constant_folding=True)
