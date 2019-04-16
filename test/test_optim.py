@@ -180,6 +180,9 @@ class TestOptim(TestCase):
             self.assertEqual(weight, weight_cuda)
             self.assertEqual(bias, bias_cuda)
 
+        # validate deepcopy() copies all attributes
+        self.assertEqual(set(optimizer.__dict__), set(deepcopy(optimizer).__dict__))
+
     def _test_basic_cases(self, constructor, scheduler_constructors=None,
                           ignore_multidevice=False):
         if scheduler_constructors is None:
