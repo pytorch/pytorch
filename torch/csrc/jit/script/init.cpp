@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/testing/file_check.h>
 
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/irparser.h>
@@ -952,23 +953,6 @@ void initJitScriptBindings(PyObject* module) {
             didFinishEmitModule(self);
           })
       .def(
-          "graph_for",
-          [](py::args args, py::kwargs kwargs) {
-            // [pybind11 varargs] note: old version of pybind11 have a bug that
-            // leaks memory when py::args is mixed with positional arguments
-            // https://github.com/pybind/pybind11/pull/1216
-            // we work around this by not mixing positional arguments with
-            // varargs
-            Module& self = py::cast<Module&>(args[0]);
-            if (self.find_method("forward")) {
-              Method& m = self.get_method("forward");
-              return m.graph_for(createStackForSchema(
-                  m.getSchema(), tuple_slice(std::move(args), 1), kwargs));
-            }
-            throw std::runtime_error(
-                "Attempted to call graph_for on a Module without a compiled forward()");
-          })
-      .def(
           "get_debug_state",
           [](Module& self) {
             if (self.find_method("forward")) {
@@ -1046,14 +1030,6 @@ void initJitScriptBindings(PyObject* module) {
               tensors.push_back(t.value().toTensor());
             }
             return tensors;
-          })
-      .def(
-          "graph_for",
-          [](py::args args, py::kwargs kwargs) {
-            // see: [pybind11 varargs]
-            Method& self = py::cast<Method&>(args[0]);
-            return self.graph_for(createStackForSchema(
-                self.getSchema(), tuple_slice(std::move(args), 1), kwargs));
           })
       .def_property_readonly("schema", &Method::getSchema)
       .def_property_readonly("code", [](Method& self) {
@@ -1136,7 +1112,8 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
   m.def("_jit_clear_class_registry", ClassType::clearRegistry);
   m.def(
-      "_debug_set_autodiff_subgraph_inlining", debugSetAutodiffSubgraphInlining);
+      "_debug_set_autodiff_subgraph_inlining",
+      debugSetAutodiffSubgraphInlining);
   m.def("_propagate_shapes", _propagate_shapes);
   m.def(
       "_propagate_and_assign_input_and_output_shapes",
@@ -1154,6 +1131,10 @@ void initJitScriptBindings(PyObject* module) {
     }
     return std::make_pair(ss.str(), std::move(constants));
   });
+  m.def(
+      "_last_executed_optimized_graph",
+      []() { return lastExecutedOptimizedGraph(); },
+      "Retrieve the optimized graph that was run the last time the graph executor ran on this thread");
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
