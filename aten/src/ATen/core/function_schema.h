@@ -4,6 +4,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/alias_info.h>
+#include <unordered_map>
 
 namespace c10 {
 
@@ -125,6 +126,7 @@ private:
   // arguments are not checked by schema
   const bool is_vararg_;
   const bool is_varret_;
+  void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
 public:
   const std::string& name() const {
@@ -173,9 +175,14 @@ public:
         is_vararg(),
         is_varret());
   }
+
   // Check that inputs have the correct types and appends any missing default
   // values.
-  void checkAndNormalizeInputs(std::vector<IValue>& inputs) const;
+  void checkAndNormalizeInputs(
+      std::vector<IValue>& inputs,
+      const std::unordered_map<std::string, IValue>& kwargs) const;
+
+  void findErrorInKwargs(const std::vector<std::string>& kwargs) const;
 };
 
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
@@ -196,42 +203,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   return out << arg.type()->str() << " " << arg.name() << (arg.default_value() ? "=<default>" : "");
 }
 
-inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
-  // eventually this should look almost identical to python arg parser, but
-  // it is simpler for now to work directly on this schema
-
-  out << schema.name();
-  out << "(";
-
-  bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments().size(); ++i) {
-    if (i > 0) out << ", ";
-    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
-      out << "*, ";
-      seen_kwarg_only = true;
-    }
-    out << schema.arguments()[i];
-  }
-
-  if(schema.is_vararg()) {
-    if(schema.arguments().size() > 0)
-      out << ", ";
-    out << "...";
-  }
-
-  out << ") -> ";
-  if (schema.returns().size() == 1) {
-    out << schema.returns().at(0).type()->str();
-  } else if (schema.returns().size() > 1) {
-    out << "(";
-    for (size_t i = 0; i < schema.returns().size(); ++i) {
-      if (i > 0) out << ", ";
-      out << schema.returns()[i].type()->str();
-    }
-    out << ")";
-  }
-  return out;
-}
+inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema);
 
 inline std::string toString(const FunctionSchema& schema) {
   std::ostringstream str;
@@ -239,46 +211,6 @@ inline std::string toString(const FunctionSchema& schema) {
   return str.str();
 }
 
-inline void FunctionSchema::checkAndNormalizeInputs(std::vector<IValue>& inputs) const {
-  // Do we have more inputs than the schema accepts?
-  AT_CHECK(
-      inputs.size() <= arguments().size(),
-      "Expected at most ",
-      arguments().size(),
-      " argument(s) for operator '",
-      name(),
-      "', but received ",
-      inputs.size(),
-      " argument(s). Declaration: ",
-      *this);
-
-  for (size_t pos = 0; pos < arguments().size(); ++pos) {
-    const auto& argument = arguments()[pos];
-    if (pos < inputs.size()) {
-      if (!isSubvalueOf(inputs[pos], argument.type())) {
-        AT_ERROR(
-            "Expected value of type ",
-            *argument.type(),
-            " for argument '",
-            argument.name(),
-            "' in position ",
-            pos,
-            ", but instead got value of type ",
-            attemptToRecoverType(inputs[pos])->str(),
-            ". Declaration: ",
-            *this);
-      }
-    } else if (argument.default_value()) {
-      inputs.push_back(*argument.default_value());
-    } else {
-      AT_ERROR(
-          name(),
-          "() is missing value for argument '",
-          argument.name(),
-          "'. Declaration: ",
-          *this);
-    }
-  }
-}
-
 } // namespace c10
+
+#include <ATen/core/function_schema_inl.h>
