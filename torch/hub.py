@@ -145,8 +145,8 @@ def _get_cache_or_reload(github, force_reload):
     # Github renames folder repo-v1.x.x to repo-1.x.x
     # We don't know the repo name before downloading the zip file
     # and inspect name from it.
-    # To check if cached repo exists, we need to normalize repo names.
-    repo_dir = os.path.join(hub_dir, repo_name + '_' + branch)
+    # To check if cached repo exists, we need to normalize folder names.
+    repo_dir = os.path.join(hub_dir, '_'.join([repo_owner, repo_name, branch]))
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
 
@@ -204,6 +204,10 @@ def _load_entry_from_hubconf(m, model):
     if not isinstance(model, str):
         raise ValueError('Invalid input: model should be a string of function name')
 
+    # Note that if a missing dependency is imported at top level of hubconf, it will
+    # throw before this function. It's a chicken and egg situation where we have to
+    # load hubconf to know what're the dependencies, but to import hubconf it requires
+    # a missing package. This is fine, Python will throw proper error message for users.
     _check_dependencies(m)
 
     func = _load_attr_from_module(m, model)
@@ -293,7 +297,11 @@ def help(github, model, force_reload=False):
     return entry.__doc__
 
 
-def load(github, model, *args, force_reload=False, **kwargs):
+# Ideally this should be `def load(github, model, *args, forece_reload=False, **kwargs):`,
+# but Python2 complains syntax error for it. We have to skip force_reload in function
+# signature here but detect it in kwargs instead.
+# TODO: fix it after Python2 EOL
+def load(github, model, *args, **kwargs):
     r"""
     Load a model from a github repo, with pretrained weights.
 
@@ -315,6 +323,9 @@ def load(github, model, *args, force_reload=False, **kwargs):
     """
     # Setup hub_dir to save downloaded files
     _setup_hubdir()
+
+    force_reload = kwargs.get('force_reload', False)
+    kwargs.pop('force_reload', None)
 
     repo_dir = _get_cache_or_reload(github, force_reload)
 
