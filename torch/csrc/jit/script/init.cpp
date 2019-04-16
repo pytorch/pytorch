@@ -378,6 +378,8 @@ struct ModuleValue : public SugaredValue {
     if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
       if (py::isinstance<py::function>(attr) &&
           py::hasattr(attr, "_parameter_names_fn")) {
+        // Fetch the names of the parameters in the list so they're in the
+        // right order
         auto fn_self = py::getattr(attr, "__self__");
         auto param_names = py::getattr(attr, "_parameter_names_fn")(fn_self);
 
