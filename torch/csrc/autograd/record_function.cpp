@@ -4,20 +4,21 @@
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {
-bool has_callbacks = false;
 std::vector<RecordFunctionCallback> start_callbacks;
 std::vector<RecordFunctionCallback> end_callbacks;
+size_t callback_needs_inputs = 0;
 thread_local RecordFunction* thread_local_func_ = nullptr;
 }
 
-void pushCallback(RecordFunctionCallback start, RecordFunctionCallback end) {
+void pushCallback(
+    RecordFunctionCallback start,
+    RecordFunctionCallback end,
+    bool needs_inputs) {
   start_callbacks.push_back(start);
   end_callbacks.push_back(end);
-  has_callbacks = true;
-}
-
-void pushCallback(RecordFunctionCallback start) {
-  pushCallback(start, [](const RecordFunction&){});
+  if (callback_needs_inputs > 0 || needs_inputs) {
+    ++callback_needs_inputs;
+  }
 }
 
 void popCallback() {
@@ -26,39 +27,53 @@ void popCallback() {
   }
   start_callbacks.pop_back();
   end_callbacks.pop_back();
-  has_callbacks = !start_callbacks.empty();
+  if (callback_needs_inputs > 0) {
+    --callback_needs_inputs;
+  }
 }
 
-RecordFunction::RecordFunction(Function* fn, GetPackedInputsCallback cb) {
-  if (!has_callbacks) {
-    return;
-  }
-  fn_ = fn;
-  name_ = StringView(fn->name());
-  sequence_nr_ = fn->sequence_nr();
-  inputs_cb_ = cb;
-  processCallbacks();
+bool hasCallbacks() {
+  return !start_callbacks.empty();
 }
 
-RecordFunction::RecordFunction(
-    std::string name, int64_t sequence_nr, GetPackedInputsCallback cb) {
-  if (!has_callbacks) {
-    return;
-  }
-  name_ = StringView(std::move(name));
-  sequence_nr_ = sequence_nr;
-  inputs_cb_ = cb;
-  processCallbacks();
+bool needsInputs() {
+  return callback_needs_inputs > 0;
 }
 
-RecordFunction::RecordFunction(
-    const char* name, int64_t sequence_nr, GetPackedInputsCallback cb) {
-  if (!has_callbacks) {
+void RecordFunction::before(const char* name, int64_t sequence_nr) {
+  if (!hasCallbacks()) {
     return;
   }
+  AT_ASSERT(!initialized_);
   name_ = StringView(name);
   sequence_nr_ = sequence_nr;
-  inputs_cb_ = cb;
+
+  initialized_ = true;
+  processCallbacks();
+}
+
+void RecordFunction::before(std::string name, int64_t sequence_nr) {
+  if (!hasCallbacks()) {
+    return;
+  }
+  AT_ASSERT(!initialized_);
+  name_ = StringView(std::move(name));
+  sequence_nr_ = sequence_nr;
+
+  initialized_ = true;
+  processCallbacks();
+}
+
+void RecordFunction::before(Function* fn, int64_t sequence_nr) {
+  if (!hasCallbacks()) {
+    return;
+  }
+  AT_ASSERT(!initialized_);
+  fn_ = fn;
+  name_ = StringView(fn->name());
+  sequence_nr_ = (sequence_nr >= 0) ? sequence_nr : fn->sequence_nr();
+
+  initialized_ = true;
   processCallbacks();
 }
 
@@ -72,7 +87,7 @@ void RecordFunction::processCallbacks() {
 }
 
 RecordFunction::~RecordFunction() {
-  if (has_callbacks) {
+  if (initialized_) {
     for (const auto& cb : end_callbacks) {
       cb(*this);
     }
