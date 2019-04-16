@@ -336,6 +336,7 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
+  // yf225 TODO: do we actually need to check this?
   AT_ASSERT(!(self.is_variable() && self.requires_grad()) || at::NonVariableTypeMode::is_enabled());  // TODO: use `compute_requires_grad()` after it's moved to ATen
   AT_ASSERT(self.is_sparse());
 
