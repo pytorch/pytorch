@@ -2,7 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
-#include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/utils/ParamUtils.h>
 
 namespace at { namespace native {
 
@@ -41,9 +41,9 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef dilation,
     int64_t groups) {
 
-  auto stride_vec = expand_param_if_needed(stride, 2);
-  auto padding_vec = expand_param_if_needed(padding, 2);
-  auto dilation_vec = expand_param_if_needed(dilation, 2);
+  auto stride_vec = expand_param_if_needed(stride, "stride", 2);
+  auto padding_vec = expand_param_if_needed(padding, "padding", 2);
+  auto dilation_vec = expand_param_if_needed(dilation, "dilation", 2);
 
   ideep::tensor w = itensor_from_mkldnn(self).as_weights();
   w.make_group(groups);
@@ -57,7 +57,7 @@ Tensor mkldnn_reorder_conv2d_weight(
           {dilation_vec.cbegin(), dilation_vec.cend()},
           groups,
           ideep::algorithm::convolution_direct);
-  ideep::tensor&& result(desc);
+  ideep::tensor result(desc);
   ideep::reorder::compute(w, result);
 
   return new_with_itensor_mkldnn(std::move(result), self.options());
