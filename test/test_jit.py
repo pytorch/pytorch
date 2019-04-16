@@ -8124,6 +8124,36 @@ a")
 
         self.assertEqual(8, bar(torch.ones(1, 1)))
 
+    def test_ellipsis_mid(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[2, ..., 0:4, 4:8].size()
+
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_mid_select(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[2, ..., 4, 4, 4:8, 2].size()
+
+        dummy = torch.zeros(8, 8, 8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_start(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[..., 0:4, 4:8].size()
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_end(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[0:4, 2, ...].size()
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
     def test_tracing_slicing(self):
         @_trace(torch.zeros(10))
         def foo_trace(x):
@@ -11272,10 +11302,27 @@ a")
                 ''',
             'archive/attributes.pkl': b'\x80\x02](e.',
             'archive/libs.py': b'op_version_set = 0\n',
-            'archive/model.json': b'{"protoVersion":"2","mainModule":{"torchscriptArena":{"key":"code/archive.py"},"name":"archive","optimize":true},"producerName":"pytorch","producerVersion":"1.0","libs":{"torchscriptArena":{"key":"libs.py"}}}'}
+            'archive/model.json':
+                b'''
+                {
+                   "protoVersion":"2",
+                   "mainModule":{
+                      "torchscriptArena":{
+                         "key":"code/archive.py"
+                      },
+                      "name":"archive",
+                      "optimize":true
+                   },
+                   "producerName":"pytorch",
+                   "producerVersion":"1.0",
+                   "libs":{
+                      "torchscriptArena":{
+                         "key":"libs.py"
+                      }
+                   }
+                }'''}
         with TemporaryFileName() as fname:
             archive_name = os.path.basename(os.path.normpath(fname))
-            print(archive_name)
             with zipfile.ZipFile(fname, 'w') as archive:
                 for k, v in model.items():
                     archive.writestr(k, v)
@@ -11283,7 +11330,7 @@ a")
             with open(fname, "rb") as f:
                 fn = torch.jit.load(f)
 
-        x = torch.zeros(5)
+        x = torch.zeros(10)
         fn(x)
 
     def test_submodule_attribute_serialization(self):

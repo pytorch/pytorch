@@ -2100,7 +2100,7 @@ add_docstr(torch.get_num_threads,
            r"""
 get_num_threads() -> int
 
-Gets the number of OpenMP threads used for parallelizing CPU operations
+Gets the number of threads used for parallelizing CPU operations
 """)
 
 add_docstr(torch.gt,
@@ -4289,7 +4289,10 @@ add_docstr(torch.set_num_threads,
            r"""
 set_num_threads(int)
 
-Sets the number of OpenMP threads used for parallelizing CPU operations
+Sets the number of threads used for parallelizing CPU operations.
+WARNING:
+To ensure that the correct number of threads is used, set_num_threads
+must be called before running eager, JIT or autograd code.
 """)
 
 add_docstr(torch.sigmoid,

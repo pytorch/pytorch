@@ -151,7 +151,6 @@ auto result_ = (${first}).${name}(${args_with_tensor_options});
 
 CONSTRUCTOR = CodeTemplate("""\
 [](Stack & stack) {
-    autograd::profiler::RecordFunction record("${name}");
     ${lvalues}
     ${call}
     drop(stack, ${num_inputs});
