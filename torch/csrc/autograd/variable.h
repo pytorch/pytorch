@@ -165,10 +165,11 @@ struct TORCH_API Variable : public at::Tensor {
 
   // NOTE: Assignment operators to Tensor come for free from the constructors.
 
-  // yf225 TODO: add these back! (or should we?) But use them in as few places as possible!
-  // yf225 TODO: write note that this API's semantics has changed (to be more similar to Python API)
-  // const at::Tensor& data() const noexcept;
-  // at::Tensor& data() noexcept;
+  // NOTE: `var.data()` in C++ has the same semantics as `tensor.data` in Python,
+  // which create a new `Variable` that shares the same storage and tensor metadata
+  // with the original `Variable`, but with a completely new autograd history.
+  const at::Tensor& data() const noexcept;
+  at::Tensor& data() noexcept;
 
   // Gradient Function and Edges
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -584,14 +585,13 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
   return static_cast<const Variable&>(tensor);
 }
 
-// yf225 TODO: clean this up
-// inline const at::Tensor& Variable::data() const noexcept {
-//   return make_variable(*this, /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
-// }
+inline const at::Tensor& Variable::data() const noexcept {
+  return make_variable(*this, /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
+}
 
-// inline at::Tensor& Variable::data() noexcept {
-//   return make_variable(*this, /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
-// }
+inline at::Tensor& Variable::data() noexcept {
+  return make_variable(*this, /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
+}
 
 // Gradient Function and Edges
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
