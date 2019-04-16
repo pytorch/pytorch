@@ -60,10 +60,6 @@ size_t get_num_threads() {
 #endif
 }
 
-} // namespace at
-
-namespace c10 {
-
 PTThreadPool::PTThreadPool(
     std::size_t pool_size,
     int numa_node_id)
@@ -96,4 +92,4 @@ std::shared_ptr<TaskThreadPoolBase> createC10ThreadPool(
 
 C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, createC10ThreadPool);
 
-} // namespace c10
+} // namespace at
