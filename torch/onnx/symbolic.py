@@ -1416,8 +1416,8 @@ def unsqueeze(g, self, dim):
     rank = len(self.type().sizes())
     if dim < 0:
         warnings.warn("ONNX export squeeze with negative axis " + str(dim) +
-                    ". It is converted to " + str(dim + rank) +
-                    " based on input shape at export time.")
+                      ". It is converted to " + str(dim + rank) +
+                      " based on input shape at export time.")
         dim = dim + rank + 1
     return g.op("Unsqueeze", self, axes_i=[dim])
 
