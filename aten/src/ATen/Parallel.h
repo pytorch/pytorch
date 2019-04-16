@@ -25,13 +25,13 @@ inline int64_t divup(int64_t x, int64_t y) {
 }
 
 // Called during new thread initialization
-C10_API void init_num_threads();
+CAFFE2_API void init_num_threads();
 
 // Sets the number of threads to be used in parallel region
-C10_API void set_num_threads(size_t);
+CAFFE2_API void set_num_threads(size_t);
 
 // Returns the number of threads used in parallel region
-C10_API size_t get_num_threads();
+CAFFE2_API size_t get_num_threads();
 
 // Returns the current thread number (starting from 0)
 // in the current parallel region, or 0 in the sequential region
