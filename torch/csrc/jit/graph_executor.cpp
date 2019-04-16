@@ -618,13 +618,14 @@ struct GraphExecutorImpl {
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
+      FuseGraph(opt_graph);
       InlineAutodiffSubgraphs(
           opt_graph,
           autodiff_subgraph_inlining ? autodiffSubgraphInlineThreshold : 1);
     } else {
       runNondiffOptimization(opt_graph);
+      FuseGraph(opt_graph);
     }
-    FuseGraph(opt_graph);
     // Make sure there are no leftovers from any passes.
     EliminateDeadCode(opt_graph);
     return ExecutionPlan(opt_graph);
