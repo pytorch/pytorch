@@ -883,7 +883,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id());
-    copy_tensor_metadata(*this, impl.get());
+    copy_tensor_metadata(this, impl.get());
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;
@@ -895,7 +895,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) {
     set_storage(impl->storage());
-    copy_tensor_metadata(impl.get(), *this);
+    copy_tensor_metadata(impl.get(), this);
     refresh_numel();
     refresh_contiguous();
   }

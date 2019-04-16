@@ -84,7 +84,7 @@ c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
   //AT_ASSERT(false);
   auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
     type_id(), dtype(), device(), opaque_handle_, sizes_);
-  copy_tensor_metadata(*this, impl.get());
+  copy_tensor_metadata(this, impl.get());
 
   // OpaqueTensorImpl-specific fields (none currently).
   return impl;
@@ -95,7 +95,7 @@ c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
    * See NOTE [ TensorImpl Shallow-Copying ] for details.
    */
   void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
-    copy_tensor_metadata(impl.get(), *this);
+    copy_tensor_metadata(impl.get(), this);
 
     // OpaqueTensorImpl-specific fields
     auto opaque_impl = static_cast<OpaqueTensorImpl<OpaqueHandle>*>(impl.get());
