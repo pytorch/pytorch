@@ -125,4 +125,21 @@ Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tenso
 
     return grad_input;
 }
+
+Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool log_input, const bool full, const double eps, const int64_t reduction)
+{
+    Tensor loss;
+    if (log_input) {
+        loss = at::exp(input) - target * input;
+    } else {
+        loss = input - target * at::log(input + eps);
+    }
+    
+    if (full) {
+        auto mask = target > 1;
+        loss[mask] += (target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target))[mask];
+    }
+
+    return apply_loss_reduction(loss, reduction);
+}
 }}  // namespace at::native
