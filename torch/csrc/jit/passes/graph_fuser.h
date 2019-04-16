@@ -19,11 +19,6 @@ constexpr size_t fusion_kernel_args_limit = 128;
 // On Windows will noop, NYI
 TORCH_API void FuseGraph(std::shared_ptr<Graph>& graph);
 
-TORCH_API void CustomFuseGraph(
-    std::shared_ptr<Graph>& graph,
-    std::function<bool(Node*)> fn,
-    Symbol tag);
-
 TORCH_API bool trackSingleGradSumToSizeToOutputs(
     Value* gradSumToSizeOutput,
     std::vector<int64_t>* outputGradSumToSizes);
