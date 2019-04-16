@@ -18,6 +18,10 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
     return quantizer_;
   }
 
+  /**
+   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
+   * See NOTE [ TensorImpl Shallow-Copying ] for details.
+   */
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
     auto impl = c10::make_intrusive<QTensorImpl>(
         Storage(storage()), type_id(), quantizer_);
@@ -30,9 +34,10 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
     return impl;
   }
 
-  // NOTE: `shallow_copy_from()` does not copy the AutogradMeta pointer
-  // because it is unique for each Variable.
-  // yf225 TODO: fix comment regarding version_counter
+  /**
+   * Shallow-copies data from another TensorImpl into this TensorImpl.
+   * See NOTE [ TensorImpl Shallow-Copying ] for details.
+   */
   void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
     auto q_impl = static_cast<QTensorImpl*>(impl.get());
     set_storage(q_impl->storage());

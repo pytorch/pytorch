@@ -844,16 +844,28 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return std::move(autograd_meta_);
   }
 
-  // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
+  // NOTE [ TensorImpl Shallow-Copying ]
+  //
+  // TensorImpl shallow-copying is used when we want to have two Variables share the same storage and tensor
+  // metadata, but each with a different autograd history. Example call sites: `make_variable()` and `set_data()`.
+  //
+  // Functions that shallow-copy a TensorImpl (such as `shallow_copy_and_detach()` and `shallow_copy_from()`)
+  // copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage / storage_offset) 
+  // by value. However, the following fields are not copied:
+  //
   // 1. the AutogradMeta pointer, because it is unique for each Variable.
   // 2. the version counter, because although it lives in TensorImpl, the version counter is managed
-  // by autograd, and the call sites of `shallow_copy_and_detach()` (from autograd) should decide what
+  // by autograd, and the call sites of the shallow-copying functions from autograd should decide what
   // the version counter should be for each new TensorImpl. See NOTE [ Version Counter Sharing ] for details.
   //
-  // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
-  // to this function that need to change the shallow copy's size or storage afterwards, and setting
-  // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
-  // undesirable.
+  // Also note that we don't set `allow_tensor_metadata_change_` to false in the TensorImpl shallow-copying functions,
+  // because there are call sites to these function that need to change the shallow copy's size or storage afterwards,
+  // and setting `allow_tensor_metadata_change_` to false would prevent those changes from happening and is undesirable.
+
+  /**
+   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
+   * See NOTE [ TensorImpl Shallow-Copying ] for details.
+   */
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id());
     impl->set_sizes_and_strides(sizes(), strides());
@@ -865,9 +877,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return impl;
   }
 
-  // NOTE: `shallow_copy_from()` does not copy the AutogradMeta pointer
-  // because it is unique for each Variable.
-  // yf225 TODO: fix comment regarding version_counter
+  /**
+   * Shallow-copies data from another TensorImpl into this TensorImpl.
+   * See NOTE [ TensorImpl Shallow-Copying ] for details.
+   */
   virtual void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) {
     type_id_ = impl->type_id();
     set_storage(impl->storage());
