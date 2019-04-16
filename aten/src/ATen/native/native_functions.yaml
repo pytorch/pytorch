@@ -2463,6 +2463,7 @@
 
 - func: numel(Tensor self) -> int
   variants: function, method
+  requires_tensor: True
   device_guard: False
 
 - func: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
