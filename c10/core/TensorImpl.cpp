@@ -33,22 +33,21 @@ const at::Tensor& TensorImpl::grad() const {
   }
 }
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable)
-    : TensorImpl(std::move(storage), type_id, storage.dtype(), storage.device(), is_variable) {}
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id)
+    : TensorImpl(std::move(storage), type_id, storage.dtype(), storage.device()) {}
 
-TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt, bool is_variable)
-    : TensorImpl({}, type_id, data_type, std::move(device_opt), is_variable) {}
+TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
+    : TensorImpl({}, type_id, data_type, std::move(device_opt)) {}
 
 TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type,
-                       c10::optional<c10::Device> device_opt, bool is_variable)
+                       c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
       sizes_{0},
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt),
-      type_id_(type_id),
-      is_variable_(is_variable) {
+      type_id_(type_id) {
   AT_ASSERT(type_id == UndefinedTensorId() || data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
             device_opt_.has_value());
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create

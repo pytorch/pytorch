@@ -260,7 +260,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
-    grad_fn->src_type = &src.dispatch_type();
+    grad_fn->src_type = &src.type();
     grad_fn->src_device = src.device();
   }
   {
@@ -316,7 +316,8 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
 }
 
 Tensor VariableType::detach(const Tensor & self) const {
-  profiler::RecordFunction profiler("detach");
+  RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
+
   torch::jit::Node* node = nullptr;
   if (jit::tracer::isTracing()) {
     auto& graph = jit::tracer::getTracingState()->graph;
@@ -336,7 +337,8 @@ Tensor VariableType::detach(const Tensor & self) const {
 }
 
 Tensor & VariableType::detach_(Tensor & self) const {
-  profiler::RecordFunction profiler("detach_");
+  RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
+
   torch::jit::Node* node = nullptr;
   if (jit::tracer::isTracing()) {
     auto& graph = jit::tracer::getTracingState()->graph;
