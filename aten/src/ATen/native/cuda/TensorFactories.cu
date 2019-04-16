@@ -327,8 +327,7 @@ Tensor tril_indices_cuda(
 
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
       tril_indices_kernel<<<
-          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()
-        (
+          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
         tensor.data<scalar_t>(),
         trapezoid_row_offset,
         m_first_row,
@@ -404,9 +403,7 @@ Tensor triu_indices_cuda(
 
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
       triu_indices_kernel<<<
-          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()
-        
-        (
+          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
         tensor.data<scalar_t>(),
         std::max<int64_t>(0, offset),
         m_first_row,
