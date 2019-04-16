@@ -89,9 +89,8 @@ struct TORCH_API Variable : public at::Tensor {
   // Factory Functions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  // yf225 TODO: do we still need them to be friend functions?
-  // NOTE: These factory functions have to be friends to access the
-  // Variable's `impl_`. As a side effect, it allows us to keep them in the class.
+  // TODO: These factory functions don't need to be friends anymore. Move them out of
+  // the Variable class.
 
   /// Creates a `Variable` that is a *view* of another (*base*) variable.
   /// The `gradient_edge` is an optional (gradient_function, input_number) pair.
