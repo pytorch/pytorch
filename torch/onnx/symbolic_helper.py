@@ -1,5 +1,5 @@
 import torch
-from torch._C import ListType, OptionalType
+from torch._C import ListType
 import warnings
 
 import torch.onnx
@@ -7,7 +7,7 @@ import torch.onnx
 # ONNX symbolics
 import torch.onnx.utils
 
-from functools import partial, wraps
+from functools import wraps
 
 
 # EDITING THIS FILE? READ THIS FIRST!

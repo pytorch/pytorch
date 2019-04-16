@@ -12,7 +12,6 @@ import re
 from torch._six import container_abcs
 import contextlib
 import numbers
-import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
@@ -192,7 +191,10 @@ def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
         args = (args, )
-
+    from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+    _set_opset_version(_default_onnx_opset_version)
+    import torch.onnx.symbolic_registry as sym_registry
+    sym_registry.register_version('', _default_onnx_opset_version)
     trace, torch_out = torch.jit.get_trace_graph(func, args, _force_outplace=True)
     trace.set_graph(_optimize_graph(trace.graph(), operator_export_type))
     if return_outs:
@@ -676,7 +678,6 @@ def _node_getitem(self, k):
 
 
 def register_custom_op_symbolic(symbolic_name, symbolic_fn):
-    import re
     if not bool(re.match(r"^[a-zA-Z]+[a-zA-Z0-9]*::[a-zA-Z]+[a-zA-Z0-9]*$", symbolic_name)):
         raise RuntimeError("Failed to register operator {}. \
                            The symbolic name must match the format Domain::Name, \
