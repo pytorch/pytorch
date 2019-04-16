@@ -65,7 +65,7 @@ Tensor& mkldnn_avg_pool2d_out(
 namespace at {
 namespace native {
 
-static Tensor ideep_pool2d(
+static Tensor _mkldnn_pool2d(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -73,6 +73,7 @@ static Tensor ideep_pool2d(
     IntArrayRef dilation,
     bool ceil_mode,
     ideep::algorithm algo) {
+  AT_CHECK(!ceil_mode, "Currently Mkldnn Pooling operators do not support ceil_mode.");
   auto kernel_size_vec = expand_param_if_needed(kernel_size, "kernel_size", 2);
   auto stride_vec = expand_param_if_needed(stride, "stride", 2);
   auto padding_vec = expand_param_if_needed(padding, "padding", 2);
@@ -108,7 +109,7 @@ std::tuple<Tensor, Tensor> mkldnn_max_pool2d_with_indices(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  Tensor output = ideep_pool2d(
+  Tensor output = _mkldnn_pool2d(
       input,
       kernel_size,
       stride,
@@ -132,7 +133,7 @@ std::tuple<Tensor&, Tensor&> mkldnn_max_pool2d_with_indices_out(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  output = ideep_pool2d(
+  output = _mkldnn_pool2d(
       input,
       kernel_size,
       stride,
@@ -153,7 +154,7 @@ Tensor mkldnn_avg_pool2d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad) {
-  return ideep_pool2d(
+  return _mkldnn_pool2d(
       input,
       kernel_size,
       stride,
@@ -172,7 +173,7 @@ Tensor& mkldnn_avg_pool2d_out(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad) {
-  output = ideep_pool2d(
+  output = _mkldnn_pool2d(
       input,
       kernel_size,
       stride,
