@@ -104,7 +104,7 @@ void testArgumentSpec() {
    def fn(a, b, c, d, e):
       return a, b, c, d, e
    )JIT")
-                   ->get_method("fn")
+                   ->get_function("fn")
                    .graph();
 
   ArgumentSpecCreator arg_spec_creator(*graph);
