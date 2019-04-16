@@ -16,7 +16,8 @@ static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop);
 void TensorIterator::parallel_reduce(const loop2d_t& loop) {
   AT_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
   int64_t numel = this->numel();
-  if (numel < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 || at::in_parallel_region()) {
+  if (numel < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
+      at::in_parallel_region()) {
     serial_for_each(loop, {0, numel});
   } else if (use_two_pass_reduction(*this)) {
     two_pass_reduction(*this, loop);
@@ -125,7 +126,8 @@ void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop, bool parall
   if (tensor(0).numel() == 1) {
     loop(*this);
   }
-  else if (numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 || at::in_parallel_region() || !parallelize) {
+  else if (numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
+      at::in_parallel_region() || !parallelize) {
     auto reduce_dims = num_reduce_dims();
 
     auto non_reduced_shape = shape.slice(reduce_dims, shape.size() - reduce_dims);
