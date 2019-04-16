@@ -557,6 +557,14 @@ def squeeze(g, self, dim=None):
                 dims.append(i)
     else:
         dims = [_get_const(dim, 'i', 'dim')]
+        # Handle negative dims
+        rank = len(self.type().sizes())
+        for i, dim in enumerate(dims):
+            if dim < 0:
+                warnings.warn("ONNX export squeeze with negative axis " + str(dim) +
+                              ". It is converted to " + str(dim + rank) +
+                              " based on input shape at export time.")
+                dims[i] += rank
     return g.op("Squeeze", self, axes_i=dims)
 
 
@@ -1404,6 +1412,13 @@ def alias(g, self):
 
 @parse_args('v', 'i')
 def unsqueeze(g, self, dim):
+    # Handle negative dims
+    rank = len(self.type().sizes())
+    if dim < 0:
+        warnings.warn("ONNX export squeeze with negative axis " + str(dim) +
+                    ". It is converted to " + str(dim + rank) +
+                    " based on input shape at export time.")
+        dim = dim + rank + 1
     return g.op("Unsqueeze", self, axes_i=[dim])
 
 
