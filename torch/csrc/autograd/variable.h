@@ -68,7 +68,6 @@ struct Function;
 ///
 ///                               Interface
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// yf225 TODO: fix these comments
 /// `Variable` inherits from `Tensor` and thus its API is a superset of that of
 /// `Tensor`. This means you can perform all the usual mathematical and other
 /// operations you can perform on `Tensor`s also on `Variable`s. Furthermore,
