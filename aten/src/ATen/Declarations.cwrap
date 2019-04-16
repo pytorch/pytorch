@@ -85,6 +85,22 @@
       - THTensor* value
 ]]
 [[
+  name: _th_masked_fill_bool_
+  cname: maskedFillBool
+  variants: function
+  return: self
+  options:
+    - arguments:
+      - arg: THTensor* self
+      - THBoolTensor* mask
+      - real value
+    - zero_dim_tensor_only: True
+      arguments:
+      - arg: THTensor* self
+      - THBoolTensor* mask
+      - THTensor* value
+]]
+[[
   name: _th_masked_scatter_
   cname: maskedCopy
   variants: function
@@ -93,6 +109,16 @@
     - arg: THTensor* self
       broadcast: mask inplace fallback types:Byte
     - THByteTensor* mask
+    - THTensor* source
+]]
+[[
+  name: _th_masked_scatter_bool_
+  cname: maskedCopyBool
+  variants: function
+  return: self
+  arguments:
+    - arg: THTensor* self
+    - THBoolTensor* mask
     - THTensor* source
 ]]
 [[
@@ -107,6 +133,18 @@
     - arg: THTensor* self
       broadcast: mask fallback types:Byte
     - THByteTensor* mask
+]]
+[[
+  name: _th_masked_select_bool
+  cname: maskedSelectBool
+  variants:
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - arg: THTensor* self
+    - THBoolTensor* mask
 ]]
 [[
   name: _th_nonzero
