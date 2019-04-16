@@ -65,13 +65,12 @@ class SubgraphSlicer {
         // redundant prim::Constants). Run CSE to clean them up.
         EliminateCommonSubexpression(curNode->g(attr::Subgraph));
 
-        // If no inputs requrie grad, we don't need the DifferentiableGraph
+        // If no inputs require grad, we don't need the DifferentiableGraph
         if (!std::any_of(
                 curNode->inputs().begin(),
                 curNode->inputs().end(),
                 [](const Value* input) {
-                  return input->type()->isSubtypeOf(TensorType::get()) &&
-                      input->type()->requires_grad();
+                  return input->type()->requires_grad();
                 })) {
           SubgraphUtils::unmergeSubgraph(curNode);
         } else if (!inlineIfTooSmall(curNode)) {
