@@ -580,7 +580,10 @@ const std::vector<std::string> functions = {
         def pow_0(self,
                   exponent: float):
             def backward(grad_output):
-                grad_self = torch.where(torch.tensor(exponent == 0.0), torch.zeros_like(self), grad_output * exponent * torch.pow(self, exponent - 1))
+                if exponent == 0.0:
+                    grad_self = torch.zeros_like(self)
+                else:
+                    grad_self = grad_output * exponent * torch.pow(self, exponent - 1)
                 return grad_self, None
 
             return torch.pow(self, exponent), backward
@@ -597,7 +600,7 @@ const std::vector<std::string> functions = {
         def pow_2(self: float,
                   exponent):
             def backward(grad_output):
-                grad_exponent = grad_output * torch.pow(self, exponent) * torch.log(torch.tensor(self))
+                grad_exponent = grad_output * torch.pow(self, exponent) * torch.log(self)
                 return None, grad_exponent
 
             return torch.pow(self, exponent), backward
@@ -1382,7 +1385,7 @@ c10::optional<GradientPair> gradientInfoForSchema(
     //
     c10::ReplaceAll(schema_str, "Scalar", "float");
     // For debugging AD change:
-    // std::cout << "Looking for " << schema_str << std::endl;
+    std::cout << "Looking for " << schema_str << std::endl;
 
     auto sym_script_it = schema_to_graphs.find(schema_str);
 

@@ -341,6 +341,7 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   at::Device device = inputs.at(0).device();
   for (const auto& t : at::TensorList(inputs).slice(1)) {
     if (t.device() != device) {
+      std::cout << "device mismatch\n";
       return false;
     }
   }
