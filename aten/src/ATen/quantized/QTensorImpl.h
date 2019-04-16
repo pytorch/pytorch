@@ -30,7 +30,21 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
     return impl;
   }
 
-  // yf225 TODO: add shallow_copy_from here!
+  // NOTE: `shallow_copy_from()` does not copy the AutogradMeta pointer
+  // because it is unique for each Variable.
+  // yf225 TODO: fix comment regarding version_counter
+  void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
+    auto q_impl = static_cast<QTensorImpl*>(impl.get());
+    set_storage(q_impl->storage());
+    type_id_ = q_impl->type_id();
+    quantizer_ = q_impl->quantizer();
+    set_sizes_and_strides(q_impl->sizes(), q_impl->strides());
+    set_storage_offset(q_impl->storage_offset());
+    is_wrapped_number_ = q_impl->is_wrapped_number_;
+    reserved_ = q_impl->reserved_;
+    refresh_numel();
+    refresh_contiguous();
+  }
 
  private:
   QuantizerPtr quantizer_;
