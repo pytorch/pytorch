@@ -36,8 +36,8 @@ const std::unordered_map<std::string, at::ScalarType> attype_names = {
   {"Bool", at::kBool},
 };
 
-std::unordered_map<at::Type*, PyTypeObject*> attype_to_py_storage_type;
-std::unordered_map<PyTypeObject*, at::Type*> py_storage_type_to_attype;
+std::unordered_map<at::DeprecatedTypeProperties*, PyTypeObject*> attype_to_py_storage_type;
+std::unordered_map<PyTypeObject*, at::DeprecatedTypeProperties*> py_storage_type_to_attype;
 
 THPDtype* dtype_registry
   [static_cast<int>(at::ScalarType::NumOptions)] = {};
@@ -61,19 +61,19 @@ at::Backend get_backend(bool is_cuda, bool is_sparse) {
   }
 }
 
-at::Type* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
+at::DeprecatedTypeProperties* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
   if (is_sparse && name == "Half") {
     return nullptr;
   }
   at::Backend backend = get_backend(is_cuda, is_sparse);
-  return &at::getNonVariableType(backend, attype_names.at(name));
+  return &at::getNonVariableDeprecatedTypeProperties(backend, attype_names.at(name));
 }
 
 PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
   at::ScalarType scalarType = at::typeMetaToScalarType(storage.dtype());
   at::TensorOptions options = at::TensorOptions(storage.device_type()).dtype(scalarType);
-  auto attype = at::globalContext().getNonVariableTypeOpt(
+  auto attype = &at::getNonVariableDeprecatedTypeProperties(
       at::tensorTypeIdToBackend(at::computeTensorTypeId(options)),
       scalarType);
   auto it = attype_to_py_storage_type.find(attype);
@@ -101,7 +101,7 @@ void registerLayoutObject(THPLayout *layout, at::Backend backend) {
   layout_registry[static_cast<int>(backend)] = layout;
 }
 
-at::Type& getVariableType(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device) {
+at::Type& z(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device) {
   const at::Backend backend = get_backend(device.type() == at::Device::Type::CUDA, layout.layout == at::Layout::Sparse);
   if (device.is_cuda()) {
     torch::utils::cuda_lazy_init();
