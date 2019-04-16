@@ -4,29 +4,11 @@ import torch
 import torch.jit
 import numpy as np
 import unittest
-from common_utils import TestCase, run_tests
+from common_utils import TestCase, run_tests, skipIfNotRegistered
 
 
 def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
-
-
-def skipIfNotRegistered(op_name, message):
-    """Wrap the decorator to hide the import of the `core`.
-
-    Args:
-        op_name: Check if this op is registered in `core._REGISTERED_OPERATORS`.
-        message: mesasge to fail with.
-    Returns:
-        unittest.skip decorator
-    """
-    try:
-        from caffe2.python import core
-        skipper = unittest.skipIf(op_name not in core._REGISTERED_OPERATORS,
-                                  message)
-    except ImportError:
-        skipper = unittest.skip("Cannot import `caffe2.python.core`")
-    return skipper
 
 
 @skipIfNotRegistered("Relu_ENGINE_DNNLOWP",
