@@ -11308,6 +11308,15 @@ a")
         imported_m = self.getExportImportCopy(m)
         self.assertEqual(m(), imported_m())
 
+    def test_string_len(self):
+        def fn(x):
+            # type: (str) -> int
+            return len(x)
+
+        self.checkScript(fn, ("",))
+        self.checkScript(fn, ("h",))
+        self.checkScript(fn, ("hello",))
+
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_attribute_unpickling(self):
         class M(torch.jit.ScriptModule):
