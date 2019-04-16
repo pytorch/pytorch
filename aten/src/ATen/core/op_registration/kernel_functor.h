@@ -29,7 +29,7 @@ namespace detail {
   // cast it to the type that should be passed to the kernel function.
   // Examples: If the IValue contains a plain type like an int, return that.
   //           If the IValue contains an IntList, return it as ArrayRef<int>.
-  // TODO Should we move the IValue so we can avoid copying Tensor objects?
+  // TODO Should we move the IValue so we can avoid bumping the Tensor refcount?
   template<class T>
   struct ivalue_to_arg_type {
     static T call(const IValue& v) {
