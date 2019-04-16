@@ -26,7 +26,7 @@ namespace c10 {
  * or "SparseCUDA"; backend in torch.backends is something like "MKL" or
  * "CUDNN".
  */
-enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, Undefined, MkldnnCPU, NumOptions };
+enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, QuantizedCPU, Undefined, MkldnnCPU, NumOptions };
 
 static inline Backend toSparse(Backend b) {
   switch (b) {
@@ -65,6 +65,8 @@ static inline Backend toDense(Backend b) {
       return Backend::CUDA;
     case Backend::SparseHIP:
       return Backend::HIP;
+    case Backend::QuantizedCPU:
+      return Backend::QuantizedCPU;
     default:
       throw std::runtime_error("Unknown backend");
   }
@@ -89,6 +91,8 @@ static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
     return Backend::SparseHIP;
   } else if (t == MkldnnCPUTensorId()) {
     return Backend::MkldnnCPU;
+  } else if (t == QuantizedCPUTensorId()) {
+    return Backend::QuantizedCPU;
   } else if (t == UndefinedTensorId()) {
     return Backend::Undefined;
   } else {
@@ -116,6 +120,8 @@ static inline TensorTypeId backendToTensorTypeId(Backend b) {
       return SparseHIPTensorId();
     case Backend::MkldnnCPU:
       return MkldnnCPUTensorId();
+    case Backend::QuantizedCPU:
+      return QuantizedCPUTensorId();
     case Backend::Undefined:
       return UndefinedTensorId();
     default:
@@ -142,6 +148,7 @@ static inline DeviceType backendToDeviceType(Backend b) {
     case Backend::SparseHIP:
       return DeviceType::HIP;
     case Backend::MkldnnCPU:
+    case Backend::QuantizedCPU:
       return DeviceType::CPU;
     case Backend::Undefined:
       AT_ERROR("Undefined backend is not a valid device type");
@@ -169,6 +176,8 @@ static inline Backend backendToCPU(Backend b) {
       return Backend::CPU;
     case Backend::MkldnnCPU:
       return Backend::MkldnnCPU;
+    case Backend::QuantizedCPU:
+      return Backend::QuantizedCPU;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
@@ -240,6 +249,8 @@ static inline const char* toString(Backend b) {
       return "SparseHIP";
     case Backend::MkldnnCPU:
       return "MkldnnCPU";
+    case Backend::QuantizedCPU:
+      return "QuantizedCPU";
     default:
       return "UNKNOWN_BACKEND";
   }

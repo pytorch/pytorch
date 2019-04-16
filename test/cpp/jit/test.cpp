@@ -41,6 +41,7 @@ namespace jit {
   _(CreateAutodiffSubgraphs)       \
   _(CustomOperators)               \
   _(CustomOperatorAliasing)        \
+  _(IValueKWargs)                  \
   _(CustomFusion)                  \
   _(Differentiate)                 \
   _(DifferentiateWithRequiresGrad) \
