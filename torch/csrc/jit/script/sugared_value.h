@@ -29,7 +29,6 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // what can we do with this thing?
   // use it as a value e.g.  `this + 4`
   virtual Value* asValue(const SourceRange& loc, Function& m) {
-    AT_ASSERT(false);
     throw ErrorReport(loc) << kind() << " cannot be used as a value";
   }
 

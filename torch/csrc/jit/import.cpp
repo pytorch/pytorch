@@ -4,6 +4,7 @@
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/import_export_helpers.h>
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
@@ -159,15 +160,21 @@ void ScriptModuleDeserializer::loadAttributeTable() {
 
 void ScriptModuleDeserializer::loadLibs(torch::ModelDef* model_def) {
   const auto lib_def = model_def->libs();
+  if (model_def->proto_version() <= 2) {
+    // Avoid tripping assert for old models. No models of this version actually
+    // use libs, so we don't need to actually load them in.
+    return;
+  }
   for (const auto lib : lib_def) {
-    AT_ASSERT(lib.has_torchscript_arena()) {
-      at::DataPtr data;
-      size_t size;
-      std::tie(data, size) = reader_.getRecord(lib.torchscript_arena().key());
-      std::string data_str(static_cast<const char*>(data.get()), size);
-      script::import_libs(
-          lib.torchscript_arena().key(), data_str, tensor_table_);
-    }
+    AT_ASSERT(lib.has_torchscript_arena());
+    at::DataPtr data;
+    size_t size;
+    std::tie(data, size) = reader_.getRecord(lib.torchscript_arena().key());
+    std::string data_str(static_cast<const char*>(data.get()), size);
+
+    const std::string class_qualifier =
+        ImportExportHelpers::pathToQualifier(lib.torchscript_arena().key());
+    script::import_libs(class_qualifier, data_str, tensor_table_);
   }
 }
 

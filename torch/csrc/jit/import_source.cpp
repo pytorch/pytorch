@@ -164,30 +164,16 @@ void import_methods(
     v->setType(mod->module_object()->type());
     return std::make_shared<SimpleValue>(v);
   };
-  mod->module_object()->type()->compilation_unit().define(definitions, resolvers, self);
+  mod->module_object()->type()->compilation_unit().define(
+      definitions, resolvers, self);
 }
 
 void import_libs(
-    const std::string& class_path,
+    const std::string& class_qualifier,
     const std::string& src,
     const std::vector<at::Tensor>& constant_table) {
   Parser p(src);
   const size_t version = parseVersionNumber(p.lexer());
-
-  // strip the "py" from the class path
-  const auto end = class_path.rfind("py");
-  AT_ASSERT(end != std::string::npos);
-
-  static const std::string lib_prefix = "libs/";
-  size_t libs_idx = class_path.find(lib_prefix);
-  size_t start = 0;
-  if (libs_idx == 0) {
-    // strip libs/ from starting path
-    AT_ASSERT(class_path.size() > lib_prefix.size());
-    start = lib_prefix.size();
-  }
-
-  const auto class_qualifier = class_path.substr(start, end - start);
 
   while (p.lexer().cur().kind != TK_EOF) {
     auto imports = parseImports(p.lexer());

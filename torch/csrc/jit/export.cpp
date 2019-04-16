@@ -7,6 +7,7 @@
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/import_export_helpers.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pickler.h>
@@ -281,8 +282,8 @@ void EncoderBase::EncodeBlock(
     if (is_raw_export) {
       AT_ASSERT(!node->kind().is_onnx());
     } else if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-      AT_ASSERT(!node->kind().is_aten() &&
-          !node->kind().is_prim() &&
+      AT_ASSERT(
+          !node->kind().is_aten() && !node->kind().is_prim() &&
           !node->kind().is_attr());
     }
     p_n->set_op_type(node->kind().toUnqualString());
@@ -596,13 +597,8 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
     const auto& class_src = item.value();
 
     // For the type, foo.bar.Baz
-    std::string class_path = class_type->qualifier();
-    std::replace_if(
-        class_path.begin(),
-        class_path.end(),
-        [](char c) { return c == '.'; },
-        '/');
-    std::string filename = "libs/" + class_path + ".py";
+    const std::string filename =
+        ImportExportHelpers::qualifierToPath(class_type->qualifier());
     // End state: filename is "foo/bar.py", in which we will define a class
     // named Baz
     fileToSrc[filename] += class_src;
