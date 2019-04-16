@@ -17,6 +17,8 @@ new_common_args = parse_kwargs("""
         Default: if None, same :class:`torch.device` as this tensor.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
+    pin_memory (bool, optional): If set, returned tensor would be allocated in
+        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 add_docstr_all('new_tensor',
@@ -486,27 +488,6 @@ bmm(batch2) -> Tensor
 See :func:`torch.bmm`
 """)
 
-add_docstr_all('btrifact',
-               r"""
-btrifact(pivot=True) -> (Tensor, Tensor)
-
-See :func:`torch.btrifact`
-""")
-
-add_docstr_all('btrifact_with_info',
-               r"""
-btrifact_with_info(pivot=True) -> (Tensor, Tensor, Tensor)
-
-See :func:`torch.btrifact_with_info`
-""")
-
-add_docstr_all('btrisolve',
-               r"""
-btrisolve(LU_data, LU_pivots) -> Tensor
-
-See :func:`torch.btrisolve`
-""")
-
 add_docstr_all('cauchy_',
                r"""
 cauchy_(median=0, sigma=1, *, generator=None) -> Tensor
@@ -681,6 +662,13 @@ add_docstr_all('data_ptr',
 data_ptr() -> int
 
 Returns the address of the first element of :attr:`self` tensor.
+""")
+
+add_docstr_all('dequantize',
+               r"""
+dequantize() -> Tensor
+
+Given a quantized Tensor, dequantize it and return the dequantized float Tensor.
 """)
 
 add_docstr_all('dense_dim',
@@ -1019,13 +1007,6 @@ ger(vec2) -> Tensor
 See :func:`torch.ger`
 """)
 
-add_docstr_all('solve',
-               r"""
-solve(A) -> Tensor, Tensor
-
-See :func:`torch.solve`
-""")
-
 add_docstr_all('indices',
                r"""
 indices() -> Tensor
@@ -1203,6 +1184,13 @@ Args:
     accumulate (bool): whether to accumulate into self
 """)
 
+add_docstr_all('index_put',
+               r"""
+index_put(indices, value, accumulate=False) -> Tensor
+
+Out-place version of :meth:`~Tensor.index_put_`
+""")
+
 add_docstr_all('index_select',
                r"""
 index_select(dim, index) -> Tensor
@@ -1268,6 +1256,13 @@ add_docstr_all('is_floating_point',
 is_floating_point() -> bool
 
 Returns True if the data type of :attr:`self` is a floating point data type.
+""")
+
+add_docstr_all('is_signed',
+               r"""
+is_signed() -> bool
+
+Returns True if the data type of :attr:`self` is a signed data type.
 """)
 
 add_docstr_all('is_set_to',
@@ -1419,6 +1414,13 @@ lt_(other) -> Tensor
 In-place version of :meth:`~Tensor.lt`
 """)
 
+add_docstr_all('lu_solve',
+               r"""
+lu_solve(LU_data, LU_pivots) -> Tensor
+
+See :func:`torch.lu_solve`
+""")
+
 add_docstr_all('map_',
                r"""
 map_(tensor, callable)
@@ -1487,6 +1489,13 @@ max(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 See :func:`torch.max`
 """)
 
+add_docstr_all('argmax',
+               r"""
+argmax(dim=None, keepdim=False) -> LongTensor
+
+See :func:`torch.argmax`
+""")
+
 add_docstr_all('mean',
                r"""
 mean(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
@@ -1506,6 +1515,13 @@ add_docstr_all('min',
 min(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 
 See :func:`torch.min`
+""")
+
+add_docstr_all('argmin',
+               r"""
+argmin(dim=None, keepdim=False) -> LongTensor
+
+See :func:`torch.argmin`
 """)
 
 add_docstr_all('mm',
@@ -1766,6 +1782,31 @@ qr() -> (Tensor, Tensor)
 See :func:`torch.qr`
 """)
 
+add_docstr_all('quantize_linear',
+               r"""
+quantize_linear(scale, zero_point) -> Tensor
+
+Quantize a float Tensor using affine quantization scheme with given scale and
+zero_point.
+returns the quantized Tensor.
+""")
+
+add_docstr_all('q_scale',
+               r"""
+q_scale() -> float
+
+Given a Tensor quantized by linear(affine) quantization,
+returns the scale of the underlying quantizer().
+""")
+
+add_docstr_all('q_zero_point',
+               r"""
+q_zero_point() -> int
+
+Given a Tensor quantized by linear(affine) quantization,
+returns the zero_point of the underlying quantizer().
+""")
+
 add_docstr_all('random_',
                r"""
 random_(from=0, to=None, *, generator=None) -> Tensor
@@ -1834,6 +1875,7 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
     `numpy.repeat <https://docs.scipy.org/doc/numpy/reference/generated/numpy.repeat.html>`_,
     but is more similar to
     `numpy.tile <https://docs.scipy.org/doc/numpy/reference/generated/numpy.tile.html>`_.
+    For the operator similar to `numpy.repeat`, see :func:`torch.repeat_interleave`.
 
 Args:
     sizes (torch.Size or int...): The number of times to repeat this tensor along each
@@ -1849,6 +1891,13 @@ Example::
             [ 1,  2,  3,  1,  2,  3]])
     >>> x.repeat(4, 2, 1).size()
     torch.Size([4, 2, 3])
+""")
+
+add_docstr_all('repeat_interleave',
+               r"""
+repeat_interleave(repeats, dim=None) -> Tensor
+
+See :func:`torch.repeat_interleave`.
 """)
 
 add_docstr_all('requires_grad_',
@@ -2200,6 +2249,13 @@ Example::
 
 """)
 
+add_docstr_all('solve',
+               r"""
+solve(A) -> Tensor, Tensor
+
+See :func:`torch.solve`
+""")
+
 add_docstr_all('sort',
                r"""
 sort(dim=-1, descending=False) -> (Tensor, LongTensor)
@@ -2264,7 +2320,7 @@ add_docstr_all('storage',
                r"""
 storage() -> torch.Storage
 
-Returns the underlying storage
+Returns the underlying storage.
 """)
 
 add_docstr_all('storage_offset',
@@ -2282,6 +2338,13 @@ Example::
     >>> x[3:].storage_offset()
     3
 
+""")
+
+add_docstr_all('storage_type',
+               r"""
+storage_type() -> type
+
+Returns the type of the underlying storage.
 """)
 
 add_docstr_all('stride',
@@ -2491,6 +2554,13 @@ take(indices) -> Tensor
 See :func:`torch.take`
 """)
 
+add_docstr_all('tan',
+               r"""
+tan() -> Tensor
+
+See :func:`torch.tan`
+""")
+
 add_docstr_all('tan_',
                r"""
 tan_() -> Tensor
@@ -2566,6 +2636,13 @@ Example::
            size=(3, 3), nnz=1, layout=torch.sparse_coo)
 """)
 
+add_docstr_all('to_mkldnn',
+               r"""
+to_mkldnn() -> Tensor
+Returns a copy of the tensor in ``torch.mkldnn`` layout.
+
+""")
+
 add_docstr_all('trace',
                r"""
 trace() -> Tensor
@@ -2585,6 +2662,13 @@ add_docstr_all('transpose_',
 transpose_(dim0, dim1) -> Tensor
 
 In-place version of :meth:`~Tensor.transpose`
+""")
+
+add_docstr_all('triangular_solve',
+               r"""
+triangular_solve(A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+
+See :func:`torch.triangular_solve`
 """)
 
 add_docstr_all('tril',
@@ -2613,13 +2697,6 @@ add_docstr_all('triu_',
 triu_(k=0) -> Tensor
 
 In-place version of :meth:`~Tensor.triu`
-""")
-
-add_docstr_all('trtrs',
-               r"""
-trtrs(A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
-
-See :func:`torch.trtrs`
 """)
 
 add_docstr_all('trunc',
@@ -2670,21 +2747,21 @@ Args:
 
 add_docstr_all('unfold',
                r"""
-unfold(dim, size, step) -> Tensor
+unfold(dimension, size, step) -> Tensor
 
 Returns a tensor which contains all slices of size :attr:`size` from
-:attr:`self` tensor in the dimension :attr:`dim`.
+:attr:`self` tensor in the dimension :attr:`dimension`.
 
 Step between two slices is given by :attr:`step`.
 
-If `sizedim` is the size of dimension :attr:`dim` for :attr:`self`, the size of
-dimension :attr:`dim` in the returned tensor will be
+If `sizedim` is the size of dimension :attr:`dimension` for :attr:`self`, the size of
+dimension :attr:`dimension` in the returned tensor will be
 `(sizedim - size) / step + 1`.
 
 An additional dimension of size :attr:`size` is appended in the returned tensor.
 
 Args:
-    dim (int): dimension in which unfolding happens
+    dimension (int): dimension in which unfolding happens
     size (int): the size of each slice that is unfolded
     step (int): the step between each slice
 
@@ -2966,6 +3043,13 @@ unbind(dim=0) -> seq
 See :func:`torch.unbind`
 """)
 
+add_docstr_all('pin_memory',
+               r"""
+pin_memory() -> Tensor
+
+Copies the tensor to pinned memory, if it's not already pinned.
+""")
+
 add_docstr_all('pinverse',
                r"""
 pinverse() -> Tensor
@@ -3076,7 +3160,7 @@ Example::
     >>> f = torch.rand(10, requires_grad=True, device="cuda")
     >>> f.is_leaf
     True
-    # f requires grad, has not operation creating it
+    # f requires grad, has no operation creating it
 
 
 """)

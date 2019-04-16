@@ -208,7 +208,10 @@ void testDifferentiateWithRequiresGrad() {
       at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);
   auto b_var = autograd::make_variable(
       at::empty_strided(2, 2, at::CPU(at::kFloat).options()), false);
-  setInputTypes(*graph, ArgumentSpec(true, {a_var, b_var}, 2));
+
+  ArgumentSpecCreator asc(*graph);
+  asc.setInputTypes(*graph, asc.create(true, {a_var, b_var}));
+
   PropagateInputShapes(graph);
   PropagateRequiresGrad(graph);
 

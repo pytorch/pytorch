@@ -135,10 +135,6 @@ THPLayout* getLayout(at::Backend backend) {
   return layout;
 }
 
-at::Device::Type getDeviceType(const at::Type& type) {
-  return type.is_cuda() ? at::Device::Type::CUDA : at::Device::Type::CPU;
-}
-
 PyObject* createPyObject(const at::Storage& storage)
 {
   auto type = getPyTypeObject(storage);

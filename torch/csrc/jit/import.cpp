@@ -229,7 +229,7 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
             .set_(storage_it->second, tensor_proto.offset(), dims, strides);
   } else if (device.type() == at::DeviceType::CUDA) {
     result =
-        at::empty({0}, at::CUDA(type).options())
+        at::empty({0}, c10::TensorOptions(type).device(storage_it->second.device()))
             .set_(storage_it->second, tensor_proto.offset(), dims, strides);
   }
   AT_ASSERT(result.defined());
@@ -258,6 +258,7 @@ void ScriptModuleDeserializer::convertModule(
       module->register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
     }
   }
+  script::ScriptTypeParser typeParser;
   for (int i = 0; i < module_def.attributes_size(); ++i) {
     const torch::AttributeDef& attr_def = module_def.attributes(i);
     if (module->find_buffer(attr_def.name())) {
@@ -267,7 +268,7 @@ void ScriptModuleDeserializer::convertModule(
 
     module->register_attribute(
       attr_def.name(),
-      script::parseType(attr_def.type()),
+      typeParser.parseType(attr_def.type()),
       attribute_table_.at(attr_def.id())
     );
   }

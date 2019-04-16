@@ -5,6 +5,41 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <TH/THGenerator.hpp>
 
+#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)                                \
+  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value) \
+  { \
+    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);                \
+    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,                        \
+                     *r__data = (*t_data OP value) ? 1 : 0;); \
+  }                                                                        \
+  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)        \
+  {                                        \
+    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL);                \
+    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,                                        \
+                     *r__data = (*t_data OP value) ? 1 : 0;); \
+  }                                                                        \
+  void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
+  {                                        \
+    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                \
+    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,                \
+                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
+  }                                                                        \
+  void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
+  {                                \
+    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                \
+    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,                        \
+                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
+  }                                                                        \
+
+TENSOR_IMPLEMENT_LOGICAL(lt,<)
+TENSOR_IMPLEMENT_LOGICAL(gt,>)
+TENSOR_IMPLEMENT_LOGICAL(le,<=)
+TENSOR_IMPLEMENT_LOGICAL(ge,>=)
+TENSOR_IMPLEMENT_LOGICAL(eq,==)
+TENSOR_IMPLEMENT_LOGICAL(ne,!=)
+
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
 {
   int64_t batch;
@@ -390,53 +425,6 @@ accreal THTensor_(trace)(THTensor *t)
   return sum;
 }
 
-void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
-{
-  int i;
-
-  if(THTensor_(nDimensionLegacyNoScalars)(a) != THTensor_(nDimensionLegacyNoScalars)(b))
-    THError("inconsistent tensor dimension %dD, %dD",
-        THTensor_(nDimensionLegacyNoScalars)(a), THTensor_(nDimensionLegacyNoScalars)(b));
-
-  for(i = 0; i < a->dim(); i++)
-  {
-    if(THTensor_(size)(a, i) != THTensor_(size)(b, i)) {
-        THDescBuff ba = THTensor_(sizeDesc)(a);
-        THDescBuff bb = THTensor_(sizeDesc)(b);
-        THError("inconsistent tensor sizes %s, %s", ba.str, bb.str);
-    }
-  }
-
-  if(dimension < 0)
-  {
-    for(i = 0; i < THTensor_(nDimensionLegacyNoScalars)(a); i++)
-    {
-      if(THTensor_sizeLegacyNoScalars(a, i) == 3)
-      {
-        dimension = i;
-        break;
-      }
-    }
-    if(dimension < 0) {
-      THDescBuff ba = THTensor_(sizeDesc)(a);
-      THError("no dimension of size 3 in a: %s", ba.str);
-    }
-  }
-
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(a), 3, "dimension %d out of range",
-      dimension);
-  THArgCheck(THTensor_sizeLegacyNoScalars(a, dimension) == 3, 3, "dimension %d does not have size 3",
-      dimension);
-
-  THTensor_(resizeAs)(r_, a);
-
-  TH_TENSOR_DIM_APPLY3(scalar_t, a, scalar_t, b, scalar_t, r_, dimension,
-                       TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
-                       r__data[0*r__stride] = a_data[1*a_stride]*b_data[2*b_stride] - a_data[2*a_stride]*b_data[1*b_stride];
-                       r__data[1*r__stride] = a_data[2*a_stride]*b_data[0*b_stride] - a_data[0*a_stride]*b_data[2*b_stride];
-                       r__data[2*r__stride] = a_data[0*a_stride]*b_data[1*b_stride] - a_data[1*a_stride]*b_data[0*b_stride];);
-}
-
 void THTensor_(cmax)(THTensor *r, THTensor *t, THTensor *src) {
   THTensor_(resizeAs)(r, t);
   TH_TENSOR_APPLY3(scalar_t, r, scalar_t, t, scalar_t, src,
@@ -544,7 +532,7 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 /* Emulate NumPy behavior of putting NaNs
  * at the end of an ascending list. */
 #define GT_OR_NAN(x, y) \
-  ((x != x && y == y) || (x > y))
+  ((th_isnan(x) && !(th_isnan(y))) || (x > y))
 
 static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elements, int64_t stride)
 {
@@ -758,53 +746,6 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
 
 /* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
 public domain implementation at http://ndevilla.free.fr/median/median/
-Adapted similarly to the above Quicksort algorithm.
-This version does not produce indices along with values. */
-static void THTensor_(quickselectnoidx)(scalar_t *arr, int64_t k, int64_t elements, int64_t stride)
-{
-  int64_t P, L, R, i, j;
-  scalar_t rswap, piv;
-  L = 0;
-  R = elements-1;
-
-  do {
-    if (R <= L) /* One element only */
-      return;
-
-    if (R == L+1) {  /* Two elements only */
-      if (ARR(L) > ARR(R)) {
-        ARR_SWAP(L, R);
-      }
-      return;
-    }
-
-    /* Use median of three for pivot choice */
-    P=(L+R)>>1;
-    ARR_SWAP(P, L+1);
-    if (ARR(L+1) > ARR(R)) { ARR_SWAP(L+1, R); }
-    if (ARR(L) > ARR(R)) { ARR_SWAP(L, R); }
-    if (ARR(L+1) > ARR(L)) { ARR_SWAP(L+1, L); }
-
-    i = L+1;
-    j = R;
-    piv = ARR(L);
-    do {
-      do i++; while(ARR(i) < piv);
-      do j--; while(ARR(j) > piv);
-      if (j < i)
-        break;
-      ARR_SWAP(i, j);
-    } while(1);
-    ARR_SWAP(L, j);
-
-    /* Re-set active partition */
-    if (j <= k) L=i;
-    if (j >= k) R=j-1;
-  } while(1);
-}
-
-/* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
-public domain implementation at http://ndevilla.free.fr/median/median/
 Adapted similarly to the above Quicksort algorithm. */
 static void THTensor_(quickselect)(scalar_t *arr, int64_t *idx, int64_t k, int64_t elements, int64_t stride)
 {
@@ -854,31 +795,6 @@ static void THTensor_(quickselect)(scalar_t *arr, int64_t *idx, int64_t k, int64
 #undef LONG_SWAP
 #undef REAL_SWAP
 #undef BOTH_SWAP
-
-scalar_t THTensor_(medianall)(THTensor *tensor)
-{
-  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
-
-  scalar_t theMedian;
-  ptrdiff_t numel;
-  int64_t k;
-  THTensor *temp_;
-  scalar_t *temp__data;
-
-  numel = THTensor_(nElement)(tensor);
-  k = (numel-1) >> 1;
-
-  temp_ = THTensor_(newClone)(tensor);
-  temp__data = temp_->data<scalar_t>();
-
-  THTensor_(quickselectnoidx)(temp__data, k, numel, 1);
-
-  theMedian = temp__data[k];
-
-  c10::raw::intrusive_ptr::decref(temp_);
-
-  return theMedian;
-}
 
 void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
@@ -992,18 +908,6 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
     THTensor_(squeeze1d)(values_, values_, dimension);
     THLongTensor_squeeze1d(indices_, indices_, dimension);
   }
-}
-
-void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
-{
-  int64_t t_size_dim, k;
-
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "dimension out of range");
-
-  t_size_dim = THTensor_sizeLegacyNoScalars(t, dimension);
-  k = (t_size_dim-1) >> 1; /* take middle or one-before-middle element */
-
-  THTensor_(kthvalue)(values_, indices_, t, k+1, dimension, keepdim);
 }
 
 void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted)
@@ -1129,41 +1033,6 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
   }
   return equal;
 }
-
-#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
-  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value)	\
-  {									\
-    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);		\
-    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,			\
-		     *r__data = (*t_data OP value) ? 1 : 0;); \
-  }									\
-  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)	\
-  {									\
-    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL);		\
-    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,					\
-		     *r__data = (*t_data OP value) ? 1 : 0;); \
-  }									\
-  void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
-  {									\
-    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);		\
-    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,		\
-		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  }									\
-  void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
-  {									\
-    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);		\
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,			\
-		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  }									\
-
-
-TENSOR_IMPLEMENT_LOGICAL(lt,<)
-TENSOR_IMPLEMENT_LOGICAL(gt,>)
-TENSOR_IMPLEMENT_LOGICAL(le,<=)
-TENSOR_IMPLEMENT_LOGICAL(ge,>=)
-TENSOR_IMPLEMENT_LOGICAL(eq,==)
-TENSOR_IMPLEMENT_LOGICAL(ne,!=)
-
 
 #ifdef _OPENMP
 
@@ -1433,10 +1302,10 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, i
                *r__data = TH_MATH_NAME(pow)(sum, 1.0/3), 0);
   } else if (value == INFINITY) {
     DIM_REDUCE(sum = THMax(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
-	       *r__data = sum, 0);
+               *r__data = sum, 0);
   } else if (value == -INFINITY) {
     DIM_REDUCE(sum = THMin(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
-	       *r__data = sum, INFINITY);
+               *r__data = sum, INFINITY);
   } else {
     DIM_REDUCE(sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(t_data[i*t_stride]), value),
                *r__data = TH_MATH_NAME(pow)(sum, 1.0/value), 0);
@@ -1811,5 +1680,7 @@ void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THT
 #undef TH_MATH_NAME
 #endif /* floating point only part */
 #undef IS_NONZERO
+
+#endif /* !defined(TH_REAL_IS_BOOL) */
 
 #endif /* TH_GENERIC_FILE */

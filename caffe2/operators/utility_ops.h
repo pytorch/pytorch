@@ -414,7 +414,7 @@ class WeightedSumOp : public Operator<Context> {
       const auto& weighti = Input(i + 1);
       CAFFE_ENFORCE_EQ(Xi.numel(), size);
       CAFFE_ENFORCE_EQ(weighti.numel(), 1);
-      math::Axpy<T, Context>(
+      math::Axpy<float, T, Context>(
           size,
           weighti.template data<float>(),
           Xi.template data<T>(),

@@ -153,6 +153,14 @@ Value* tryMatchArgument(
                           << " for argument '" << arg.name() << "' but found "
                           << value->type()->str() << "\n";
 
+    if (auto v = value->type()->cast<ListType>()) {
+      if (v->getElementType()->isSubtypeOf(TensorType::get())) {
+        ostream << "Empty lists default to List[Tensor]. Use torch.jit."
+                   "annotate(List[my_type], []) to create an empty list of"
+                   " another type\n";
+      }
+    }
+
     if (value->type() == NumberType::get() &&
         value->node()->kind() == aten::item) {
       ostream
@@ -413,16 +421,14 @@ Value* emitBuiltinCall(
         return emitBuiltinNode(*matched_schema, loc, graph, name);
       }
     }
-    for (Method* method : builtin_functions) {
-      if (auto result = try_emit_call_to(
+    for (Function* method : builtin_functions) {
+      if (auto result = method->try_emit_call(
               graph,
               loc,
-              *method,
               self,
               inputs,
               attributes,
               failure_messages,
-              nullptr,
               allow_conversions)) {
         return result;
       }

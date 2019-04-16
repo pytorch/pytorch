@@ -1,13 +1,11 @@
-#include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
-#include <torch/csrc/jit/script/tree_views.h>
 
 namespace torch {
 namespace jit {
 namespace script {
 
+namespace {
 const std::unordered_map<std::string, TypePtr>& ident_to_type_lut() {
   static std::unordered_map<std::string, TypePtr> map = {
       {"Tensor", TensorType::get()},
@@ -24,73 +22,63 @@ const std::unordered_map<std::string, TypePtr>& ident_to_type_lut() {
   return map;
 }
 
-const std::unordered_map<std::string, std::function<TypePtr(Subscript)>>&
-subscript_to_type_fns() {
-  static std::unordered_map<std::string, std::function<TypePtr(Subscript)>>
-      map = {
-          {"Tuple",
-           [](Subscript subscript) -> TypePtr {
-             std::vector<TypePtr> subscript_expr_types;
-             for (auto expr : subscript.subscript_exprs()) {
-               subscript_expr_types.push_back(parseTypeFromExpr(expr));
-             }
-             return TupleType::create(subscript_expr_types);
-           }},
-          {"List",
-           [](Subscript subscript) -> TypePtr {
-             if (subscript.subscript_exprs().size() != 1) {
-               throw ErrorReport(subscript)
-                   << " expected exactly one element type but found "
-                   << subscript.subscript_exprs().size();
-             }
-             auto elem_type =
-                 parseTypeFromExpr(*subscript.subscript_exprs().begin());
-             return ListType::create(elem_type);
-           }},
-          {"Optional",
-           [](Subscript subscript) -> TypePtr {
-             if (subscript.subscript_exprs().size() != 1) {
-               throw ErrorReport(subscript)
-                   << " expected exactly one element type but found "
-                   << subscript.subscript_exprs().size();
-             }
-             auto elem_type =
-                 parseTypeFromExpr(*subscript.subscript_exprs().begin());
-             return OptionalType::create(elem_type);
-           }},
-          {"Future",
-           [](Subscript subscript) -> TypePtr {
-             if (subscript.subscript_exprs().size() != 1) {
-               throw ErrorReport(subscript)
-                   << " expected exactly one element type but found "
-                   << subscript.subscript_exprs().size();
-             }
-             auto elem_type =
-                 parseTypeFromExpr(*subscript.subscript_exprs().begin());
-             return FutureType::create(elem_type);
-           }},
-          {"Dict",
-           [](Subscript subscript) -> TypePtr {
-             if (subscript.subscript_exprs().size() != 2) {
-               throw ErrorReport(subscript)
-                   << " expected exactly 2 element types but found "
-                   << subscript.subscript_exprs().size();
-             }
-             auto key_type = parseTypeFromExpr(subscript.subscript_exprs()[0]);
-             auto value_type =
-                 parseTypeFromExpr(subscript.subscript_exprs()[1]);
-             return DictType::create(key_type, value_type);
-           }},
-      };
-  return map;
-}
-
 bool isTorch(const Expr& expr) {
   return expr.kind() == TK_VAR && Var(expr).name().name() == "torch";
 }
+} // namespace
 
-c10::optional<std::pair<TypePtr, int32_t>> parseBroadcastList(
-    const Expr& expr) {
+TypePtr ScriptTypeParser::subscriptToType(
+    const std::string& typeName,
+    const Subscript& subscript) const {
+  if (typeName == "Tuple") {
+    std::vector<TypePtr> subscript_expr_types;
+    for (auto expr : subscript.subscript_exprs()) {
+      subscript_expr_types.push_back(parseTypeFromExpr(expr));
+    }
+    return TupleType::create(subscript_expr_types);
+  } else if (typeName == "List") {
+    if (subscript.subscript_exprs().size() != 1) {
+      throw ErrorReport(subscript)
+          << " expected exactly one element type but found "
+          << subscript.subscript_exprs().size();
+    }
+    auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+    return ListType::create(elem_type);
+
+  } else if (typeName == "Optional") {
+    if (subscript.subscript_exprs().size() != 1) {
+      throw ErrorReport(subscript)
+          << " expected exactly one element type but found "
+          << subscript.subscript_exprs().size();
+    }
+    auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+    return OptionalType::create(elem_type);
+
+  } else if (typeName == "Future") {
+    if (subscript.subscript_exprs().size() != 1) {
+      throw ErrorReport(subscript)
+          << " expected exactly one element type but found "
+          << subscript.subscript_exprs().size();
+    }
+    auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+    return FutureType::create(elem_type);
+  } else if (typeName == "Dict") {
+    if (subscript.subscript_exprs().size() != 2) {
+      throw ErrorReport(subscript)
+          << " expected exactly 2 element types but found "
+          << subscript.subscript_exprs().size();
+    }
+    auto key_type = parseTypeFromExpr(subscript.subscript_exprs()[0]);
+    auto value_type = parseTypeFromExpr(subscript.subscript_exprs()[1]);
+    return DictType::create(key_type, value_type);
+  } else {
+    throw ErrorReport(subscript.range())
+        << "Unknown type constructor " << typeName;
+  }
+}
+
+c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
+    const Expr& expr) const {
   if (expr.kind() != TK_SUBSCRIPT)
     return c10::nullopt;
   auto subscript = Subscript(expr);
@@ -114,7 +102,8 @@ c10::optional<std::pair<TypePtr, int32_t>> parseBroadcastList(
 
   if (subscript_exprs.size() != 1)
     throw ErrorReport(subscript.subscript_exprs().range())
-        << "BroadcastingList/Optional[BroadcastingList] must be subscripted with a type";
+        << "BroadcastingList/Optional[BroadcastingList] "
+           "must be subscripted with a type";
 
   auto typ = subscript_exprs[0];
   auto len = var.name().name().substr(strlen("BroadcastingList"));
@@ -144,7 +133,8 @@ c10::optional<std::pair<TypePtr, int32_t>> parseBroadcastList(
 
 // gets the base type name given namespaces where the types live
 // turns torch.Tensor -> Tensor, X -> X
-c10::optional<std::string> parseBaseTypeName(const Expr& expr) {
+c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
+    const Expr& expr) const {
   switch (expr.kind()) {
     case TK_VAR: {
       return Var(expr).name().name();
@@ -162,7 +152,7 @@ c10::optional<std::string> parseBaseTypeName(const Expr& expr) {
   return at::nullopt;
 }
 
-TypePtr parseTypeFromExpr(const Expr& expr) {
+TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
     auto value_name = parseBaseTypeName(subscript.value());
@@ -170,11 +160,7 @@ TypePtr parseTypeFromExpr(const Expr& expr) {
       throw ErrorReport(subscript.value().range())
           << "Subscripted type must be a type identifier";
     }
-    if (!subscript_to_type_fns().count(*value_name)) {
-      throw ErrorReport(subscript.range())
-          << "Unknown type constructor " << *value_name;
-    }
-    return subscript_to_type_fns().at(*value_name)(subscript);
+    return subscriptToType(*value_name, subscript);
   } else if (auto name = parseBaseTypeName(expr)) {
     auto itr = ident_to_type_lut().find(*name);
     if (itr != ident_to_type_lut().end()) {
@@ -190,7 +176,7 @@ TypePtr parseTypeFromExpr(const Expr& expr) {
       << " cannot be used in a type expression";
 }
 
-TypePtr parseType(const std::string& str) {
+TypePtr ScriptTypeParser::parseType(const std::string& str) {
   Parser p(str);
   return parseTypeFromExpr(p.parseExp());
 }

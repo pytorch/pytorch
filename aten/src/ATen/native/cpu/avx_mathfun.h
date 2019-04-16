@@ -100,7 +100,7 @@ typedef union imm_xmm_union {
 
 #define COPY_IMM_TO_XMM(imm_, xmm0_, xmm1_) {    \
     imm_xmm_union u __attribute__((aligned(32)));  \
-    u.imm = imm_;				   \
+    u.imm = imm_;                                   \
     xmm0_ = u.xmm[0];                            \
     xmm1_ = u.xmm[1];                            \
 }
@@ -228,8 +228,8 @@ inline v8sf log256_ps(v8sf x) {
   return x;
 }
 
-_PS256_CONST(exp_hi,	88.3762626647949f);
-_PS256_CONST(exp_lo,	-88.3762626647949f);
+_PS256_CONST(exp_hi,        88.3762626647949f);
+_PS256_CONST(exp_lo,        -88.3762626647949f);
 
 _PS256_CONST(cephes_LOG2EF, 1.44269504088896341);
 _PS256_CONST(cephes_exp_C1, 0.693359375);

@@ -4,7 +4,7 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/TensorGeometry.h>
-#include <ATen/Type.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
 #include <c10/util/Optional.h>
 
 #include <cstdint>
@@ -15,7 +15,7 @@ namespace torch { namespace autograd {
 struct CopyBackwards : public Function {
   variable_list apply(variable_list&& grads) override;
 
-  at::Type *src_type = nullptr; // initialized for safety.
+  at::DeprecatedTypeProperties *src_type = nullptr; // initialized for safety.
   at::Device src_device = at::kCPU;
 };
 

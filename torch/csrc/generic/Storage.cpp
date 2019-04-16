@@ -283,6 +283,28 @@ static struct PyMemberDef THPStorage_(members)[] = {
   {nullptr}
 };
 
+static PyObject * THPStorage_(device)(THPStorage* self) {
+  HANDLE_TH_ERRORS
+  return THPDevice_New(self->cdata->device());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPStorage_(dtype)(THPStorage *self)
+{
+  HANDLE_TH_ERRORS
+  return torch::autograd::utils::wrap(
+      torch::getDtype(at::typeMetaToScalarType(self->cdata->dtype())));
+  END_HANDLE_TH_ERRORS
+}
+
+typedef PyObject *(*getter)(PyObject *, void *);
+
+static struct PyGetSetDef THPStorage_(properties)[] = {
+  {"device", (getter)THPStorage_(device), nullptr, nullptr, nullptr},
+  {"dtype",  (getter)THPStorage_(dtype), nullptr, nullptr, nullptr},
+  {nullptr}
+};
+
 extern THPCopyList THWStorage_(copy_functions);
 THPCopyList THWStorage_(copy_functions);
 
@@ -346,6 +368,7 @@ bool THPStorage_(init)(PyObject *module)
 
   THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_members = THPStorage_(members);
+  THPStorageType.tp_getset = THPStorage_(properties);
   if (PyType_Ready(&THPStorageType) < 0)
     return false;
   Py_INCREF(&THPStorageType);

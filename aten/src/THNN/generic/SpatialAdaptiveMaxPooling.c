@@ -98,7 +98,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
 
 
   THNN_ARGCHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
-		"non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
+                "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   if (input->dim() == 4)
   {

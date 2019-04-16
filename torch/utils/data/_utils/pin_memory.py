@@ -7,7 +7,7 @@ static methods.
 
 import torch
 from torch._six import queue, container_abcs, string_classes
-from . import collate, MP_STATUS_CHECK_INTERVAL, ExceptionWrapper
+from . import MP_STATUS_CHECK_INTERVAL, ExceptionWrapper
 
 
 def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
