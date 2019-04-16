@@ -1423,7 +1423,7 @@ def unsqueeze(g, self, dim):
                           " based on input shape at export time.")
             dim = dim + self.type().dim() + 1
         else:
-            _unimplemented('unsqueeze', 'negative axis with unknown input rank')
+            return _unimplemented('unsqueeze', 'negative axis with unknown input rank')
 
     return g.op("Unsqueeze", self, axes_i=[dim])
 
