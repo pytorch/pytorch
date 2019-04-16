@@ -847,7 +847,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // NOTE [ TensorImpl Shallow-Copying ]
   //
   // TensorImpl shallow-copying is used when we want to have two Variables share the same storage and tensor
-  // metadata, but each with a different autograd history. Example call sites: `make_variable()` and `set_data()`.
+  // metadata, but each with a different autograd history. There are two example call sites:
+  //
+  // 1. `var = make_variable(tensor)` uses TensorImpl shallow-copying to create `var` that shares the same storage
+  // and tensor metadata with `tensor`, but with a completely new autograd history.
+  // 2. `var.set_data(tensor)` uses TensorImpl shallow-copying to copy storage pointer and tensor metadata from
+  // `tensor` into `var`, while keeping `var`'s original AutogradMeta.
   //
   // Functions that shallow-copy a TensorImpl (such as `shallow_copy_and_detach()` and `shallow_copy_from()`)
   // copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage / storage_offset) 
@@ -1074,7 +1079,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void Resize(Ts... dim_source) {
     bool size_changed = SetDims(dim_source...);
     if (size_changed) {
-      // If needed, we will free the data. the next mutable_data() callf
+      // If needed, we will free the data. the next mutable_data() call
       // will create the data storage.
       bool reset_tensor = false;
       if (reserved_) {
