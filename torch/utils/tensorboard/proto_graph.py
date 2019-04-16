@@ -1,15 +1,6 @@
-from tensorboard.compat.proto.graph_pb2 import GraphDef
 from tensorboard.compat.proto.node_def_pb2 import NodeDef
-from tensorboard.compat.proto.versions_pb2 import VersionDef
 from tensorboard.compat.proto.attr_value_pb2 import AttrValue
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
-
-from collections import defaultdict
-
-# nodes.append(
-#     NodeDef(name=node['name'], op=node['op'], input=node['inputs'],
-#             attr={'lanpa': AttrValue(s=node['attr'].encode(encoding='utf_8')),
-#                   '_output_shapes': AttrValue(list=AttrValue.ListValue(shape=[shapeproto]))}))
 
 
 def AttrValue_proto(dtype,

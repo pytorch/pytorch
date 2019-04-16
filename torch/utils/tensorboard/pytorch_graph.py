@@ -1,14 +1,9 @@
 import time
-import warnings
-import itertools
 from distutils.version import LooseVersion
 from collections import OrderedDict
-from tensorboard.compat.proto.attr_value_pb2 import AttrValue
 from tensorboard.compat.proto.graph_pb2 import GraphDef
-from tensorboard.compat.proto.node_def_pb2 import NodeDef
 from tensorboard.compat.proto.step_stats_pb2 import StepStats, DeviceStepStats, NodeExecStats, AllocatorMemoryUsed
 from tensorboard.compat.proto.config_pb2 import RunMetadata
-from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 from tensorboard.compat.proto.versions_pb2 import VersionDef
 from .proto_graph import Node_proto
 
@@ -160,7 +155,6 @@ class Graph_py(object):
 
 # one argument: 'hasAttribute', 'hasAttributes',
 def parse(graph, args=None, omit_useless_nodes=True):
-    import torch
     n_inputs = len(args)  # not sure...
 
     scope = {}

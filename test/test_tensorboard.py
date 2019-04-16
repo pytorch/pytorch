@@ -2,14 +2,14 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
-from common_utils import TestCase, run_tests
+from common_utils import run_tests
 
 from torch.utils.tensorboard import x2num, SummaryWriter
 import torch
 import numpy as np
 import unittest
 from torch.utils.tensorboard import summary
-from torch.utils.tensorboard.utils import make_grid, _prepare_video, convert_to_HWC
+from torch.utils.tensorboard.utils import _prepare_video, convert_to_HWC
 import pytest
 # from torch.utils.tensorboard import SummaryWriter
 # from .expect_reader import compare_proto
@@ -288,7 +288,7 @@ class SummaryTest(unittest.TestCase):
 
     def test_video(self):
         try:
-            import moviepy
+            import moviepy  # noqa F401
         except ImportError:
             return
         np.random.seed(0)
@@ -416,10 +416,10 @@ class FigureTest(unittest.TestCase):
             figures.append(figure)
 
         writer.add_figure("add_figure/figure_list", figures, 0, close=False)
-        assert all([plt.fignum_exists(figure.number) is True for figure in figures])
+        assert all([plt.fignum_exists(figure.number) is True for figure in figures])  # noqa F812
 
         writer.add_figure("add_figure/figure_list", figures, 1)
-        assert all([plt.fignum_exists(figure.number) is False for figure in figures])
+        assert all([plt.fignum_exists(figure.number) is False for figure in figures])  # noqa F812
 
         writer.close()
 

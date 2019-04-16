@@ -33,14 +33,12 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import bisect
 import logging
 import numpy as np
 import os
 import re as _re
 
 # pylint: disable=unused-import
-from six import StringIO
 from six.moves import range
 from tensorboard.compat.proto.summary_pb2 import Summary
 from tensorboard.compat.proto.summary_pb2 import HistogramProto
@@ -321,7 +319,7 @@ def video(tag, tensor, fps=4):
 
 def make_video(tensor, fps):
     try:
-        import moviepy
+        import moviepy  # noqa: F401
     except ImportError:
         print('add_video needs package moviepy')
         return
@@ -419,7 +417,6 @@ def custom_scalars(layout):
 
 
 def text(tag, text):
-    import json
     PluginData = [SummaryMetadata.PluginData(
         plugin_name='text', content=TextPluginData(version=0).SerializeToString())]
     smd = SummaryMetadata(plugin_data=PluginData)

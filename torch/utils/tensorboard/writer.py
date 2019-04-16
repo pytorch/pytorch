@@ -28,7 +28,6 @@ from tensorboard.summary.writer.event_file_writer import EventFileWriter
 from .onnx_graph import gg
 from .pytorch_graph import graph
 from tensorboard.compat.proto import event_pb2
-from tensorboard.compat.proto import summary_pb2
 from .summary import (
     scalar, histogram, histogram_raw, image, audio, text,
     pr_curve, pr_curve_raw, video, custom_scalars, image_boxes
@@ -192,16 +191,8 @@ class SummaryWriter(object):
             neg_buckets.append(-v)
             v *= 1.1
         self.default_bins = neg_buckets[::-1] + [0] + buckets
-
         self.scalar_dict = {}
-
-        # TODO (ml7): Remove try-except when PyTorch 1.0 merges PyTorch and Caffe2
-        try:
-            import caffe2
-            from caffe2.python import workspace  # workaround for pytorch/issue#10249
-            self.caffe2_enabled = True
-        except (SystemExit, ImportError):
-            self.caffe2_enabled = False
+        self.caffe2_enabled = True
 
     def __append_to_scalar_dict(self, tag, scalar_value, global_step,
                                 timestamp):
