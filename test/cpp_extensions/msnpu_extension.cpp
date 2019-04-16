@@ -46,7 +46,6 @@ Tensor kl_div_backward_override(
     const Tensor & self,
     const Tensor & target,
     int64_t reduction) {
-  std::cout << "kl_div_backward_override here1" << std::endl;
   test_int = 4;
   return get_dtype_tensor(self.dtype());
 }
