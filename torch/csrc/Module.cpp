@@ -13,6 +13,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/dlpack.h>
 #include <ATen/DLConvertor.h>
+#include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -147,14 +148,13 @@ static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
 
 static PyObject * THPModule_getNumThreads(PyObject *module)
 {
-  return PyLong_FromLong(THGetNumThreads());
+  return PyLong_FromLong(at::get_num_threads());
 }
 
 static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
 {
   THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
           "but got %s", THPUtils_typename(arg));
-  THSetNumThreads((int)THPUtils_unpackLong(arg));
   at::set_num_threads((int)THPUtils_unpackLong(arg));
   Py_RETURN_NONE;
 }
@@ -541,7 +541,7 @@ __declspec(dllexport)
 #endif
 PyObject* initModule() {
   HANDLE_TH_ERRORS
-  THInferNumThreads();
+  at::init_num_threads();
 
 #define ASSERT_TRUE(cmd) if (!(cmd)) return nullptr
 

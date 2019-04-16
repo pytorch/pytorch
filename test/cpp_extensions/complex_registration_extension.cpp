@@ -44,7 +44,7 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
     auto storage_impl = c10::make_intrusive<StorageImpl>(
         options.dtype(),
         0,
-        allocator->allocate(nelements * dtype.itemsize()),
+        allocator->allocate(0),
         allocator,
         /*resizable=*/true);
     auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::ComplexCPUTensorId());
