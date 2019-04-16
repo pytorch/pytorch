@@ -35,7 +35,6 @@ __global__ void UpsampleBilinearKernel(
     indexTemp /= output_width;
     const int out_y = indexTemp % output_height;
     indexTemp /= output_height;
-    //const int c = indexTemp % num_channels;
     indexTemp /= num_channels;
     const int n = indexTemp;
 
