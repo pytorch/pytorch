@@ -9,6 +9,7 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/Parallel.h>
 #include <c10/util/Exception.h>
 
 #include <atomic>
@@ -204,7 +205,7 @@ Engine::Engine() = default;
 Engine::~Engine() = default;
 
 auto Engine::thread_init(int device) -> void {
-  THInferNumThreads();
+  at::init_num_threads();
   // Note [Allocating GPUs to autograd threads]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // What's our strategy here?  Originally, the autograd engine was written
