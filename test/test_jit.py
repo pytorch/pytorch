@@ -8124,6 +8124,36 @@ a")
 
         self.assertEqual(8, bar(torch.ones(1, 1)))
 
+    def test_ellipsis_mid(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[2, ..., 0:4, 4:8].size()
+
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_mid_select(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[2, ..., 4, 4, 4:8, 2].size()
+
+        dummy = torch.zeros(8, 8, 8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_start(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[..., 0:4, 4:8].size()
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_end(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[0:4, 2, ...].size()
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
     def test_tracing_slicing(self):
         @_trace(torch.zeros(10))
         def foo_trace(x):
