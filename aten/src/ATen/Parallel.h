@@ -143,10 +143,6 @@ inline scalar_t parallel_reduce(
   }
 }
 
-} // namespace at
-
-namespace c10 {
-
 class CAFFE2_API PTThreadPool : public c10::ThreadPool {
  public:
   explicit PTThreadPool(
@@ -156,4 +152,4 @@ class CAFFE2_API PTThreadPool : public c10::ThreadPool {
   void init_thread() override;
 };
 
-} // namespace c10
+} // namespace at
