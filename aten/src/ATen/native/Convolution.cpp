@@ -227,6 +227,17 @@ static void check_shape_forward(const at::Tensor& input,
            groups, " at dimension 0, but got weight of size ", weight_sizes,
            " instead");
 
+  AT_CHECK(
+      !(input_is_mkldnn && k != 4),
+      "Expected ",
+      4,
+      "-dimensional input for Mkldnn Convolution",
+      ", but got ",
+      k,
+      "-dimensional input of size ",
+      input.sizes(),
+      " instead");
+
   if (!transposed) {
     std::vector<int64_t> input_shape;
     std::vector<int64_t> kernel_shape;
