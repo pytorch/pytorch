@@ -1479,7 +1479,7 @@ class _DistTestBase(object):
         model_gpu.cuda(gpu_subset[0])
 
         # DDP training setup
-        model_DDP = nn.utils.convert_sync_batchnorm(copy.deepcopy(model))
+        model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(model))
         model_DDP.cuda(gpu_subset[0])
         model_DDP = nn.parallel.DistributedDataParallel(
             model_DDP, device_ids=gpu_subset
@@ -1516,7 +1516,9 @@ class _DistTestBase(object):
     def test_DistributedDataParallel_SyncBatchNorm(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
-        gpus = list(rank_to_GPU[rank])
+        # DDP does not support replicating BN layers within a process, hence
+        # testing with one module replica per process
+        gpus = [rank]
         self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank)
 
         # test output_device

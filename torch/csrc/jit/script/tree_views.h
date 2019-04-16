@@ -295,6 +295,7 @@ struct Expr : public TreeView {
       case '^':
       case '|':
       case TK_LIST_COMP:
+      case TK_DOTS:
         return;
       default:
         throw ErrorReport(tree)
@@ -499,7 +500,7 @@ struct For : public Stmt {
   }
 };
 
-//TODO: supports only single comprehension for now
+// TODO: supports only single comprehension for now
 struct ListComp : public Expr {
   explicit ListComp(const TreeRef& tree) : Expr(tree) {
     tree->match(TK_LIST_COMP);
@@ -639,6 +640,15 @@ struct Pass : public Stmt {
   }
   static Pass create(const SourceRange& range) {
     return Pass(Compound::create(TK_PASS, range, {}));
+  }
+};
+
+struct Dots : public Expr {
+  explicit Dots(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_DOTS);
+  }
+  static Dots create(const SourceRange& range) {
+    return Dots(Compound::create(TK_DOTS, range, {}));
   }
 };
 

@@ -149,13 +149,13 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 
   /* get optimal workspace size */
   THLapack_(gels)('N', m, n, nrhs, ra__->data<scalar_t>(), lda,
-		  rb__->data<scalar_t>(), ldb,
-		  &wkopt, -1, &info);
+                  rb__->data<scalar_t>(), ldb,
+                  &wkopt, -1, &info);
   lwork = (int)wkopt;
   work = THTensor_(newWithSize1d)(lwork);
   THLapack_(gels)('N', m, n, nrhs, ra__->data<scalar_t>(), lda,
-		  rb__->data<scalar_t>(), ldb,
-		  work->data<scalar_t>(), lwork, &info);
+                  rb__->data<scalar_t>(), ldb,
+                  work->data<scalar_t>(), lwork, &info);
 
   THLapackCheckWithCleanup("Lapack Error in %s : The %d-th diagonal element of the triangular factor of A is zero",
                            THCleanup(c10::raw::intrusive_ptr::decref(ra__);
@@ -378,21 +378,21 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   }
 
   THLapack_(gesdd)(jobz,
-	     m,n,ra__->data<scalar_t>(),lda,
-	     rs__data,
-	     ru__data,
-	     ldu,
-	     rv__data, ldvt,
-	     &wkopt, -1, THIntTensor_data(iwork), &info);
+             m,n,ra__->data<scalar_t>(),lda,
+             rs__data,
+             ru__data,
+             ldu,
+             rv__data, ldvt,
+             &wkopt, -1, THIntTensor_data(iwork), &info);
   lwork = (int)wkopt;
   work = THTensor_(newWithSize1d)(lwork);
   THLapack_(gesdd)(jobz,
-	     m,n,ra__->data<scalar_t>(),lda,
-	     rs__data,
-	     ru__data,
-	     ldu,
-	     rv__data, ldvt,
-	     work->data<scalar_t>(),lwork, THIntTensor_data(iwork), &info);
+             m,n,ra__->data<scalar_t>(),lda,
+             rs__data,
+             ru__data,
+             ldu,
+             rv__data, ldvt,
+             work->data<scalar_t>(),lwork, THIntTensor_data(iwork), &info);
 
   if (jobz != 'N') {
     THLapackCheckWithCleanup("Lapack Error %s : %d superdiagonals failed to converge.",

@@ -880,7 +880,6 @@ class TestSparse(TestCase):
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
 
-    @skipIfRocm
     def test_dsmm(self):
         def test_shape(di, dj, dk, nnz):
             x = self._gen_sparse(2, nnz, [di, dj])[0]

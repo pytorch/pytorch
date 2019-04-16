@@ -2,6 +2,7 @@
 
 #include <torch/nn/init.h>
 #include <torch/nn/modules/linear.h>
+#include <torch/nn/modules/conv.h>
 
 #include <test/cpp/api/init_baseline.h>
 #include <test/cpp/api/support.h>
@@ -123,4 +124,9 @@ TEST(InitTest, CalculateGainWithLeakyRelu) {
   double gain =
       torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::LeakyReLU);
   ASSERT_DOUBLE_EQ(gain, std::sqrt(2.0 / (1 + pow(0.01, 2))));
+}
+
+TEST(InitTest, CanInitializeCnnWithOrthogonal) {
+  torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(3, 2, 3).stride(2));
+  torch::nn::init::orthogonal_(conv_layer->named_parameters()["weight"]);
 }

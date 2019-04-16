@@ -32,7 +32,7 @@ bool isEqual(const ArgumentInfo& ti, const autograd::Variable& v) {
       ti.type() == v.scalar_type() && ti.dim() == v.dim();
 }
 
-autograd::Variable var(at::Type& t, at::IntArrayRef sizes, bool requires_grad) {
+autograd::Variable var(at::DeprecatedTypeProperties& t, at::IntArrayRef sizes, bool requires_grad) {
   return autograd::make_variable(at::rand(sizes, t.options()), requires_grad);
 }
 autograd::Variable undef() {
