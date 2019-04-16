@@ -122,7 +122,8 @@ class DNNLowPOp : public Operator<CPUContext> {
     }
   }
 
-  Tensor* OutputTensorCPU_(int idx, at::IntArrayRef dims, at::TensorOptions options) {
+  Tensor*
+  OutputTensorCPU_(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     if (dequantize_output_) {
       return Output(idx, dims, options.device(CPU));
     } else {

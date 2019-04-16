@@ -100,6 +100,13 @@ class HistogramObserver final : public ObserverBase<OperatorBase> {
 
 class HistogramNetObserver final : public NetObserver {
  public:
+  /**
+   * @params mul_nets true if we expect multiple nets with the same name so
+   *                  we include extra information in the file name to
+   *                  distinghuish them
+   * @params dump_freq if not -1 we dump histogram every dump_freq invocation
+   *                   of the net
+   */
   explicit HistogramNetObserver(
       NetBase* subject,
       const std::string& out_file_name,

@@ -1,7 +1,6 @@
 import math
 import torch
 import warnings
-import itertools
 import numbers
 
 from .module import Module

@@ -66,6 +66,8 @@ Sections start with a reference to the source file where the code related to the
     + [`tensors/`](#-tensors--)
     + [`attributes.pkl`](#-attributespkl-)
     + [Implementation Details](#implementation-details)
+- [Testing Programs](#testing-programs)
+  * [Test Autodiff](#testautodiff)
 - [Python Bindings](#python-bindings)
 
 
@@ -368,21 +370,21 @@ As the trace runs, individual operators create Nodes in the Graph being traced t
 torch::jit::Node* node = nullptr;
 std::shared_ptr<jit::tracer::TracingState> tracer_state;
 if (jit::tracer::isTracing()) {
-	tracer_state = jit::tracer::getTracingState();
-	at::Symbol op_name;
-	op_name = jit::Symbol::fromQualString("aten::__ilshift__");
-	node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
-	jit::tracer::recordSourceLocation(node);
-	jit::tracer::addInputs(node, "self", self);
-	jit::tracer::addInputs(node, "other", other);
-	tracer_state->graph->insertNode(node);
+        tracer_state = jit::tracer::getTracingState();
+        at::Symbol op_name;
+        op_name = jit::Symbol::fromQualString("aten::__ilshift__");
+        node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+        jit::tracer::recordSourceLocation(node);
+        jit::tracer::addInputs(node, "self", self);
+        jit::tracer::addInputs(node, "other", other);
+        tracer_state->graph->insertNode(node);
 
-	jit::tracer::setTracingState(nullptr);
+        jit::tracer::setTracingState(nullptr);
 }
 TypeDefault::__ilshift__(self, other);
 if (tracer_state) {
-	jit::tracer::setTracingState(std::move(tracer_state));
-	jit::tracer::addOutput(node, self);
+        jit::tracer::setTracingState(std::move(tracer_state));
+        jit::tracer::addOutput(node, self);
 }
 ```
 
@@ -410,15 +412,15 @@ Our frontends produce ASTs in the form of Tree objects. Trees are similar to [s-
 
 ```
  (-
-	(+
-	  (variable (ident x))
-	  (variable (ident y)))
-	(apply
-	  (.
-		(variable (ident z))
-		(ident sigmoid))
-	  (list)
-	  (list))))
+        (+
+          (variable (ident x))
+          (variable (ident y)))
+        (apply
+          (.
+                (variable (ident z))
+                (ident sigmoid))
+          (list)
+          (list))))
 ```
 
 This is printed in s-expression style with `(kind ...)` representing compound trees and `string_value` representing strings.
@@ -452,16 +454,16 @@ The typical way to traverse a tree is to `switch` on the kind and then construct
 ```cpp
 switch (tree.kind()) {
   case TK_VAR:
-  	auto var = Var(tree); // construct tree-view
-	return environment_stack->getSugaredVar(var.name());
+          auto var = Var(tree); // construct tree-view
+        return environment_stack->getSugaredVar(var.name());
   case '.': {
-	auto select = Select(tree); // construct tree-view
-	auto sv = emitSugaredExpr(select.value(), 1);
-	return sv->attr(select.range(), method, select.selector().name());
+        auto select = Select(tree); // construct tree-view
+        auto sv = emitSugaredExpr(select.value(), 1);
+        return sv->attr(select.range(), method, select.selector().name());
   }
   case TK_APPLY: {
-	auto apply = Apply(tree); // construct tree-view
-	return emitApplyExpr(apply, n_binders);
+        auto apply = Apply(tree); // construct tree-view
+        return emitApplyExpr(apply, n_binders);
   } break;
 
 ```
@@ -505,7 +507,7 @@ Tokens are either keywords (`def`), operators (`+`), literals (`3.4`), or identi
 
 ```cpp
 if (lexer.nextIf('+')) {
-	// handle + ...
+        // handle + ...
 }
 ```
 
@@ -648,10 +650,10 @@ using Operation = std::function<int(Stack&)>;
 
 // schema: example_add(Tensor a, Tensor b) -> Tensor
 int example_add(Stack& stack) {
-	Tensor a, b;
-	// stack before: ? ? ? a b <- back
-	pop(stack, a, b); //Templated helper function
-	                  // that pops a, b and converts them to tensor
+        Tensor a, b;
+        // stack before: ? ? ? a b <- back
+        pop(stack, a, b); //Templated helper function
+                          // that pops a, b and converts them to tensor
     push(stack, a + b);
     // stack after:
     // ? ? ? c <- back
@@ -1124,7 +1126,7 @@ As a more involved example, the following TorchScript snippet:
 ```python
 @torch.jit.script
 def foo(a : Tensor, b : Tensor):
-	c = 2 * b
+        c = 2 * b
   a += 1
   if a.max() > 4:
     r = a[0]
@@ -1162,6 +1164,36 @@ TODO: fusion, operators
 
 # Saving Programs
 
+# Testing Programs
+## Test Autodiff ##
+[symbolic_script.cpp](symbolic_script.cpp)
+
+When differentiating a graph, each node that has a symbolic gradient will be included in a `prim::DifferentiableGraph`. We fall back to use autograd for the node if there isn't a gradient formula for it.
+Adding/updating symbolic gradient functions must be tested carefully as it's easy to get CI green by comparing autograd result with itself, but potentially cause autodiff support regression.
+
+If your PR adds/updates a gradient formula for `torch`/`nn` functions, you **MUST** enable/update the corresponding tests in
+- `torch` functions: `method_tests` in [common_method_tests.py](../../../test/common_method_tests.py)
+- `nn` functions: `nn_functional_tests` in [test_jit.py](../../../test/test_jit.py)
+
+To turn on autodiff check, you can add an optional `check_ad(should_check_autodiff[bool], nonfusible_nodes[str|list[str]], fusible_nodes[str|list[str]])` tuple after the optional test variant name field.
+If `should_check_autodiff=True`, the differentiated traced/script forward graph must have a `prim::DifferentiableGraph`.
+
+All nodes in `nonfusible_nodes` should show up in at least once in `prim::DifferentiableGraph` subgraphs.
+When fusion is enabled, all nodes in `fusible_nodes` should show up in one of `prim::FusionGroup` graphs attached to `prim::DifferentiableGraph`,
+otherwise they're checked as `nonfusible_nodes` as well.
+On the other hand, if `should_check_autodiff=False`, the graph can still have `prim::DifferentiableGraph` with other nodes, but not `nonfusible_nodes` and `fusible_nodes`.
+
+To make writing test easier, you only need to write out node names if it's different from the function name. Below are a few examples:
+```python
+('conv1d', ...), # No symbolic gradient formula
+('avg_pool2d', ..., (True,)), # Has symbolic gradient formula, only has one nonfusible node aten::avg_pool2d
+('nll_loss', ..., (True, 'aten::nll_loss_forward')), # Is replaced by a different node in its symbolic gradient formula
+('dropout', ..., (True, ['prim::is_cuda', 'aten::bernoulli_'], ['aten::rand_like', ..., 'aten::div'])), # Some op are fused when fusion is enabled.
+```
+
+Note that even for the same function, different tests could trigger different function schemas (e.g `aten::add`) while only a few of them have symbolic gradient formulas.
+You should only turn on autodiff check in tests who have symbolic gradient. If you are not sure, uncomment the debugging line in [symbolic_script.cpp](symbolic_script.cpp)
+to check which function schema the test triggers.
 
 ## Python Printer
 

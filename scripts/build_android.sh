@@ -37,9 +37,13 @@ if [ ! -d "$ANDROID_NDK" ]; then
   exit 1
 fi
 
+ANDROID_NDK_PROPERTIES="$ANDROID_NDK/source.properties"
+[ -f "$ANDROID_NDK_PROPERTIES" ] && ANDROID_NDK_VERSION=$(sed -n 's/^Pkg.Revision[^=]*= *\([0-9]*\)\..*$/\1/p' "$ANDROID_NDK_PROPERTIES")
+
 echo "Bash: $(/bin/bash --version | head -1)"
 echo "Caffe2 path: $CAFFE2_ROOT"
 echo "Using Android NDK at $ANDROID_NDK"
+echo "Android NDK version: $ANDROID_NDK_VERSION"
 
 # Build protobuf from third_party so we have a host protoc binary.
 echo "Building protoc"
@@ -70,7 +74,11 @@ CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
 CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")
 CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
-CMAKE_ARGS+=("-DANDROID_TOOLCHAIN=gcc")
+if (( "${ANDROID_NDK_VERSION:-0}" < 18 )); then
+  CMAKE_ARGS+=("-DANDROID_TOOLCHAIN=gcc")
+else
+  CMAKE_ARGS+=("-DANDROID_TOOLCHAIN=clang")
+fi
 # Disable unused dependencies
 CMAKE_ARGS+=("-DUSE_CUDA=OFF")
 CMAKE_ARGS+=("-DUSE_GFLAGS=OFF")

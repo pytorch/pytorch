@@ -112,19 +112,25 @@ class Pickler {
   void pushTuple(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
   void pushClass(PicklerClass cls);
+  void pushInt(const IValue& ivalue);
   const void* getPointer(const IValue& ivalue);
 
-  void pushUint8(uint8_t value);
-  void pushOpCode(OpCode value);
-  void pushUint32(uint32_t value);
-  void pushInt32(int32_t value);
+  // These convert values to bytes and add them to the stack (NB: since T is to
+  // the left of a '::', its type cannot be deduced by the compiler so one must
+  // explicitly instantiate the template, i.e. push<int>(int) works, push(int)
+  // does not)
+  template<typename T>
+  void push(typename std::common_type<T>::type value) {
+    const char* begin = reinterpret_cast<const char*>(&value);
+    stack_.insert(stack_.end(), begin, begin + sizeof(T));
+  }
 
   // Stack of opcodes/data
   std::vector<char> stack_;
 
   // Memoization of IValues that have been written (index in table is used for
   // BINPUT opcodes) to enable shared references
-  std::unordered_map<const void*, uint32_t> memo_;
+  std::unordered_map<const void*, uint32_t> memo_map_;
 
   // External table of tensors to serialize
   std::vector<at::Tensor>* tensor_table_;
@@ -144,7 +150,8 @@ class Unpickler {
       const std::vector<at::Tensor>* tensor_table)
       : bytes_(static_cast<const uint8_t*>(data)),
         end_ptr_(bytes_ + size),
-        tensor_table_(tensor_table) {}
+        tensor_table_(tensor_table),
+        last_opcode_(OpCode::STOP) {}
 
   std::vector<IValue> parse_ivalue_list();
 
@@ -170,7 +177,7 @@ class Unpickler {
   void readList();
 
   std::vector<IValue> stack_;
-  std::vector<IValue> memo_;
+  std::vector<IValue> memo_table_;
   std::vector<size_t> marks_;
   const uint8_t* bytes_;
   const uint8_t* end_ptr_;

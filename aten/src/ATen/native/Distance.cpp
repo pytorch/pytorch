@@ -104,8 +104,8 @@ Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double
   Tensor w12 = at::sum(x1 * x2, dim);
   Tensor w1 = at::sum(x1 * x1, dim);
   Tensor w2 = at::sum(x2 * x2, dim);
-  Tensor n12 = (w1 * w2).rsqrt_().clamp_max(1.0 / eps);
-  return w12.mul_(n12);
+  Tensor n12 = (w1 * w2).clamp_min_(eps * eps).sqrt_();
+  return w12.div_(n12);
 }
 
 }}  // namespace at::native

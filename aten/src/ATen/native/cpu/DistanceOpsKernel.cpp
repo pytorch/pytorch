@@ -106,7 +106,7 @@ struct Dist {
     // vector from the input, j is the second, and k is the result index. This
     // parallelizes over the range of k and infers what i and j are from the
     // value of k.
-    parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [p, self_start, self_end, n, m, res_start, combs](int64_t k, int64_t end) {
+    parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [p, self_start, self_end, n, m, res_start](int64_t k, int64_t end) {
       const Vec pvec(p);
       double n2 = n - .5;
       // The -1 accounts for floating point truncation issues
@@ -336,25 +336,25 @@ struct Dist {
 };
 
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, const double p) {
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist", [&] {
     Dist<scalar_t>::apply_pdist(result, self, p);
   });
 }
 
 static void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist_backward", [&] {
     Dist<scalar_t>::apply_backward_pdist(result, grad, self, p, dist);
   });
 }
 
 static void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
-  AT_DISPATCH_FLOATING_TYPES(result.type(), "cdist", [&] {
+  AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist", [&] {
     Dist<scalar_t>::apply_cdist(result, x1, x2, p);
   });
 }
 
 static void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& dist) {
-  AT_DISPATCH_FLOATING_TYPES(result.type(), "cdist_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist_backward", [&] {
     Dist<scalar_t>::apply_backward_cdist(result, grad, x1, x2, p, dist);
   });
 }

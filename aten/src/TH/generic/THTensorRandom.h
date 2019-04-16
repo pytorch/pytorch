@@ -5,7 +5,6 @@
 TH_API void THTensor_(random)(THTensor *self, THGenerator *_generator);
 TH_API void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, int64_t min, int64_t max);
 TH_API void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, int64_t max);
-TH_API void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p);
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 TH_API void THTensor_(bernoulli_Tensor)(THTensor *self, THGenerator *_generator, THTensor *p);
@@ -19,7 +18,7 @@ TH_API void THTensor_(cauchy)(THTensor *self, THGenerator *_generator, double me
 TH_API void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double mean, double stdv);
 TH_API void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement);
 TH_API void THTensor_(multinomialAliasSetup)(THTensor *prob_dist, THLongTensor *J, THTensor *q);
-TH_API void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator, THLongTensor *J, THTensor *q);
+TH_API void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator, THTensor *q, THLongTensor *J, int n_sample);
 #endif
 
 #if defined(TH_REAL_IS_BYTE)

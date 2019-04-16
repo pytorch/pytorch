@@ -35,20 +35,20 @@ find_package_handle_standard_args(
     MIOPEN DEFAULT_MSG MIOPEN_INCLUDE_DIR MIOPEN_LIBRARY)
 
 if(MIOPEN_FOUND)
-	# get MIOpen version
+        # get MIOpen version
   file(READ ${MIOPEN_INCLUDE_DIR}/version.h MIOPEN_HEADER_CONTENTS)
-	string(REGEX MATCH "define MIOPEN_VERSION_MAJOR * +([0-9]+)"
-				 MIOPEN_VERSION_MAJOR "${MIOPEN_HEADER_CONTENTS}")
-	string(REGEX REPLACE "define MIOPEN_VERSION_MAJOR * +([0-9]+)" "\\1"
-				 MIOPEN_VERSION_MAJOR "${MIOPEN_VERSION_MAJOR}")
-	string(REGEX MATCH "define MIOPEN_VERSION_MINOR * +([0-9]+)"
-				 MIOPEN_VERSION_MINOR "${MIOPEN_HEADER_CONTENTS}")
-	string(REGEX REPLACE "define MIOPEN_VERSION_MINOR * +([0-9]+)" "\\1"
-				 MIOPEN_VERSION_MINOR "${MIOPEN_VERSION_MINOR}")
-	string(REGEX MATCH "define MIOPEN_VERSION_PATCH * +([0-9]+)"
-				 MIOPEN_VERSION_PATCH "${MIOPEN_HEADER_CONTENTS}")
-	string(REGEX REPLACE "define MIOPEN_VERSION_PATCH * +([0-9]+)" "\\1"
-				 MIOPEN_VERSION_PATCH "${MIOPEN_VERSION_PATCH}")
+        string(REGEX MATCH "define MIOPEN_VERSION_MAJOR * +([0-9]+)"
+                                 MIOPEN_VERSION_MAJOR "${MIOPEN_HEADER_CONTENTS}")
+        string(REGEX REPLACE "define MIOPEN_VERSION_MAJOR * +([0-9]+)" "\\1"
+                                 MIOPEN_VERSION_MAJOR "${MIOPEN_VERSION_MAJOR}")
+        string(REGEX MATCH "define MIOPEN_VERSION_MINOR * +([0-9]+)"
+                                 MIOPEN_VERSION_MINOR "${MIOPEN_HEADER_CONTENTS}")
+        string(REGEX REPLACE "define MIOPEN_VERSION_MINOR * +([0-9]+)" "\\1"
+                                 MIOPEN_VERSION_MINOR "${MIOPEN_VERSION_MINOR}")
+        string(REGEX MATCH "define MIOPEN_VERSION_PATCH * +([0-9]+)"
+                                 MIOPEN_VERSION_PATCH "${MIOPEN_HEADER_CONTENTS}")
+        string(REGEX REPLACE "define MIOPEN_VERSION_PATCH * +([0-9]+)" "\\1"
+                                 MIOPEN_VERSION_PATCH "${MIOPEN_VERSION_PATCH}")
   # Assemble MIOpen version
   if(NOT MIOPEN_VERSION_MAJOR)
     set(MIOPEN_VERSION "?")

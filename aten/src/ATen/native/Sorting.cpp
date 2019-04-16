@@ -231,7 +231,7 @@ Tensor median_cpu(const Tensor& self) {
   }
   auto tmp_values = self.clone().view(-1);
   auto result = at::empty({1}, self.options());
-  AT_DISPATCH_ALL_TYPES(self.type(), "median", [&] {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "median", [&] {
     // note, quick_select is 0 based while kthvalue is not
     int64_t k = (tmp_values.size(0) - 1) / 2;
     auto val_accessor = tmp_values.accessor<scalar_t, 1>();

@@ -323,35 +323,6 @@ CAFFE2_API void Select(
     T* y,
     Context* context);
 
-template <typename T, class Context>
-CAFFE2_API void
-Axpy(const int N, const float alpha, const T* x, T* y, Context* context);
-
-// Different from the Axpy function above, if alpha is passed in
-// as a pointer, we will assume that it lives on the Context device,
-// for example on GPU.
-template <typename T, class Context>
-CAFFE2_API void
-Axpy(const int N, const float* alpha, const T* x, T* y, Context* context);
-
-template <typename TCoeff, typename TData, class Context>
-CAFFE2_API void Axpby(
-    const int N,
-    const TCoeff alpha,
-    const TData* x,
-    const TCoeff b,
-    TData* y,
-    Context* context);
-
-template <typename TCoeff, typename TData, class Context>
-CAFFE2_API void Axpby(
-    const int N,
-    const TCoeff* alpha,
-    const TData* x,
-    const TCoeff* b,
-    TData* y,
-    Context* context);
-
 // groups must be 1 for GPU
 // For NHWC order with groups > 1, the result will be layout in
 // NHW G RS C/G order to make data within the same group to be contiguous.
@@ -487,7 +458,6 @@ CAFFE2_API void CopyMatrix(
 
 template <typename T, class Context>
 CAFFE2_API void CopyVector(const int N, const T* A, T* B, Context* context);
-
 
 } // namespace math
 } // namespace caffe2

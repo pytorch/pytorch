@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/CPUGeneral.h>
+#include <ATen/core/ATenGeneral.h>
 #include <ATen/Type.h>
 #include <ATen/TypeExtendedInterface.h>
 #include <ATen/Utils.h>
@@ -68,6 +68,7 @@ class CAFFE2_API Context {
   bool hasOpenMP() const;
   bool hasMKL() const;
   bool hasLAPACK() const;
+  bool hasMKLDNN() const;
   bool hasMAGMA() const {
     return detail::getCUDAHooks().hasMAGMA();
   }
@@ -163,12 +164,6 @@ CAFFE2_API Context& globalContext();
 
 static inline void init() {
   globalContext();
-  if (const char *env_p = std::getenv("OMP_NUM_THREADS")) {
-    at::set_num_threads(std::stoi(env_p));
-  }
-  if (const char *env_p = std::getenv("MKL_NUM_THREADS")) {
-    at::set_num_threads(std::stoi(env_p));
-  }
 }
 
 static inline TypeExtendedInterface& getNonVariableType(Backend p, ScalarType s) {
@@ -181,16 +176,19 @@ CAFFE2_API TypeExtendedInterface& getType(const Tensor&);
 
 CAFFE2_API Allocator* getCPUAllocator();
 
-static inline TypeExtendedInterface& CPU(ScalarType s) {
-  return getNonVariableType(Backend::CPU, s);
+static inline DeprecatedTypeProperties& CPU(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::CPU, s, /*is_variable*/false);
 }
 
-static inline TypeExtendedInterface& CUDA(ScalarType s) {
-  return getNonVariableType(Backend::CUDA, s);
+static inline DeprecatedTypeProperties& CUDA(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::CUDA, s, /*is_variable*/false);
 }
 
-static inline TypeExtendedInterface& HIP(ScalarType s) {
-  return getNonVariableType(Backend::HIP, s);
+static inline DeprecatedTypeProperties& HIP(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::HIP, s, /*is_variable*/false);
 }
 
 CAFFE2_API LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options);
@@ -242,6 +240,10 @@ static inline bool hasLAPACK() {
 
 static inline bool hasMAGMA() {
   return globalContext().hasMAGMA();
+}
+
+static inline bool hasMKLDNN() {
+  return globalContext().hasMKLDNN();
 }
 
 static inline void manual_seed(uint64_t seed) {

@@ -1726,10 +1726,8 @@ class TestDistributions(TestCase):
         # construct batch of PSD covariances
         tmp = torch.randn(6, 5, 3, 10)
         cov_batched = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
-        prec_batched = [C.inverse() for C in cov_batched.view((-1, 3, 3))]
-        prec_batched = torch.stack(prec_batched).view(cov_batched.shape)
-        scale_tril_batched = [torch.cholesky(C, upper=False) for C in cov_batched.view((-1, 3, 3))]
-        scale_tril_batched = torch.stack(scale_tril_batched).view(cov_batched.shape)
+        prec_batched = cov_batched.inverse()
+        scale_tril_batched = cov_batched.cholesky(upper=False)
 
         # ensure that sample, batch, event shapes all handled correctly
         self.assertEqual(MultivariateNormal(mean, cov).sample().size(), (5, 3))
@@ -1750,13 +1748,26 @@ class TestDistributions(TestCase):
         self.assertEqual(MultivariateNormal(mean, scale_tril=scale_tril_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
 
         # check gradients
-        self._gradcheck_log_prob(MultivariateNormal, (mean, cov))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_multi_batch, cov))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_multi_batch, cov_batched))
-        self._gradcheck_log_prob(MultivariateNormal, (mean, None, prec))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, prec_batched))
-        self._gradcheck_log_prob(MultivariateNormal, (mean, None, None, scale_tril))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, None, scale_tril_batched))
+        # We write a custom gradcheck function to maintain the symmetry
+        # of the perturbed covariances and their inverses (precision)
+        def multivariate_normal_log_prob_gradcheck(mean, covariance=None, precision=None, scale_tril=None):
+            mvn_samples = MultivariateNormal(mean, covariance, precision, scale_tril).sample().requires_grad_()
+
+            def gradcheck_func(samples, mu, sigma, prec, scale_tril):
+                if sigma is not None:
+                    sigma = 0.5 * (sigma + sigma.transpose(-1, -2))  # Ensure symmetry of covariance
+                if prec is not None:
+                    prec = 0.5 * (prec + prec.transpose(-1, -2))  # Ensure symmetry of precision
+                return MultivariateNormal(mu, sigma, prec, scale_tril).log_prob(samples)
+            gradcheck(gradcheck_func, (mvn_samples, mean, covariance, precision, scale_tril), raise_exception=True)
+
+        multivariate_normal_log_prob_gradcheck(mean, cov)
+        multivariate_normal_log_prob_gradcheck(mean_multi_batch, cov)
+        multivariate_normal_log_prob_gradcheck(mean_multi_batch, cov_batched)
+        multivariate_normal_log_prob_gradcheck(mean, None, prec)
+        multivariate_normal_log_prob_gradcheck(mean_no_batch, None, prec_batched)
+        multivariate_normal_log_prob_gradcheck(mean, None, None, scale_tril)
+        multivariate_normal_log_prob_gradcheck(mean_no_batch, None, None, scale_tril_batched)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multivariate_normal_log_prob(self):
@@ -2694,14 +2705,14 @@ class TestRsample(TestCase):
 
 class TestDistributionShapes(TestCase):
     def setUp(self):
-        super(TestCase, self).setUp()
+        super(TestDistributionShapes, self).setUp()
         self.scalar_sample = 1
         self.tensor_sample_1 = torch.ones(3, 2)
         self.tensor_sample_2 = torch.ones(3, 2, 3)
         Distribution.set_default_validate_args(True)
 
     def tearDown(self):
-        super(TestCase, self).tearDown()
+        super(TestDistributionShapes, self).tearDown()
         Distribution.set_default_validate_args(False)
 
     def test_entropy_shape(self):
@@ -3082,6 +3093,7 @@ class TestDistributionShapes(TestCase):
 class TestKL(TestCase):
 
     def setUp(self):
+        super(TestKL, self).setUp()
 
         class Binomial30(Binomial):
             def __init__(self, probs):
@@ -3596,6 +3608,7 @@ class TestNumericalStability(TestCase):
 
 class TestLazyLogitsInitialization(TestCase):
     def setUp(self):
+        super(TestLazyLogitsInitialization, self).setUp()
         self.examples = [e for e in EXAMPLES if e.Dist in
                          (Categorical, OneHotCategorical, Bernoulli, Binomial, Multinomial)]
 
@@ -3638,7 +3651,7 @@ class TestLazyLogitsInitialization(TestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(TestCase):
     def setUp(self):
-        set_rng_seed(0)
+        super(TestAgainstScipy, self).setUp()
         positive_var = torch.randn(20).exp()
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
@@ -3789,6 +3802,7 @@ class TestAgainstScipy(TestCase):
 
 class TestTransforms(TestCase):
     def setUp(self):
+        super(TestTransforms, self).setUp()
         self.transforms = []
         transforms_by_cache_size = {}
         for cache_size in [0, 1]:
@@ -4197,7 +4211,7 @@ class TestValidation(TestCase):
                     raise AssertionError(fail_string.format(Dist.__name__, i + 1, len(params)))
 
     def tearDown(self):
-        super(TestCase, self).tearDown()
+        super(TestValidation, self).tearDown()
         Distribution.set_default_validate_args(False)
 
 

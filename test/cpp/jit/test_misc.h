@@ -16,6 +16,7 @@
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/interpreter.h"
+#include "torch/csrc/jit/pass_manager.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
@@ -40,6 +41,7 @@
 #include "ATen/core/ivalue.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
+#include "torch/jit.h"
 
 #include "onnx/onnx_pb.h"
 
@@ -369,11 +371,10 @@ static const auto cf_examples = R"JIT(
     return a
 )JIT";
 void testControlFlow() {
-  auto cu = std::make_shared<script::Module>();
-  script::defineMethodsInModule(
-      cu, cf_examples, script::nativeResolver, c10::nullopt);
+  auto cu = compile(cf_examples);
+
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu->get_method(name).graph();
+    auto graph = cu->get_function(name).graph();
     Code code(graph);
     InterpreterState interp(code);
     interp.run(stack);
@@ -575,6 +576,107 @@ void testTopologicalIndex() {
   }
 }
 
+at::Tensor invokeTestRecordFunction(at::Tensor& t) {
+  RECORD_FUNCTION("test", std::vector<c10::IValue>({t}));
+
+  auto t2 = t.pow(2);
+  return t2;
+}
+
+static const auto invokeTestRecordFunction_JIT = R"JIT(
+  def forward(t):
+    t2 = t.pow(2)
+    return t2
+)JIT";
+
+at::Tensor invokeTestRecordFunctionJIT(at::Tensor& t) {
+  RECORD_FUNCTION("test", std::vector<c10::IValue>({t}));
+
+  auto cu = compile(invokeTestRecordFunction_JIT);
+  return cu->get_function("forward")({t}).toTensor();
+}
+
+using TracedTestInputs =
+    std::vector<std::tuple<std::string, std::vector<std::vector<int64_t>>>>;
+
+void checkTracedInputs(const TracedTestInputs& inputs) {
+  bool found_test = false;
+  bool found_pow = false;
+  bool found_mul = false;
+  for (const auto& input : inputs) {
+    const auto& fn = std::get<0>(input);
+    const auto& sizes = std::get<1>(input);
+    if (fn == "test") {
+      found_test = true;
+      AT_CHECK(sizes.size() == 1);
+      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    } else if (fn == "test::pow") {
+      found_pow = true;
+      AT_CHECK(sizes.size() == 2);
+      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      AT_CHECK(sizes[1].empty());
+    } else if (fn.find("::mul") != std::string::npos) {
+      found_mul = true;
+      AT_CHECK(sizes.size() > 1);
+      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    }
+  }
+  AT_CHECK(found_test);
+  AT_CHECK(found_pow);
+  AT_CHECK(found_mul);
+}
+
+std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
+  std::string full_name = "";
+  while (fn_ptr != nullptr) {
+    if (!full_name.empty()) {
+      full_name = std::string(fn_ptr->name().str()) + "::" + full_name;
+    } else {
+      full_name = fn_ptr->name().str();
+    }
+    fn_ptr = fn_ptr->parent();
+  }
+  return full_name;
+}
+
+void testRecordFunction() {
+  // [(fn, [[sizes], [sizes], ...]), ...]
+  TracedTestInputs traced_inputs;
+  autograd::profiler::pushCallback(
+      [&traced_inputs](const autograd::profiler::RecordFunction& fn) {
+        auto inputs = fn.inputs();
+        std::vector<std::vector<int64_t>> sizes;
+        for (const auto& input : inputs) {
+          if (input.isTensor()) {
+            sizes.push_back(input.toTensor().sizes().vec());
+          } else if (input.isScalar()){
+            sizes.push_back(std::vector<int64_t>());
+          }
+        }
+        traced_inputs.push_back(
+            std::make_tuple(std::string(getFullName(&fn)), sizes));
+      }, [](const autograd::profiler::RecordFunction&) {}, true);
+
+  auto t = torch::randn({1, 2, 3}, at::kCPU);
+  t.set_requires_grad(true);
+  auto t2 = invokeTestRecordFunction(t);
+  t2.backward();
+  auto eager_inputs = traced_inputs;
+  traced_inputs.clear();
+
+  t = torch::randn({1, 2, 3}, at::kCPU);
+  t.set_requires_grad(true);
+  t2 = invokeTestRecordFunctionJIT(t);
+  t2.backward();
+  auto jit_inputs = traced_inputs;
+  traced_inputs.clear();
+
+  autograd::profiler::popCallback();
+
+  checkTracedInputs(eager_inputs);
+  checkTracedInputs(jit_inputs);
+}
+
 void testAutogradProfiler() {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -606,7 +708,7 @@ void testAutogradProfiler() {
 void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
-          "test::test_none() -> int?",
+          "prim::test_none() -> int?",
           [](const Node* node) {
             return [](Stack& stack) {
               push(stack, IValue());
@@ -614,7 +716,7 @@ void testNoneSchemaMatch() {
             };
           }),
       Operator(
-          "test::is_none(int? a) -> bool",
+          "prim::is_none(int? a) -> bool",
           [](const Node* node) {
             return [](Stack& stack) {
               IValue a = pop(stack);
@@ -634,8 +736,8 @@ void testNoneSchemaMatch() {
 
   auto r = std::make_shared<Graph>();
   auto& g = *r;
-  auto opt_int = g.insert(Symbol::fromQualString("test::test_none"), {});
-  auto out_bool = g.insert(Symbol::fromQualString("test::is_none"), {opt_int});
+  auto opt_int = g.insert(Symbol::fromQualString("prim::test_none"), {});
+  auto out_bool = g.insert(Symbol::fromQualString("prim::is_none"), {opt_int});
   g.registerOutput(out_bool);
   ConstantPropagation(r);
 
@@ -643,6 +745,44 @@ void testNoneSchemaMatch() {
   // checking that constant propagation ran wo/failure
   AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
 }
+
+void testModuleDefine() {
+  auto m = std::make_shared<script::Module>();
+  m->register_parameter("foo", torch::ones({}), false);
+  m->define(R"(
+    def add_it(self, x, b : int = 4):
+      return self.foo + x + b
+  )");
+  auto result = m->run_method("add_it", torch::ones({}));
+  AT_ASSERT(result.toTensor().item<float>() == 6)
+}
+
+static int testPassValue = 0;
+void fakePass(std::shared_ptr<Graph>& g) {
+  testPassValue++;
+  return;
+}
+
+RegisterPass p(fakePass);
+
+void testPassManagement() {
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  script::parseIR(
+      R"IR(
+graph(%a):
+  return (%a))IR",
+      &*graph);
+
+  std::vector<IValue> stack = {IValue(torch::randn({22}, at::kCPU))};
+  auto run = [&](std::shared_ptr<Graph>& graph, std::vector<IValue> stack) {
+    GraphExecutor executor(graph);
+    executor.run(stack);
+    return stack;
+  };
+  run(graph, stack);
+  AT_ASSERT(testPassValue);
+}
+
 } // namespace test
 } // namespace jit
 } // namespace torch

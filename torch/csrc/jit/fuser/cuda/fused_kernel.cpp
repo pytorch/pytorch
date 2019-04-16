@@ -185,9 +185,9 @@ FusedKernelCUDA::FusedKernelCUDA(
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
   if (result == NVRTC_ERROR_COMPILATION) {
     size_t logsize;
-    nvrtcGetProgramLogSize(program, &logsize);
+    nvrtc().nvrtcGetProgramLogSize(program, &logsize);
     std::vector<char> log(logsize);
-    nvrtcGetProgramLog(program, log.data());
+    nvrtc().nvrtcGetProgramLog(program, log.data());
     std::stringstream cu;
     cu << log.data();
     throw std::runtime_error(cu.str());
