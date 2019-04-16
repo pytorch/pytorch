@@ -336,7 +336,6 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
-  AT_ASSERT(!(self.is_variable() && self.requires_grad()) || at::NonVariableTypeMode::is_enabled());  // We need to make sure operations on `self` do not accumulate gradients
   AT_ASSERT(self.is_sparse());
 
   if (self.is_coalesced()) {
@@ -345,7 +344,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
   // we should keep the original tensor intact and do coalesce on a copy of the tensor
   if (self._nnz() < 2) {
-    SparseTensor dst = self.clone();
+    SparseTensor dst = self.detach().clone();
     dst._coalesced_(true);
     return dst;
   }
