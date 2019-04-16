@@ -3,7 +3,6 @@
 #include <atomic>
 #include <cstddef>
 #include <exception>
-#include <numeric>
 
 #ifdef _OPENMP
 #include <omp.h>

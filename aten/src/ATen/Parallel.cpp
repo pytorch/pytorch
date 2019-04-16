@@ -32,9 +32,9 @@ void set_num_threads(size_t nthreads) {
   if (nthreads == 0) {
     return;
   }
+  num_threads.store(nthreads);
 #ifdef _OPENMP
   omp_set_num_threads(nthreads);
-  num_threads.store(nthreads);
 #endif
 #ifdef TH_BLAS_MKL
   mkl_set_num_threads(nthreads);
