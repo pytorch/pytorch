@@ -24,12 +24,14 @@ def TensorShape_proto(outputsize):
 
 def Node_proto(name,
                op='UnSpecified',
-               input=[],
+               input=None,
                dtype=None,
                shape=None,  # type: tuple
                outputsize=None,
                attributes=''
                ):
+    if input is None:
+        input = []
     if not isinstance(input, list):
         input = [input]
     return NodeDef(
