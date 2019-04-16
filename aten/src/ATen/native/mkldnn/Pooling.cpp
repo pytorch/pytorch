@@ -1,7 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/utils/ParamUtils.h>
 #include <tuple>
+
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -71,10 +73,10 @@ static Tensor ideep_pool2d(
     IntArrayRef dilation,
     bool ceil_mode,
     ideep::algorithm algo) {
-  auto kernel_size_vec = expand_param_if_needed(kernel_size, 2);
-  auto stride_vec = expand_param_if_needed(stride, 2);
-  auto padding_vec = expand_param_if_needed(padding, 2);
-  auto dilation_vec = expand_param_if_needed(dilation, 2);
+  auto kernel_size_vec = expand_param_if_needed(kernel_size, "kernel_size", 2);
+  auto stride_vec = expand_param_if_needed(stride, "stride", 2);
+  auto padding_vec = expand_param_if_needed(padding, "padding", 2);
+  auto dilation_vec = expand_param_if_needed(dilation, "dilation", 2);
 
   const ideep::tensor& x = itensor_from_mkldnn(input);
   const std::vector<int64_t> output_sizes = pool_output_sizes(
