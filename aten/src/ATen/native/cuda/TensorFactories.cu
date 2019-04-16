@@ -45,6 +45,7 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 
 Tensor empty_cuda(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == at::Backend::CUDA);
+  AT_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
 
   auto* allocator = at::cuda::getCUDADeviceAllocator();
@@ -326,7 +327,8 @@ Tensor tril_indices_cuda(
 
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
       tril_indices_kernel<<<
-          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()
+        (
         tensor.data<scalar_t>(),
         trapezoid_row_offset,
         m_first_row,
@@ -402,7 +404,9 @@ Tensor triu_indices_cuda(
 
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
       triu_indices_kernel<<<
-          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()
+        
+        (
         tensor.data<scalar_t>(),
         std::max<int64_t>(0, offset),
         m_first_row,
