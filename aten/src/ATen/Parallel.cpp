@@ -70,8 +70,6 @@ void PTThreadPool::init_thread() {
   at::init_num_threads();
 }
 
-namespace {
-
 std::shared_ptr<TaskThreadPoolBase> createC10ThreadPool(
     int device_id,
     int pool_size,
@@ -87,8 +85,6 @@ std::shared_ptr<TaskThreadPoolBase> createC10ThreadPool(
   AT_ASSERT(pool->size() == pool_size);
   return pool;
 }
-
-} // namespace
 
 C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, createC10ThreadPool);
 
