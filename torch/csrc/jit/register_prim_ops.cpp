@@ -117,7 +117,7 @@ RegisterOperators reg(
          [](const Node* node) {
            const auto key = registerFusion(node);
            return [key](Stack& stack) {
-             autograd::profiler::RecordFunction record("FusionGroup");
+             RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
              runFusion(key, stack);
              return 0;
            };
@@ -660,7 +660,8 @@ RegisterOperators reg(
              return v->uses().size() > 0;
            });
            return [=](Stack& stack) {
-             autograd::profiler::RecordFunction record("chunk");
+             RECORD_FUNCTION("chunk", last(stack, 1));
+
              at::Tensor t;
              pop(stack, t);
              auto result = at::chunk(t, chunks, dim);

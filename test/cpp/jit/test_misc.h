@@ -576,14 +576,54 @@ void testTopologicalIndex() {
   }
 }
 
-void invokeTestRecordFunction(at::Tensor& t) {
-  autograd::profiler::GetPackedInputsCallback inputs_cb = [t]() {
-    Stack st;
-    pack(st, t);
-    return st;
-  };
-  autograd::profiler::RecordFunction guard("test", inputs_cb);
-  t.add_(torch::ones_like(t));
+at::Tensor invokeTestRecordFunction(at::Tensor& t) {
+  RECORD_FUNCTION("test", std::vector<c10::IValue>({t}));
+
+  auto t2 = t.pow(2);
+  return t2;
+}
+
+static const auto invokeTestRecordFunction_JIT = R"JIT(
+  def forward(t):
+    t2 = t.pow(2)
+    return t2
+)JIT";
+
+at::Tensor invokeTestRecordFunctionJIT(at::Tensor& t) {
+  RECORD_FUNCTION("test", std::vector<c10::IValue>({t}));
+
+  auto cu = compile(invokeTestRecordFunction_JIT);
+  return cu->get_function("forward")({t}).toTensor();
+}
+
+using TracedTestInputs =
+    std::vector<std::tuple<std::string, std::vector<std::vector<int64_t>>>>;
+
+void checkTracedInputs(const TracedTestInputs& inputs) {
+  bool found_test = false;
+  bool found_pow = false;
+  bool found_mul = false;
+  for (const auto& input : inputs) {
+    const auto& fn = std::get<0>(input);
+    const auto& sizes = std::get<1>(input);
+    if (fn == "test") {
+      found_test = true;
+      AT_CHECK(sizes.size() == 1);
+      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    } else if (fn == "test::pow") {
+      found_pow = true;
+      AT_CHECK(sizes.size() == 2);
+      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      AT_CHECK(sizes[1].empty());
+    } else if (fn.find("::mul") != std::string::npos) {
+      found_mul = true;
+      AT_CHECK(sizes.size() > 1);
+      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    }
+  }
+  AT_CHECK(found_test);
+  AT_CHECK(found_pow);
+  AT_CHECK(found_mul);
 }
 
 std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
@@ -599,47 +639,42 @@ std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
   return full_name;
 }
 
-void invokeTestRecordFunctionNested() {
-  autograd::profiler::RecordFunction guard("inner");
-}
-
 void testRecordFunction() {
-  std::vector<std::vector<int64_t>> input_sizes;
+  // [(fn, [[sizes], [sizes], ...]), ...]
+  TracedTestInputs traced_inputs;
   autograd::profiler::pushCallback(
-      [&input_sizes](const autograd::profiler::RecordFunction& fn) {
-        for (const auto& input : fn.inputs()) {
+      [&traced_inputs](const autograd::profiler::RecordFunction& fn) {
+        auto inputs = fn.inputs();
+        std::vector<std::vector<int64_t>> sizes;
+        for (const auto& input : inputs) {
           if (input.isTensor()) {
-            std::vector<int64_t> t = input.toTensor().sizes().vec();
-            input_sizes.push_back(t);
+            sizes.push_back(input.toTensor().sizes().vec());
+          } else if (input.isScalar()){
+            sizes.push_back(std::vector<int64_t>());
           }
         }
-      });
+        traced_inputs.push_back(
+            std::make_tuple(std::string(getFullName(&fn)), sizes));
+      }, [](const autograd::profiler::RecordFunction&) {}, true);
 
   auto t = torch::randn({1, 2, 3}, at::kCPU);
-  invokeTestRecordFunction(t);
+  t.set_requires_grad(true);
+  auto t2 = invokeTestRecordFunction(t);
+  t2.backward();
+  auto eager_inputs = traced_inputs;
+  traced_inputs.clear();
+
+  t = torch::randn({1, 2, 3}, at::kCPU);
+  t.set_requires_grad(true);
+  t2 = invokeTestRecordFunctionJIT(t);
+  t2.backward();
+  auto jit_inputs = traced_inputs;
+  traced_inputs.clear();
 
   autograd::profiler::popCallback();
 
-  AT_CHECK(input_sizes.size() == 1);
-  AT_CHECK(input_sizes[0] == at::IntArrayRef({1, 2, 3}));
-
-  // test nested RecordFunctions
-  std::vector<std::string> nested_names;
-  autograd::profiler::pushCallback(
-      [&nested_names](const autograd::profiler::RecordFunction& fn) {
-        nested_names.push_back(getFullName(&fn));
-      });
-
-  {
-    autograd::profiler::RecordFunction guard("outer");
-    invokeTestRecordFunctionNested();
-    ;
-  }
-
-  autograd::profiler::popCallback();
-  AT_CHECK(nested_names.size() == 2);
-  AT_CHECK(nested_names[0] == "outer");
-  AT_CHECK(nested_names[1] == "outer::inner");
+  checkTracedInputs(eager_inputs);
+  checkTracedInputs(jit_inputs);
 }
 
 void testAutogradProfiler() {
