@@ -46,11 +46,30 @@
 namespace torch {
 namespace jit {
 
+// for debugging it is helpful to be able to force autodiff subgraphs
+// to be created, to check their correctness, even when the
+// size of the of the subgraph is too small to be profitable.
+thread_local bool autodiff_subgraph_inlining = true;
+void debugSetAutodiffSubgraphInlining(bool state) {
+  autodiff_subgraph_inlining = state;
+}
+
+thread_local std::weak_ptr<Graph> last_executed_optimized_graph;
+std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
+  return last_executed_optimized_graph.lock();
+}
+
 namespace {
 
 using tensor_list = std::vector<at::Tensor>;
 using Variable = autograd::Variable;
 using autograd::variable_list;
+
+// Tunable parameters for deciding when to create/keep subgraphs of
+// differentiable code
+
+const size_t autodiffSubgraphNodeThreshold = 2;
+const size_t autodiffSubgraphInlineThreshold = 5;
 
 struct ExecutionPlan {
   ExecutionPlan() = default;
@@ -58,7 +77,8 @@ struct ExecutionPlan {
       : code(graph), graph(std::move(graph)) {}
 
   void run(Stack& stack) const {
-    return InterpreterState(code).run(stack);
+    InterpreterState(code).run(stack);
+    last_executed_optimized_graph = graph;
   }
 
   operator bool() const {
@@ -480,9 +500,9 @@ struct GraphExecutorImpl {
         num_inputs(this->graph->inputs().size()),
         arg_spec_creator_(*graph),
         num_outputs(this->graph->outputs().size()) {
-          logging::getLogger()->addStatValue(
-              logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
-        }
+    logging::getLogger()->addStatValue(
+        logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
+  }
 
   // entry point where execution begins
   void run(Stack& stack) {
@@ -505,22 +525,6 @@ struct GraphExecutorImpl {
     return execution_plan.run(stack);
   }
 
-  std::shared_ptr<Graph> graphFor(const Stack& stack) const {
-    AT_ASSERT(stack.size() >= num_inputs);
-
-    ArgumentSpec spec =
-        arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
-
-    if (!optimize) {
-      AT_CHECK(fallback, "No graph found for given inputs");
-      return fallback.graph;
-    }
-
-    auto it = plan_cache.find(spec);
-    AT_CHECK(it != plan_cache.end(), "No graph found for given inputs");
-    return it->second.graph;
-  }
-
   GraphExecutorState getDebugState() {
     GraphExecutorState state;
     state.graph = graph.get();
@@ -531,14 +535,6 @@ struct GraphExecutorImpl {
       state.execution_plans.emplace(entry.first, entry.second.getDebugState());
     }
     return state;
-  }
-
-  // This function should be used only for testing purposes
-  void debugDisableAutodiffSubgraphInlining() {
-    // Allow single-node autodiff subgraphs
-    autodiffSubgraphNodeThreshold = 1;
-    // Don't inline autodiff subgraphs into autograd functions
-    autodiffSubgraphInlineThreshold = 1;
   }
 
  private:
@@ -603,15 +599,18 @@ struct GraphExecutorImpl {
     // Phase 5. Apply non-differentiable optimizations to the graphs we've found
     //          (or the whole grpah if we know we won't need its derivative).
     if (needsGradient(opt_graph)) {
-      auto diff_nodes =
-          CreateAutodiffSubgraphs(opt_graph, autodiffSubgraphNodeThreshold);
+      auto diff_nodes = CreateAutodiffSubgraphs(
+          opt_graph,
+          autodiff_subgraph_inlining ? autodiffSubgraphNodeThreshold : 1);
       for (Node* dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
-      InlineAutodiffSubgraphs(opt_graph, autodiffSubgraphInlineThreshold);
+      InlineAutodiffSubgraphs(
+          opt_graph,
+          autodiff_subgraph_inlining ? autodiffSubgraphInlineThreshold : 1);
     } else {
       runNondiffOptimization(opt_graph);
     }
@@ -731,10 +730,6 @@ struct GraphExecutorImpl {
   // GraphExecutors can be accessed from multiple threads, so this thread needs
   // to be held every time we access the fallback or plan_cache.
   std::mutex compile_mutex;
-
-  // Some tunable parameters
-  size_t autodiffSubgraphNodeThreshold = 2;
-  size_t autodiffSubgraphInlineThreshold = 5;
 };
 
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
@@ -748,16 +743,8 @@ std::shared_ptr<Graph> GraphExecutor::graph() const {
   return pImpl->graph;
 }
 
-std::shared_ptr<Graph> GraphExecutor::graphFor(const Stack& inputs) const {
-  return pImpl->graphFor(inputs);
-}
-
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
-}
-
-void GraphExecutor::debugDisableAutodiffSubgraphInlining() {
-  return pImpl->debugDisableAutodiffSubgraphInlining();
 }
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
