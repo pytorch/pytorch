@@ -143,6 +143,10 @@ inline scalar_t parallel_reduce(
   }
 }
 
+} // namespace at
+
+namespace c10 {
+
 class C10_API PTThreadPool : public c10::ThreadPool {
  public:
   explicit PTThreadPool(
@@ -152,9 +156,4 @@ class C10_API PTThreadPool : public c10::ThreadPool {
   void init_thread() override;
 };
 
-C10_API std::shared_ptr<TaskThreadPoolBase> createC10ThreadPool(
-    int device_id,
-    int pool_size,
-    bool create_new);
-
-} // namespace at
+} // namespace c10
