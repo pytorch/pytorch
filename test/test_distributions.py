@@ -1726,10 +1726,8 @@ class TestDistributions(TestCase):
         # construct batch of PSD covariances
         tmp = torch.randn(6, 5, 3, 10)
         cov_batched = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
-        prec_batched = [C.inverse() for C in cov_batched.view((-1, 3, 3))]
-        prec_batched = torch.stack(prec_batched).view(cov_batched.shape)
-        scale_tril_batched = [torch.cholesky(C, upper=False) for C in cov_batched.view((-1, 3, 3))]
-        scale_tril_batched = torch.stack(scale_tril_batched).view(cov_batched.shape)
+        prec_batched = cov_batched.inverse()
+        scale_tril_batched = cov_batched.cholesky(upper=False)
 
         # ensure that sample, batch, event shapes all handled correctly
         self.assertEqual(MultivariateNormal(mean, cov).sample().size(), (5, 3))
@@ -1750,13 +1748,26 @@ class TestDistributions(TestCase):
         self.assertEqual(MultivariateNormal(mean, scale_tril=scale_tril_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
 
         # check gradients
-        self._gradcheck_log_prob(MultivariateNormal, (mean, cov))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_multi_batch, cov))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_multi_batch, cov_batched))
-        self._gradcheck_log_prob(MultivariateNormal, (mean, None, prec))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, prec_batched))
-        self._gradcheck_log_prob(MultivariateNormal, (mean, None, None, scale_tril))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, None, scale_tril_batched))
+        # We write a custom gradcheck function to maintain the symmetry
+        # of the perturbed covariances and their inverses (precision)
+        def multivariate_normal_log_prob_gradcheck(mean, covariance=None, precision=None, scale_tril=None):
+            mvn_samples = MultivariateNormal(mean, covariance, precision, scale_tril).sample().requires_grad_()
+
+            def gradcheck_func(samples, mu, sigma, prec, scale_tril):
+                if sigma is not None:
+                    sigma = 0.5 * (sigma + sigma.transpose(-1, -2))  # Ensure symmetry of covariance
+                if prec is not None:
+                    prec = 0.5 * (prec + prec.transpose(-1, -2))  # Ensure symmetry of precision
+                return MultivariateNormal(mu, sigma, prec, scale_tril).log_prob(samples)
+            gradcheck(gradcheck_func, (mvn_samples, mean, covariance, precision, scale_tril), raise_exception=True)
+
+        multivariate_normal_log_prob_gradcheck(mean, cov)
+        multivariate_normal_log_prob_gradcheck(mean_multi_batch, cov)
+        multivariate_normal_log_prob_gradcheck(mean_multi_batch, cov_batched)
+        multivariate_normal_log_prob_gradcheck(mean, None, prec)
+        multivariate_normal_log_prob_gradcheck(mean_no_batch, None, prec_batched)
+        multivariate_normal_log_prob_gradcheck(mean, None, None, scale_tril)
+        multivariate_normal_log_prob_gradcheck(mean_no_batch, None, None, scale_tril_batched)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multivariate_normal_log_prob(self):

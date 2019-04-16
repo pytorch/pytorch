@@ -328,6 +328,7 @@ struct THCCachingAllocator
   void emptyCache()
   {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    synchronize_and_free_events(nullopt);
     free_blocks(large_blocks, large_blocks.begin(), large_blocks.end());
     free_blocks(small_blocks, small_blocks.begin(), small_blocks.end());
   }
@@ -478,6 +479,10 @@ struct THCCachingAllocator
 
   void free_cached_blocks(int device)
   {
+    // First ensure that all blocks that can't currently be allocated due to
+    // outstanding events are returned to the pool.
+    synchronize_and_free_events(device);
+
     // Free all non-split cached blocks on device
     Block lower_bound(device, nullptr, 0);
     Block upper_bound(device + 1, nullptr, 0);
@@ -509,6 +514,32 @@ struct THCCachingAllocator
         ++it;
       }
     }
+  }
+
+  void synchronize_and_free_events(optional<int> device) {
+    // Synchronize on outstanding events and then free associated blocks.
+    // Limited to blocks on the given device if specified.
+
+    auto remaining_events = decltype(cuda_events)();
+
+    for (auto& e : cuda_events) {
+      cudaEvent_t event = e.first;
+      Block* block = e.second;
+      if (device.has_value() && block->device != *device) {
+        remaining_events.push_back(e);
+        continue;
+      }
+
+      C10_CUDA_CHECK(cudaEventSynchronize(event));
+      C10_CUDA_CHECK(cudaEventDestroy(event));
+
+      block->event_count--;
+      if (block->event_count == 0) {
+        free_block(block);
+      }
+    }
+
+    std::swap(cuda_events, remaining_events);
   }
 
   Block* find_allocated_block(void *ptr) {
