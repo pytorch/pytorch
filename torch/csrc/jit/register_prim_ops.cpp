@@ -213,6 +213,19 @@ RegisterOperators reg(
            push(stack, autograd::make_variable(at::scalar_to_tensor(b)));
            return 0;
          }),
+     // FIXME: It would be nice to remove this if symbolic_script can get by without
+     Operator(
+         "aten::_float(Scalar a) -> float",
+         [](Stack& stack) {
+           IValue scalar;
+           pop(stack, scalar);
+           if (scalar.isDouble()) {
+             push(stack, scalar);
+           } else {
+             push(stack, static_cast<double>(scalar.toInt()));
+           }
+           return 0;
+         }),
      Operator(
          "prim::Float(Scalar a) -> float",
          [](Stack& stack) {

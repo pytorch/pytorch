@@ -580,10 +580,10 @@ const std::vector<std::string> functions = {
         def pow_0(self,
                   exponent: float):
             def backward(grad_output):
-                if exponent == 0.0:
+                if torch._float(exponent) == 0.0:
                     grad_self = torch.zeros_like(self)
                 else:
-                    grad_self = grad_output * exponent * torch.pow(self, exponent - 1)
+                    grad_self = grad_output * exponent * torch.pow(self, torch._float(exponent) - 1)
                 return grad_self, None
 
             return torch.pow(self, exponent), backward
