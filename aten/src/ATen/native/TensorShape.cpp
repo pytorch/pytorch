@@ -304,7 +304,7 @@ Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef s
   auto tid = self.type_id();
   AT_CHECK(
       tid == CPUTensorId() || tid == CUDATensorId(),
-      "as_strided_tensorimpl is only implemented for strided CPU and CUDA tensors.");
+      "as_strided is only implemented for strided CPU, CUDA and QuantizedCPU tensors.");
   auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), tid);
   setStrided(result, size, stride, storage_offset);
   return result;
@@ -315,7 +315,7 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   auto tid = self.type_id();
   AT_CHECK(
       tid == QuantizedCPUTensorId(),
-      "as_strided_qtensorimpl is only implemented for strided QuantizedCPU tensors.");
+      "as_strided is only implemented for strided CPU, CUDA and QuantizedCPU tensors.");
   auto result = detail::make_tensor<QTensorImpl>(Storage(self.storage()), tid, get_qtensorimpl(self)->quantizer());
   setStrided(result, size, stride, storage_offset);
   return result;
