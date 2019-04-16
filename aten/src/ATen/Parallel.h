@@ -5,7 +5,6 @@
 #include <atomic>
 #include <cstddef>
 #include <exception>
-#include <numeric>
 
 #ifdef _OPENMP
 #define INTRA_OP_PARALLEL
