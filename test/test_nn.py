@@ -7805,9 +7805,7 @@ class TestNN(NNTestCase):
     def test_transformer_number_match(self):
 
        # transform will be loaded directly from torch.nn directly.
-        import sys
-        sys.path.append('../torch/nn/modules')
-        import transformer as T
+        import torch.nn.modules.transformer as T
 
         # Train the simple copy task.
         V = 11
