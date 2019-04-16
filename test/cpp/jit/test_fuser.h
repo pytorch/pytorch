@@ -177,7 +177,7 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
   auto createGraphWithNames = [](std::string cname, std::string dname) {
     auto graph = std::make_shared<Graph>();
     at::ScalarType s = at::ScalarType::Float;
-    auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+    auto type = DimensionedTensorType::create(s, at::kCPU, 3, /*requires_grad=*/false);
     auto a = SymbolicVariable::asNewInput(*graph, type);
     auto b = SymbolicVariable::asNewInput(*graph, type);
     auto c = a * b;
@@ -185,6 +185,8 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
     c.value()->setUniqueName(cname);
     d.value()->setUniqueName(dname);
     graph->registerOutput(d.value());
+    PropagateInputShapes(graph);
+    PropagateRequiresGrad(graph);
     torch::jit::overrideCanFuseOnCPU(true);
     FuseGraph(graph);
     torch::jit::overrideCanFuseOnCPU(false);
