@@ -245,8 +245,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
     if (has_packed_bias) {
       const auto& packed_filter =
           this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
-      b_quantized_ = packed_filter.bias;
-      b_quantized_data_ = b_quantized_->data();
+      b_quantized_data_ = packed_filter.bias->data();
     } else {
       const auto& bias = InputTensorCPU_(BIAS);
       if (this->template InputIsType<int8::Int8TensorCPU>(BIAS)) {
@@ -290,6 +289,8 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
     if (this->order_ == StorageOrder::NHWC && in_qparams_[INPUT].zero_point &&
         column_offsets_->empty()) {
       if (b_quantized_->empty()) {
+        // When b_quantized_data_ is from pre-packed bias or Int8TensorCPU,
+        // we can't inplace modify so copy to internal b_quantized_ vector.
         b_quantized_->assign(b_quantized_data_, b_quantized_data_ + M);
         b_quantized_data_ = b_quantized_->data();
       }
