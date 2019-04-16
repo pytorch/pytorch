@@ -73,11 +73,18 @@ void PTThreadPool::init_thread() {
 namespace {
 
 std::shared_ptr<TaskThreadPoolBase> createC10ThreadPool(
-    int /* unused */,
+    int device_id,
     int pool_size,
-    bool /* unused */) {
+    bool create_new) {
   static std::shared_ptr<TaskThreadPoolBase> pool =
       std::make_shared<PTThreadPool>(pool_size);
+  // For now, the only accepted device id is 0
+  // for the JIT inter-op pool (CPU),
+  AT_ASSERT(device_id == 0);
+  // we use the shared thread pool
+  AT_ASSERT(!create_new);
+  // and the size does not change
+  AT_ASSERT(pool->size() == pool_size);
   return pool;
 }
 
