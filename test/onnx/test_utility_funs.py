@@ -40,9 +40,9 @@ class TestUtilityFuns(TestCase):
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
-            assert node.kind != "onnx::Transpose"
-            assert node.kind != "onnx::Cast"
-            assert node.kind != "onnx::Constant"
+            assert node.kind() != "onnx::Transpose"
+            assert node.kind() != "onnx::Cast"
+            assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
     def test_constant_fold_slice(self):
@@ -58,9 +58,9 @@ class TestUtilityFuns(TestCase):
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
-            assert node.kind != "onnx::Slice"
-            assert node.kind != "onnx::Cast"
-            assert node.kind != "onnx::Constant"
+            assert node.kind() != "onnx::Slice"
+            assert node.kind() != "onnx::Cast"
+            assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
     def test_constant_fold_unsqueeze(self):
@@ -76,9 +76,9 @@ class TestUtilityFuns(TestCase):
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
-            assert node.kind != "onnx::Unsqueeeze"
-            assert node.kind != "onnx::Cast"
-            assert node.kind != "onnx::Constant"
+            assert node.kind() != "onnx::Unsqueeeze"
+            assert node.kind() != "onnx::Cast"
+            assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
     def test_constant_fold_concat(self):
@@ -95,9 +95,9 @@ class TestUtilityFuns(TestCase):
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
-            assert node.kind != "onnx::Concat"
-            assert node.kind != "onnx::Cast"
-            assert node.kind != "onnx::Constant"
+            assert node.kind() != "onnx::Concat"
+            assert node.kind() != "onnx::Cast"
+            assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
     def test_constant_fold_lstm(self):
@@ -115,9 +115,9 @@ class TestUtilityFuns(TestCase):
         graph, _, __ = utils._model_to_graph(GruNet(), (input, h0), None,
                                              do_constant_folding=True)
         for node in graph.nodes():
-            assert node.kind != "onnx::Slice"
-            assert node.kind != "onnx::Concat"
-            assert node.kind != "onnx::Unsqueeze"
+            assert node.kind() != "onnx::Slice"
+            assert node.kind() != "onnx::Concat"
+            assert node.kind() != "onnx::Unsqueeze"
         assert len(list(graph.nodes())) == 3
 
     def test_constant_fold_transpose_matmul(self):
@@ -134,7 +134,7 @@ class TestUtilityFuns(TestCase):
         graph, _, __ = utils._model_to_graph(MatMulNet(), (A), None,
                                              do_constant_folding=True)
         for node in graph.nodes():
-            assert node.kind != "onnx::Transpose"
+            assert node.kind() != "onnx::Transpose"
         assert len(list(graph.nodes())) == 1
 
 if __name__ == '__main__':

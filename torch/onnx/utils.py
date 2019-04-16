@@ -287,6 +287,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
 
     if do_constant_folding and _export_onnx_opset_version == 9:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict)
+        torch._C._jit_pass_dce(graph)
 
     if verbose:
         print(graph)
