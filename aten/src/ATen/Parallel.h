@@ -147,7 +147,7 @@ inline scalar_t parallel_reduce(
 
 namespace c10 {
 
-class C10_API PTThreadPool : public c10::ThreadPool {
+class CAFFE2_API PTThreadPool : public c10::ThreadPool {
  public:
   explicit PTThreadPool(
       std::size_t pool_size,
