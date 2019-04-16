@@ -1,7 +1,6 @@
 import torch
 
 import itertools
-import os
 import functools
 import random
 import unittest
@@ -962,26 +961,23 @@ class TestSparse(TestCase):
         self.assertEqual(res, expected)
 
     def test_spadd(self):
-        # pass
-        input(os.getpid())
         self._test_spadd_shape(10, [5, 6])
-        # self._test_spadd_shape(10, [10, 10, 10])
-        # self._test_spadd_shape(10, [50, 30, 20])
-        # self._test_spadd_shape(10, [5, 5, 5, 5, 5, 5])
-        # self._test_spadd_shape(0, [0, 30, 20])
-        # self._test_spadd_shape(0, [50, 0, 20])
-        # self._test_spadd_shape(0, [50, 30, 0])
+        self._test_spadd_shape(10, [10, 10, 10])
+        self._test_spadd_shape(10, [50, 30, 20])
+        self._test_spadd_shape(10, [5, 5, 5, 5, 5, 5])
+        self._test_spadd_shape(0, [0, 30, 20])
+        self._test_spadd_shape(0, [50, 0, 20])
+        self._test_spadd_shape(0, [50, 30, 0])
 
     def test_spadd_hybrid(self):
-        pass
-        # self._test_spadd_shape(10, [5, 6], [2, 3])
-        # self._test_spadd_shape(10, [10, 10, 10], [3])
-        # self._test_spadd_shape(10, [50, 30, 20], [2])
-        # self._test_spadd_shape(10, [5, 5, 5, 5, 5, 5], [2])
-        # self._test_spadd_shape(0, [0, 30, 20], [2, 0])
-        # self._test_spadd_shape(0, [50, 0, 20], [2, 0])
-        # self._test_spadd_shape(0, [50, 30, 0], [2, 0])
-        # self._test_spadd_shape(10, [50, 30, 20], [2, 0])
+        self._test_spadd_shape(10, [5, 6], [2, 3])
+        self._test_spadd_shape(10, [10, 10, 10], [3])
+        self._test_spadd_shape(10, [50, 30, 20], [2])
+        self._test_spadd_shape(10, [5, 5, 5, 5, 5, 5], [2])
+        self._test_spadd_shape(0, [0, 30, 20], [2, 0])
+        self._test_spadd_shape(0, [50, 0, 20], [2, 0])
+        self._test_spadd_shape(0, [50, 30, 0], [2, 0])
+        self._test_spadd_shape(10, [50, 30, 20], [2, 0])
 
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):
