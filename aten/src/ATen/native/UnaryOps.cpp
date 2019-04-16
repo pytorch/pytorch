@@ -95,8 +95,13 @@ Tensor& _fill__cpu(Tensor& self, Scalar value) {
     return self;
   }
   if (iter->dtype() == at::ScalarType::Bool) {
+    // It is undefined behavior to load values other than 0 or 1.
     bool fill_value = value.to<bool>();
-    unary_kernel(*iter, [=](bool a) -> bool { return fill_value; });
+    if (fill_value) {
+      unary_kernel(*iter, [=](bool a) -> bool { return 1; });
+    } else {
+      unary_kernel(*iter, [=](bool a) -> bool { return 0; });
+    }
     return self;
   }
   fill_stub(iter->device_type(), *iter, value);
