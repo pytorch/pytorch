@@ -121,7 +121,7 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
         AT_DISPATCH_ALL_TYPES_AND2(
           at::ScalarType::Half, at::ScalarType::Bool,
           self.scalar_type(), "_copy_same_type_", [&] {
-              serial_unary_kernel(
+              unary_kernel(
                   *iter,
                   [=](scalar_t a) -> scalar_t { return a; });
             });
