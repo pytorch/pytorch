@@ -866,7 +866,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Copy tensor metadata from one TensorImpl to another TensorImpl.
    * See NOTE [ TensorImpl Shallow-Copying ] for details.
    */
-  friend void copy_tensor_metadata(TensorImpl* src_impl, TensorImpl* dest_impl) {
+  friend void copy_tensor_metadata(const TensorImpl* src_impl, TensorImpl* dest_impl) {
     dest_impl->set_sizes_and_strides(src_impl->sizes(), src_impl->strides());
     dest_impl->set_storage_offset(src_impl->storage_offset());
     dest_impl->data_type_ = src_impl->data_type_;
