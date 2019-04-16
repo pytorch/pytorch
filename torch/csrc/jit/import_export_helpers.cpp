@@ -1,5 +1,7 @@
 #include "jit/import_export_helpers.h"
 
+#include <algorithm>
+
 namespace torch {
 namespace jit {
 namespace ImportExportHelpers {
