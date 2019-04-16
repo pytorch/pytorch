@@ -29,52 +29,11 @@
 
 namespace torch {
 namespace jit {
-namespace detail {
-
-using ::c10::Argument;
-using ::c10::FunctionSchema;
 
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
 // that is confusing to display to the end user since it always reports
 // locations in libtorch code rather than user code.
-
-inline void findErrorInKwargs(const FunctionSchema& schema, py::kwargs kwargs) {
-  const auto& arguments = schema.arguments();
-  // First check if any of the kwargs are unknown, i.e. don't match the name of
-  // any argument in the schema.
-  for (const auto& kwarg : kwargs) {
-    const auto key = py::cast<std::string>(kwarg.first);
-    if (!std::count_if(
-            arguments.begin(),
-            arguments.end(),
-            [&key](const Argument& argument) {
-              return argument.name() == key;
-            })) {
-      throw std::runtime_error(c10::str(
-          "Unknown keyword argument '",
-          key,
-          "' for operator '",
-          schema.name(),
-          "'. Schema: ",
-          schema));
-    }
-  }
-  // If there are unconsumed kwargs but none of them were unknown, the first
-  // positional argument present in the kwargs is duplicated.
-  for (const auto& argument : arguments) {
-    if (kwargs.contains(argument.name().c_str())) {
-      AT_ASSERT(!argument.default_value());
-      throw std::runtime_error(c10::str(
-          "Argument '",
-          argument.name(),
-          "' specified both as positional and ",
-          "keyword argument. Schema: ",
-          schema));
-    }
-  }
-}
-} // namespace detail
 
 inline IValue toIValue(py::handle input) {
   if (THPVariable_Check(input.ptr())) {
@@ -347,10 +306,9 @@ inline py::object toPyObject(IValue&& ivalue) {
     const auto obj = ivalue.toObject();
     const auto classType = ClassType::get(obj->name());
     AT_ASSERT(classType);
-    auto pyClass = py::module::import("torch.jit")
-                       .attr("_get_script_class")(obj->name());
+    auto pyClass =
+        py::module::import("torch.jit").attr("_get_script_class")(obj->name());
     auto pyObj = pyClass.attr("__new__")(pyClass);
-
 
     const auto numAttrs = classType->numAttributes();
 
@@ -436,7 +394,11 @@ inline Stack createStackForSchema(
   }
 
   if (consumed_kwargs != kwargs.size()) {
-    detail::findErrorInKwargs(schema, kwargs);
+    std::vector<std::string> names;
+    for (const auto& kwarg : kwargs) {
+      names.emplace_back(py::cast<std::string>(kwarg.first));
+    }
+    schema.findErrorInKwargs(names);
   }
 
   return stack;

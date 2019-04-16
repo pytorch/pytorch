@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/utils/ParamUtils.h>
 
 #include <ATen/Config.h>
 #if AT_NNPACK_ENABLED()
@@ -356,21 +357,6 @@ at::Tensor convolution(
                           ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
 }
 
-static inline std::vector<int64_t> convolution_expand_param_if_needed(
-  IntArrayRef list_param, const char *param_name, int64_t expected_dim) {
-  if (list_param.size() == 1) {
-    return std::vector<int64_t>(expected_dim, list_param[0]);
-  } else if ((int64_t) list_param.size() != expected_dim) {
-    std::ostringstream ss;
-    ss << "expected " << param_name << " to be a single integer value or a "
-       << "list of " << expected_dim << " values to match the convolution "
-       << "dimensions, but got " << param_name << "=" << list_param;
-    AT_ERROR(ss.str());
-  } else {
-    return list_param.vec();
-  }
-}
-
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
@@ -395,11 +381,11 @@ at::Tensor _convolution(
   AT_CHECK(dim > 0, "weight should have at least three dimensions");
 
   ConvParams params;
-  params.stride = convolution_expand_param_if_needed(stride_, "stride", dim);
-  params.padding = convolution_expand_param_if_needed(padding_, "padding", dim);
-  params.dilation = convolution_expand_param_if_needed(dilation_, "dilation", dim);
+  params.stride = expand_param_if_needed(stride_, "stride", dim);
+  params.padding = expand_param_if_needed(padding_, "padding", dim);
+  params.dilation = expand_param_if_needed(dilation_, "dilation", dim);
   params.transposed = transposed_;
-  params.output_padding = convolution_expand_param_if_needed(output_padding_, "output_padding", dim);
+  params.output_padding = expand_param_if_needed(output_padding_, "output_padding", dim);
   params.groups = groups_;
   params.benchmark = benchmark;
   params.deterministic = deterministic;
