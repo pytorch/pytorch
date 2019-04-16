@@ -6,7 +6,7 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 # from .proto.onnx_pb2 import ModelProto
 
 
-def gg(fname):
+def load_onnx_graph(fname):
     import onnx  # 0.2.1
     m = onnx.load(fname)
     g = m.graph
