@@ -863,15 +863,27 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // and setting `allow_tensor_metadata_change_` to false would prevent those changes from happening and is undesirable.
 
   /**
+   * Copy tensor metadata from one TensorImpl to another TensorImpl.
+   * See NOTE [ TensorImpl Shallow-Copying ] for details.
+   */
+  friend void copy_tensor_metadata(TensorImpl* src_impl, TensorImpl* dest_impl) {
+    dest_impl->set_sizes_and_strides(src_impl->sizes(), src_impl->strides());
+    dest_impl->set_storage_offset(src_impl->storage_offset());
+    dest_impl->data_type_ = src_impl->data_type_;
+    dest_impl->device_opt_ = src_impl->device_opt_;
+    dest_impl->type_id_ = src_impl->type_id_;
+    dest_impl->is_contiguous_ = src_impl->is_contiguous_;
+    dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
+    dest_impl->reserved_ = src_impl->reserved_;
+  }
+
+  /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    * See NOTE [ TensorImpl Shallow-Copying ] for details.
    */
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id());
-    impl->set_sizes_and_strides(sizes(), strides());
-    impl->storage_offset_ = storage_offset_;
-    impl->is_wrapped_number_ = is_wrapped_number_;
-    impl->reserved_ = reserved_;
+    copy_tensor_metadata(*this, impl.get());
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;
@@ -882,12 +894,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See NOTE [ TensorImpl Shallow-Copying ] for details.
    */
   virtual void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) {
-    type_id_ = impl->type_id();
     set_storage(impl->storage());
-    set_sizes_and_strides(impl->sizes(), impl->strides());
-    set_storage_offset(impl->storage_offset());
-    is_wrapped_number_ = impl->is_wrapped_number_;
-    reserved_ = impl->reserved_;
+    copy_tensor_metadata(impl.get(), *this);
     refresh_numel();
     refresh_contiguous();
   }

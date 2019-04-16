@@ -84,15 +84,7 @@ c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
   //AT_ASSERT(false);
   auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
     type_id(), dtype(), device(), opaque_handle_, sizes_);
-  // TensorImpl general fields
-  // Note that some of these fields are not used in opaque tensor code,
-  // and we copy them here only for completeness.
-  impl->sizes_ = sizes_;
-  impl->strides_ = strides_;
-  impl->storage_offset_ = storage_offset_;
-  impl->is_contiguous_ = is_contiguous_;
-  impl->is_wrapped_number_ = is_wrapped_number_;
-  impl->reserved_ = reserved_;
+  copy_tensor_metadata(*this, impl.get());
 
   // OpaqueTensorImpl-specific fields (none currently).
   return impl;
@@ -103,21 +95,11 @@ c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
    * See NOTE [ TensorImpl Shallow-Copying ] for details.
    */
   void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
-    auto opaque_impl = static_cast<OpaqueTensorImpl<OpaqueHandle>*>(impl.get());
-    type_id_ = opaque_impl->type_id();
-    data_type_ = opaque_impl->dtype();
-    device_opt_ = opaque_impl->device();
-    opaque_handle_ = opaque_impl->opaque_handle_;
-    sizes_ = opaque_impl->sizes_;
+    copy_tensor_metadata(impl.get(), *this);
 
-    // TensorImpl general fields
-    // Note that some of these fields are not used in opaque tensor code,
-    // and we copy them here only for completeness.
-    strides_ = opaque_impl->strides_;
-    storage_offset_ = opaque_impl->storage_offset_;
-    is_contiguous_ = opaque_impl->is_contiguous_;
-    is_wrapped_number_ = opaque_impl->is_wrapped_number_;
-    reserved_ = opaque_impl->reserved_;
+    // OpaqueTensorImpl-specific fields
+    auto opaque_impl = static_cast<OpaqueTensorImpl<OpaqueHandle>*>(impl.get());
+    opaque_handle_ = opaque_impl->opaque_handle_;
   }
 
   OpaqueHandle& unsafe_opaque_handle() {

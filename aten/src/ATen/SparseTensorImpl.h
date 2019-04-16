@@ -189,14 +189,7 @@ public:
    */
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
     auto impl = c10::make_intrusive<SparseTensorImpl>(type_id(), dtype());
-    // TensorImpl general fields
-    // Note that these fields are not used in sparse tensor code, and we copy them here only for completeness.
-    impl->sizes_ = sizes_;
-    impl->strides_ = strides_;
-    impl->storage_offset_ = storage_offset_;
-    impl->is_contiguous_ = is_contiguous_;
-    impl->is_wrapped_number_ = is_wrapped_number_;
-    impl->reserved_ = reserved_;
+    copy_tensor_metadata(*this, impl.get());
 
     // Sparse-specific fields
     impl->sparse_dim_ = sparse_dim();
@@ -215,20 +208,10 @@ public:
    */
   void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
     AT_ASSERT(impl->is_sparse());
-    auto sparse_impl = static_cast<SparseTensorImpl*>(impl.get());
-    type_id_ = sparse_impl->type_id();
-    data_type_ = sparse_impl->dtype();
-
-    // TensorImpl general fields
-    // Note that these fields are not used in sparse tensor code, and we copy them here only for completeness.
-    sizes_ = sparse_impl->sizes_;
-    strides_ = sparse_impl->strides_;
-    storage_offset_ = sparse_impl->storage_offset_;
-    is_contiguous_ = sparse_impl->is_contiguous_;
-    is_wrapped_number_ = sparse_impl->is_wrapped_number_;
-    reserved_ = sparse_impl->reserved_;
+    copy_tensor_metadata(impl.get(), *this);
 
     // Sparse-specific fields
+    auto sparse_impl = static_cast<SparseTensorImpl*>(impl.get());
     sparse_dim_ = sparse_impl->sparse_dim();
     dense_dim_ = sparse_impl->dense_dim();
     indices_ = sparse_impl->indices();
