@@ -2,14 +2,6 @@
 
 namespace at { namespace native {
 
-std::vector<int64_t> expand_param_if_needed(IntArrayRef param, int64_t expected_dim) {
-  if (param.size() == 1) {
-    return std::vector<int64_t>(expected_dim, param[0]);
-  } else {
-    return param.vec();
-  }
-}
-
 std::vector<int64_t> conv_output_size(
     IntArrayRef input_size,
     IntArrayRef kernel_size,
