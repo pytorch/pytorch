@@ -41,6 +41,7 @@ namespace jit {
   _(CreateAutodiffSubgraphs)       \
   _(CustomOperators)               \
   _(CustomOperatorAliasing)        \
+  _(IValueKWargs)                  \
   _(CustomFusion)                  \
   _(Differentiate)                 \
   _(DifferentiateWithRequiresGrad) \
@@ -56,6 +57,7 @@ namespace jit {
   _(TopologicalMove)               \
   _(SubgraphUtils)                 \
   _(AliasAnalysis)                 \
+  _(AliasRegistration)             \
   _(WriteTracking)                 \
   _(Wildcards)                     \
   _(MemoryDAG)                     \
