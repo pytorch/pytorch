@@ -109,54 +109,39 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
 
   // TODO: Replace this with TensorIterator!
   bool serial_path = false;
-//   if (self.numel() == src.numel()) {
-//     if (self.is_contiguous() && src.is_contiguous()) {
-//       copy_kernel(kCPU, self, src);
-//     } else if (copy_transpose_valid(self, src)) {
-//       _copy_same_type_transpose_(self, src);
-//     } else {
-// #ifdef _OPENMP
-//       if (!in_parallel_region()) {
-//         auto iter = TensorIterator::unary_op(self, src);
-//         AT_DISPATCH_ALL_TYPES_AND(
-//             at::ScalarType::Half, self.scalar_type(), "_copy_same_type_", [&] {
-//               unary_kernel(
-//                   *iter,
-//                   [=](scalar_t a) -> scalar_t { return a; });
-//             });
-//       } else {
-//         serial_path = true;
-//       }
-// #else
-//       serial_path = true;
-// #endif
-//     }
-//   } else {
-//     serial_path = true;
-//   }
-serial_path = true;
+  if (self.numel() == src.numel()) {
+    if (self.is_contiguous() && src.is_contiguous()) {
+      copy_kernel(kCPU, self, src);
+    } else if (copy_transpose_valid(self, src)) {
+      _copy_same_type_transpose_(self, src);
+    } else {
+#ifdef _OPENMP
+      if (!in_parallel_region()) {
+        auto iter = TensorIterator::unary_op(self, src, /* resize_outputs = */false);
+        AT_DISPATCH_ALL_TYPES_AND2(
+          at::ScalarType::Half, at::ScalarType::Bool,
+          self.scalar_type(), "_copy_same_type_", [&] {
+              serial_unary_kernel(
+                  *iter,
+                  [=](scalar_t a) -> scalar_t { return a; });
+            });
+      } else {
+        serial_path = true;
+      }
+#else
+      serial_path = true;
+#endif
+    }
+  } else {
+    serial_path = true;
+  }
 
-// if (serial_path) {
-//   AT_DISPATCH_ALL_TYPES_AND(
-//     at::ScalarType::Half, self.scalar_type(), "_copy_same_type_", [&]() {
-//       at::CPU_tensor_apply2<scalar_t, scalar_t>(
-//           self, src, [](scalar_t& self_val, const scalar_t& src_val) {
-//             self_val = src_val;
-//           });
-//       });
-// }
-//
-// std::cout << "\nBEFOR "<< self.sizes() << " " << self.strides() <<" "<< self.dim() <<" "<< self.is_sparse() << " " << self.is_contiguous() << " " << self.numel() << "\n";
-// std::cout <<   "      "<< src.sizes() << " " << src.strides() <<" "<< src.dim() <<" "<< src.is_sparse() << " " << src.is_contiguous() << " " << src.numel() << "\n";
-// auto iter = TensorIterator::unary_op(self, src, /* resize_outputs = */false);
-// std::cout << "AFTER "<< self.sizes() << " " << self.strides() <<" "<< self.dim() <<" "<< self.is_sparse() << " " << self.is_contiguous() << " " << self.numel() << "\n";
-// std::cout << "      "<< src.sizes() << " " << src.strides() <<" "<< src.dim() <<" "<< src.is_sparse() << " " << src.is_contiguous() << " " << src.numel() << "\n";
-
-  if (serial_path && 1) {
+  if (serial_path) {
     auto iter = TensorIterator::unary_op(self, src, /* resize_outputs = */false);
-    AT_DISPATCH_ALL_TYPES_AND(
-        at::ScalarType::Half, self.scalar_type(), "_copy_same_type_", [&] {
-          unary_kernel(
+    AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::Bool,
+      self.scalar_type(), "_copy_same_type_", [&] {
+          serial_unary_kernel(
               *iter,
               [=](scalar_t a) -> scalar_t { return a; });
         });

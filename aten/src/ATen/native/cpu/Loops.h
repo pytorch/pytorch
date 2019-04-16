@@ -275,6 +275,19 @@ void unary_kernel(TensorIterator& iter, func_t op) {
   });
 }
 
+template <typename func_t>
+void serial_unary_kernel(TensorIterator& iter, func_t op) {
+  using traits = unary_function_traits<func_t>;
+  iter.serial_for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
+    // Specializations to encourage auto-vectorization (trick from Numpy's loops.c.src)
+    if (is_unary_contiguous<traits>(strides)) {
+      unary_loop(data, strides, 0, n, op);
+    } else {
+      unary_loop(data, strides, 0, n, op);
+    }
+  }, {0, iter.numel()});
+}
+
 template <typename func_t, typename vec_func_t>
 void unary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
   using traits = unary_function_traits<func_t>;

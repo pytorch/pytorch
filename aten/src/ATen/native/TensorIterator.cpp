@@ -481,10 +481,9 @@ std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Ten
 
 std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tensor& a, bool resize_outputs) {
   auto builder = TensorIterator::Builder();
-
   builder.add_output(out);
   builder.add_input(a);
-  if (! resize_outputs) {
+  if (!resize_outputs) {
     builder.dont_resize_outputs();
   }
   return builder.build();
