@@ -60,7 +60,7 @@ class Threshold(Module):
 
 
 @weak_module
-class ReLU(Threshold):
+class ReLU(Module):
     r"""Applies the rectified linear unit function element-wise:
 
     :math:`\text{ReLU}(x)= \max(0, x)`
