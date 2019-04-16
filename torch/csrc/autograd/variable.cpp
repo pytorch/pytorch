@@ -87,11 +87,10 @@ void Variable::backward(
 }
 
 void Variable::set_data(const at::Tensor &new_data) {
-  // yf225 TODO: what we want to express here is:
-  // If new_data is of different type of TensorImpl (e.g. TensorImpl vs. SparseTensorImpl vs. OpaqueTensorImpl<T> vs. QTensorImpl), then it's not ok to call set_data(...)
-  // otherwise, it's ok
+  // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
+  // from `new_data` to `var`. It requires that `new_data` has the same derived
+  // type of TensorImpl as `var`.
   typeid(this->unsafeGetTensorImpl()) == typeid(new_data.unsafeGetTensorImpl());
-  // AT_ASSERT(type_id() == new_data.type_id());
 
   // Resets gradient accumulator if metadata is out of date
   Variable::AutogradMeta* autograd_meta = get_autograd_meta();
