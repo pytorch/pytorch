@@ -2232,7 +2232,7 @@ class TestCuda(TestCase):
             torch.backends.cuda.cufft_plan_cache[torch.cuda.device_count() + 10]
 
         if TEST_MULTIGPU:
-            # Test that differnt GPU has different cache
+            # Test that different GPU has different cache
             x0 = torch.randn(2, 3, 3, device='cuda:0')
             x1 = x0.cuda(1)
             self.assertEqual(x0.rfft(2), x1.rfft(2))
