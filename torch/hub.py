@@ -173,19 +173,6 @@ def _get_cache_or_reload(github, force_reload):
     return repo_dir
 
 
-def _load_hubconf_module(github, force_reload):
-    # Setup hub_dir to save downloaded files
-    _setup_hubdir()
-
-    repo_dir = _get_cache_or_reload(github, force_reload)
-
-    sys.path.insert(0, repo_dir)
-
-    m = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
-
-    return m
-
-
 def _check_module_exists(name):
     if sys.version_info >= (3, 4):
         import importlib.util
@@ -260,8 +247,16 @@ def list(github, force_reload=False):
     Example:
         >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
     """
+    # Setup hub_dir to save downloaded files
+    _setup_hubdir()
 
-    hub_module = _load_hubconf_module(github, force_reload)
+    repo_dir = _get_cache_or_reload(github, force_reload)
+
+    sys.path.insert(0, repo_dir)
+
+    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+
+    sys.path.remove(repo_dir)
 
     # We take functions starts with '_' as internal helper functions
     entrypoints = [f for f in dir(hub_module) if callable(getattr(hub_module, f)) and not f.startswith('_')]
@@ -282,7 +277,16 @@ def help(github, model, force_reload=False):
     Example:
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
-    hub_module = _load_hubconf_module(github, force_reload)
+    # Setup hub_dir to save downloaded files
+    _setup_hubdir()
+
+    repo_dir = _get_cache_or_reload(github, force_reload)
+
+    sys.path.insert(0, repo_dir)
+
+    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+
+    sys.path.remove(repo_dir)
 
     entry = _load_entry_from_hubconf(hub_module, model)
 
@@ -309,11 +313,22 @@ def load(github, model, *args, force_reload=False, **kwargs):
     Example:
         >>> model = torch.hub.load('pytorch/vision', 'resnet50', pretrained=True)
     """
-    hub_module = _load_hubconf_module(github, force_reload)
+    # Setup hub_dir to save downloaded files
+    _setup_hubdir()
+
+    repo_dir = _get_cache_or_reload(github, force_reload)
+
+    sys.path.insert(0, repo_dir)
+
+    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
 
     entry = _load_entry_from_hubconf(hub_module, model)
 
-    return entry(*args, **kwargs)
+    model = entry(*args, **kwargs)
+
+    sys.path.remove(repo_dir)
+
+    return model
 
 
 def _download_url_to_file(url, dst, hash_prefix, progress):
