@@ -7574,7 +7574,7 @@ class _TestTorchMixin(object):
         num_copy, num_dest = 3, 10
         dest = torch.randn(num_dest)
         src = torch.randn(num_copy)
-        mask = torch.ByteTensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0))
+        mask = torch.BoolTensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0))
         dest2 = dest.clone()
         dest.masked_scatter_(mask, src)
         j = 0
@@ -7593,10 +7593,23 @@ class _TestTorchMixin(object):
         with self.assertRaises(RuntimeError):
             dest.masked_scatter_(mask, src)
 
+        # test bool tensor case
+        for device in torch.testing.get_all_device_types():
+            dest = torch.tensor([1, 2, 3, 4], device=device)
+            src = torch.tensor([5, 5, 5, 5], device=device)
+            mask = torch.tensor([0, 1, 0, 1], dtype=torch.bool, device=device)
+            dest.masked_scatter_(mask, src)
+            self.assertEqual(dest, torch.tensor([1, 5, 3, 5], device=device))
+
+            mask = mask.byte()
+            with warnings.catch_warnings(record=True) as w:
+                dest.masked_scatter_(mask, src)
+                self.assertEquals(len(w), 1)
+
     def test_masked_select(self):
         num_src = 10
         src = torch.randn(num_src)
-        mask = torch.rand(num_src).clamp(0, 1).mul(2).floor().byte()
+        mask = torch.rand(num_src).clamp(0, 1).mul(2).floor()
         dst = src.masked_select(mask)
         dst2 = []
         for i in range(num_src):
@@ -7604,10 +7617,22 @@ class _TestTorchMixin(object):
                 dst2 += [src[i]]
         self.assertEqual(dst, torch.Tensor(dst2), 0)
 
+        # test bool tensor case
+        for device in torch.testing.get_all_device_types():
+            x = torch.tensor([1, 2, 3, 4], device=device)
+            mask = torch.tensor([1, 0, 1, 0], dtype=torch.bool, device=device)
+            res = torch.masked_select(x, mask)
+            self.assertEqual(res, torch.tensor([1, 3], device=device))
+
+            mask = mask.byte()
+            with warnings.catch_warnings(record=True) as w:
+                res = torch.masked_select(x, mask)
+                self.assertEquals(len(w), 1)
+
     def test_masked_fill(self):
         num_dest = 10
         dst = torch.randn(num_dest)
-        mask = torch.rand(num_dest).mul(2).floor().byte()
+        mask = torch.rand(num_dest).mul(2).floor()
         val = random.random()
         dst2 = dst.clone()
         dst.masked_fill_(mask, val)
@@ -7622,6 +7647,18 @@ class _TestTorchMixin(object):
         dst.masked_fill_(dst > 0, val)
         dst2.masked_fill_(dst2 > 0, val)
         self.assertEqual(dst, dst2, 0)
+
+        # test bool tensor case
+        for device in torch.testing.get_all_device_types():
+            x = torch.tensor([1, 2, 3, 4], device=device)
+            mask = torch.tensor([0, 0, 1, 1], dtype=torch.bool, device=device)
+            res = x.masked_fill(mask, 1)
+            self.assertEqual(res, torch.tensor([1, 2, 1, 1], device=device))
+
+            mask = mask.byte()
+            with warnings.catch_warnings(record=True) as w:
+                res = x.masked_fill(mask, 1)
+                self.assertEquals(len(w), 1)
 
     def test_abs(self):
         def _test_abs(tensors_dict):
