@@ -31,7 +31,7 @@ from random import shuffle
 
 import torch
 from torch._six import inf
-from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests, skipIfRocm
+from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
 from common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
@@ -1986,7 +1986,6 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @skipIfRocm
     def test_gamma_gpu_sample(self):
         set_rng_seed(0)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
