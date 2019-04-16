@@ -3303,7 +3303,6 @@ a")
 
             a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
             func(a, 1).backward()
-            print (func.graph_for(a, 2))
 
             @torch.jit.script
             def func(a: float, b):
@@ -3311,11 +3310,6 @@ a")
 
             a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
             func(2, a).backward()
-            print (a.grad.device)
-            print (func.graph_for(2, a))
-            bw_graph = backward_graph(func, diff_graph_idx=0)
-            print (bw_graph)
-        print(torch.autograd.gradcheck(lambda x: func(2, x), a))
 
     def test_triple(self):
         def func(x):

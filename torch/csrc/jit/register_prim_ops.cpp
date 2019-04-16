@@ -345,13 +345,6 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "aten::log(float f) -> float",
-         [](Stack& stack) {
-           auto f = pop(stack).toFloat();
-           push(stack, std::log(f));
-           return 0;
-         }),
-     Operator(
          "prim::device(Tensor a) -> Device",
          [](Stack& stack) {
            push(stack, pop(stack).toTensor().device());
