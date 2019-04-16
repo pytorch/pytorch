@@ -31,6 +31,7 @@ struct Resolver;
 
 using ResolverPtr = std::shared_ptr<Resolver>;
 using Self = std::function<std::shared_ptr<SugaredValue>(Value*)>;
+using Kwargs = std::unordered_map<std::string, IValue>;
 
 // A Function is a pure Graph with no implicit `self` object bound.
 // It contains schema information, and the executor that manages the
@@ -55,8 +56,10 @@ struct TORCH_API Function {
     run(stack);
   }
 
-  IValue operator()(std::vector<IValue> stack) {
-    getSchema().checkAndNormalizeInputs(stack);
+  IValue operator()(
+      std::vector<IValue> stack,
+      const Kwargs& kwargs = Kwargs()) {
+    getSchema().checkAndNormalizeInputs(stack, kwargs);
     run(stack);
     return stack.front();
   }
@@ -101,10 +104,6 @@ struct TORCH_API Function {
 
   GraphExecutorState getDebugState() {
     return get_executor().getDebugState();
-  }
-
-  void debugDisableAutodiffSubgraphInlining() {
-    return get_executor().debugDisableAutodiffSubgraphInlining();
   }
 
   bool is_optimized() const {
@@ -180,7 +179,6 @@ struct TORCH_API Function {
   // before a call to setSchema
   mutable std::unique_ptr<FunctionSchema> schema_;
 };
-
 
 // A CompilationUnit is a list of named script::Functions
 // with helper methods to iterate the list, or invoke the function.
