@@ -5159,10 +5159,76 @@ a")
 
     def test_math_ops(self):
 
-        def test_floor():
-            return math.floor(1.5)
+        def test_floor(x):
+            # type: (float) -> float
+            return math.floor(x)
 
-        self.checkScript(test_floor, ())
+        def test_ceil(x):
+            # type: (float) -> float
+            return math.ceil(x)
+
+        def test_log_int(x):
+            # type: (int) -> float
+            return math.log(x)
+
+        def test_log_float(x):
+            # type: (float) -> float
+            return math.log(x)
+
+        def test_log1p_int(x):
+            # type: (int) -> float
+            return math.log1p(x)
+
+        def test_log1p_float(x):
+            # type: (float) -> float
+            return math.log1p(x)
+
+        def test_log10_int(x):
+            # type: (int) -> float
+            return math.log10(x)
+
+        def test_log10_float(x):
+            # type: (float) -> float
+            return math.log10(x)
+
+        def test_exp_int(x):
+            # type: (int) -> float
+            return math.exp(x)
+
+        def test_exp_float(x):
+            # type: (float) -> float
+            return math.exp(x)
+
+        def test_sqrt_int(x):
+            # type: (int) -> float
+            return math.sqrt(x)
+
+        def test_sqrt_float(x):
+            # type: (float) -> float
+            return math.sqrt(x)
+
+        def test_pow_float(x, y):
+            # type: (float, float) -> float
+            return math.pow(x, y)
+
+        def test_pow_int(x, y):
+            # type: (float, int) -> float
+            return math.pow(x, y)
+
+        self.checkScript(test_floor, (1.5,))
+        self.checkScript(test_ceil, (1.5,))
+        self.checkScript(test_log_int, (2,))
+        self.checkScript(test_log_float, (2.0,))
+        self.checkScript(test_log1p_int, (1,))
+        self.checkScript(test_log1p_float, (1.0,))
+        self.checkScript(test_log10_int, (2,))
+        self.checkScript(test_log10_float, (2.0,))
+        self.checkScript(test_exp_int, (2,))
+        self.checkScript(test_exp_float, (2.0,))
+        self.checkScript(test_sqrt_int, (2,))
+        self.checkScript(test_sqrt_float, (2.0,))
+        self.checkScript(test_pow_float, (2.0, 2.0))
+        self.checkScript(test_pow_int, (2.0, 2))
 
     def test_if_nest_while(self):
         def func(a, b):

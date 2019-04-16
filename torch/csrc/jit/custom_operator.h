@@ -245,9 +245,10 @@ struct TORCH_API RegisterOperators {
   template <typename Implementation>
   RegisterOperators& op(
       const std::string& name,
-      Implementation&& implementation) {
-    registerOperator(
-        createOperator(name, std::forward<Implementation>(implementation)));
+      Implementation&& implementation,
+      OperatorOptions options = OperatorOptions()) {
+    registerOperator(createOperator(
+        name, std::forward<Implementation>(implementation), options));
     return *this;
   }
 };
