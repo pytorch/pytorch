@@ -27,20 +27,17 @@ __global__ void UpsampleBilinearKernel(
     const int output_width,
     const float height_scale,
     const float width_scale,
-    const float* X,
-    float* Y) {
-  CUDA_1D_KERNEL_LOOP(index, output_size) {
-    int indexTemp = index;
+    const float* __restrict__ X,
+    float* __restrict__ Y) {
+  int indexTemp = threadIdx.x + blockIdx.x * blockDim.x;
+  if (indexTemp < output_height * output_width){
     const int out_x = indexTemp % output_width;
     indexTemp /= output_width;
     const int out_y = indexTemp % output_height;
     indexTemp /= output_height;
-    const int c = indexTemp % num_channels;
+    //const int c = indexTemp % num_channels;
     indexTemp /= num_channels;
     const int n = indexTemp;
-
-    const int in_y = fminf(out_y / height_scale, input_height - 1);
-    const int in_x = fminf(out_x / width_scale, input_width - 1);
 
     const float rheight =
         output_height > 1 ? (input_height - 1.f) / (output_height - 1.f) : 0.f;
@@ -61,39 +58,17 @@ __global__ void UpsampleBilinearKernel(
     const float w1lambda = w1r - w1;
     const float w0lambda = 1.f - w1lambda;
 
-    Y[index] =
-        (h0lambda *
-             (w0lambda *
-                  X[idx(
-                      n, num_channels, c, input_height, input_width, h1, w1)] +
-              w1lambda *
-                  X[idx(
-                      n,
-                      num_channels,
-                      c,
-                      input_height,
-                      input_width,
-                      h1,
-                      w1 + w1p)]) +
-         h1lambda *
-             (w0lambda *
-                  X[idx(
-                      n,
-                      num_channels,
-                      c,
-                      input_height,
-                      input_width,
-                      h1 + h1p,
-                      w1)] +
-              w1lambda *
-                  X[idx(
-                      n,
-                      num_channels,
-                      c,
-                      input_height,
-                      input_width,
-                      h1 + h1p,
-                      w1 + w1p)]));
+    CUDA_1D_KERNEL_LOOP(c, num_channels) {
+
+      float X0 = X[idx(n, num_channels, c, input_height, input_width, h1, w1)];
+      float X1 = X[idx(n, num_channels, c, input_height, input_width, h1, w1 + w1p)];
+      float X2 = X[idx(n, num_channels, c, input_height, input_width, h1 + h1p, w1)];
+      float X3 = X[idx(n, num_channels, c, input_height, input_width, h1 + h1p, w1 + w1p)];
+
+      Y[c*output_height*output_width + out_y*output_width + out_x] =
+                  h0lambda * (w0lambda * X0 + w1lambda * X1) +
+                  h1lambda * (w0lambda * X2 + w1lambda * X3);
+    }
   }
 }
 
@@ -195,7 +170,8 @@ bool UpsampleBilinearOp<float, CUDAContext>::RunOnDevice() {
       {batch_size, num_channels, output_height, output_width},
       at::dtype<float>());
 
-  const auto size = Y->numel();
+  //
+  const auto size = output_height * output_width;
   UpsampleBilinearKernel<<<
       CAFFE_GET_BLOCKS(size),
       CAFFE_CUDA_NUM_THREADS,
