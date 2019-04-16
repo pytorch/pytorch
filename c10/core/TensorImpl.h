@@ -867,8 +867,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See NOTE [ TensorImpl Shallow-Copying ] for details.
    */
   friend void copy_tensor_metadata(const TensorImpl* src_impl, TensorImpl* dest_impl) {
-    dest_impl->set_sizes_and_strides(src_impl->sizes(), src_impl->strides());
-    dest_impl->set_storage_offset(src_impl->storage_offset());
+    dest_impl->sizes_ = src_impl->sizes_;
+    dest_impl->strides_ = src_impl->strides_;
+    dest_impl->storage_offset_ = src_impl->storage_offset_;
     dest_impl->data_type_ = src_impl->data_type_;
     dest_impl->device_opt_ = src_impl->device_opt_;
     dest_impl->type_id_ = src_impl->type_id_;
@@ -1073,7 +1074,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void Resize(Ts... dim_source) {
     bool size_changed = SetDims(dim_source...);
     if (size_changed) {
-      // If needed, we will free the data. the next mutable_data() call
+      // If needed, we will free the data. the next mutable_data() callf
       // will create the data storage.
       bool reset_tensor = false;
       if (reserved_) {
