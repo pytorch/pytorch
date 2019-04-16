@@ -22,6 +22,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool compiledWithMIOpen() const override;
   bool supportsDilatedConvolutionWithCuDNN() const override;
   long versionCuDNN() const override;
+  std::string showConfig() const override;
   double batchnormMinEpsilonCuDNN() const override;
   int64_t cuFFTGetPlanCacheMaxSize() const override;
   void cuFFTSetPlanCacheMaxSize(int64_t max_size) const override;

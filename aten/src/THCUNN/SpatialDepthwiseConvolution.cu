@@ -76,7 +76,9 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
 
     AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
     const IndexType offset0 = (n * inputChannels + inputChannel) * inputHeight * inputWidth;
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
     for (int kH = 0; kH < KH_LIMIT; ++kH) {
 #ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
@@ -136,7 +138,9 @@ __global__ void spatialDepthwiseConvolutionUpdateGradInput(
 
     AccT value = ScalarConvert<int, AccT>::to(0);
 
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
     for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
       int och = (c * depthwiseMultiplier) + multiplier;
       int weightOffset = och * kernelHeight * kernelWidth;

@@ -7,6 +7,7 @@
 #include "torch/csrc/jit/irparser.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/jit.h"
 
 namespace torch {
 namespace jit {
@@ -262,6 +263,17 @@ graph(%x: Tensor, %y: Tensor):
     testing::FileCheck().run(text, *graph);
   }
 }
+
+void testIValueKWargs() {
+  const auto text = R"(
+    def foo(a : int, b : int, c : int = 4):
+      return a + 2*b + 3*c
+  )";
+  auto cu = compile(text);
+  auto result = cu->get_function("foo")({1}, {{"b", 3}});
+  ASSERT_EQ(result.toInt(), 19);
+}
+
 } // namespace test
 } // namespace jit
 } // namespace torch
