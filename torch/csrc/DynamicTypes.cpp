@@ -101,7 +101,7 @@ void registerLayoutObject(THPLayout *layout, at::Backend backend) {
   layout_registry[static_cast<int>(backend)] = layout;
 }
 
-at::Type& z(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device) {
+at::Type& getVariableType(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device) {
   const at::Backend backend = get_backend(device.type() == at::Device::Type::CUDA, layout.layout == at::Layout::Sparse);
   if (device.is_cuda()) {
     torch::utils::cuda_lazy_init();
