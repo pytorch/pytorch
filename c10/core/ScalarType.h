@@ -246,10 +246,14 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
         "promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be");
   }
 
+  // For QInt types, we only allow exact match
+  if (isQIntType(a) && a == b) {
+    return a;
+  }
+
   if (isQIntType(a) || isQIntType(b)) {
-    return ScalarType::Undefined;
-    // AT_ERROR(
-    //     "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be");
+    AT_ERROR(
+        "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be");
   }
 
   // this matrix has to be consistent with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX

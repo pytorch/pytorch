@@ -39,7 +39,7 @@ bool is_quantized(const Tensor& self) {
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {
-  return self.toType(other.dispatch_type());
+  return self.toType(other.type());
 }
 
 }} // namespace at::native

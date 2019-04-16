@@ -120,6 +120,10 @@ CAFFE2_API void checkDeviceType(
     at::ArrayRef<Tensor> tensors,
     at::DeviceType device_type);
 
+CAFFE2_API void checkLayout(CheckedFrom c, const Tensor& t, Layout layout);
+
+CAFFE2_API void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout);
+
 // Methods for getting data_ptr if tensor is defined
 CAFFE2_API void* maybe_data_ptr(const Tensor& tensor);
 CAFFE2_API void* maybe_data_ptr(const TensorArg& tensor);

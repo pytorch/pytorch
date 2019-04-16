@@ -21,6 +21,7 @@ struct TensorOptions;
 namespace at {
 struct Generator;
 struct Type;
+class DeprecatedTypeProperties;
 class Tensor;
 } // namespace at
 
@@ -177,26 +178,6 @@ class CAFFE2_API Tensor {
     return impl_->is_contiguous();
   }
 
-  bool is_transposed() const {
-    if (is_contiguous()) {
-      return false;
-    }
-    int64_t max_stride = 1;
-    int64_t size_max_stride = 1;
-    int64_t z = 1;
-    int d;
-    for (d = 0; d < dim(); ++d) {
-      if (stride(d) == 0 && size(d) != 1)
-        return false;
-      if (stride(d) > max_stride) {
-        max_stride = stride(d);
-        size_max_stride = size(d);
-      }
-      z *= size(d);
-    }
-    return z == max_stride * size_max_stride;
-  }
-
   // Total bytes consumed by the "view" of elements of the array.  Does not
   // include size of metadata.  The number reported here does not necessarily
   // correspond to the true physical memory consumed by a tensor; instead,
@@ -219,7 +200,9 @@ class CAFFE2_API Tensor {
 
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(type_id()), scalar_type());
+        tensorTypeIdToBackend(type_id()),
+        scalar_type(),
+        is_variable() && !at::NonVariableTypeMode::is_enabled());
   }
   Type & dispatch_type() const {
     return legacyTensorType(*impl_);
@@ -239,8 +222,8 @@ class CAFFE2_API Tensor {
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
-  Tensor toType(const Type & t, bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
+  Tensor toType(const DeprecatedTypeProperties & t, bool non_blocking=false) const;
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
