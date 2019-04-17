@@ -3019,6 +3019,25 @@ class TestScript(JitTestCase):
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
 
+    def test_for_in_tensors(self):
+        def test_sizes(x):
+            sumz = 0
+            for s in x:
+                sumz += 1
+            return sumz
+        self.checkScript(test_sizes, (torch.rand(5, 4, 3, 2, 1),))
+        self.checkScript(test_sizes, (torch.rand(777),))
+
+    def test_for_in_tensors_nested(self):
+        def test_sizes(x):
+            sumz = 0
+            for n in x:
+                for t in n:
+                    sumz += 1
+            return sumz
+
+        self.checkScript(test_sizes, (torch.rand(5, 4, 3, 2, 1),))
+
     # to avoid defining sum_list in multiple tests
     def get_sum_list_fn(self):
         def sum_list(a):
