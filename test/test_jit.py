@@ -13964,13 +13964,14 @@ class TestClassType(JitTestCase):
     def test_imported_classes(self):
         import jit.foo
         import jit.bar
+        import jit.very.very.nested
 
         class MyMod(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, a):
                 foo = jit.foo.FooSameName(a)
                 bar = jit.bar.FooSameName(a)
-                three = jit.foo.FooUniqueName(a)
+                three = jit.very.very.nested.FooUniqueName(a)
                 return foo.x + bar.y + three.y
 
         m = MyMod()

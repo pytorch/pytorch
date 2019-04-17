@@ -604,10 +604,13 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
     fileToSrc[filename] += class_src;
   }
 
-  // Write out the files.
-  for (const auto& pr : fileToSrc) {
-    const auto& filename = pr.first;
-    const auto& src = pr.second;
+  // Write out the files. We still have to do this in converted_classes_ order,
+  // to maintain dependency order.
+  for (const auto& item : converted_classes_) {
+    const ClassTypePtr& class_type = item.key();
+    const std::string filename =
+        ImportExportHelpers::qualifierToPath(class_type->qualifier());
+    const std::string& src = fileToSrc.at(filename);
 
     std::ostringstream lib_stream;
     lib_stream << "op_version_set = " << op_version_set << "\n";

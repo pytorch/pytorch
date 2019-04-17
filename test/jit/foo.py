@@ -8,10 +8,4 @@ import jit.bar
 class FooSameName(object):
     def __init__(self, x):
         self.x = x
-
-
-@torch.jit.script
-class FooUniqueName(object):
-    def __init__(self, y):
-        self.y = y
-        self.nested = jit.bar.FooSameName(y)
+        self.nested = jit.bar.FooSameName(x)
