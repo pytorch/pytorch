@@ -56,12 +56,7 @@ using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(Module* owner, Function* function, std::vector<Slot> initial_members)
-      : owner_(owner),
-        function_(function),
-        initial_ivalues_(std::move(initial_members)) {
-    AT_ASSERT(function->num_inputs() >= initial_ivalues_.size());
-  }
+  Method(Module* owner, Function* function);
 
   // the module that contains this method.
   Module& owner() const {
@@ -106,13 +101,8 @@ struct TORCH_API Method {
     return function_->num_inputs() - initial_ivalues_.size();
   }
 
-  FunctionSchema getSchema() const {
-    // we are required to slice out the slot inputs from the schema
-    // we can't cache this because setSchema on the underlying function
-    // will change the underlying schema
-    auto sliced = ArrayRef<Argument>(function_->getSchema().arguments())
-                      .slice(0, num_inputs());
-    return function_->getSchema().cloneWithArguments(sliced.vec());
+  const FunctionSchema& getSchema() const {
+    return schema_;
   }
 
   GraphExecutor& get_executor() {
@@ -129,11 +119,14 @@ struct TORCH_API Method {
   Module* owner_;
 
   // Underlying unbound function
-  Function* function_;
+  // This is the _lowered_ function and is different than the
+  // first-class function in class_compilation_unit()
+  std::shared_ptr<Function> function_;
 
   // parameters and attributes loaded from the Module and appending
   // before calling function_
   std::vector<Slot> initial_ivalues_;
+  FunctionSchema schema_;
 };
 
 struct Module;
@@ -151,7 +144,7 @@ struct TORCH_API Module {
     // Function has a self argument which owns the ClassType, created a
     // referernce cycle. By dropping all the methods of the module's class
     // here we break the cycle.
-    class_cu().drop_all_functions();
+    class_compilation_unit().drop_all_functions();
   }
   const std::string& name() const {
     return name_;
@@ -160,12 +153,11 @@ struct TORCH_API Module {
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
   void set_optimized(bool o) {
-    lowered_methods().set_optimized(o);
-    class_cu().set_optimized(o);
+    class_compilation_unit().set_optimized(o);
   }
 
   bool is_optimized() const {
-    return class_cu().is_optimized();
+    return class_compilation_unit().is_optimized();
   }
 
   IValue forward(std::vector<IValue> inputs) {
@@ -284,8 +276,8 @@ struct TORCH_API Module {
   }
   const std::vector<std::unique_ptr<Method>>& get_methods() const {
     // force methods_ to be up to date by querying all
-    // methods. This will go away when lowered_methods_ is deleted
-    for (const auto& m : class_cu().get_functions()) {
+    // methods.
+    for (const auto& m : class_compilation_unit().get_functions()) {
       get_method(m->name());
     }
     return methods_;
@@ -316,13 +308,21 @@ struct TORCH_API Module {
       return methods_[*offset].get();
     }
 
-    if (Function* fn = class_cu().find_function(name).get()) {
-      // temporary lock because technically this is marked const,
+    if (Function* fn = class_compilation_unit().find_function(name).get()) {
+      // lock because technically this is marked const,
       // but we have to update the internal Method cache.
-      // This can be removed when class_cu() is the source of truth for
+      // This can be removed when class_compilation_unit() is the source of truth for
       // methods.
-      std::lock_guard<std::recursive_mutex> guard(find_method_guard_);
-      return &const_cast<Module*>(this)->lower_first_class_method(fn);
+      std::lock_guard<std::recursive_mutex> guard(create_method_guard_);
+      Module* mutable_this = const_cast<Module*>(this);
+      std::unique_ptr<Method> m(new Method(mutable_this, fn));
+      return mutable_this
+          ->insert(
+              fn->name(),
+              mutable_this->methods_,
+              EntityType::METHOD,
+              std::move(m))
+          .get();
     }
 
     return nullptr;
@@ -435,21 +435,23 @@ struct TORCH_API Module {
       names.pop_back();
     }
 
-    for (auto& fn : class_cu().get_functions()) {
-      curr->class_cu().clone_function(*fn);
+    for (auto& fn : class_compilation_unit().get_functions()) {
+      curr->class_compilation_unit().clone_function(*fn);
     }
   }
 
   enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
 
   at::optional<EntityType> kind_of(const std::string& name) const {
-    // force lazy creation of Method if needed
-    // remove once lowered_methods_ is removed.
-    find_method(name);
-
     auto it = dict_.find(name);
-    if (it == dict_.end())
+    if (it == dict_.end()) {
+      // methods are lazily created, see if this is, in face,
+      // a method that has not been created yet.
+      if (auto fn = class_compilation_unit().find_function(name)) {
+        return EntityType::METHOD;
+      }
       return at::nullopt;
+    }
     return it->second.type;
   }
 
@@ -459,31 +461,16 @@ struct TORCH_API Module {
   CompilationUnit& class_compilation_unit() {
     return module_object()->type()->compilation_unit();
   }
-  CompilationUnit& lowered_methods() const {
-    return lowered_methods_;
+  const CompilationUnit& class_compilation_unit() const {
+    return module_object()->type()->compilation_unit();
   }
 
   // so that C++ users can easily add methods
   void define(const std::string& src, const Resolver& resolver = nullptr);
 
-  void _define_lowered(
-      const std::vector<Def>& definitions,
-      const std::vector<Resolver>& resolvers);
-  void _define_lowered(const std::string& src, const Resolver& resolver);
-
-  Method& _define_lowered(
-      std::string name,
-      std::shared_ptr<Graph> graph,
-      std::vector<Slot> slots);
-
  private:
-  Method& _create_lowered_method(
-      Function* func,
-      std::vector<Slot> member_inputs);
 
-  Method& lower_first_class_method(Function* fn);
-  void lift_lowered_method(Method& fn);
-  void lift_lowered_methods(size_t start);
+  std::pair<std::shared_ptr<Function>, std::vector<Slot>> lower_first_class_method(Function* fn);
 
   void to_impl(
       const c10::optional<at::Device>& device,
@@ -572,13 +559,6 @@ struct TORCH_API Module {
     return Slot(module_value_, slot_index);
   }
 
-  CompilationUnit& class_cu() {
-    return module_value_->type()->compilation_unit();
-  }
-  const CompilationUnit& class_cu() const {
-    return module_value_->type()->compilation_unit();
-  }
-
   // modules have a single namespace, but spread over 4 different concepts:
   // parameters, attributes, methods, and sub-modules
   // we store individual lists of each concept, and a single map to
@@ -611,11 +591,8 @@ struct TORCH_API Module {
   // first-class: module_value_->type().compilation_unit() holds Functions that
   // treat modules as first class.
 
-  // lowered: In this lowered form, all the attributes/parameters are appended
-  // as additional inputs. lowered_methods_ holds this lowered form
-  // mutable because it is a cache for class_cu() methods
-  mutable CompilationUnit lowered_methods_;
-  mutable std::recursive_mutex find_method_guard_;
+  mutable std::recursive_mutex create_method_guard_;
+  friend struct Method;
 };
 
 } // namespace script

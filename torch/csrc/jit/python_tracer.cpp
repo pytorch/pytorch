@@ -36,14 +36,38 @@ std::string getPythonInterpreterStackTrace() {
   return stack_trace.str();
 }
 
+static void gatherParametersAndBuffers(Value* self_value, const script::Module& self) {
+  Graph& g = *self_value->owningGraph();
+  for (auto& param : self.get_parameters()) {
+    setValueTrace(param.value(), g.insertGetAttr(self_value, param.name()));
+  }
+  for (auto& param : self.get_attributes()) {
+    if (param.type()->isSubtypeOf(TensorType::get())) {
+        setValueTrace(param.value(), g.insertGetAttr(self_value, param.name()));
+    }
+  }
+  for (const auto& sub : self.get_modules()) {
+    gatherParametersAndBuffers(g.insertGetAttr(self_value, sub->name()),  *sub);
+  }
+}
+
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     const py::function& func,
     Stack trace_inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
-    const c10::optional<size_t>& num_real_inputs) {
-  size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
+    const std::shared_ptr<script::Module>& self) {
   auto enter_info = tracer::enter(std::move(trace_inputs));
+  auto graph = enter_info.first->graph;
+
+  // if we are a module, then make sure the modules parameters are in the map
+  // and mapped to accesses to the self object
+  if (self) {
+    Value* self_value =
+        graph->insertInput(0, "self")->setType(self->module_object()->type());
+    gatherParametersAndBuffers(self_value, *self);
+  }
+
   getTracingState()->lookup_var_name_fn =
       [var_name_lookup_fn](const Variable& var) -> std::string {
     AutoGIL ag;
@@ -51,6 +75,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
   };
   getTracingState()->force_outplace = force_outplace;
   try {
+    size_t num_func_inputs = enter_info.second.size();
     py::tuple py_inputs(num_func_inputs);
     for (size_t i = 0; i < num_func_inputs; ++i) {
       py_inputs[i] = py::cast(enter_info.second[i]);
@@ -62,7 +87,6 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
           "captured in traces, so it would be a no-op.");
     }
     tracer::exit({toIValue(out)});
-    auto graph = enter_info.first->graph;
     EliminateDeadCode(graph);
     LowerSimpleTuples(graph);
 

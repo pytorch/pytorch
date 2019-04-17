@@ -614,22 +614,6 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
   }
 }
 
-static void gatherParametersAndBuffers(
-    std::vector<Slot>& values,
-    const Module& m) {
-  for (auto& param : m.get_parameters()) {
-    values.push_back(param);
-  }
-  for (auto& param : m.get_attributes()) {
-    if (param.type()->isSubtypeOf(TensorType::get())) {
-      values.push_back(param);
-    }
-  }
-  for (const auto& sub : m.get_modules()) {
-    gatherParametersAndBuffers(values, *sub);
-  }
-}
-
 namespace {
 
 Resolver pythonResolver(const ResolutionCallback& rcb) {
@@ -785,15 +769,11 @@ void initJitScriptBindings(PyObject* module) {
           [](std::shared_ptr<Module> m,
              py::object py_m,
              const std::string& script,
-             ResolutionCallback rcb,
-             bool has_self) {
+             ResolutionCallback rcb) {
             c10::optional<Self> self;
-            if (has_self) {
-              m->class_compilation_unit().define(
-                  script, pythonResolver(rcb), moduleSelf(m, py_m));
-            } else {
-              m->_define_lowered(script, pythonResolver(rcb));
-            }
+            m->class_compilation_unit().define(
+                script, pythonResolver(rcb), moduleSelf(m, py_m));
+
             didFinishEmitModule(m);
           })
       .def(
@@ -917,13 +897,6 @@ void initJitScriptBindings(PyObject* module) {
                 });
           })
       .def(
-          "_create_method_from_graph",
-          [](Module& self,
-             const std::string& name,
-             std::shared_ptr<Graph> graph) {
-            self._define_lowered(name, std::move(graph), {});
-          })
-      .def(
           "_create_method_from_trace",
           [](std::shared_ptr<Module> self,
              const std::string& name,
@@ -933,20 +906,15 @@ void initJitScriptBindings(PyObject* module) {
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
-            std::vector<Slot> parameters;
-            gatherParametersAndBuffers(parameters, *self);
             Stack inputs = toStack(input_tuple);
-            for (const Slot& param : parameters) {
-              inputs.emplace_back(param.value());
-            }
             auto graph = tracer::createGraphByTracing(
                 func,
                 inputs,
                 var_lookup_fn,
                 force_outplace,
-                input_tuple.size());
-            self->_define_lowered(
-                name, std::move(graph), std::move(parameters));
+                self);
+            self->module_object()->type()->compilation_unit().create_function(
+                name, graph);
             didFinishEmitModule(self);
           })
       .def(
@@ -988,8 +956,7 @@ void initJitScriptBindings(PyObject* module) {
             }
 
             Method* orig_method = orig->find_method(name);
-            m->_define_lowered(
-                name, orig_method->graph()->copy(), std::move(member_inputs));
+            AT_ERROR("NYI");
           });
 
   py::class_<CompilationUnit, std::shared_ptr<CompilationUnit>>(m, "CompilationUnit")
@@ -1090,11 +1057,9 @@ void initJitScriptBindings(PyObject* module) {
           func,
           inputs,
           var_lookup_fn,
-          force_outplace,
-          input_tuple.size());
+          force_outplace);
       CompilationUnit cu;
-      cu.create_function(std::move(name), std::move(graph));
-      auto result = cu.get_functions().at(0);
+      auto result = cu.create_function(std::move(name), std::move(graph));
       didFinishEmitFunction(result);
       return result;
     });
@@ -1178,6 +1143,13 @@ void initJitScriptBindings(PyObject* module) {
       "_last_executed_optimized_graph",
       []() { return lastExecutedOptimizedGraph(); },
       "Retrieve the optimized graph that was run the last time the graph executor ran on this thread");
+  m.def(
+      "_create_function_from_graph",
+      [](const std::string& name,
+         std::shared_ptr<Graph> graph) {
+        return CompilationUnit().create_function(name, graph);
+      });
+
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())

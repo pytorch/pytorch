@@ -224,10 +224,11 @@ struct TORCH_API CompilationUnit {
     create_function(remote.name(), remote.graph()->copy());
   }
 
-  Function& create_function(std::string name, std::shared_ptr<Graph> graph) {
+  std::shared_ptr<Function> create_function(std::string name, std::shared_ptr<Graph> graph) {
     auto fn = std::make_shared<Function>(
         std::move(name), is_optimized(), std::move(graph), nullptr);
-    return register_function(std::move(fn));
+    register_function(fn);
+    return fn;
   }
 
   const std::vector<std::shared_ptr<Function>>& get_functions() const {

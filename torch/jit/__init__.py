@@ -1234,7 +1234,7 @@ if _enabled:
             # createResolutionCallback internally adds 1 to get us to our frame, then
             # we add 1 to get to the proper surrounding scope.
             rcb = _jit_internal.createResolutionCallback(frames_up=1)
-            self._c._define(self, lang, rcb, True)
+            self._c._define(self, lang, rcb)
 
         def copy(self):
             m = ScriptModule()
