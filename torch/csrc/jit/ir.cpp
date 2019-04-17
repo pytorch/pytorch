@@ -1258,7 +1258,14 @@ Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
-    AT_ASSERT(v->type()->isSubtypeOf(elem_type));
+    AT_CHECK(
+        v->type()->isSubtypeOf(elem_type),
+        "All elements in a list must be the same or "
+        "subtypes of the list type. List type was '",
+        elem_type->python_str(),
+        "' but had an element with type '",
+        v->type()->python_str(),
+        "'");
   }
   n->output()->setType(ListType::create(elem_type));
   return n;

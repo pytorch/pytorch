@@ -199,6 +199,16 @@ Value* tryCreateList(
       return nullptr;
     list_ctor.push_back(av);
   }
+  for (const auto& item : list_ctor) {
+    AT_CHECK(
+        item->type()->isSubtypeOf(elem_type),
+        "All elements in a list must be the same or "
+        "subtypes of the list type. List type was '",
+        elem_type->python_str(),
+        "' but had an element with type '",
+        item->type()->python_str(),
+        "'\n", loc);
+  }
   return graph.insertNode(graph.createList(elem_type, list_ctor))->output();
 }
 
