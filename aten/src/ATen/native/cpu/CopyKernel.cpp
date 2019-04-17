@@ -14,20 +14,17 @@ namespace {
 constexpr int64_t COPY_GRAIN_SIZE = 20000;
 
 static void copy_kernel_impl(Tensor& dst, const Tensor& src) {
-  AT_DISPATCH_ALL_TYPES_AND2(
-    at::ScalarType::Half, at::ScalarType::Bool, dst.scalar_type(), "copy_kernel_impl", [&]() {
-      scalar_t* self_ptr = dst.data<scalar_t>();
-      scalar_t* src_ptr = src.data<scalar_t>();
+  char* self_ptr = (char*)dst.data_ptr();
+  char* src_ptr = (char*)src.data_ptr();
 
-      auto sample = [&](int64_t begin, int64_t end) {
-        int64_t len = end - begin;
-        scalar_t* self_seg = self_ptr + begin;
-        scalar_t* src_seg = src_ptr + begin;
-        at::vec256::convert<scalar_t, scalar_t>(src_seg, self_seg, len);
-    };
+  auto sample = [=](int64_t begin, int64_t end) {
+    int64_t len = end - begin;
+    char* self_seg = self_ptr + begin;
+    char* src_seg = src_ptr + begin;
+    memcpy(self_seg, src_seg, len);
+  };
 
-    parallel_for(0, dst.numel(), COPY_GRAIN_SIZE, sample);
-  });
+  parallel_for(0, dst.nbytes(), COPY_GRAIN_SIZE, sample);
 }
 
 } // anonymous namespace
