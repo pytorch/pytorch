@@ -24,6 +24,23 @@ void EliminateCommonSubexpression(
       continue;
     }
 
+    // A node with output feeding into prim::Unused indicates the user
+    // explicitly wants THIS NODE to be preserved and not merged with any others.
+    auto outputs = node->outputs();
+    bool output_unused = std::any_of(outputs.begin(), outputs.end(), [](Value *v) {
+      auto uses = v->uses();
+      for (auto &use : uses) {
+        if (use.user->kind() == prim::Unused) {
+          return true;
+        }
+      }
+      return false;
+    });
+    if (output_unused) {
+      continue;
+    }
+
+
     if (!node->blocks().empty()) {
       // Traverse sub-blocks.
       for (auto block : node->blocks()) {
