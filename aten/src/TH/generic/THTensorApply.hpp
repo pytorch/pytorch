@@ -258,14 +258,14 @@ if (std::isnan(val)) break;
   ptrdiff_t TENSOR##Size = THTensor_(nElement)(TENSOR); \
   if (TENSOR##Contig) { \
     TYPE *rp = THTensor_getStoragePtr(TENSOR)->data<TYPE>()+TENSOR->storage_offset(); \
-    OUTPUT = at::parallel_reduce(0, TENSOR##Size, (THRESHOLD * 10), (TYPE)0, [&](int64_t begin, int64_t end, TYPE ident)->TYPE { \
-      TYPE r = ident; \
+    OUTPUT = at::parallel_reduce(0, TENSOR##Size, (THRESHOLD * 10), (accreal)0, [&](int64_t begin, int64_t end, accreal ident)->accreal { \
+      accreal r = ident; \
       for (auto iter = begin; iter < end; iter++) { \
         TYPE *TENSOR##_data = rp+iter; \
         r += (EXPR); \
       } \
       return r; \
-    }, std::plus<TYPE>()); \
+    }, std::plus<accreal>()); \
   } else { \
     int TH_TENSOR_APPLY_hasFinished = 0; \
     int64_t TH_TENSOR_dim_index = 0; \
@@ -273,7 +273,7 @@ if (std::isnan(val)) break;
     if (0 == TH_TENSOR_APPLY_hasFinished) { \
       auto TENSOR##_data_local = TENSOR##_data; \
       auto TENSOR##_i_local = TENSOR##_i; \
-      OUTPUT = at::parallel_reduce(0, TENSOR##Size, THRESHOLD, (TYPE)0, [&](int64_t begin, int64_t end, TYPE ident)->TYPE { \
+      OUTPUT = at::parallel_reduce(0, TENSOR##Size, THRESHOLD, (accreal)0, [&](int64_t begin, int64_t end, accreal ident)->accreal { \
         auto TENSOR##_data = TENSOR##_data_local; \
         auto TENSOR##_i = TENSOR##_i_local; \
         ptrdiff_t line_index_start = begin; \
@@ -282,7 +282,7 @@ if (std::isnan(val)) break;
         TENSOR##_data += TENSOR##_memory_offset; \
         ptrdiff_t count = 0; \
         ptrdiff_t TENSOR##_start = TENSOR##_counter_tmp[TENSOR##_dim - 1]; \
-        TYPE r = ident; \
+        accreal r = ident; \
         while (count < line_seg_length) { \
           for (TENSOR##_i=TENSOR##_start; (count < line_seg_length)&&(TENSOR##_i < TENSOR##_size); ++TENSOR##_i, ++count) { \
             r += (EXPR); \
@@ -296,7 +296,7 @@ if (std::isnan(val)) break;
           THFree(TENSOR##_counter_tmp); \
         } \
         return r; \
-      }, std::plus<TYPE>()); \
+      }, std::plus<accreal>()); \
     } \
     if (TENSOR##_counter != NULL) { \
       THFree(TENSOR##_counter); \
