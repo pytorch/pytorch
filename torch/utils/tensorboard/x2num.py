@@ -4,7 +4,10 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
+import torch
 import six
+
+from caffe2.python import workspace
 
 
 def make_np(x):
@@ -21,7 +24,6 @@ def make_np(x):
 
 
 def prepare_pytorch(x):
-    import torch
     if isinstance(x, torch.autograd.Variable):
         x = x.data
     x = x.cpu().numpy()
@@ -29,6 +31,5 @@ def prepare_pytorch(x):
 
 
 def prepare_caffe2(x):
-    from caffe2.python import workspace
     x = workspace.FetchBlob(x)
     return x

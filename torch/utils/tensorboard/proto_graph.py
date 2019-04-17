@@ -3,10 +3,7 @@ from tensorboard.compat.proto.attr_value_pb2 import AttrValue
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 
 
-def AttrValue_proto(dtype,
-                    shape,
-                    s,
-                    ):
+def AttrValue_proto(dtype, shape, s):
     attr = {}
 
     if s is not None:

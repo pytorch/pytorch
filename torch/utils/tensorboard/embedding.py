@@ -1,4 +1,10 @@
 import os
+import math
+import numpy as np
+from .x2num import make_np
+from .utils import make_grid
+from PIL import Image
+from posixpath import join
 
 
 def make_tsv(metadata, save_path, metadata_header=None):
@@ -9,24 +15,14 @@ def make_tsv(metadata, save_path, metadata_header=None):
             'len of header must be equal to the number of columns in metadata'
         metadata = ['\t'.join(str(e) for e in l)
                     for l in [metadata_header] + metadata]
-    import sys
-    if sys.version_info[0] == 3:
-        with open(os.path.join(save_path, 'metadata.tsv'), 'w', encoding='utf8') as f:
-            for x in metadata:
-                f.write(x + '\n')
-    else:
-        with open(os.path.join(save_path, 'metadata.tsv'), 'wb') as f:
-            for x in metadata:
-                f.write((x + '\n').encode('utf-8'))
 
-
+    with open(os.path.join(save_path, 'metadata.tsv'), 'w') as f:
+        for x in metadata:
+            f.write(x + '\n')
 # https://github.com/tensorflow/tensorboard/issues/44 image label will be squared
+
+
 def make_sprite(label_img, save_path):
-    import math
-    import numpy as np
-    from .x2num import make_np
-    from .utils import make_grid
-    from PIL import Image
     # this ensures the sprite image has correct dimension as described in
     # https://www.tensorflow.org/get_started/embedding_viz
     nrow = int(math.ceil((label_img.size(0)) ** 0.5))
@@ -41,7 +37,6 @@ def make_sprite(label_img, save_path):
 
 
 def append_pbtxt(metadata, label_img, save_path, subdir, global_step, tag):
-    from posixpath import join
     with open(os.path.join(save_path, 'projector_config.pbtxt'), 'a') as f:
         # step = os.path.split(save_path)[-1]
         f.write('embeddings {\n')

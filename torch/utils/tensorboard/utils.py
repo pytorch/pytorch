@@ -1,3 +1,6 @@
+import numpy as np
+
+
 # Functions for converting
 def figure_to_image(figures, close=True):
     """Render matplotlib figure to numpy format.
@@ -11,7 +14,6 @@ def figure_to_image(figures, close=True):
     Returns:
         numpy.array: image in [CHW] order
     """
-    import numpy as np
     try:
         import matplotlib.pyplot as plt
         import matplotlib.backends.backend_agg as plt_backend_agg
@@ -37,12 +39,7 @@ def figure_to_image(figures, close=True):
         return image
 
 
-def graphviz_to_image():
-    pass
-
-
 def _prepare_video(V):
-    import numpy as np
     b, t, c, h, w = V.shape
 
     if V.dtype == np.uint8:
@@ -69,7 +66,6 @@ def _prepare_video(V):
 
 def make_grid(I, ncols=8):
     # I: N1HW or N3HW
-    import numpy as np
     assert isinstance(
         I, np.ndarray), 'plugin error, should pass numpy array here'
     if I.shape[1] == 1:
@@ -96,7 +92,6 @@ def make_grid(I, ncols=8):
 
 
 def convert_to_HWC(tensor, input_format):  # tensor: numpy array
-    import numpy as np
     assert(len(set(input_format)) == len(input_format)), "You can not use the same dimension shordhand twice. \
         input_format: {}".format(input_format)
     assert(len(tensor.shape) == len(input_format)), "size of input tensor and input format are different. \

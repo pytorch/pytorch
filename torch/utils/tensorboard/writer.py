@@ -9,18 +9,19 @@ import os
 import six
 import time
 
-from .embedding import make_mat, make_sprite, make_tsv, append_pbtxt
+from tensorboard.compat.proto.event_pb2 import SessionLog
+from tensorboard.compat.proto.event_pb2 import Event
+from tensorboard.compat.proto import event_pb2
 from tensorboard.summary.writer.event_file_writer import EventFileWriter
+
+from .embedding import make_mat, make_sprite, make_tsv, append_pbtxt
 from .onnx_graph import load_onnx_graph
 from .pytorch_graph import graph
-from tensorboard.compat.proto import event_pb2
 from .summary import (
     scalar, histogram, histogram_raw, image, audio, text,
     pr_curve, pr_curve_raw, video, custom_scalars, image_boxes
 )
 from .utils import figure_to_image
-from tensorboard.compat.proto.event_pb2 import SessionLog
-from tensorboard.compat.proto.event_pb2 import Event
 
 
 class FileWriter(object):

@@ -1,11 +1,17 @@
 import time
+import numpy as np
+import torch
+
 from distutils.version import LooseVersion
 from collections import OrderedDict
+
 from tensorboard.compat.proto.graph_pb2 import GraphDef
 from tensorboard.compat.proto.step_stats_pb2 import StepStats, DeviceStepStats, NodeExecStats, AllocatorMemoryUsed
 from tensorboard.compat.proto.config_pb2 import RunMetadata
 from tensorboard.compat.proto.versions_pb2 import VersionDef
+
 from .proto_graph import Node_proto
+
 
 methods_OP = ['attributeNames', 'hasMultipleOutputs', 'hasUses', 'inputs',
               'kind', 'outputs', 'outputsSize', 'scopeName']
@@ -124,15 +130,14 @@ class Graph_py(object):
             if hasattr(node, 'scope'):
                 if node.scope == '' and self.shallowestScopeName:
                     self.uniqueNameToScopedName[node.uniqueName] = self.shallowestScopeName + '/' + node.uniqueName
+
         # replace name
-        # print(self.uniqueNameToScopedName)
         for key, node in self.nodes_IO.items():
             self.nodes_IO[key].inputs = [self.uniqueNameToScopedName[node_input_id] for node_input_id in node.inputs]
             if node.uniqueName in self.uniqueNameToScopedName:
                 self.nodes_IO[key].uniqueName = self.uniqueNameToScopedName[node.uniqueName]
 
     def to_proto(self):
-        import numpy as np
         nodes = []
         node_stats = []
         for v in self.nodes_IO.values():
@@ -155,6 +160,12 @@ class Graph_py(object):
 
 # one argument: 'hasAttribute', 'hasAttributes',
 def parse(graph, args=None, omit_useless_nodes=True):
+    """This method parses a PyTorch graph.
+    Args:
+      graph (PyTorch module): The model to be parsed.
+      args (tuple): input tensor[s] for the model.
+      omit_useless_nodes (boolean) whether to remove nodes from the graph.
+    """
     n_inputs = len(args)  # not sure...
 
     scope = {}
@@ -180,8 +191,6 @@ def parse(graph, args=None, omit_useless_nodes=True):
 
 
 def graph(model, args, verbose=False, **kwargs):
-    import torch
-
     def _optimize_trace(trace, operator_export_type):
         trace.set_graph(_optimize_graph(trace.graph(), operator_export_type))
 
@@ -252,8 +261,10 @@ def graph(model, args, verbose=False, **kwargs):
     if 'omit_useless_nodes' not in kwargs:
         omit_useless_nodes = True
 
-    _optimize_trace(trace, operator_export_type)
-
+    try:
+        _optimize_trace(trace, operator_export_type)
+    except RuntimeError as e:
+        logging.warn(ImportError(e))
     graph = trace.graph()
     if verbose:
         print(graph)

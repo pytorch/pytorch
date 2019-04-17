@@ -3,7 +3,6 @@ from tensorboard.compat.proto.node_def_pb2 import NodeDef
 from tensorboard.compat.proto.versions_pb2 import VersionDef
 from tensorboard.compat.proto.attr_value_pb2 import AttrValue
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
-# from .proto.onnx_pb2 import ModelProto
 
 
 def load_onnx_graph(fname):
@@ -46,6 +45,7 @@ def parse(graph):
             input=node.input,
             attr={'parameters': AttrValue(s=attr)},
         ))
+
     # two pass token replacement, appends opname to object id
     mapping = {}
     for node in nodes:

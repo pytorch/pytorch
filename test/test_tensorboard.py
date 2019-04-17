@@ -2,24 +2,22 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
-from common_utils import run_tests
 
-from torch.utils.tensorboard import x2num, SummaryWriter
-import torch
+import matplotlib.pyplot as plt
 import numpy as np
+import os
+import pytest
+import sys
 import unittest
+
+import torch
+from common_utils import run_tests
+from torch.utils.tensorboard import x2num, SummaryWriter
 from torch.utils.tensorboard import summary
 from torch.utils.tensorboard.utils import _prepare_video, convert_to_HWC
-import pytest
-# from torch.utils.tensorboard import SummaryWriter
-# from .expect_reader import compare_proto
-import os
-import sys
-import matplotlib.pyplot as plt
-# from torch.utils.tensorboard import x2num
 
 
-class PyTorchNumpyTest(unittest.TestCase):
+class TestTensorBoardPyTorchNumpy(unittest.TestCase):
     def test_pytorch_np(self):
         tensors = [torch.rand(3, 10, 10), torch.rand(1), torch.rand(1, 2, 3, 4, 5)]
         for tensor in tensors:
@@ -80,7 +78,7 @@ class PyTorchNumpyTest(unittest.TestCase):
                                 bucket_counts=counts.tolist())
 
 
-class UtilsTest(unittest.TestCase):
+class TestTensorBoardUtils(unittest.TestCase):
     def test_to_HWC(self):
         np.random.seed(1)
         test_image = np.random.randint(0, 256, size=(3, 32, 32), dtype=np.uint8)
@@ -114,7 +112,7 @@ precision = [0.3333333, 0.3786982, 0.5384616, 1.0, 0.0]
 recall = [1.0, 0.8533334, 0.28, 0.0666667, 0.0]
 
 
-class WriterTest(unittest.TestCase):
+class TestTensorBoardWriter(unittest.TestCase):
     def test_writer(self):
         with SummaryWriter() as writer:
             sample_rate = 44100
@@ -150,12 +148,7 @@ class WriterTest(unittest.TestCase):
             writer.export_scalars_to_json("./all_scalars.json")
 
 
-def test_linting():
-    import subprocess
-    subprocess.check_output(['flake8', 'tensorboardX'])
-
-
-class SummaryWriterTest(unittest.TestCase):
+class TestTensorBoardSummaryWriter(unittest.TestCase):
     def test_summary_writer_ctx(self):
         # after using a SummaryWriter as a ctx it should be closed
         with SummaryWriter(filename_suffix='.test') as writer:
@@ -174,13 +167,6 @@ class SummaryWriterTest(unittest.TestCase):
 
         assert passed
 
-    def test_windowsPath(self):
-        dummyPath = "C:\\Downloads\\fjoweifj02utj43tj430"
-        with SummaryWriter(dummyPath) as writer:
-            writer.add_scalar('test', 1)
-        import shutil
-        shutil.rmtree(dummyPath)
-
     def test_pathlib(self):
         import sys
         if sys.version_info.major == 2:
@@ -194,7 +180,7 @@ class SummaryWriterTest(unittest.TestCase):
         shutil.rmtree(str(p))
 
 
-class EmbeddingTest(unittest.TestCase):
+class TestTensorBoardEmbedding(unittest.TestCase):
     def test_embedding(self):
         w = SummaryWriter()
         all_features = torch.Tensor([[1, 2, 3], [5, 4, 1], [3, 7, 7]])
@@ -233,11 +219,9 @@ class EmbeddingTest(unittest.TestCase):
                         label_img=all_images,
                         metadata_header=['digit', 'dataset'],
                         global_step=2)
-np.random.seed(0)
-# compare_proto = write_proto  # massive update expect
 
 
-class SummaryTest(unittest.TestCase):
+class TestTensorBoardSummary(unittest.TestCase):
     def test_uint8_image(self):
         '''
         Tests that uint8 image (pixel values in [0, 255]) is not changed
@@ -317,15 +301,15 @@ class SummaryTest(unittest.TestCase):
         compare_proto(summary.histogram('dummy', np.random.rand(1024), bins='doane', max_bins=5), self)
 
 
-def removeWhiteChar(string):
+def remove_whitespace(string):
     return string.replace(' ', '').replace('\t', '').replace('\n', '')
 
 
 def compare_proto(str_to_compare, function_ptr):
-    # TODO: reable test
+    # TODO: enable test after tensorboard is ready.
     return
     if 'histogram' in function_ptr.id():
-        return  # numpy.histogram has slightly different between different version
+        return  # numpy.histogram has slight difference between versions
 
     if 'pr_curve' in function_ptr.id():
         return  # pr_curve depends on numpy.histogram
@@ -341,9 +325,9 @@ def compare_proto(str_to_compare, function_ptr):
     with open(expected_file) as f:
         expected = f.read()
     str_to_compare = str(str_to_compare)
-    print(removeWhiteChar(str_to_compare))
-    print(removeWhiteChar(expected))
-    assert removeWhiteChar(str_to_compare) == removeWhiteChar(expected)
+    print(remove_whitespace(str_to_compare))
+    print(remove_whitespace(expected))
+    assert remove_whitespace(str_to_compare) == remove_whitespace(expected)
 
 
 def write_proto(str_to_compare, function_ptr):
@@ -358,7 +342,7 @@ def write_proto(str_to_compare, function_ptr):
         f.write(str(str_to_compare))
 
 
-class PytorchGraphTest(unittest.TestCase):
+class TestTensorBoardPytorchGraph(unittest.TestCase):
     def test_pytorch_graph(self):
         dummy_input = (torch.zeros(1, 3),)
 
@@ -382,7 +366,7 @@ class PytorchGraphTest(unittest.TestCase):
                 w.add_graph(model, dummy_input)  # error
 
 
-class FigureTest(unittest.TestCase):
+class TestTensorBoardFigure(unittest.TestCase):
     def test_figure(self):
         writer = SummaryWriter()
 
@@ -424,7 +408,7 @@ class FigureTest(unittest.TestCase):
         writer.close()
 
 
-class NumpyTest(unittest.TestCase):
+class TestTensorBoardNumpy(unittest.TestCase):
     def test_scalar(self):
         res = x2num.make_np(1.1)
         assert isinstance(res, np.ndarray) and res.shape == (1,)
@@ -436,9 +420,6 @@ class NumpyTest(unittest.TestCase):
         assert isinstance(res, np.ndarray) and res.shape == (1,)
         res = x2num.make_np(np.int64(100000000000))
         assert isinstance(res, np.ndarray) and res.shape == (1,)
-
-    def test_make_grid(self):
-        pass
 
     def test_numpy_vid(self):
         shapes = [(16, 3, 30, 28, 28), (19, 3, 30, 28, 28), (19, 3, 29, 23, 19)]

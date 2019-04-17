@@ -9,6 +9,7 @@ import re as _re
 
 # pylint: disable=unused-import
 from six.moves import range
+
 from tensorboard.compat.proto.summary_pb2 import Summary
 from tensorboard.compat.proto.summary_pb2 import HistogramProto
 from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
@@ -20,6 +21,7 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 # from tensorboard.compat.proto import layout_pb2
 from .x2num import make_np
 from .utils import _prepare_video, convert_to_HWC
+
 
 _INVALID_TAG_CHARACTERS = _re.compile(r'[^-/\w\.]')
 
