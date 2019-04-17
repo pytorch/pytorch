@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 
 #include <set>
 #include <tuple>
@@ -41,20 +42,34 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
   if (return_inverse || return_counts) {
     inverse_indices.resize_(input.sizes());
     int64_t* inverse_indices_data = inverse_indices.data<int64_t>();
-    std::unordered_map<scalar_t, int64_t> inverse_map;
     inverse_map.reserve(output.numel());
     for (int i = 0; i < output.numel(); ++i) {
       inverse_map[output_data[i]] = i;
     }
-    for (int i = 0; i < numel; ++i) {
-      inverse_indices_data[i] = inverse_map[input_data[i]];
-    }
+    at::parallel_for(0, numel, 1, [&](int64_t i_begin, int64_t i_end) {
+      for(int64_t i = i_begin; i < i_end; i++) {
+        inverse_indices_data[i] = inverse_map[input_data[i]];
+      }
+    });
     if (return_counts) {
+      std::unordered_map<scalar_t, std::atomic_int64_t> counts_map;
+      counts_map.reserve(output.numel());
+      for (int i = 0; i < output.numel(); ++i) {
+        counts_map[output_data[i]] = 0;
+      }
+      at::parallel_for(0, numel, 1, [&](int64_t i_begin, int64_t i_end) {
+        for(int64_t i = i_begin; i < i_end; i++) {
+          counts_map[input_data[i]] += 1;
+        }
+      });
       counts.resize_(output.sizes());
       counts.fill_(0);
-      for (int i = 0; i < numel; ++i) {
-        counts[inverse_map[input_data[i]]] += 1;
-      }
+      int64_t *counts_data = counts.data<int64_t>();
+      at::parallel_for(0, output.numel(), 1, [&](int64_t i_begin, int64_t i_end) {
+        for(int64_t i = i_begin; i < i_end; i++) {
+          counts_data[i] = counts_map[output_data[i]];
+        }
+      });
     }
   }
   return std::make_tuple(output, inverse_indices, counts);
