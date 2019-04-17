@@ -387,8 +387,7 @@ struct ModuleValue : public SugaredValue {
           auto& param = *it;
           params.emplace_back(g.insertGetAttr(self_, param.name()));
         }
-        auto list =
-            g.insertNode(g.createTuple(params))->output();
+        auto list = g.insertNode(g.createTuple(params))->output();
         return std::make_shared<ConstantParameterList>(list);
       }
       if (py::isinstance<py::function>(attr) ||
@@ -700,6 +699,61 @@ static Self moduleSelf(const std::shared_ptr<Module>& m) {
   };
 }
 
+static void setInputTensorTypes(Graph& g, const Stack& stack) {
+  AT_ASSERT(stack.size() == g.inputs().size());
+  for (size_t i = 0; i < stack.size(); ++i) {
+    g.inputs().at(i)->setType(
+        DimensionedTensorType::create(stack.at(i).toTensor()));
+  }
+}
+
+static std::shared_ptr<Graph> _propagate_shapes(
+    Graph& graph,
+    std::vector<at::Tensor> inputs,
+    bool with_grad = false) {
+  Stack stack(inputs.begin(), inputs.end());
+  auto retval = graph.copy();
+  setInputTensorTypes(*retval, stack);
+  PropagateInputShapes(retval);
+  return retval;
+}
+
+static std::shared_ptr<Graph> _propagate_and_assign_input_and_output_shapes(
+    Graph& graph,
+    std::vector<at::Tensor> inputs,
+    std::vector<at::Tensor> outputs,
+    bool with_grad = false,
+    bool propagate = true) {
+  auto retval = graph.copy();
+  if (propagate) {
+    setInputTensorTypes(*retval, fmap<IValue>(inputs));
+    PropagateInputShapes(retval);
+  }
+  AT_ASSERT(retval->inputs().size() == inputs.size());
+  for (size_t i = 0; i < retval->inputs().size(); ++i) {
+    auto scalar_type = inputs[i].scalar_type();
+    auto sizes = inputs[i].sizes();
+    auto type =
+        torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+    retval->inputs()[i]->setType(type);
+  }
+  at::ArrayRef<Value*> output_values = retval->outputs();
+  // patch this to still work if we are returning a tuple of multiple values
+  if (output_values.at(0)->type()->kind() == TupleType::Kind) {
+    AT_ASSERT(output_values.at(0)->node()->kind() == prim::TupleConstruct);
+    output_values = output_values.at(0)->node()->inputs();
+  }
+  AT_ASSERT(output_values.size() == outputs.size());
+  for (size_t i = 0; i < retval->outputs().size(); ++i) {
+    auto scalar_type = outputs[i].scalar_type();
+    auto sizes = outputs[i].sizes();
+    auto type =
+        torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+    output_values[i]->setType(type);
+  }
+  return retval;
+}
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -931,14 +985,6 @@ void initJitScriptBindings(PyObject* module) {
                 "Attempted to call get_debug_state on a Module without a compiled forward()");
           })
       .def(
-          "debug_disable_autodiff_subgraph_inlining",
-          [](Module& self) {
-            if (self.find_method("forward")) {
-              Method& m = self.get_method("forward");
-              m.get_executor().debugDisableAutodiffSubgraphInlining();
-            }
-          })
-      .def(
           "forward",
           [](py::args args, py::kwargs kwargs) {
             // We implement this in C++ to avoid incurring the pybind11 dispatch
@@ -954,15 +1000,6 @@ void initJitScriptBindings(PyObject* module) {
                 self.get_method("forward"),
                 tuple_slice(std::move(args), 1),
                 std::move(kwargs));
-          })
-      .def(
-          "_python_print",
-          [](Module& self) {
-            std::ostringstream ss;
-            std::vector<at::Tensor> tensors;
-            std::vector<ClassTypePtr> classes;
-            PythonPrint(ss, self, tensors, classes, true);
-            return std::make_pair(ss.str(), tensors);
           })
       .def_property_readonly(
           "code",
@@ -998,7 +1035,6 @@ void initJitScriptBindings(PyObject* module) {
           });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
-      .def("graph", [&](Method& self) { return self.graph(); })
       .def(
           "__call__",
           [](py::args args, py::kwargs kwargs) {
@@ -1007,28 +1043,7 @@ void initJitScriptBindings(PyObject* module) {
             return invokeScriptMethodFromPython(
                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
           })
-      .def_property_readonly("graph", [](Method& m) { return m.graph(); })
-      .def(
-          "propagate_shapes",
-          [](Method& m, const std::vector<at::Tensor>& inputs, bool with_grad) {
-            return propagate_shapes(
-                *m.graph(), inputs, m.initial_ivalues(), with_grad);
-          })
-      .def(
-          "propagate_and_assign_input_and_output_shapes",
-          [](Method& m,
-             const std::vector<at::Tensor>& inputs,
-             std::vector<at::Tensor> outputs,
-             bool with_grad,
-             bool propagate) {
-            return propagate_and_assign_input_and_output_shapes(
-                *m.graph(),
-                inputs,
-                m.initial_ivalues(),
-                outputs,
-                with_grad,
-                propagate);
-          })
+      .def_property_readonly("graph", &Method::graph)
       .def(
           "initial_ivalues",
           [](Method& m) {
@@ -1046,29 +1061,7 @@ void initJitScriptBindings(PyObject* module) {
             return self.graph_for(createStackForSchema(
                 self.getSchema(), tuple_slice(std::move(args), 1), kwargs));
           })
-      .def(
-          "debug_disable_autodiff_subgraph_inlining",
-          [](Method& m) {
-            return m.get_executor().debugDisableAutodiffSubgraphInlining();
-          })
-      .def("schema", &Method::getSchema)
-      .def(
-          "pretty_print_schema",
-          [](Method& m) {
-            const FunctionSchema& schema = m.getSchema();
-            std::stringstream ss;
-            ss << schema;
-            return ss.str();
-          })
-      .def(
-          "python_print",
-          [](Method& m) {
-            std::ostringstream oss;
-            std::vector<at::Tensor> constants;
-            std::vector<ClassTypePtr> classes;
-            PythonPrint(oss, m, constants, classes, true);
-            return std::make_pair(oss.str(), std::move(constants));
-          })
+      .def_property_readonly("schema", &Method::getSchema)
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;
@@ -1148,6 +1141,25 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
   m.def("_jit_clear_class_registry", ClassType::clearRegistry);
+  m.def(
+      "_debug_set_autodiff_subgraph_inlining", debugSetAutodiffSubgraphInlining);
+  m.def("_propagate_shapes", _propagate_shapes);
+  m.def(
+      "_propagate_and_assign_input_and_output_shapes",
+      _propagate_and_assign_input_and_output_shapes);
+  m.def("_jit_python_print", [](py::object obj) {
+    std::ostringstream ss;
+    std::vector<at::Tensor> constants;
+    std::vector<ClassTypePtr> classes;
+    if (py::isinstance<Module>(obj)) {
+      auto& self = py::cast<Module&>(obj);
+      PythonPrint(ss, self, constants, classes, true);
+    } else {
+      auto& m = py::cast<Method&>(obj);
+      PythonPrint(ss, m, constants, classes, true);
+    }
+    return std::make_pair(ss.str(), std::move(constants));
+  });
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
