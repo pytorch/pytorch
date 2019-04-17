@@ -250,7 +250,8 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs) {
 
       return c10::ivalue::GenericDict::create(std::move(elem_pairs));
     } else if (auto list_type = type->cast<ListType>()) {
-      size_t num_elems = input.isGenericList() ? input.toGenericListRef().size() : input.toTensorListRef().size();
+      size_t num_elems = input.isGenericList() ? input.toGenericListRef().size()
+                                               : input.toTensorListRef().size();
       auto list_unpack = state->graph->insertNode(state->graph->createListUnpack(value, num_elems));
       auto unpack_outputs = list_unpack->outputs();
 
