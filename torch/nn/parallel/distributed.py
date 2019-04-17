@@ -22,7 +22,7 @@ def _find_tensors(obj):
     """
     if isinstance(obj, torch.Tensor):
         return [obj]
-    elif isinstance(obj, (list, tuple)):
+    if isinstance(obj, (list, tuple)):
         return itertools.chain(*map(_find_tensors, obj))
     if isinstance(obj, dict):
         return itertools.chain(*map(_find_tensors, obj.values()))
