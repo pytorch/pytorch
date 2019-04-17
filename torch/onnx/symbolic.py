@@ -355,10 +355,15 @@ def addmm(g, self, mat1, mat2, beta, alpha):
 
 @parse_args('v', 'v', 'v')
 def linear(g, self, w, b):
-    if b.node().mustBeNone():
-        return matmul(g, self, t(g, w))
-    else:
+    if (self.type().kind() in ["CompleteTensorType", "DimensionedTensorType"] and
+        self.type().dim() == 2 and
+        not b.node().mustBeNone()):
         return g.op("Gemm", self, w, b, transB_i=1)
+    else:
+        res = matmul(g, self, t(g, w))
+        if not b.node().mustBeNone():
+            res = add(g, res, b)
+        return res
 
 
 def neg(g, self):

@@ -6,7 +6,7 @@ ModelProto {
     GraphProto {
       name: "torch-jit-export"
       inputs: [{name: "x.1", type:Tensor dims: 1 10},{name: "1", type:Tensor dims: 20},{name: "2", type:Tensor dims: 20 10}]
-      outputs: [{name: "8", type:Tensor dims: 1 20}]
+      outputs: [{name: "11", type:Tensor dims: 1 20}]
       initializers: [TensorProto shape: [20],TensorProto shape: [20 10]]
       nodes: [
         Node {type: "Add", inputs: [x.1,x.1], outputs: [3], attributes: []},
@@ -14,21 +14,25 @@ ModelProto {
         Node {type: "Constant", inputs: [], outputs: [5], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
         Node {type: "Greater", inputs: [4,5], outputs: [6], attributes: []},
         Node {type: "Cast", inputs: [6], outputs: [7], attributes: [{ name: 'to', type: int, value: 2}]},
-        Node {type: "If", inputs: [7], outputs: [8], attributes: [{ name: 'then_branch', type: graph, value:
+        Node {type: "Transpose", inputs: [2], outputs: [8], attributes: [{ name: 'perm', type: ints, values: [1 0]}]},
+        Node {type: "Transpose", inputs: [2], outputs: [9], attributes: [{ name: 'perm', type: ints, values: [1 0]}]},
+        Node {type: "Transpose", inputs: [2], outputs: [10], attributes: [{ name: 'perm', type: ints, values: [1 0]}]},
+        Node {type: "If", inputs: [7], outputs: [11], attributes: [{ name: 'then_branch', type: graph, value:
             GraphProto {
               name: "torch-jit-export1"
               inputs: []
-              outputs: [{name: "9", type:Tensor dims: 1 20}]
+              outputs: [{name: "12", type:Tensor dims: 1 20}]
               initializers: []
               nodes: [
-                Node {type: "If", inputs: [7], outputs: [9], attributes: [{ name: 'then_branch', type: graph, value:
+                Node {type: "If", inputs: [7], outputs: [12], attributes: [{ name: 'then_branch', type: graph, value:
                     GraphProto {
                       name: "torch-jit-export2"
                       inputs: []
-                      outputs: [{name: "10", type:Tensor dims: 1 20}]
+                      outputs: [{name: "14", type:Tensor dims: 1 20}]
                       initializers: []
                       nodes: [
-                        Node {type: "Gemm", inputs: [3,2,1], outputs: [10], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'transB', type: int, value: 1}]}
+                        Node {type: "MatMul", inputs: [3,8], outputs: [13], attributes: []},
+                        Node {type: "Add", inputs: [13,1], outputs: [14], attributes: []}
                       ]
                     }
 
@@ -36,10 +40,11 @@ ModelProto {
                     GraphProto {
                       name: "torch-jit-export3"
                       inputs: []
-                      outputs: [{name: "11", type:Tensor dims: 1 20}]
+                      outputs: [{name: "16", type:Tensor dims: 1 20}]
                       initializers: []
                       nodes: [
-                        Node {type: "Gemm", inputs: [3,2,1], outputs: [11], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'transB', type: int, value: 1}]}
+                        Node {type: "MatMul", inputs: [3,9], outputs: [15], attributes: []},
+                        Node {type: "Add", inputs: [15,1], outputs: [16], attributes: []}
                       ]
                     }
 
@@ -51,10 +56,11 @@ ModelProto {
             GraphProto {
               name: "torch-jit-export4"
               inputs: []
-              outputs: [{name: "12", type:Tensor dims: 1 20}]
+              outputs: [{name: "18", type:Tensor dims: 1 20}]
               initializers: []
               nodes: [
-                Node {type: "Gemm", inputs: [3,2,1], outputs: [12], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'transB', type: int, value: 1}]}
+                Node {type: "MatMul", inputs: [3,10], outputs: [17], attributes: []},
+                Node {type: "Add", inputs: [17,1], outputs: [18], attributes: []}
               ]
             }
 
