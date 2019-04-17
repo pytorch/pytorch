@@ -39,6 +39,7 @@
 
 #include <torch/csrc/jit/testing/file_check.h>
 #include "ATen/core/ivalue.h"
+#include "torch/csrc/jit/profiling_record.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/jit.h"
@@ -781,6 +782,56 @@ graph(%a):
   };
   run(graph, stack);
   AT_ASSERT(testPassValue);
+}
+
+static void checkShape(Node* n, std::vector<int64_t> expected) {
+  auto tp = n->output()->type();
+  auto ptp = tp->expect<ProfiledTensorType>();
+  ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+}
+
+void testProfiler() {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2 * input_size;
+
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+
+  auto input = at::randn({batch_size, input_size}, at::kCPU);
+  auto hx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(at::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCPU));
+
+  auto g = build_lstm();
+  auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
+
+  auto& opt_graph = *g.get();
+  ArgumentSpecCreator arg_spec_creator(opt_graph);
+  ArgumentSpec spec =
+      arg_spec_creator.create(autograd::GradMode::is_enabled(), stack);
+  arg_spec_creator.setInputTypes(opt_graph, spec);
+  auto pr = ProfilingRecord::instrumentGraph(g);
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+
+  auto begin = pr->profiled_graph_->block()->nodes().begin();
+  auto end = pr->profiled_graph_->block()->nodes().end();
+  auto mm =
+      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mm; });
+  ASSERT_NE(mm, end);
+  std::vector<int64_t> mm_expected{4, 2048};
+  std::vector<int64_t> eltwise{4, 512};
+  checkShape(*mm, mm_expected);
+  auto sigmoid_n = std::find_if(
+      begin, end, [](Node* n) { return n->kind() == aten::sigmoid; });
+  ASSERT_NE(sigmoid_n, end);
+  checkShape(*sigmoid_n, eltwise);
+  auto tanh_n =
+      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::tanh; });
+  checkShape(*tanh_n, eltwise);
 }
 
 } // namespace test
