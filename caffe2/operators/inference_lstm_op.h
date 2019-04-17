@@ -1,7 +1,6 @@
 #ifndef LSTM_OP_H_
 #define LSTM_OP_H_
 
-#include <c10/core/Tensor.h>
 #include <algorithm>
 #include <sstream>
 #include <unordered_map>

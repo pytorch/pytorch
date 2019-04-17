@@ -17,9 +17,9 @@ void mul_op_cpu_impl(
     const at::Tensor& C_,
     bool legacy_broadcast,
     int64_t axis) {
-  Tensor A{C10Tensor(A_)};
-  Tensor B{C10Tensor(B_)};
-  Tensor C{C10Tensor(C_)};
+  Tensor A(A_);
+  Tensor B(B_);
+  Tensor C(C_);
   CPUContext context;
   const DataType* A_data = A.template data<DataType>();
   const DataType* B_data = B.template data<DataType>();

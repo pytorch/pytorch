@@ -1,10 +1,10 @@
 #include <torch/extension.h>
 
-#include <ATen/CPUFloatType.h>
 #include <ATen/Type.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <ATen/detail/ComplexHooksInterface.h>
 
+#include <ATen/CPUTypeDefault.h>
 #include <c10/core/Allocator.h>
 #include <ATen/CPUGenerator.h>
 #include <ATen/DeviceGuard.h>
@@ -15,7 +15,6 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
-#include <ATen/native/TensorFactories.h>
 
 #include <cstddef>
 #include <functional>
@@ -42,9 +41,11 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
   Tensor empty(IntArrayRef size, const TensorOptions & options) const override {
     AT_ASSERT(options.device().is_cpu());
 
-    native::check_size_nonnegative(sizes);
+    for (auto x: size) {
+      AT_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
+    }
     auto* allocator = at::getCPUAllocator();
-    int64_t nelements = at::prod_intlist(sizes);
+    int64_t nelements = at::prod_intlist(size);
     auto dtype = options.dtype();
     auto storage_impl = c10::make_intrusive<StorageImpl>(
         dtype,
