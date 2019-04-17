@@ -167,6 +167,9 @@ struct TORCH_API Variable : public at::Tensor {
   // NOTE: `var.data()` in C++ has the same semantics as `tensor.data` in Python,
   // which create a new `Variable` that shares the same storage and tensor metadata
   // with the original `Variable`, but with a completely new autograd history.
+  //
+  // NOTE: `var.data()` performs shallow-copying of `var`'s TensorImpl, which incurs
+  // runtime overhead.
   at::Tensor data() noexcept;
 
   // Gradient Function and Edges
