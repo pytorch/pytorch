@@ -88,9 +88,11 @@ class ReLU(Module):
         >>> input = torch.randn(2).unsqueeze(0)
         >>> output = torch.cat((m(input),m(-input)))
     """
+    __constants__ = ['inplace']
 
     def __init__(self, inplace=False):
-        super(ReLU, self).__init__(0., 0., inplace)
+        super(ReLU, self).__init__()
+        self.inplace = inplace
 
     @weak_script_method
     def forward(self, input):
