@@ -580,10 +580,10 @@ const std::vector<std::string> functions = {
         def pow_0(self,
                   exponent: float):
             def backward(grad_output):
-                if torch._float(exponent) == 0.0:
+                if exponent == 0.0:
                     grad_self = torch.zeros_like(self)
                 else:
-                    grad_self = grad_output * exponent * torch.pow(self, torch._float(exponent) - 1)
+                    grad_self = grad_output * exponent * torch.pow(self, exponent - 1)
                 return grad_self, None
 
             return torch.pow(self, exponent), backward
@@ -1383,13 +1383,34 @@ c10::optional<GradientPair> gradientInfoForSchema(
     //    in its argument, all scalar arg should already be passed with float
     //    value since scalar/int aren't differentiable either way.
     //
-    c10::ReplaceAll(schema_str, "Scalar", "float");
+    auto raw_schema_str = schema_str;
+    bool replace_scalar = c10::ReplaceAll(schema_str, "Scalar", "float");
     // For debugging AD change:
     // std::cout << "Looking for " << schema_str << std::endl;
 
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
     if (sym_script_it != schema_to_graphs.end()) {
+      if (replace_scalar) {
+        // so the problem is that our replaced Scalar might not have been a
+        // float (but could be an int). So what we do is to change the input
+        // back to Scalar (aka NumberType) and cast to float.
+        auto raw_schema = parseSchema(raw_schema_str);
+        auto& g = *sym_script_it->second.forward;
+        WithInsertPoint guard(*g.nodes().begin());
+        for (size_t i = 0; i < raw_schema.arguments().size(); i++) {
+          auto nt = raw_schema.arguments()[i].type();
+          if (nt->kind() == TypeKind::NumberType) {
+            auto inp = sym_script_it->second.forward->inputs().at(i);
+            auto inp_cast = g.create(prim::Float, inp);
+            inp_cast->output()->setType(inp->type());
+            g.insertNode(inp_cast);
+            inp->replaceAllUsesWith(inp_cast->output());
+            inp_cast->replaceInput(0, inp);
+            inp->setType(nt);
+          }
+        }
+      }
       cached_gradient_pairs.emplace_hint(
           cache_it, &schema, sym_script_it->second);
       return sym_script_it->second;
