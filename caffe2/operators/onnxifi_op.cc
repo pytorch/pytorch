@@ -167,6 +167,70 @@ OnnxifiOp<float, CPUContext>::buildInitializationList(
 }
 
 template <>
+std::vector<int> OnnxifiOp<float, CPUContext>::extractOutputBatchSizes() const {
+  CAFFE_ENFORCE_EQ(
+      input_shapes_.size(),
+      InputSize(),
+      "Input shapes and input size don't match. ",
+      input_shapes_.size(),
+      " vs ",
+      InputSize());
+  CAFFE_ENFORCE_EQ(
+      output_shapes_.size(),
+      OutputSize(),
+      "Output shapes and output size don't match. ",
+      output_shapes_.size(),
+      " vs ",
+      OutputSize());
+
+  std::vector<int> adjusted_output_batch;
+  for (const auto& shape : output_shapes_) {
+    if (shape.empty()) {
+      adjusted_output_batch.push_back(0);
+    } else {
+      const auto max_output_batch_size = shape.front();
+      const auto it = batch_pos_map_.find(max_output_batch_size);
+      if (it == batch_pos_map_.end()) {
+        if (use_onnx_) {
+          // For ONNX path, it's possible that we have output batch size that is
+          // unknown, because we handle the second outout of Concat and Split in
+          // ONNX. But for C2 path, we should not meet with this condition.
+          adjusted_output_batch.push_back(0);
+          continue;
+        } else {
+          CAFFE_THROW("Unknow output max batch size: ", max_output_batch_size);
+        }
+      }
+      auto idx = it->second;
+      CAFFE_ENFORCE_LT(idx, input_shapes_.size(), "index out of bound");
+      const auto& input_shape = input_shapes_[idx];
+      // If input real batch size and output max size is the same, we don't need
+      // to adjust max batch size of the output
+      if (input_shape.empty() || input_shape.front() == max_output_batch_size) {
+        adjusted_output_batch.push_back(0);
+      } else {
+        adjusted_output_batch.push_back(input_shape.front());
+      }
+    }
+  }
+
+  return adjusted_output_batch;
+}
+
+template <>
+void OnnxifiOp<float, CPUContext>::maybeAdjustOutputBatchSizes(
+    const std::vector<int>& real_output_batch_sizes) {
+  CAFFE_ENFORCE_EQ(real_output_batch_sizes.size(), output_shapes_.size());
+  for (int i = 0; i < real_output_batch_sizes.size(); ++i) {
+    if (!real_output_batch_sizes[i]) {
+      continue;
+    }
+    auto* output_tensor = Output(i);
+    output_tensor->ShrinkTo(real_output_batch_sizes[i]);
+  }
+}
+
+template <>
 bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
   input_shapes_.clear();
@@ -209,6 +273,7 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
   bool ext_supported = false;
   onnxMemoryFenceV1 input_fence;
   onnxMemoryFenceV1 output_fence;
+  std::vector<int> output_batch_sizes;
 #ifdef ONNXIFI_ENABLE_EXT
   /**
    * If onnxifi extension mode is enabled,
@@ -230,6 +295,7 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
             &output_fence,
             /* traceEvents */ nullptr),
         ONNXIFI_STATUS_SUCCESS);
+    output_batch_sizes = extractOutputBatchSizes();
     CAFFE_ENFORCE_EQ(
         lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
@@ -261,6 +327,7 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
+    output_batch_sizes = extractOutputBatchSizes();
     CAFFE_ENFORCE_EQ(
         lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
 
@@ -270,6 +337,8 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(
         lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
   }
+
+  maybeAdjustOutputBatchSizes(output_batch_sizes);
   return true;
 }
 
@@ -285,5 +354,8 @@ OPERATOR_SCHEMA(Onnxifi)
         "(string default=\"\") Serialized ONNX model to be converted to backend representation")
     .Arg(
         "initializers",
-        "Initialization pair indicating the mapping of the name between NetDef and ONNX model");
+        "Initialization pair indicating the mapping of the name between NetDef and ONNX model")
+    .Arg(
+        "output_resize_hints",
+        "A list of key/value pairs indicating which input index to look up for real batch size for the given max output batch size");
 } // namespace caffe2
