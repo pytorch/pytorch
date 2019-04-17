@@ -11,6 +11,8 @@ Scalar item(const Tensor& self) {
     if (self._nnz() == 0) return Scalar(0);
     if (self.is_coalesced()) return at::_local_scalar_dense(self._values());
     return at::_local_scalar_dense(self._values().sum());
+  } else if (self.is_quantized()) {
+    return self.dequantize().item();
   } else {
     return _local_scalar_dense(self);
   }
@@ -18,8 +20,8 @@ Scalar item(const Tensor& self) {
 
 Scalar _local_scalar_dense_cpu(const Tensor& self) {
   Scalar r;
-  AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX(
-      self.type(), "_local_scalar_dense_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
+    at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "_local_scalar_dense_cpu", [&] {
         scalar_t value = *self.data<scalar_t>();
         r = Scalar(value);
       });

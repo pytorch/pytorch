@@ -201,7 +201,7 @@ void fractional_max_pool3d_out_cpu_template(
     indices.resize_({numBatch, numPlanes, outputT, outputH, outputW});
   }
   AT_DISPATCH_FLOATING_TYPES(
-    input.type(),
+    input.scalar_type(),
     "fractional_max_pool3d_out_frame",
     [&] {
       fractional_max_pool3d_out_frame<scalar_t>(
@@ -330,7 +330,7 @@ void fractional_max_pool3d_backward_out_cpu_template(
 
   /* backprop */
   AT_DISPATCH_FLOATING_TYPES(
-    input.type(),
+    input.scalar_type(),
     "fractional_max_pool3d_backward_out_frame",
     [&]{
       fractional_max_pool3d_backward_out_frame<scalar_t>(

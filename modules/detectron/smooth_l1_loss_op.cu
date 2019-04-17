@@ -15,7 +15,7 @@
  */
 
 #include "caffe2/core/context_gpu.h"
-#include "smooth_l1_loss_op.h"
+#include "modules/detectron/smooth_l1_loss_op.h"
 
 namespace caffe2 {
 
@@ -27,7 +27,7 @@ __global__ void SmoothL1Kernel(
   //        |x| - 0.5 * beta      otherwise
   CUDA_1D_KERNEL_LOOP(index, n) {
     T val = in[index];
-    T abs_val = abs(val);
+    T abs_val = c10::cuda::compat::abs(val);
     if (abs_val < beta) {
       out[index] = 0.5 * val * val / beta;
     } else {
@@ -49,7 +49,7 @@ __global__ void SmoothL1GradientKernel(
   // We also scale by norm * d_loss in this kernel for convenience
   CUDA_1D_KERNEL_LOOP(index, n) {
     T val = in[index];
-    T abs_val = abs(val);
+    T abs_val = c10::cuda::compat::abs(val);
     T d_loss = *d_loss_data;
     if (abs_val < beta) {
       out[index] = norm * d_loss * val / beta;

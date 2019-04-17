@@ -188,7 +188,7 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
     _check_inputs(inputs, outputs, 1, 1);
     size_t len = inputs.size();
 
-    ncclDataType_t data_type = _get_data_type(inputs[0].type());
+    ncclDataType_t data_type = _get_data_type(inputs[0]);
 
     int64_t count = inputs[0].numel();
     std::lock_guard<std::mutex> lock(*(c10::cuda::CUDACachingAllocator::getFreeMutex()));
@@ -268,7 +268,7 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
     size_t len = inputs.size();
     _check_inputs(inputs, outputs, len, 1);
 
-    ncclDataType_t data_type = _get_data_type(inputs[0].type());
+    ncclDataType_t data_type = _get_data_type(inputs[0]);
 
     int64_t count = inputs[0].numel();
     std::lock_guard<std::mutex> lock(*(c10::cuda::CUDACachingAllocator::getFreeMutex()));
@@ -331,7 +331,7 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
     size_t len = inputs.size();
     _check_inputs(inputs, outputs, 1, len);
 
-    ncclDataType_t data_type = _get_data_type(inputs[0].type());
+    ncclDataType_t data_type = _get_data_type(inputs[0]);
 
     int64_t count = inputs[0].numel() / len;
     std::lock_guard<std::mutex> lock(*(c10::cuda::CUDACachingAllocator::getFreeMutex()));

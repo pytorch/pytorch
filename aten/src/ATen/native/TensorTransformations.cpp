@@ -60,7 +60,7 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
     }
   }
 
-  AT_DISPATCH_ALL_TYPES(in_tensor.type(), "flip_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES(in_tensor.scalar_type(), "flip_cpu", [&] {
     flip_cpu_kernel<scalar_t>(
       total_dims,
       stride_contiguous_v,

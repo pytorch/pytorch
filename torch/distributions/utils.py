@@ -1,6 +1,5 @@
 from functools import update_wrapper
 from numbers import Number
-import math
 import torch
 import torch.nn.functional as F
 

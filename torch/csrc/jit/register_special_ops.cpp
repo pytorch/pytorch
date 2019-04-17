@@ -140,7 +140,8 @@ RegisterOperators reg({
     Operator(
         "aten::split(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]",
         [](Stack& stack) {
-          autograd::profiler::RecordFunction record("split_with_sizes");
+          RECORD_FUNCTION("split_with_sizes", last(stack, 3));
+
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
               (std::move(peek(stack, 1, 3))).toIntList()->elements(),
@@ -155,7 +156,8 @@ RegisterOperators reg({
     Operator(
         "aten::size(Tensor self) -> int[]",
         [](Stack& stack) {
-          autograd::profiler::RecordFunction record("sizes");
+          RECORD_FUNCTION("size", last(stack, 1));
+
           auto t = std::move(pop(stack)).toTensor();
           pack(stack, t.sizes().vec());
           return 0;
@@ -163,7 +165,8 @@ RegisterOperators reg({
     Operator(
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
-          autograd::profiler::RecordFunction record("sizes");
+          RECORD_FUNCTION("sizes", last(stack, 2));
+
           auto list = peek(stack, 0, 2).toIntListRef();
           auto defaults = peek(stack, 1, 2).toIntListRef();
           drop(stack, 2);
@@ -318,7 +321,7 @@ DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kByte).options()).f
             at::empty(sizes, at::initialTensorOptions().dtype(initial_scalar_type)));
 
           recursiveStore((char*)tensor.data_ptr(), sizes, tensor.strides(), 0,
-              tensor.type().elementSizeInBytes(), data);
+              tensor.element_size(), data);
 
           at::ScalarType scalar_type = dtype.isNone() ? tensor.scalar_type() : dtype.toScalarType();
           c10::Device dev = device.isNone() ? tensor.device() : device.toDevice();

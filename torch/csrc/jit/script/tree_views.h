@@ -109,6 +109,9 @@ struct TreeView {
   int kind() const {
     return tree_->kind();
   }
+  void dump() const {
+    std::cout << tree_;
+  }
 
  protected:
   const TreeRef& subtree(size_t i) const {
@@ -291,6 +294,8 @@ struct Expr : public TreeView {
       case '&':
       case '^':
       case '|':
+      case TK_LIST_COMP:
+      case TK_DOTS:
         return;
       default:
         throw ErrorReport(tree)
@@ -495,6 +500,30 @@ struct For : public Stmt {
   }
 };
 
+// TODO: supports only single comprehension for now
+struct ListComp : public Expr {
+  explicit ListComp(const TreeRef& tree) : Expr(tree) {
+    tree->match(TK_LIST_COMP);
+  }
+  Expr elt() const {
+    return Expr(subtree(0));
+  }
+  Expr target() const {
+    return Expr(subtree(1));
+  }
+  Expr iter() const {
+    return Expr(subtree(2));
+  }
+  // TODO: no ifs for now
+  static ListComp create(
+      const SourceRange& range,
+      const Expr& elt,
+      const Expr& target,
+      const Expr& iter) {
+    return ListComp(Compound::create(TK_LIST_COMP, range, {elt, target, iter}));
+  }
+};
+
 struct Global : public Stmt {
   explicit Global(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_GLOBAL);
@@ -611,6 +640,15 @@ struct Pass : public Stmt {
   }
   static Pass create(const SourceRange& range) {
     return Pass(Compound::create(TK_PASS, range, {}));
+  }
+};
+
+struct Dots : public Expr {
+  explicit Dots(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_DOTS);
+  }
+  static Dots create(const SourceRange& range) {
+    return Dots(Compound::create(TK_DOTS, range, {}));
   }
 };
 

@@ -36,7 +36,6 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
   caffe2::TypeMeta typeMeta() const override;
   Backend backend() const override;
   const char* toString() const override;
-  size_t elementSizeInBytes() const override;
   TypeID ID() const override;
 
   Tensor empty(IntArrayRef size, const TensorOptions & options) const override {
@@ -72,10 +71,6 @@ const char* CPUComplexFloatType::toString() const {
 
 TypeID CPUComplexFloatType::ID() const {
   return TypeID::CPUComplexFloat;
-}
-
-size_t CPUComplexFloatType::elementSizeInBytes() const {
-  return sizeof(float);
 }
 
 REGISTER_COMPLEX_HOOKS(ComplexHooks);

@@ -5,6 +5,9 @@
 #include "caffe2_dnnlowp_utils.h"
 
 C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
+C10_DECLARE_double(caffe2_dnnlowp_acc16_density_threshold);
+C10_DECLARE_int32(caffe2_dnnlowp_acc16_n_threshold);
+C10_DECLARE_int32(caffe2_dnnlowp_acc16_k_threshold);
 
 namespace caffe2 {
 
@@ -115,7 +118,7 @@ template void ComputeColumnOffsets<int16_t>(
     const vector<TensorQuantizationParams>& qparams,
     vector<int32_t>& col_offsets);
 
-fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
+int CountOutliers(
     int groups,
     int kernel_dim,
     int M,
@@ -133,6 +136,17 @@ fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
       }
     }
   }
+  return outlier_cnt;
+}
+
+fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
+    int groups,
+    int kernel_dim,
+    int M,
+    int nbits_in_non_outlier,
+    vector<int8_t>& W_quantized) {
+  int outlier_cnt =
+      CountOutliers(groups, kernel_dim, M, nbits_in_non_outlier, W_quantized);
 
   fbgemm::CompressedSparseColumn* Wq_outlier =
       new fbgemm::CompressedSparseColumn(kernel_dim, M);
@@ -160,6 +174,7 @@ fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
       }
     }
   } // for each group
+  CAFFE_ENFORCE_EQ(outlier_cnt, Wq_outlier->RowIdx().size());
   Wq_outlier->ColPtr()[M] = outlier_cnt;
 
   return Wq_outlier;
@@ -422,57 +437,115 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   ComputeColumnOffsets(
       kernel_dim, M, W_quantized.data(), Y->qparams, *Y->column_offsets);
 
+  // Check if we should fallback to 32-bit accumulation.
+  // This check is only meaningful when engine is DNNLOWP_ACC16.
+  bool fallback_to_32_bit_accumulation = false;
+  if (nbits_in_non_outlier_ == 0) {
+    LOG(INFO) << "nbits_in_non_outlier == 0 means everything is outlier so we "
+                 "fallback to acc32";
+    fallback_to_32_bit_accumulation = true;
+  }
+  // In Skylake, acc16 is not faster when N or K is smaller than 128
+  // FIXME : code duplication with conv_dnnlowp_acc16_op.cc
+  constexpr int SKYLAKE_ACC16_N_THRESHOLD_MIN = 128,
+                SKYLAKE_ACC16_K_THRESHOLD_MIN = 128;
+  int acc16_n_threshold = FLAGS_caffe2_dnnlowp_acc16_n_threshold;
+  if (caffe2::GetCpuId().avx512f() &&
+      acc16_n_threshold < SKYLAKE_ACC16_N_THRESHOLD_MIN) {
+    acc16_n_threshold = SKYLAKE_ACC16_N_THRESHOLD_MIN;
+  }
+  int acc16_k_threshold = FLAGS_caffe2_dnnlowp_acc16_k_threshold;
+  if (caffe2::GetCpuId().avx512f() &&
+      acc16_k_threshold < SKYLAKE_ACC16_K_THRESHOLD_MIN) {
+    acc16_k_threshold = SKYLAKE_ACC16_K_THRESHOLD_MIN;
+  }
+  if (!fallback_to_32_bit_accumulation && M / group_ < acc16_n_threshold) {
+    LOG(INFO) << "N " << M / group_ << " of weight blob "
+              << this->debug_def().input(0) << " is smaller than threshold "
+              << acc16_n_threshold << " . Falling back to acc32";
+    fallback_to_32_bit_accumulation = true;
+  }
+  if (!fallback_to_32_bit_accumulation && kernel_dim < acc16_k_threshold) {
+    LOG(INFO) << "K " << kernel_dim << " of weight blob "
+              << this->debug_def().input(0) << " is smaller than threshold "
+              << acc16_k_threshold << " . Falling back to acc32";
+    fallback_to_32_bit_accumulation = true;
+  }
+
   // When nbits_in_non_outlier == 0, we fall back to acc32
   if (this->debug_def().engine() == "DNNLOWP_ACC16" &&
-      nbits_in_non_outlier_ > 0) {
+      !fallback_to_32_bit_accumulation) {
     if (nbits_in_non_outlier_ < 8) {
-      Y->W_outlier.reset(ExtractOutlierMatrix(
-          group_, kernel_dim, M, nbits_in_non_outlier_, W_quantized));
-      int outlier_cnt = Y->W_outlier->ColPtr()[M];
+      int outlier_cnt = CountOutliers(
+          group_, kernel_dim, M, nbits_in_non_outlier_, W_quantized);
 
       LOG(INFO) << "Proportion of outlier for Conv layer with weight blob "
                 << this->debug_def().input(0) << " is "
                 << static_cast<float>(outlier_cnt) / W_quantized.size();
       LOG(INFO) << "nbits_in_non_outlier " << nbits_in_non_outlier_;
+
+      if (static_cast<float>(outlier_cnt) / W_quantized.size() >
+          FLAGS_caffe2_dnnlowp_acc16_density_threshold) {
+        LOG(INFO) << "Density of outliers is higher than threshold "
+                  << FLAGS_caffe2_dnnlowp_acc16_density_threshold
+                  << " . Falling back to acc32";
+        fallback_to_32_bit_accumulation = true;
+      } else {
+        Y->W_outlier.reset(ExtractOutlierMatrix(
+            group_, kernel_dim, M, nbits_in_non_outlier_, W_quantized));
+      }
     }
 
-    Y->nbits_in_non_outlier = nbits_in_non_outlier_;
-    Y->W_acc16.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
-        fbgemm::matrix_op_t::Transpose,
-        group_ * kernel_dim,
-        M / group_,
-        W_quantized.data(),
-        kernel_dim,
-        nullptr, // pmat
-        group_));
-  } else if (TakeDepthWise3x3FastPath_()) {
-    Y->W_depthwise_3x3.reset(
-        new fbgemm::Packed3x3ConvMatrix(group_, W_quantized.data()));
-  } else if (TakeDepthWise3x3x3FastPath_()) {
-    Y->W_depthwise_3x3x3.reset(
-        new fbgemm::Packed3x3x3ConvMatrix(group_, W_quantized.data()));
-  } else if (TakeGConvFastPath_()) {
-    fbgemm::conv_param_t<> conv_p(
-        1,
-        group_ * C_per_group,
-        M,
-        {1, 1},
-        group_,
-        {this->kernel_[0], this->kernel_[1]},
-        {this->stride_[0], this->stride_[1]},
-        {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+    if (!fallback_to_32_bit_accumulation) {
+      Y->nbits_in_non_outlier = nbits_in_non_outlier_;
+      Y->W_acc16.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
+          fbgemm::matrix_op_t::Transpose,
+          group_ * kernel_dim,
+          M / group_,
+          W_quantized.data(),
+          kernel_dim,
+          nullptr, // pmat
+          group_));
+    }
+  }
 
-    Y->W_gconv.reset(new fbgemm::PackWeightMatrixForGConv<int8_t>(
-        fbgemm::matrix_op_t::Transpose, conv_p, W_quantized.data()));
-  } else {
-    Y->W.reset(new fbgemm::PackBMatrix<int8_t>(
-        fbgemm::matrix_op_t::Transpose,
-        group_ * kernel_dim,
-        M / group_,
-        W_quantized.data(),
-        kernel_dim,
-        nullptr, // pmat
-        group_));
+  if (fallback_to_32_bit_accumulation) {
+    Y->W_acc16.reset();
+    Y->W_outlier.reset();
+  }
+
+  if (this->debug_def().engine() != "DNNLOWP_ACC16" ||
+      fallback_to_32_bit_accumulation) {
+    // acc32
+    if (TakeDepthWise3x3FastPath_()) {
+      Y->W_depthwise_3x3.reset(
+          new fbgemm::Packed3x3ConvMatrix(group_, W_quantized.data()));
+    } else if (TakeDepthWise3x3x3FastPath_()) {
+      Y->W_depthwise_3x3x3.reset(
+          new fbgemm::Packed3x3x3ConvMatrix(group_, W_quantized.data()));
+    } else if (TakeGConvFastPath_()) {
+      fbgemm::conv_param_t<> conv_p(
+          1,
+          group_ * C_per_group,
+          M,
+          {1, 1},
+          group_,
+          {this->kernel_[0], this->kernel_[1]},
+          {this->stride_[0], this->stride_[1]},
+          {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+
+      Y->W_gconv.reset(new fbgemm::PackWeightMatrixForGConv<int8_t>(
+          fbgemm::matrix_op_t::Transpose, conv_p, W_quantized.data()));
+    } else {
+      Y->W.reset(new fbgemm::PackBMatrix<int8_t>(
+          fbgemm::matrix_op_t::Transpose,
+          group_ * kernel_dim,
+          M / group_,
+          W_quantized.data(),
+          kernel_dim,
+          nullptr, // pmat
+          group_));
+    }
   }
 
   if (InputSize() >= 2) {

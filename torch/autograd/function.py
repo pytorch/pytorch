@@ -51,7 +51,8 @@ class _ContextMethodMixin(object):
         This will mark outputs as not requiring gradients, increasing the
         efficiency of backward computation. You still need to accept a gradient
         for each output in :meth:`~Function.backward`, but it's always going to
-        be ``None``.
+        be a zero tensor with the same shape as the shape of a corresponding
+        output.
 
         This is used e.g. for indices returned from a max :class:`Function`.
         """
@@ -93,14 +94,14 @@ class FunctionMeta(type):
                 has_static_forward = isinstance(forward, staticmethod) or isinstance(forward, classmethod)
                 break
 
-        setattr(cls, '_is_legacy', not has_static_forward)
+        cls._is_legacy = not has_static_forward
 
         # old-style functions
         if not has_static_forward:
             return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
         backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
-        setattr(cls, '_backward_cls', backward_fn)
+        cls._backward_cls = backward_fn
 
         return super(FunctionMeta, cls).__init__(name, bases, attrs)
 

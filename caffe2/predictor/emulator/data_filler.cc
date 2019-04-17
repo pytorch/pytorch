@@ -245,5 +245,14 @@ void TestDataRandomFiller::fillInputToWorkspace(Workspace* workspace) const {
   }
 }
 
+void fillRandomNetworkInputs(
+    const NetDef& net,
+    const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
+    const std::vector<std::vector<std::string>>& inputTypes,
+    Workspace* workspace) {
+  TestDataRandomFiller(net, inputDims, inputTypes)
+      .fillInputToWorkspace(workspace);
+}
+
 } // namespace emulator
 } // namespace caffe2

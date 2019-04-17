@@ -132,7 +132,7 @@ TaskThreadPoolBase* ParallelNet::poolGetter(
   std::unique_lock<std::mutex> pools_lock(pools_mutex_);
   auto pool = pools[device_id][pool_size];
   if (!pool) {
-    pool = ThreadPoolRegistry()->Create(
+    pool = c10::ThreadPoolRegistry()->Create(
         DeviceTypeName(device_type),
         device_id,
         pool_size,

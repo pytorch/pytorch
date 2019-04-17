@@ -280,10 +280,13 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   // Creates chunk and flattened input descriptions
   std::vector<PartitionDesc> chunk_desc;
-  std::vector<std::pair<const Value*, const TensorDesc>> flat_inputs;
+  std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>> flat_inputs;
   {
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {
+      if (p->type()->isSubtypeOf(FloatType::get())) {
+        flat_inputs.emplace_back(p, c10::nullopt);
+      }
       if (!p->type()->isSubtypeOf(TensorType::get())) {
         continue;
       }
@@ -329,8 +332,12 @@ std::shared_ptr<FusedKernel> compileKernel(
     }
   }
 
-  const std::string name = "kernel_" + std::to_string(next_kernel_id++);
+  // Have checked the limit at graph_fuser. Assert nothing else changing that.
+  AT_ASSERT((flat_inputs.size() + flat_outputs.size()) <=
+            fusion_kernel_args_limit);
+
   const bool use_cuda = device.is_cuda();
+  const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   std::string code =
       generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
   const FusedKernelConstructor& kernel_ctor =

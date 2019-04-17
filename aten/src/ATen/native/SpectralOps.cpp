@@ -27,7 +27,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
   AT_CHECK(signal_ndim >= 1 && signal_ndim <= 3,
            "Expected signal_ndim to be 1, 2, or 3, but got signal_ndim=",
            signal_ndim);
-  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+  AT_CHECK(at::isFloatingType(self.scalar_type()),
            "Expected an input tensor of floating types, but got input=",
            self.type(), self.sizes());
 
@@ -191,7 +191,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   auto win_length = win_lengthOpt.value_or(n_fft);
 
-  if (!at::isFloatingType(self.type().scalarType()) || self.dim() > 2 || self.dim() < 1) {
+  if (!at::isFloatingType(self.scalar_type()) || self.dim() > 2 || self.dim() < 1) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D or 2D tensor of floating types";
     AT_ERROR(ss.str());

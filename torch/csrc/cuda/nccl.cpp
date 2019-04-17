@@ -81,11 +81,11 @@ ArrayRef<ncclComm_t> _get_communicators(TensorList inputs) {
   return it->second.ref();
 }
 
-ncclDataType_t _get_data_type(const Type& type) {
-  if (type.backend() != Backend::CUDA) {
+ncclDataType_t _get_data_type(const Tensor& t) {
+  if (t.type().backend() != Backend::CUDA) {
     throw std::runtime_error("Unconvertible NCCL type");
   }
-  switch (type.scalarType()) {
+  switch (t.scalar_type()) {
     case at::kFloat:
       return ncclFloat;
     case at::kHalf:
@@ -126,7 +126,7 @@ void _check_inputs(
 
   device_set devices;
   int64_t numel = inputs[0].numel();
-  auto& type = inputs[0].type();
+  auto type = inputs[0].type();
 
   for (size_t i = 0; i < len; i++) {
     auto input = inputs[i];
@@ -178,7 +178,7 @@ bool is_available(TensorList tensors) {
 #ifdef USE_NCCL
   device_set devices;
   for (auto& tensor : tensors) {
-    auto& type = tensor.type();
+    auto type = tensor.type();
     if (!type.is_cuda() || type.is_sparse())
       return false;
     if (!tensor.is_contiguous())
@@ -233,7 +233,7 @@ void broadcast(
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   _check_inputs(tensors, tensors, 1, 1);
-  ncclDataType_t data_type = _get_data_type(tensors[0].type());
+  ncclDataType_t data_type = _get_data_type(tensors[0]);
   int64_t numel = tensors[0].numel();
 
   std::lock_guard<std::mutex> free_mutex(
@@ -281,7 +281,7 @@ void reduce(
   _check_inputs(inputs, outputs, 1, 1);
   const auto len = inputs.size();
 
-  ncclDataType_t data_type = _get_data_type(inputs[0].type());
+  ncclDataType_t data_type = _get_data_type(inputs[0]);
 
   const auto count = inputs[0].numel();
   std::lock_guard<std::mutex> lock(*(c10::cuda::CUDACachingAllocator::getFreeMutex()));

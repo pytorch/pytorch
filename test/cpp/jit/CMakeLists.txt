@@ -2,7 +2,7 @@ set(JIT_TEST_ROOT ${TORCH_ROOT}/test/cpp/jit)
 
 add_executable(test_jit
   ${TORCH_ROOT}/test/cpp/common/main.cpp
-  ${JIT_TEST_ROOT}/gtest.cpp)
+  ${JIT_TEST_ROOT}/test.cpp)
 
 target_link_libraries(test_jit PRIVATE torch gtest)
 target_compile_definitions(test_jit PRIVATE USE_GTEST)

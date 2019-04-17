@@ -1,7 +1,6 @@
 import math
 import torch
 import warnings
-import itertools
 import numbers
 
 from .module import Module
@@ -154,7 +153,8 @@ class RNNBase(Module):
     def get_expected_hidden_size(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> Tuple[int, int, int]
         if batch_sizes is not None:
-            mini_batch = int(batch_sizes[0])
+            mini_batch = batch_sizes[0]
+            mini_batch = int(mini_batch)
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
         num_directions = 2 if self.bidirectional else 1
@@ -183,7 +183,8 @@ class RNNBase(Module):
         is_packed = isinstance(input, PackedSequence)
         if is_packed:
             input, batch_sizes, sorted_indices, unsorted_indices = input
-            max_batch_size = int(batch_sizes[0])
+            max_batch_size = batch_sizes[0]
+            max_batch_size = int(max_batch_size)
         else:
             batch_sizes = None
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
@@ -540,7 +541,8 @@ class LSTM(RNNBase):
     def forward_packed(self, input, hx=None):
         # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
         input, batch_sizes, sorted_indices, unsorted_indices = input
-        max_batch_size = int(batch_sizes[0])
+        max_batch_size = batch_sizes[0]
+        max_batch_size = int(max_batch_size)
 
         output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
 

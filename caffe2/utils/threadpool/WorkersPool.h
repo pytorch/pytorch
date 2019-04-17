@@ -3,9 +3,9 @@
 #include <atomic>
 #include <condition_variable>
 #include <thread>
+#include "c10/util/thread_name.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/utils/thread_name.h"
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -263,7 +263,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
 
   // Thread entry point.
   void ThreadFunc() {
-    setThreadName("CaffeWorkersPool");
+    c10::setThreadName("CaffeWorkersPool");
     ChangeState(State::Ready);
 
     // Thread main loop

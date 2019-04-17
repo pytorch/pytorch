@@ -33,12 +33,14 @@ TESTS = [
     'indexing',
     'indexing_cuda',
     'jit',
+    'mkldnn',
     'multiprocessing',
     'multiprocessing_spawn',
     'nccl',
     'nn',
     'numba_integration',
     'optim',
+    'quantized',
     'sparse',
     'thd_distributed',
     'torch',
@@ -46,6 +48,7 @@ TESTS = [
     'type_hints',
     'utils',
     'namedtuple_return_api',
+    'jit_fuser',
 ]
 
 WINDOWS_BLACKLIST = [
@@ -91,8 +94,8 @@ THD_DISTRIBUTED_TESTS_CONFIG = {
 }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
-SIGNALS_TO_NAMES_DICT = dict((getattr(signal, n), n) for n in dir(signal)
-                             if n.startswith('SIG') and '_' not in n)
+SIGNALS_TO_NAMES_DICT = {getattr(signal, n): n for n in dir(signal)
+                         if n.startswith('SIG') and '_' not in n}
 
 CPP_EXTENSIONS_ERROR = """
 Ninja (https://ninja-build.org) must be available to run C++ extensions tests,

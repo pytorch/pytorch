@@ -120,7 +120,7 @@ static_assert(
 #else
 // Optimized version - generates no code.
 #define DCHECK(condition) \
-  if (false)              \
+  while (false)           \
   CHECK(condition)
 #endif // NDEBUG
 
@@ -146,22 +146,22 @@ static_assert(
 #else // !NDEBUG
 // These versions generate no code in optimized mode.
 #define DCHECK_EQ(val1, val2) \
-  if (false)                  \
+  while (false)               \
   CHECK_OP(val1, val2, ==)
 #define DCHECK_NE(val1, val2) \
-  if (false)                  \
+  while (false)               \
   CHECK_OP(val1, val2, !=)
 #define DCHECK_LE(val1, val2) \
-  if (false)                  \
+  while (false)               \
   CHECK_OP(val1, val2, <=)
 #define DCHECK_LT(val1, val2) \
-  if (false)                  \
+  while (false)               \
   CHECK_OP(val1, val2, <)
 #define DCHECK_GE(val1, val2) \
-  if (false)                  \
+  while (false)               \
   CHECK_OP(val1, val2, >=)
 #define DCHECK_GT(val1, val2) \
-  if (false)                  \
+  while (false)               \
   CHECK_OP(val1, val2, >)
 #endif // NDEBUG
 
@@ -178,7 +178,7 @@ static_assert(
 #else // !NDEBUG
 // Optimized version - generates no code.
 #define DCHECK_NOTNULL(val) \
-  if (false)                \
+  while (false)             \
   CHECK_NOTNULL(val)
 #endif // NDEBUG
 

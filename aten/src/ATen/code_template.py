@@ -30,7 +30,10 @@ class CodeTemplate(object):
         self.pattern = pattern
         self.filename = filename
 
-    def substitute(self, env={}, **kwargs):
+    def substitute(self, env=None, **kwargs):
+        if env is None:
+            env = {}
+
         def lookup(v):
             return kwargs[v] if v in kwargs else env[v]
 

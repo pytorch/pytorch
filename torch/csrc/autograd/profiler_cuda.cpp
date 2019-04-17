@@ -43,8 +43,7 @@ struct CUDAMethods : public CUDAStubs {
   }
   void onEachDevice(std::function<void(int)> op) override {
     at::cuda::OptionalCUDAGuard device_guard;
-    int count;
-    TORCH_CUDA_CHECK(cudaGetDeviceCount(&count));
+    int count = at::cuda::device_count();
     for(int i = 0; i < count; i++) {
       device_guard.set_index(i);
       op(i);

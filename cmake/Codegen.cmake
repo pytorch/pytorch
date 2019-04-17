@@ -155,7 +155,6 @@ if (NOT BUILD_ATEN_MOBILE)
   EXECUTE_PROCESS(
       COMMAND ${GEN_COMMAND}
         --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt
-        --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       RESULT_VARIABLE RETURN_VALUE
   )
   if (NOT RETURN_VALUE EQUAL 0)
@@ -179,7 +178,6 @@ if (NOT BUILD_ATEN_MOBILE)
 
   add_custom_command(OUTPUT ${generated_cpp} ${cuda_generated_cpp}
     COMMAND ${GEN_COMMAND}
-      --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
     DEPENDS ${all_python} ${all_templates} ${cwrap_files} ${core_gen_checked_inputs})
 
   # Generated headers used from a CUDA (.cu) file are

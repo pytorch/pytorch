@@ -6,3 +6,6 @@
 
 #include <TH/generic/THTensorFill.cpp>
 #include <TH/THGenerateHalfType.h>
+
+#include <TH/generic/THTensorFill.cpp>
+#include <TH/THGenerateBoolType.h>

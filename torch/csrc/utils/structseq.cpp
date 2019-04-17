@@ -52,7 +52,7 @@ PyObject *structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high
 
 PyObject *returned_structseq_repr(PyStructSequence *obj) {
     PyTypeObject *typ = Py_TYPE(obj);
-    PyObject *tup = six::toTuple(obj);
+    THPObjectPtr tup = six::maybeAsTuple(obj);
     if (tup == nullptr) {
         return nullptr;
     }
@@ -69,26 +69,22 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
         if (cname == nullptr) {
             PyErr_Format(PyExc_SystemError, "In structseq_repr(), member %d name is nullptr"
                          " for type %.500s", i, typ->tp_name);
-            Py_DECREF(tup);
             return nullptr;
         }
 
-        val = PyTuple_GetItem(tup, i);
+        val = PyTuple_GetItem(tup.get(), i);
         if (val == nullptr) {
-            Py_DECREF(tup);
             return nullptr;
         }
 
         repr = PyObject_Repr(val);
         if (repr == nullptr) {
-            Py_DECREF(tup);
             return nullptr;
         }
 
         crepr = PyUnicode_AsUTF8(repr);
         Py_DECREF(repr);
         if (crepr == nullptr) {
-            Py_DECREF(tup);
             return nullptr;
         }
 
@@ -99,7 +95,6 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
     }
     ss << ")";
 
-    Py_DECREF(tup);
     return PyUnicode_FromString(ss.str().c_str());
 }
 

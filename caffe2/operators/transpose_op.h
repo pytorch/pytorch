@@ -30,8 +30,6 @@ class TransposeOp final : public Operator<Context> {
     }
   }
 
-  ~TransposeOp() = default;
-
   bool RunOnDevice() override {
     // Do the actual transpose, which is implemented in DoRunWithType().
     return DispatchHelper<TensorTypes<float, double, int, int64_t>>::call(
@@ -50,13 +48,13 @@ class TransposeOp final : public Operator<Context> {
     } else {
       CAFFE_ENFORCE_EQ(ndim, axes_.size());
     }
-    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
-    std::vector<int64_t> Y_dims(ndim);
+    const std::vector<std::int64_t> X_dims = X.sizes().vec();
+    std::vector<std::int64_t> Y_dims(ndim);
     for (int i = 0; i < ndim; ++i) {
       Y_dims[i] = X_dims[axes_[i]];
     }
     auto* Y = Output(0, Y_dims, at::dtype<T>());
-    math::Transpose<T, Context>(
+    math::Transpose<std::int64_t, T, Context>(
         X_dims.size(),
         X_dims.data(),
         axes_.data(),

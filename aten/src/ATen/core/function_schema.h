@@ -4,6 +4,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/alias_info.h>
+#include <unordered_map>
 
 namespace c10 {
 
@@ -39,7 +40,7 @@ struct Argument {
   c10::optional<int32_t> N() const {
     return N_;
   }
-  c10::optional<IValue> default_value() const {
+  const c10::optional<IValue>& default_value() const {
     return default_value_;
   }
   bool kwarg_only() const {
@@ -64,14 +65,35 @@ private:
   c10::optional<AliasInfo> alias_info_;
 };
 
+namespace detail {
+inline bool defaultValueEquals_(const c10::optional<IValue>& lhs, const c10::optional<IValue>& rhs) {
+  if (lhs.has_value()) {
+    return rhs.has_value() && shallowEquals(*lhs, *rhs);
+  } else {
+    return !rhs.has_value();
+  }
+}
+}
+
+inline bool operator==(const Argument& lhs, const Argument& rhs) {
+  return lhs.name() == rhs.name()
+          && lhs.type() == rhs.type()
+          && lhs.N() == rhs.N()
+          && detail::defaultValueEquals_(lhs.default_value(), rhs.default_value())
+          && lhs.kwarg_only() == rhs.kwarg_only()
+          && lhs.alias_info() == rhs.alias_info();
+}
+
 struct FunctionSchema {
   FunctionSchema(
       std::string name,
+      std::string overload_name,
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
       bool is_varret = false)
       : name_(std::move(name)),
+        overload_name_(std::move(overload_name)),
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
@@ -79,6 +101,7 @@ struct FunctionSchema {
 
   FunctionSchema(
       Symbol name,
+      std::string overload_name,
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
@@ -86,6 +109,7 @@ struct FunctionSchema {
       std::vector<std::string> writes = {})
       : FunctionSchema(
             name.toQualString(),
+            std::move(overload_name),
             std::move(std::move(arguments)),
             std::move(std::move(returns)),
             is_vararg,
@@ -93,6 +117,7 @@ struct FunctionSchema {
 
 private:
   const std::string name_;
+  const std::string overload_name_;
   const std::vector<Argument> arguments_;
   const std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
@@ -101,10 +126,14 @@ private:
   // arguments are not checked by schema
   const bool is_vararg_;
   const bool is_varret_;
+  void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
 public:
   const std::string& name() const {
     return name_;
+  }
+  const std::string& overload_name() const {
+    return overload_name_;
   }
   const std::vector<Argument>& arguments() const {
     return arguments_;
@@ -119,12 +148,17 @@ public:
     return is_varret_;
   }
   bool is_mutable() const {
-    return std::any_of(
-        arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
-          const auto& aliasInfo = arg.alias_info();
-          return aliasInfo && aliasInfo.value().isWrite();
-        });
+    // see [custom operator aliasing]
+    const auto kind = Symbol::fromQualString(name_);
+    const auto is_custom_op = !kind.is_aten() && !kind.is_prim();
+    return is_custom_op ||
+        std::any_of(
+            arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
+              const auto& aliasInfo = arg.alias_info();
+              return aliasInfo && aliasInfo.value().isWrite();
+            });
   }
+
   c10::optional<int> argumentIndexWithName(const std::string& name) const {
     for(size_t i = 0; i < arguments().size(); ++i) {
       if(name == arguments()[i].name())
@@ -132,48 +166,51 @@ public:
     }
     return c10::nullopt;
   }
+  FunctionSchema cloneWithArguments(std::vector<Argument> new_arguments) const {
+    return FunctionSchema(
+        name(),
+        overload_name(),
+        std::move(new_arguments),
+        returns(),
+        is_vararg(),
+        is_varret());
+  }
+
+  // Check that inputs have the correct types and appends any missing default
+  // values.
+  void checkAndNormalizeInputs(
+      std::vector<IValue>& inputs,
+      const std::unordered_map<std::string, IValue>& kwargs) const;
+
+  void findErrorInKwargs(const std::vector<std::string>& kwargs) const;
 };
+
+inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
+  return lhs.name() == rhs.name()
+      && lhs.overload_name() == rhs.overload_name()
+      && lhs.arguments() == rhs.arguments()
+      && lhs.returns() == rhs.returns()
+      && lhs.is_vararg() == rhs.is_vararg()
+      && lhs.is_varret() == rhs.is_varret();
+}
+
+inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
+  return !(lhs == rhs);
+}
 
 // for debugging, make sure we can describe the call site
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   return out << arg.type()->str() << " " << arg.name() << (arg.default_value() ? "=<default>" : "");
 }
 
-inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
-  // eventually this should look almost identical to python arg parser, but
-  // it is simpler for now to work directly on this schema
+inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema);
 
-  out << schema.name();
-  out << "(";
-
-  bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments().size(); ++i) {
-    if (i > 0) out << ", ";
-    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
-      out << "*, ";
-      seen_kwarg_only = true;
-    }
-    out << schema.arguments()[i];
-  }
-
-  if(schema.is_vararg()) {
-    if(schema.arguments().size() > 0)
-      out << ", ";
-    out << "...";
-  }
-
-  out << ") -> ";
-  if (schema.returns().size() == 1) {
-    out << schema.returns().at(0).type()->str();
-  } else if (schema.returns().size() > 1) {
-    out << "(";
-    for (size_t i = 0; i < schema.returns().size(); ++i) {
-      if (i > 0) out << ", ";
-      out << schema.returns()[i].type()->str();
-    }
-    out << ")";
-  }
-  return out;
+inline std::string toString(const FunctionSchema& schema) {
+  std::ostringstream str;
+  str << schema;
+  return str.str();
 }
 
 } // namespace c10
+
+#include <ATen/core/function_schema_inl.h>

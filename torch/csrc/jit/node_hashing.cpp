@@ -16,7 +16,7 @@ namespace jit {
 namespace {
 
 bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
-  return &lhs.type() == &rhs.type() && lhs.equal(rhs);
+  return lhs.type() == rhs.type() && lhs.equal(rhs);
 }
 
 bool tensorListEqual(

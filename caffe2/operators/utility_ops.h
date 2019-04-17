@@ -43,6 +43,30 @@ struct GetNanCheckGradient : public GradientMakerBase {
 };
 
 template <class Context>
+class IsNanOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  IsNanOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<float, double>>::call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
+    auto& X = Input(0);
+    auto* Y = Output(0, X.sizes(), at::dtype<uint8_t>());
+    const auto* X_data = X.template data<T>();
+    uint8_t* Y_data = Y->template mutable_data<uint8_t>();
+    for (size_t i = 0; i < X.numel(); i++) {
+      Y_data[i] = (uint8_t)(std::isnan(X_data[i]));
+    }
+    return true;
+  }
+};
+
+template <class Context>
 class WallClockTimeOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -390,7 +414,7 @@ class WeightedSumOp : public Operator<Context> {
       const auto& weighti = Input(i + 1);
       CAFFE_ENFORCE_EQ(Xi.numel(), size);
       CAFFE_ENFORCE_EQ(weighti.numel(), 1);
-      math::Axpy<T, Context>(
+      math::Axpy<float, T, Context>(
           size,
           weighti.template data<float>(),
           Xi.template data<T>(),
@@ -1083,7 +1107,7 @@ class GatherRangesOp : public Operator<Context> {
   template <typename Index>
   size_t accumulate(Index* ranges, size_t start, size_t end) {
     size_t result = 0;
-    for (int i = start + 1; i < end; i += 2) {
+    for (size_t i = start + 1; i < end; i += 2) {
       result += ranges[i];
     }
     return result;

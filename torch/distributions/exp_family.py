@@ -18,8 +18,8 @@ class ExponentialFamily(Distribution):
     Note:
         This class is an intermediary between the `Distribution` class and distributions which belong
         to an exponential family mainly to check the correctness of the `.entropy()` and analytic KL
-        divergence methods. We use this class to compute the entropy and KL divergence using the AD frame-
-        work and Bregman divergences (courtesy of: Frank Nielsen and Richard Nock, Entropies and
+        divergence methods. We use this class to compute the entropy and KL divergence using the AD
+        framework and Bregman divergences (courtesy of: Frank Nielsen and Richard Nock, Entropies and
         Cross-entropies of Exponential Families).
     """
 

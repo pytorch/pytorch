@@ -244,7 +244,7 @@ namespace {
        output.resize_({sizeD, osizeH, osizeW});
     }
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-        input_.type(), "adaptive_avg_pool2d", [&] {
+        input_.scalar_type(), "adaptive_avg_pool2d_cuda", [&] {
           scalar_t *input_data = input_.data<scalar_t>();
           scalar_t *output_data = output.data<scalar_t>();
 
@@ -284,13 +284,13 @@ namespace {
 
     int64_t osizeH = gradOutput.size(-2);
     int64_t osizeW = gradOutput.size(-1);
-    
+
     int64_t grid_x = sizeD;
     if (input.ndimension() == 4) grid_x *= input.size(-4);
 
       //bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0);
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-        input.type(), "adaptive_avg_pool2d_backward", [&] {
+        input.scalar_type(), "adaptive_avg_pool2d_backward_cuda", [&] {
           scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
           scalar_t *gradInput_data = gradInput.data<scalar_t>();
 

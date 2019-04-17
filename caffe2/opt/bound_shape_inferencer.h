@@ -61,11 +61,16 @@ class CAFFE2_API BoundShapeInferencer {
       const std::string& name,
       ShapeInfo::DimType t,
       std::vector<int64_t> bound_dims,
-      TensorProto::DataType type);
+      TensorProto::DataType type,
+      bool is_quantized);
 
+  void InferConcatInputs(const OperatorDef& op);
+
+  void InferGivenTensorFill(const OperatorDef& op);
   void InferSparseLengthsSum(const OperatorDef& op);
   void InferFC(const OperatorDef& op);
   void InferConcat(const OperatorDef& op);
+  void InferShape(const OperatorDef& op);
   void InferReshape(const OperatorDef& op);
   void InferLengthsRangeFill(const OperatorDef& op);
 
@@ -74,7 +79,7 @@ class CAFFE2_API BoundShapeInferencer {
   void InferCommonOp(const OperatorDef& op);
 
   const BoundShapeSpec spec_;
-  ShapeInfo::DimType current_dim_type_{ShapeInfo::DimType::UNKNOWN};
+  ShapeInfo::DimType current_dim_type_{ShapeInfo::DimType::BATCH};
   int64_t current_max_batch_size_{0};
   std::unordered_map<std::string, ShapeInfo> shape_info_;
 };

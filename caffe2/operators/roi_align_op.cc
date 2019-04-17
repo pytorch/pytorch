@@ -373,3 +373,21 @@ Region of Interest (RoI) align operation as used in Mask R-CNN.
         "is a pooled feature map cooresponding to the r-th RoI.");
 
 } // namespace caffe2
+
+using RoIAlignOpFloatCPU = caffe2::RoIAlignOp<float, caffe2::CPUContext>;
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    RoIAlign,
+    (std::vector<c10::Argument>{
+        c10::Argument("features"),
+        c10::Argument("rois"),
+        c10::Argument("order", StringType::get()),
+        c10::Argument("spatial_scale", FloatType::get()),
+        c10::Argument("pooled_h", IntType::get()),
+        c10::Argument("pooled_w", IntType::get()),
+        c10::Argument("sampling_ratio", IntType::get()),
+    }),
+    (std::vector<c10::Argument>{
+        c10::Argument("pooled_features"),
+    }),
+    RoIAlignOpFloatCPU);

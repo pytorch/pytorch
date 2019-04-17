@@ -40,6 +40,9 @@ template <
     int BDims,
     CUDAHistogramMemoryType MemoryType = CUDAHistogramMemoryType::MULTI_BLOCK,
     typename Op>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> a, /* output */
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
@@ -330,8 +333,8 @@ Tensor _bincount_cuda(
     const Tensor& self,
     const Tensor& weights,
     int64_t minlength) {
-  return AT_DISPATCH_INTEGRAL_TYPES(self.type(), "bincount", [&] {
-    const auto scalar = weights.type().scalarType();
+  return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cuda", [&] {
+    const auto scalar = weights.scalar_type();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
       return _bincount_cuda_template<scalar_t, float>(self, weights, minlength);
     return _bincount_cuda_template<scalar_t, double>(
@@ -344,10 +347,10 @@ Tensor _histc_cuda(
     int64_t nbins,
     Scalar min,
     Scalar max) {
-  if (self.type().scalarType() == ScalarType::Half) {
+  if (self.scalar_type() == ScalarType::Half) {
     AT_ERROR("HalfTensor is not supported");
   }
-  return AT_DISPATCH_ALL_TYPES(self.type(), "histc", [&] {
+  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
     return _histc_cuda_template<scalar_t>(self, nbins, min.to<scalar_t>(), max.to<scalar_t>());
   });
 }

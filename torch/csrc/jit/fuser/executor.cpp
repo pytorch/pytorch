@@ -133,7 +133,7 @@ static bool expandArgs(
 static bool shouldExpandArgs(
     const KernelSpec& spec,
     std::vector<at::Tensor>& args,
-    std::vector<int64_t>& map_size) {  
+    std::vector<int64_t>& map_size) {
   return expandArgs(spec, args, map_size, /*dry_run=*/true);
 }
 
@@ -191,6 +191,7 @@ void launchFusion(
     const FusedKernel& fusion,
     const at::Device device,
     const at::ArrayRef<at::Tensor>& inputs,
+    const at::ArrayRef<IValue>& all_inputs,
     std::vector<at::Tensor>& outputs) {
   // Fails if fusion and given inputs disagree
   AT_ASSERT(inputs.size() == fusion.inputDesc().size());
@@ -222,6 +223,13 @@ void launchFusion(
     numel = computeNumel(map_size);
   }
 
+  // compute number of scalar inputs and convert them to float
+  std::vector<double> scalar_inputs;
+  scalar_inputs.reserve(all_inputs.size());
+  for (auto const &input: all_inputs){
+    if (input.isDouble()) scalar_inputs.push_back(input.to<float>());
+  }
+
   // Computes the storage needed to store TensorInfo structs for inputs and
   // outputs.
   size_t uncompressedDim = fusion.inputDesc().at(0).contiguity.size();
@@ -234,7 +242,7 @@ void launchFusion(
 
   // A vector of arguments to the kernel (numel, *input_desc_s, *output_desc_s)
   std::vector<void*> arguments;
-  arguments.reserve(3 + flat_inputs_size + flat_outputs_size);
+  arguments.reserve(3 + scalar_inputs.size() + flat_inputs_size + flat_outputs_size);
   arguments.push_back(&numel);
 
   auto addTensorInfoRaw = [&](const TensorDesc& desc,
@@ -265,7 +273,7 @@ void launchFusion(
       addTensorInfo(fusion.inputDesc()[i], tensor);
     } else {
       size_t chunk_offset = map_size[chunk.dim()] * tensor.stride(chunk.dim()) *
-          elementSize(tensor.type().scalarType());
+          elementSize(tensor.scalar_type());
       char* data_ptr = reinterpret_cast<char*>(tensor.data_ptr());
       for (size_t chunks = 0; chunks < chunk.nSubTensors(); ++chunks) {
         addTensorInfoRaw(
@@ -273,6 +281,10 @@ void launchFusion(
         data_ptr += chunk_offset;
       }
     }
+  }
+  // Adds scalar arguments
+  for (double &s: scalar_inputs){
+    arguments.push_back(&s);
   }
 
   // Adds (flattened) output arguments
@@ -305,7 +317,7 @@ void launchFusion(
   fusion.launch_raw(numel, arguments);
 }
 
-bool runFusion(const int64_t key, Stack& stack) {
+bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   // Short-circuits if fusion isn't enabled
   if (!canFuseOnCPU() && !canFuseOnGPU())
     return false;
@@ -361,9 +373,13 @@ bool runFusion(const int64_t key, Stack& stack) {
   maybe_kernel = spec.findKernel(arg_spec);
   AT_ASSERT(maybe_kernel);
 
+  if (code_out) {
+    *code_out = maybe_kernel.value()->code();
+  }
+
   // Launches fusion
   std::vector<at::Tensor> raw_outputs;
-  launchFusion(*(*maybe_kernel), device, inputs, raw_outputs);
+  launchFusion(*(*maybe_kernel), device, inputs, all_inputs, raw_outputs);
 
   auto outputs = fmap(spec.outputMapAndSizes(), [&](const OutputMapAndSize& omap) {
     if (omap.needsSumToSize()) {

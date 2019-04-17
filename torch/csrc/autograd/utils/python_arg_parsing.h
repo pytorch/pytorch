@@ -32,7 +32,7 @@ inline std::tuple<c10::optional<at::Device>, c10::optional<at::ScalarType>, bool
       throw std::runtime_error(".to() does not accept copy argument");
     return std::make_tuple(
       tensor.device(),
-      tensor.type().scalarType(),
+      tensor.scalar_type(),
       r.toBool(1),
       r.toBool(2)
     );

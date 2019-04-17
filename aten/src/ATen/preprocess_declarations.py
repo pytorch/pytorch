@@ -14,20 +14,17 @@ type_map = {
         'Char',
         'Short',
         'Int',
-        'Long'
+        'Long',
+        'Bool',
+        'QInt8',
     ],
 }
 
 all_types = type_map['floating_point'] + type_map['integral']
 type_map['all'] = all_types
 
-all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA']
+all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA', 'MkldnnCPU', 'QuantizedCPU']
 default_backends = ['CPU', 'CUDA']
-
-sparse_map = {
-    'CPU': 'SparseCPU',
-    'CUDA': 'SparseCUDA',
-}
 
 
 def process_types_and_backends(option):
@@ -36,8 +33,8 @@ def process_types_and_backends(option):
     # if backend or type is not defined, it is assumed to be all of them
     if 'backend_type_pairs' not in option:
         backends = option.get('backends', default_backends)
-        if option.get('aten_sparse', False):
-            backends.extend([sparse_map[p] for p in backends if p in sparse_map])
+        if isinstance(option.get('type_method_definition_dispatch'), dict):
+            backends = option.get('type_method_definition_dispatch').keys()
         backends = set(backends)
 
         types = option.get('types', all_types)
@@ -61,9 +58,16 @@ def process_types_and_backends(option):
         if arg['type'] == 'THSTensor*':
             pairs.discard(('CUDA', 'Half'))
 
-    # special case remove Half for cpu unless it is explicitly enabled,
+    # special case remove Half for cpu unless it is explicitly enabled
     if not option.get('cpu_half', False):
         pairs.discard(('CPU', 'Half'))
+
+    # special cases remove bool for cpu and cuda unless it is explicitly enabled
+    if not option.get('cpu_bool', False):
+        pairs.discard(('CPU', 'Bool'))
+
+    if not option.get('cuda_bool', False):
+        pairs.discard(('CUDA', 'Bool'))
 
     # sort the result for easy reading
     option['backend_type_pairs'] = sorted([p for p in pairs])

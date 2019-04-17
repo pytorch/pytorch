@@ -162,7 +162,7 @@ inline void CopyToProtoAsIs(
       "The source type and dest type cannot be copied as-is. Did "
       "you mean CopyToProtoWithCast?");
   field->Reserve(size);
-  for (int i = 0; i < size; ++i) {
+  for (size_t i = 0; i < size; ++i) {
     field->Add(0);
   }
   context->template CopyToCPU<SrcType>(
@@ -183,7 +183,7 @@ inline void CopyToProtoWithCast(
   context->template CopyToCPU<SrcType>(size, src, buffer.get());
   context->FinishDeviceComputation();
   field->Reserve(size);
-  for (int i = 0; i < size; ++i) {
+  for (size_t i = 0; i < size; ++i) {
     field->Add(static_cast<DstType>(buffer[i]));
   }
 }
@@ -214,7 +214,7 @@ inline void CopyFromProtoWithCast(
   // CPUContext. Remove it if it is performance critical.
   unique_ptr<DstType[]> buffer(new DstType[size]);
   const SrcType* src = field.data();
-  for (int i = 0; i < size; ++i) {
+  for (size_t i = 0; i < size; ++i) {
     buffer[i] = static_cast<DstType>(src[i]);
   }
   context->template CopyFromCPU<DstType>(size, buffer.get(), dst);
