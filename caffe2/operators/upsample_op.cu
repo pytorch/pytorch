@@ -16,10 +16,7 @@ inline __device__ int idx(
     const int x) {
   return ((n * num_channels + c) * height + y) * width + x;
 }
- 
-// this is copied and pasted from the current pytorch master's file to see
-// if this passes the integration test.
-    
+
 // input is X, output is Y
 __global__ void UpsampleBilinearKernel(
     const int output_size,
@@ -198,8 +195,7 @@ bool UpsampleBilinearOp<float, CUDAContext>::RunOnDevice() {
       {batch_size, num_channels, output_height, output_width},
       at::dtype<float>());
 
-  //
-  const auto size = output_height * output_width;
+  const auto size = Y->numel();
   UpsampleBilinearKernel<<<
       CAFFE_GET_BLOCKS(size),
       CAFFE_CUDA_NUM_THREADS,
@@ -215,15 +211,12 @@ bool UpsampleBilinearOp<float, CUDAContext>::RunOnDevice() {
       width_scale_,
       X.data<float>(),
       Y->template mutable_data<float>());
-
   return true;
 }
-
 template <>
 bool UpsampleBilinearGradientOp<float, CUDAContext>::RunOnDevice() {
   const auto& dY = Input(0);
   const auto& X = Input(1);
-
   const auto inputDims = dY.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = dY.dim32(0);
@@ -247,7 +240,6 @@ bool UpsampleBilinearGradientOp<float, CUDAContext>::RunOnDevice() {
       at::dtype<float>());
   math::Set<float, CUDAContext>(
       dX->numel(), 0.0f, dX->mutable_data<float>(), &context_);
-
   const auto size = dY.numel();
   UpsampleBilinearGradientKernel<<<
       CAFFE_GET_BLOCKS(size),
@@ -264,10 +256,8 @@ bool UpsampleBilinearGradientOp<float, CUDAContext>::RunOnDevice() {
       width_scale_,
       dY.data<float>(),
       dX->template mutable_data<float>());
-
   return true;
 }
-
 REGISTER_CUDA_OPERATOR(
     UpsampleBilinear,
     UpsampleBilinearOp<float, CUDAContext>);
