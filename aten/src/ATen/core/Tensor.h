@@ -590,6 +590,7 @@ class CAFFE2_API Tensor {
   Tensor dequantize() const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;
+  Tensor int_repr() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
