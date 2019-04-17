@@ -1388,7 +1388,7 @@ struct to_ir {
           << "range() expects 1 argument but got " << args.size();
     }
     auto max_trip_count_val = ensureInt(range, emitExpr(args[0]));
-    auto ident_name = target.name();
+    const auto ident_name = target.name();
     auto assigner = [ident_name, range](Value* index, std::shared_ptr<Environment> env) {
       env->setVar(range, ident_name, index);
     };
@@ -1414,7 +1414,7 @@ void emitForInListLoop(const For& stmt, std::shared_ptr<torch::jit::script::Simp
         {listArg},
         {},
         /*required=*/true);
-  auto ident_name = target.name();
+  const auto ident_name = target.name();
   auto assigner = [ident_name, range, listArg, this](Value* index, std::shared_ptr<Environment> env) {
   auto cur_elm = emitBuiltinCall(
       range,
