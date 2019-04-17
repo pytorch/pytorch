@@ -3036,15 +3036,10 @@ class _TestTorchMixin(object):
 
     def test_bool_tensor_value_change(self):
         for device in torch.testing.get_all_device_types():
-            print("0")
             x = torch.tensor([True, False], dtype=torch.bool)
-            print("1")
             x[0] = False
-            print("2")
             x[1] = True
-            print("3")
             self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool))
-            print("4")
 
     def test_unfold_all_devices_and_dtypes(self):
         for device in torch.testing.get_all_device_types():
