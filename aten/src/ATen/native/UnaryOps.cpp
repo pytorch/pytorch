@@ -17,8 +17,6 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 
-#include <ATen/native/cpu/Loops.h>
-
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -89,11 +87,6 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 
 Tensor& _fill__cpu(Tensor& self, Scalar value) {
   auto iter = TensorIterator::unary_op(self, self);
-  if (iter->dtype() == at::ScalarType::Half) {
-    at::Half fill_value = value.to<at::Half>();
-    unary_kernel(*iter, [=](at::Half a) -> at::Half { return fill_value; });
-    return self;
-  }
   if (iter->dtype() == at::ScalarType::Bool) {
     // TODO: Replace this with TensorIterator
     // It is undefined behavior to load values other than 0 or 1.
