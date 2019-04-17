@@ -8456,7 +8456,7 @@ a")
         self.assertExpected(str(cu.__getattr__('foo').schema))
 
     def test_parser_type_annotations_unknown_type(self):
-        with self.assertRaisesRegex(RuntimeError, r'Unknown type name Foo'):
+        with self.assertRaisesRegex(RuntimeError, "Unknown type name 'Foo'"):
             cu = torch.jit.CompilationUnit('''
                 def foo(x : Tensor, y : Tuple[Tuple[Foo, Tensor], Tensor]) -> Tuple[Tensor, Tensor]:
                     return x, x
@@ -9511,8 +9511,7 @@ a")
         FileCheck().check_count('%', 3).check(":").check_count("mm", 2).run(str(sm.graph))
 
     def test_module_with_params_called_fails(self):
-        with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with parameters. Stateful "
-                                                  "modules to be inlined must be submodules of the callee."):
+        with self.assertRaisesRegex(RuntimeError, "Modules with parameters must be submodules of"):
             class ScriptMod(torch.jit.ScriptModule):
                 def __init__(self):
                     super(ScriptMod, self).__init__()
@@ -10517,7 +10516,7 @@ a")
 
         self.assertIsNot(other_strong_mod.weak, other_strong_mod.weak2)
 
-        with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with param"):
+        with self.assertRaisesRegex(RuntimeError, "Modules with parameters must be submodules of"):
             strong_mod = Strong()
 
     def test_weak_module_copying(self):
@@ -11518,6 +11517,14 @@ a")
         x = torch.randn(3, 6)
         y = torch.randn(3, 6)
         self.checkScript(split_two, [(x + y)])
+
+    def test_python_op_name(self):
+        import random
+
+        with self.assertRaisesRegex(RuntimeError, "randint"):
+            @torch.jit.script
+            def fn():
+                return random.randint()
 
 
 class MnistNet(nn.Module):
