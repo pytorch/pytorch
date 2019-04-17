@@ -301,7 +301,21 @@ class JitTestCase(TestCase):
         self.setHooks()
 
     def emitFunctionHook(self, func):
-        print("IMPLEMENT ME")
+        # func has invalid names for export, skip the jitter check
+        if func.name == "<lambda>" or "aten::" in func.name:
+            return
+        # disable the hook while we parse code, otherwise we will re-enter the hook
+        with self.disableEmitHook():
+            try:
+                src, constants = _jit_python_print(func)
+                cu = torch.jit.CompilationUnit()._import(src, constants)
+                src2, constants2 = _jit_python_print(getattr(cu, func.name))
+                self.assertMultiLineEqual(src, src2)
+            except RuntimeError as e:
+                se = str(e)
+                if "could not export python function" not in se and \
+                   "closures are not exportable" not in se:
+                    raise
 
     def emitModuleHook(self, module):
         import zipfile
@@ -365,8 +379,10 @@ class JitTestCase(TestCase):
 
     def getExportImportCopy(self, m, also_test_file=True, map_location=None):
         if isinstance(m, torch._C.Function):
-            print("TODO: getExportImportCopy")
-            return m
+            src, constants = _jit_python_print(m)
+            cu = torch.jit.CompilationUnit()._import(src, constants)
+            return getattr(cu, m.name)
+
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
@@ -2651,8 +2667,8 @@ graph(%x : Tensor,
             return 2 * x + y
 
         r, _ = _jit_python_print(foo)
-        cu = torch._C._jit_import_functions("op_version_set = 0\n{}".format(r), [])
-        self.assertExpected(cu.find_function('foo').graph.pretty_print())
+        cu = torch.jit.CompilationUnit()._import(r, [])
+        self.assertExpected(cu.foo.graph.pretty_print())
 
     def test_function_default_values(self):
         outer_var = torch.tensor(20)
@@ -2959,10 +2975,9 @@ class TestScript(JitTestCase):
                 return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
 
             pp, table = _jit_python_print(foo)
-            ppv = "op_version_set = 0\n{}".format(pp)
-            sm = _jit_import_functions(ppv, table)
+            sm = torch.jit.CompilationUnit()._import(pp, table)
             r = foo()
-            r2 = sm.find_function('foo')()
+            r2 = sm.foo()
             # use precise assert, we are checking floating point details
             self.assertTrue(r[:-1] == r2[:-1])
             self.assertTrue(math.isnan(r[-1]) and math.isnan(r2[-1]))
@@ -11111,14 +11126,12 @@ a")
 
         # Export and ensure ignored code not present
         pp, constants = _jit_python_print(m.forward)
-        print(pp)
-        ppv = "op_version_set = 0\n{}".format(pp)
-        printed = torch._C._jit_import_functions(ppv, constants)
-        self.assertIn('IgnoredPythonOp', ppv)
-        self.assertNotIn('ignored_code', ppv)
+        printed = torch.jit.CompilationUnit()._import(pp, constants)
+        self.assertIn('IgnoredPythonOp', pp)
+        self.assertNotIn('ignored_code', pp)
 
         with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
-            printed.find_function('forward')(torch.ones(1))
+            printed.forward(torch.ones(1))
 
     def test_view_write(self):
         def fn(x, y):

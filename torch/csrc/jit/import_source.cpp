@@ -136,9 +136,6 @@ void import_functions(
     resolvers.emplace_back(importer.resolver_);
   }
   cu.define(definitions, resolvers, self);
-  for(auto f : cu.get_functions()) {
-    std::cout << f->name() << " " << *f->graph() << "\n";
-  }
 }
 
 void import_methods(

@@ -1035,7 +1035,8 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("get_debug_state", [](Function& self) {
         return self.get_executor().getDebugState();
-      });
+      })
+      .def_property_readonly("name", &Function::name);
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
@@ -1148,14 +1149,7 @@ void initJitScriptBindings(PyObject* module) {
         import_ir_module(module_lookup, in, optional_device, extra_files);
       });
 
-  m.def(
-      "_jit_import_functions",
-      [](const std::string& src,
-         const std::vector<at::Tensor>& constant_table) {
-        auto cu = std::make_shared<CompilationUnit>();
-        import_functions(*cu, src, constant_table);
-        return cu;
-      });
+  m.def("_jit_import_functions", import_functions);
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_clear_class_registry", ClassType::clearRegistry);

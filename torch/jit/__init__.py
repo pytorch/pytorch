@@ -670,6 +670,8 @@ def trace(func,
                                            var_lookup_fn, _force_outplace)
     else:
         name = getattr(func, '__name__', 'forward')
+        if name == '<lambda>':
+            name = '_lambda' # make name a valid identifier
         traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                       var_lookup_fn,
                                                       _force_outplace)
@@ -701,6 +703,22 @@ class CompilationUnit(object):
         if r is None:
             raise AttributeError("'CompilationUnit' has no attribute '{}'".format(attr))
         return r
+
+    def _import(self, src, constants):
+        """ test import logic for single function, use only for testing """
+        src = "op_version_set = 0\n{}".format(src)
+        # HACK: export always adds a self argument
+        # even if the thing is a pure function,
+        # we just delete it here
+        # Once the serialization outputs the first-class
+        # functions and not the lowered functions,
+        # we can change this behavior
+        src = (src.replace('self,\n', '')
+                  .replace('(self)', '()')
+                  .replace('self.__forked_function', '__forked_function'))
+        torch._C._jit_import_functions(self._c, src, constants, None)
+        return self
+
 
 def _try_get_dispatched_fn(fn):
     if not callable(fn):
