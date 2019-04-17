@@ -126,10 +126,10 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     double size_d;
     if (std::is_same<scalar_t, int64_t>::value) {
       size_d = std::ceil(static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>())
-			 / step.to<accscalar_t>());
+                         / step.to<accscalar_t>());
     } else {
       size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>())
-			 / step.to<double>());
+                         / step.to<double>());
     }
 
     AT_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");

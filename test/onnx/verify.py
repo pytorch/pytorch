@@ -68,7 +68,8 @@ class Errors(object):
         """
         if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
             try:
-                np.testing.assert_allclose(x, y, rtol=self.rtol, atol=self.atol, equal_nan=False, verbose=True)
+                np.testing.assert_allclose(x, y, rtol=self.rtol, atol=self.atol,
+                                           equal_nan=True, verbose=True)
             except AssertionError as e:
                 raise
                 k("{}{}".format(colonize(msg), str(e).lstrip()))

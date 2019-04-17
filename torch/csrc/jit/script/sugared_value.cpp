@@ -16,7 +16,7 @@ struct NoneValue : SugaredValue {
 
 std::shared_ptr<SugaredValue> PrintValue::call(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -58,7 +58,7 @@ builtin_cast_methods() {
 
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -70,7 +70,7 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
   if (value_->type()->isSubtypeOf(TensorType::get())) {
@@ -116,7 +116,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
     if (auto method = classType->getMethod(field)) {
-      return std::make_shared<MethodValue>(shared_from_this(), *method);
+      return std::make_shared<MethodValue>(getValue(), *method);
     }
 
     if (!classType->hasAttribute(field)) {
@@ -135,7 +135,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     const c10::optional<size_t>& size_hint) {
   static const auto make_simple_value =
       [](Value* v) -> std::shared_ptr<SugaredValue> {
@@ -161,7 +161,7 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
 
 void SimpleValue::setAttr(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     const std::string& field,
     Value* newValue) {
   const auto classType = value_->type()->cast<ClassType>();
@@ -217,7 +217,7 @@ void SimpleValue::setAttr(
 
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
@@ -226,8 +226,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
 
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
-  auto createNode = g.insertNode(g.createObject(type_));
-  auto self = std::make_shared<SimpleValue>(createNode->output());
+  auto self = g.insertNode(g.createObject(type_))->output();
 
   auto initMethod = type_->getMethod("__init__");
   AT_ASSERT(initMethod);
@@ -235,12 +234,12 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   // Call the init function
   MethodValue(self, *initMethod).call(loc, m, inputs, attributes, n_binders);
 
-  return self;
+  return std::make_shared<SimpleValue>(self);
 }
 
 std::shared_ptr<SugaredValue> ClassValue::attr(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     const std::string& field) {
   if (field != "__new__") {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";
