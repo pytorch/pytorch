@@ -697,6 +697,7 @@ class CompilationUnit(object):
             raise AttributeError("'CompilationUnit' has no attribute '{}'".format(attr))
         return r
 
+
 def _try_get_dispatched_fn(fn):
     if not callable(fn):
         return None
