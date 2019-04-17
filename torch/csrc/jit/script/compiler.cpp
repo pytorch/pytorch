@@ -2779,7 +2779,7 @@ void CompilationUnit::define(
   AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Function*> methods;
-  std::unordered_map<std::string, Function*> function_table;
+  std::unordered_map<std::string, std::shared_ptr<Function>> function_table;
   for (const Def& def : definitions) {
     const std::string& name = def.name().name();
     auto resolver = *resolver_it++;
@@ -2794,7 +2794,7 @@ void CompilationUnit::define(
                      const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
         auto it = function_table.find(name);
         if (it != function_table.end()) {
-          return std::make_shared<MethodValue>(c10::nullopt, *it->second);
+          return std::make_shared<MethodValue>(c10::nullopt, it->second);
         }
         return resolver(name, m, loc);
       };
@@ -2803,9 +2803,9 @@ void CompilationUnit::define(
       AT_ASSERT(resolver);
       to_ir(def, resolver, self, method);
     };
-    std::unique_ptr<Function> fn(
+    std::shared_ptr<Function> fn(
         new Function(name, is_optimized(), std::make_shared<Graph>(), creator));
-    function_table[name] = fn.get();
+    function_table[name] = fn;
     methods.push_back(fn.get());
     register_function(std::move(fn));
   }

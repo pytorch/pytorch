@@ -52,7 +52,6 @@ def _parse_env(name, default, true_message, false_message):
 _enabled = _parse_env('PYTORCH_JIT', True, "> Using PyTorch JIT", "> PyTorch JIT DISABLED")
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
-_jit_script_compile = torch._C._jit_script_compile
 _jit_script_class_compile = torch._C._jit_script_class_compile
 
 Future = torch._C.Future
@@ -661,22 +660,28 @@ def trace(func,
     # done primarily so that weird iterables fail here and not pybind11 code
     elif not isinstance(example_inputs, tuple):
         example_inputs = tuple(example_inputs)
-    if _module_class:
-        module = _module_class(func, **executor_options)
-    else:
-        module = TopLevelTracedModule(func, **executor_options)
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
-    module._c._create_method_from_trace('forward', func, example_inputs,
-                                        var_lookup_fn, _force_outplace)
+
+    if isinstance(func, torch.nn.Module):
+        if _module_class is None:
+            _module_class = TopLevelTracedModule
+        traced = _module_class(func, **executor_options)
+        traced._c._create_method_from_trace('forward', func, example_inputs,
+                                           var_lookup_fn, _force_outplace)
+    else:
+        name = getattr(func, '__name__', 'forward')
+        traced = torch._C._create_function_from_trace(name, func, example_inputs,
+                                                      var_lookup_fn,
+                                                      _force_outplace)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
         if check_inputs is not None:
-            _check_trace(check_inputs, func, executor_options, module, check_tolerance, _force_outplace)
+            _check_trace(check_inputs, func, executor_options, traced, check_tolerance, _force_outplace)
         else:
-            _check_trace([example_inputs], func, executor_options, module, check_tolerance, _force_outplace)
+            _check_trace([example_inputs], func, executor_options, traced, check_tolerance, _force_outplace)
 
-    return module
+    return traced
 
 
 class CompilationUnit(object):
@@ -741,12 +746,11 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         _add_script_class(obj, obj.__name__)
         return obj
     else:
-        mod = ScriptModule()
         ast = get_jit_def(obj)
-        _jit_script_compile(mod._c, ast, _rcb, get_default_args(obj))
+        fn = torch._C._jit_script_compile(ast, _rcb, get_default_args(obj))
         # Forward docstrings
-        mod.__doc__ = obj.__doc__
-        return mod
+        fn.__doc__ = obj.__doc__
+        return fn
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -1379,11 +1383,8 @@ class TracedModule(ScriptModule):
         if id_set is None:
             id_set = set()
 
-        if not isinstance(orig, torch.nn.Module):
-            self._name = orig.__name__
-            orig = torch.nn.Module()
-        else:
-            self._name = 'TracedModule[' + type(orig).__name__ + ']'
+        assert(isinstance(orig, torch.nn.Module))
+        self._name = 'TracedModule[' + type(orig).__name__ + ']'
 
         def check_unique(param):
             if param in id_set:
@@ -1591,6 +1592,7 @@ def _graph_for(self, *args, **kwargs):
 
 torch._C.ScriptMethod.graph_for = _graph_for
 torch._C.Function.graph_for = _graph_for
+Function = torch._C.Function
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

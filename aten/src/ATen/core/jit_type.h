@@ -1168,7 +1168,7 @@ struct CAFFE2_API ClassType : public Type {
     return attributeNames_[slot];
   }
 
-  Function* getMethod(const std::string& name) const;
+  std::shared_ptr<Function> getMethod(const std::string& name) const;
   CompilationUnit& compilation_unit();
   const CompilationUnit& compilation_unit() const;
   std::vector<Function*> methods() const;

@@ -225,8 +225,6 @@ def get_grad_executor(plan_state, diff_graph_idx=None):
 
 
 def backward_graph(script_module, diff_graph_idx=None):
-    if not isinstance(script_module, torch.jit.ScriptModule):
-        raise RuntimeError('Expected ScriptModule')
     ge_state = script_module.get_debug_state()
     fwd_plan = get_execution_plan(ge_state)
     grad_executor_state = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx)
@@ -273,6 +271,12 @@ class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
     _restored_warnings = False
 
+    def setHooks(self):
+        torch._C._jit_set_emit_hooks(self.emitModuleHook, self.emitFunctionHook)
+
+    def clearHooks(self):
+        torch._C._jit_set_emit_hooks(None, None)
+
     def setUp(self):
         super(JitTestCase, self).setUp()
         # unittest overrides all warning filters and forces all of them to show up
@@ -281,20 +285,23 @@ class JitTestCase(TestCase):
         if not JitTestCase._restored_warnings:
             torch.jit.TracerWarning.ignore_lib_warnings()
             JitTestCase._restored_warnings = True
-        torch._C._jit_set_emit_module_hook(self.emitModuleHook)
+        self.setHooks()
 
     def tearDown(self):
         super(JitTestCase, self).tearDown()
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
-        torch._C._jit_set_emit_module_hook(None)
+        self.clearHooks()
         torch._C._jit_clear_class_registry()
 
     @contextmanager
-    def disableModuleHook(self):
-        torch._C._jit_set_emit_module_hook(None)
+    def disableEmitHook(self):
+        self.clearHooks()
         yield None
-        torch._C._jit_set_emit_module_hook(self.emitModuleHook)
+        self.setHooks()
+
+    def emitFunctionHook(self, func):
+        print("IMPLEMENT ME")
 
     def emitModuleHook(self, module):
         import zipfile
@@ -310,7 +317,7 @@ class JitTestCase(TestCase):
             return c
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        with self.disableModuleHook():
+        with self.disableEmitHook():
             try:
                 if len(module.code) == 0:
                     # short-circuit if this is an empty module
@@ -357,6 +364,9 @@ class JitTestCase(TestCase):
             self.assertMultiLineEqual(main_module_code, main_module_2_code)
 
     def getExportImportCopy(self, m, also_test_file=True, map_location=None):
+        if isinstance(m, torch._C.Function):
+            print("TODO: getExportImportCopy")
+            return m
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
@@ -1181,7 +1191,7 @@ graph(%x : Tensor,
         torch._C._jit_pass_insert_observers(m.graph, observe)
 
         # Collect statistics
-        m.forward(x1, y1)
+        m(x1, y1)
 
         # Check what we collected
         self.assertTrue('p' in value_stats and 'z' in value_stats)
@@ -1191,7 +1201,7 @@ graph(%x : Tensor,
         self.assertEqual(value_stats['z'][0], x1 - y1)
 
         # Run one more time and check the updated statistics
-        m.forward(x2, y2)
+        m(x2, y2)
         self.assertEqual(len(value_stats['p']), 2)
         self.assertEqual(len(value_stats['z']), 2)
         self.assertEqual(value_stats['p'][1], x2 + y2)
@@ -2641,9 +2651,8 @@ graph(%x : Tensor,
             return 2 * x + y
 
         r, _ = _jit_python_print(foo)
-        mod = torch.jit.ScriptModule()
-        torch._C._jit_import_methods(mod._c, "op_version_set = 0\n{}".format(r), [])
-        self.assertExpected(mod.graph.pretty_print())
+        cu = torch._C._jit_import_functions("op_version_set = 0\n{}".format(r), [])
+        self.assertExpected(cu.find_function('foo').graph.pretty_print())
 
     def test_function_default_values(self):
         outer_var = torch.tensor(20)
@@ -2944,17 +2953,16 @@ class TestScript(JitTestCase):
         mod.ninf = float("-inf")
         mod.nan = float("nan")
 
-        with self.disableModuleHook():
+        with self.disableEmitHook():
             @torch.jit.script
             def foo():
                 return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
 
             pp, table = _jit_python_print(foo)
             ppv = "op_version_set = 0\n{}".format(pp)
-            sm = torch.jit.ScriptModule()
-            torch._C._jit_import_methods(sm._c, ppv, table)
+            sm = _jit_import_functions(ppv, table)
             r = foo()
-            r2 = sm()
+            r2 = sm.find_function('foo')()
             # use precise assert, we are checking floating point details
             self.assertTrue(r[:-1] == r2[:-1])
             self.assertTrue(math.isnan(r[-1]) and math.isnan(r2[-1]))
@@ -8439,7 +8447,7 @@ a")
                 return x, x
         ''')
 
-        self.assertExpected(str(cu.__getattr__('foo').schema))
+        self.assertExpected(str(cu.foo.schema))
 
     def test_parser_type_annotations_comment(self):
         cu = torch.jit.CompilationUnit('''
@@ -8448,7 +8456,7 @@ a")
                 return x, x
         ''')
 
-        self.assertExpected(str(cu.__getattr__('foo').schema))
+        self.assertExpected(str(cu.foo.schema))
 
     def test_parser_type_annotations_unknown_type(self):
         with self.assertRaisesRegex(RuntimeError, r'Unknown type name Foo'):
@@ -9037,7 +9045,7 @@ a")
         FileCheck().check("aten::neg").check("aten::add").run(str(traced_fn.graph))
 
     def test_call_script_mod_from_tracing_fn(self):
-        with self.disableModuleHook():
+        with self.disableEmitHook():
             class ScriptMod(torch.jit.ScriptModule):
                 def __init__(self):
                     super(ScriptMod, self).__init__()
@@ -9119,6 +9127,7 @@ a")
                 return traced_fn(torch.mm(x, self.param))
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
+
         # Note: neg op from the traced function should be properly inlined
         FileCheck().check("aten::mm").check_same("scope: TracedModule") \
             .check_next("aten::neg").check("scope: TracedModule/traced_fn") \
@@ -9331,21 +9340,19 @@ a")
         FileCheck().check("aten::neg").check("aten::add").run(str(script_fn.graph))
 
     def test_call_traced_mod_from_script_fn(self):
-        class TracedModule(torch.nn.Module):
-            def __init__(self):
-                super(TracedModule, self).__init__()
+        with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
+            class TracedModule(torch.nn.Module):
+                def __init__(self):
+                    super(TracedModule, self).__init__()
 
-            def forward(self, x):
-                return torch.mm(x, torch.zeros(4, 3))
+                def forward(self, x):
+                    return torch.mm(x, torch.zeros(4, 3))
 
-        tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
+            tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
-        @torch.jit.script
-        def script_fn(x):
-            return tm(x) + 1
-
-        FileCheck().check("aten::zeros").check_same("scope: TracedModule").check("aten::mm") \
-            .check("aten::add").run(str(script_fn.graph))
+            @torch.jit.script
+            def script_fn(x):
+                return tm(x) + 1
 
     def test_call_script_fn_from_script_fn(self):
         @torch.jit.script
@@ -9361,21 +9368,20 @@ a")
         FileCheck().check("aten::neg").run(str(script_fn.graph))
 
     def test_call_script_mod_from_script_fn(self):
-        class ScriptMod(torch.jit.ScriptModule):
-            def __init__(self):
-                super(ScriptMod, self).__init__()
+        with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
+            class ScriptMod(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(ScriptMod, self).__init__()
 
-            @torch.jit.script_method
-            def forward(self, x):
-                return torch.mm(x, torch.zeros([4, 3]))
+                @torch.jit.script_method
+                def forward(self, x):
+                    return torch.mm(x, torch.zeros([4, 3]))
 
-        sm = ScriptMod()
+            sm = ScriptMod()
 
-        @torch.jit.script
-        def script_fn(x):
-            return sm(x) + 1
-
-        FileCheck().check("zeros").check("aten::mm").check("add").run(str(script_fn.graph))
+            @torch.jit.script
+            def script_fn(x):
+                return sm(x) + 1
 
     def test_call_python_fn_from_script_module(self):
         def python_fn(x):
@@ -9392,7 +9398,7 @@ a")
 
         sm = ScriptMod()
         FileCheck().check("aten::mm").check("python_fn") \
-            .run(str(sm.__getattr__('forward').graph))
+            .run(str(sm.forward.graph))
 
     def test_call_python_mod_from_script_module(self):
         class PythonMod(torch.nn.Module):
@@ -9433,7 +9439,7 @@ a")
                 return traced_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        FileCheck().check("aten::mm").check("aten::neg").run(str(sm.__getattr__('forward').graph))
+        FileCheck().check("aten::mm").check("aten::neg").run(str(sm.forward.graph))
 
     def test_call_tracing_mod_from_script_module(self):
         class TracedMod(torch.nn.Module):
@@ -9476,7 +9482,7 @@ a")
                 return script_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        graph = (sm.__getattr__('forward').graph)
+        graph = (sm.forward.graph)
         FileCheck().check("aten::mm").check("aten::neg").run(str(graph))
 
     def test_call_script_mod_from_script_module(self):
@@ -9507,8 +9513,7 @@ a")
         FileCheck().check_count('%', 3).check(":").check_count("mm", 2).run(str(sm.graph))
 
     def test_module_with_params_called_fails(self):
-        with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with parameters. Stateful "
-                                                  "modules to be inlined must be submodules of the callee."):
+        with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
             class ScriptMod(torch.jit.ScriptModule):
                 def __init__(self):
                     super(ScriptMod, self).__init__()
@@ -9668,7 +9673,7 @@ a")
             # type: (Tensor, Tuple[Tensor, Tensor, Tensor], Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tensor
             return x
 
-        self.assertExpected(str(foo.__getattr__('forward').schema))
+        self.assertExpected(str(foo.schema))
 
     def test_annotated_script_method(self):
         class SM(torch.jit.ScriptModule):
@@ -9679,7 +9684,7 @@ a")
 
         sm = SM()
 
-        self.assertExpected(str(sm.__getattr__('forward').schema))
+        self.assertExpected(str(sm.forward.schema))
 
     def test_annotated_script_fn_return_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "but is actually of type"):
@@ -9773,7 +9778,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             cu = torch.jit.CompilationUnit(self.format_code(code, pair))
-            test_str.append(str(cu.__getattr__('foo').schema))
+            test_str.append(str(cu.foo.schema))
         self.assertExpected("\n".join(test_str))
 
     #  String frontend , Python 3-style type annotations , Script method
@@ -9790,7 +9795,7 @@ a")
         for pair in self.type_input_return_pairs():
             tm = TestModule()
             tm.define(self.format_code(code, pair))
-            test_str.append(str(tm.__getattr__('foo').schema))
+            test_str.append(str(tm.foo.schema))
         self.assertExpected("\n".join(test_str))
 
     #  String frontend , MyPy-style type comments , Script function
@@ -9803,7 +9808,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             cu = torch.jit.CompilationUnit(self.format_code(code, pair))
-            test_str.append(str(cu.__getattr__('foo').schema))
+            test_str.append(str(cu.foo.schema))
         self.assertExpected("\n".join(test_str))
 
     #  String frontend , MyPy-style type comments , Script method
@@ -9822,7 +9827,7 @@ a")
         for pair in self.type_input_return_pairs():
             tm = TestModule()
             tm.define(self.format_code(code, pair))
-            test_str.append(str(tm.__getattr__('foo').schema))
+            test_str.append(str(tm.foo.schema))
         self.assertExpected("\n".join(test_str))
 
     # Helper function to eval Python3 code without causing a syntax error for
@@ -9854,7 +9859,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'foo')
-            test_str.append(str(fn.__getattr__('forward').schema))
+            test_str.append(str(fn.schema))
         self.assertExpected("\n".join(test_str))
 
     #  Python AST Frontend , Python 3-style type annotations , Script method
@@ -9876,7 +9881,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'instance')
-            test_str.append(str(fn.__getattr__('foo').schema))
+            test_str.append(str(fn.foo.schema))
         self.assertExpected("\n".join(test_str))
 
     #  Python AST Frontend , MyPy-style type comments , Script function
@@ -9893,7 +9898,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'foo')
-            test_str.append(str(fn.__getattr__('forward').schema))
+            test_str.append(str(fn.schema))
         self.assertExpected("\n".join(test_str))
 
     #  Python AST Frontend , MyPy-style type comments , Script method
@@ -9912,7 +9917,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'instance')
-            test_str.append(str(fn.__getattr__('foo').schema))
+            test_str.append(str(fn.foo.schema))
         self.assertExpected("\n".join(test_str))
 
     def test_method_casts_script(self):
@@ -10513,7 +10518,7 @@ a")
 
         self.assertIsNot(other_strong_mod.weak, other_strong_mod.weak2)
 
-        with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with param"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
             strong_mod = Strong()
 
     def test_weak_module_copying(self):
@@ -10725,7 +10730,7 @@ a")
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
     def test_bool_dispatch(self):
-        with self.disableModuleHook():  # TODO: Python print broadcasting list
+        with self.disableEmitHook():  # TODO: Python print broadcasting list
             def kwarg_false(x):
                 # type: (Tensor) -> Tensor
                 return F.max_pool1d(x, 1, 1, return_indices=False)
@@ -11106,14 +11111,14 @@ a")
 
         # Export and ensure ignored code not present
         pp, constants = _jit_python_print(m.forward)
-        printed = torch.jit.ScriptModule()
+        print(pp)
         ppv = "op_version_set = 0\n{}".format(pp)
-        torch._C._jit_import_methods(printed._c, ppv, constants)
+        printed = torch._C._jit_import_functions(ppv, constants)
         self.assertIn('IgnoredPythonOp', ppv)
         self.assertNotIn('ignored_code', ppv)
 
         with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
-            printed(torch.ones(1))
+            printed.find_function('forward')(torch.ones(1))
 
     def test_view_write(self):
         def fn(x, y):
@@ -11265,7 +11270,7 @@ a")
                 # type: (str) -> Tensor
                 return self.table[key] + self.x
 
-        with self.disableModuleHook():
+        with self.disableEmitHook():
             # TODO: re-enable module hook when Python printing of attributes is
             # supported
             m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
@@ -13101,7 +13106,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                     self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
             if test_name in EXCLUDE_PYTHON_PRINT:
-                with self.disableModuleHook():
+                with self.disableEmitHook():
                     run_test()
             else:
                 run_test()
@@ -13174,7 +13179,7 @@ def add_nn_module_test(*args, **kwargs):
                     self.submodule = nn_module(*constructor_args)
             # module cannot be imported / exported
             if module_name in EXCLUDE_MODULE_EXPORT_IMPORT:
-                with self.disableModuleHook():
+                with self.disableEmitHook():
                     module = TheModule()
                     module.define(script)
                     create_script_module.last_graph = module.graph
