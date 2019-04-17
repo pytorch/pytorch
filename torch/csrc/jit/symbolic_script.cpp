@@ -385,7 +385,7 @@ const std::vector<std::string> functions = {
                     tensor1,
                     tensor2,
                     *,
-                    value: float = 1.0):
+                    value: number = 1.0):
             def backward(grad_output):
                 grad = grad_output * value
                 grad_tensor1 = (grad * tensor2)._grad_sum_to_size(tensor1.size())
@@ -448,10 +448,10 @@ const std::vector<std::string> functions = {
 
         def lerp_0(self,
                    end,
-                   weight: float):
+                   weight: number):
             def backward(grad_output):
-                grad_self = (grad_output * (1 - weight))._grad_sum_to_size(self.size())
-                grad_end = (grad_output * weight)._grad_sum_to_size(end.size())
+                grad_self = (grad_output * (1 - float(weight)))._grad_sum_to_size(self.size())
+                grad_end = (grad_output * float(weight))._grad_sum_to_size(end.size())
                 return grad_self, grad_end, None
             return torch.lerp(self, end, weight), backward
 
@@ -578,12 +578,12 @@ const std::vector<std::string> functions = {
             return torch.ones_like(self), backward
 
         def pow_0(self,
-                  exponent: float):
+                  exponent: number):
             def backward(grad_output):
-                if exponent == 0.0:
+                if float(exponent) == 0.0:
                     grad_self = torch.zeros_like(self)
                 else:
-                    grad_self = grad_output * exponent * torch.pow(self, exponent - 1)
+                    grad_self = grad_output * exponent * torch.pow(self, float(exponent) - 1)
                 return grad_self, None
 
             return torch.pow(self, exponent), backward
@@ -597,16 +597,16 @@ const std::vector<std::string> functions = {
 
             return torch.pow(self, exponent), backward
 
-        def pow_2(self: float,
+        def pow_2(self: number,
                   exponent):
             def backward(grad_output):
-                grad_exponent = grad_output * torch.pow(self, exponent) * torch.log(self)
+                grad_exponent = grad_output * torch.pow(self, exponent) * torch.log(float(self))
                 return None, grad_exponent
 
             return torch.pow(self, exponent), backward
 
         def rsub_0(self, other,
-                   alpha: float = 1.0):
+                   alpha: number = 1.0):
             self_size = self.size()
             other_size = other.size()
             def backward(grad_output):
@@ -617,8 +617,8 @@ const std::vector<std::string> functions = {
             return torch.rsub(self, other, alpha), backward
 
         def rsub_1(self,
-                   other: float,
-                   alpha: float = 1.0):
+                   other: number,
+                   alpha: number = 1.0):
             self_size = self.size()
             def backward(grad_output):
                 grad_self = (- grad_output * alpha)._grad_sum_to_size(self_size)
@@ -1383,34 +1383,24 @@ c10::optional<GradientPair> gradientInfoForSchema(
     //    in its argument, all scalar arg should already be passed with float
     //    value since scalar/int aren't differentiable either way.
     //
-    auto raw_schema_str = schema_str;
-    bool replace_scalar = c10::ReplaceAll(schema_str, "Scalar", "float");
     // For debugging AD change:
     // std::cout << "Looking for " << schema_str << std::endl;
 
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
-    if (sym_script_it != schema_to_graphs.end()) {
-      if (replace_scalar) {
-        // so the problem is that our replaced Scalar might not have been a
-        // float (but could be an int). So what we do is to change the input
-        // back to Scalar (aka NumberType) and cast to float.
-        auto raw_schema = parseSchema(raw_schema_str);
-        auto& g = *sym_script_it->second.forward;
-        WithInsertPoint guard(*g.nodes().begin());
-        for (size_t i = 0; i < raw_schema.arguments().size(); i++) {
-          auto nt = raw_schema.arguments()[i].type();
-          if (nt->kind() == TypeKind::NumberType) {
-            auto inp = sym_script_it->second.forward->inputs().at(i);
-            auto inp_cast = g.create(prim::Float, inp);
-            inp_cast->output()->setType(inp->type());
-            g.insertNode(inp_cast);
-            inp->replaceAllUsesWith(inp_cast->output());
-            inp_cast->replaceInput(0, inp);
-            inp->setType(nt);
-          }
-        }
+    if (sym_script_it == schema_to_graphs.end()) {
+      // FIXME: We used to replace Scalar by float. If we were sure that
+      // all of the definitions above have been converted to number instead,
+      // we could drop this if.
+      if (c10::ReplaceAll(schema_str, "Scalar", "float")) {
+	sym_script_it = schema_to_graphs.find(schema_str);
+        // Use this to find replaced definitions
+	// if (sym_script_it != schema_to_graphs.end()) {
+	//  std::cout << "Found replaced" << schema_str << std::endl;
+	// }
       }
+    }
+    if (sym_script_it != schema_to_graphs.end()) {
       cached_gradient_pairs.emplace_hint(
           cache_it, &schema, sym_script_it->second);
       return sym_script_it->second;
