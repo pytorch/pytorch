@@ -5,31 +5,31 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <TH/THGenerator.hpp>
 
-#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)                                \
+#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP) \
   void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value) \
   { \
-    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);                \
-    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,                        \
+    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL); \
+    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t, \
                      *r__data = (*t_data OP value) ? 1 : 0;); \
-  }                                                                        \
-  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)        \
-  {                                        \
-    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL);                \
-    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,                                        \
+  } \
+  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value) \
+  { \
+    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL); \
+    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, \
                      *r__data = (*t_data OP value) ? 1 : 0;); \
-  }                                                                        \
+  } \
   void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
-  {                                        \
-    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                \
-    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,                \
+  { \
+    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL); \
+    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb, \
                      *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  }                                                                        \
+  } \
   void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
-  {                                \
-    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                \
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,                        \
+  { \
+    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL); \
+    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb, \
                      *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  }                                                                        \
+  }
 
 TENSOR_IMPLEMENT_LOGICAL(lt,<)
 TENSOR_IMPLEMENT_LOGICAL(gt,>)
@@ -296,15 +296,16 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
     if (r_Contig && (tp != rp)) {
       ptrdiff_t r_Size = THTensor_(nElement)(r_);
       int r_Dim = THTensor_nDimensionLegacyAll(r_);
-      at::parallel_for(0, r_Size, HYPER_TH_OMP_OVERHEAD_THRESHOLD, [=](int64_t begin, int64_t end) {
+      at::parallel_for(0, r_Size, HYPER_TH_OMP_OVERHEAD_THRESHOLD,
+          [&](int64_t begin, int64_t end) {
         for (auto iter = begin; iter < end; iter++) {
           int j;
           int64_t quot;
           int64_t rem = iter;
           ptrdiff_t tBasicIndex = 0;
 
-          for(j = 0; j < r_Dim; ++j) {
-            if(j != dimension){
+          for (j = 0; j < r_Dim; ++j) {
+            if (j != dimension) {
               quot = rem/r_->stride(j);
               rem = rem%r_->stride(j);
               tBasicIndex += quot*t->stride(j);
@@ -313,7 +314,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
           scalar_t *t_data = tp+tBasicIndex;
           scalar_t *r__data = rp+iter;
           *r__data = 1;
-          for(j=0; j < THTensor_sizeLegacyNoScalars(t, dimension); ++j) {
+          for (j=0; j < THTensor_sizeLegacyNoScalars(t, dimension); ++j) {
             *r__data *= *(t_data + j*THTensor_strideLegacyNoScalars(t, dimension));
           }
         }
@@ -1042,7 +1043,7 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
     ptrdiff_t r_Size = THTensor_(nElement)(r_); \
     int r_Contig = THTensor_(isContiguous)(r_); \
     int tContig = THTensor_(isContiguous)(t); \
-    if( !at::in_parallel_region()) { \
+    if (!at::in_parallel_region()) { \
       TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, THRESHOLD); \
     } else { \
       TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);); \
@@ -1062,7 +1063,7 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
     if (r_Contig && tContig) { \
       TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(NAME)(r__data, t_data, r__len);); \
     } else { \
-      if( !at::in_parallel_region()) { \
+      if (!at::in_parallel_region()) { \
         TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, THRESHOLD); \
       } \
       else { \
@@ -1666,8 +1667,9 @@ void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THT
   scalar_t*const alpha_data = alpha->data<scalar_t>();
   scalar_t*const total_data = total->data<scalar_t>();
   const int64_t numel = THTensor_(nElement)(x);
-  at::parallel_for(0, numel, TH_OMP_OVERHEAD_THRESHOLD, [=](int64_t begin, int64_t end) {
-    for(auto i = begin; i < end; ++i) {
+  at::parallel_for(0, numel, TH_OMP_OVERHEAD_THRESHOLD,
+      [&](int64_t begin, int64_t end) {
+    for (auto i = begin; i < end; ++i) {
       grad_data[i] = THTensor_(dirichlet_grad_one)(x_data[i], alpha_data[i], total_data[i]);
     }
   });

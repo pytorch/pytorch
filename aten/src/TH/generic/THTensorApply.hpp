@@ -75,7 +75,7 @@ if (std::isnan(val)) break;
     TYPE1 *rp = THTensor_getStoragePtr(TENSOR1)->data<TYPE1>()+TENSOR1->storage_offset(); \
     TYPE2 *tp = THTensor_getStoragePtr(TENSOR2)->data<TYPE2>()+TENSOR2->storage_offset(); \
     if (tp != (TYPE2*)rp) { \
-      at::parallel_for(0, SIZE, (THRESHOLD * 10), [=](int64_t begin, int64_t end) { \
+      at::parallel_for(0, SIZE, (THRESHOLD * 10), [&](int64_t begin, int64_t end) { \
         PRAGMA_LOOP(ivdep) \
         for (auto iter = begin; iter < end; iter++) { \
           TYPE2 *TENSOR2##_data = tp+iter; \
@@ -84,7 +84,7 @@ if (std::isnan(val)) break;
         } \
       }); \
     } else { \
-      at::parallel_for(0, SIZE, (THRESHOLD * 10), [=](int64_t begin, int64_t end) { \
+      at::parallel_for(0, SIZE, (THRESHOLD * 10), [&](int64_t begin, int64_t end) { \
         PRAGMA_LOOP(simd) \
         for (auto iter = begin; iter < end; iter++) { \
           TYPE2* TENSOR2##_data = tp+iter; \
@@ -107,11 +107,15 @@ if (std::isnan(val)) break;
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, -1, 1) \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE1, TENSOR1, -1, 1) \
     if (0 == TH_TENSOR_APPLY_hasFinished) { \
-      at::parallel_for(0, SIZE, THRESHOLD, [=,TENSOR1##_data_l=TENSOR1##_data,TENSOR2##_data_l=TENSOR2##_data,TENSOR1##_i_l=TENSOR1##_i,TENSOR2##_i_l=TENSOR2##_i](int64_t begin, int64_t end) { \
-        auto TENSOR1##_i = TENSOR1##_i_l; \
-        auto TENSOR2##_i = TENSOR2##_i_l; \
-        auto TENSOR1##_data = TENSOR1##_data_l; \
-        auto TENSOR2##_data = TENSOR2##_data_l; \
+      auto TENSOR1##_i_local = TENSOR1##_i; \
+      auto TENSOR2##_i_local = TENSOR2##_i; \
+      auto TENSOR1##_data_local = TENSOR1##_data; \
+      auto TENSOR2##_data_local = TENSOR2##_data; \
+      at::parallel_for(0, SIZE, THRESHOLD, [&](int64_t begin, int64_t end) { \
+        auto TENSOR1##_i = TENSOR1##_i_local; \
+        auto TENSOR2##_i = TENSOR2##_i_local; \
+        auto TENSOR1##_data = TENSOR1##_data_local; \
+        auto TENSOR2##_data = TENSOR2##_data_local; \
         /*step 2*/ \
         ptrdiff_t line_index_start = begin; \
         ptrdiff_t line_seg_length = (end - begin); \
@@ -160,7 +164,7 @@ if (std::isnan(val)) break;
     TYPE2 *tp = THTensor_getStoragePtr(TENSOR2)->data<TYPE2>()+TENSOR2->storage_offset(); \
     TYPE3 *srcp = THTensor_getStoragePtr(TENSOR3)->data<TYPE3>()+TENSOR3->storage_offset(); \
     if (tp != (TYPE2*)rp) { \
-      at::parallel_for(0, SIZE, (THRESHOLD * 10), [=](int64_t begin, int64_t end) { \
+      at::parallel_for(0, SIZE, (THRESHOLD * 10), [&](int64_t begin, int64_t end) { \
         PRAGMA_LOOP(ivdep) \
         for (auto iter = begin; iter < end; iter++) { \
           TYPE1 *TENSOR1##_data = rp+iter; \
@@ -170,7 +174,7 @@ if (std::isnan(val)) break;
         } \
       }); \
     } else { \
-      at::parallel_for(0, SIZE, (THRESHOLD * 10), [=](int64_t begin, int64_t end) { \
+      at::parallel_for(0, SIZE, (THRESHOLD * 10), [&](int64_t begin, int64_t end) { \
         PRAGMA_LOOP(simd) \
         for (auto iter = begin; iter < end; iter++) { \
           TYPE1 *TENSOR1##_data = rp+iter; \
@@ -187,13 +191,19 @@ if (std::isnan(val)) break;
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, -1, 1) \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE3, TENSOR3, -1, 1) \
     if (0 == TH_TENSOR_APPLY_hasFinished) { \
-      at::parallel_for(0, SIZE, THRESHOLD, [=,TENSOR1##_data_l=TENSOR1##_data,TENSOR2##_data_l=TENSOR2##_data,TENSOR3##_data_l=TENSOR3##_data,TENSOR1##_i_l=TENSOR1##_i,TENSOR2##_i_l=TENSOR2##_i,TENSOR3##_i_l=TENSOR3##_i](int64_t begin, int64_t end) { \
-        auto TENSOR1##_i = TENSOR1##_i_l; \
-        auto TENSOR2##_i = TENSOR2##_i_l; \
-        auto TENSOR3##_i = TENSOR3##_i_l; \
-        auto TENSOR1##_data = TENSOR1##_data_l; \
-        auto TENSOR2##_data = TENSOR2##_data_l; \
-        auto TENSOR3##_data = TENSOR3##_data_l; \
+      auto TENSOR1##_i_local = TENSOR1##_i; \
+      auto TENSOR2##_i_local = TENSOR2##_i; \
+      auto TENSOR3##_i_local = TENSOR3##_i; \
+      auto TENSOR1##_data_local = TENSOR1##_data; \
+      auto TENSOR2##_data_local = TENSOR2##_data; \
+      auto TENSOR3##_data_local = TENSOR3##_data; \
+      at::parallel_for(0, SIZE, THRESHOLD, [&](int64_t begin, int64_t end) { \
+        auto TENSOR1##_i = TENSOR1##_i_local; \
+        auto TENSOR2##_i = TENSOR2##_i_local; \
+        auto TENSOR3##_i = TENSOR3##_i_local; \
+        auto TENSOR1##_data = TENSOR1##_data_local; \
+        auto TENSOR2##_data = TENSOR2##_data_local; \
+        auto TENSOR3##_data = TENSOR3##_data_local; \
         ptrdiff_t line_index_start = begin; \
         ptrdiff_t line_seg_length = (end - begin); \
         __TH_TENSOR_APPLYX_CAL_MEMORY_OFFSET(TENSOR1); \
@@ -248,7 +258,7 @@ if (std::isnan(val)) break;
   ptrdiff_t TENSOR##Size = THTensor_(nElement)(TENSOR); \
   if (TENSOR##Contig) { \
     TYPE *rp = THTensor_getStoragePtr(TENSOR)->data<TYPE>()+TENSOR->storage_offset(); \
-    OUTPUT = at::parallel_reduce(0, TENSOR##Size, (THRESHOLD * 10), (TYPE)0, [rp](int64_t begin, int64_t end, TYPE ident)->TYPE { \
+    OUTPUT = at::parallel_reduce(0, TENSOR##Size, (THRESHOLD * 10), (TYPE)0, [&](int64_t begin, int64_t end, TYPE ident)->TYPE { \
       TYPE r = ident; \
       for (auto iter = begin; iter < end; iter++) { \
         TYPE *TENSOR##_data = rp+iter; \
@@ -261,9 +271,11 @@ if (std::isnan(val)) break;
     int64_t TH_TENSOR_dim_index = 0; \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE, TENSOR, -1, 1); \
     if (0 == TH_TENSOR_APPLY_hasFinished) { \
-      OUTPUT = at::parallel_reduce(0, TENSOR##Size, THRESHOLD, (TYPE)0, [=,TENSOR##_data_l=TENSOR##_data,TENSOR##_i_l=TENSOR##_i](int64_t begin, int64_t end, TYPE ident)->TYPE { \
-        auto TENSOR##_data = TENSOR##_data_l; \
-        auto TENSOR##_i = TENSOR##_i_l; \
+      auto TENSOR##_data_local = TENSOR##_data; \
+      auto TENSOR##_i_local = TENSOR##_i; \
+      OUTPUT = at::parallel_reduce(0, TENSOR##Size, THRESHOLD, (TYPE)0, [&](int64_t begin, int64_t end, TYPE ident)->TYPE { \
+        auto TENSOR##_data = TENSOR##_data_local; \
+        auto TENSOR##_i = TENSOR##_i_local; \
         ptrdiff_t line_index_start = begin; \
         ptrdiff_t line_seg_length = (end - begin); \
         __TH_TENSOR_APPLYX_CAL_MEMORY_OFFSET(TENSOR); \
@@ -295,15 +307,14 @@ if (std::isnan(val)) break;
 #ifdef INTRA_OP_PARALLEL
 #define TH_TENSOR_APPLY_CONTIG(TYPE, TENSOR, CODE) \
 { \
-  TYPE *TENSOR##_data_start = TENSOR->data<scalar_t>(); \
-  auto code_fn = [=](int64_t begin, int64_t end) { \
+  auto code_fn = [&](int64_t begin, int64_t end) { \
     ptrdiff_t TENSOR##_len = end - begin; \
-    TYPE *TENSOR##_data = TENSOR##_data_start + begin; \
+    TYPE *TENSOR##_data = TENSOR->data<scalar_t>() + begin; \
     CODE \
   }; \
-  int inParallel = at::in_parallel_region(); \
+  int in_parallel = at::in_parallel_region(); \
   ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR); \
-  if (!inParallel) { \
+  if (!in_parallel) { \
     at::parallel_for(0, TH_TENSOR_size, TH_OMP_OVERHEAD_THRESHOLD, code_fn); \
   } else { \
     code_fn(0, TH_TENSOR_size); \
@@ -321,17 +332,15 @@ if (std::isnan(val)) break;
 #ifdef INTRA_OP_PARALLEL
 #define TH_TENSOR_APPLY2_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
 { \
-  TYPE1 *TENSOR1##_data_start = TENSOR1->data<scalar_t>(); \
-  TYPE2 *TENSOR2##_data_start = TENSOR2->data<scalar_t>(); \
-  auto code_fn = [=](int64_t begin, int64_t end) { \
+  auto code_fn = [&](int64_t begin, int64_t end) { \
     ptrdiff_t TENSOR1##_len = end - begin; \
-    TYPE1 *TENSOR1##_data = TENSOR1##_data_start + begin; \
-    TYPE2 *TENSOR2##_data = TENSOR2##_data_start + begin; \
+    TYPE1 *TENSOR1##_data = TENSOR1->data<scalar_t>() + begin; \
+    TYPE2 *TENSOR2##_data = TENSOR2->data<scalar_t>() + begin; \
     CODE \
   }; \
-  int inParallel = at::in_parallel_region(); \
+  int in_parallel = at::in_parallel_region(); \
   ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR1); \
-  if (!inParallel) { \
+  if (!in_parallel) { \
     at::parallel_for(0, TH_TENSOR_size, TH_OMP_OVERHEAD_THRESHOLD, code_fn); \
   } else { \
     code_fn(0, TH_TENSOR_size); \
@@ -350,19 +359,16 @@ if (std::isnan(val)) break;
 #ifdef INTRA_OP_PARALLEL
 #define TH_TENSOR_APPLY3_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, CODE) \
 { \
-  TYPE1 *TENSOR1##_data_start = TENSOR1->data<scalar_t>(); \
-  TYPE2 *TENSOR2##_data_start = TENSOR2->data<scalar_t>(); \
-  TYPE3 *TENSOR3##_data_start = TENSOR3->data<scalar_t>(); \
-  auto code_fn = [=](int64_t begin, int64_t end) { \
+  auto code_fn = [&](int64_t begin, int64_t end) { \
     ptrdiff_t TENSOR1##_len = end - begin; \
-    TYPE1 *TENSOR1##_data = TENSOR1##_data_start + begin; \
-    TYPE2 *TENSOR2##_data = TENSOR2##_data_start + begin; \
-    TYPE3 *TENSOR3##_data = TENSOR3##_data_start + begin; \
+    TYPE1 *TENSOR1##_data = TENSOR1->data<scalar_t>() + begin; \
+    TYPE2 *TENSOR2##_data = TENSOR2->data<scalar_t>() + begin; \
+    TYPE3 *TENSOR3##_data = TENSOR3->data<scalar_t>() + begin; \
     CODE \
   }; \
-  int inParallel = at::in_parallel_region(); \
+  int in_parallel = at::in_parallel_region(); \
   ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR1); \
-  if (!inParallel) { \
+  if (!in_parallel) { \
     at::parallel_for(0, TH_TENSOR_size, TH_OMP_OVERHEAD_THRESHOLD, code_fn); \
   } else { \
     code_fn(0, TH_TENSOR_size); \
