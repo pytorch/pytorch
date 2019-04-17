@@ -336,6 +336,7 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
+  // This check exists to make sure operations on `self` doesn't build up autograd history.
   AT_ASSERT(!(self.is_variable() && self.requires_grad()) || at::NonVariableTypeMode::is_enabled());
   AT_ASSERT(self.is_sparse());
 
