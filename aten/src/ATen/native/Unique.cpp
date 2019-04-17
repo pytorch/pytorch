@@ -41,7 +41,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
   if (return_inverse || return_counts) {
     inverse_indices.resize_(input.sizes());
     int64_t* inverse_indices_data = inverse_indices.data<int64_t>();
-    std::unordered_map<scalar_t, std::atomic_int64_t> inverse_map;
+    std::unordered_map<scalar_t, int64_t> inverse_map;
     inverse_map.reserve(output.numel());
     for (int i = 0; i < output.numel(); ++i) {
       inverse_map[output_data[i]] = i;
