@@ -1630,7 +1630,7 @@ graph(%x : Tensor,
                 b, c = d['y']
                 return a + b
 
-        inputs = {'x': (torch.rand(2, 2), torch.rand(2, 2)), 'y': (torch.ones(1,1), torch.ones(2,1))}
+        inputs = {'x': (torch.rand(2, 2), torch.rand(2, 2)), 'y': (torch.ones(1, 1), torch.ones(2, 1))}
         module = torch.jit.trace(Test(), inputs)
         FileCheck().check('aten::values') \
                    .check('prim::ListUnpack') \
@@ -1647,22 +1647,22 @@ graph(%x : Tensor,
     def test_input_dict_unify(self):
         def test(d):
             return d['int'], d['float']
-        inputs = {'int': torch.ones((2,2), dtype=torch.int32),
-                  'float': torch.ones((2,2), dtype=torch.float32)}
+        inputs = {'int': torch.ones((2, 2), dtype=torch.int32),
+                  'float': torch.ones((2, 2), dtype=torch.float32)}
         self.checkTrace(test, (inputs,), inputs_require_grads=False)
 
     def test_input_tuple_of_dicts(self):
         def test(t):
             d = t[0]
             return d['x']['y']
-        inputs= {'x': {'y': torch.rand(2,3)}}
+        inputs = {'x': {'y': torch.rand(2, 3)}}
         self.checkTrace(test, ((inputs, inputs),), allow_unused=True)
 
     def test_input_dict_of_dicts(self):
         def test(d):
             return d['x']['y']
-        nested_input = {'y': torch.rand(2,3)}
-        unified_nested = {'y': torch.rand(3,2)}
+        nested_input = {'y': torch.rand(2, 3)}
+        unified_nested = {'y': torch.rand(3, 2)}
         inputs = {'x': nested_input, 'force_unify': unified_nested}
         self.checkTrace(test, (inputs,), allow_unused=True)
 
