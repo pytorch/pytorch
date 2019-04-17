@@ -118,7 +118,13 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       }
       rets.push_back(Argument("0", ret_type, {}, {}, false));
     }
-    return FunctionSchema("", "", std::move(args), std::move(rets));
+    std::string name("");
+    if (py::hasattr(self, "__qualname__")) {
+      name = py::str(py::getattr(self, "__qualname__"));
+    } else if (py::hasattr(self, "__name__")) {
+      name = py::str(py::getattr(self, "__name__"));
+    }
+    return FunctionSchema(name, "", std::move(args), std::move(rets));
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
@@ -501,7 +507,9 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
 };
 
 std::shared_ptr<MethodValue> moduleToMethod(
-    const std::shared_ptr<Module>& mod) {
+    const std::shared_ptr<Module>& mod,
+    const py::object& py_mod,
+    const SourceRange& loc) {
   // this path only supports calling raw script functions
   // but because they are not distinguished from models, we have to check
   // that they are function-like here. They must not have state, and they
@@ -509,9 +517,10 @@ std::shared_ptr<MethodValue> moduleToMethod(
   //  this will be replaced with a direct py::isinstance<Function> call.
 
   if (mod->get_parameters().size() != 0) {
-    throw ErrorReport()
-        << "Attempted to inline a Module with parameters. "
-           "Stateful modules to be inlined must be submodules of the callee.";
+    throw ErrorReport() << "Modules with parameters must be submodules of"
+                           " the caller, but this module was not: "
+                        << py::str(py_mod) << "\n"
+                        << loc << "\n";
   }
   Method* forward = mod->find_method("forward");
   if (!forward) {
@@ -570,7 +579,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     // within a scripting context while still enforcing that parameters from
     // stateful submodules are properly accounted for.
     auto mod = py::cast<std::shared_ptr<Module>>(obj);
-    return moduleToMethod(mod);
+    return moduleToMethod(mod, obj, loc);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
@@ -592,7 +601,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
     if (!compiled_fn.is(py::none())) {
       auto mod = py::cast<std::shared_ptr<Module>>(compiled_fn);
-      return moduleToMethod(mod);
+      return moduleToMethod(mod, obj, loc);
     }
   }
 
