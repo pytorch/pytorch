@@ -2693,7 +2693,7 @@ class _TestTorchMixin(object):
         rqr = qr.dequantize()
         print(r.numpy())
         print(rqr.numpy())
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2/scale))
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
