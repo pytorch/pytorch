@@ -31,7 +31,7 @@ $extra_cuda_headers
 namespace at {
 
 ${Type}::${Type}()
-  : ${DenseBackend}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
+  : ${DeviceType}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};

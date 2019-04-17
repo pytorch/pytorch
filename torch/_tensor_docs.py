@@ -17,6 +17,8 @@ new_common_args = parse_kwargs("""
         Default: if None, same :class:`torch.device` as this tensor.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
+    pin_memory (bool, optional): If set, returned tensor would be allocated in
+        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 add_docstr_all('new_tensor',
@@ -484,13 +486,6 @@ add_docstr_all('bmm',
 bmm(batch2) -> Tensor
 
 See :func:`torch.bmm`
-""")
-
-add_docstr_all('btrisolve',
-               r"""
-btrisolve(LU_data, LU_pivots) -> Tensor
-
-See :func:`torch.btrisolve`
 """)
 
 add_docstr_all('cauchy_',
@@ -1417,6 +1412,13 @@ add_docstr_all('lt_',
 lt_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.lt`
+""")
+
+add_docstr_all('lu_solve',
+               r"""
+lu_solve(LU_data, LU_pivots) -> Tensor
+
+See :func:`torch.lu_solve`
 """)
 
 add_docstr_all('map_',
@@ -2530,6 +2532,16 @@ int() -> Tensor
 
 ``self.int()`` is equivalent to ``self.to(torch.int32)``. See :func:`to`.
 """)
+
+add_docstr_all('int_repr',
+               r"""
+int_repr() -> Tensor
+
+Given a quantized Tensor,
+``self.int_repr()`` returns a CPU Tensor with uint8_t as data type that stores the
+underlying uint8_t values of the given Tensor.
+""")
+
 
 add_docstr_all('long',
                r"""

@@ -11,7 +11,6 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
   QTensorImpl(
       Storage&& storage,
       TensorTypeId type_id,
-      bool is_variable,
       QuantizerPtr quantizer);
 
   // TODO: Expose in PyTorch Frontend
@@ -21,7 +20,7 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
 
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
     auto impl = c10::make_intrusive<QTensorImpl>(
-        Storage(storage()), type_id(), is_variable(), quantizer_);
+        Storage(storage()), type_id(), quantizer_);
     impl->set_sizes_and_strides(sizes(), strides());
     impl->storage_offset_ = storage_offset_;
     impl->is_wrapped_number_ = is_wrapped_number_;
