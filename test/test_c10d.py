@@ -1934,6 +1934,52 @@ class ReducerTest(TestCase):
             optimizer.step()
 
 
+class ComputeBucketAssignmentTest(TestCase):
+    def test_single_limit_single_dtype(self):
+        tensors = [
+            torch.empty([100], dtype=torch.float),
+            torch.empty([200], dtype=torch.float),
+            torch.empty([100], dtype=torch.float),
+            torch.empty([50], dtype=torch.float),
+        ]
+        result = dist._compute_bucket_assignment_by_size(tensors, [400])
+        self.assertEqual([[0], [1], [2], [3]], result)
+
+    def test_single_limit_multi_dtype(self):
+        tensors = [
+            torch.empty([50], dtype=torch.float),
+            torch.empty([25], dtype=torch.double),
+            torch.empty([50], dtype=torch.float),
+            torch.empty([25], dtype=torch.double),
+            torch.empty([50], dtype=torch.float),
+            torch.empty([25], dtype=torch.double),
+        ]
+        result = dist._compute_bucket_assignment_by_size(tensors, [400])
+        self.assertEqual([[0, 2], [1, 3], [4], [5]], result)
+
+    def test_multi_limit_single_dtype(self):
+        tensors = [
+            torch.empty([10], dtype=torch.float),
+            torch.empty([10], dtype=torch.float),
+            torch.empty([10], dtype=torch.float),
+            torch.empty([10], dtype=torch.float),
+        ]
+        result = dist._compute_bucket_assignment_by_size(tensors, [40, 80])
+        self.assertEqual([[0], [1, 2], [3]], result)
+
+    def test_multi_limit_multi_dtype(self):
+        tensors = [
+            torch.empty([50], dtype=torch.float),
+            torch.empty([25], dtype=torch.double),
+            torch.empty([50], dtype=torch.float),
+            torch.empty([25], dtype=torch.double),
+            torch.empty([50], dtype=torch.float),
+            torch.empty([25], dtype=torch.double),
+        ]
+        result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
+        self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
+
+
 if __name__ == '__main__':
     assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
 
