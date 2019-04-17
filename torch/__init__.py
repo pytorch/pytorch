@@ -313,5 +313,7 @@ def compiled_with_cxx11_abi():
 # Import the ops "namespace"
 from torch._ops import ops  # noqa: F401
 
+torch.jit._unused = torch.ops.prim.Unused
+
 # Import the quasi random sampler
 import torch.quasirandom

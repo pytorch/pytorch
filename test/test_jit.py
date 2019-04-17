@@ -10678,6 +10678,15 @@ a")
             return a
         self.checkScript(foo, (torch.ones(4, 3), torch.ones(4, 3)))
 
+    def test_unused(self):
+        @torch.jit.script
+        def test_unused(x):
+            for i in range(300):
+                torch.jit._unused([])
+
+        FileCheck().check('prim::ListConstruct()').check('prim::Unused')\
+                   .run(test_unused.graph)
+
     def test_lhs_advanced_indexing_augmented_assignment(self):
         def foo(x, y):
             a = torch.exp(x)

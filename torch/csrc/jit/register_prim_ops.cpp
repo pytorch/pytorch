@@ -889,7 +889,14 @@ RegisterOperators reg(
          userObj->setSlot(slot, std::move(v));
          return 0;
        };
-     })});
+        }),
+     Operator("prim::Unused(t item) -> ()", [](const Node* node) {
+       return [](Stack& stack) {
+         auto v = pop(stack);
+         return 0;
+       };
+        }),
+     });
 
 RegisterOperators logging_operators(
     {Operator(

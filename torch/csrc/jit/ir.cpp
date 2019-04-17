@@ -835,6 +835,7 @@ bool Node::hasSideEffects() const {
     case aten::warn:
     case prim::AddStatValue:
     case prim::TimePoint:
+    case prim::Unused:
       return true;
   }
   // All other builtin ops are known to be safe.
