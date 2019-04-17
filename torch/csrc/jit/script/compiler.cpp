@@ -1326,9 +1326,8 @@ struct to_ir {
           integral_constants);
     }
 
-    auto true_constant  = graph->insertConstant(true, nullptr, range);
-    cond_val = (cond.has_value()) ? emitCond(cond.value()) : true_constant;
-
+    cond_val = (cond) ? emitCond(cond.value())
+                      : graph->insertConstant(true, nullptr, range);
     n->addInput(max_trip_count_val);
     n->addInput(cond_val);
     auto* body_block = n->addBlock();
@@ -1349,7 +1348,8 @@ struct to_ir {
       emitStatements(body);
 
       // Also emit the conditional
-      cond_val = (cond.has_value()) ? emitCond(cond.value()) : true_constant;
+      cond_val = (cond) ? emitCond(cond.value())
+                        : graph->insertConstant(true, nullptr, range);
       body_block->registerOutput(cond_val);
       auto body_frame = popFrame();
       auto outer_frame = environment_stack;
@@ -1388,7 +1388,7 @@ struct to_ir {
           << "range() expects 1 argument but got " << args.size();
     }
     auto max_trip_count_val = ensureInt(range, emitExpr(args[0]));
-    const auto ident_name = target.name();
+    const auto& ident_name = target.name();
     auto assigner = [ident_name, range](Value* index, std::shared_ptr<Environment> env) {
       env->setVar(range, ident_name, index);
     };
@@ -1414,7 +1414,7 @@ void emitForInListLoop(const For& stmt, std::shared_ptr<torch::jit::script::Simp
         {listArg},
         {},
         /*required=*/true);
-  const auto ident_name = target.name();
+  const auto& ident_name = target.name();
   auto assigner = [ident_name, range, listArg, this](Value* index, std::shared_ptr<Environment> env) {
   auto cur_elm = emitBuiltinCall(
       range,
