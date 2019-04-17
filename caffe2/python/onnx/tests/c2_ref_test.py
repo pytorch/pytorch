@@ -23,14 +23,14 @@ import caffe2.python.onnx.frontend as c2_onnx
 import caffe2.python.onnx.backend as c2
 
 import numpy as np
-from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
+from caffe2.python.models.download import ModelDownloader
 
-from caffe2.python.onnx.tests.test_utils import DownloadingTestCase
+from caffe2.python.onnx.tests.test_utils import TestCase
 
 import caffe2.python._import_c_extension as C
 
 
-class TestCaffe2Basic(DownloadingTestCase):
+class TestCaffe2Basic(TestCase):
     def test_dummy_name(self):
         g = C.DummyName()
         n1 = g.new_dummy_name()
@@ -726,43 +726,33 @@ class TestCaffe2Basic(DownloadingTestCase):
             self.assertSameOutputs(c2_outputs, onnx_outputs)
 
 
-class TestCaffe2End2End(DownloadingTestCase):
-    def _model_dir(self, model):
-        caffe2_home = os.path.expanduser(os.getenv('CAFFE2_HOME', '~/.caffe2'))
-        models_dir = os.getenv('ONNX_MODELS', os.path.join(caffe2_home, 'models'))
-        return os.path.join(models_dir, model)
+class TestCaffe2End2End(TestCase):
+    def setUp(self):
+        self.model_downloader = ModelDownloader('ONNX_MODELS')
 
     def _test_net(self,
                   net_name,
                   input_blob_dims=(1, 3, 224, 224),
                   decimal=7):
         np.random.seed(seed=0)
-        model_dir = self._model_dir(net_name)
-        if not os.path.exists(model_dir):
-            self._download(net_name)
-        c2_predict_pb = os.path.join(model_dir, 'predict_net.pb')
-        c2_predict_net = caffe2_pb2.NetDef()
-        with open(c2_predict_pb, 'rb') as f:
-            c2_predict_net.ParseFromString(f.read())
-        c2_predict_net.name = net_name
+        try:
+            c2_init_net, c2_predict_net, value_info = self.model_downloader.get_c2_model(net_name)
+        except (OSError, IOError) as e:
+            # catch IOError/OSError that is caused by FileNotFoundError and PermissionError
+            self.skipTest(str(e))
 
-        c2_init_pb = os.path.join(model_dir, 'init_net.pb')
-        c2_init_net = caffe2_pb2.NetDef()
-        with open(c2_init_pb, 'rb') as f:
-            c2_init_net.ParseFromString(f.read())
-        c2_init_net.name = net_name + '_init'
-
+        # start to run the model and compare outputs
         n, c, h, w = input_blob_dims
         data = np.random.randn(n, c, h, w).astype(np.float32)
         inputs = [data]
         _, c2_outputs = c2_native_run_net(c2_init_net, c2_predict_net, inputs)
         del _
 
-        with open(os.path.join(model_dir, 'value_info.json'), 'r') as value_info_conf:
-            model = c2_onnx.caffe2_net_to_onnx_model(
-                predict_net=c2_predict_net,
-                init_net=c2_init_net,
-                value_info=json.load(value_info_conf))
+        model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=c2_predict_net,
+            init_net=c2_init_net,
+            value_info=value_info,
+        )
         c2_ir = c2.prepare(model)
         onnx_outputs = c2_ir.run(inputs)
         self.assertSameOutputs(c2_outputs, onnx_outputs, decimal=decimal)

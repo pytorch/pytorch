@@ -13,7 +13,7 @@
 #endif
 
 #include <torch/csrc/cuda/THCP.h>
-
+#include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -57,12 +57,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self)
 PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
-  int ndevice;
-  if (cudaGetDeviceCount(&ndevice) != cudaSuccess) {
-    cudaGetLastError();
-    ndevice = 0;
-  }
-  return PyLong_FromLong(ndevice);
+  return PyLong_FromLong(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
 
@@ -213,6 +208,14 @@ PyObject * THCPModule_cudaSynchronize(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
   THCudaCheck(cudaDeviceSynchronize());
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_cudaIPCCollect(PyObject *_unused /* unused */)
+{
+  HANDLE_TH_ERRORS
+  torch::CudaIPCCollect();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -377,11 +380,6 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   THCPByteStorage_postInit(m);
   THCPBoolStorage_postInit(m);
 
-  bool has_magma = at::hasMAGMA();
-  if (has_magma) {
-    THCMagma_init(state);
-  }
-
   bool has_half = true;
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
@@ -391,7 +389,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
     }
   };
 
-  set_module_attr("has_magma", has_magma ? Py_True : Py_False);
+  set_module_attr("has_magma", at::hasMAGMA() ? Py_True : Py_False);
   set_module_attr("has_half", has_half ? Py_True : Py_False);
 
   auto _state_cdata = THPObjectPtr(PyLong_FromVoidPtr(state));
@@ -453,6 +451,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_initialSeed", (PyCFunction)THCPModule_initialSeed,      METH_NOARGS,  nullptr},
   {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, nullptr},
   {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
+  {"_cuda_ipc_collect", (PyCFunction)THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
   {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, nullptr},
   {"_cuda_lock_mutex",   (PyCFunction)THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
   {"_cuda_unlock_mutex", (PyCFunction)THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},

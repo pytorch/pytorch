@@ -9,11 +9,11 @@ import onnx
 import onnx.defs
 from onnx.helper import make_node, make_graph, make_tensor, make_tensor_value_info, make_model
 from onnx.backend.base import namedtupledict
-from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
+from caffe2.python.models.download import ModelDownloader
 import caffe2.python.onnx.backend as c2
 from caffe2.python.onnx.workspace import Workspace
 from caffe2.python.trt.transform import convert_onnx_model_to_trt_op, transform_caffe2_net
-from caffe2.python.onnx.tests.test_utils import TestCase, DownloadingTestCase
+from caffe2.python.onnx.tests.test_utils import TestCase
 import numpy as np
 import os.path
 import json
@@ -80,6 +80,9 @@ def _download_onnx_model(model_name, opset_version):
     return model_dir
 
 class TensorRTOpTest(TestCase):
+    def setUp(self):
+        self.opset_version = onnx.defs.onnx_opset_version()
+
     def _test_relu_graph(self, X, batch_size, trt_max_batch_size):
         node_def = make_node("Relu", ["X"], ["Y"])
         Y_c2 = c2.run_node(node_def, {"X": X})
@@ -114,8 +117,7 @@ class TensorRTOpTest(TestCase):
         X = np.random.randn(52, 1, 3, 2).astype(np.float32)
         self._test_relu_graph(X, 52, 50)
 
-    def _test_onnx_importer(self, model_name, data_input_index,
-                            opset_version = onnx.defs.onnx_opset_version()):
+    def _test_onnx_importer(self, model_name, data_input_index, opset_version=onnx.defs.onnx_opset_version()):
         model_dir = _download_onnx_model(model_name, opset_version)
         model_def = onnx.load(os.path.join(model_dir, 'model.onnx'))
         input_blob_dims = [int(x.dim_value) for x in model_def.graph.input[data_input_index].type.tensor_type.shape.dim]
@@ -176,31 +178,9 @@ class TensorRTOpTest(TestCase):
         self._test_onnx_importer('vgg19', -2, 9)
 
 
-class TensorRTTransformTest(DownloadingTestCase):
-    def _model_dir(self, model):
-        caffe2_home = os.path.expanduser(os.getenv('CAFFE2_HOME', '~/.caffe2'))
-        models_dir = os.getenv('CAFFE2_MODELS', os.path.join(caffe2_home, 'models'))
-        return os.path.join(models_dir, model)
-
-    def _get_c2_model(self, model_name):
-        model_dir = self._model_dir(model_name)
-        if not os.path.exists(model_dir):
-            self._download(model_name)
-        c2_predict_pb = os.path.join(model_dir, 'predict_net.pb')
-        c2_predict_net = caffe2_pb2.NetDef()
-        with open(c2_predict_pb, 'rb') as f:
-            c2_predict_net.ParseFromString(f.read())
-        c2_predict_net.name = model_name
-
-        c2_init_pb = os.path.join(model_dir, 'init_net.pb')
-        c2_init_net = caffe2_pb2.NetDef()
-        with open(c2_init_pb, 'rb') as f:
-            c2_init_net.ParseFromString(f.read())
-        c2_init_net.name = model_name + '_init'
-
-        with open(os.path.join(model_dir, 'value_info.json')) as f:
-            value_info = json.load(f)
-        return c2_init_net, c2_predict_net, value_info
+class TensorRTTransformTest(TestCase):
+    def setUp(self):
+        self.model_downloader = ModelDownloader()
 
     def _add_head_tail(self, pred_net, new_head, new_tail):
         orig_head = pred_net.external_input[0]
@@ -226,14 +206,13 @@ class TensorRTTransformTest(DownloadingTestCase):
         pred_net.op.extend([tail])
         pred_net.external_output[0] = new_tail
 
-
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_resnet50_core(self):
         N = 2
         warmup = 20
         repeat = 100
         print("Batch size: {}, repeat inference {} times, warmup {} times".format(N, repeat, warmup))
-        init_net, pred_net, _  = self._get_c2_model('resnet50')
+        init_net, pred_net, _ = self.model_downloader.get_c2_model('resnet50')
         self._add_head_tail(pred_net, 'real_data', 'real_softmax')
         input_blob_dims = (N, 3, 224, 224)
         input_name = "real_data"

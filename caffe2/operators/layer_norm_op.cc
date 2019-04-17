@@ -1,7 +1,5 @@
 #include "caffe2/operators/layer_norm_op.h"
 
-#include <ATen/core/dispatch/KernelRegistration.h>
-#include <ATen/core/dispatch/OpSchemaRegistration.h>
 #include <c10/core/Tensor.h>
 
 #include "caffe2/core/operator_c10wrapper.h"
@@ -201,6 +199,6 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
 
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
-    _c10_ops::LayerNorm(),
+    "_caffe2::LayerNorm",
     C10LayerNorm_DontUseThisOpYet);
 }

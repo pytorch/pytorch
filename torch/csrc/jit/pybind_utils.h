@@ -29,52 +29,11 @@
 
 namespace torch {
 namespace jit {
-namespace detail {
-
-using ::c10::Argument;
-using ::c10::FunctionSchema;
 
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
 // that is confusing to display to the end user since it always reports
 // locations in libtorch code rather than user code.
-
-inline void findErrorInKwargs(const FunctionSchema& schema, py::kwargs kwargs) {
-  const auto& arguments = schema.arguments();
-  // First check if any of the kwargs are unknown, i.e. don't match the name of
-  // any argument in the schema.
-  for (const auto& kwarg : kwargs) {
-    const auto key = py::cast<std::string>(kwarg.first);
-    if (!std::count_if(
-            arguments.begin(),
-            arguments.end(),
-            [&key](const Argument& argument) {
-              return argument.name() == key;
-            })) {
-      throw std::runtime_error(c10::str(
-          "Unknown keyword argument '",
-          key,
-          "' for operator '",
-          schema.name(),
-          "'. Schema: ",
-          schema));
-    }
-  }
-  // If there are unconsumed kwargs but none of them were unknown, the first
-  // positional argument present in the kwargs is duplicated.
-  for (const auto& argument : arguments) {
-    if (kwargs.contains(argument.name().c_str())) {
-      AT_ASSERT(!argument.default_value());
-      throw std::runtime_error(c10::str(
-          "Argument '",
-          argument.name(),
-          "' specified both as positional and ",
-          "keyword argument. Schema: ",
-          schema));
-    }
-  }
-}
-} // namespace detail
 
 inline IValue toIValue(py::handle input) {
   if (THPVariable_Check(input.ptr())) {
@@ -92,9 +51,14 @@ inline IValue toIValue(py::handle input) {
     }
     return Tuple::create(s);
   } else {
-    AT_ERROR(
-        "Only tensors and (possibly nested) tuples of tensors are supported "
-        "as inputs or outputs of traced functions");
+    throw std::runtime_error(c10::str(
+        "Only tensors and (possibly nested) tuples of tensors are supported ",
+        "as inputs or outputs of traced functions",
+        ", but instead got value of type ",
+        py::str(input.get_type().attr("__name__")),
+        ".",
+        "\nValue: ",
+        py::repr(input)));
   }
 }
 
@@ -136,6 +100,7 @@ inline IValue toIValue(
     case TypeKind::TensorType:
     case TypeKind::AutogradZeroTensorType:
     case TypeKind::DimensionedTensorType:
+    case TypeKind::ProfiledTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
@@ -218,11 +183,26 @@ inline IValue toIValue(
       }
       return toIValue(obj, type->expect<OptionalType>()->getElementType());
     }
+    case TypeKind::ClassType: {
+      auto classType = type->expect<ClassType>();
+      // 1. create a bare ivalue
+      const size_t numAttrs = classType->numAttributes();
+      auto userObj = c10::ivalue::Object::create(classType, numAttrs);
+
+      // 2. copy all the contained types
+      for (size_t slot = 0; slot < numAttrs; slot++) {
+        const auto& attrType = classType->getAttribute(slot);
+        const auto& attrName = classType->getAttributeName(slot);
+
+        const auto& contained = py::getattr(obj, attrName.c_str());
+        userObj->setSlot(slot, toIValue(contained, attrType));
+      }
+      return userObj;
+    }
     case TypeKind::NumberType:
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
-    case TypeKind::ClassType:
       break;
   }
   AT_ERROR(
@@ -323,6 +303,22 @@ inline py::object toPyObject(IValue&& ivalue) {
       py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
     }
     return std::move(py_dict);
+  } else if (ivalue.isObject()) {
+    const auto obj = ivalue.toObject();
+    const auto classType = ClassType::get(obj->name());
+    AT_ASSERT(classType);
+    auto pyClass =
+        py::module::import("torch.jit").attr("_get_script_class")(obj->name());
+    auto pyObj = pyClass.attr("__new__")(pyClass);
+
+    const auto numAttrs = classType->numAttributes();
+
+    for (size_t slot = 0; slot < numAttrs; slot++) {
+      const auto& attrName = classType->getAttributeName(slot);
+      IValue v = obj->getSlot(slot);
+      py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
+    }
+    return pyObj;
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }
@@ -336,16 +332,16 @@ struct VISIBILITY_HIDDEN tuple_slice {
   tuple_slice(py::tuple tup_, int64_t b_, int64_t e_)
       : tup(std::move(tup_)), b(b_), e(e_) {}
   py::detail::tuple_iterator begin() const {
-    return {tup, b};
+    return {tup, static_cast<pybind11::ssize_t>(b)};
   }
   py::detail::tuple_iterator end() const {
-    return {tup, e};
+    return {tup, static_cast<pybind11::ssize_t>(e)};
   }
   size_t size() const {
     return e - b;
   }
   py::detail::tuple_accessor operator[](size_t index) const {
-    return {tup, b + index};
+    return {tup, static_cast<size_t>(b + index)};
   }
 
  private:
@@ -399,7 +395,11 @@ inline Stack createStackForSchema(
   }
 
   if (consumed_kwargs != kwargs.size()) {
-    detail::findErrorInKwargs(schema, kwargs);
+    std::vector<std::string> names;
+    for (const auto& kwarg : kwargs) {
+      names.emplace_back(py::cast<std::string>(kwarg.first));
+    }
+    schema.findErrorInKwargs(names);
   }
 
   return stack;

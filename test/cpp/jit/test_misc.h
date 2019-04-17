@@ -16,6 +16,7 @@
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/interpreter.h"
+#include "torch/csrc/jit/pass_manager.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
@@ -38,8 +39,10 @@
 
 #include <torch/csrc/jit/testing/file_check.h>
 #include "ATen/core/ivalue.h"
+#include "torch/csrc/jit/profiling_record.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
+#include "torch/jit.h"
 
 #include "onnx/onnx_pb.h"
 
@@ -78,59 +81,6 @@ std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {
   }
   out << "}";
   return out;
-}
-auto ct = CodeTemplate(R"(
-int foo($args) {
-
-    $bar
-        $bar
-    $a+$b
-}
-int commatest(int a${,stuff})
-int notest(int a${,empty,})
-)");
-auto ct_expect = R"(
-int foo(hi, 8) {
-
-    what
-    on many
-    lines...
-    7
-        what
-        on many
-        lines...
-        7
-    3+4
-}
-int commatest(int a, things..., others)
-int notest(int a)
-)";
-
-void testCodeTemplate() {
-  {
-    TemplateEnv e;
-    e.s("hi", "foo");
-    e.v("what", {"is", "this"});
-    TemplateEnv c(e);
-    c.s("hi", "foo2");
-    ASSERT_EQ(e.s("hi"), "foo");
-    ASSERT_EQ(c.s("hi"), "foo2");
-    ASSERT_EQ(e.v("what")[0], "is");
-  }
-
-  {
-    TemplateEnv e;
-    e.v("args", {"hi", "8"});
-    e.v("bar", {"what\non many\nlines...", "7"});
-    e.s("a", "3");
-    e.s("b", "4");
-    e.v("stuff", {"things...", "others"});
-    e.v("empty", {});
-    auto s = ct.format(e);
-    // std::cout << "'" << s << "'\n";
-    // std::cout << "'" << ct_expect << "'\n";
-    ASSERT_EQ(s, ct_expect);
-  }
 }
 
 void testInternedStrings() {
@@ -177,30 +127,6 @@ void testFromQualString() {
     } catch (const std::exception& c) {
     }
   }
-}
-
-void testInterp() {
-  constexpr int batch_size = 4;
-  constexpr int input_size = 256;
-  constexpr int seq_len = 32;
-
-  int hidden_size = 2 * input_size;
-
-  auto input = at::randn({seq_len, batch_size, input_size}, at::kCUDA);
-  auto hx = at::randn({batch_size, hidden_size}, at::kCUDA);
-  auto cx = at::randn({batch_size, hidden_size}, at::kCUDA);
-  auto w_ih = t_def(at::randn({4 * hidden_size, input_size}, at::kCUDA));
-  auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
-
-  auto lstm_g = build_lstm();
-  Code lstm_function(lstm_g);
-  InterpreterState lstm_interp(lstm_function);
-  auto outputs = run(lstm_interp, {input[0], hx, cx, w_ih, w_hh});
-  std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
-
-  // std::cout << almostEqual(outputs[0],hx) << "\n";
-  ASSERT_TRUE(exactlyEqual(outputs[0], hx));
-  ASSERT_TRUE(exactlyEqual(outputs[1], cx));
 }
 
 void testTHNNConv() {
@@ -424,58 +350,7 @@ void testATenNativeBatchNorm() {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
-using var_meta_type = std::vector<int64_t>;
-using var_meta_list = std::vector<var_meta_type>;
-using test_fn_type = std::function<variable_list(const variable_list&)>;
-
-void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
-  // Build up a fake graph with a FusionGroup
-  auto createGraphWithNames = [](std::string cname, std::string dname) {
-    auto graph = std::make_shared<Graph>();
-    at::ScalarType s = at::ScalarType::Float;
-    auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
-    auto a = SymbolicVariable::asNewInput(*graph, type);
-    auto b = SymbolicVariable::asNewInput(*graph, type);
-    auto c = a * b;
-    auto d = c * a;
-    c.value()->setUniqueName(cname);
-    d.value()->setUniqueName(dname);
-    graph->registerOutput(d.value());
-    torch::jit::overrideCanFuseOnCPU(true);
-    FuseGraph(graph);
-    torch::jit::overrideCanFuseOnCPU(false);
-    return graph;
-  };
-
-  auto getFusionGroup = [](const std::shared_ptr<Graph>& graph) {
-    const auto& nodes = graph->nodes();
-    auto maybe_fusion_group =
-        std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
-          return node->kind() == prim::FusionGroup;
-        });
-    AT_CHECK(
-        maybe_fusion_group != nodes.end(),
-        "testRegisterFusionCachesKernel: could not create FusionGroup");
-    return *maybe_fusion_group;
-  };
-
-  // Create two alpha-equivalent fusion groups
-  auto graph1 = createGraphWithNames("c1", "d1");
-  auto fg1 = getFusionGroup(graph1);
-
-  auto graph2 = createGraphWithNames("c2", "d2");
-  auto fg2 = getFusionGroup(graph2);
-
-  // Register both with the fusion compiler.
-  auto expected_key = registerFusion(fg1);
-  auto second_key = registerFusion(fg2);
-
-  // Because the graphs are alpha-equivalent, they should return the same key
-  // and therefore share a KernelSpec to share kernels for specializations
-  ASSERT_EQ(second_key, expected_key);
-}
-
-const auto cf_examples = R"JIT(
+static const auto cf_examples = R"JIT(
   def if_test(a, b):
       # FIXME: use 0 instead of a.
       # c = 0
@@ -497,11 +372,10 @@ const auto cf_examples = R"JIT(
     return a
 )JIT";
 void testControlFlow() {
-  auto cu = std::make_shared<script::Module>();
-  script::defineMethodsInModule(
-      cu, cf_examples, script::nativeResolver, c10::nullopt);
+  auto cu = compile(cf_examples);
+
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu->get_method(name).graph();
+    auto graph = cu->get_function(name).graph();
     Code code(graph);
     InterpreterState interp(code);
     interp.run(stack);
@@ -525,205 +399,6 @@ void testControlFlow() {
 void testProto() {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
-}
-
-void testCustomOperators() {
-  {
-    RegisterOperators reg({createOperator(
-        "foo::bar", [](double a, at::Tensor b) { return a + b; })});
-    auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar"));
-    ASSERT_EQ(ops.size(), 1);
-
-    auto& op = ops.front();
-    ASSERT_EQ(op->schema().name(), "foo::bar");
-
-    ASSERT_EQ(op->schema().arguments().size(), 2);
-    ASSERT_EQ(op->schema().arguments()[0].name(), "_0");
-    ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
-    ASSERT_EQ(op->schema().arguments()[1].name(), "_1");
-    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::TensorType);
-
-    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
-
-    Stack stack;
-    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
-    op->getOperation()(stack);
-    at::Tensor output;
-    pop(stack, output);
-
-    ASSERT_TRUE(output.allclose(autograd::make_variable(at::full(5, 3.0f))));
-  }
-  {
-    RegisterOperators reg({createOperator(
-        "foo::bar_with_schema(float a, Tensor b) -> Tensor",
-        [](double a, at::Tensor b) { return a + b; })});
-
-    auto& ops =
-        getAllOperatorsFor(Symbol::fromQualString("foo::bar_with_schema"));
-    ASSERT_EQ(ops.size(), 1);
-
-    auto& op = ops.front();
-    ASSERT_EQ(op->schema().name(), "foo::bar_with_schema");
-
-    ASSERT_EQ(op->schema().arguments().size(), 2);
-    ASSERT_EQ(op->schema().arguments()[0].name(), "a");
-    ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
-    ASSERT_EQ(op->schema().arguments()[1].name(), "b");
-    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::TensorType);
-
-    ASSERT_EQ(op->schema().returns().size(), 1);
-    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
-
-    Stack stack;
-    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
-    op->getOperation()(stack);
-    at::Tensor output;
-    pop(stack, output);
-
-    ASSERT_TRUE(output.allclose(autograd::make_variable(at::full(5, 3.0f))));
-  }
-  {
-    // Check that lists work well.
-    RegisterOperators reg({createOperator(
-        "foo::lists(int[] ints, float[] floats, Tensor[] tensors) -> float[]",
-        [](const std::vector<int64_t>& ints,
-           const std::vector<double>& floats,
-           std::vector<at::Tensor> tensors) { return floats; })});
-
-    auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists"));
-    ASSERT_EQ(ops.size(), 1);
-
-    auto& op = ops.front();
-    ASSERT_EQ(op->schema().name(), "foo::lists");
-
-    ASSERT_EQ(op->schema().arguments().size(), 3);
-    ASSERT_EQ(op->schema().arguments()[0].name(), "ints");
-    ASSERT_TRUE(
-        op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofInts()));
-    ASSERT_EQ(op->schema().arguments()[1].name(), "floats");
-    ASSERT_TRUE(
-        op->schema().arguments()[1].type()->isSubtypeOf(ListType::ofFloats()));
-    ASSERT_EQ(op->schema().arguments()[2].name(), "tensors");
-    ASSERT_TRUE(
-        op->schema().arguments()[2].type()->isSubtypeOf(ListType::ofTensors()));
-
-    ASSERT_EQ(op->schema().returns().size(), 1);
-    ASSERT_TRUE(
-        op->schema().returns()[0].type()->isSubtypeOf(ListType::ofFloats()));
-
-    Stack stack;
-    push(stack, std::vector<int64_t>{1, 2});
-    push(stack, std::vector<double>{1.0, 2.0});
-    push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
-    op->getOperation()(stack);
-    std::vector<double> output;
-    pop(stack, output);
-
-    ASSERT_EQ(output.size(), 2);
-    ASSERT_EQ(output[0], 1.0);
-    ASSERT_EQ(output[1], 2.0);
-  }
-  {
-    RegisterOperators reg(
-        "foo::lists2(Tensor[] tensors) -> Tensor[]",
-        [](std::vector<at::Tensor> tensors) { return tensors; });
-
-    auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists2"));
-    ASSERT_EQ(ops.size(), 1);
-
-    auto& op = ops.front();
-    ASSERT_EQ(op->schema().name(), "foo::lists2");
-
-    ASSERT_EQ(op->schema().arguments().size(), 1);
-    ASSERT_EQ(op->schema().arguments()[0].name(), "tensors");
-    ASSERT_TRUE(
-        op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofTensors()));
-
-    ASSERT_EQ(op->schema().returns().size(), 1);
-    ASSERT_TRUE(
-        op->schema().returns()[0].type()->isSubtypeOf(ListType::ofTensors()));
-
-    Stack stack;
-    push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
-    op->getOperation()(stack);
-    std::vector<at::Tensor> output;
-    pop(stack, output);
-
-    ASSERT_EQ(output.size(), 1);
-    ASSERT_TRUE(output[0].allclose(autograd::make_variable(at::ones(5))));
-  }
-  {
-    auto op = createOperator(
-        "traced::op(float a, Tensor b) -> Tensor",
-        [](double a, at::Tensor b) { return a + b; });
-
-    std::shared_ptr<tracer::TracingState> state;
-    std::tie(state, std::ignore) = tracer::enter({});
-
-    Stack stack;
-    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
-    op.getOperation()(stack);
-    at::Tensor output = autograd::make_variable(at::empty({}));
-    pop(stack, output);
-
-    tracer::exit({IValue(output)});
-
-    std::string op_name("traced::op");
-    bool contains_traced_op = false;
-    for (const auto& node : state->graph->nodes()) {
-      if (std::string(node->kind().toQualString()) == op_name) {
-        contains_traced_op = true;
-        break;
-      }
-    }
-    ASSERT_TRUE(contains_traced_op);
-  }
-  {
-    ASSERT_THROWS_WITH(
-        createOperator(
-            "foo::bar_with_bad_schema(Tensor a) -> Tensor",
-            [](double a, at::Tensor b) { return a + b; }),
-        "Inferred 2 argument(s) for operator implementation, "
-        "but the provided schema specified 1 argument(s).");
-    ASSERT_THROWS_WITH(
-        createOperator(
-            "foo::bar_with_bad_schema(Tensor a) -> Tensor",
-            [](double a) { return a; }),
-        "Inferred type for argument #0 was float, "
-        "but the provided schema specified type Tensor "
-        "for the argument in that position");
-    ASSERT_THROWS_WITH(
-        createOperator(
-            "foo::bar_with_bad_schema(float a) -> (float, float)",
-            [](double a) { return a; }),
-        "Inferred 1 return value(s) for operator implementation, "
-        "but the provided schema specified 2 return value(s).");
-    ASSERT_THROWS_WITH(
-        createOperator(
-            "foo::bar_with_bad_schema(float a) -> Tensor",
-            [](double a) { return a; }),
-        "Inferred type for return value #0 was float, "
-        "but the provided schema specified type Tensor "
-        "for the return value in that position");
-  }
-  {
-    // vector<double> is not supported yet.
-    auto op = createOperator(
-        "traced::op(float[] f) -> int",
-        [](const std::vector<double>& f) -> int64_t { return f.size(); });
-
-    std::shared_ptr<tracer::TracingState> state;
-    std::tie(state, std::ignore) = tracer::enter({});
-
-    Stack stack;
-    push(stack, std::vector<double>{1.0});
-
-    ASSERT_THROWS_WITH(
-        op.getOperation()(stack),
-        "Tracing float lists currently not supported!");
-
-    tracer::abandon();
-  }
 }
 
 void testEvalModeForLoadedModule() {
@@ -902,194 +577,105 @@ void testTopologicalIndex() {
   }
 }
 
-std::unique_ptr<detail::DynamicDAG<std::string>> newDynamicDAG() {
-  return std::unique_ptr<detail::DynamicDAG<std::string>>(
-      new detail::DynamicDAG<std::string>());
+at::Tensor invokeTestRecordFunction(at::Tensor& t) {
+  RECORD_FUNCTION("test", std::vector<c10::IValue>({t}));
+
+  auto t2 = t.pow(2);
+  return t2;
 }
 
-void testNewVertex() {
-  auto graph = newDynamicDAG();
-  AT_ASSERT(graph->debugNumVertices() == 0);
-  auto a = graph->newVertex("a");
-  AT_ASSERT(graph->debugNumVertices() == 1);
-  AT_ASSERT(a->ord == 0);
-  AT_ASSERT(a->data.size() == 1);
-  AT_ASSERT(a->data[0] == "a");
-  AT_ASSERT(a->in_edges().size() == 0);
-  AT_ASSERT(a->out_edges().size() == 0);
-  auto b = graph->newVertex("b");
-  auto c = graph->newVertex("c");
-  AT_ASSERT(graph->debugNumVertices() == 3);
-  AT_ASSERT(b->ord == 1);
-  AT_ASSERT(c->ord == 2);
+static const auto invokeTestRecordFunction_JIT = R"JIT(
+  def forward(t):
+    t2 = t.pow(2)
+    return t2
+)JIT";
+
+at::Tensor invokeTestRecordFunctionJIT(at::Tensor& t) {
+  RECORD_FUNCTION("test", std::vector<c10::IValue>({t}));
+
+  auto cu = compile(invokeTestRecordFunction_JIT);
+  return cu->get_function("forward")({t}).toTensor();
 }
 
-void testAddEdgeBasic() {
-  // a -> b -> c
-  // \---------^
-  auto graph = newDynamicDAG();
-  auto a = graph->newVertex("a");
-  auto b = graph->newVertex("b");
-  auto c = graph->newVertex("c");
-  graph->addEdge(a, b);
-  graph->addEdge(b, c);
-  graph->addEdge(a, c);
-  AT_ASSERT(a->in_edges().size() == 0);
-  AT_ASSERT(a->out_edges().size() == 2);
-  AT_ASSERT(a->out_edges().contains(b));
-  AT_ASSERT(a->out_edges().contains(c));
-  AT_ASSERT(b->in_edges().size() == 1);
-  AT_ASSERT(b->out_edges().size() == 1);
-  AT_ASSERT(b->in_edges().contains(a));
-  AT_ASSERT(b->out_edges().contains(c));
-  AT_ASSERT(c->in_edges().size() == 2);
-  AT_ASSERT(c->out_edges().size() == 0);
-  AT_ASSERT(c->in_edges().contains(a));
-  AT_ASSERT(c->in_edges().contains(b));
-}
+using TracedTestInputs =
+    std::vector<std::tuple<std::string, std::vector<std::vector<int64_t>>>>;
 
-void testAddEdgeCycleDetection() {
-  // a -> b -> c
-  // ^---------/
-  auto graph = newDynamicDAG();
-  auto a = graph->newVertex("a");
-  auto b = graph->newVertex("b");
-  auto c = graph->newVertex("c");
-  graph->addEdge(a, b);
-  graph->addEdge(b, c);
-  bool erred = false;
-  try {
-    graph->addEdge(c, a);
-  } catch (c10::Error& err) {
-    erred = true;
+void checkTracedInputs(const TracedTestInputs& inputs) {
+  bool found_test = false;
+  bool found_pow = false;
+  bool found_mul = false;
+  for (const auto& input : inputs) {
+    const auto& fn = std::get<0>(input);
+    const auto& sizes = std::get<1>(input);
+    if (fn == "test") {
+      found_test = true;
+      AT_CHECK(sizes.size() == 1);
+      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    } else if (fn == "test::pow") {
+      found_pow = true;
+      AT_CHECK(sizes.size() == 2);
+      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      AT_CHECK(sizes[1].empty());
+    } else if (fn.find("::mul") != std::string::npos) {
+      found_mul = true;
+      AT_CHECK(sizes.size() > 1);
+      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    }
   }
-  AT_ASSERT(erred);
+  AT_CHECK(found_test);
+  AT_CHECK(found_pow);
+  AT_CHECK(found_mul);
 }
 
-void testAddEdgeReordersBasic() {
-  // a, b => b -> a
-  auto graph = newDynamicDAG();
-  auto a = graph->newVertex("a");
-  auto b = graph->newVertex("b");
-  AT_ASSERT(a->ord == 0);
-  AT_ASSERT(b->ord == 1);
-  graph->addEdge(b, a);
-  AT_ASSERT(a->ord == 1);
-  AT_ASSERT(b->ord == 0);
+std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
+  std::string full_name = "";
+  while (fn_ptr != nullptr) {
+    if (!full_name.empty()) {
+      full_name = std::string(fn_ptr->name().str()) + "::" + full_name;
+    } else {
+      full_name = fn_ptr->name().str();
+    }
+    fn_ptr = fn_ptr->parent();
+  }
+  return full_name;
 }
 
-void testAddEdgeReordersComplicated() {
-  // a -> b  c -> d with addEdge(d, b) ==>
-  // c -> d -> a -> b
-  auto graph = newDynamicDAG();
-  auto a = graph->newVertex("a");
-  auto b = graph->newVertex("b");
-  auto c = graph->newVertex("c");
-  auto d = graph->newVertex("d");
-  graph->addEdge(a, b);
-  graph->addEdge(c, d);
-  AT_ASSERT(a->ord == 0);
-  AT_ASSERT(b->ord == 1);
-  AT_ASSERT(c->ord == 2);
-  AT_ASSERT(d->ord == 3);
-  graph->addEdge(d, a);
-  AT_ASSERT(c->ord == 0);
-  AT_ASSERT(d->ord == 1);
-  AT_ASSERT(a->ord == 2);
-  AT_ASSERT(b->ord == 3);
-  AT_ASSERT(c->in_edges().size() == 0);
-  AT_ASSERT(c->out_edges().size() == 1);
-  AT_ASSERT(c->out_edges().contains(d));
-  AT_ASSERT(d->in_edges().size() == 1);
-  AT_ASSERT(d->out_edges().size() == 1);
-  AT_ASSERT(d->in_edges().contains(c));
-  AT_ASSERT(d->out_edges().contains(a));
-  AT_ASSERT(a->in_edges().size() == 1);
-  AT_ASSERT(a->out_edges().size() == 1);
-  AT_ASSERT(a->in_edges().contains(d));
-  AT_ASSERT(a->out_edges().contains(b));
-  AT_ASSERT(b->in_edges().size() == 1);
-  AT_ASSERT(b->out_edges().size() == 0);
-  AT_ASSERT(b->in_edges().contains(a));
-}
+void testRecordFunction() {
+  // [(fn, [[sizes], [sizes], ...]), ...]
+  TracedTestInputs traced_inputs;
+  autograd::profiler::pushCallback(
+      [&traced_inputs](const autograd::profiler::RecordFunction& fn) {
+        auto inputs = fn.inputs();
+        std::vector<std::vector<int64_t>> sizes;
+        for (const auto& input : inputs) {
+          if (input.isTensor()) {
+            sizes.push_back(input.toTensor().sizes().vec());
+          } else if (input.isScalar()){
+            sizes.push_back(std::vector<int64_t>());
+          }
+        }
+        traced_inputs.push_back(
+            std::make_tuple(std::string(getFullName(&fn)), sizes));
+      }, [](const autograd::profiler::RecordFunction&) {}, true);
 
-void testRemoveEdgeBasic() {
-  // a -> b
-  auto graph = newDynamicDAG();
-  auto a = graph->newVertex("a");
-  auto b = graph->newVertex("b");
-  graph->addEdge(a, b);
-  AT_ASSERT(graph->debugNumVertices() == 2);
-  graph->removeEdge(a, b);
-  AT_ASSERT(graph->debugNumVertices() == 2);
-  AT_ASSERT(a->out_edges().size() == 0);
-  AT_ASSERT(b->in_edges().size() == 0);
-}
+  auto t = torch::randn({1, 2, 3}, at::kCPU);
+  t.set_requires_grad(true);
+  auto t2 = invokeTestRecordFunction(t);
+  t2.backward();
+  auto eager_inputs = traced_inputs;
+  traced_inputs.clear();
 
-void testRemoveVertexBasic() {
-  // a -> b
-  auto graph = newDynamicDAG();
-  auto a = graph->newVertex("a");
-  auto b = graph->newVertex("b");
-  auto c = graph->newVertex("c");
-  graph->addEdge(a, b);
-  graph->addEdge(b, c);
-  AT_ASSERT(graph->debugNumVertices() == 3);
-  graph->removeVertex(b);
-  AT_ASSERT(graph->debugNumVertices() == 2);
-  AT_ASSERT(a->out_edges().size() == 0);
-  AT_ASSERT(c->in_edges().size() == 0);
-}
+  t = torch::randn({1, 2, 3}, at::kCPU);
+  t.set_requires_grad(true);
+  t2 = invokeTestRecordFunctionJIT(t);
+  t2.backward();
+  auto jit_inputs = traced_inputs;
+  traced_inputs.clear();
 
-void testContractEdgeBasic() {
-  // a -> b -> c -> d
-  auto graph = newDynamicDAG();
-  auto a = graph->newVertex("a");
-  auto b = graph->newVertex("b");
-  auto c = graph->newVertex("c");
-  auto d = graph->newVertex("d");
-  graph->addEdge(a, b);
-  graph->addEdge(b, c);
-  graph->addEdge(c, d);
-  graph->contractEdge(b, c);
-  AT_ASSERT(graph->debugNumVertices() == 3);
-  AT_ASSERT(a->out_edges().size() == 1);
-  AT_ASSERT(d->in_edges().size() == 1);
-  AT_ASSERT(*a->out_edges().begin() == *d->in_edges().begin());
-  auto* contracted = *a->out_edges().begin();
-  AT_ASSERT(contracted->data.size() == 2);
-  AT_ASSERT(contracted->data[0] == "b");
-  AT_ASSERT(contracted->data[1] == "c");
-  AT_ASSERT(contracted->out_edges().size() == 1);
-  AT_ASSERT(contracted->in_edges().size() == 1);
-  AT_ASSERT(contracted->in_edges().contains(a));
-  AT_ASSERT(contracted->out_edges().contains(d));
-}
+  autograd::profiler::popCallback();
 
-void testContractEdgeCycleDetection() {
-  // a -> b -> c
-  // `---------^
-  // contractEdge(a, c) will cause a cycle
-  auto graph = newDynamicDAG();
-  auto a = graph->newVertex("a");
-  auto b = graph->newVertex("b");
-  auto c = graph->newVertex("c");
-  graph->addEdge(a, b);
-  graph->addEdge(b, c);
-  graph->addEdge(a, c);
-  AT_ASSERT(!graph->contractEdge(a, c));
-}
-
-void testDynamicDAG() {
-  testNewVertex();
-  testAddEdgeBasic();
-  testAddEdgeCycleDetection();
-  testAddEdgeReordersBasic();
-  testAddEdgeReordersComplicated();
-  testRemoveEdgeBasic();
-  testRemoveVertexBasic();
-  testContractEdgeBasic();
-  testContractEdgeCycleDetection();
+  checkTracedInputs(eager_inputs);
+  checkTracedInputs(jit_inputs);
 }
 
 void testAutogradProfiler() {
@@ -1123,7 +709,7 @@ void testAutogradProfiler() {
 void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
-          "test::test_none() -> int?",
+          "prim::test_none() -> int?",
           [](const Node* node) {
             return [](Stack& stack) {
               push(stack, IValue());
@@ -1131,7 +717,7 @@ void testNoneSchemaMatch() {
             };
           }),
       Operator(
-          "test::is_none(int? a) -> bool",
+          "prim::is_none(int? a) -> bool",
           [](const Node* node) {
             return [](Stack& stack) {
               IValue a = pop(stack);
@@ -1151,8 +737,8 @@ void testNoneSchemaMatch() {
 
   auto r = std::make_shared<Graph>();
   auto& g = *r;
-  auto opt_int = g.insert(Symbol::fromQualString("test::test_none"), {});
-  auto out_bool = g.insert(Symbol::fromQualString("test::is_none"), {opt_int});
+  auto opt_int = g.insert(Symbol::fromQualString("prim::test_none"), {});
+  auto out_bool = g.insert(Symbol::fromQualString("prim::is_none"), {opt_int});
   g.registerOutput(out_bool);
   ConstantPropagation(r);
 
@@ -1160,6 +746,94 @@ void testNoneSchemaMatch() {
   // checking that constant propagation ran wo/failure
   AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
 }
+
+void testModuleDefine() {
+  auto m = std::make_shared<script::Module>();
+  m->register_parameter("foo", torch::ones({}), false);
+  m->define(R"(
+    def add_it(self, x, b : int = 4):
+      return self.foo + x + b
+  )");
+  auto result = m->run_method("add_it", torch::ones({}));
+  AT_ASSERT(result.toTensor().item<float>() == 6)
+}
+
+static int testPassValue = 0;
+void fakePass(std::shared_ptr<Graph>& g) {
+  testPassValue++;
+  return;
+}
+
+RegisterPass p(fakePass);
+
+void testPassManagement() {
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  script::parseIR(
+      R"IR(
+graph(%a):
+  return (%a))IR",
+      &*graph);
+
+  std::vector<IValue> stack = {IValue(torch::randn({22}, at::kCPU))};
+  auto run = [&](std::shared_ptr<Graph>& graph, std::vector<IValue> stack) {
+    GraphExecutor executor(graph);
+    executor.run(stack);
+    return stack;
+  };
+  run(graph, stack);
+  AT_ASSERT(testPassValue);
+}
+
+static void checkShape(Node* n, std::vector<int64_t> expected) {
+  auto tp = n->output()->type();
+  auto ptp = tp->expect<ProfiledTensorType>();
+  ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+}
+
+void testProfiler() {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2 * input_size;
+
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+
+  auto input = at::randn({batch_size, input_size}, at::kCPU);
+  auto hx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(at::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCPU));
+
+  auto g = build_lstm();
+  auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
+
+  auto& opt_graph = *g.get();
+  ArgumentSpecCreator arg_spec_creator(opt_graph);
+  ArgumentSpec spec =
+      arg_spec_creator.create(autograd::GradMode::is_enabled(), stack);
+  arg_spec_creator.setInputTypes(opt_graph, spec);
+  auto pr = ProfilingRecord::instrumentGraph(g);
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+
+  auto begin = pr->profiled_graph_->block()->nodes().begin();
+  auto end = pr->profiled_graph_->block()->nodes().end();
+  auto mm =
+      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mm; });
+  ASSERT_NE(mm, end);
+  std::vector<int64_t> mm_expected{4, 2048};
+  std::vector<int64_t> eltwise{4, 512};
+  checkShape(*mm, mm_expected);
+  auto sigmoid_n = std::find_if(
+      begin, end, [](Node* n) { return n->kind() == aten::sigmoid; });
+  ASSERT_NE(sigmoid_n, end);
+  checkShape(*sigmoid_n, eltwise);
+  auto tanh_n =
+      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::tanh; });
+  checkShape(*tanh_n, eltwise);
+}
+
 } // namespace test
 } // namespace jit
 } // namespace torch

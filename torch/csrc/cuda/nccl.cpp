@@ -126,7 +126,7 @@ void _check_inputs(
 
   device_set devices;
   int64_t numel = inputs[0].numel();
-  auto& type = inputs[0].type();
+  auto type = inputs[0].type();
 
   for (size_t i = 0; i < len; i++) {
     auto input = inputs[i];
@@ -178,7 +178,7 @@ bool is_available(TensorList tensors) {
 #ifdef USE_NCCL
   device_set devices;
   for (auto& tensor : tensors) {
-    auto& type = tensor.type();
+    auto type = tensor.type();
     if (!type.is_cuda() || type.is_sparse())
       return false;
     if (!tensor.is_contiguous())

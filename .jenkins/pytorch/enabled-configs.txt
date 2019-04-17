@@ -8,6 +8,7 @@
 pytorch-linux-xenial-cuda8-cudnn7-py3-build
 pytorch-linux-xenial-cuda8-cudnn7-py3-test
 pytorch-linux-xenial-cuda8-cudnn7-py3-multigpu-test
+pytorch-linux-xenial-cuda8-cudnn7-py3-nogpu-test
 pytorch-linux-xenial-cuda9-cudnn7-py2-build
 pytorch-linux-xenial-cuda9-cudnn7-py2-test
 pytorch-linux-xenial-cuda9-cudnn7-py3-build
@@ -18,6 +19,7 @@ pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build
 pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-test
 pytorch-linux-xenial-py3-clang5-asan-build
 pytorch-linux-xenial-py3-clang5-asan-test
+pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
 pytorch-linux-trusty-py2.7.9-build
 pytorch-linux-trusty-py2.7.9-test
 pytorch-linux-trusty-py2.7-build
@@ -50,5 +52,6 @@ pytorch-ppc64le-cuda9.1-cudnn7-py3-build
 pytorch-ppc64le-cuda9.1-cudnn7-py3-test
 pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX2-test
 pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX-NO_AVX2-test
+pytorch-linux-xenial-cuda8-cudnn7-py3-slow-test
 pytorch-xla-linux-trusty-py3.6-gcc5.4-build
 pytorch-xla-linux-trusty-py3.6-gcc5.4-test

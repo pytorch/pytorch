@@ -14,6 +14,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/filler.h"
+#include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 
@@ -186,6 +187,10 @@ class CAFFE2_API OpSchema {
   inline vector<TensorShape> InferTensor(
       const OperatorDef& def,
       const vector<TensorShape>& input_type_shape) const {
+    CAFFE_ENFORCE(
+        Verify(def),
+        "(InferTensor) Operator def did not pass schema checking: ",
+        ProtoDebugString(def));
     return tensor_inference_function_(def, input_type_shape);
   }
 

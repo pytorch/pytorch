@@ -21,18 +21,22 @@
   } catch (const std::exception& e) {                                    \
     ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
   }
-#define ASSERT_ANY_THROW(statement)   \
-  bool threw = false;                 \
-  try {                               \
-    (void)statement;                  \
-  } catch (const std::exception& e) { \
-    threw = true;                     \
-  }                                   \
-  ASSERT_TRUE(threw);
+#define ASSERT_ANY_THROW(statement)     \
+  {                                     \
+    bool threw = false;                 \
+    try {                               \
+      (void)statement;                  \
+    } catch (const std::exception& e) { \
+      threw = true;                     \
+    }                                   \
+    ASSERT_TRUE(threw);                 \
+  }
 
 #endif // defined(USE_GTEST)
 
-bool isSandcastle() {
-  return ((std::getenv("SANDCASTLE")) || \
-    (std::getenv("TW_JOB_USER") && std::string(std::getenv("TW_JOB_USER")) == "sandcastle"));
+static inline bool isSandcastle() {
+  return (
+      (std::getenv("SANDCASTLE")) ||
+      (std::getenv("TW_JOB_USER") &&
+       std::string(std::getenv("TW_JOB_USER")) == "sandcastle"));
 }
