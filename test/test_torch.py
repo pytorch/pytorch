@@ -2663,13 +2663,26 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
         self.assertFalse(r.is_quantized)
+        # slicing and int_repr
+        int_repr = qr.int_repr()
+        for num in int_repr:
+            self.assertEqual(num, 3)
+        for num in qr[2:].int_repr():
+            self.assertEqual(num, 3)
+        # dequantize
         rqr = qr.dequantize()
         for i in range(num_elements):
             self.assertEqual(r[i], rqr[i])
-        # Testing item
+        # Scalar Tensor
+        # item
         r = torch.ones(1, dtype=torch.float)
         qr = r.quantize_linear(scale, zero_point)
         self.assertEqual(qr.item(), 1)
+        self.assertEqual(qr[0].item(), 1)
+        # assignment
+        # This calls _th_fill_
+        # qr[0] = 8 # float asignment
+        # self.assertEqual(qr.item(), 8)
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4

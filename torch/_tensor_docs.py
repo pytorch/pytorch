@@ -2533,6 +2533,16 @@ int() -> Tensor
 ``self.int()`` is equivalent to ``self.to(torch.int32)``. See :func:`to`.
 """)
 
+add_docstr_all('int_repr',
+               r"""
+int_repr() -> Tensor
+
+Given a quantized Tensor,
+``self.int_repr()`` returns a CPU Tensor with uint8_t as data type that stores the
+underlying uint8_t values of the given Tensor.
+""")
+
+
 add_docstr_all('long',
                r"""
 long() -> Tensor
