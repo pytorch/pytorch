@@ -1175,7 +1175,6 @@ graph(%x : Tensor,
 
         m = torch.jit.script(fn)
         # Insert observers
-        observer_dict1 = {'activation': observerObj}
         # Create sub-module quantconfigobject dict
         observer_dict = {'__main__': {'activation': observerObj}
                          }
@@ -1197,15 +1196,22 @@ graph(%x : Tensor,
         self.assertEqual(value_stats['p'][1], x2 + y2)
         self.assertEqual(value_stats['z'][1], x2 - y2)
 
-    def test_insert_input_observers(self):
-        x1 = torch.tensor([0.4, 0.3])
-        y1 = torch.tensor([0.7, 0.5])
+    def test_insert_param_observers(self):
+        x1 = torch.ones([1, 1, 1, 1])
 
-        # Function that we will use as a graph
-        def fn(x, y):
-            p = x + y
-            z = x - y
-            return p * z
+        class testModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(testModule, self).__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1, 1)
+                self.conv1.weight.data.fill_(1.0)
+                self.conv1.bias.data.fill_(0.01)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = self.conv1(x)
+                return x
+
+        trace = testModule()
 
         # Custom observer function
         value_stats = {}
@@ -1218,20 +1224,17 @@ graph(%x : Tensor,
                 return x
         observerObj = ObserverModule()
 
-        m = torch.jit.script(fn)
-        # Insert observers for activation
-        observer_dict1 = {'activation': observerObj}
-        observer_dict = {'__main__': {'activation': observerObj}
+        # Insert observers for parameters
+        observer_dict = {'__main__': {'param': observerObj}
                          }
 
-        torch._C._jit_pass_insert_observers(m, observer_dict)
+        torch._C._jit_pass_insert_observers(trace, observer_dict)
         # Collect statistics
-        m.forward(x1, y1)
+        trace.forward(x1)
 
         # Check what we collected. Validates external input
-        self.assertTrue('x' in value_stats and 'y' in value_stats)
-        self.assertTrue(torch.equal(value_stats['x'], x1))
-        self.assertTrue(torch.equal(value_stats['y'], y1))
+        self.assertTrue(trace.conv1.weight in list(value_stats.values()))
+        self.assertTrue(trace.conv1.bias in list(value_stats.values()))
 
     def test_insert_quantdequant_consecutive_qnodes_script(self):
         class testModule(torch.jit.ScriptModule):
