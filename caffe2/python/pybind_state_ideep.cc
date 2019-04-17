@@ -59,13 +59,13 @@ public:
                   (atensor.get_nelems() == 0 ||
                    atensor.get_data_handle() != nullptr),
                   "Trying to fetch uninitialized tensor");
-    const int numpy_type = CaffeToNumpyType(type_transform(atensor));
+    // NOTE: Only support float so far.
+    const int numpy_type = NPY_FLOAT;
     CAFFE_ENFORCE(
         numpy_type != -1,
         "Unsupported ideep memory data type? This usually should not happen "
         "since ideep memory usually only do float and double.");
     itensor::dims dims = atensor.get_public_format_dims();
-
     std::vector<npy_intp> npy_dims(dims.begin(), dims.end());
 
     result.copied = force_copy || atensor.need_reorder();
@@ -86,7 +86,7 @@ public:
     }
 
     if (result.copied) {
-      atensor.reorder_to(outPtr);
+      atensor.to_public(outPtr);
     }
 
     return result;
@@ -144,7 +144,7 @@ public:
         if (tensor->get_dims() != adims || type != tensor->get_data_type()) {
           tensor->resize(adims, type);
         }
-        tensor->reorder_from(adims, type,
+        tensor->feed_from(adims, type,
                              static_cast<void *>(PyArray_DATA(array)));
     }
 #else

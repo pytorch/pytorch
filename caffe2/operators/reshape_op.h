@@ -30,8 +30,7 @@ class ReshapeOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    DoRunWithTypeImpl<T>(
-        Input(0), Output(0, Input(0).sizes(), Input(0).dtype()));
+    DoRunWithTypeImpl<T>(Input(0), Output(0));
     return true;
   }
 
@@ -124,7 +123,7 @@ class ReshapeOp : public Operator<Context> {
     }
 
     output->Resize(actual_new_shape);
-    if (!IsInputOutputAlias(0, 0)) {
+    if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
       context_.CopyItemsSameDevice(
           input.dtype(),

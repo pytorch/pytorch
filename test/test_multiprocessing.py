@@ -120,6 +120,10 @@ def requires_grad_variable_sharing(queue, ready):
     queue.put(var.requires_grad)
 
 
+def integer_parameter_serialization(iparam):
+    iparam + 1
+
+
 def autograd_sharing(queue, ready, master_modified, device, is_parameter):
     var = queue.get()
     ready.set()
@@ -750,6 +754,16 @@ class TestMultiprocessing(TestCase):
     def test_cuda_parameter_sharing(self):
         param = Parameter(torch.arange(1., 26, device='cuda').view(5, 5))
         self._test_autograd_sharing(param, mp.get_context('spawn'), is_parameter=True)
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    def test_integer_parameter_serialization(self):
+        iparam = torch.nn.Parameter(torch.tensor(0, dtype=torch.int64), requires_grad=False)
+
+        ctx = mp.get_context('spawn')
+        p = ctx.Process(target=integer_parameter_serialization, args=(iparam,))
+        p.start()
+        p.join()
 
     def test_empty_shared(self):
         t = torch.Tensor()

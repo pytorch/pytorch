@@ -14,6 +14,7 @@
 
 namespace c10 {
 struct IValue;
+struct ClassType;
 
 namespace ivalue {
 
@@ -683,30 +684,42 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
  public:
-  Object(Symbol name, size_t numSlots) : typename_(std::move(name)) {
+  Object(std::shared_ptr<ClassType> type, size_t numSlots) : type_(std::move(type)) {
     slots_.resize(numSlots);
   }
 
   static c10::intrusive_ptr<Object> create(
-      Symbol name,
+      std::shared_ptr<ClassType> type,
       size_t numSlots) {
-    return c10::make_intrusive<Object>(std::move(name), numSlots);
+    return c10::make_intrusive<Object>(std::move(type), numSlots);
   }
 
   void setSlot(size_t slot, IValue v) {
+    if (slot >= slots_.size()) {
+      // for module types, it is possible that the members of the class have
+      // expanded after the object was created. In this case, we expand
+      // the slots to the right size
+      resizeObject(slot);
+    }
     slots_[slot] = v;
   }
 
-  IValue getSlot(size_t slot) const {
+  const IValue& getSlot(size_t slot) const {
     return slots_.at(slot);
   }
 
-  Symbol name() const {
-    return typename_;
+  const std::string& name() const;
+
+  const std::vector<IValue>& slots() const {
+    return slots_;
+  }
+  std::shared_ptr<ClassType> type() const {
+    return type_;
   }
 
  private:
-  const Symbol typename_;
+  void resizeObject(size_t slot);
+  std::shared_ptr<ClassType> type_;
   std::vector<IValue> slots_;
 };
 

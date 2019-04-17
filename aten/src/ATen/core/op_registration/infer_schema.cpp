@@ -21,7 +21,7 @@ C10_EXPORT void assertSchemasHaveSameSignature(const FunctionSchema& inferred, c
   if (inferred.returns().size() != specified.returns().size()) {
     AT_ERROR("In operator registration: Specified function schema [", serialize_schema(specified), "] ",
              "doesn't match inferred function schema [", serialize_schema(inferred), "]. ",
-             "The number of returns is different.Specified ", specified.returns().size(),
+             "The number of returns is different. Specified ", specified.returns().size(),
              " but inferred ", inferred.returns().size());
   }
 
@@ -29,7 +29,7 @@ C10_EXPORT void assertSchemasHaveSameSignature(const FunctionSchema& inferred, c
     if (*inferred.arguments()[i].type() != *specified.arguments()[i].type()) {
       AT_ERROR("In operator registration: Specified function schema [", serialize_schema(specified), "] ",
                "doesn't match inferred function schema [", serialize_schema(inferred), "]. ",
-               "Type mismatch in argument ", i, ": specified ", specified.arguments()[i].type()->str(),
+               "Type mismatch in argument ", (i+1) , ": specified ", specified.arguments()[i].type()->str(),
                " but inferred ", inferred.arguments()[i].type()->str());
     }
   }
@@ -38,7 +38,7 @@ C10_EXPORT void assertSchemasHaveSameSignature(const FunctionSchema& inferred, c
     if (*inferred.returns()[i].type() != *specified.returns()[i].type()) {
       AT_ERROR("In operator registration: Specified function schema [", serialize_schema(specified), "] ",
                "doesn't match inferred function schema [", serialize_schema(inferred), "]. ",
-               "Type mismatch in return ", i, ": specified ", specified.returns()[i].type()->str(),
+               "Type mismatch in return ", (i+1), ": specified ", specified.returns()[i].type()->str(),
                " but inferred ", inferred.returns()[i].type()->str());
     }
   }

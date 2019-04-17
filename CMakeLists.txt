@@ -57,26 +57,6 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
-# For MSVC,
-# 1. Replace /Zi and /ZI with /Z7
-# 2. Switch off incremental linking in debug builds
-if (MSVC)
-  foreach(flag_var
-      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-    if(${flag_var} MATCHES "/Z[iI]")
-      string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
-    endif(${flag_var} MATCHES "/Z[iI]")
-  endforeach(flag_var)
-  foreach(flag_var
-      CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
-      CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
-    if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
-      string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
-    endif()
-  endforeach(flag_var)
-endif(MSVC)
-
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -155,7 +135,35 @@ cmake_dependent_option(
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
 
+# /Z7 override option
+# When generating debug symbols, CMake default to use the flag /Zi.
+# However, it is not compatible with sccache. So we rewrite it off.
+# But some users don't use sccache; this override is for them.
+option(MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON)
+
 SET(ONNX_NAMESPACE "onnx_c2" CACHE STRING "onnx namespace")
+
+# For MSVC,
+# 1. Replace /Zi and /ZI with /Z7
+# 2. Switch off incremental linking in debug builds
+if (MSVC)
+  if(MSVC_Z7_OVERRIDE)
+    foreach(flag_var
+        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      if(${flag_var} MATCHES "/Z[iI]")
+        string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
+      endif(${flag_var} MATCHES "/Z[iI]")
+    endforeach(flag_var)
+  endif(MSVC_Z7_OVERRIDE)
+  foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
+      CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
+    if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
+      string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
+endif(MSVC)
 
 if (ANDROID OR IOS)
   set(BUILD_ATEN_MOBILE ON)

@@ -54,10 +54,11 @@ class BooleanUnmaskOp<CUDAContext> final : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     int maskSize = Input(0).numel();
     int numMasks = InputSize() / 2;
-    const auto& dtype = Input(1).dtype();
+    const auto& meta = Input(1).meta();
 
-    auto* out = Output(0, maskSize, at::dtype(dtype));
-    auto* dest = (char*)out->raw_mutable_data(dtype);
+    auto* out = Output(0);
+    out->Resize(maskSize);
+    auto* dest = (char*)out->raw_mutable_data(meta);
 
     ReinitializeTensor(&hostMasks_, {numMasks}, at::dtype<bool*>().device(CPU));
     auto* hostMasksData = hostMasks_.mutable_data<bool*>();
@@ -100,7 +101,7 @@ class BooleanUnmaskOp<CUDAContext> final : public Operator<CUDAContext> {
         context_.cuda_stream()>>>(
         numMasks,
         maskSize,
-        dtype.itemsize(),
+        meta.itemsize(),
         indicesData,
         values_.data<char*>(),
         valueSizesData,

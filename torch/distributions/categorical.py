@@ -64,7 +64,7 @@ class Categorical(Distribution):
         if 'probs' in self.__dict__:
             new.probs = self.probs.expand(param_shape)
             new._param = new.probs
-        else:
+        if 'logits' in self.__dict__:
             new.logits = self.logits.expand(param_shape)
             new._param = new.logits
         new._num_events = self._num_events

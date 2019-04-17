@@ -192,9 +192,6 @@
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
 
-- name: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots)
-  self: not_implemented("btrisolve")
-
 - name: cat(TensorList tensors, int64_t dim)
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim)
 
@@ -234,7 +231,7 @@
 - name: cosh(Tensor self)
   self: grad * self.sinh()
 
-- name: cross(Tensor self, Tensor other, int64_t dim)
+- name: cross(Tensor self, Tensor other, int64_t? dim)
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
@@ -466,6 +463,9 @@
 
 - name: _lu_with_info(Tensor self, bool pivot, bool check_errors)
   self: not_implemented("lu_with_info")
+
+- name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots)
+  self: not_implemented("lu_solve")
 
 - name: masked_fill_(Tensor self, Tensor mask, Scalar value)
   self: grad.clone().masked_fill_(mask, 0)
@@ -753,10 +753,10 @@
   self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: split(Tensor self, int64_t split_size, int64_t dim)
-  self: split_backward(grads, split_size, dim, self.sizes(), self.type())
+  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
 
 - name: split_with_sizes(Tensor self, IntArrayRef split_sizes, int64_t dim)
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.type())
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
 
 - name: sqrt(Tensor self)
   self: grad / (2 * result)
@@ -848,7 +848,7 @@
   self: grad.transpose(dim0, dim1)
 
 - name: triangular_solve(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular)
-  self, A: triangular_solve_backward(grads[0], grads[1], self, A, result0, upper, transpose, unitriangular, grad_input_mask)
+  self, A: triangular_solve_backward(grads[0], grads[1], self, A, solution, upper, transpose, unitriangular, grad_input_mask)
 
 - name: tril(Tensor self, int64_t diagonal)
   self: grad.tril(diagonal)
@@ -861,6 +861,9 @@
 
 - name: to_dense(Tensor self)
   self: to_dense_backward(grad, self)
+
+- name: to_mkldnn(Tensor self)
+  self: to_mkldnn_backward(grad, self)
 
 - name: unfold(Tensor self, int64_t dimension, int64_t size, int64_t step)
   self: unfold_backward(grad, self.sizes(), dimension, size, step)
@@ -945,10 +948,14 @@
   indices: not_differentiable
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
 
-- name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse)
+- name: embedding_dense_backward(Tensor grad_output, Tensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq)
+  grad_output: embedding_dense_double_backward(grad, indices)
+
+- name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse, Tensor per_sample_weights)
   indices: not_differentiable
   offsets: not_differentiable
-  weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse)
+  weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse, per_sample_weights)
+  per_sample_weights: _embedding_bag_per_sample_weights_backward(grad, weight, indices, result1, mode)
 
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   indices: not_differentiable
@@ -1196,7 +1203,7 @@
 
 - name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output)
   grad_output: elu_backward(grad, alpha, scale, input_scale, output)
-  output: grad * grad_output * input_scale * (output < 0).toType(grad.type())
+  output: grad * grad_output * input_scale * (output < 0).type_as(grad)
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, IntArrayRef kernel_size, IntArrayRef output_size, Tensor indices)
   grad_output: max_pool_double_backward(grad, indices, 2)

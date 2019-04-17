@@ -130,7 +130,7 @@ class Pickler {
 
   // Memoization of IValues that have been written (index in table is used for
   // BINPUT opcodes) to enable shared references
-  std::unordered_map<const void*, uint32_t> memo_;
+  std::unordered_map<const void*, uint32_t> memo_map_;
 
   // External table of tensors to serialize
   std::vector<at::Tensor>* tensor_table_;
@@ -150,7 +150,8 @@ class Unpickler {
       const std::vector<at::Tensor>* tensor_table)
       : bytes_(static_cast<const uint8_t*>(data)),
         end_ptr_(bytes_ + size),
-        tensor_table_(tensor_table) {}
+        tensor_table_(tensor_table),
+        last_opcode_(OpCode::STOP) {}
 
   std::vector<IValue> parse_ivalue_list();
 
@@ -176,7 +177,7 @@ class Unpickler {
   void readList();
 
   std::vector<IValue> stack_;
-  std::vector<IValue> memo_;
+  std::vector<IValue> memo_table_;
   std::vector<size_t> marks_;
   const uint8_t* bytes_;
   const uint8_t* end_ptr_;

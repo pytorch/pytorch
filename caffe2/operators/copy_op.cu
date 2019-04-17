@@ -13,14 +13,14 @@ class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = OperatorBase::OutputTensor(
-        0, input.sizes(), at::dtype(input.dtype()).device(CUDA));
+    auto* output = OperatorBase::Output<Tensor>(0, CUDA);
     CUDAContext context(GetGPUIDForPointer(Input(1).raw_data()));
+    output->ResizeLike(input);
     context.template CopyItems<CUDAContext, CUDAContext>(
-        input.dtype(),
+        input.meta(),
         input.numel(),
         input.raw_data(),
-        output->raw_mutable_data(input.dtype()));
+        output->raw_mutable_data(input.meta()));
     return true;
   }
 };

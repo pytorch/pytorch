@@ -1025,7 +1025,7 @@ class TestCuda(TestCase):
 
             self.assertEqual(x * y, 4.5)
             self.assertEqual(y * x, 4.5)
-            with self.assertRaisesRegex(RuntimeError, "doesn't match the desired type"):
+            with self.assertRaisesRegex(RuntimeError, "doesn't match the desired"):
                 y *= x
             x *= y
             self.assertEqual(x, 4.5)
@@ -1264,8 +1264,6 @@ class TestCuda(TestCase):
     def test_scatter_gpu(self):
         self._test_scatter(torch.randn(4, 4).cuda(), dim=0)
 
-    # Note: This test fails on ROCm CI gfx900 but passes on gfx906
-    @skipIfRocm
     def test_scatter_gpu_dim(self):
         self._test_scatter(torch.randn(4, 4).cuda(), dim=1)
 
@@ -1297,7 +1295,6 @@ class TestCuda(TestCase):
     def test_gather(self):
         self._test_gather(0)
 
-    @skipIfRocm
     def test_gather_dim(self):
         self._test_gather(1)
 
@@ -2052,6 +2049,26 @@ class TestCuda(TestCase):
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
 
+    def test_caching_allocator_record_stream_oom(self):
+        """allocations delayed by a record_stream call should still be freed on
+        an out-of-memory in cuda_malloc_retry. see issue #19219"""
+        stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(stream):
+            y = torch.zeros(40 * 1024 * 1024, device='cuda')
+
+        for _ in range(100):
+            x = torch.empty(40 * 1024 * 1024, device='cuda')
+            with torch.cuda.stream(stream):
+                y += x
+            # delays re-use of `x` until after all operations in `stream`
+            x.record_stream(stream)
+            del x
+
+        # we've made a mess by allocating up to the device capacity. free any
+        # cached blocks in case it affects future tests.
+        torch.cuda.empty_cache()
+
     def test_reduction_gpu_memory_accessing(self):
         x = torch.ones(512, 8, dtype=torch.float32, device='cuda')
         torch.sum(x, 0)
@@ -2059,15 +2076,13 @@ class TestCuda(TestCase):
     def test_sum_cpu_gpu_mismatch(self):
         x = torch.randn(20, dtype=torch.float32, device='cuda')
         y = torch.randn(1, dtype=torch.float32)
-        with self.assertRaisesRegex(RuntimeError, 'expected type'
-                                    ' torch.FloatTensor but got'
-                                    ' torch.cuda.FloatTensor'):
+        with self.assertRaisesRegex(RuntimeError,
+                                    'expected backend CPU and dtype Float but got backend CUDA and dtype Float'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
         # makeing sure half to float promotion is also properly working.
         x = x.half()
-        with self.assertRaisesRegex(RuntimeError, 'expected type'
-                                    ' torch.FloatTensor but got'
-                                    ' torch.cuda.HalfTensor'):
+        with self.assertRaisesRegex(RuntimeError,
+                                    'expected backend CPU and dtype Float but got backend CUDA and dtype Half'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
 
     @skipIfRocm
@@ -2113,7 +2128,6 @@ class TestCuda(TestCase):
     def _select_broadcastable_dims(dims_full=None):
         return _TestTorchMixin._select_broadcastable_dims(dims_full)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_inverse(self):
         _TestTorchMixin._test_inverse(self, lambda t: t.cuda())
@@ -2249,6 +2263,9 @@ class TestCuda(TestCase):
         samples = probs.multinomial(1000000, replacement=True)
         self.assertGreater(probs[samples].min().item(), 0)
 
+    def test_multinomial_alias(self):
+        _TestTorchMixin._test_multinomial_alias(self, lambda t: t.cuda())
+
     @staticmethod
     def mute():
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
@@ -2357,17 +2374,14 @@ class TestCuda(TestCase):
     def test_kthvalue(self):
         _TestTorchMixin._test_kthvalue(self, device='cuda')
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu(self):
         _TestTorchMixin._test_lu(self, lambda t: t.cuda())
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_btrisolve(self):
-        _TestTorchMixin._test_btrisolve(self, lambda t: t.cuda())
+    def test_lu_solve(self):
+        _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda())
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_lu_unpack(self):
         _TestTorchMixin._test_lu_unpack(self, lambda t: t.cuda())
@@ -2549,7 +2563,6 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    @skipIfRocm
     def test_norm(self):
         _TestTorchMixin._test_norm(self, device='cuda')
 

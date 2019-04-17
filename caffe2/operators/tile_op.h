@@ -74,12 +74,13 @@ class TileOp final : public Operator<Context> {
     }
 
     const auto& X = Input(0);
+    auto* Y = Output(0);
     const int axis = X.canonical_axis_index(axis_);
 
     // reshape output to be input tiled along the axis
     std::vector<std::int64_t> Y_dims = X.sizes().vec();
     Y_dims[axis] *= tiles_;
-    auto* Y = Output(0, Y_dims, at::dtype<T>());
+    Y->Resize(Y_dims);
 
     // size up to (and not including) axis
     const int outer_size = X.size_to_dim(axis);
@@ -178,13 +179,14 @@ class TileGradientOp final : public Operator<Context> {
     }
 
     const auto& dY = Input(0);
+    auto* dX = Output(0);
     const int axis = dY.canonical_axis_index(axis_);
 
     // reshape output to be input "untiled" along the axis
     std::vector<std::int64_t> X_dims = dY.sizes().vec();
     CAFFE_ENFORCE_EQ(X_dims[axis] % tiles_, 0);
     X_dims[axis] /= tiles_;
-    auto* dX = Output(0, X_dims, at::dtype<T>());
+    dX->Resize(X_dims);
 
     // size up to (and not including) axis
     const int outer_size = dX->size_to_dim(axis);

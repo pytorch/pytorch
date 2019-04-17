@@ -88,9 +88,9 @@ namespace detail {
   // SFINAE version for kernels that return an output
   template<class KernelFunctor>
   struct wrap_kernel_functor<KernelFunctor, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
-    static void call(Stack* stack, KernelCache* cache) {
-      static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Kernel functor must inherit from c10::OperatorKernel");
+    static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
+    static void call(Stack* stack, KernelCache* cache) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
       auto output = call_functor_with_ivalue_args<KernelFunctor>(functor, torch::jit::last(*stack, num_inputs));
@@ -102,9 +102,9 @@ namespace detail {
   // SFINAE version for kernels that don't return an output
   template<class KernelFunctor>
   struct wrap_kernel_functor<KernelFunctor, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
-    static void call(Stack* stack, KernelCache* cache) {
-      static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Kernel functor must inherit from c10::OperatorKernel.");
+    static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
+    static void call(Stack* stack, KernelCache* cache) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
       call_functor_with_ivalue_args<KernelFunctor>(functor, torch::jit::last(*stack, num_inputs));
@@ -114,10 +114,9 @@ namespace detail {
 
   template<class KernelFunctor, class... Args>
   class KernelFactory final {
-  public:
-    static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Kernel functor must inherit from c10::OperatorKernel.");
     static_assert(std::is_constructible<KernelFunctor, Args...>::value, "Wrong argument types for constructor of kernel functor.");
 
+  public:
     explicit constexpr KernelFactory(Args... args)
     : constructor_parameters_(std::move(args)...) {}
 
@@ -140,9 +139,7 @@ namespace detail {
   };
 
   template<class KernelFunctor, class... ConstructorParameters>
-  // enable_if: only enable it if KernelFunctor is actually a functor and inherits from c10::OperatorKernel
-  inline constexpr guts::enable_if_t<guts::is_functor<KernelFunctor>::value && std::is_base_of<OperatorKernel, KernelFunctor>::value,
-  detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>>
+  detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>
   kernelFunctor(ConstructorParameters&&... constructorParameters) {
     return {
       &detail::wrap_kernel_functor<KernelFunctor>::call,
@@ -189,10 +186,13 @@ namespace detail {
  * >         c10::dispatchKey(CPUTensorId()));
  */
 template<class KernelFunctor, class... ConstructorParameters>
-// enable_if: only enable it if KernelFunctor is actually a functor and inherits from c10::OperatorKernel
-inline constexpr guts::enable_if_t<guts::is_functor<KernelFunctor>::value && std::is_base_of<OperatorKernel, KernelFunctor>::value,
+// enable_if: only enable it if KernelFunctor is actually a functor
+inline constexpr guts::enable_if_t<guts::is_functor<KernelFunctor>::value,
 detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>>
 kernel(ConstructorParameters&&... constructorParameters) {
+  static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
+  static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
+
   return detail::kernelFunctor<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...);
 }
 

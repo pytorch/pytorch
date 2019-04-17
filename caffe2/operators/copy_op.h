@@ -14,10 +14,9 @@ class CopyOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = this->template Input<Tensor>(0, SrcContext::GetDeviceType());
-    auto* output = this->OutputTensor(
-        0,
-        input.sizes(),
-        at::dtype(input.dtype()).device(DstContext::GetDeviceType()));
+    auto* output =
+        this->template Output<Tensor>(0, DstContext::GetDeviceType());
+    output->ResizeLike(input);
     this->context_.template CopyItems<SrcContext, DstContext>(
         input.dtype(),
         input.numel(),

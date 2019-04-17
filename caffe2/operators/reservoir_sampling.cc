@@ -23,7 +23,6 @@ class ReservoirSamplingOp final : public Operator<Context> {
     auto& mutex = OperatorBase::Input<std::unique_ptr<std::mutex>>(MUTEX);
     std::lock_guard<std::mutex> guard(*mutex);
 
-    // TODO: separate diff for this
     auto* output = Output(RESERVOIR);
     const auto& input = Input(DATA);
 

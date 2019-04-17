@@ -19,6 +19,7 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/ddp.h>
+#include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -40,6 +41,26 @@ PyObject* c10d_init(PyObject* _unused) {
   }
 
   auto module = py::handle(c10d_module).cast<py::module>();
+
+  shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
+      .def(py::init<
+           std::vector<std::vector<torch::autograd::Variable>>,
+           std::vector<std::vector<size_t>>,
+           std::shared_ptr<::c10d::ProcessGroup>>())
+      .def(
+          "initialize_buckets",
+          &::c10d::Reducer::initialize_buckets,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "prepare_for_backward",
+          &::c10d::Reducer::prepare_for_backward,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "prepare_for_backward",
+          [](::c10d::Reducer& reducer, const torch::autograd::Variable& output)
+              -> void { reducer.prepare_for_backward({output}); },
+          py::call_guard<py::gil_scoped_release>())
+      .def("get_backward_stats", &::c10d::Reducer::get_backward_stats);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class of available reduce operations: ``SUM``, ``PRODUCT``,
@@ -320,11 +341,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
               "barrier",
               &::c10d::ProcessGroup::barrier,
               py::arg("opts") = ::c10d::BarrierOptions(),
-              py::call_guard<py::gil_scoped_release>())
-
-          .def(
-              "group_ranks",
-              &::c10d::ProcessGroup::getGroupRank,
               py::call_guard<py::gil_scoped_release>());
 
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
@@ -414,11 +430,17 @@ They are used in specifying strategies for reduction collectives, e.g.,
 #endif
 
 #ifdef USE_C10D_MPI
-  shared_ptr_class_<::c10d::ProcessGroupMPI>(
-      module, "ProcessGroupMPI", processGroup)
-      .def(py::init([](std::vector<int> ranks) {
+  auto processGroupMPI = shared_ptr_class_<::c10d::ProcessGroupMPI>(
+      module, "ProcessGroupMPI", processGroup);
+
+  // Define static create function instead of a constructor, because
+  // this function may return null. This happens if this process is not
+  // part of a sub group that is to be created.
+  processGroupMPI.def_static(
+      "create",
+      [](std::vector<int> ranks) {
         return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
-      }));
+      });
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")

@@ -30,6 +30,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         prepack_weight=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
+        fuse_relu=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_dnnlowp_fully_connected_int(
@@ -43,6 +44,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         prepack_weight,
         preserve_activation_sparsity,
         preserve_weight_sparsity,
+        fuse_relu,
         gc,
         dc,
     ):
@@ -92,10 +94,17 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
 
         op_engine_list = [
             ("FC", ""),
-            ("FC", "DNNLOWP"),
-            ("FC", "DNNLOWP_16"),
-            ("Int8FC", "DNNLOWP"),
         ]
+        if fuse_relu:
+            op_engine_list += [
+                ("Int8FCRelu", "DNNLOWP"),
+            ]
+        else:
+            op_engine_list += [
+                ("FC", "DNNLOWP"),
+                ("FC", "DNNLOWP_16"),
+                ("Int8FC", "DNNLOWP"),
+            ]
 
         for op_type, engine in op_engine_list:
             init_net = core.Net("test_init_net")
@@ -173,6 +182,8 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                     fc, outputs[0][0], preserve_activation_sparsity
                 )
             net.Proto().op.extend([fc])
+            if fuse_relu and "DNNLOWP" not in engine:
+                net.Relu(["Y"], "Y")
 
             if do_dequantize:
                 dequantize = core.CreateOperator(

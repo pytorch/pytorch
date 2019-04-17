@@ -205,6 +205,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumprod
    .. automethod:: cumsum
    .. automethod:: data_ptr
+   .. automethod:: dequantize
    .. automethod:: det
    .. automethod:: dense_dim
    .. automethod:: detach
@@ -307,6 +308,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lt
    .. automethod:: lt_
    .. automethod:: lu
+   .. automethod:: lu_solve
    .. automethod:: map_
    .. automethod:: masked_scatter_
    .. automethod:: masked_scatter
@@ -354,6 +356,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: pstrf
    .. automethod:: put_
    .. automethod:: qr
+   .. automethod:: quantize_linear
+   .. automethod:: q_scale
+   .. automethod:: q_zero_point
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
@@ -363,6 +368,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
+   .. automethod:: repeat_interleave
    .. automethod:: requires_grad
    .. automethod:: requires_grad_
    .. automethod:: reshape
@@ -419,6 +425,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: t
    .. automethod:: t_
    .. automethod:: to
+   .. automethod:: to_mkldnn
    .. automethod:: take
    .. automethod:: tan
    .. automethod:: tan_
@@ -444,6 +451,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unfold
    .. automethod:: uniform_
    .. automethod:: unique
+   .. automethod:: unique_consecutive
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
    .. automethod:: values

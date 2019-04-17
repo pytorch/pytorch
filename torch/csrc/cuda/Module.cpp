@@ -380,11 +380,6 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   THCPByteStorage_postInit(m);
   THCPBoolStorage_postInit(m);
 
-  bool has_magma = at::hasMAGMA();
-  if (has_magma) {
-    THCMagma_init(state);
-  }
-
   bool has_half = true;
 
   auto set_module_attr = [&](const char* name, PyObject* v) {
@@ -394,7 +389,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
     }
   };
 
-  set_module_attr("has_magma", has_magma ? Py_True : Py_False);
+  set_module_attr("has_magma", at::hasMAGMA() ? Py_True : Py_False);
   set_module_attr("has_half", has_half ? Py_True : Py_False);
 
   auto _state_cdata = THPObjectPtr(PyLong_FromVoidPtr(state));

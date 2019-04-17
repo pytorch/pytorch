@@ -23,8 +23,9 @@ bool ConditionalOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE(innerSize * dataF.dtype().itemsize() == innerSizeBytes);
 
   // initialize output shape
+  auto* dataOut = Output(0);
   const auto* condPtr = condition.template data<bool>();
-  auto* dataOut = Output(0, dataT.sizes(), at::dtype(dataT.dtype()));
+  dataOut->ResizeLike(dataT);
   auto* outPtr = (char*)dataOut->raw_mutable_data(dataT.dtype());
 
   // perform conditional op along first dimension
