@@ -69,10 +69,6 @@ except ImportError:
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-# Note: creating FusionGroups is currently device-independent.
-# FusionGroup creation with CPU is disabled.
-FUSION_ENABLED = torch._C._jit_can_fuse_on_cpu() or torch._C._jit_can_fuse_on_gpu()
-
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_HALF = RUN_CUDA
 if torch.cuda.is_available():
@@ -438,9 +434,6 @@ class JitTestCase(TestCase):
         self.assertExpected(str(graph), *args, **kwargs)
 
     def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
-        if not FUSION_ENABLED:
-            nonfusible_nodes = nonfusible_nodes + fusible_nodes
-            fusible_nodes = []
         diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
         diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
 
