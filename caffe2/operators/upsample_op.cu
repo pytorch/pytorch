@@ -57,7 +57,7 @@ __global__ void UpsampleBilinearKernel(
     const float w1lambda = w1r - w1;
     const float w0lambda = 1.f - w1lambda;
 
-    CUDA_1D_KERNEL_LOOP(c, num_channels) {
+    for (int c = 0; c< num_channels; c++) {
 
       float X0 = X[idx(n, num_channels, c, input_height, input_width, h1, w1)];
       float X1 = X[idx(n, num_channels, c, input_height, input_width, h1, w1 + w1p)];
