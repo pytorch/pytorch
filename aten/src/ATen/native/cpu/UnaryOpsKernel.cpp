@@ -48,7 +48,7 @@ static void sigmoid_kernel(TensorIterator& iter) {
 static void fill_kernel(TensorIterator& iter, Scalar value) {
   if (iter.dtype() == at::ScalarType::Half) {
     at::Half fill_value = value.to<at::Half>();
-    unary_kernel(*iter, [=](at::Half a) -> at::Half { return fill_value; });
+    unary_kernel(iter, [=](at::Half a) -> at::Half { return fill_value; });
   } else {
     AT_DISPATCH_ALL_TYPES(iter.dtype(), "fill_cpu", [&]() {
       scalar_t fill_value = value.to<scalar_t>();
