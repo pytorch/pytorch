@@ -1376,30 +1376,11 @@ c10::optional<GradientPair> gradientInfoForSchema(
     return cache_it->second;
   } else {
     auto schema_str = canonicalSchemaString(schema);
-    // Specialize Scalar to float for the arg type of the node schema
-    // this is used to:
-    // 1. define scalar type as float in TorchScript autodiff formula
-    // 2. to make sure the input of any graph node does not contain scalar type
-    //    in its argument, all scalar arg should already be passed with float
-    //    value since scalar/int aren't differentiable either way.
-    //
     // For debugging AD change:
     // std::cout << "Looking for " << schema_str << std::endl;
 
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
-    if (sym_script_it == schema_to_graphs.end()) {
-      // FIXME: We used to replace Scalar by float. If we were sure that
-      // all of the definitions above have been converted to number instead,
-      // we could drop this if.
-      if (c10::ReplaceAll(schema_str, "Scalar", "float")) {
-	sym_script_it = schema_to_graphs.find(schema_str);
-        // Use this to find replaced definitions
-	// if (sym_script_it != schema_to_graphs.end()) {
-	//  std::cout << "Found replaced" << schema_str << std::endl;
-	// }
-      }
-    }
     if (sym_script_it != schema_to_graphs.end()) {
       cached_gradient_pairs.emplace_hint(
           cache_it, &schema, sym_script_it->second);
