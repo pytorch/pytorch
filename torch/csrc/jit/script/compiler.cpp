@@ -1309,10 +1309,10 @@ struct to_ir {
   void emitLoopCommon(
       SourceRange range,
       const List<Stmt>& body,
-      std::function<void(Value*, std::shared_ptr<Environment>)> current_element_assigner,
+      const std::function<void(Value*, std::shared_ptr<Environment>)>&
+          current_element_assigner,
       c10::optional<Expr> cond,
-      Value* max_trip_count_val = nullptr
-      ) {
+      Value* max_trip_count_val = nullptr) {
     Value* cond_val = nullptr;
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
     WithInsertPoint guard(n);
@@ -1395,18 +1395,17 @@ struct to_ir {
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
+  void emitForInListLoop(
+      const For& stmt,
+      const std::shared_ptr<torch::jit::script::SimpleValue>& siv) {
+    auto targets = stmt.targets();
+    auto itrs = stmt.itrs();
+    auto body = stmt.body();
+    auto& range = stmt.range();
+    auto target = Var(targets[0]).name();
 
-
-void emitForInListLoop(const For& stmt, std::shared_ptr<torch::jit::script::SimpleValue> siv)
-{
-  auto targets = stmt.targets();
-  auto itrs = stmt.itrs();
-  auto body = stmt.body();
-  auto& range = stmt.range();
-  auto target = Var(targets[0]).name();
-
-  auto listArg = siv->asValue(range, method);
-  auto  max_trip_count_val = emitBuiltinCall(
+    auto listArg = siv->asValue(range, method);
+    auto max_trip_count_val = emitBuiltinCall(
         range,
         *graph,
         aten::len,
@@ -1414,21 +1413,21 @@ void emitForInListLoop(const For& stmt, std::shared_ptr<torch::jit::script::Simp
         {listArg},
         {},
         /*required=*/true);
-  const auto& ident_name = target.name();
-  auto assigner = [ident_name, range, listArg, this](Value* index, std::shared_ptr<Environment> env) {
-  auto cur_elm = emitBuiltinCall(
-      range,
-      *this->graph,
-      aten::select,
-      c10::nullopt,
-      {listArg, index},
-      {},
-      /*required=*/true);
-  env->setVar(range, ident_name, cur_elm);
-  };
-  emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
-}
-
+    const auto& ident_name = target.name();
+    auto assigner = [ident_name, range, listArg, this](
+                        Value* index, std::shared_ptr<Environment> env) {
+      auto cur_elm = emitBuiltinCall(
+          range,
+          *this->graph,
+          aten::select,
+          c10::nullopt,
+          {listArg, index},
+          {},
+          /*required=*/true);
+      env->setVar(range, ident_name, cur_elm);
+    };
+    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
+  }
 
   void emitFor(const For& stmt) {
     // For now, we only support range loops. e.g. for i in range(3): ...
