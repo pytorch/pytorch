@@ -685,6 +685,11 @@
     SparseCPU: empty_sparse
     SparseCUDA: empty_sparse
 
+- func: empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0) -> Tensor
+  matches_jit_signature: True
+  dispatch:
+    CPU: empty_affine_quantized_cpu
+
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   variants: method
   cpu_bool: True
