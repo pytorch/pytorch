@@ -239,6 +239,7 @@ def set_dir(d):
 def list(github, force_reload=False):
     r"""
     List all entrypoints available in `github` hubconf.
+
     Args:
         github: Required, a string with format "repo_owner/repo_name[:tag_name]" with an optional
             tag/branch. The default branch is `master` if not specified.
@@ -271,8 +272,9 @@ def list(github, force_reload=False):
 def help(github, model, force_reload=False):
     r"""
     Show the docstring of entrypoint `model`.
+
     Args:
-        github: Required, a string with format "repo_owner/repo_name[:tag_name]" with an optional
+        github: Required, a string with format <repo_owner/repo_name[:tag_name]> with an optional
             tag/branch. The default branch is `master` if not specified.
             Example: 'pytorch/vision[:hub]'
         model: Required, a string of entrypoint name defined in repo's hubconf.py

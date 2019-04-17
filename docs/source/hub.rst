@@ -19,37 +19,40 @@ to a github repository by adding a simple ``hubconf.py`` file;
 
 How to implement an entrypoint?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Here is a code snippet from pytorch/vision repository, which specifies an entrypoint
-for ``resnet18`` model. You can see a full script in
+Here is a code snippet specifies an entrypoint for ``resnet18`` model if we expand
+the implementation in ``pytorch/vision/hubconf.conf``.
+In most case importing the right function in ``hubconf.conf`` is sufficient. Here we
+just want to use the expanded version as an example to show how it works.
+You can see the full script in
 `pytorch/vision repo <https://github.com/pytorch/vision/blob/master/hubconf.py>`_
 
 ::
 
     dependencies = ['torch']
+    from torchvision.models.resnet import resnet18 as _resnet18
 
+    # resnet18 is the name of entrypoint
     def resnet18(pretrained=False, **kwargs):
-        """
+        """ # This docstring shows up in hub.help()
         Resnet18 model
         pretrained (bool): kwargs, load pretrained weights into the model
         """
-        # Call the model in the repo
-        from torchvision.models.resnet import resnet18 as _resnet18
+        # Call the model, load pretrained weights
         model = _resnet18(pretrained=pretrained, **kwargs)
         return model
 
 
 - ``dependencies`` variable is a **list** of package names required to to run the model.
-- ``pretrained`` controls whether to load the pre-trained weights provided by repo owners.
 - ``args`` and ``kwargs`` are passed along to the real callable function.
 - Docstring of the function works as a help message. It explains what does the model do and what
   are the allowed positional/keyword arguments. It's highly recommended to add a few examples here.
 - Entrypoint function should **ALWAYS** return a model(nn.module).
-- Pretrained weights can either be stored local in the github repo, or loadable by
+- Pretrained weights can either be stored locally in the github repo, or loadable by
   ``torch.hub.load_state_dict_from_url()``. In the example above ``torchvision.models.resnet.resnet18``
-  handles ``pretrained``, alternatively you can put the following logic in the entrypoint.
+  handles ``pretrained``, alternatively you can put the following logic in the entrypoint definition.
 
 ::
-    if kwargs.get('pretrained', False):
+    if pretrained:
         # For checkpoint saved in local repo
         model.load_state_dict(<path_to_saved_checkpoint>)
 
@@ -79,6 +82,16 @@ show docstring and examples through ``torch.hub.help()`` and load the pre-traine
 
 .. autofunction:: load
 
+Running a loaded model:
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Note that ``*args, **kwargs`` in ``torch.load()`` are used to **instantiate** a model.
+After you loaded a model, how can you find out what you can do with the model?
+A suggested workflow is
+
+- ``dir(model)`` to see all avaialble methods of the model.
+- ``help(model.foo)`` to check what arguments ``model.foo`` takes to run
+
 Where are my downloaded models saved?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -100,3 +113,15 @@ By default, we don't clean up files after loading it. Hub uses the cache by defa
 Users can force a reload by calling ``hub.load(..., force_reload=True)``. This will delete
 the existing github folder and downloaded weights, reinitialize a fresh download. This is useful
 when updates are published to the same branch, users can keep up with the latest release.
+
+
+Known limitations:
+^^^^^^^^^^^^^^^^^^
+Torch hub works by importing the package as if it was installed. There're some side effects
+introduced by importing in Python. For example, you can see new items in Python caches
+``sys.modules`` and ``sys.path_importer_cache`` which is normal Python behavior.
+
+A known limitation that worth mentioning here is user **CANNOT** load two different branches of
+the same repo in the **same python process**. It's just like installing two packages with the
+same name in Python, which is not good. Cache might join the party and give you surprises if you
+actually try that. Of course it's totally fine to load them in separate processes.
