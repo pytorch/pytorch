@@ -3,9 +3,10 @@
 // it now to implement correct semantic checking for script
 #pragma once
 
+#include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir.h>
-#include <ATen/core/stack.h>
+#include <torch/csrc/jit/operator_options.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
@@ -58,19 +59,31 @@ using OperationCreator = std::function<Operation(const Node*)>;
  */
 
 struct TORCH_API Operator {
-  Operator(FunctionSchema schema, OperationCreator op_creator)
+  Operator(
+      FunctionSchema schema,
+      OperationCreator op_creator,
+      OperatorOptions options = OperatorOptions())
       : schema_(std::make_shared<FunctionSchema>(std::move(schema))),
-        op_creator_(std::move(op_creator)) {}
+        op_creator_(std::move(op_creator)),
+        options_(std::move(options)) {}
 
-  Operator(const std::string& schema, OperationCreator op_creator)
-      : schema_string_(schema), op_creator_(std::move(op_creator)) {}
+  Operator(
+      const std::string& schema,
+      OperationCreator op_creator,
+      OperatorOptions options = OperatorOptions())
+      : schema_string_(schema),
+        op_creator_(std::move(op_creator)),
+        options_(std::move(options)) {}
 
   // Helper constructor to register `op` to run
   // run for _every_ IR Node where n.kind() == name, regardless of arguments.
   // This is accomplished by marking the schema varargs and having no required
   // arguments. This is used for things like prim::While or prim::If that can
   // take a number of different valid input types and lengths.
-  Operator(Symbol name, OperationCreator op_creator)
+  Operator(
+      Symbol name,
+      OperationCreator op_creator,
+      OperatorOptions options = OperatorOptions())
       : Operator(
             FunctionSchema(
                 name,
@@ -79,15 +92,24 @@ struct TORCH_API Operator {
                 {},
                 /*is_vararg*/ true,
                 /*is_varret*/ true),
-            std::move(op_creator)) {}
+            std::move(op_creator),
+            std::move(options)) {}
 
-  Operator(FunctionSchema schema, Operation op)
+  Operator(
+      FunctionSchema schema,
+      Operation op,
+      OperatorOptions options = OperatorOptions())
       : schema_(std::make_shared<FunctionSchema>(std::move(schema))),
-        op_(std::make_shared<Operation>(std::move(op))) {}
+        op_(std::make_shared<Operation>(std::move(op))),
+        options_(std::move(options)) {}
 
-  Operator(const std::string& schema, Operation op)
+  Operator(
+      const std::string& schema,
+      Operation op,
+      OperatorOptions options = OperatorOptions())
       : schema_string_(schema),
-        op_(std::make_shared<Operation>(std::move(op))) {}
+        op_(std::make_shared<Operation>(std::move(op))),
+        options_(std::move(options)) {}
 
   bool matches(const Node* node) const;
 
@@ -110,6 +132,10 @@ struct TORCH_API Operator {
     return *schema_;
   }
 
+  const OperatorOptions& options() const {
+    return options_;
+  }
+
  private:
   mutable c10::optional<std::string> schema_string_;
   // cannot use c10::optional because windows has issues that require an
@@ -121,6 +147,7 @@ struct TORCH_API Operator {
   // NB: std::function has a default state (where it == nullptr).
   std::shared_ptr<Operation> op_;
   OperationCreator op_creator_;
+  OperatorOptions options_;
 };
 
 TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
