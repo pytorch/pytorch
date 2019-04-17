@@ -2157,6 +2157,100 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::fabs, std::fabs(a), float, float),
     DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
 
+    Operator(
+        "aten::isnan(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::isnan(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::asinh(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::asinh(a));
+          return 0;
+        }),
+    Operator(
+        "aten::asinh(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::asinh(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::atanh(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::atanh(a));
+          return 0;
+        }),
+    Operator(
+        "aten::atanh(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::atanh(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::cosh(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::cosh(a));
+          return 0;
+        }),
+    Operator(
+        "aten::cosh(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::cosh(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::sinh(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::sinh(a));
+          return 0;
+        }),
+    Operator(
+        "aten::sinh(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::sinh(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::tanh(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::tanh(a));
+          return 0;
+        }),
+    Operator(
+        "aten::tanh(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::tanh(a));
+          return 0;
+        }),
+
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),
     DEFINE_COMPARISON_OP(aten::lt, a < b),

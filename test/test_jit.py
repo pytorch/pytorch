@@ -6010,6 +6010,51 @@ a")
             # type: (float, int) -> float
             return math.pow(x, y)
 
+        def test_isnan(x):    #HERE
+            # type: (float) -> boolean
+            return math.isnan(x)
+
+        def test_asinh_int(x):
+            # type: (int) -> float
+            return math.asinh(x)
+
+        def test_asinh_float(x):
+            # type: (float) -> float
+            return math.asinh(x)
+
+        def test_atanh_int(x):
+            # type: (int) -> float
+            return math.atanh(x)
+
+        def test_atanh_float(x):
+            # type: (float) -> float
+            return math.atanh(x)
+
+        def test_cosh_float(x):
+            # type: (float) -> float
+            return math.cosh(x)
+
+        def test_cosh_int(x):
+            # type: (int) -> float
+            return math.cosh(x)
+
+        def test_sinh_int(x):
+            # type: (int) -> float
+            return math.sinh(x)
+
+        def test_sinh_float(x):
+            # type: (float) -> float
+            return math.sinh(x)
+
+        def test_tanh_int(x):
+            # type: (int) -> float
+            return math.tanh(x)
+
+        def test_tanh_float(x):
+            # type: (float) -> float
+            return math.tanh(x)
+
+
         self.checkScript(test_floor, (1.5,))
         self.checkScript(test_ceil, (1.5,))
         self.checkScript(test_log_int, (2,))
@@ -6024,6 +6069,19 @@ a")
         self.checkScript(test_sqrt_float, (2.0,))
         self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
+        
+        self.checkScript(test_isnan, (2,))
+        self.checkScript(test_asinh_int, (2,))
+        self.checkScript(test_asinh_float, (2.0,))
+        self.checkScript(test_atanh_int, (2,))
+        self.checkScript(test_atanh_float, (1.0,))
+        self.checkScript(test_atanh_float, (.20,))
+        self.checkScript(test_cosh_int, (2,))
+        self.checkScript(test_cosh_float, (2.0,))
+        self.checkScript(test_sinh_int, (2,))
+        self.checkScript(test_sinh_float, (2.0,))
+        self.checkScript(test_tanh_int, (2,))
+        self.checkScript(test_tanh_float, (2.0,))
 
     @unittest.skipIf(PY2, "Requires python 3")
     def test_math_gcd(self):
