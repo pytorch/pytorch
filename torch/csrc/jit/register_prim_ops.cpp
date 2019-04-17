@@ -1999,7 +1999,7 @@ auto math_ops =
         .op("aten::abs", static_cast<double (*)(double)>(&std::abs))
         .op("aten::floor", static_cast<double (*)(double)>(&std::floor))
         .op("aten::pow", static_cast<double (*)(double, double)>(&std::pow))
-        .op("aten::pow", static_cast<double (*)(double, int)>(&std::pow))
+        .op("aten::pow", static_cast<double (*)(double, int64_t)>(&std::pow))
         .op("aten::exp", static_cast<double (*)(int64_t)>(&std::exp))
         .op("aten::exp", static_cast<double (*)(double)>(&std::exp))
         .op("aten::sqrt", static_cast<double (*)(int64_t)>(&std::sqrt))
