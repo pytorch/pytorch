@@ -3598,6 +3598,54 @@ workflows:
   version: 2
   build:
     jobs:
+      - binary_linux_manywheel_2.7m_cpu_devtoolset3_build
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build
+      - binary_linux_manywheel_3.5m_cpu_devtoolset3_build
+      - binary_linux_manywheel_3.6m_cpu_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cpu_devtoolset3_build
+      - binary_linux_manywheel_2.7m_cu80_devtoolset3_build
+      - binary_linux_manywheel_2.7mu_cu80_devtoolset3_build
+      - binary_linux_manywheel_3.5m_cu80_devtoolset3_build
+      - binary_linux_manywheel_3.6m_cu80_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cu80_devtoolset3_build
+      - binary_linux_manywheel_2.7m_cu90_devtoolset3_build
+      - binary_linux_manywheel_2.7mu_cu90_devtoolset3_build
+      - binary_linux_manywheel_3.5m_cu90_devtoolset3_build
+      - binary_linux_manywheel_3.6m_cu90_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cu90_devtoolset3_build
+      - binary_linux_manywheel_2.7m_cu100_devtoolset3_build
+      - binary_linux_manywheel_2.7mu_cu100_devtoolset3_build
+      - binary_linux_manywheel_3.5m_cu100_devtoolset3_build
+      - binary_linux_manywheel_3.6m_cu100_devtoolset3_build
+      - binary_linux_manywheel_3.7m_cu100_devtoolset3_build
+      - binary_linux_manywheel_2.7m_cpu_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cpu_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cpu_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cpu_devtoolset7_build
+      - binary_linux_manywheel_2.7m_cu80_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cu80_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cu80_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cu80_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cu80_devtoolset7_build
+      - binary_linux_manywheel_2.7m_cu90_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cu90_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cu90_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cu90_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cu90_devtoolset7_build
+      - binary_linux_manywheel_2.7m_cu100_devtoolset7_build
+      - binary_linux_manywheel_2.7mu_cu100_devtoolset7_build
+      - binary_linux_manywheel_3.5m_cu100_devtoolset7_build
+      - binary_linux_manywheel_3.6m_cu100_devtoolset7_build
+      - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cpu_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cu80_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cu90_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cu100_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cu80_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cu90_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_build
       - pytorch_linux_trusty_py2_7_9_build
       - pytorch_linux_trusty_py2_7_9_test:
           requires:
@@ -3907,6 +3955,14 @@ workflows:
       - binary_linux_manywheel_3.5m_cu100_devtoolset7_build
       - binary_linux_manywheel_3.6m_cu100_devtoolset7_build
       - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cpu_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cu80_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cu90_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cu100_devtoolset3_build
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cu80_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cu90_devtoolset7_build
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_build
       - binary_linux_conda_2.7_cpu_build
       - binary_linux_conda_3.5_cpu_build
       - binary_linux_conda_3.6_cpu_build
