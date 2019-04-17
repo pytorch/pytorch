@@ -2663,13 +2663,37 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
         self.assertFalse(r.is_quantized)
+        # slicing and int_repr
+        int_repr = qr.int_repr()
+        for num in int_repr:
+            self.assertEqual(num, 3)
+        for num in qr[2:].int_repr():
+            self.assertEqual(num, 3)
+        # dequantize
         rqr = qr.dequantize()
         for i in range(num_elements):
             self.assertEqual(r[i], rqr[i])
-        # Testing item
+        # Scalar Tensor
+        # item
         r = torch.ones(1, dtype=torch.float)
         qr = r.quantize_linear(scale, zero_point)
         self.assertEqual(qr.item(), 1)
+        self.assertEqual(qr[0].item(), 1)
+        # assignment
+        # This calls _th_fill_
+        # qr[0] = 8 # float asignment
+        # self.assertEqual(qr.item(), 8)
+
+    def test_qtensor_quant_dequant(self):
+        r = np.random.rand(3, 2) * 2 - 4
+        r = torch.from_numpy(r).float()
+        scale = 2
+        zero_point = 2
+        qr = r.quantize_linear(scale, zero_point)
+        rqr = qr.dequantize()
+        print(r.numpy())
+        print(rqr.numpy())
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
@@ -9973,6 +9997,40 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(pinned, x)
         self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_pin_memory_from_constructor(self):
+
+        def _get_like(t, **kwargs):
+            return [
+                torch.rand_like(t, **kwargs),
+                torch.randn_like(t, **kwargs),
+                torch.empty_like(t, **kwargs),
+                torch.full_like(t, 4, **kwargs),
+                torch.zeros_like(t, **kwargs),
+                torch.ones_like(t, **kwargs),
+            ]
+
+        def _get_tensors(**kwargs):
+            return [
+                torch.tensor([10, 11], **kwargs),
+                torch.randn(3, 5, **kwargs),
+                torch.rand(3, **kwargs),
+                # torch.randint(3, 5, **kwargs), // unsupported
+                torch.zeros(3, **kwargs),
+                torch.randperm(3, **kwargs),
+                torch.empty(6, **kwargs),
+                torch.ones(6, **kwargs),
+                torch.eye(6, **kwargs),
+                torch.arange(3, 5, **kwargs)]
+
+        pinned_tensors = _get_tensors(pin_memory=True) + _get_like(torch.empty(5, dtype=torch.float64), pin_memory=True)
+        for x in pinned_tensors:
+            self.assertTrue(x.is_pinned())
+
+        tensors = _get_tensors() + _get_like(torch.empty(5, dtype=torch.float64, pin_memory=True))
+        for x in tensors:
+            self.assertFalse(x.is_pinned())
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_unresizable(self):
         x = np.zeros((2, 2))
@@ -10666,7 +10724,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     def test_unique_dim(self):
         self.assertFalse(hasattr(torch, 'unique_dim'))
-        torch.unique_dim = torch._C._VariableFunctions.unique_dim
 
         def run_test(dtype=torch.float, device=torch.device('cpu')):
             x = torch.tensor([[[1., 1.],
@@ -10721,7 +10778,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim0, x_unique)
             self.assertEqual(expected_inverse_dim0, x_inverse)
 
-            x_unique, _, x_counts = torch.unique_dim(
+            x_unique, x_counts = torch.unique(
                 x,
                 return_inverse=False,
                 return_counts=True,
@@ -10729,7 +10786,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim0, x_unique)
             self.assertEqual(expected_counts_dim0, x_counts)
 
-            x_unique, x_inverse, x_counts = torch.unique_dim(
+            x_unique, x_inverse, x_counts = torch.unique(
                 x,
                 return_inverse=True,
                 return_counts=True,
@@ -10749,7 +10806,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim1, x_unique)
             self.assertEqual(expected_inverse_dim1, x_inverse)
 
-            x_unique, _, x_counts = torch.unique_dim(
+            x_unique, x_counts = torch.unique(
                 x,
                 return_inverse=False,
                 return_counts=True,
@@ -10757,7 +10814,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim1, x_unique)
             self.assertEqual(expected_counts_dim1, x_counts)
 
-            x_unique, x_inverse, x_counts = torch.unique_dim(
+            x_unique, x_inverse, x_counts = torch.unique(
                 x,
                 return_inverse=True,
                 return_counts=True,
@@ -10777,7 +10834,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_inverse_dim2, x_inverse)
 
-            x_unique, _, x_counts = torch.unique_dim(
+            x_unique, x_counts = torch.unique(
                 x,
                 return_inverse=False,
                 return_counts=True,
@@ -10785,7 +10842,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_counts_dim2, x_counts)
 
-            x_unique, x_inverse, x_counts = torch.unique_dim(
+            x_unique, x_inverse, x_counts = torch.unique(
                 x,
                 return_inverse=True,
                 return_counts=True,
