@@ -220,39 +220,27 @@ void THCTensor_(sortViaThrust)(THCState* state,
 
   // Fill the indices with a global index across all slices
   thrust::counting_iterator<int64_t> countIter(0);
-
   thrust::copy(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     countIter, countIter + totalElements, indexIter);
-
-  // First, we sort globally (across all slices) according to key
-  // (the values we're sorting)
-  if (dir) {
-    thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-      keyIter, keyIter + totalElements, indexIter, ThrustGTOp<scalar_t, true>());
-  } else {
-    thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-      keyIter, keyIter + totalElements, indexIter, ThrustLTOp<scalar_t, true>());
-  }
-
-  // Then, re-sort according to slice that each index is
-  // in. This completes the segment sort in Thrust, since we're
-  // stably sorting here, preserving the relative order of values
-  // per each slice
-  thrust::stable_sort_by_key(
+  if (dir)
+    thrust::sort(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
-    indexIter, indexIter + totalElements, keyIter,
-    SliceComp(sliceSize));
+    thrust::make_zip_iterator(thrust::make_tuple(indexIter, keyIter)),
+    thrust::make_zip_iterator(thrust::make_tuple(indexIter, keyIter))+totalElements,
+    ThrustSliceGTOp<scalar_t, true>(sliceSize));
+  else
+    thrust::sort(
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+#endif
+    thrust::make_zip_iterator(thrust::make_tuple(indexIter, keyIter)),
+    thrust::make_zip_iterator(thrust::make_tuple(indexIter, keyIter))+totalElements,
+    ThrustSliceLTOp<scalar_t, true>(sliceSize));
 
   // Translate the global integer 0-based index to a per-slice real
   // Lua index
@@ -268,7 +256,6 @@ void THCTensor_(sortViaThrust)(THCState* state,
     THCTensor_(transpose)(state, trContigKey, NULL, dim, nDims - 1);
     THCudaLongTensor_transpose(state, trContigIndices, NULL, dim, nDims - 1);
   }
-
   // Then copy back to the expected output
   THCTensor_(freeCopyTo)(state, trContigKey, sorted);
   THCudaLongTensor_freeCopyTo(state, trContigIndices, indices);
