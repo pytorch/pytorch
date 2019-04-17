@@ -75,10 +75,11 @@ struct Function;
 /// can thus call functions defined on `Tensor`s also with `Variable`s. For
 /// this, the `Variable` class allows implicit construction from `Tensor`. It is
 /// the responsibility of calling code to ensure that this constructor is
-/// invoked only when the `Tensor`'s dynamic type is actually `Variable`. Most
-/// notably, it is *not* correct to construct a brand new `Variable` from a
-/// `Tensor` using this constructor. To do so, you must use the `make_variable`
-/// free function instead. To create a view variable, use `make_variable_view`.
+/// invoked only when the `Tensor` contains autograd metadata
+/// (i.e. `tensor.is_variable() == true`). Most notably, it is *not* correct to
+/// construct a brand new `Variable` from a `Tensor` using this constructor.
+/// To do so, you must use the `make_variable` free function instead. To create
+/// a view variable, use `make_variable_view`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 struct TORCH_API Variable : public at::Tensor {
