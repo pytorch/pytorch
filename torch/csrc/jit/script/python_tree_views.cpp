@@ -79,11 +79,14 @@ void initTreeViewBindings(PyObject* module) {
 
   py::class_<TreeView>(m, "TreeView")
       .def("range", &TreeView::range)
-      .def("__str__", [](const TreeView& tree) {
-        std::ostringstream stream;
-        stream << tree.get();
-        return stream.str();
-      });
+      .def(
+          "__str__",
+          [](const TreeView& tree) {
+            std::ostringstream stream;
+            stream << tree.get();
+            return stream.str();
+          })
+      .def("dump", [](const TreeView& tree) { tree.dump(); });
 
   py::class_<Ident, TreeView>(m, "Ident")
       .def(py::init(&Ident::create))
@@ -157,6 +160,8 @@ void initTreeViewBindings(PyObject* module) {
       }));
   py::class_<Pass, Stmt>(m, "Pass").def(
       py::init([](const SourceRange& range) { return Pass::create(range); }));
+      py::class_<Dots, Expr>(m, "Dots").def(
+          py::init([](const SourceRange& range) { return Dots::create(range); }));
   py::class_<If, Stmt>(m, "If").def(
       py::init([](const SourceRange& range,
                   const Expr& cond,
@@ -233,6 +238,11 @@ void initTreeViewBindings(PyObject* module) {
       .def(py::init(
           [](const Expr& cond, const Expr& true_expr, const Expr& false_expr) {
             return TernaryIf::create(cond.range(), cond, true_expr, false_expr);
+          }));
+  py::class_<ListComp, Expr>(m, "ListComp")
+      .def(py::init(
+          [](const SourceRange& range, const Expr& elt, const Expr& target, const Expr& iter) {
+            return ListComp::create(range, elt, target, iter);
           }));
   py::class_<ListLiteral, Expr>(m, "ListLiteral")
       .def(py::init([](const SourceRange& range, std::vector<Expr> args) {

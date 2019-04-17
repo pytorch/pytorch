@@ -12,9 +12,7 @@ Only files that are in CLANG_FORMAT_WHITELIST are checked.
 import subprocess
 import os
 import argparse
-import fnmatch
 import difflib
-import sys
 import re
 
 

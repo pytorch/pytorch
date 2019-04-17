@@ -127,7 +127,19 @@ struct ParserImpl {
       } break;
       case '[': {
         auto list = parseList('[', ',', ']', &ParserImpl::parseExp);
-        prefix = ListLiteral::create(list.range(), List<Expr>(list));
+
+        if (list.size() == 1 && (*list.begin()).kind() == TK_LIST_COMP) {
+          prefix = *list.begin();
+        } else {
+          for (auto se : list) {
+            if (se.kind() == TK_LIST_COMP) {
+              throw ErrorReport(list.range())
+                  << " expected a single list comprehension within '[' , ']'";
+            }
+          }
+          prefix = ListLiteral::create(list.range(), List<Expr>(list));
+        }
+
       } break;
       case '{': {
         L.next();
@@ -149,6 +161,10 @@ struct ParserImpl {
       } break;
       case TK_STRINGLITERAL: {
         prefix = parseConcatenatedStringLiterals();
+      } break;
+      case TK_DOTS: {
+        prefix = Dots::create(L.cur().range);
+        L.next();
       } break;
       default: {
         Ident name = parseIdent();
@@ -236,6 +252,14 @@ struct ParserImpl {
       // special case for trinary operator
       if (kind == TK_IF) {
         prefix = parseTrinary(prefix, pos, binary_prec);
+        continue;
+      }
+
+      if (kind == TK_FOR) {
+        auto target = parseExp();
+        L.expect(TK_IN);
+        auto iter = parseExp();
+        prefix = ListComp::create(pos, Expr(prefix), target, iter);
         continue;
       }
 
@@ -331,6 +355,7 @@ struct ParserImpl {
 
     auto subscript_exprs =
         parseList('[', ',', ']', &ParserImpl::parseSubscriptExp);
+
     return Subscript::create(range, Expr(value), subscript_exprs);
   }
 
@@ -552,7 +577,12 @@ struct ParserImpl {
   TreeRef parseClass() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
-    // TODO no inheritance or () allowed right now
+    if (L.nextIf('(')) {
+      // The parser only supports py3 syntax, so classes are new-style when
+      // they don't inherit from anything.
+      L.reportError(
+          "Inheritance is not yet supported for TorchScript classes yet.");
+    }
     L.expect(':');
 
     L.expect(TK_INDENT);
@@ -615,6 +645,9 @@ Lexer& Parser::lexer() {
 }
 Decl Parser::parseTypeComment() {
   return pImpl->parseTypeComment();
+}
+Expr Parser::parseExp() {
+  return pImpl->parseExp();
 }
 
 } // namespace script

@@ -1,4 +1,4 @@
-from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, flatten
+from test_pytorch_common import TestCase, run_tests, flatten
 
 import torch
 import torch.onnx
@@ -10,11 +10,9 @@ import itertools
 import io
 import unittest
 import inspect
-import argparse
 import glob
 import os
 import shutil
-import sys
 import common_utils as common
 
 
@@ -434,6 +432,10 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.flatten(x, 1), x)
 
+    def test_isnan(self):
+        x = torch.tensor([1, float('nan'), 2])
+        self.assertONNX(lambda x: torch.isnan(x), x)
+
     def test_argmax(self):
         x = torch.randn(4, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.argmax(x, dim=1), x)
@@ -478,7 +480,7 @@ class TestOperators(TestCase):
 
     def test_batchnorm_noaffine(self):
         x = torch.randn(128, 128, 1, 1, requires_grad=True)
-        self.assertONNX(nn.BatchNorm2d(128, affine=False), x)
+        self.assertONNX(nn.BatchNorm2d(128, affine=False, momentum=0.3), x)
 
     def test_embedding_bags(self):
         emb_bag = nn.EmbeddingBag(10, 8)
@@ -551,6 +553,47 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3).float()
         y = torch.randn(2, 3).float()
         self.assertONNX(lambda x, y: x + y, (x, y), opset_version=10)
+
+    def test_retain_param_name_disabled(self):
+        class MyModule(Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.fc1 = nn.Linear(4, 5, bias=False)
+                self.fc1.weight.data.fill_(2.)
+                self.fc2 = nn.Linear(5, 6, bias=False)
+                self.fc2.weight.data.fill_(3.)
+
+            def forward(self, x):
+                return self.fc2(self.fc1(x))
+
+        x = torch.randn(3, 4).float()
+        self.assertONNX(MyModule(), (x,), _retain_param_name=False)
+
+    def test_c2_op(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, scores, bbox_deltas, im_info, anchors):
+                a, b = torch.ops._caffe2.GenerateProposals(
+                    (scores), (bbox_deltas), (im_info), (anchors),
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                )
+                return a, b
+
+        model = MyModel()
+        A = 4
+        H = 10
+        W = 8
+        img_count = 3
+        scores = torch.ones(img_count, A, H, W, dtype=torch.float32)
+        bbox_deltas = torch.linspace(0, 10, steps=img_count * 4 * A * H * W,
+                                     dtype=torch.float32)
+        bbox_deltas = bbox_deltas.view(img_count, 4 * A, H, W)
+        im_info = torch.ones(img_count, 3, dtype=torch.float32)
+        anchors = torch.ones(A, 4, dtype=torch.float32)
+        inputs = (scores, bbox_deltas, im_info, anchors)
+        self.assertONNX(model, inputs)
 
 
 if __name__ == '__main__':

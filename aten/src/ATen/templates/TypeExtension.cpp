@@ -26,10 +26,6 @@ Backend ${Type}::backend() const {
   return Backend::${Backend};
 }
 
-size_t ${Type}::elementSizeInBytes() const {
-  AT_ERROR("elementSizeInBytes is not implemented for ${Type}");
-}
-
 ${type_method_definitions}
 
 } // namespace at

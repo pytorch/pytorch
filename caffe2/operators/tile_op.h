@@ -45,6 +45,15 @@ class TileOp final : public Operator<Context> {
           Input(1).dim() == 1 && Input(1).numel() == 1,
           "Input `tiles` should be a vector of size 1.");
       tiles_ = GetArgFromTensor(Input(1));
+
+      // Because of a bug in original code, temporarily adds this part to keep
+      // backward compatibility.
+      // TODO(yangxm): Remove this part when prod runtime upgraded with fixed
+      // model config.
+      if (Input(1).template IsType<std::int64_t>()) {
+        axis_ = 0;
+      }
+
       if (InputSize() > 2) {
         CAFFE_ENFORCE(
             Input(2).dim() == 1 && Input(2).numel() == 1,

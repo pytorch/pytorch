@@ -144,10 +144,8 @@ class TestAdadelta(serial.SerializedTestCase):
                              allow_nan=False, allow_infinity=False),
            decay=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           data_strategy=st.data(),
            **hu.gcs)
-    def test_sparse_adadelta_empty(self, inputs, lr, epsilon, decay,
-                                  data_strategy, gc, dc):
+    def test_sparse_adadelta_empty(self, inputs, lr, epsilon, decay, gc, dc):
         param, moment, moment_delta = inputs
         moment = np.abs(moment)
         lr = np.array([lr], dtype=np.float32)

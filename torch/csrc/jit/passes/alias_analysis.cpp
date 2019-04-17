@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -91,7 +92,7 @@ bool AliasDb::hasWriters(const Value* v) const {
     // If `n` has a wildcard, any write in the graph may write to it.
     // So the only way we know there are no writers is if there are no writes
     // at all.
-    return numWrites_ == 0;
+    return numWrites_ != 0;
   }
 
   if (!elementMap_.count(v)) {
@@ -346,6 +347,21 @@ void AliasDb::analyze(Node* node) {
   }
 }
 
+// Returns true if analysis was run using
+// the registered analyzer.
+bool AliasDb::tryRegisteredAnalysis(Node* node) {
+  const Operator& op = getOperatorFor(node);
+  auto analysis = op.options().aliasAnalysis();
+  switch (analysis) {
+    case AliasAnalysisKind::PURE:
+      analyzeCreator(node);
+      return true;
+    case AliasAnalysisKind::DEFAULT:
+      return false;
+  }
+  return false;
+}
+
 // The basic strategy is:
 //   1. Retrieve alias information for every input.
 //   2. Use the node's schema's alias annotations to propgagate alias/write
@@ -409,6 +425,9 @@ void AliasDb::analyzeImpl(Node* node) {
       // These ops do nothing
       return;
     default:
+      if (tryRegisteredAnalysis(node)) {
+        return;
+      }
       AT_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
   }
 
@@ -426,6 +445,11 @@ void AliasDb::analyzeImpl(Node* node) {
           << "Alias information not found for node. File a bug report.\n"
           << "Node: " << *node << "\n";
     }
+  }
+
+  // see [custom operator aliasing]
+  if (!node->kind().is_aten() && !node->kind().is_prim()) {
+    return analyzeCustomOp(node);
   }
 
   // Bind formal alias annotation to actual alias sets
@@ -516,6 +540,11 @@ void AliasDb::analyzeImpl(Node* node) {
 }
 // Register the fact that `n` writes to `v`.
 void AliasDb::registerWrite(const Value* v, Node* n) {
+  if (!shouldAnnotate(v)) {
+    // don't need to register a write if the value isn't mutable
+    return;
+  }
+
   numWrites_++;
 
   if (isWildcard(v)) {
@@ -682,6 +711,19 @@ void AliasDb::analyzeSetAttr(Node* node) {
   registerWrite(self, node);
 }
 
+// Custom ops may write to any input and produce wildcards
+void AliasDb::analyzeCustomOp(Node* node) {
+  for (const auto input : node->inputs()) {
+    registerWrite(input, node);
+  }
+
+  // TODO(suo): we can make the more refined assumption that outputs may only
+  // alias any input.
+  for (const auto output : node->outputs()) {
+    setWildcard(output);
+  }
+}
+
 // BroadcastingChunk: all inputs are broadcasted, and then individually chunked.
 // This is an intermediate node used only in the graph fuser.
 void AliasDb::analyzeBroadcastingChunk(Node* node) {
@@ -708,6 +750,16 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
   if (from == to) {
     return;
   }
+
+  // Special case: if `from` is an optional, `to` could be a None. Don't
+  // create a pointer in that case
+  if (from->type()->kind() == TypeKind::OptionalType &&
+      to->type()->kind() == TypeKind::NoneType) {
+    return;
+  }
+
+  // At this point, we should be dealing with two mutable types.
+  AT_ASSERT(shouldAnnotate(from) && shouldAnnotate(to));
 
   // If either value is a wildcard, don't insert anything into the graph;
   // wildcards are tracked separately since they have different aliasing rules.
@@ -1171,6 +1223,9 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
 
 // Register `v` as a wildcard value.
 void AliasDb::setWildcard(const Value* v) {
+  if (!shouldAnnotate(v)) {
+    return;
+  }
   wildcards_.insert(v);
 }
 

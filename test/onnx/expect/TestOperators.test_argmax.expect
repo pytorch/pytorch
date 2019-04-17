@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "1.1"
 graph {
   node {
-    input: "x"
+    input: "0"
     output: "1"
     op_type: "ArgMax"
     attribute {
@@ -19,7 +19,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "x"
+    name: "0"
     type {
       tensor_type {
         elem_type: 1

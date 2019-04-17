@@ -23,6 +23,17 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
     }
     out << ")";
+  } else if (auto value = t.cast<ProfiledTensorType>()) {
+    out << "Tensor(dtype = ";
+    if  (value->scalarType().has_value())
+    {
+        out << *value->scalarType();
+    }
+    else
+    {
+      out << " dynamic";
+    }
+    out << " , shape = " << value->sizes();
   } else if (auto value = t.cast<DimensionedTensorType>()) {
     out << toString(value->scalarType()) << "(";
     for (int64_t i = 0; i < value->dim(); ++i) {
@@ -454,6 +465,11 @@ class ClassTypeRegistry {
     return nullptr;
   }
 
+  void clear() {
+    std::lock_guard<std::mutex> g(mutex_);
+    reg_.clear();
+  }
+
  private:
   std::mutex mutex_;
   std::unordered_map<std::string, ClassTypePtr> reg_;
@@ -467,13 +483,78 @@ ClassTypeRegistry& getRegistry() {
 
 ClassTypePtr ClassType::create(
     const std::string& name,
-    std::shared_ptr<Module> module) {
-  auto ptr = ClassTypePtr(new ClassType(name, std::move(module)));
+    std::shared_ptr<CompilationUnit> cu) {
+  auto ptr = ClassTypePtr(new ClassType(name, std::move(cu)));
   getRegistry().registerType(name, ptr);
+  return ptr;
+}
+
+ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
+  return ClassTypePtr(new ClassType("Module", std::move(cu)));
+}
+
+ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
+  auto ptr = ClassTypePtr(new ClassType(typename_, compilation_unit_));
+  AT_ASSERT(numAttributes() == refined_slots.size());
+  for(size_t i = 0; i < attributeNames_.size(); ++i) {
+    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
+    ptr->addAttribute(attributeNames_[i], refined_slots[i]);
+  }
   return ptr;
 }
 
 ClassTypePtr ClassType::get(const std::string& name) {
   return getRegistry().getType(name);
 }
+
+
+void ClassType::clearRegistry() {
+  getRegistry().clear();
+}
+
+std::string ProfiledTensorType::str() const {
+  return "Tensor";
+}
+
+VaryingShape VaryingShape::merge(const VaryingShape& other) const
+{
+  if (size_ != other.size_) {
+    return VaryingShape(c10::optional<size_t>{});
+  }
+
+  VaryingShape vs(c10::optional<size_t>(dims_.size()));
+  for (size_t i = 0; i < dims_.size(); i++)
+  {
+    vs.dims_[i] = merge_primitive(dims_[i], other.dims_[i]);
+  }
+
+  return vs;
+}
+
+std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
+
+    out << "(";
+    if (!vs.size()) {
+      out << "*)";
+      return out;
+    }
+
+    for (size_t i = 0; i < vs.size(); i++)
+    {
+      if (i > 0) {
+        out << ", ";
+      }
+      if (vs[i].has_value())
+      {
+        out << vs[i].value();
+      }
+      else
+      {
+        out << "*";
+      }
+    }
+    out << ")";
+    return out;
+}
+
 } // namespace c10

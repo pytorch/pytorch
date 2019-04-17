@@ -419,7 +419,20 @@ template <typename ModuleType>
 AnyModule::AnyModule(std::shared_ptr<ModuleType> module)
     : content_(make_holder(
           std::move(module),
-          &std::remove_reference<ModuleType>::type::forward)) {}
+          &std::remove_reference<ModuleType>::type::forward)) {
+  // `AnyModule` can only store an `nn::Module` subclass object that provides
+  // a `forward()` method that has a non-templatized return type.
+  // (e.g. `AnyModule` cannot store `nn::Sequential`, because `nn::Sequential`'s
+  // `forward()` method has a templatized return type.)
+  static_assert(
+      torch::detail::is_module<ModuleType>::value,
+      "Can only store object derived from nn::Module into AnyModule");
+  static_assert(
+      torch::detail::has_forward<ModuleType>::value,
+      "Can only store module with a forward() method that has a non-templatized"
+      "return type into AnyModule (e.g. we cannot store nn::Sequential"
+      "into AnyModule, because its forward() method's return type is templatized)");
+}
 
 template <typename ModuleType, typename>
 AnyModule::AnyModule(ModuleType&& module)

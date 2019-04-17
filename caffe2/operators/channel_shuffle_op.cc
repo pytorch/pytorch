@@ -50,12 +50,13 @@ void RunChannelShuffleNHWC(
     const T* X,
     T* Y,
     CPUContext* context) {
-  const std::array<int, 2> dims = {G, K};
-  const std::array<int, 2> axes = {1, 0};
+  const std::array<std::int64_t, 2> dims = {G, K};
+  const std::array<std::int32_t, 2> axes = {1, 0};
   const int M = N * HxW;
   const int C = G * K;
   for (int i = 0; i < M; ++i) {
-    math::Transpose<T, CPUContext>(2, dims.data(), axes.data(), X, Y, context);
+    math::Transpose<std::int64_t, T, CPUContext>(
+        2, dims.data(), axes.data(), X, Y, context);
     X += C;
     Y += C;
   }

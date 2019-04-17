@@ -114,9 +114,9 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             G, K, X_data, Y_data);
   } else {
-    const std::array<int, 3> dims = {N * HxW, G, K};
-    const std::array<int, 3> axes = {0, 2, 1};
-    math::Transpose<float, CUDAContext>(
+    const std::array<std::int64_t, 3> dims = {N * HxW, G, K};
+    const std::array<std::int32_t, 3> axes = {0, 2, 1};
+    math::Transpose<std::int64_t, float, CUDAContext>(
         3, dims.data(), axes.data(), X_data, Y_data, &context_);
   }
   return true;
@@ -184,9 +184,9 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
         <<<outer_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
             K, G, dY_data, dX_data);
   } else {
-    const std::array<int, 3> dims = {N * HxW, K, G};
-    const std::array<int, 3> axes = {0, 2, 1};
-    math::Transpose<float, CUDAContext>(
+    const std::array<std::int64_t, 3> dims = {N * HxW, K, G};
+    const std::array<std::int32_t, 3> axes = {0, 2, 1};
+    math::Transpose<std::int64_t, float, CUDAContext>(
         3, dims.data(), axes.data(), dY_data, dX_data, &context_);
   }
   return true;

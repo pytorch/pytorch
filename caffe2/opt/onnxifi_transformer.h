@@ -21,8 +21,13 @@ struct OnnxifiTransformerOptions {
 
   // Dump onnx model for debugging
   bool debug{false};
+
   // Pass serialized onnx model if true, otherwise pass serialized c2 model
-  bool use_onnx{true};
+  bool use_onnx{false};
+
+  // Minimum number of ops to create an onnxifi op. If the subgraph is too
+  // small, it doesn't make sense to lower it to backend.
+  size_t min_ops{1};
 
   // Bound shape spec
   BoundShapeSpec bound_shape_spec;
@@ -65,7 +70,8 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::unordered_map<std::string, TensorShape>& output_size_hints,
       const std::unordered_set<std::string>& initialization_list,
       const std::vector<std::string>& external_inputs,
-      const std::vector<std::string>& external_outputs);
+      const std::vector<std::string>& external_outputs,
+      const std::unordered_map<int, std::string>& batch_pos_map);
 
   // Transform by passing C2 proto to backend
   NetDef TransformViaC2(
@@ -95,6 +101,17 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       onnx::OnnxExporter* exporter,
       const std::unordered_set<int>& blacklisted_ops,
       onnxBackendID backend_id) const;
+
+  // Go through the inputs of the onnxifi subgraph and extract their batch size.
+  // And use this info to hint how we can cut output batch size from
+  // max_batch_size. The returning key/value is max_batch_size/input_name. For
+  // example, when OnnxifiOp sees an output with batch size 100, it will lookup
+  // the map with key=100. And if we then look into the batch size of the
+  // corresponding input for its real batch size, say 50, and use that to shrink
+  // the output tensor to real batch size.
+  std::unordered_map<int, std::string> generateBatchPaddingHints(
+      const NetDef& onnxifi_net,
+      const ShapeInfoMap& shape_hints);
 
   // Tie the output of Gather to the scalar weight input of the
   // SparseLengthsWeighted* op. If the latter is disabled, disable the former

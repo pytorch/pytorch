@@ -4,7 +4,9 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
+# shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
+
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
@@ -22,6 +24,11 @@ if [ -n "${IN_CIRCLECI}" ]; then
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
     sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
     sudo mkdir -p /var/run/sshd
+  fi
+
+  if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
+    export PYTORCH_TEST_WITH_SLOW=1
+    export PYTORCH_TEST_SKIP_FAST=1
   fi
 fi
 
@@ -180,6 +187,8 @@ test_xla() {
   popd
   assert_git_not_dirty
 }
+
+(cd test && python -c "import torch; print(torch.__config__.show())")
 
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   test_torchvision

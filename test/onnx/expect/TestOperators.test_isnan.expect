@@ -1,0 +1,50 @@
+ir_version: 4
+producer_name: "pytorch"
+producer_version: "1.1"
+graph {
+  node {
+    input: "0"
+    output: "1"
+    op_type: "IsNaN"
+  }
+  node {
+    input: "1"
+    output: "2"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 2
+      type: INT
+    }
+  }
+  name: "torch-jit-export"
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 3
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: 2
+        shape {
+          dim {
+            dim_value: 3
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}

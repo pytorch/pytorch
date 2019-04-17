@@ -7,6 +7,17 @@ graph {
     output: "1"
     op_type: "NonZero"
   }
+  node {
+    input: "1"
+    output: "2"
+    op_type: "Transpose"
+    attribute {
+      name: "perm"
+      ints: 1
+      ints: 0
+      type: INTS
+    }
+  }
   name: "torch-jit-export"
   input {
     name: "0"
@@ -28,7 +39,7 @@ graph {
     }
   }
   output {
-    name: "1"
+    name: "2"
     type {
       tensor_type {
         elem_type: 7

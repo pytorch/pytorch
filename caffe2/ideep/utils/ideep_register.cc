@@ -1,7 +1,7 @@
 #include <caffe2/core/event_cpu.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/proto/caffe2_pb.h>
-#include <ideep_pin_singletons.hpp>
+#include <ideep/tensor.hpp>
 #include "ideep_context.h"
 
 namespace at {

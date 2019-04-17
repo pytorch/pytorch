@@ -3,22 +3,20 @@ from __future__ import division
 
 import warnings
 import math
-import types
 
 import torch
 from torch._C import _infer_size, _add_docstr
 from . import _reduction as _Reduction
-from . import _functions
 from .modules import utils
 from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
-from . import grad
+from . import grad  # noqa: F401
 from . import _VF
 from .._jit_internal import weak_script, List
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
-conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
 
 Applies a 1D convolution over an input signal composed of several input
 planes.
@@ -33,12 +31,13 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or
       a one-element tuple `(sW,)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a
       single number or a one-element tuple `(padW,)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
       a one-element tuple `(dW,)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
       the number of groups. Default: 1
+    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -48,7 +47,7 @@ Examples::
 """)
 
 conv2d = _add_docstr(torch.conv2d, r"""
-conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
 
 Applies a 2D convolution over an input image composed of several input
 planes.
@@ -63,12 +62,13 @@ Args:
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sH, sW)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a
       single number or a tuple `(padH, padW)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
       number of groups. Default: 1
+    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -79,7 +79,7 @@ Examples::
 """)  # noqa: E501
 
 conv3d = _add_docstr(torch.conv3d, r"""
-conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
 
 Applies a 3D convolution over an input image composed of several input
 planes.
@@ -94,12 +94,13 @@ Args:
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a
       single number or a tuple `(padT, padH, padW)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dT, dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
       the number of groups. Default: 1
+    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -1414,7 +1415,7 @@ def bilinear(input1, input2, weight, bias=None):
 def _no_grad_embedding_renorm_(weight, input, max_norm, norm_type):
     # type: (Tensor, Tensor, float, float) -> Tensor
     with torch.no_grad():
-        return torch.embedding_renorm_(weight, input, max_norm, norm_type)
+        torch.embedding_renorm_(weight, input, max_norm, norm_type)
 
 
 @weak_script
@@ -1501,8 +1502,9 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
 
 @weak_script
 def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
-                  scale_grad_by_freq=False, mode='mean', sparse=False):
-    # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool) -> Tensor
+                  scale_grad_by_freq=False, mode='mean', sparse=False,
+                  per_sample_weights=None):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool, Optional[Tensor]) -> Tensor
     r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
 
@@ -1529,6 +1531,11 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
                                  :class:`torch.nn.Embedding` for more details regarding sparse gradients.
                                  Note: this option is not supported when ``mode="max"``.
+        per_sample_weights (Tensor, optional): a tensor of float / double weights, or None
+            to indicate all weights should be taken to be 1. If specified, :attr:`per_sample_weights`
+            must have exactly the same shape as input and is treated as having the same
+            :attr:`offsets`, if those are not None.
+
 
     Shape:
 
@@ -1552,6 +1559,9 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         - :attr:`weight` (Tensor): the learnable weights of the module of
           shape `(num_embeddings, embedding_dim)`
 
+        - :attr:`per_sample_weights` (Tensor, optional). Has the same shape as
+          :attr:`input`.
+
         - :attr:`output`: aggregated embedding values of shape `(B, embedding_dim)`
 
     Examples::
@@ -1574,17 +1584,23 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                       "and should now be `embedding_bag(input, weight, ...)`.")
         weight, input = input, weight
 
+    if per_sample_weights is not None and input.size() != per_sample_weights.size():
+        raise ValueError("embedding_bag: If per_sample_weights ({}) is not None, "
+                         "then it must have the same shape as the input ({})"
+                         .format(per_sample_weights.shape, input.shape))
+
     if input.dim() == 2:
         if offsets is not None:
             raise ValueError("if input is 2D, then offsets has to be None"
                              ", as input is treated is a mini-batch of"
                              " fixed length sequences. However, found "
                              "offsets of type {}".format(type(offsets)))
-        else:
-            offsets = torch.arange(0, input.numel(), input.size(1),
-                                   dtype=torch.long, device=input.device)
+        offsets = torch.arange(0, input.numel(), input.size(1),
+                               dtype=torch.long, device=input.device)
 
-            input = input.reshape(-1)
+        input = input.reshape(-1)
+        if per_sample_weights is not None:
+            per_sample_weights = per_sample_weights.reshape(-1)
     elif input.dim() == 1:
         if offsets is None:
             raise ValueError("offsets has to be a 1D Tensor but got None")
@@ -1627,13 +1643,20 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         # remove once script supports set_grad_enabled
         _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
 
+    if per_sample_weights is not None and mode != 'sum':
+        raise NotImplementedError("embedding_bag: per_sample_weights was not None. "
+                                  "per_sample_weights is only supported for mode='sum' "
+                                  "(got mode='{}'). Please open a feature request on GitHub."
+                                  .format(mode))
+
     ret, _, _, _ = torch.embedding_bag(
         weight,
         input,
         offsets,
         scale_grad_by_freq,
         mode_enum,
-        sparse)
+        sparse,
+        per_sample_weights)
     return ret
 
 
@@ -2068,9 +2091,10 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
-                      "Please ensure they have the same size.".format(target.size(), input.size()))
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if input.numel() != target.numel():
         raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
                          "!= input nelement ({})".format(target.numel(), input.numel()))
@@ -2159,6 +2183,11 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
 
     See :class:`~torch.nn.SmoothL1Loss` for details.
     """
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
@@ -2180,6 +2209,11 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
 
     See :class:`~torch.nn.L1Loss` for details.
     """
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
@@ -2201,6 +2235,11 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
 
     See :class:`~torch.nn.MSELoss` for details.
     """
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
@@ -2457,7 +2496,6 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     .. include:: cuda_deterministic_backward.rst
     """
-    from numbers import Integral
     from .modules.utils import _ntuple
 
     def _check_size_scale_factor(dim):
@@ -2476,7 +2514,12 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             return size
         scale_factors = _ntuple(dim)(scale_factor)
         # math.floor might return float in py2.7
-        return [int(math.floor(input.size(i + 2) * scale_factors[i])) for i in range(dim)]
+
+        # make scale_factor a tensor in tracing so constant doesn't get baked in
+        if torch._C._get_tracing_state():
+            return [(torch.floor(input.size(i + 2) * torch.tensor(float(scale_factors[i])))) for i in range(dim)]
+        else:
+            return [int(math.floor(int(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
     if mode in ('nearest', 'area'):
         if align_corners is not None:
@@ -2720,7 +2763,7 @@ def pad(input, pad, mode='constant', value=0):
         input (Tensor): N-dimensional tensor
         pad (tuple): m-elements tuple, where
             :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
-        mode: ``'constant'``, ``'reflect'`` or ``'replicate'``.
+        mode: ``'constant'``, ``'reflect'``, ``'replicate'`` or ``'circular'``.
             Default: ``'constant'``
         value: fill value for ``'constant'`` padding. Default: ``0``
 
@@ -2754,6 +2797,8 @@ def pad(input, pad, mode='constant', value=0):
                 ret = torch._C._nn.reflection_pad1d(input, pad)
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad1d(input, pad)
+            elif mode == 'circular':
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
@@ -2764,6 +2809,8 @@ def pad(input, pad, mode='constant', value=0):
                 ret = torch._C._nn.reflection_pad2d(input, pad)
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad2d(input, pad)
+            elif mode == 'circular':
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
@@ -2775,12 +2822,15 @@ def pad(input, pad, mode='constant', value=0):
                 raise NotImplementedError
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad3d(input, pad)
+            elif mode == 'circular':
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
         else:
             ret = input  # TODO: remove this when jit raise supports control flow
             raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
+
     return ret
 
 # distance
@@ -3004,3 +3054,29 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
         ret = input  # TODO: remove when jit supports exception control flow
     return ret
+
+
+@weak_script
+def _pad_circular(input, padding):
+    # type: (Tensor, List[int]) -> Tensor
+    """
+    Arguments
+        :param input: tensor of shape :math:`(N, C_{\text{in}}, H, [W, D]))`
+        :param padding: (tuple): m-elem tuple where m is the degree of convolution
+    Returns
+        :return: tensor of shape :math:`(N, C_{\text{in}}, [D + 2 * padding[0],
+                 H + 2 * padding[1]], W + 2 * padding[2]))`
+    """
+
+    input = torch.cat([input, input[:, :, 0:padding[-1]]], dim=2)
+    input = torch.cat([input[:, :, -(padding[-1] + padding[-2]):-padding[-1]], input], dim=2)
+
+    if len(padding) > 2:
+        input = torch.cat([input, input[:, :, :, 0:padding[-3]]], dim=3)
+        input = torch.cat([input[:, :, :, -(padding[-3] + padding[-4]):-padding[-3]], input], dim=3)
+
+    if len(padding) > 4:
+        input = torch.cat([input, input[:, :, :, :, 0:padding[-5]]], dim=4)
+        input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):-padding[-5]], input], dim=4)
+
+    return input
