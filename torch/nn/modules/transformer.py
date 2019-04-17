@@ -3,28 +3,28 @@ import torch.nn as nn
 import copy, math
 import torch.nn.functional as F
 from torch.autograd import Variable
-
-from torch.nn import MultiheadAttention
+from .module import Module
+from .activation import MultiheadAttention
 
 def get_clones(module, N):
 	return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
 def buildTransformerModel(src_vocab, tgt_vocab, d_model=512, nhead=8, num_encoder_layers=6, num_decoder_layers=6, d_ff=2048, dropout=0.1):
-	encoder_layer = EncoderLayer(d_model, nhead, d_ff, dropout)
+	encoder_layer = TransformerEncoderLayer(d_model, nhead, d_ff, dropout)
 	src_embed = Embeddings(d_model, src_vocab) 
 	pos_encoder = PositionalEncoding(d_model, dropout) 
 	encoder_norm = Tensor1DNorm(d_model) 
-	encoder = Encoder(encoder_layer, num_encoder_layers, src_embed, pos_encoder, encoder_norm)
+	encoder = TransformerEncoder(encoder_layer, num_encoder_layers, src_embed, pos_encoder, encoder_norm)
 
-	decoder_layer = DecoderLayer(d_model, nhead, d_ff, dropout)	
+	decoder_layer = TransformerDecoderLayer(d_model, nhead, d_ff, dropout)	
 	tgt_embed = Embeddings(d_model, tgt_vocab) 
 	pos_decoder = PositionalEncoding(d_model, dropout) 
 	decoder_norm = Tensor1DNorm(d_model) 
-	decoder = Decoder(decoder_layer, num_decoder_layers, tgt_embed, pos_decoder, decoder_norm)
+	decoder = TransformerDecoder(decoder_layer, num_decoder_layers, tgt_embed, pos_decoder, decoder_norm)
 
 	generator = Generator(d_model, tgt_vocab)
-	model = Transformer(encoder, decoder, generator)
+	model = TransformerBase(encoder, decoder, generator)
 
 	for p in model.parameters():
 		if p.dim() > 1:
@@ -32,14 +32,14 @@ def buildTransformerModel(src_vocab, tgt_vocab, d_model=512, nhead=8, num_encode
 	return model
 
 
-class Transformer(nn.Module):
+class TransformerBase(Module):
 	"""
 	A base class for transformer. The transformer is based on a standard
 	Encoder-Decoder architecture.
 	Docs comming...
 	"""
 	def __init__(self,  encoder, decoder, generator = None):
-		super(Transformer, self).__init__()
+		super(TransformerBase, self).__init__()
 		self.encoder = encoder 
 		self.decoder = decoder
 		self.generator = generator 
@@ -57,13 +57,13 @@ class Transformer(nn.Module):
 		return self.decoder(tgt, memory, tgt_mask, memory_mask)
 
 
-class Encoder(nn.Module):
+class TransformerEncoder(Module):
 	"""
-	Encoder is a stack of N layers
+	TransformerEncoder is a stack of N layers
 	Docs comming...
 	"""
 	def __init__(self, encoder_layer, num_layers, src_embed=None, pos_encoder=None, norm=None):
-		super(Encoder, self).__init__()
+		super(TransformerEncoder, self).__init__()
 		self.layers = get_clones(encoder_layer, num_layers)
 		self.num_layers = num_layers
 		self.src_embed = src_embed
@@ -88,13 +88,13 @@ class Encoder(nn.Module):
 		return output
 
 
-class Decoder(nn.Module):
+class TransformerDecoder(Module):
 	"""
-	Decoder is a stack of N layers
+	TransformerDecoder is a stack of N layers
 	Docs comming...
 	"""
 	def __init__(self, decoder_layer, num_layers, tgt_embed=None, pos_encoder=None, norm=None):
-		super(Decoder, self).__init__()
+		super(TransformerDecoder, self).__init__()
 		self.layers = get_clones(decoder_layer, num_layers)
 		self.num_layers = num_layers
 		self.tgt_embed = tgt_embed
@@ -118,13 +118,13 @@ class Decoder(nn.Module):
 
 		return output
 
-class EncoderLayer(nn.Module):
+class TransformerEncoderLayer(Module):
 	"""
-	Encoder layer is made up of self-attn and feed forward (defined below)
+	TransformerEncoder layer is made up of self-attn and feed forward (defined below)
 	Docs comming...
 	"""
 	def __init__(self, d_model, nhead, d_ff=2048,dropout=0.1):
-		super(EncoderLayer, self).__init__()
+		super(TransformerEncoderLayer, self).__init__()
 		self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
 		self.ff = FeedForward(d_model, d_ff=d_ff, dropout=dropout)
 		self.norm1 = Tensor1DNorm(d_model)
@@ -140,13 +140,13 @@ class EncoderLayer(nn.Module):
 		return x
 
 
-class DecoderLayer(nn.Module):
+class TransformerDecoderLayer(Module):
 	"""
-	Decoder layer is made up of self-attn, multihead_attn and feed forward (defined below)
+	TransformerDecoder layer is made up of self-attn, multihead_attn and feed forward (defined below)
 	Docs comming...
 	"""
 	def __init__(self, d_model, nhead, d_ff=2048, dropout=0.1):
-		super(DecoderLayer, self).__init__()
+		super(TransformerDecoderLayer, self).__init__()
 		self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
 		self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
 		self.ff = FeedForward(d_model, d_ff=d_ff, dropout=dropout)
@@ -168,7 +168,7 @@ class DecoderLayer(nn.Module):
 
 
 # Temporarily leave Tensor1DNorm module here. Will bemoved somewhere else.
-class Tensor1DNorm(nn.Module):
+class Tensor1DNorm(Module):
 	"Normalization component with two learnable variables"
 	def __init__(self, d_model, eps = 1e-6):
 		super(Tensor1DNorm, self).__init__()
@@ -184,7 +184,7 @@ class Tensor1DNorm(nn.Module):
 		return self.alpha * (x - x_mean) / (x_std + self.eps) + self.bias
 
 # Temporarily leave FeedForward module here. Will be moved somewhere else.
-class FeedForward(nn.Module):
+class FeedForward(Module):
 	def __init__(self, d_model, d_ff=2048, dropout = 0.1):
 		super(FeedForward, self).__init__() 
 		# We set d_ff as a default to 2048
@@ -197,7 +197,7 @@ class FeedForward(nn.Module):
 
 
 # Temporarily leave Embeddings module here. Will be moved somewhere else.
-class Embeddings(nn.Module):
+class Embeddings(Module):
 	def __init__(self, d_model, vocab):
 		super(Embeddings, self).__init__()
 		self.lut = nn.Embedding(vocab, d_model)
@@ -208,7 +208,7 @@ class Embeddings(nn.Module):
 
 
 # Temporarily leave PositionalEncoding module here. Will be moved somewhere else.
-class PositionalEncoding(nn.Module):
+class PositionalEncoding(Module):
 	"Implement the PE function."
 	def __init__(self, d_model, dropout, max_len=5000):
 		super(PositionalEncoding, self).__init__()
@@ -230,7 +230,7 @@ class PositionalEncoding(nn.Module):
 
 
 # Temporarily leave Generator module here. Will be moved somewhere else.
-class Generator(nn.Module):
+class Generator(Module):
 	"Define standard linear + softmax generation step."
 	def __init__(self, d_model, vocab):
 		super(Generator, self).__init__()

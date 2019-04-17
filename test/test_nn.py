@@ -38,7 +38,7 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     ctcloss_reference, new_module_tests
 
 from torch.nn import MultiheadAttention
-
+from torch.nn import buildTransformerModel
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -7803,9 +7803,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
 
     def test_transformer_number_match(self):
-
-       # transform will be loaded directly from torch.nn directly.
-        import torch.nn.modules.transformer as T
+        #import torch.nn.modules.transformer as T
 
         # Train the simple copy task.
         V = 11
@@ -7816,7 +7814,7 @@ class TestNN(NNTestCase):
         d_model=512 # embedding
         nhead=8 # number of heads
         dropout=0.1
-        model = T.buildTransformerModel(V, V, d_model=d_model, nhead=nhead, num_encoder_layers=num_encoder_layers, num_decoder_layers=num_decoder_layers)
+        model = buildTransformerModel(V, V, d_model=d_model, nhead=nhead, num_encoder_layers=num_encoder_layers, num_decoder_layers=num_decoder_layers)
 
         # Modify multiheadattention in model
         for i in range(0, num_encoder_layers):
