@@ -100,6 +100,7 @@ inline IValue toIValue(
     case TypeKind::TensorType:
     case TypeKind::AutogradZeroTensorType:
     case TypeKind::DimensionedTensorType:
+    case TypeKind::ProfiledTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
