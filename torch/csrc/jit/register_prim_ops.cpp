@@ -1600,7 +1600,11 @@ RegisterOperators reg2({
     DEFINE_STRING_OP(aten::ne, a != b, bool),
     DEFINE_STRING_OP(aten::add, a + b, str),
 #undef DEFINE_STRING_OP
-
+    Operator("aten::len(str s) -> int", [](Stack& stack) {
+        auto string = pop(stack).toStringRef();
+        push(stack, static_cast<int64_t>(string.size()));
+        return 0;
+    }),
     // tensor length op (size of 1st dimension)
     Operator(
         "aten::len(Tensor t) -> int",
