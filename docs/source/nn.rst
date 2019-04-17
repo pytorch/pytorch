@@ -308,6 +308,11 @@ Non-linear activations (weighted sum, nonlinearity)
 .. autoclass:: LogSigmoid
     :members:
 
+:hidden:`MultiheadAttention`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autoclass:: MultiheadAttention
+    :members:
+
 :hidden:`PReLU`
 ~~~~~~~~~~~~~~~
 

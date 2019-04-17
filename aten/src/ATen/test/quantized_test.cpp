@@ -21,6 +21,14 @@ TEST(TestQTensor, QuantDequantAPIs) {
   ASSERT_EQ(qr.q_scale().to<float>(), scale);
   ASSERT_EQ(qr.q_zero_point().to<int32_t>(), zero_point);
   ASSERT_TRUE(qr.is_quantized());
+  ASSERT_FALSE(r.is_quantized());
+
+  // int_repr
+  Tensor int_repr = qr.int_repr();
+  auto* int_repr_data = int_repr.data<uint8_t>();
+  for (auto i = 0; i < num_elements; ++i) {
+    ASSERT_EQ(int_repr_data[i], 3);
+  }
 
   // Check for correct quantization
   auto r_data = r.data<float>();

@@ -1348,7 +1348,7 @@ def ones_like(g, input, dtype, layout, device, pin_memory=False):
 
 
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
-    if pin_memory and _parse_arg(pin_memory,'b'):
+    if pin_memory and _parse_arg(pin_memory, 'b'):
         raise RuntimeError("onnx pin_memory support is not implemented")
     const_value = _maybe_get_const(value, 't')
     if _is_value(const_value):

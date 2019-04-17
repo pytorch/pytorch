@@ -42,7 +42,6 @@ namespace jit {
   _(CustomOperators)               \
   _(CustomOperatorAliasing)        \
   _(IValueKWargs)                  \
-  _(CustomFusion)                  \
   _(Differentiate)                 \
   _(DifferentiateWithRequiresGrad) \
   _(DynamicDAG)                    \
@@ -68,6 +67,7 @@ namespace jit {
   _(ATenNativeBatchNorm)           \
   _(NoneSchemaMatch)               \
   _(ClassParser)                   \
+  _(Profiler)                      \
   _(PeepholeOptimize)              \
   _(RecordFunction)                \
   _(ModuleDefine)

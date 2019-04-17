@@ -36,7 +36,7 @@ inline QTensor new_qtensor(
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
   AT_ASSERT(isQIntType(typeMetaToScalarType(dtype)));
-  auto storage_impl = c10::make_intrusive<StorageImpl>(
+  auto storage = c10::make_intrusive<StorageImpl>(
       dtype,
       nelements,
       allocator->allocate(nelements * dtype.itemsize()),
@@ -44,7 +44,7 @@ inline QTensor new_qtensor(
       /*resizable=*/true);
   // TODO: get TensorTypeId from quantizer
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage_impl, at::QuantizedCPUTensorId(), quantizer);
+      storage, at::QuantizedCPUTensorId(), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   return tensor;
 }
