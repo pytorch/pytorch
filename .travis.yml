@@ -16,6 +16,10 @@ matrix:
         python: "3.6"
         dist: xenial
         script: cd .circleci && ./ensure-consistency.py
+      - name: "Shellcheck Jenkins scripts"
+        dist: xenial
+        install: sudo apt-get install -y shellcheck
+        script: .jenkins/run-shellcheck.sh
       - name: "Ensure no tabs"
         python: "2.7"
         script:

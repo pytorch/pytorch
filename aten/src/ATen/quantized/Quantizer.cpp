@@ -36,7 +36,7 @@ inline QTensor new_qtensor(
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
   AT_ASSERT(isQIntType(typeMetaToScalarType(dtype)));
-  auto storage_impl = c10::make_intrusive<StorageImpl>(
+  auto storage = c10::make_intrusive<StorageImpl>(
       dtype,
       nelements,
       allocator->allocate(nelements * dtype.itemsize()),
@@ -44,7 +44,7 @@ inline QTensor new_qtensor(
       /*resizable=*/true);
   // TODO: get TensorTypeId from quantizer
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage_impl, at::QuantizedCPUTensorId(), quantizer);
+      storage, at::QuantizedCPUTensorId(), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   return tensor;
 }
@@ -95,7 +95,9 @@ RealTensor PerTensorAffineQuantizer::dequantize(QTensor tensor) {
   const auto* qvd = tensor.data<qint8>();
   float* rvd = rv.data<float>();
   for (auto i = 0; i < tensor.numel(); ++i) {
-    rvd[i] = (static_cast<uint32_t>(qvd[i].val_) - zero_point_) * scale_;
+    // We need to convert the qint8 value to float to ensure the subtraction
+    // subexpression returns a float
+    rvd[i] = (static_cast<float>(qvd[i].val_) - zero_point_) * scale_;
   }
   return rv;
 }
