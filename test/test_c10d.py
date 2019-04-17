@@ -1870,6 +1870,18 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             unbox=lambda x: x["tensor"],
         )
 
+        # Test with list with dict return value
+        test(
+            box=lambda x: ["foo", "bar", {"tensor": x}],
+            unbox=lambda x: x[2]["tensor"],
+        )
+
+        # Test with dict with list return value
+        test(
+            box=lambda x: {"foo": "bar", "list": [0, 1, x]},
+            unbox=lambda x: x["list"][2],
+        )
+
 
 class ReducerModule(nn.Module):
     def __init__(self):
