@@ -174,6 +174,7 @@ generators = {
     },
 }
 
+
 def backend_to_devicetype(backend):
     if backend == 'QuantizedCPU':
         return 'CPU'
