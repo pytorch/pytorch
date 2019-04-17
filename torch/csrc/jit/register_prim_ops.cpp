@@ -1991,26 +1991,41 @@ RegisterOperators reg2({
     Operator("aten::hash(float t) -> int", hashValue<double>),
 });
 
+auto pure_op = OperatorOptions().aliasAnalysis(AliasAnalysisKind::PURE);
 
 auto math_ops =
     RegisterOperators()
         // the static_cast<...> business is to select a specific overload
-        .op("aten::abs", static_cast<int64_t (*)(int64_t)>(&std::abs))
-        .op("aten::abs", static_cast<double (*)(double)>(&std::abs))
-        .op("aten::floor", static_cast<double (*)(double)>(&std::floor))
-        .op("aten::pow", static_cast<double (*)(double, double)>(&std::pow))
-        .op("aten::pow", static_cast<double (*)(double, int64_t)>(&std::pow))
-        .op("aten::exp", static_cast<double (*)(int64_t)>(&std::exp))
-        .op("aten::exp", static_cast<double (*)(double)>(&std::exp))
-        .op("aten::sqrt", static_cast<double (*)(int64_t)>(&std::sqrt))
-        .op("aten::sqrt", static_cast<double (*)(double)>(&std::sqrt))
-        .op("aten::log10", static_cast<double (*)(int64_t)>(&std::log10))
-        .op("aten::log10", static_cast<double (*)(double)>(&std::log10))
-        .op("aten::log1p", static_cast<double (*)(int64_t)>(&std::log1p))
-        .op("aten::log1p", static_cast<double (*)(double)>(&std::log1p))
-        .op("aten::ceil", static_cast<double (*)(double)>(&std::ceil))
-        .op("aten::log", static_cast<double (*)(int64_t)>(&std::log))
-        .op("aten::log", static_cast<double (*)(double)>(&std::log));
+        .op("aten::abs", static_cast<int64_t (*)(int64_t)>(&std::abs), pure_op)
+        .op("aten::abs", static_cast<double (*)(double)>(&std::abs), pure_op)
+        .op("aten::floor",
+            static_cast<double (*)(double)>(&std::floor),
+            pure_op)
+        .op("aten::pow",
+            static_cast<double (*)(double, double)>(&std::pow),
+            pure_op)
+        .op("aten::pow",
+            static_cast<double (*)(double, int64_t)>(&std::pow),
+            pure_op)
+        .op("aten::exp", static_cast<double (*)(int64_t)>(&std::exp), pure_op)
+        .op("aten::exp", static_cast<double (*)(double)>(&std::exp), pure_op)
+        .op("aten::sqrt", static_cast<double (*)(int64_t)>(&std::sqrt), pure_op)
+        .op("aten::sqrt", static_cast<double (*)(double)>(&std::sqrt), pure_op)
+        .op("aten::log10",
+            static_cast<double (*)(int64_t)>(&std::log10),
+            pure_op)
+        .op("aten::log10",
+            static_cast<double (*)(double)>(&std::log10),
+            pure_op)
+        .op("aten::log1p",
+            static_cast<double (*)(int64_t)>(&std::log1p),
+            pure_op)
+        .op("aten::log1p",
+            static_cast<double (*)(double)>(&std::log1p),
+            pure_op)
+        .op("aten::ceil", static_cast<double (*)(double)>(&std::ceil), pure_op)
+        .op("aten::log", static_cast<double (*)(int64_t)>(&std::log), pure_op)
+        .op("aten::log", static_cast<double (*)(double)>(&std::log), pure_op);
 
 // reference: _output_size in torch/nn/functional.py
 // size can be none, int or intlist
