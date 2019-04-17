@@ -11308,6 +11308,15 @@ a")
         imported_m = self.getExportImportCopy(m)
         self.assertEqual(m(), imported_m())
 
+    def test_string_len(self):
+        def fn(x):
+            # type: (str) -> int
+            return len(x)
+
+        self.checkScript(fn, ("",))
+        self.checkScript(fn, ("h",))
+        self.checkScript(fn, ("hello",))
+
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_attribute_unpickling(self):
         class M(torch.jit.ScriptModule):
@@ -11360,7 +11369,8 @@ a")
                 def forward(self,
                     _0: Tensor) -> Tensor:
                   _1 = torch.zeros([10], dtype=6, layout=0, device=torch.device("cpu"))
-                  result = torch.to(torch.fill_(_1, 5), dtype=6, layout=0, device=torch.device("cpu"), non_blocking=False, copy=False)
+                  result = torch.to(torch.fill_(_1, 5), dtype=6, layout=0, device=torch.device("cpu"),
+                                    non_blocking=False, copy=False)
                   result2 = torch.rand([10], dtype=6, layout=0, device=torch.device("cpu"))
                   result3 = torch.rand_like(result2, dtype=6, layout=0, device=torch.device("cpu"))
                   _2 = torch.add(torch.add(result, result2, alpha=1), result3, alpha=1)

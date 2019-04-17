@@ -68,6 +68,7 @@ namespace jit {
   _(ATenNativeBatchNorm)           \
   _(NoneSchemaMatch)               \
   _(ClassParser)                   \
+  _(Profiler)                      \
   _(PeepholeOptimize)              \
   _(RecordFunction)                \
   _(ModuleDefine)
