@@ -30,6 +30,7 @@ class OnnxifiOp final : public Operator<Context> {
     lib_ = onnx::initOnnxifiLibrary();
     backend_graph_map_ptr_ = onnx::getOnnxBackendGraphMap();
     CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
+    use_onnx_ = this->template GetSingleArgument<int>("use_onnx", 0);
     auto onnx_model_str =
         this->template GetSingleArgument<std::string>("onnx_model", "");
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
@@ -62,6 +63,19 @@ class OnnxifiOp final : public Operator<Context> {
         output_shape_hints_.emplace(output_idx, std::move(info));
       }
       ++output_idx;
+    }
+
+    // Get output resizing hints
+    auto output_resize_hints =
+        this->template GetRepeatedArgument<int>("output_resize_hints");
+    CAFFE_ENFORCE_EQ(
+        output_resize_hints.size() % 2,
+        0,
+        "output_resize_hints must have even size: ",
+        output_resize_hints.size());
+    for (int i = 0; i < output_resize_hints.size(); ++i) {
+      auto k = output_resize_hints[i++];
+      batch_pos_map_.emplace(k, output_resize_hints[i]);
     }
 
     // Encode arguments starting with "custom_" to backend
@@ -202,6 +216,11 @@ class OnnxifiOp final : public Operator<Context> {
 #endif
   }
 
+  std::vector<int> extractOutputBatchSizes() const;
+
+  void maybeAdjustOutputBatchSizes(
+      const std::vector<int>& real_output_batch_sizes);
+
   std::vector<onnxTensorDescriptorV1> buildInitializationList(
       Workspace* ws,
       const std::vector<std::string>& initializers,
@@ -233,6 +252,7 @@ class OnnxifiOp final : public Operator<Context> {
       onnxMemoryFenceV1*,
       onnxTraceEventList*);
 #endif
+  bool use_onnx_{false};
 
   // We bind the op input/output by position while ONNXIFI binds input/output by
   // names. In addition, op input/output names can be writtten by, for example,
@@ -246,6 +266,12 @@ class OnnxifiOp final : public Operator<Context> {
 
   // output shape hints
   std::unordered_map<int, TensorInfo> output_shape_hints_;
+
+  // Output resizing hint map
+  // key: max batch size
+  // value: position of the input where the real batch size can be extracted
+  // from its first dimension
+  std::unordered_map<int, int> batch_pos_map_;
 };
 
 } // namespace caffe2

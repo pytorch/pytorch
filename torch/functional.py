@@ -390,8 +390,8 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
 del torch.unique_dim
 
 
-def unique(input, sorted=True, return_inverse=False, dim=None):
-    r"""Returns the unique scalar elements of the input tensor as a 1-D tensor.
+def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
+    r"""Returns the unique elements of the input tensor.
 
     Arguments:
         input (Tensor): the input tensor
@@ -399,18 +399,26 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
             before returning as output.
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
+        return_counts (bool): Whether to also return the counts for each unique
+            element. Currently only supported when `dim` is not None.
         dim (int): the dimension to apply unique. If ``None``, the unique of the
             flattened input is returned. default: ``None``
 
     Returns:
-        (Tensor, Tensor (optional)): A tensor or a tuple of tensors containing
+        (Tensor, Tensor (optional) Tensor (optional))::
+        A tensor or a tuple of tensors containing
 
             - **output** (*Tensor*): the output list of unique scalar elements.
             - **inverse_indices** (*Tensor*): (optional) if
-              :attr:`return_inverse` is True, there will be a
-              2nd returned tensor (same shape as input) representing the indices
+              :attr:`return_inverse` is True, there will be an additional
+              returned tensor (same shape as input) representing the indices
               for where elements in the original input map to in the output;
               otherwise, this function will only return a single tensor.
+            - **counts** (*Tensor*): (optional) if
+              :attr:`return_counts` is True, there will be an additional
+              returned tensor (same shape as output or output.size(dim),
+              if dim was specified) representing the number of occurrences
+              for each unique value or tensor.
 
     Example::
 
@@ -435,20 +443,28 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
 
     """
     if dim is not None:
-        output, inverse_indices = torch._unique_dim(
+        output, inverse_indices, counts = torch._C._VariableFunctions.unique_dim(
             input,
             dim,
             sorted=sorted,
-            return_inverse=return_inverse
+            return_inverse=return_inverse,
+            return_counts=return_counts,
         )
     else:
+        if return_counts:
+            raise NotImplementedError(
+                "torch.unique currently does not support return_counts with dim not None")
         output, inverse_indices = torch._unique(
             input,
             sorted=sorted,
-            return_inverse=return_inverse,
+            return_inverse=return_inverse
         )
-    if return_inverse:
+    if return_inverse and return_counts:
+        return output, inverse_indices, counts
+    elif return_inverse:
         return output, inverse_indices
+    elif return_counts:
+        return output, counts
     else:
         return output
 

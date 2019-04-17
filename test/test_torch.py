@@ -2663,13 +2663,26 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
         self.assertFalse(r.is_quantized)
+        # slicing and int_repr
+        int_repr = qr.int_repr()
+        for num in int_repr:
+            self.assertEqual(num, 3)
+        for num in qr[2:].int_repr():
+            self.assertEqual(num, 3)
+        # dequantize
         rqr = qr.dequantize()
         for i in range(num_elements):
             self.assertEqual(r[i], rqr[i])
-        # Testing item
+        # Scalar Tensor
+        # item
         r = torch.ones(1, dtype=torch.float)
         qr = r.quantize_linear(scale, zero_point)
         self.assertEqual(qr.item(), 1)
+        self.assertEqual(qr[0].item(), 1)
+        # assignment
+        # This calls _th_fill_
+        # qr[0] = 8 # float asignment
+        # self.assertEqual(qr.item(), 8)
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
@@ -2680,7 +2693,7 @@ class _TestTorchMixin(object):
         rqr = qr.dequantize()
         print(r.numpy())
         print(rqr.numpy())
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2/scale))
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
@@ -3894,11 +3907,11 @@ class _TestTorchMixin(object):
                     return t0_fn(1.0, t1, t2)
                 else:
                     return t0_fn(t1)
-            r1 = tensorfn_inplace(large_expanded, small_expanded, small2_expanded)
-            r2 = tensorfn_inplace(large_expanded_clone, small, small2)
             # in-place pointwise operations don't actually work if the in-place
             # tensor is 0-strided (numpy has the same issue)
             if (0 not in large_expanded.stride() and 0 not in large_expanded_clone.stride()):
+                r1 = tensorfn_inplace(large_expanded, small_expanded, small2_expanded)
+                r2 = tensorfn_inplace(large_expanded_clone, small, small2)
                 self.assertEqual(r1, r2)
 
             def broadcastable(t0, t1, t2=None):
@@ -10711,7 +10724,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     def test_unique_dim(self):
         self.assertFalse(hasattr(torch, 'unique_dim'))
-        torch.unique_dim = torch._C._VariableFunctions.unique_dim
 
         def run_test(dtype=torch.float, device=torch.device('cpu')):
             x = torch.tensor([[[1., 1.],
@@ -10766,7 +10778,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim0, x_unique)
             self.assertEqual(expected_inverse_dim0, x_inverse)
 
-            x_unique, _, x_counts = torch.unique_dim(
+            x_unique, x_counts = torch.unique(
                 x,
                 return_inverse=False,
                 return_counts=True,
@@ -10774,7 +10786,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim0, x_unique)
             self.assertEqual(expected_counts_dim0, x_counts)
 
-            x_unique, x_inverse, x_counts = torch.unique_dim(
+            x_unique, x_inverse, x_counts = torch.unique(
                 x,
                 return_inverse=True,
                 return_counts=True,
@@ -10794,7 +10806,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim1, x_unique)
             self.assertEqual(expected_inverse_dim1, x_inverse)
 
-            x_unique, _, x_counts = torch.unique_dim(
+            x_unique, x_counts = torch.unique(
                 x,
                 return_inverse=False,
                 return_counts=True,
@@ -10802,7 +10814,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim1, x_unique)
             self.assertEqual(expected_counts_dim1, x_counts)
 
-            x_unique, x_inverse, x_counts = torch.unique_dim(
+            x_unique, x_inverse, x_counts = torch.unique(
                 x,
                 return_inverse=True,
                 return_counts=True,
@@ -10822,7 +10834,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_inverse_dim2, x_inverse)
 
-            x_unique, _, x_counts = torch.unique_dim(
+            x_unique, x_counts = torch.unique(
                 x,
                 return_inverse=False,
                 return_counts=True,
@@ -10830,7 +10842,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_counts_dim2, x_counts)
 
-            x_unique, x_inverse, x_counts = torch.unique_dim(
+            x_unique, x_inverse, x_counts = torch.unique(
                 x,
                 return_inverse=True,
                 return_counts=True,
@@ -11114,6 +11126,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             inplace_op(tensor)
 
     @staticmethod
+    def binary_check_mem_overlap(self, inplace_op, value=-0.5, device='cpu'):
+        if isinstance(inplace_op, str):
+            inplace_op = getattr(torch.Tensor, inplace_op)
+        tensor = torch.tensor(value, device=device).expand(3, 3)
+        other = torch.rand_like(tensor)
+        with self.assertRaisesRegex(RuntimeError, 'single memory location'):
+            inplace_op(tensor, other)
+
+    @staticmethod
     def _test_inplace_unary_mem_overlap(self, device='cpu'):
         TestTorch.unary_check_mem_overlap(self, lambda t: t.acos_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.asin_(), device=device)
@@ -11137,8 +11158,17 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         TestTorch.unary_check_mem_overlap(self, lambda t: t.tanh_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.trunc_(), device=device)
 
+    @staticmethod
+    def _test_inplace_binary_mem_overlap(self, device='cpu'):
+        binary_ops = ['add_', 'mul_', 'div_', 'sub_']
+        for op in binary_ops:
+            TestTorch.binary_check_mem_overlap(self, op, device=device)
+
     def test_inplace_unary_mem_overlap(self):
         return self._test_inplace_unary_mem_overlap(self)
+
+    def test_inplace_binary_mem_overlap(self):
+        return self._test_inplace_binary_mem_overlap(self)
 
     @unittest.expectedFailure
     def test_abs_unary_mem_overlap(self):
