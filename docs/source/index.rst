@@ -50,6 +50,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    hub
    model_zoo
    onnx
+   torch.__config__ <__config__>
    torch.distributed.deprecated <distributed_deprecated>
 
 .. toctree::

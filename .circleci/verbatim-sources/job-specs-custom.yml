@@ -1,7 +1,7 @@
   pytorch_short_perf_test_gpu:
     environment:
       BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:300"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -34,7 +34,7 @@
   pytorch_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:300"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
