@@ -10,11 +10,27 @@ namespace {
 
 template <typename self_T, typename src_T>
 void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
-  at::CPU_tensor_apply2<self_T, src_T>(
-      self, src, [](self_T& self_val, const src_T& src_val) {
-        self_val = static_cast<self_T>(
+  bool serial_path = false;
+#ifdef _OPENMP
+  if (!at::in_parallel_region()) {
+    at::CPU_tensor_parallel_apply2<self_T, src_T>(
+        self, src, [](self_T& self_val, const src_T& src_val) {
+          self_val = static_cast<self_T>(
             static_cast<at::native::inter_copy_type_t<self_T>>(src_val));
-      });
+          }, 20000);
+  } else {
+    serial_path = true;
+  }
+#else
+  serial_path = true;
+#endif
+  if (serial_path) {
+    at::CPU_tensor_apply2<self_T, src_T>(
+        self, src, [](self_T& self_val, const src_T& src_val) {
+          self_val = static_cast<self_T>(
+            static_cast<at::native::inter_copy_type_t<self_T>>(src_val));
+        });
+  }
 }
 
 template <typename self_T>
@@ -36,16 +52,6 @@ bool copy_transpose_valid(const at::Tensor& self, const at::Tensor& src) {
 
 namespace at {
 namespace native {
-
-Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
-  if (src.type_id() != CPUTensorId()) {
-    _s_copy_from(src, self, non_blocking);
-    return self;
-  }
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool,
-      self.scalar_type(), "_copy__cpu", [&]() { ::_copy__cpu<scalar_t>(self, src); });
-  return self;
-}
 
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's tricker
@@ -142,6 +148,20 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
             });
         });
   }
+}
+
+Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
+  if (src.type_id() != CPUTensorId()) {
+    _s_copy_from(src, self, non_blocking);
+    return self;
+  }
+  if (self.scalar_type() == src.scalar_type()) {
+    _copy_same_type__cpu(self, src);
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool,
+      self.scalar_type(), "_copy__cpu", [&]() { ::_copy__cpu<scalar_t>(self, src); });
+  }
+  return self;
 }
 
 DEFINE_DISPATCH(copy_kernel);
