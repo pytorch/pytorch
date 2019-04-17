@@ -146,9 +146,11 @@ static bool outputsNeedToBeObserved(Node* n) {
   return n->kind() != prim::Constant && n->kind() != prim::PythonOp;
 }
 
-void InsertObserverNodes(std::shared_ptr<Graph>& graph,
-  std::unordered_map<std::string, Node*>& observerNodeDict,
-  ssize_t num_input_params) {
+void InsertObserverNodes(script::Method* method,
+  std::unordered_map<std::string, Node*>& observerNodeDict) {
+  AT_ASSERT(method != nullptr);
+  auto graph = method->graph();
+  AT_ASSERT(graph != nullptr);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -165,7 +167,7 @@ void InsertObserverNodes(std::shared_ptr<Graph>& graph,
   auto inputVals = graph->inputs();
   int inputlength = inputVals.size();
   // Module params get appended after external inputs
-  int param_start_index = inputlength - num_input_params;
+  int param_start_index = inputlength - method->initial_ivalues().size();
   AT_ASSERT(param_start_index >= 0);
   // Insert point is the beginning of graph node
   Node* insert_node = *graph->nodes().begin();

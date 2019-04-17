@@ -29,6 +29,7 @@ def weightObserver(value, stats):
     stats[1] = torch.max(value)
     return value
 
+
 r"""
 Default Activation Observer:
 This implementation averages over collected stats.
@@ -45,36 +46,52 @@ Output:
 
 def activationObserver(value, stats):
     averaging_constant = 0.001
-    stats[0] = (1 - averaging_constant) * stats[0] + averaging_constant * torch.min(value)
-    stats[1] = (1 - averaging_constant) * stats[1] + averaging_constant * torch.max(value)
+    stats[0] = (1 - averaging_constant) * stats[0] + \
+        averaging_constant * torch.min(value)
+    stats[1] = (1 - averaging_constant) * stats[1] + \
+        averaging_constant * torch.max(value)
     return value
+
 
 r"""
 Default QParam computation: This is stateless
-qparam_dict and value_stats will be input from Observer
+value_stats will be input from Observer
 
 Arguments:
-    qparam_dict: Quantization parameter dict. Injected by calQParam
+    name: Key name in the stats dictionary
 wrapper
-    value_stats: Tensor stats dict from observer
-wrapper
+    value_stats: Stats dict from observer wrapper
+
 
 Output:
-    None
+    scale, zero_point
 """
 
 
-def calcQParamFunc(qparam_dict, value_stats):
+def calcQParamFunc(name, value_stats):
+    scaleT = 2.0 * (torch.max(value_stats[name][1],
+                    -value_stats[name][0]) / 255.0)
+    scale = scaleT.item()
+    zero_point = 0
+    return scale, zero_point
 
-    for name in value_stats:
-        qparam = torch.zeros(2)
-        scaleT = 2.0 * (torch.max(value_stats[name][1], -value_stats[name][0]) / 255.0)
-        scale = scaleT.item()
-        zero_point = 0
-        qparam_dict.update({name: (scale, zero_point)})
 
 r"""
-This is an example Quant Module which will be used to collect
+ Unified Dictionary for all qparam
+"""
+
+
+def getAllQParamDict(allqparam_dict, quantObj):
+    if allqparam_dict is None:
+        allqparam_dict = {}
+    qparam_dict = quantObj.getQParamDict()
+    if qparam_dict is None:
+        return
+    allqparam_dict.update(qparam_dict)
+
+
+r"""
+This is an example QuantConfigTemplate which will be used to collect
 stats across batches by running torch script/trace module, from the
 observer nodes inserted in the graph. These stats are used to compute
 Quantization Parameters. These will be passed to quantizer to be used
@@ -82,13 +99,14 @@ as arguments for quant ops in quantization pass.
 """
 
 
-class QuantModule:
-    def __init__(self, observerImpl=None, calcQParamImpl=None):
+class QuantConfigTemplate:
+    def __init__(self, tensorType=None, observerImpl=None, calcQParamImpl=None):
         self.value_stats = {}
         self.qparam_dict = {}
         self.averaging_constant = 0.001
         self.observerImpl = observerImpl
         self.calcQParamImpl = calcQParamImpl
+        self.tensor_type = tensorType
 
     def resetStats(self):
         self.value_stats = {}
@@ -110,7 +128,13 @@ class QuantModule:
         self.qparam_dict = {}
         if self.calcQParamImpl is None:
             return
-        self.calcQParamImpl(self.qparam_dict, self.value_stats)
+        for name in self.value_stats:
+            scaleT = 2.0 * (torch.max(self.value_stats[name][1],
+                            -self.value_stats[name][0]) / 255.0)
+            scale = scaleT.item()
+            zero_point = 0
+            scale, zero_point = self.calcQParamImpl(name, self.value_stats)
+            self.qparam_dict.update({name: (self.tensor_type, scale, zero_point)})
 
     def getQParam(self, name):
         if name in self.qparam_dict:
@@ -160,9 +184,9 @@ class QuantizerTestCase(TestCase):
 
         # Eager mode
 
-        # Create QuantModule object for eager mode
-        eagerQuantObj = QuantModule(observerImpl=activationObserver,
-                                    calcQParamImpl=calcQParamFunc)
+        # Create QuantConfig object for eager mode
+        eagerQuantObj = QuantConfigTemplate(observerImpl=activationObserver,
+                                            calcQParamImpl=calcQParamFunc)
         eagerM = TestM(quantObj=eagerQuantObj)
 
         # Run EagerMode Model and Collect stats
@@ -172,19 +196,20 @@ class QuantizerTestCase(TestCase):
         # Script mode
         scriptM = TestScriptM()
 
-        # Create QuantModule object for script mode
-        activationQuantObj = QuantModule(observerImpl=activationObserver,
-                                         calcQParamImpl=calcQParamFunc)
-        paramQuantObj = QuantModule(observerImpl=weightObserver,
-                                    calcQParamImpl=calcQParamFunc)
+        # Create QuantConfig object for script mode
+        activationQuantObj = QuantConfigTemplate(observerImpl=activationObserver,
+                                                 calcQParamImpl=calcQParamFunc)
+        paramQuantObj = QuantConfigTemplate(observerImpl=weightObserver,
+                                            calcQParamImpl=calcQParamFunc)
 
         # This performs type analysis to identify tensors from other
         # types. This info needed for further quantizer passes
         torch._C._jit_pass_constant_propagation(scriptM.graph)
 
-        # Create observer dictionary for activations
-        observer_dict = {'activation': activationQuantObj.observer,
-                         'param': paramQuantObj.observer}
+        # Create sub-module quantconfigobject dict
+        observer_dict = {'__main__': {'activation': activationQuantObj,
+                                      'param': paramQuantObj}
+                         }
 
         # Insert observers
         torch._C._jit_pass_insert_observers(scriptM, observer_dict)

@@ -1165,15 +1165,20 @@ graph(%x : Tensor,
         # Custom observer function
         value_stats = {}
 
-        def observe(x, name):
-            if name not in value_stats:
-                value_stats[name] = []
-            value_stats[name].append(x)
-            return x
+        class ObserverModule:
+            def observer(self, x, name):
+                if name not in value_stats:
+                    value_stats[name] = []
+                value_stats[name].append(x)
+                return x
+        observerObj = ObserverModule()
 
         m = torch.jit.script(fn)
         # Insert observers
-        observer_dict = {'activation': observe}
+        observer_dict1 = {'activation': observerObj}
+        # Create sub-module quantconfigobject dict
+        observer_dict = {'__main__': {'activation': observerObj}
+                         }
         torch._C._jit_pass_insert_observers(m, observer_dict)
         # Collect statistics
         m.forward(x1, y1)
@@ -1205,15 +1210,19 @@ graph(%x : Tensor,
         # Custom observer function
         value_stats = {}
 
-        def observe(x, name):
-            if name not in value_stats:
-                value_stats[name] = []
-            value_stats.update({name : x})
-            return x
+        class ObserverModule:
+            def observer(self, x, name):
+                if name not in value_stats:
+                    value_stats[name] = []
+                value_stats.update({name : x})
+                return x
+        observerObj = ObserverModule()
 
         m = torch.jit.script(fn)
         # Insert observers for activation
-        observer_dict = {'activation': observe}
+        observer_dict1 = {'activation': observerObj}
+        observer_dict = {'__main__': {'activation': observerObj}
+                         }
 
         torch._C._jit_pass_insert_observers(m, observer_dict)
         # Collect statistics

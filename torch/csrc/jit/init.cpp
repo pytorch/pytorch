@@ -119,38 +119,38 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_insert_observers",
           [](std::shared_ptr<script::Module>& moduleObj,
-              py::dict& pyObserverDict) {
+              py::dict& pyModuleObjDict) {
             // Create a new node that would be used in the insert observer pass:
             // all observer nodes will be cloned from this one.
-            auto observerDict = py::cast<std::unordered_map<std::string,
-              py::function>>(pyObserverDict);
-            if (!observerDict.size()) {
+            if (!pyModuleObjDict.size()) {
               return;
             }
+            auto moduleObjDict = py::cast<std::unordered_map<std::string,
+              std::unordered_map<std::string,
+              py::object>>>(pyModuleObjDict);
 
-            // This is a placeholder. Once Modules are first class citizens
-            // and code inlining from graph is removed, we would need to
-            // recursively call sub-modules and invoke the IR mutations for each
-            // subgraph. The code logic will move within moduleIteratorFunc
-            // below :
-            // std::function<void(script::Module&)>
-            //   moduleIteratorFunc = [](script::Module& moduleObj) {};
-            // moduleObj->apply(moduleIteratorFunc);
-
+            // Lookup for the top level module quantObject
+            if (!moduleObjDict.count(moduleObj->name())) {
+              return;
+            }
+            auto& quantConfigObjDict = moduleObjDict[moduleObj->name()];
+            if (!quantConfigObjDict.size()) {
+              return;
+            }
             script::Method* method = moduleObj->find_method("forward");
             AT_ASSERT(method != nullptr);
 
             auto g = method->graph();
-            // Convert to new dict with new (key value)
+            // Convert to observer dict with new (key value)
             std::unordered_map<std::string, Node*> observerNodeDict;
-            for (auto& it : observerDict) {
+            for (auto& it : quantConfigObjDict) {
+              auto observer = py::getattr(it.second, "observer");
               Node* new_node = g->createPythonOp(
-                  THPObjectPtr(it.second.release().ptr()), "dd", {});
+                  THPObjectPtr(observer.release().ptr()), "dd", {});
               observerNodeDict.emplace(it.first, new_node);
             }
 
-            InsertObserverNodes(g, observerNodeDict,
-              method->initial_ivalues().size());
+            InsertObserverNodes(method, observerNodeDict);
             // We don't need these nodes anymore, don't forget to remove it.
             for (auto& it : observerNodeDict) {
               Node* node = it.second;
