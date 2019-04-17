@@ -64,11 +64,11 @@
 [submodule "third_party/ideep"]
 	path = third_party/ideep
 	url = https://github.com/intel/ideep
-[submodule "third_party/nccl/nccl"]
-	path = third_party/nccl/nccl
+[submodule "third_party/nccl"]
+	path = third_party/nccl
 	url = https://github.com/NVIDIA/nccl
-[submodule "third_party/gemmlowp/gemmlowp"]
-	path = third_party/gemmlowp/gemmlowp
+[submodule "third_party/gemmlowp"]
+	path = third_party/gemmlowp
 	url = https://github.com/google/gemmlowp.git
 [submodule "third_party/QNNPACK"]
 	path = third_party/QNNPACK
