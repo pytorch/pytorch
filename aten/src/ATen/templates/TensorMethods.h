@@ -31,10 +31,6 @@ inline Tensor Tensor::hip() const {
   return toType(type().hip());
 }
 
-inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
-  return dispatch_type().copy_(*this, src, non_blocking);
-}
-
 inline Tensor Tensor::toType(ScalarType t) const {
   return toType(type().toScalarType(t));
 }
