@@ -10920,6 +10920,16 @@ a")
         self.checkScript(fn, ("h"))
         self.checkScript(fn, ("y"))
 
+        # in Python 3, encoded strings are bytes which ord() refuses to handle,
+        # so check it manually (here we're only matching Python 2 semantics)
+        @torch.jit.script
+        def fn_unicode(x, i):
+            # type: (str, int) -> int
+            return ord(x[i])
+
+        s = "中文".encode("utf-8")
+        self.assertEqual(fn_unicode(s, 0), s[0])
+
     def test_string_slicing(self):
         def fn1(x):
             # type: (str) -> str
