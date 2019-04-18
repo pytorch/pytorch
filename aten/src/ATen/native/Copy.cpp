@@ -11,21 +11,23 @@
 
 namespace {
 
-template <typename self_T, typename src_T>
-void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
-  at::CPU_tensor_apply2<self_T, src_T>(
-      self, src, [](self_T& self_val, const src_T& src_val) {
-        self_val = static_cast<self_T>(
-            static_cast<at::native::inter_copy_type_t<self_T>>(src_val));
-      });
-}
-
 template <typename self_T>
 void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
   AT_CHECK(self.numel() == src.numel(), "sizes do not match");
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, src.scalar_type(), "_copy__cpu", [&]() {
-    _copy__cpu<self_T, scalar_t>(self, src);
-  });
+
+  auto iter = at::TensorIterator::unary_op(self, src, /* resize_outputs = */ false);
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::Bool,
+      self.scalar_type(),
+      "_copy_same_type_",
+      [&] {
+        at::native::unary_kernel(
+          *iter,
+          [=](scalar_t a) -> self_T { return static_cast<self_T>(
+              static_cast<at::native::inter_copy_type_t<self_T>>(a)); });
+      });
+
 }
 
 bool copy_transpose_valid(const at::Tensor& self, const at::Tensor& src) {
@@ -58,6 +60,7 @@ Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
     _s_copy_from(src, self, non_blocking);
     return self;
   }
+
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool,
       self.scalar_type(), "_copy__cpu", [&]() { ::_copy__cpu<scalar_t>(self, src); });
   return self;
@@ -120,17 +123,15 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
   if (self.is_same(src)) {
     return;
   }
-  bool fast_path = false;
+
   if (self.numel() == src.numel()) {
     if (self.is_contiguous() && src.is_contiguous()) {
-      copy_kernel(kCPU, self, src);
-      fast_path = true;
+      return copy_kernel(kCPU, self, src);
     } else if (copy_transpose_valid(self, src)) {
-      _copy_same_type_transpose_(self, src);
-      fast_path = true;
+      return _copy_same_type_transpose_(self, src);
     }
   }
-  if (!fast_path) {
+
   auto iter = TensorIterator::unary_op(self, src, /* resize_outputs = */ false);
   AT_DISPATCH_ALL_TYPES_AND2(
       at::ScalarType::Half,
@@ -142,7 +143,7 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
           *iter,
           [=](scalar_t a) -> scalar_t { return a; });
       });
-  }
+
 }
 
 DEFINE_DISPATCH(copy_kernel);
