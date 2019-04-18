@@ -6,7 +6,7 @@ import torch
 from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
-
+from torch._six import with_metaclass
 
 _IncompatibleKeys = namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])
 
@@ -23,7 +23,21 @@ def _addindent(s_, numSpaces):
     return s
 
 
-class Module(object):
+class ModuleMeta(type):
+    def __instancecheck__(self, instance):
+        if super(ModuleMeta, self).__instancecheck__(instance):
+            return True
+
+        try:
+            original_cls = instance._original_cls
+            return issubclass(original_cls, self)
+        except (AttributeError, NotImplementedError, RuntimeError):
+            pass
+
+        return False
+
+
+class Module(with_metaclass(ModuleMeta, object)):
     r"""Base class for all neural network modules.
 
     Your models should also subclass this class.

@@ -2805,6 +2805,27 @@ graph(%x : Tensor,
                 self.assertTrue(type(block.paramNode()) == torch._C.Node)
         self.assertTrue(tested_blocks)
 
+    def test_isinstance(self):
+        class TestModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.linear = nn.Linear(5, 5)
+                self.conv2d = nn.Conv2d(3, 8, 3)
+
+        m = TestModule()
+
+        self.assertIsInstance(m.linear, torch.jit.WeakScriptModuleProxy)
+        self.assertIsInstance(m.conv2d, torch.jit.WeakScriptModuleProxy)
+
+        self.assertIsInstance(m.linear, nn.Module)
+        self.assertIsInstance(m.conv2d, nn.Module)
+
+        self.assertIsInstance(m.linear, nn.Linear)
+        self.assertIsInstance(m.conv2d, nn.Conv2d)
+
+        self.assertNotIsInstance(m.conv2d, nn.Linear)
+        self.assertNotIsInstance(m.linear, nn.Conv2d)
+
 
 def execWrapper(code, glob, loc):
     if PY2:

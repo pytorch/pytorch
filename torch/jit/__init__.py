@@ -1,7 +1,7 @@
 import torch._C
 from torch.autograd import Variable, function
 from torch.serialization import validate_cuda_device
-from torch.nn import Module, ModuleList, Parameter, Sequential
+from torch.nn import ModuleMeta, Module, ModuleList, Parameter, Sequential
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
@@ -949,7 +949,7 @@ def _create_methods_from_stubs(self, stubs):
 # resolve references to `self.param` or `self.module`.
 
 
-class ScriptMeta(type(torch._C.ScriptModule)):
+class ScriptMeta(type(torch._C.ScriptModule), ModuleMeta):
     # this has to inherit from pybind11's metaclass otherwise we get
     # issues because ScriptModule inherits from torch._C.ScriptModule,
     # a pybind11 type
@@ -1219,6 +1219,7 @@ if _enabled:
             super(WeakScriptModuleProxy, self).__init__()
 
             self.__dict__["_original"] = weakref.ref(original)
+            self.__dict__["_original_cls"] = type(original)
 
             # Copy Parameters / Modules / Buffers
             for name in dir(original):
