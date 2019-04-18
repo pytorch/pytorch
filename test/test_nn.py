@@ -1,6 +1,7 @@
 import math
 import random
 import string
+import time
 import unittest
 import itertools
 import contextlib
@@ -37,7 +38,7 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     ctcloss_reference, new_module_tests
 
 from torch.nn import MultiheadAttention
-from torch.nn import buildTransformerModel
+from torch.nn import Transformer 
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -7689,52 +7690,37 @@ class TestNN(NNTestCase):
         self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
 
     def test_transformer_number_match(self):
-        #import torch.nn.modules.transformer as T
-
         # Train the simple copy task.
         V = 11
-        criterion = LabelSmoothing(size=V, padding_idx=0, smoothing=0.0)
+        num_encoder_layers=1
+        num_decoder_layers=1
+        d_model=16 # embedding
+        nhead=2 # number of heads
+        dropout=0.20
+        d_ff=64
+        batch_size = 400
+        milliseconds = int(round(time.time() * 1000))
+        torch.manual_seed(milliseconds)
 
-        num_encoder_layers=2
-        num_decoder_layers=2
-        d_model=512 # embedding
-        nhead=8 # number of heads
-        dropout=0.1
-        model = buildTransformerModel(V, V, d_model=d_model, nhead=nhead, num_encoder_layers=num_encoder_layers, num_decoder_layers=num_decoder_layers)
-
-        # Modify multiheadattention in model
-        for i in range(0, num_encoder_layers):
-            model.encoder.layers[i].self_attn = ModifiedMultiheadAttention(d_model, nhead, dropout=dropout)
-
-        for i in range(0, num_decoder_layers):
-            model.decoder.layers[i].self_attn = ModifiedMultiheadAttention(d_model, nhead, dropout=dropout)
-            model.decoder.layers[i].multihead_attn = ModifiedMultiheadAttention(d_model, nhead, dropout=dropout)
-
+        model = Transformer(V, V, d_model=d_model, nhead=nhead, num_encoder_layers=num_encoder_layers, num_decoder_layers=num_decoder_layers, d_ff=d_ff)
         model_opt = NoamOpt(model.encoder.src_embed.d_model, 1, 400,
-                torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
+                torch.optim.Adam(model.parameters(), lr=2.5, betas=(0.9, 0.98), eps=1e-9))
+        criterion = LabelSmoothingLoss(size=V, padding_idx=0, smoothing=0.0)
 
         print("Training the model...")
-
         for epoch in range(10):
-            #print("-------------------------------------------")
-            #print("Epoch %d:" %epoch)
             model.train()
-            run_epoch(data_gen(V, 50, 21), model, 
-                      SimpleLossCompute(model.generator, criterion, model_opt))
+            train_epoch(data_gen(V, batch_size, 21), model, criterion, model_opt) 
             model.eval()
-            #print("evaluation result:")
-            run_epoch(data_gen(V, 50, 6), model, 
-                            SimpleLossCompute(model.generator, criterion, None))
+            valid_epoch(data_gen(V, batch_size, 6), model, criterion) 
 
         model.eval()
-        #src = Variable(torch.LongTensor([[1,2,3,4,5,6,7,8,9,10]]) )
-        src_mask = Variable(torch.ones(1, 1, 10) )
-        #print(greedy_decode(model, src, src_mask, max_len=10, start_symbol=1))
-        for _i in range(5):
-            src = Variable(torch.randint(1, 11, (1, 10)))
+        
+        for _ in range(3):    
+            src = Variable(torch.randint(1, V, (10, 1)))
             src[0][0] = 1
-            tgt = greedy_decode(model, src, src_mask, max_len=10, start_symbol=1)
-            #print(src, tgt)
+            tgt = generate_test(model, src, max_len=10, start_symbol=1)
+            #print(_, src.transpose(0,1), tgt.transpose(0,1))
             assert np.allclose(src, tgt, atol=1e-5) 
 
 class TestNNInit(TestCase):
@@ -8610,44 +8596,15 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 # The following are some helpers for TestNN.test_transformer_number_match
-class ModifiedMultiheadAttention(nn.Module):
-    def __init__(self, d_model, nhead, dropout):
-        super(ModifiedMultiheadAttention, self).__init__()
-        self.attn = MultiheadAttention(d_model, nhead, dropout)
-
-    def forward(self, query, key, value, mask=None):
-        query = query.transpose(0, 1).contiguous()
-        key = key.transpose(0, 1).contiguous()
-        value = value.transpose(0, 1).contiguous()
-        if mask is not None:
-            mask_float = mask[0].float()
-            mask_float = mask_float.masked_fill(mask_float == 0, float('-inf'))
-            mask_float = mask_float.masked_fill(mask_float == 1, float(0.0))
-            #mask = mask_float
-            mask = mask_float.double()
-        [attn, attn_weight] = self.attn(query, key, value, attn_mask=mask)
-        attn = attn.transpose(0, 1).contiguous()
-        return attn
-
-class Batch:
+class DataBatch:
     "Object for holding a batch of data with mask during training."
     def __init__(self, src, trg=None, pad=0):
-        self.src = src
+        self.src = src.transpose(0, 1).contiguous()
         self.src_mask = (src != pad).unsqueeze(-2)
         if trg is not None:
-            self.trg = trg[:, :-1]
-            self.trg_y = trg[:, 1:]
-            self.trg_mask = \
-                self.make_std_mask(self.trg, pad)
+            self.trg = trg[:, :-1].transpose(0, 1).contiguous()
+            self.trg_y = trg[:, 1:].transpose(0, 1).contiguous()
             self.ntokens = (self.trg_y != pad).data.sum().item()
-    
-    @staticmethod
-    def make_std_mask(tgt, pad):
-        "Create a mask to hide padding and future words."
-        tgt_mask = (tgt != pad).unsqueeze(-2)
-        tgt_mask = tgt_mask & Variable(
-            subsequent_mask(tgt.size(-1)).type_as(tgt_mask.data))
-        return tgt_mask
 
 class NoamOpt:
     "Optim wrapper that implements rate."
@@ -8676,10 +8633,10 @@ class NoamOpt:
             (self.model_size ** (-0.5) *
             min(step ** (-0.5), step * self.warmup ** (-1.5)))
 
-class LabelSmoothing(nn.Module):
+class LabelSmoothingLoss(nn.Module):
     "Implement label smoothing."
     def __init__(self, size, padding_idx, smoothing=0.0):
-        super(LabelSmoothing, self).__init__()
+        super(LabelSmoothingLoss, self).__init__()
         self.criterion = nn.KLDivLoss(size_average=False)
         self.padding_idx = padding_idx
         self.confidence = 1.0 - smoothing
@@ -8699,68 +8656,31 @@ class LabelSmoothing(nn.Module):
         self.true_dist = true_dist
         return self.criterion(x, Variable(true_dist, requires_grad=False))
 
-class SimpleLossCompute:
-    "A simple loss compute and train function."
-    def __init__(self, generator, criterion, opt=None):
-        self.generator = generator
-        self.criterion = criterion
-        self.opt = opt
-        
-    def __call__(self, x, y, norm):
-        x = self.generator(x)
-        loss = self.criterion(x.contiguous().view(-1, x.size(-1)), 
-                              y.contiguous().view(-1)) / norm
-        loss.backward()
-        if self.opt is not None:
-            self.opt.step()
-            self.opt.optimizer.zero_grad()
-        return loss.item() * norm
-
-def subsequent_mask(size):
-    "Mask out subsequent positions."
-    attn_shape = (1, size, size)
-    subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
-    return torch.from_numpy(subsequent_mask) == 0
-
-def run_epoch(data_iter, model, loss_compute):
-    import time
-
-    "Standard Training and Logging Function"
+def train_epoch(data_iter, model, criterion, opt):
     start = time.time()
     total_tokens = 0
     total_loss = 0
     tokens = 0
     for i, batch in enumerate(data_iter):
-        out = model.forward(batch.src, batch.trg, 
-                            batch.src_mask, batch.trg_mask)
-        loss = loss_compute(out, batch.trg_y, batch.ntokens)
-        total_loss += loss
-        total_tokens += batch.ntokens
-        tokens += batch.ntokens
-        if i % 5 == 0:
-            elapsed = time.time() - start
-            #print("Epoch Step: %d Loss: %f Tokens per Sec: %f" %
-            #        (i, loss / batch.ntokens, tokens / elapsed))
-            start = time.time()
-            tokens = 0
-    return total_loss / total_tokens
+        tgt_mask = model.generate_square_subsequent_mask(batch.trg.size(0)).double()
+        out = model.forward(batch.src, batch.trg, tgt_mask=tgt_mask)
+        loss = criterion(out.contiguous().view(-1, out.size(-1)), 
+                         batch.trg_y.contiguous().view(-1)) / batch.ntokens
+        loss.backward()
+        opt.step()
+        opt.optimizer.zero_grad()
 
-global max_src_in_batch, max_tgt_in_batch
-def batch_size_fn(new, count, sofar):
-    "Keep augmenting batch and calculate total number of tokens + padding."
-    global max_src_in_batch, max_tgt_in_batch
-    if count == 1:
-        max_src_in_batch = 0
-        max_tgt_in_batch = 0
-    max_src_in_batch = max(max_src_in_batch,  len(new.src))
-    max_tgt_in_batch = max(max_tgt_in_batch,  len(new.trg) + 2)
-    src_elements = count * max_src_in_batch
-    tgt_elements = count * max_tgt_in_batch
-    return max(src_elements, tgt_elements)
-        
-def get_std_opt(model):
-    return NoamOpt(model.src_embed[0].d_model, 2, 4000,
-            torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
+def valid_epoch(data_iter, model, criterion):
+    start = time.time()
+    total_tokens = 0
+    total_loss = 0
+    tokens = 0
+    for i, batch in enumerate(data_iter):
+        tgt_mask = model.generate_square_subsequent_mask(batch.trg.size(0)).double()
+        out = model.forward(batch.src, batch.trg, tgt_mask=tgt_mask)
+        loss = criterion(out.contiguous().view(-1, out.size(-1)), 
+                         batch.trg_y.contiguous().view(-1)) / batch.ntokens
+        loss.backward()
 
 def data_gen(V, batch, nbatches):
     "Generate random data for a src-tgt copy task."
@@ -8769,19 +8689,16 @@ def data_gen(V, batch, nbatches):
         data[:, 0] = 1
         src = Variable(data, requires_grad=False)
         tgt = Variable(data, requires_grad=False)
-        yield Batch(src, tgt, 0)
+        yield DataBatch(src, tgt, 0)
 
-def greedy_decode(model, src, src_mask, max_len, start_symbol):
-    memory = model.encode(src, src_mask)
+def generate_test(model, src, max_len, start_symbol):
+    memory = model.encode(src)
     ys = torch.ones(1, 1).fill_(start_symbol).type_as(src.data)
     for i in range(max_len-1):
-        out = model.decode(Variable(ys), memory, 
-                           Variable(subsequent_mask(ys.size(1)).type_as(src.data)),
-                           src_mask) 
-        prob = model.generator(out[:, -1])
-        _, next_word = torch.max(prob, dim = 1)
-        next_word = next_word.data[0]
-        ys = torch.cat([ys, torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=1)
+        out = model.decode(Variable(ys), memory) 
+        prob = model.generator(out[-1, :].unsqueeze(0))
+        _, next_word = torch.max(prob, dim = 2)
+        ys = torch.cat([ys, torch.ones(1, 1).type_as(src.data).fill_(next_word.item())], dim=0)
     return ys
 # end TestNN.test_transformer_number_match
 
