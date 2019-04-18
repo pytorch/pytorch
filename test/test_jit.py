@@ -3448,6 +3448,8 @@ a")
             scalar = x.item()
             return int(scalar), float(scalar)
 
+        graph = torch.jit.script(test_scalar_cast).graph
+        FileCheck().check("(int, float) = prim::TupleConstruct").run(graph)
         self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
         self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
 
@@ -4982,6 +4984,20 @@ a")
         self.checkScriptRaisesRegex(test_bool_cast_tensor, (torch.tensor([1, 1]),), Exception,
                                     "bool value of Tensor with more than one value")
 
+        def test_not_cast(x):
+            if not x:
+                return 1
+            else:
+                return 0
+
+        self.checkScript(test_not_cast, (torch.tensor(1),))
+        self.checkScript(test_not_cast, (torch.tensor(0),))
+
+        with self.assertRaisesRegex(RuntimeError, "expected"):
+            @torch.jit.script
+            def test_mult(x, y):
+                return not(x, y)
+
         def test_cast_int(x):
             # type: (int) -> int
             if x:
@@ -5159,10 +5175,76 @@ a")
 
     def test_math_ops(self):
 
-        def test_floor():
-            return math.floor(1.5)
+        def test_floor(x):
+            # type: (float) -> float
+            return math.floor(x)
 
-        self.checkScript(test_floor, ())
+        def test_ceil(x):
+            # type: (float) -> float
+            return math.ceil(x)
+
+        def test_log_int(x):
+            # type: (int) -> float
+            return math.log(x)
+
+        def test_log_float(x):
+            # type: (float) -> float
+            return math.log(x)
+
+        def test_log1p_int(x):
+            # type: (int) -> float
+            return math.log1p(x)
+
+        def test_log1p_float(x):
+            # type: (float) -> float
+            return math.log1p(x)
+
+        def test_log10_int(x):
+            # type: (int) -> float
+            return math.log10(x)
+
+        def test_log10_float(x):
+            # type: (float) -> float
+            return math.log10(x)
+
+        def test_exp_int(x):
+            # type: (int) -> float
+            return math.exp(x)
+
+        def test_exp_float(x):
+            # type: (float) -> float
+            return math.exp(x)
+
+        def test_sqrt_int(x):
+            # type: (int) -> float
+            return math.sqrt(x)
+
+        def test_sqrt_float(x):
+            # type: (float) -> float
+            return math.sqrt(x)
+
+        def test_pow_float(x, y):
+            # type: (float, float) -> float
+            return math.pow(x, y)
+
+        def test_pow_int(x, y):
+            # type: (float, int) -> float
+            return math.pow(x, y)
+
+        self.checkScript(test_floor, (1.5,))
+        self.checkScript(test_ceil, (1.5,))
+        self.checkScript(test_log_int, (2,))
+        self.checkScript(test_log_float, (2.0,))
+        self.checkScript(test_log1p_int, (1,))
+        self.checkScript(test_log1p_float, (1.0,))
+        self.checkScript(test_log10_int, (2,))
+        self.checkScript(test_log10_float, (2.0,))
+        self.checkScript(test_exp_int, (2,))
+        self.checkScript(test_exp_float, (2.0,))
+        self.checkScript(test_sqrt_int, (2,))
+        self.checkScript(test_sqrt_float, (2.0,))
+        self.checkScript(test_pow_float, (2.0, 2.0))
+        self.checkScript(test_pow_int, (2.0, 2))
 
     def test_if_nest_while(self):
         def func(a, b):
@@ -8123,6 +8205,36 @@ a")
             return y + 1
 
         self.assertEqual(8, bar(torch.ones(1, 1)))
+
+    def test_ellipsis_mid(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[2, ..., 0:4, 4:8].size()
+
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_mid_select(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[2, ..., 4, 4, 4:8, 2].size()
+
+        dummy = torch.zeros(8, 8, 8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_start(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[..., 0:4, 4:8].size()
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_end(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[0:4, 2, ...].size()
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
 
     def test_tracing_slicing(self):
         @_trace(torch.zeros(10))
@@ -11212,6 +11324,15 @@ a")
         imported_m = self.getExportImportCopy(m)
         self.assertEqual(m(), imported_m())
 
+    def test_string_len(self):
+        def fn(x):
+            # type: (str) -> int
+            return len(x)
+
+        self.checkScript(fn, ("",))
+        self.checkScript(fn, ("h",))
+        self.checkScript(fn, ("hello",))
+
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_attribute_unpickling(self):
         class M(torch.jit.ScriptModule):
@@ -11253,6 +11374,56 @@ a")
             archive = zipfile.ZipFile(fname, 'r')
             pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
             JitUnpickler(io.BytesIO(pickled_data)).load()
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    def test_old_models_bc(self):
+        model = {
+            'archive/version': b'1',
+            'archive/code/archive.py':
+                b'''
+                op_version_set = 0
+                def forward(self,
+                    _0: Tensor) -> Tensor:
+                  _1 = torch.zeros([10], dtype=6, layout=0, device=torch.device("cpu"))
+                  result = torch.to(torch.fill_(_1, 5), dtype=6, layout=0, device=torch.device("cpu"),
+                                    non_blocking=False, copy=False)
+                  result2 = torch.rand([10], dtype=6, layout=0, device=torch.device("cpu"))
+                  result3 = torch.rand_like(result2, dtype=6, layout=0, device=torch.device("cpu"))
+                  _2 = torch.add(torch.add(result, result2, alpha=1), result3, alpha=1)
+                  return _2
+                ''',
+            'archive/attributes.pkl': b'\x80\x02](e.',
+            'archive/libs.py': b'op_version_set = 0\n',
+            'archive/model.json':
+                b'''
+                {
+                   "protoVersion":"2",
+                   "mainModule":{
+                      "torchscriptArena":{
+                         "key":"code/archive.py"
+                      },
+                      "name":"archive",
+                      "optimize":true
+                   },
+                   "producerName":"pytorch",
+                   "producerVersion":"1.0",
+                   "libs":{
+                      "torchscriptArena":{
+                         "key":"libs.py"
+                      }
+                   }
+                }'''}
+        with TemporaryFileName() as fname:
+            archive_name = os.path.basename(os.path.normpath(fname))
+            with zipfile.ZipFile(fname, 'w') as archive:
+                for k, v in model.items():
+                    archive.writestr(k, v)
+
+            with open(fname, "rb") as f:
+                fn = torch.jit.load(f)
+
+        x = torch.zeros(10)
+        fn(x)
 
     def test_submodule_attribute_serialization(self):
         class S(torch.jit.ScriptModule):

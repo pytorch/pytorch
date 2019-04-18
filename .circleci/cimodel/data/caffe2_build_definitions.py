@@ -2,9 +2,10 @@
 
 from collections import OrderedDict
 
-import cimodel.data.dimensions as dimensions
+import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
-from cimodel.lib.conf_tree import Ver
+import cimodel.lib.visualization as visualization
+from cimodel.data.caffe2_build_data import CONFIG_TREE_DATA, TopLevelNode
 
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
@@ -12,55 +13,14 @@ DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 DOCKER_IMAGE_VERSION = 266
 
 
-CONFIG_HIERARCHY = [
-    (Ver("ubuntu", "14.04"), [
-        (Ver("gcc", "4.8"), ["py2"]),
-        (Ver("gcc", "4.9"), ["py2"]),
-    ]),
-    (Ver("ubuntu", "16.04"), [
-        (Ver("cuda", "8.0"), ["py2"]),
-        (Ver("cuda", "9.0"), [
-            # TODO make explicit that this is a "secret TensorRT build"
-            #  (see https://github.com/pytorch/pytorch/pull/17323#discussion_r259446749)
-            "py2",
-            "cmake",
-        ]),
-        (Ver("cuda", "9.1"), ["py2"]),
-        (Ver("mkl"), ["py2"]),
-        (Ver("gcc", "5"), ["onnx_py2"]),
-        (Ver("clang", "3.8"), ["py2"]),
-        (Ver("clang", "3.9"), ["py2"]),
-        (Ver("clang", "7"), ["py2"]),
-        (Ver("android"), ["py2"]),
-    ]),
-    (Ver("centos", "7"), [
-        (Ver("cuda", "9.0"), ["py2"]),
-    ]),
-    (Ver("macos", "10.13"), [
-        # TODO ios and system aren't related. system qualifies where the python comes
-        #  from (use the system python instead of homebrew or anaconda)
-        (Ver("ios"), ["py2"]),
-        (Ver("system"), ["py2"]),
-    ]),
-]
-
-
 class Conf(object):
-    def __init__(self, language, distro, compiler, phase):
+    def __init__(self, language, distro, compiler, phase, build_only):
 
         self.language = language
         self.distro = distro
         self.compiler = compiler
         self.phase = phase
-
-    def is_build_only(self):
-        return str(self.compiler) in [
-            "gcc4.9",
-            "clang3.8",
-            "clang3.9",
-            "clang7",
-            "android",
-        ] or self.get_platform() == "macos"
+        self.build_only = build_only
 
     # TODO: Eventually we can probably just remove the cudnn7 everywhere.
     def get_cudnn_insertion(self):
@@ -88,7 +48,10 @@ class Conf(object):
         return self.construct_phase_name(self.phase)
 
     def get_platform(self):
-        return "macos" if self.distro.name == "macos" else "linux"
+        platform = self.distro.name
+        if self.distro.name != "macos":
+            platform = "linux"
+        return platform
 
     def gen_docker_image(self):
 
@@ -135,7 +98,7 @@ class Conf(object):
 
         else:
             tuples.append(("DOCKER_IMAGE", self.gen_docker_image()))
-            if self.is_build_only():
+            if self.build_only:
                 tuples.append(("BUILD_ONLY", miniutils.quote("1")))
 
         d = OrderedDict({"environment": OrderedDict(tuples)})
@@ -149,31 +112,44 @@ class Conf(object):
         return d
 
 
-def gen_build_list():
-    x = []
-    for distro, d1 in CONFIG_HIERARCHY:
-        for compiler_name, build_languages in d1:
-            for language in build_languages:
-                for phase in dimensions.PHASES:
+def get_root():
+    return TopLevelNode("Caffe2 Builds", CONFIG_TREE_DATA)
 
-                    c = Conf(language, distro, compiler_name, phase)
 
-                    if phase == "build" or not c.is_build_only():
-                        x.append(c)
+def instantiate_configs():
 
-    return x
+    config_list = []
+
+    root = get_root()
+    found_configs = conf_tree.dfs(root)
+    for fc in found_configs:
+
+        c = Conf(
+            fc.find_prop("language_version"),
+            fc.find_prop("distro_version"),
+            fc.find_prop("compiler_version"),
+            fc.find_prop("phase_name"),
+            fc.find_prop("build_only"),
+        )
+
+        config_list.append(c)
+
+    return config_list
 
 
 def add_caffe2_builds(jobs_dict):
 
-    configs = gen_build_list()
+    configs = instantiate_configs()
     for conf_options in configs:
         jobs_dict[conf_options.get_name()] = conf_options.gen_yaml_tree()
+
+    graph = visualization.generate_graph(get_root())
+    graph.draw("caffe2-config-dimensions.png", prog="twopi")
 
 
 def get_caffe2_workflows():
 
-    configs = gen_build_list()
+    configs = instantiate_configs()
 
     # TODO Why don't we build this config?
     # See https://github.com/pytorch/pytorch/pull/17323#discussion_r259450540

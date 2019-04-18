@@ -38,7 +38,7 @@ using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 // autograd::Variable. Some functions in c10d create temporary tensors. We can't
 // mix and match use of Tensor and Variable. This hasn't been a problem for
 // operatations on dense tensors that all happen in place. When adding support
-// for sparse allreduce, we found were in fact taking Variable arguments, and
+// for sparse allreduce, we found we were in fact taking Variable arguments, and
 // tried to copy them into temporary Tensor instances in c10d.
 //
 // The best fix here is to simply make c10d depend on libtorch and use Variable
@@ -232,7 +232,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
           .def(
               "allreduce",
               [](::c10d::ProcessGroup& pg,
-                 std::vector<at::Tensor> xs,
+                 std::vector<at::Tensor>& xs,
                  ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
@@ -245,7 +245,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
           .def(
               "allreduce",
-              [](::c10d::ProcessGroup& pg, at::Tensor x, ::c10d::ReduceOp op) {
+              [](::c10d::ProcessGroup& pg, at::Tensor& x, ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
                 auto xs = unbox({x});
@@ -543,6 +543,13 @@ They are used in specifying strategies for reduction collectives, e.g.,
       py::arg("grads_batch_coalesced"),
       py::call_guard<py::gil_scoped_release>());
 #endif
+
+  module.def(
+      "_compute_bucket_assignment_by_size",
+      &::c10d::compute_bucket_assignment_by_size,
+      py::arg("tensors"),
+      py::arg("bucket_size"),
+      py::call_guard<py::gil_scoped_release>());
 
   Py_RETURN_TRUE;
 }
