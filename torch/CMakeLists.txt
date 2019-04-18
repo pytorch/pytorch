@@ -142,6 +142,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_c10_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/profiling_record.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
@@ -521,6 +522,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/peephole.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/constant_fold.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_arg_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp

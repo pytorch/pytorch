@@ -8,6 +8,8 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
 
+namespace detail {
+// InputToIValue takes a value and converts it to an IValue to be put on a stack.
 template<class T>
 struct InputToIValue final {
   template<class T_>
@@ -33,10 +35,11 @@ struct InputToIValue<c10::ArrayRef<T>> final {
     return c10::IValue(v.vec());
   }
 };
+}
 
 template<class... Inputs>
 inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
-  return {InputToIValue<c10::guts::decay_t<Inputs>>::call(std::forward<Inputs>(inputs))...};
+  return {detail::InputToIValue<c10::guts::decay_t<Inputs>>::call(std::forward<Inputs>(inputs))...};
 }
 
 inline at::Tensor dummyTensor(c10::TensorTypeId dispatch_key) {

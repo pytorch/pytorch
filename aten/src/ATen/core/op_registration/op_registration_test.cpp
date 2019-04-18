@@ -230,9 +230,13 @@ TEST(OperatorRegistrationTest, givenOpWithMultipleKernels_whenKernelsHaveSameDis
  * when called with `input` fulfills `inputExpectation` inside the kernel, then
  * returns `output` and the returned value fulfills `outputExpectation`.
  *
+ * `inputExpectation` and `outputExpectation` should be lambdas that run
+ * googletest expect macros (or use other ways to assert the expectation is met).
+ *
  * Optionally, you can specify the argument list part of a function schema
  * (e.g. "(Tensor a) -> Tensor") as an additional argument to use when
- * registering the kernel.
+ * registering the kernel. In this case, the operator registration logic will
+ * check that the kernel function signature matches the one you specified.
  */
 template<class InputType, class OutputType = InputType>
 struct ArgTypeTestKernel final : OperatorKernel {
@@ -479,6 +483,8 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
 
   // TODO Do we want to support list of optional / optional of list ?
+
+  // TODO Add tests for dict types
 }
 
 }

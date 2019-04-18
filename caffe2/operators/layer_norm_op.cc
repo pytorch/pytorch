@@ -1,7 +1,5 @@
 #include "caffe2/operators/layer_norm_op.h"
 
-#include <c10/core/Tensor.h>
-
 #include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/utils/eigen_utils.h"
 
