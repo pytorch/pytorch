@@ -803,62 +803,37 @@ bool AliasDb::mayAlias(const Value* a, const Value* b) const {
     return true;
   }
 
-  if (!elementMap_.count(a) || !elementMap_.count(b)) {
-    return false;
-  }
-
   return memoryDAG_->mayAlias(elementMap_.at(a), elementMap_.at(b));
 }
 
-bool AliasDb::mayContainAlias(const Value* elem, const Value* container) const {
-  if (mayAlias(elem, container)) {
+bool AliasDb::cannotCheckAliasContainment(const Value* elem) const {
+  if (isWildcard(elem)) {
     return true;
   }
 
-  if (!shouldAnnotate(elem) || !shouldAnnotate(container)) {
-    return false;
-  }
-
-  if (!elementMap_.count(elem) || !elementMap_.count(container)) {
-    return false;
-  }
-
-  // don't know how to analyze containers other than tuple
   if (isContainerType(elem->type())) {
     if (elem->node()->kind() != prim::TupleConstruct) {
       return true;
     }
-    auto inp = elem->node()->inputs();
-    return std::any_of(inp.begin(), inp.end(), [&](const Value* v) {
-      return mayContainAlias(v, container);
+    auto inps = elem->node()->inputs();
+    return std::any_of(inps.begin(), inps.end(), [&](const Value* v) {
+      return cannotCheckAliasContainment(v);
     });
   }
 
-  // if it's not a container type case already covered through mayAlias
-  if (!isContainerType(container->type())) {
+  return false;
+}
+
+bool AliasDb::mayContainAlias(const Value* a, const Value* b) const {
+  if (!shouldAnnotate(a) || !shouldAnnotate(b)) {
     return false;
   }
 
-  // don't know how to analyze anything except TupleConstruct
-  if (container->node()->kind() != prim::TupleConstruct) {
+  if (cannotCheckAliasContainment(a) || cannotCheckAliasContainment(b)) {
     return true;
   }
 
-  auto inp = container->node()->inputs();
-  if (std::any_of(inp.begin(), inp.end(), [&](const Value* cont) {
-        return mayContainAlias(elem, cont);
-      })) {
-    return true;
-  };
-
-  for (const auto& input : container->node()->inputs()) {
-    if (isWildcard(input)) {
-      return true;
-    }
-  }
-
-  return memoryDAG_->mayContainAlias(
-      elementMap_.at(elem), elementMap_.at(container));
+  return memoryDAG_->mayContainAlias(elementMap_.at(a), elementMap_.at(b));
 }
 
 // Make each value in the `from` list point to its partner in the `to` list

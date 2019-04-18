@@ -47,7 +47,7 @@ class AliasDb {
 
   // Does `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
-  bool mayContainAlias(const Value* elem, const Value* container) const;
+  bool mayContainAlias(const Value* a, const Value* b) const;
 
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Value* a, const Value* b) const;
@@ -168,6 +168,10 @@ class AliasDb {
   bool hasWildcard(const Node* n) const;
   // Returns nullopt if there are no wildcard nodes
   c10::optional<const Node*> getLastWildcard() const;
+
+  // Is the element a wildcard or an unhandled container type,
+  // or does the element contain an element for which that's true
+  bool cannotCheckAliasContainment(const Value* elem) const;
 
   /**
    * Special analysis methods

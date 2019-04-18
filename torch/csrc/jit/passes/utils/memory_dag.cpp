@@ -2,6 +2,7 @@
 
 #include <torch/csrc/utils/memory.h>
 #include <algorithm>
+#include <iostream>
 #include <queue>
 
 namespace torch {
@@ -32,14 +33,12 @@ bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
   return false;
 }
 
-bool MemoryDAG::mayContainAlias(
-    const Element* contained,
-    const Element* container) const {
-  return mayContainAliasImpl(contained, container);
+bool MemoryDAG::mayContainAlias(const Element* a, const Element* b) const {
+  return mayContainAliasImpl(a, b);
 }
 
-bool MemoryDAG::mayContainAlias(Element* contained, Element* container) const {
-  return mayContainAliasImpl(contained, container);
+bool MemoryDAG::mayContainAlias(Element* a, Element* b) const {
+  return mayContainAliasImpl(a, b);
 }
 
 void collectContainedElems(
@@ -64,15 +63,13 @@ std::unordered_set<const Element*> collectAllContainedMemoryLocations(
   return elem_contained;
 }
 
-bool MemoryDAG::mayContainAliasImpl(
-    const Element* elem,
-    const Element* container) const {
-  auto all_elem_mlocs = collectAllContainedMemoryLocations(elem);
-  auto all_cont_mlocs = collectAllContainedMemoryLocations(container);
+bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
+  auto all_a_mlocs = collectAllContainedMemoryLocations(a);
+  auto all_b_mlocs = collectAllContainedMemoryLocations(b);
 
-  for (const auto elem_mem : all_elem_mlocs) {
-    for (const auto cont_mem : all_cont_mlocs) {
-      if (elem_mem == cont_mem) {
+  for (const auto a_mem : all_a_mlocs) {
+    for (const auto b_mem : all_b_mlocs) {
+      if (a_mem == b_mem) {
         return true;
       }
     }
