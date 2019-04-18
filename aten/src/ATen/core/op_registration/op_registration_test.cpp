@@ -207,4 +207,16 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernelsWithoutTensorInputs_whenRegi
   ASSERT_TRUE(op.has_value()); // assert schema is registered
 }
 
+TEST(OperatorRegistrationTest, givenOpWithMultipleKernels_whenKernelsHaveSameDispatchKey_thenFails) {
+  auto registrar = c10::RegisterOperators()
+      .op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  expectThrows<c10::Error>([&] {
+    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
+  }, "Tried to register multiple kernels with same dispatch key");
+}
+
 }
