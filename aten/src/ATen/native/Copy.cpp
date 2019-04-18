@@ -106,20 +106,29 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
   if (self.is_same(src)) {
     return;
   }
+  bool fast_path = false;
   if (self.numel() == src.numel()) {
     if (self.is_contiguous() && src.is_contiguous()) {
-      return copy_kernel(kCPU, self, src);
+      copy_kernel(kCPU, self, src);
+      fast_path = true;
     } else if (copy_transpose_valid(self, src)) {
-      return _copy_same_type_transpose_(self, src);
+      _copy_same_type_transpose_(self, src);
+      fast_path = true;
     }
   }
+  if (!fast_path) {
   auto iter = TensorIterator::unary_op(self, src, /* resize_outputs = */ false);
   AT_DISPATCH_ALL_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::Bool,
       self.scalar_type(),
       "_copy_same_type_",
-      [&] { unary_kernel(*iter, [=](scalar_t a) -> scalar_t { return a; }); });
+      [&] {
+        unary_kernel(
+          *iter,
+          [=](scalar_t a) -> scalar_t { return a; });
+      });
+  }
 }
 
 DEFINE_DISPATCH(copy_kernel);
