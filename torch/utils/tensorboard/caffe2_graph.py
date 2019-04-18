@@ -9,13 +9,13 @@ import os
 import re
 import six
 
-from builtins import bytes
-from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace
-
 from tensorboard.compat.proto.graph_pb2 import GraphDef
 from tensorboard.compat.proto.node_def_pb2 import NodeDef
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
+
+from builtins import bytes
+from caffe2.proto import caffe2_pb2
+from caffe2.python import core, workspace
 
 
 def _make_unique_name(seen, name, min_version=0):

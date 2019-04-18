@@ -1,13 +1,13 @@
-import time
 import numpy as np
+import time
 import torch
 
-from distutils.version import LooseVersion
 from collections import OrderedDict
+from distutils.version import LooseVersion
 
+from tensorboard.compat.proto.config_pb2 import RunMetadata
 from tensorboard.compat.proto.graph_pb2 import GraphDef
 from tensorboard.compat.proto.step_stats_pb2 import StepStats, DeviceStepStats, NodeExecStats, AllocatorMemoryUsed
-from tensorboard.compat.proto.config_pb2 import RunMetadata
 from tensorboard.compat.proto.versions_pb2 import VersionDef
 
 from .proto_graph import Node_proto
