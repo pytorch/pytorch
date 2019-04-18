@@ -180,6 +180,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
   ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/function_schema_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/schema_type_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp

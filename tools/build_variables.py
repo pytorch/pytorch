@@ -101,6 +101,7 @@ libtorch_sources = [
     "torch/csrc/jit/script/edit_distance.cpp",
     "torch/csrc/jit/script/logging.cpp",
     "torch/csrc/jit/script/final_returns.cpp",
+    "torch/csrc/jit/script/function_schema_parser.cpp",
     "torch/csrc/jit/script/schema_type_parser.cpp",
     "torch/csrc/jit/script/script_type_parser.cpp",
     "torch/csrc/jit/script/sugared_value.cpp",
