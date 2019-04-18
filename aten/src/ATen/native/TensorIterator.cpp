@@ -479,10 +479,14 @@ std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Ten
   return builder.build();
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tensor& a, bool resize_outputs) {
+std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tensor& a, bool resize_outputs, bool different_types) {
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   builder.add_input(a);
+  if (different_types)
+  {
+    builder.dont_compute_common_dtype();
+  }
   if (!resize_outputs) {
     builder.dont_resize_outputs();
   }
