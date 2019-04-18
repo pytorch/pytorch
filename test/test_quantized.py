@@ -60,7 +60,7 @@ graph(%x : (Tensor, float, int)):
 class TestQuantizedOps(unittest.TestCase):
     """Tests the correctness of the quantized::relu op."""
     def test_qrelu(self):
-        relu = torch.ops.aten.quantized_relu
+        relu = torch.ops.quantized.relu
 
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
