@@ -1263,16 +1263,7 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
 
   };
 
-  // These namespaces are required to have Python printers unless
-  // otherwise noted in unneeded.
-  const static std::unordered_set<Symbol> required_namespaces = {
-      c10::namespaces::prim,
-      c10::namespaces::aten,
-      c10::namespaces::onnx,
-  };
-
-  return handled.count(sym) || unneeded.count(sym) ||
-      !required_namespaces.count(sym.ns());
+  return handled.count(sym) || unneeded.count(sym);
 }
 
 } // namespace jit

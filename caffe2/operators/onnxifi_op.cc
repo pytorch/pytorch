@@ -138,7 +138,7 @@ void BlobToTensorDescriptor(
 
 template <>
 std::vector<onnxTensorDescriptorV1>
-OnnxifiOp<float, CPUContext>::buildInitializationList(
+OnnxifiOp<CPUContext>::buildInitializationList(
     Workspace* ws,
     const std::vector<std::string>& initializers,
     std::vector<std::string>* weight_names,
@@ -167,7 +167,7 @@ OnnxifiOp<float, CPUContext>::buildInitializationList(
 }
 
 template <>
-std::vector<int> OnnxifiOp<float, CPUContext>::extractOutputBatchSizes() const {
+std::vector<int> OnnxifiOp<CPUContext>::extractOutputBatchSizes() const {
   CAFFE_ENFORCE_EQ(
       input_shapes_.size(),
       InputSize(),
@@ -218,7 +218,7 @@ std::vector<int> OnnxifiOp<float, CPUContext>::extractOutputBatchSizes() const {
 }
 
 template <>
-void OnnxifiOp<float, CPUContext>::maybeAdjustOutputBatchSizes(
+void OnnxifiOp<CPUContext>::maybeAdjustOutputBatchSizes(
     const std::vector<int>& real_output_batch_sizes) {
   CAFFE_ENFORCE_EQ(real_output_batch_sizes.size(), output_shapes_.size());
   for (int i = 0; i < real_output_batch_sizes.size(); ++i) {
@@ -231,7 +231,7 @@ void OnnxifiOp<float, CPUContext>::maybeAdjustOutputBatchSizes(
 }
 
 template <>
-bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
+bool OnnxifiOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
   input_shapes_.clear();
   for (unsigned i = 0U; i < InputSize(); ++i) {
@@ -342,7 +342,7 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-REGISTER_CPU_OPERATOR(Onnxifi, OnnxifiOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(Onnxifi, OnnxifiOp<CPUContext>);
 OPERATOR_SCHEMA(Onnxifi)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
