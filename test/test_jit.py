@@ -1236,124 +1236,164 @@ graph(%x : Tensor,
         self.assertTrue(trace.conv1.weight in list(value_stats.values()))
         self.assertTrue(trace.conv1.bias in list(value_stats.values()))
 
-    def test_insert_quantdequant_consecutive_qnodes_script(self):
-        class testModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super(testModule, self).__init__()
-                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+    def test_insert_quantdequant(self):
+        # Test Class to generate default qparams
+        script_only = True
+        x1 = torch.ones([1, 1, 1, 1])
 
-            @torch.jit.script_method
-            def forward(self, x):
-                x = F.relu(self.conv1(x))
+        class TestGenQParam:
+            def __init__(self, tensorType):
+                self.tensor_type = tensorType
+                self.qparam_dict = {}
+
+            def observer(self, x, name):
+                if name not in self.qparam_dict:
+                    self.qparam_dict[name] = []
+                self.qparam_dict.update({name : (self.tensor_type, 1.0, 0)})
                 return x
 
-        trace = testModule()
+        # Helper function to run quantdequant pass for all tests
+        def test_helper_run_quantdequant(trace, x1):
+            activationObj = TestGenQParam('activation')
+            weightObj = TestGenQParam('param')
+            qconfig_dict = {'__main__': {'activation': activationObj,
+                                         'param': weightObj}
+                            }
+            torch._C._jit_pass_insert_observers(trace, qconfig_dict)
+            trace.forward(x1)
+            # qparam_dict
+            allqparam_dict = {}
+            allqparam_dict.update(activationObj.qparam_dict)
+            allqparam_dict.update(weightObj.qparam_dict)
+            torch._C._jit_pass_insert_quantdequant(trace.graph, allqparam_dict)
 
-        # Constant Propagation step is performed because this pass is intended
-        # to insert quant-dequant nodes for quantizable tensors. The type analysis
-        # happens as part of this jit pass
-        torch._C._jit_pass_constant_propagation(trace.graph)
-        self.run_pass('insert_quantdequant', trace.graph)
+        def test_insert_quantdequant_consecutive_qnodes_script():
+            class testModule(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(testModule, self).__init__()
+                    self.conv1 = nn.Conv2d(1, 1, 1, 1)
 
-        # We expect to see quant-dequant node before and after
-        # both conv and relu nodes and at external output since relu
-        # is last node. Constant nodes correspond to params for the
-        # quantization nodes
-        FileCheck().check("quantize_linear").check_next("dequantize") \
-                   .check("conv2d").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("dequantize").run(str(trace.graph))
-        FileCheck().check("relu").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("dequantize").check_next("return") \
-                   .run(str(trace.graph))
+                @torch.jit.script_method
+                def forward(self, x):
+                    x = F.relu(self.conv1(x))
+                    return x
 
-    def test_insert_quantdequant_consecutive_qnodes_trace(self):
-        class testModule(torch.nn.Module):
-            def __init__(self):
-                super(testModule, self).__init__()
-                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+            trace = testModule()
 
-            def forward(self, x):
-                x = F.relu(self.conv1(x))
-                return x
+            # Constant Propagation step is performed because this pass is intended
+            # to insert quant-dequant nodes for quantizable tensors. The type analysis
+            # happens as part of this jit pass
+            torch._C._jit_pass_constant_propagation(trace.graph)
 
-        trace = torch.jit.trace(testModule(), (torch.rand(1, 1, 28, 28)))
+            test_helper_run_quantdequant(trace, x1)
 
-        self.run_pass('insert_quantdequant', trace.graph)
-        # We expect to see quant-dequant node before and after
-        # both conv and relu nodes and at external output since relu
-        # is last node. Constant nodes correspond to params for the
-        # quantization nodes
-        FileCheck().check("quantize_linear").check_next("dequantize") \
-                   .check("_convolution").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("dequantize").run(str(trace.graph))
-        FileCheck().check("relu").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("dequantize").check_next("return") \
-                   .run(str(trace.graph))
+            # We expect to see quant-dequant node before and after
+            # both conv and relu nodes and at external output since relu
+            # is last node. Constant nodes correspond to params for the
+            # quantization nodes
+            FileCheck().check("quantize_linear").check_next("dequantize") \
+                       .check("conv2d").check_next("Constant") \
+                       .check_next("Constant").check_next("quantize_linear") \
+                       .check_next("dequantize").run(str(trace.graph))
+            FileCheck().check("relu").check_next("Constant") \
+                       .check_next("Constant").check_next("quantize_linear") \
+                       .check_next("dequantize").check_next("return") \
+                       .run(str(trace.graph))
+        test_insert_quantdequant_consecutive_qnodes_script()
 
-    def test_insert_quantdequant_single_qnode(self):
-        class testModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super(testModule, self).__init__()
-                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+        def test_insert_quantdequant_consecutive_qnodes_trace():
+            class testModule(torch.nn.Module):
+                def __init__(self):
+                    super(testModule, self).__init__()
+                    self.conv1 = nn.Conv2d(1, 1, 1, 1)
 
-            @torch.jit.script_method
-            def forward(self, x):
-                x = self.conv1(x)
-                x1 = torch.add(x, 1)
-                return x1
+                def forward(self, x):
+                    x = F.relu(self.conv1(x))
+                    return x
 
-        trace = testModule()
+            trace = torch.jit.trace(testModule(), (torch.ones(1, 1, 1, 1)))
 
-        # Constant Propagation step is performed because this pass is intended
-        # to insert quant-dequant nodes for quantizable tensors. The type analysis
-        # happens as part of this jit pass
-        torch._C._jit_pass_constant_propagation(trace.graph)
-        self.run_pass('insert_quantdequant', trace.graph)
+            test_helper_run_quantdequant(trace, x1)
 
-        # We expect to see quant-dequant node before and after
-        # both conv and no quant-dequant after add. Constant nodes correspond
-        # to params for the quantization nodes
-        FileCheck().check("quantize_linear").check_next("dequantize") \
-                   .check("conv2d").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("dequantize").check_next("add") \
-                   .check_next("return").run(str(trace.graph))
+            # We expect to see quant-dequant node before and after
+            # both conv and relu nodes and at external output since relu
+            # is last node. Constant nodes correspond to params for the
+            # quantization nodes
+            FileCheck().check("quantize_linear").check_next("dequantize") \
+                       .check("_convolution").check_next("Constant") \
+                       .check_next("Constant").check_next("quantize_linear") \
+                       .check_next("dequantize").run(str(trace.graph))
+            FileCheck().check("relu").check_next("Constant") \
+                       .check_next("Constant").check_next("quantize_linear") \
+                       .check_next("dequantize").check_next("return") \
+                       .run(str(trace.graph))
+        if not script_only:
+            test_insert_quantdequant_consecutive_qnodes_trace()
 
-    def test_insert_quantdequant_alternate_qnode(self):
-        class testModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super(testModule, self).__init__()
-                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+        def test_insert_quantdequant_single_qnode():
+            class testModule(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(testModule, self).__init__()
+                    self.conv1 = nn.Conv2d(1, 1, 1, 1)
 
-            @torch.jit.script_method
-            def forward(self, x):
-                x = self.conv1(x)
-                x1 = torch.add(x, 1)
-                x2 = F.relu(x1)
-                return x2
+                @torch.jit.script_method
+                def forward(self, x):
+                    x = self.conv1(x)
+                    x1 = torch.add(x, 1)
+                    return x1
 
-        trace = testModule()
+            trace = testModule()
 
-        # Constant Propagation step is performed because this pass is intended
-        # to insert quant-dequant nodes for quantizable tensors. The type analysis
-        # happens as part of this jit pass
-        torch._C._jit_pass_constant_propagation(trace.graph)
-        self.run_pass('insert_quantdequant', trace.graph)
+            # Constant Propagation step is performed because this pass is intended
+            # to insert quant-dequant nodes for quantizable tensors. The type analysis
+            # happens as part of this jit pass
+            torch._C._jit_pass_constant_propagation(trace.graph)
 
-        # We expect to see quant-dequant node before and after
-        # conv, relu and add. Constant nodes correspond to params for the
-        # quantization nodes
-        FileCheck().check("quantize_linear").check_next("dequantize") \
-                   .check("conv2d").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("dequantize").run(str(trace.graph))
-        FileCheck().check("add").check_next("Constant")\
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check("dequantize").run(str(trace.graph))
+            test_helper_run_quantdequant(trace, x1)
+
+            # We expect to see quant-dequant node before and after
+            # both conv and no quant-dequant after add. Constant nodes correspond
+            # to params for the quantization nodes
+            FileCheck().check("quantize_linear").check_next("dequantize") \
+                       .check("conv2d").check_next("Constant") \
+                       .check_next("Constant").check_next("quantize_linear") \
+                       .check_next("dequantize").check_next("add") \
+                       .check_next("return").run(str(trace.graph))
+        test_insert_quantdequant_single_qnode()
+
+        def test_insert_quantdequant_alternate_qnode():
+            class testModule(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(testModule, self).__init__()
+                    self.conv1 = nn.Conv2d(1, 1, 1, 1)
+
+                @torch.jit.script_method
+                def forward(self, x):
+                    x = self.conv1(x)
+                    x1 = torch.add(x, 1)
+                    x2 = F.relu(x1)
+                    return x2
+
+            trace = testModule()
+
+            # Constant Propagation step is performed because this pass is intended
+            # to insert quant-dequant nodes for quantizable tensors. The type analysis
+            # happens as part of this jit pass
+            torch._C._jit_pass_constant_propagation(trace.graph)
+
+            test_helper_run_quantdequant(trace, x1)
+
+            # We expect to see quant-dequant node before and after
+            # conv, relu and add. Constant nodes correspond to params for the
+            # quantization nodes
+            FileCheck().check("quantize_linear").check_next("dequantize") \
+                       .check("conv2d").check_next("Constant") \
+                       .check_next("Constant").check_next("quantize_linear") \
+                       .check_next("dequantize").run(str(trace.graph))
+            FileCheck().check("add").check_next("Constant")\
+                       .check_next("Constant").check_next("quantize_linear") \
+                       .check("dequantize").run(str(trace.graph))
+        test_insert_quantdequant_alternate_qnode()
 
     def test_expand_quantlint(self):
         pass

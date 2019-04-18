@@ -39,40 +39,42 @@ int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"
   return quantnodeLookup.find(n);
 }
 
-void insertQuantNodeParams(Node* quant, std::tuple<float, int> qparam) {
+void insertQuantNodeParams(Node* quant, float scale, int zero_point) {
   WithInsertPoint ins(quant);
-  Value* scale = quant->owningGraph()->insertConstant(std::get<0>(qparam));
-  Value* zeropoint = quant->owningGraph()->insertConstant(std::get<1>(qparam));
-  quant->addInput(scale);
-  quant->addInput(zeropoint);
+  Value* scale_v = quant->owningGraph()->insertConstant(scale);
+  Value* zeropoint_v = quant->owningGraph()->insertConstant(zero_point);
+  quant->addInput(scale_v);
+  quant->addInput(zeropoint_v);
 }
 
-// Create Quant-Dequant node pair for quantizable Value
-std::pair<Node*, Node*> createQuantDeQuantNodes(Value* v, Node* n) {
+// Create Quant Node
+Node* createQuantNode(Value* v, Node* n) {
   Node* quant =
       n->owningGraph()->create(at::Symbol::fromQualString(
         "aten::quantize_linear"));
   AT_ASSERTM(quant != nullptr, "Failed to create quant node");
   quant->output()->setUniqueName(v->uniqueName() + ".quant");
+  quant->setScope(n->scope());
+  return quant;
+}
 
+// Create Dequant node
+Node* createDeQuantNode(Value* v, Node* n) {
   Node* dequant =
       n->owningGraph()->create(at::Symbol::fromQualString("aten::dequantize"));
   AT_ASSERTM(dequant != nullptr, "Failed to create dequant node");
   dequant->output()->setUniqueName(v->uniqueName() + ".dequant");
-
-  quant->setScope(n->scope());
   dequant->setScope(n->scope());
-
-  return std::make_pair(quant, dequant);
+  return dequant;
 }
 
 // Insert Quant-Dequant node pair for quantizable node outputs
-void addQuantDeQuantNodes(Value* v) {
+void addQuantDeQuantNodes(Value* v,
+  std::tuple<std::string, float, int>& qparam) {
   AT_ASSERT(v != nullptr);
   Node* n = v->node();
-  auto qdq = createQuantDeQuantNodes(v, n);
-  Node* quant = qdq.first;
-  Node* dequant = qdq.second;
+  Node* quant = createQuantNode(v, n);
+  Node* dequant = createDeQuantNode(v, n);
 
   // Add quant-dequant nodes and replace for all uses of Value
   quant->insertAfter(n);
@@ -81,18 +83,19 @@ void addQuantDeQuantNodes(Value* v) {
 
   // Attach inputs to quant and dequant nodes
   quant->addInput(v);
-  // Default Quant Params <Scale:1.0, ZeroPoint:0>
-  insertQuantNodeParams(quant, std::make_tuple(1.0, 0));
+
+  insertQuantNodeParams(quant, std::get<1>(qparam),
+    std::get<2>(qparam));
   dequant->addInput(quant->output());
 }
 
 // Insert Quant-Dequant node pair for specific input to node n
-void addQuantDeQuantNodesForInput(Value* v, Node* n) {
+void addQuantDeQuantNodesForInput(Value* v, Node* n,
+  std::tuple<std::string, float, int>& qparam) {
   AT_ASSERT(v != nullptr);
   AT_ASSERT(n != nullptr);
-  auto qdq = createQuantDeQuantNodes(v, n);
-  Node* quant = qdq.first;
-  Node* dequant = qdq.second;
+  Node* quant = createQuantNode(v, n);
+  Node* dequant = createDeQuantNode(v, n);
 
   // Insert the quant-dequant node for the V->N
   // pair which is identified as quantizable during
@@ -104,8 +107,27 @@ void addQuantDeQuantNodesForInput(Value* v, Node* n) {
   // Attach inputs to quant and dequant nodes
   quant->addInput(v);
   // Default Quant Params <Scale:1.0, ZeroPoint:0>
-  insertQuantNodeParams(quant, std::make_tuple(1.0, 0));
+  insertQuantNodeParams(quant, std::get<1>(qparam),
+    std::get<2>(qparam));
   dequant->addInput(quant->output());
+}
+
+template <typename... ArgT>
+bool matchQParamDictKeytoObserver(Node* n,
+  std::unordered_map<std::string, std::tuple<ArgT...>>& qparam_dict,
+  std::unordered_map<Value*, std::tuple<ArgT...>>& qparam_value_dict) {
+  if (n->kind() != prim::PythonOp) {
+    return false;
+  }
+  Value* vname = n->inputs()[1];
+  IValue valuekey = toIValue(vname).value();
+  Value* v = n->inputs()[0];
+  if (qparam_dict.count(valuekey.toStringRef()) == 0) {
+    return false;
+  }
+  // This is observer node for Value v
+  qparam_value_dict.emplace(v, qparam_dict[valuekey.toStringRef()]);
+  return true;
 }
 
 } // namespace
@@ -223,7 +245,9 @@ void InsertObserverNodes(script::Method* method,
   }
 }
 
-void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
+void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph,
+  std::unordered_map<std::string, std::tuple<std::string,
+  float, int>>& qparam_dict) {
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   // For storing quantizable values - node pairs that are external
@@ -235,6 +259,14 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
   std::vector<Value*> quantOutputs;
   std::unordered_set<Value*> valueLookup;
 
+  // Observer nodes to remove from graph
+  std::vector<Node*> nodes_to_remove;
+
+  // Create value:qparam dict which guarantees no
+  // name conflict between passes
+  std::unordered_map<Value*,
+    std::tuple<std::string, float, int>> qparam_value_dict;
+
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
@@ -243,6 +275,15 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
       // Schedule the sub blocks
       for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);
+      }
+
+      if (matchQParamDictKeytoObserver<std::string, float, int>
+        (n, qparam_dict, qparam_value_dict)) {
+        // This is the observer node. Mark it and the second input
+        // constant nod for deletion.
+        nodes_to_remove.emplace_back(n);
+        nodes_to_remove.emplace_back(n->inputs()[1]->node());
+        continue;
       }
 
       // We iterate over node inputs to identify which Values
@@ -292,14 +333,24 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
     } //end for
   } // end Block traversal
 
+  // Destory Observer Nodes
+  for (auto& n : nodes_to_remove) {
+    n->destroy();
+  }
+
   // Insert the quant-dequant pair for values output from quantizable nodes
   for (auto& ele : quantOutputs) {
-    addQuantDeQuantNodes(ele);
+    if (qparam_value_dict.count(ele) != 0) {
+      addQuantDeQuantNodes(ele, qparam_value_dict[ele]);
+    }
   }
 
   // Insert the quant-dequant pair for values inputs to quantizable nodes
   for (auto& ele : quantInputs) {
-    addQuantDeQuantNodesForInput(ele.first, ele.second);
+    if (qparam_value_dict.count(ele.first) != 0) {
+      addQuantDeQuantNodesForInput(ele.first,
+        ele.second, qparam_value_dict[ele.first]);
+    }
   }
 }
 
