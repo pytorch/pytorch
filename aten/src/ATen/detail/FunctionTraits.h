@@ -50,7 +50,7 @@ struct function_traits<ReturnType(Args...)> {
 };
 
 template <typename T>
-struct fill_function_traits {
+struct nullary_function_traits {
   using traits = function_traits<T>;
   using result_type = typename traits::result_type;
 };
