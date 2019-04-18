@@ -66,8 +66,7 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
 struct ComplexHooks : public at::ComplexHooksInterface {
   ComplexHooks(ComplexHooksArgs) {}
   void registerComplexTypes(Context* context) const override {
-    context->registerType(
-        Backend::ComplexCPU, ScalarType::ComplexFloat, new CPUComplexFloatType());
+    context->registerType(Backend::ComplexCPU, new CPUComplexFloatType());
   }
 };
 
