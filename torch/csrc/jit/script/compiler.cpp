@@ -534,8 +534,6 @@ struct to_ir {
           << "methods must have a self argument";
     }
     method.setSchema(emitDef(def, self, graph->block()));
-    // NB: moving returns to end needs to run before all other passes
-    moveAllReturnsToEnd(graph);
     runCleanupPasses(graph);
   }
 
@@ -570,13 +568,21 @@ struct to_ir {
   }
 
   void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
+    // NB: moving returns to end needs to run before all other passes
+    moveAllReturnsToEnd(to_clean);
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(to_clean);
     ConstantPooling(to_clean);
   }
 
   // If the graph might not return, at an implicit None return at the end
-  void handleMaybeNoReturn(const Def& def) {
+  void handleMaybeNoReturn(const Def& def, Block* block) {
+    // if we're emitting a block that isn't the graph block,
+    // (like in a closure), do not add a return
+    if (block != block->owningGraph()->block()) {
+      return;
+    }
+
     if (exit_blocks.count(graph->block()) == 0) {
       auto decl_ret = def_stack_.back().declared_return_type_;
       if (decl_ret && decl_ret != NoneType::get() &&
@@ -595,10 +601,7 @@ struct to_ir {
     }
   }
 
-  FunctionSchema emitDef(
-      const Def& def,
-      const Self& self,
-      Block* block) {
+  FunctionSchema emitDef(const Def& def, const Self& self, Block* block) {
     auto schema = extractSchemaFromDef(def, self);
     // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
@@ -610,7 +613,7 @@ struct to_ir {
     // body
     auto stmts_list = def.statements();
     emitStatements(stmts_list.begin(), stmts_list.end());
-    handleMaybeNoReturn(def);
+    handleMaybeNoReturn(def, block);
     std::vector<Argument> returns = {emitOutput(def.range(), schema, block)};
     return {def.name().name(), "", std::move(arguments), std::move(returns)};
   }
@@ -652,9 +655,7 @@ struct to_ir {
     return stack.at(0).toTuple()->elements();
   }
 
-  std::vector<Argument> parseArgsFromDecl(
-      const Decl& decl,
-      const Self& self) {
+  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
     if (self) {
@@ -726,9 +727,7 @@ struct to_ir {
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false)};
   }
-  FunctionSchema extractSchemaFromDef(
-      const Def& def,
-      const Self& self) {
+  FunctionSchema extractSchemaFromDef(const Def& def, const Self& self) {
     const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
@@ -741,7 +740,6 @@ struct to_ir {
       const Self& self,
       const FunctionSchema& schema,
       Block* block) {
-
     std::vector<Argument> arguments; // for schema
     // inputs
     auto it = def.decl().params().begin();
@@ -762,7 +760,8 @@ struct to_ir {
       AT_ASSERT(it != end);
       const auto& name = (*it).ident().name();
       Value* new_input = block->addInput()->setUniqueName(name);
-      environment_stack->setSugaredVar((*it).ident().range(), name, self(new_input));
+      environment_stack->setSugaredVar(
+          (*it).ident().range(), name, self(new_input));
       arguments.emplace_back(name, new_input->type());
       ++it;
     }
