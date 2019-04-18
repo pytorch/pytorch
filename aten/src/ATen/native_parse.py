@@ -202,19 +202,15 @@ def parse_arguments(args, func_variants, declaration, func_return):
             {'name': 'dtype', 'type': 'ScalarType', 'is_nullable': False, 'annotation': None},
             {'name': 'layout', 'type': 'Layout', 'is_nullable': False, 'annotation': None},
             {'name': 'device', 'type': 'Device', 'is_nullable': False, 'annotation': None},
+            {'name': 'pin_memory', 'type': 'bool', 'is_nullable': False, 'annotation': None, 'default': False},
         ]
     ]
     supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[0]))
-    supported_topt_arguments[1][0]['kwarg_only'] = True
-    supported_topt_arguments[1][1]['kwarg_only'] = True
-    supported_topt_arguments[1][2]['kwarg_only'] = True
+    for arg in supported_topt_arguments[1]:
+        arg.update({'kwarg_only': True})
     supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[1]))
-    supported_topt_arguments[2][0]['default'] = 'c10::nullopt'
-    supported_topt_arguments[2][1]['default'] = 'c10::nullopt'
-    supported_topt_arguments[2][2]['default'] = 'c10::nullopt'
-    supported_topt_arguments[2][0]['is_nullable'] = True
-    supported_topt_arguments[2][1]['is_nullable'] = True
-    supported_topt_arguments[2][2]['is_nullable'] = True
+    for arg in supported_topt_arguments[2]:
+        arg.update({'default': 'c10::nullopt', 'is_nullable': True})
 
     corresponding_topts = [
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None},
@@ -226,30 +222,28 @@ def parse_arguments(args, func_variants, declaration, func_return):
 
     def check_topt_representation(topt_representation):
         for idx, supported_topt in enumerate(supported_topt_arguments):
-            matches = True
-            matches = matches and topt_representation[0] == supported_topt[0]
-            matches = matches and topt_representation[1] == supported_topt[1]
-            matches = matches and topt_representation[2] == supported_topt[2]
+            matches = all(topt_representation[i] == topt for i, topt in enumerate(supported_topt))
             if matches:
                 return corresponding_topts[idx]
         return None
 
     def is_tensor_option(argument):
-        return argument['name'] in ['dtype', 'layout', 'device']
+        return argument['name'] in ['dtype', 'layout', 'device', 'pin_memory']
 
     new_arguments = []
     idx = 0
     while idx < len(arguments):
         argument = arguments[idx]
-        if is_tensor_option(argument) and len(arguments) - idx >= 3:
+        number_of_arguments = len(supported_topt_arguments[0])
+        if is_tensor_option(argument) and len(arguments) - idx >= number_of_arguments:
             topt_representation = []
-            for i in range(3):
+            for i in range(number_of_arguments):
                 argument = arguments[idx]
                 if not is_tensor_option(argument):
                     break
                 topt_representation.append(argument)
                 idx += 1
-            if len(topt_representation) == 3:
+            if len(topt_representation) == number_of_arguments:
                 merged_argument = check_topt_representation(topt_representation)
                 assert merged_argument, \
                     "Unsupported combination of TensorOptions {}, the only currently supported combinations are {}"\

@@ -635,8 +635,4 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
   return enqueue(std::move(entry));
 }
 
-std::unordered_map<int, int> ProcessGroupMPI::getGroupRank() {
-  throw std::runtime_error("ProcessGroupMPI does not support getGroupRank");
-}
-
 } // namespace c10d
