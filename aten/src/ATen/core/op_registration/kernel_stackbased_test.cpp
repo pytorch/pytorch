@@ -3,6 +3,7 @@
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
+#include <torch/csrc/jit/script/function_schema_parser.h>
 
 using c10::RegisterOperators;
 using c10::kernel;
@@ -138,6 +139,15 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensor
   auto outputs = callOp(*op, 3);
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(4, outputs[0].toInt());
+}
+
+void kernelForSchemaInference(Stack* stack, KernelCache* cache) {
+}
+
+TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenFailsBecauseItCannotInferFromStackBasedKernel) {
+  expectThrows<c10::Error>([] {
+      RegisterOperators().op("_test::no_schema_specified", kernel(&kernelForSchemaInference, &noCache));
+  }, "Cannot infer schema from this kernel function. Please explicitly specify the operator schema.");
 }
 
 struct Cache final : KernelCache {
