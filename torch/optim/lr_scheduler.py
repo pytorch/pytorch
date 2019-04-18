@@ -652,7 +652,7 @@ class CyclicLR(_LRScheduler):
         return lrs
 
 
-class SGDR(_LRScheduler):
+class CosineAnnealingWarmRestarts(_LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing
     schedule, where :math:`\eta_{max}` is set to the initial lr, :math:`T_{cur}`
     is the number of epochs since the last restart and :math:`T_{i}` is the number
@@ -690,7 +690,7 @@ class SGDR(_LRScheduler):
         self.T_i = T_0
         self.T_mult = T_mult
         self.eta_min = eta_min
-        super(SGDR, self).__init__(optimizer, last_epoch)
+        super(CosineAnnealingWarmRestarts, self).__init__(optimizer, last_epoch)
         self.T_cur = last_epoch
 
     def get_lr(self):
