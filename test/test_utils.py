@@ -515,8 +515,8 @@ class TestHub(TestCase):
             'resnet18',
             pretrained=True)
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
-        assert os.path.exists(temp_dir + '/vision_master')
-        shutil.rmtree(temp_dir + '/vision_master')
+        assert os.path.exists(temp_dir + '/pytorch_vision_master')
+        shutil.rmtree(temp_dir + '/pytorch_vision_master')
 
     def test_list_entrypoints(self):
         entry_lists = hub.list('pytorch/vision', force_reload=True)
