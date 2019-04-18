@@ -3781,7 +3781,7 @@
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_forward_out_cpu
-    GPU: max_unpooling3d_forward_out_cuda
+    CUDA: max_unpooling3d_forward_out_cuda
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
