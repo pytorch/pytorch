@@ -1165,13 +1165,13 @@ graph(%x : Tensor,
         # Custom observer function
         value_stats = {}
 
-        class ObserverModule:
+        class Observer:
             def observer(self, x, name):
                 if name not in value_stats:
                     value_stats[name] = []
                 value_stats[name].append(x)
                 return x
-        observerObj = ObserverModule()
+        observerObj = Observer()
 
         m = torch.jit.script(fn)
         # Insert observers
@@ -1216,13 +1216,13 @@ graph(%x : Tensor,
         # Custom observer function
         value_stats = {}
 
-        class ObserverModule:
+        class Observer:
             def observer(self, x, name):
                 if name not in value_stats:
                     value_stats[name] = []
                 value_stats.update({name : x})
                 return x
-        observerObj = ObserverModule()
+        observerObj = Observer()
 
         # Insert observers for parameters
         observer_dict = {'__main__': {'param': observerObj}
