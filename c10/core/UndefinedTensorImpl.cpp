@@ -3,6 +3,11 @@
 
 namespace c10 {
 
+TensorImpl * UndefinedTensorImpl::singleton() {
+  static UndefinedTensorImpl singleton;
+  return &singleton;
+}
+
 // should this use the globalContext?  Can it get a context passed in somehow?
 UndefinedTensorImpl::UndefinedTensorImpl()
 : TensorImpl(UndefinedTensorId(), caffe2::TypeMeta(), c10::nullopt) {
@@ -39,6 +44,5 @@ int64_t UndefinedTensorImpl::storage_offset() const {
 IntArrayRef UndefinedTensorImpl::strides() const {
   AT_ERROR("strides() called on undefined Tensor");
 }
-UndefinedTensorImpl UndefinedTensorImpl::_singleton;
 
 }
