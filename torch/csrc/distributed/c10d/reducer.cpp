@@ -163,6 +163,15 @@ void Reducer::mark_variable_ready(
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& replica = bucket.replicas[replica_index];
+  AT_ASSERTM(
+      replica.pending >= 1,
+      "Received autograd hook for completed bucket replica ",
+      "(replica_index: ",
+      replica_index,
+      ", variable_index: ",
+      variable_index,
+      ").");
+
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
   const auto offset = replica.offsets[bucket_index.intra_bucket_index];
   const auto length = replica.lengths[bucket_index.intra_bucket_index];

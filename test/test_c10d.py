@@ -1818,12 +1818,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 self.fc3 = nn.Linear(4, 4, bias=False)
                 self.relu = nn.ReLU()
 
-            def forward(self, x, fn, use_fc3=False):
+            def forward(self, x, fn):
                 x = self.relu(self.fc1(x))
                 x = self.relu(self.fc2(x))
-                if use_fc3:
-                    x = self.fc3(x)
-                return fn(F.softmax(x, dim=1))
+                # The first softmax does NOT include fc3 in its autograd graph
+                # whereas the second softmax DOES. If we pass only the first
+                # tensor we see in the output to the reducer, it marks the
+                # gradient for fc3 as ready (because it doesn't show up). If
+                # downstream uses of this return value choose to differentiate
+                # against the second output tensor, it would still receive a
+                # gradient and a callback for this tensor, resulting in a crash.
+                return fn(
+                    F.softmax(x, dim=1),
+                    F.softmax(self.fc3(x), dim=1),
+                )
 
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         model = DistributedDataParallel(
@@ -1848,38 +1856,38 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # Test with identity return value
         test(
-            box=lambda x: x,
-            unbox=lambda x: x,
+            box=lambda x, y: (x, y),
+            unbox=lambda obj: obj[1],
         )
 
         # Test with list return value
         test(
-            box=lambda x: ["foo", "bar", x],
-            unbox=lambda x: x[2],
+            box=lambda x, y: ["foo", x, "bar", y],
+            unbox=lambda obj: obj[3],
         )
 
         # Test with tuple return value
         test(
-            box=lambda x: ("foo", "bar", x),
-            unbox=lambda x: x[2],
+            box=lambda x, y: ("foo", x, "bar", y),
+            unbox=lambda obj: obj[3],
         )
 
         # Test with dict return value
         test(
-            box=lambda x: {"foo": "bar", "tensor": x},
-            unbox=lambda x: x["tensor"],
+            box=lambda x, y: {"foo": "bar", "a": x, "b": y},
+            unbox=lambda obj: obj["b"],
         )
 
         # Test with list with dict return value
         test(
-            box=lambda x: ["foo", "bar", {"tensor": x}],
-            unbox=lambda x: x[2]["tensor"],
+            box=lambda x, y: ["foo", "bar", {"a": x, "b": y}],
+            unbox=lambda obj: obj[2]["b"],
         )
 
         # Test with dict with list return value
         test(
-            box=lambda x: {"foo": "bar", "list": [0, 1, x]},
-            unbox=lambda x: x["list"][2],
+            box=lambda x, y: {"foo": "bar", "list": [0, x, 1, y]},
+            unbox=lambda obj: obj["list"][3],
         )
 
 
