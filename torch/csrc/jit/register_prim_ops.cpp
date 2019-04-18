@@ -1843,6 +1843,21 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
 
+    //all is a function that takes an iterable and returns True if all are True
+    Operator(
+      "prim::all(Tensor x) -> Tensor",
+      [](Stack& stack) {
+        at::Tensor t;
+        pop(stack, t);
+        for (int i = 0; i < t.size(0); i++) {
+          if(i != true){
+          return 0;
+          }
+          else {
+            return 1;
+          }
+        }
+      }),
     Operator(
         "prim::abs(int x) -> int",
         [](Stack& stack) {
