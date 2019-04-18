@@ -4,6 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
+#include <c10/util/string_utils.h>
 #include <string>
 
 using c10::Symbol;
@@ -105,7 +106,7 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
     L.expect(')');
   } else if (L.nextIf('!')) {
     alias_info.addBeforeSet(
-        Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
+        Symbol::fromQualString("alias::$" + c10::guts::to_string(next_id++)));
     alias_info.setIsWrite(true);
   } else {
     return c10::nullopt;
@@ -147,7 +148,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     parseList(TK_NOTHING, ',', ')', [&] {
       const std::string& num = L.expect(TK_NUMBER).text();
       std::string::size_type num_len;
-      size_t dim = std::stoi(num, &num_len);
+      size_t dim = c10::stoi(num, &num_len);
       AT_ASSERTM(
           num_len == num.size(),
           "Bad tensor dimension size. Strides not yet supported in parsing",
