@@ -3,6 +3,7 @@
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
+#include <torch/csrc/jit/script/function_schema_parser.h>
 
 using c10::RegisterOperators;
 using c10::OperatorKernel;
@@ -598,6 +599,22 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenFallbackKernelWithoutTens
   auto outputs = callOp(*op, 3);
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(4, outputs[0].toInt());
+}
+
+struct KernelForSchemaInference final : OperatorKernel {
+  std::tuple<int64_t, Tensor> operator()(Tensor arg1, int64_t arg2, ArrayRef<Tensor> arg3) {
+    return {};
+  }
+};
+
+TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenInfersSchema) {
+  auto registrar = RegisterOperators()
+      .op("_test::no_schema_specified", kernel<KernelForSchemaInference>());
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::no_schema_specified", "");
+  ASSERT_TRUE(op.has_value());
+
+  c10::assertSchemasHaveSameSignature(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
 }
 
 template<class Return, class... Args> struct KernelFunc final : OperatorKernel{
