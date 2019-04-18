@@ -9,15 +9,12 @@ using ::c10::IValue;
 const static std::unordered_map<std::string, PicklerClass> name_to_class{
   {"TensorID", PicklerClass::TENSOR},
   {"IntList", PicklerClass::INTLIST},
-  {"LiteralTensor", PicklerClass::LITERAL_TENSOR},
-  {"_rebuild_tensor_v2", PicklerClass::REBUILD_TENSOR},
 };
 
 const static std::unordered_map<PicklerClass, std::string, std::hash<uint8_t>>
     class_to_name{
         {PicklerClass::TENSOR, "TensorID\n"},
         {PicklerClass::INTLIST, "IntList\n"},
-        {PicklerClass::LITERAL_TENSOR, "LiteralTensor\n"},
     };
 
 static std::string module_name = "__main__\n";
