@@ -464,16 +464,6 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_end, None
             return torch.lerp(self, end, weight), backward
 
-        def mul(self, other):
-            def backward(grad_output):
-                # self & other are used in backward. No need to pass in their size
-                # from forward pass
-                grad_self = (grad_output * other)._grad_sum_to_size(self.size())
-                grad_other = (grad_output * self)._grad_sum_to_size(other.size())
-                return grad_self, grad_other
-
-            return self * other, backward
-
         def reshape(self,
                     shape: List[int]):
             self_size = self.size()
@@ -693,14 +683,6 @@ const std::vector<std::string> functions = {
 
     )",
     R"(
-        def div(self, other):
-            def backward(grad_output):
-                grad_self = (grad_output / other)._grad_sum_to_size(self.size())
-                grad_other = (-grad_output * self / (other * other))._grad_sum_to_size(other.size())
-                return grad_self, grad_other
-
-            return self / other, backward
-
         def max(self, other):
             def backward(grad_output):
                 grad_self = (grad_output * (self > other).type_as(grad_output))._grad_sum_to_size(self.size())
@@ -727,7 +709,6 @@ const std::vector<std::string> functions = {
         # Share backward with threshold
         def relu(self):
             result = torch.relu(self)
-            self_size = self.size()
             def backward(grad_output):
                 return grad_output * (result > 0).type_as(result)
 
@@ -775,36 +756,6 @@ const std::vector<std::string> functions = {
                 return grad_output.squeeze(dim), None
 
             return torch.unsqueeze(self, dim), backward
-
-        def lt(self, other):
-            def backward(grad_output):
-                return None, None
-
-            return torch.lt(self, other), backward
-
-        def gt(self, other):
-            def backward(grad_output):
-                return None, None
-
-            return torch.gt(self, other), backward
-
-        def ge(self, other):
-            def backward(grad_output):
-                return None, None
-
-            return torch.ge(self, other), backward
-
-        def eq(self, other):
-            def backward(grad_output):
-                return None, None
-
-            return torch.eq(self, other), backward
-
-        def ne(self, other):
-            def backward(grad_output):
-                return None, None
-
-            return torch.ne(self, other), backward
 
         def abs(self):
             def backward(grad_output):
@@ -949,6 +900,184 @@ const std::vector<std::string> functions = {
                 return grad_output.expand(self_size), None
 
             return torch._grad_sum_to_size(self, size), backward
+
+        def add_0(self, other, *, alpha: number):
+            self_size = self.size()
+            other_size = other.size()
+            def backward(grad_output):
+                return grad_output._grad_sum_to_size(self_size), (grad_output * alpha)._grad_sum_to_size(other_size), None
+
+            return torch.add(self, other, alpha=alpha), backward
+
+        def add_1(self, other: number, alpha: number):
+            def backward(grad_output):
+                return grad_output, None, None
+
+            return torch.add(self, other, alpha), backward
+
+        def sub_0(self, other, *, alpha: number):
+            self_size = self.size()
+            other_size = other.size()
+            def backward(grad_output):
+                return grad_output._grad_sum_to_size(self_size), (-grad_output * alpha)._grad_sum_to_size(other_size), None
+
+            return torch.sub(self, other, alpha=alpha), backward
+
+        def sub_1(self, other: number, alpha: number):
+            def backward(grad_output):
+                return grad_output, None, None
+
+            return torch.sub(self, other, alpha), backward
+
+        def mul_0(self, other):
+            def backward(grad_output):
+                # self & other are used in backward. No need to pass in their size
+                # from forward pass
+                grad_self = (grad_output * other)._grad_sum_to_size(self.size())
+                grad_other = (grad_output * self)._grad_sum_to_size(other.size())
+                return grad_self, grad_other
+
+            return self * other, backward
+
+        def mul_1(self, other: number):
+            def backward(grad_output):
+                return grad_output * other, None
+
+            return torch.mul(self, other), backward
+
+        def div_0(self, other):
+            def backward(grad_output):
+                grad_self = (grad_output / other)._grad_sum_to_size(self.size())
+                grad_other = (-grad_output * self / (other * other))._grad_sum_to_size(other.size())
+                return grad_self, grad_other
+
+            return self / other, backward
+
+        def div_1(self, other: number):
+            def backward(grad_output):
+                return grad_output / other, None
+
+            return torch.div(self, other), backward
+
+        def threshold(self, threshold: number, value: number):
+            result = torch.threshold(self, threshold, value)
+            def backward(grad_output):
+                return grad_output * (self > threshold).type_as(result), None, None
+
+            return result, backward
+
+        def clamp(self, min: Optional[number], max: Optional[number]):
+            def backward(grad_output):
+                # From symbolic_variable
+                # XXX - this formula is wrong when min or max are not strictly a constant
+                # None but may be None dynamically. In this case an internal compiler
+                # error will get throw when tring to generate expressions involving the
+                # values of min/max.
+                if min is not None and max is not None:
+                    grad_self = grad_output * (1 - (self <= min).type_as(self)) * (1 - (self >= max).type_as(self))
+                elif min is not None:
+                    grad_self = grad_output * (1 - (self <= min).type_as(self))
+                elif max is not None:
+                    grad_self = grad_output * (1 - (self >= max).type_as(self))
+                else:
+                    grad_self = grad_output
+                return grad_self, None, None
+
+            return torch.clamp(self, min, max), backward
+
+        def addmm(self, mat1, mat2, *, beta: number, alpha: number):
+            self_size = self.size()
+            def backward(grad_output):
+                return (grad_output * beta)._grad_sum_to_size(self_size),\
+                       grad_output.mm(mat2.t()) * alpha,\
+                       mat1.t().mm(grad_output) * alpha, None, None
+
+            return torch.addmm(self, mat1, mat2, beta=beta, alpha=alpha), backward
+
+        def lt_0(self, other):
+            def backward(grad_output):
+                return None, None
+
+            return torch.lt(self, other), backward
+
+        def lt_1(self, other: number):
+            def backward(grad_output):
+                return None, None
+
+            return torch.lt(self, other), backward
+
+        def gt_0(self, other):
+            def backward(grad_output):
+                return None, None
+
+            return torch.gt(self, other), backward
+
+        def gt_1(self, other: number):
+            def backward(grad_output):
+                return None, None
+
+            return torch.gt(self, other), backward
+
+        def ge_0(self, other):
+            def backward(grad_output):
+                return None, None
+
+            return torch.ge(self, other), backward
+
+        def ge_1(self, other: number):
+            def backward(grad_output):
+                return None, None
+
+            return torch.ge(self, other), backward
+
+        def eq_0(self, other):
+            def backward(grad_output):
+                return None, None
+
+            return torch.eq(self, other), backward
+
+        def eq_1(self, other: number):
+            def backward(grad_output):
+                return None, None
+
+            return torch.eq(self, other), backward
+
+        def ne_0(self, other):
+            def backward(grad_output):
+                return None, None
+
+            return torch.ne(self, other), backward
+
+        def ne_1(self, other: number):
+            def backward(grad_output):
+                return None, None
+
+            return torch.ne(self, other), backward
+
+        def le_0(self, other):
+            def backward(grad_output):
+                return None, None
+
+            return torch.le(self, other), backward
+
+        def le_1(self, other: number):
+            def backward(grad_output):
+                return None, None
+
+            return torch.le(self, other), backward
+
+        def fmod(self, other: number):
+            def backward(grad_output):
+                return grad_output, None
+
+            return torch.fmod(self, other), backward
+
+        def remainder(self, other: number):
+            def backward(grad_output):
+                return grad_output, None
+
+            return torch.remainder(self, other), backward
+
     )",
     R"(
         def AD_adaptive_avg_pool2d_backward(grad,
@@ -1380,7 +1509,7 @@ c10::optional<GradientPair> gradientInfoForSchema(
     //    in its argument, all scalar arg should already be passed with float
     //    value since scalar/int aren't differentiable either way.
     //
-    c10::ReplaceAll(schema_str, "Scalar", "float");
+    // c10::ReplaceAll(schema_str, "Scalar", "float");
     // For debugging AD change:
     // std::cout << "Looking for " << schema_str << std::endl;
 

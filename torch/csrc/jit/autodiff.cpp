@@ -47,23 +47,6 @@ bool needTrimGrad(Node* n) {
 bool isDifferentiable(Node* n) {
   // TODO: scalar-tensor ops should be canonicalized
   static OperatorSet differentiable_ops = {
-      "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-      "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-      "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-      "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-      "aten::mul(Tensor self, Scalar other) -> Tensor",
-      "aten::div(Tensor self, Scalar other) -> Tensor",
-      "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
-      "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
-      "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
-      "aten::lt(Tensor self, Scalar other) -> Tensor",
-      "aten::le(Tensor self, Scalar other) -> Tensor",
-      "aten::gt(Tensor self, Scalar other) -> Tensor",
-      "aten::ge(Tensor self, Scalar other) -> Tensor",
-      "aten::eq(Tensor self, Scalar other) -> Tensor",
-      "aten::ne(Tensor self, Scalar other) -> Tensor",
-      "aten::fmod(Tensor self, Scalar other) -> Tensor",
-      "aten::remainder(Tensor self, Scalar other) -> Tensor",
       "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
       "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
       "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
@@ -223,127 +206,15 @@ class GradientHelper {
 
   std::vector<SymbolicVariable> buildSymbolicGradient(
       const std::vector<SymbolicVariable>& grads) {
-    static const OperatorSet comparison_ops = {
-        "aten::lt(Tensor self, Scalar other) -> Tensor",
-        "aten::le(Tensor self, Scalar other) -> Tensor",
-        "aten::gt(Tensor self, Scalar other) -> Tensor",
-        "aten::ge(Tensor self, Scalar other) -> Tensor",
-        "aten::eq(Tensor self, Scalar other) -> Tensor",
-        "aten::ne(Tensor self, Scalar other) -> Tensor",
-    };
     auto inputs = fmap<SymbolicVariable>(node->inputs());
     auto outputs = fmap<SymbolicVariable>(node->outputs());
 
-    if (node->matches(
-            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
-      return {gradSumToSizeOf(grads.at(0), attr::self),
-              gradSumToSizeOf(
-                  grads.at(0) * node->namedInput(attr::alpha), attr::other),
-              nullptr};
-
-    } else if (
-        node->matches(
-            "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor")) {
-      return {grads.at(0), nullptr, nullptr};
-
-    } else if (node->kind() == prim::AutogradAdd) {
+    if (node->kind() == prim::AutogradAdd) {
       // NB: AutogradAdds don't broadcast
       return {grads.at(0), grads.at(0)};
 
-    } else if (
-        node->matches(
-            "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
-      return {gradSumToSizeOf(grads.at(0), attr::self),
-              gradSumToSizeOf(
-                  -grads.at(0) * node->namedInput(attr::alpha), attr::other),
-              nullptr};
-
-    } else if (
-        node->matches(
-            "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor")) {
-      return {grads.at(0), nullptr, nullptr};
-
-    } else if (node->matches(
-                   "aten::mul(Tensor self, Scalar other) -> Tensor")) {
-      return {grads.at(0) * inputs.at(1), nullptr};
-
-    } else if (node->matches(
-                   "aten::div(Tensor self, Scalar other) -> Tensor")) {
-      return {grads.at(0) / inputs.at(1), nullptr};
-
-    } else if (
-        node->matches(
-            "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor")) {
-      // handle the case that min/max is None
-      Value* min = inputs.at(1);
-      bool min_must_be_none = min->mustBeNone();
-      Value* max = inputs.at(2);
-      bool max_must_be_none = max->mustBeNone();
-      // XXX - this formula is wrong when min or max are not stricly a constant
-      // None but may be None dynamically. In this case an internal compiler
-      // error will get thrown when trying to generate expressions involving the
-      // values of min/max
-      if (!min_must_be_none && !max_must_be_none) {
-        return {grads.at(0) *
-                    (1 - (inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0))) *
-                    (1 - (inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))),
-                nullptr,
-                nullptr};
-      } else if (max_must_be_none) {
-        return {grads.at(0) *
-                    (1 - (inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0))),
-                nullptr,
-                nullptr};
-      } else if (min_must_be_none) {
-        return {grads.at(0) *
-                    (1 - (inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))),
-                nullptr,
-                nullptr};
-      } else {
-        return {grads.at(0), nullptr, nullptr};
-      }
-    } else if (
-        node->matches(
-            "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor")) {
-      auto threshold = node->get<at::Scalar>(attr::threshold).value();
-      return {grads.at(0) * (inputs.at(0) > threshold).type_as(outputs.at(0)),
-              nullptr,
-              nullptr};
-
-    } else if (node->matches(
-                   "aten::fmod(Tensor self, Scalar other) -> Tensor")) {
-      return {grads.at(0), nullptr};
-
-    } else if (node->matches(
-                   "aten::remainder(Tensor self, Scalar other) -> Tensor")) {
-      return {grads.at(0), nullptr};
-
     } else if (node->kind() == prim::ConstantChunk) {
       return {SymbolicVariable::cat(grads, node->i(attr::dim))};
-
-    } else if (
-        node->matches("aten::view(Tensor self, int[] size) -> Tensor") ||
-        node->matches("aten::reshape(Tensor self, int[] shape) -> Tensor")) {
-      // TODO: if sizes are not available statically, add an operator that
-      // reutrns them as a tuple
-      auto sizes = node->namedInput(attr::self)
-                       ->type()
-                       ->expect<CompleteTensorType>()
-                       ->sizes();
-      return {grads.at(0).reshape(sizes), nullptr};
-
-    } else if (
-        node->matches(
-            "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor")) {
-      return {gradSumToSizeOf(
-                  grads.at(0) * node->namedInput(attr::beta), attr::self),
-              grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
-              inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
-              nullptr,
-              nullptr};
-
-    } else if (comparison_ops.find(node)) {
-      return {nullptr, nullptr};
 
     } else if (
         node->matches(
