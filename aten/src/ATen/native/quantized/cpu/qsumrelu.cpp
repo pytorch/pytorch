@@ -27,18 +27,9 @@ class QSumReLUInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    c10::FunctionSchema(
-        "quantized::sum_relu",
-        "",
-        std::vector<c10::Argument>{
-          c10::Argument("qa", TensorType::get()),
-          c10::Argument("qb", TensorType::get()),
-          c10::Argument("scale", FloatType::get()),
-          c10::Argument("zero_point", IntType::get())
-        },
-        std::vector<c10::Argument>{c10::Argument("qc", TensorType::get())}
-    ),
+    "quantized::sum_relu(Tensor qa, Tensor qb, float scale, int zero_point)"
+      "-> Tensor",
     c10::kernel<QSumReLUInt8>(),
     c10::dispatchKey(QuantizedCPUTensorId()));
-} // namespace
-}} // namespace at::native
+}  // namespace
+}}  // namespace at::native

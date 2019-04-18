@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/script/compiler.h>
-
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -575,10 +574,7 @@ struct to_ir {
     ConstantPooling(to_clean);
   }
 
-  FunctionSchema emitDef(
-      const Def& def,
-      const Self& self,
-      Block* block) {
+  FunctionSchema emitDef(const Def& def, const Self& self, Block* block) {
     auto schema = extractSchemaFromDef(def, self);
     // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
@@ -631,9 +627,7 @@ struct to_ir {
     return stack.at(0).toTuple()->elements();
   }
 
-  std::vector<Argument> parseArgsFromDecl(
-      const Decl& decl,
-      const Self& self) {
+  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
     if (self) {
@@ -705,9 +699,7 @@ struct to_ir {
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false)};
   }
-  FunctionSchema extractSchemaFromDef(
-      const Def& def,
-      const Self& self) {
+  FunctionSchema extractSchemaFromDef(const Def& def, const Self& self) {
     const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
@@ -720,7 +712,6 @@ struct to_ir {
       const Self& self,
       const FunctionSchema& schema,
       Block* block) {
-
     std::vector<Argument> arguments; // for schema
     // inputs
     auto it = def.decl().params().begin();
@@ -741,7 +732,8 @@ struct to_ir {
       AT_ASSERT(it != end);
       const auto& name = (*it).ident().name();
       Value* new_input = block->addInput()->setUniqueName(name);
-      environment_stack->setSugaredVar((*it).ident().range(), name, self(new_input));
+      environment_stack->setSugaredVar(
+          (*it).ident().range(), name, self(new_input));
       arguments.emplace_back(name, new_input->type());
       ++it;
     }
@@ -1309,44 +1301,26 @@ struct to_ir {
 
   void emitLoopCommon(
       SourceRange range,
-      c10::optional<Expr> max_trip_count,
-      c10::optional<Expr> cond,
       const List<Stmt>& body,
-      c10::optional<Ident> itr_ident,
-      bool in_list = false) {
+      const std::function<void(Value*, std::shared_ptr<Environment>)>&
+          current_element_assigner,
+      c10::optional<Expr> cond,
+      Value* max_trip_count_val = nullptr) {
+    Value* cond_val = nullptr;
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
-    Value *max_trip_count_val, *cond_val;
-    {
-      WithInsertPoint guard(n);
-      if (max_trip_count) {
-        if (in_list) {
-          auto listArg = emitExpr(max_trip_count.value());
+    WithInsertPoint guard(n);
 
-          max_trip_count_val = emitBuiltinCall(
-              max_trip_count->range(),
-              *graph,
-              aten::len,
-              c10::nullopt,
-              {listArg},
-              {},
-              /*required=*/true);
-        } else {
-          max_trip_count_val = ensureInt(
-              max_trip_count->range(), emitExpr(max_trip_count.value()));
-        }
-      } else {
-        max_trip_count_val = materializeConstant(
-            std::numeric_limits<int64_t>::max(),
-            *graph,
-            range,
-            integral_constants);
-      }
-      if (cond) {
-        cond_val = emitCond(cond.value());
-      } else {
-        cond_val = graph->insertConstant(true, nullptr, range);
-      }
+    if (!max_trip_count_val)
+    {
+      max_trip_count_val = materializeConstant(
+          std::numeric_limits<int64_t>::max(),
+          *graph,
+          range,
+          integral_constants);
     }
+
+    cond_val = (cond) ? emitCond(cond.value())
+                      : graph->insertConstant(true, nullptr, range);
     n->addInput(max_trip_count_val);
     n->addInput(cond_val);
     auto* body_block = n->addBlock();
@@ -1356,33 +1330,20 @@ struct to_ir {
     {
       pushFrame(body_block);
       WithInsertPoint guard(body_block);
-      if (itr_ident) {
-        if (in_list) {
-          // set user's iterator variable to the current element
-          auto listArg = emitExpr(max_trip_count.value());
-          trip_count = emitBuiltinCall(
-              max_trip_count->range(),
-              *graph,
-              aten::select,
-              c10::nullopt,
-              {listArg, trip_count},
-              {},
-              /*required=*/true);
-        }
-        environment_stack->setVar(
-            itr_ident->range(), itr_ident->name(), trip_count);
+
+      // current_element_assigner uses an induction variable
+      // to set a current element
+      if (current_element_assigner)
+      {
+        current_element_assigner(trip_count, environment_stack);
       }
+
       emitStatements(body);
 
       // Also emit the conditional
-      if (cond) {
-        Value* body_cond_value = emitCond(cond.value());
-        body_block->registerOutput(body_cond_value);
-      } else {
-        Value* cond_value_dummy = graph->insertConstant(true, nullptr, range);
-        body_block->registerOutput(cond_value_dummy);
-      }
-
+      cond_val = (cond) ? emitCond(cond.value())
+                        : graph->insertConstant(true, nullptr, range);
+      body_block->registerOutput(cond_val);
       auto body_frame = popFrame();
       auto outer_frame = environment_stack;
 
@@ -1419,7 +1380,46 @@ struct to_ir {
       throw ErrorReport(range)
           << "range() expects 1 argument but got " << args.size();
     }
-    emitLoopCommon(range, {args[0]}, {}, body, target);
+    auto max_trip_count_val = ensureInt(range, emitExpr(args[0]));
+    const auto& ident_name = target.name();
+    auto assigner = [ident_name, range](Value* index, std::shared_ptr<Environment> env) {
+      env->setVar(range, ident_name, index);
+    };
+    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
+  }
+
+  void emitForInListLoop(
+      const For& stmt,
+      const std::shared_ptr<torch::jit::script::SimpleValue>& siv) {
+    auto targets = stmt.targets();
+    auto itrs = stmt.itrs();
+    auto body = stmt.body();
+    auto& range = stmt.range();
+    auto target = Var(targets[0]).name();
+
+    auto listArg = siv->asValue(range, method);
+    auto max_trip_count_val = emitBuiltinCall(
+        range,
+        *graph,
+        aten::len,
+        c10::nullopt,
+        {listArg},
+        {},
+        /*required=*/true);
+    const auto& ident_name = target.name();
+    auto assigner = [ident_name, range, listArg, this](
+                        Value* index, std::shared_ptr<Environment> env) {
+      auto cur_elm = emitBuiltinCall(
+          range,
+          *this->graph,
+          aten::select,
+          c10::nullopt,
+          {listArg, index},
+          {},
+          /*required=*/true);
+      env->setVar(range, ident_name, cur_elm);
+    };
+    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
   void emitFor(const For& stmt) {
@@ -1462,8 +1462,8 @@ struct to_ir {
     // check if a value is simple and list-like
     if (auto siv = std::dynamic_pointer_cast<SimpleValue>(sv)) {
       if (siv->getValue()->type()->kind() == TypeKind::ListType) {
-        return emitLoopCommon(
-            stmt.range(), {itrs[0]}, {}, body, {target}, true);
+        emitForInListLoop(stmt, siv);
+        return;
       }
     }
     auto instances = sv->asTuple(stmt.range(), method);
@@ -1485,7 +1485,7 @@ struct to_ir {
 
   void emitWhile(const While& stmt) {
     auto cond = stmt.cond();
-    emitLoopCommon(stmt.range(), {}, {cond}, stmt.body(), {});
+    emitLoopCommon(stmt.range(), stmt.body(), nullptr, cond, nullptr);
   }
 
   // Currently we do not support assigning exceptions to variables,
@@ -2274,7 +2274,6 @@ struct to_ir {
       case TK_POW:
       case TK_IS:
       case TK_ISNOT:
-      case TK_NOT:
       case TK_NE:
       case TK_EQ:
       case '<':
@@ -2302,6 +2301,18 @@ struct to_ir {
             {},
             /*required=*/true);
       }
+      case TK_NOT: {
+        Value* input = emitCond(Expr(tree->trees()[0]));
+        return emitBuiltinCall(
+            tree->range(),
+            *method.graph(),
+            aten::__not__,
+            c10::nullopt,
+            {input},
+            {},
+            /*required=*/true);
+      }
+
       case TK_UNARY_MINUS: {
         return emitNegate(tree);
       }
@@ -2433,16 +2444,10 @@ struct to_ir {
   Value* emitSelect(
       const SourceRange& loc,
       Value* input,
-      int64_t dim,
+      Value* dim,
       Value* index) {
     return emitBuiltinCall(
-        loc,
-        *graph,
-        aten::select,
-        c10::nullopt,
-        {input, graph->insertConstant(dim, nullptr, loc), index},
-        {},
-        true);
+        loc, *graph, aten::select, c10::nullopt, {input, dim, index}, {}, true);
   }
 
   // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,
@@ -2450,7 +2455,7 @@ struct to_ir {
   Value* emitSlice(
       const SourceRange& loc,
       Value* input,
-      c10::optional<int64_t> dim, // Only used for tensor slicing
+      Value* dim, // Only used for tensor slicing
       const SliceExpr& slice) {
     std::vector<NamedValue> args;
     args.reserve(4);
@@ -2460,8 +2465,8 @@ struct to_ir {
     // aten::slice, we should separate it from this function.
     if (dim) {
       AT_ASSERT(input->type()->isSubtypeOf(TensorType::get()));
-      args.emplace_back(
-          loc, "dim", graph->insertConstant(dim.value(), nullptr, loc));
+
+      args.emplace_back(dim);
     } else {
       AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
     }
@@ -2530,15 +2535,43 @@ struct to_ir {
       dim++;
     };
 
+    // before ellipsis, dimension index should be `dim`
+    // after ellipsis, dimension index should be `-offset`
+    int offset = 0;
+    size_t ellipsis_dim = 0;
+    auto insert_value_for_dim = [&](int64_t dim) {
+      return (offset == 0)
+          ? graph->insertConstant(dim, nullptr, loc)
+          :
+          // NB: offset is incremented to move to the next dimension index
+          graph->insertConstant(offset++, nullptr, loc);
+    };
+
     for (const auto& subscript_expr : subscript_exprs) {
+      // NB: ellipsis_dim is **always** incremented
+      // (comparing to dim) in order to compute
+      // the correct offsets for the remaining
+      // dimension indices following an ellipsis "..."
+      // token
+      ellipsis_dim++;
+      if (subscript_expr.kind() == TK_DOTS) {
+        offset = -(subscript_exprs.size() - ellipsis_dim);
+        ++dim;
+        continue;
+      }
       if (subscript_expr.kind() == TK_SLICE_EXPR) {
-        sliceable = emitSlice(loc, sliceable, dim, SliceExpr(subscript_expr));
+        auto dim_val = insert_value_for_dim(dim);
+        sliceable =
+            emitSlice(loc, sliceable, dim_val, SliceExpr(subscript_expr));
         ++dim;
         continue;
       }
       auto index = emitExpr(subscript_expr, OptionalType::ofTensor());
       if (index->type() == IntType::get()) {
-        sliceable = emitSelect(loc, sliceable, dim, index);
+        // NB: note, select squeezes out a dimension,
+        // so dim is **not** incremented
+        auto dim_val = insert_value_for_dim(dim);
+        sliceable = emitSelect(loc, sliceable, dim_val, index);
         continue;
       } else if (index->type()->isSubtypeOf(NoneType::get())) {
         sliceable = emitUnsqueeze(loc, sliceable, dim);
@@ -2614,10 +2647,10 @@ struct to_ir {
     AT_ASSERT(subscript_exprs.size() == 1);
     AT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript_exprs[0]);
-    c10::optional<int64_t> maybe_dim;
+    Value* maybe_dim = nullptr;
     if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
-      maybe_dim = 0;
+      maybe_dim = graph->insertConstant(0, nullptr, loc);
     }
     return emitSlice(loc, sliceable, maybe_dim, slice_exp);
   }

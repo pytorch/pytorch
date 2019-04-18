@@ -27,13 +27,9 @@ class QReluInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    c10::FunctionSchema(
-        "quantized::relu",
-        "",
-        std::vector<c10::Argument>{c10::Argument("qx", TensorType::get())},
-        std::vector<c10::Argument>{c10::Argument("qy", TensorType::get())}
-    ),
+    "quantized::relu(Tensor qx) -> Tensor",
     c10::kernel<QReluInt8>(),
     c10::dispatchKey(QuantizedCPUTensorId()));
-} // namespace
-}} // namespace at::native
+
+}  // namespace
+}}  // namespace at::native

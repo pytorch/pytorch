@@ -31,10 +31,6 @@ inline Tensor Tensor::hip() const {
   return toType(type().hip());
 }
 
-inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
-  return dispatch_type().copy_(*this, src, non_blocking);
-}
-
 inline Tensor Tensor::toType(ScalarType t) const {
   return toType(type().toScalarType(t));
 }
@@ -184,6 +180,9 @@ inline Tensor & Tensor::clamp_min_(Scalar min) {
 }
 inline Tensor Tensor::contiguous() const {
     return dispatch_type().contiguous(*this);
+}
+inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
+    return dispatch_type().copy_(*this, src, non_blocking);
 }
 inline Tensor Tensor::cos() const {
     return dispatch_type().cos(*this);

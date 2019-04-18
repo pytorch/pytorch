@@ -1208,6 +1208,9 @@ if _enabled:
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
 
+        def graph_for(self, *args, **kwargs):
+            return self._get_method('forward').graph_for(*args, **kwargs)
+
     class WeakScriptModuleProxy(ScriptModule):
         def __init__(self, original, stubs):
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
@@ -1490,6 +1493,13 @@ def _get_builtin_table():
     _builtin_table[id(torch.nn.functional._no_grad_embedding_renorm_)] = "aten::_no_grad_embedding_renorm_"
 
     _builtin_table[id(math.floor)] = "aten::floor"
+    _builtin_table[id(math.ceil)] = "aten::ceil"
+    _builtin_table[id(math.log)] = "aten::log"
+    _builtin_table[id(math.log1p)] = "aten::log1p"
+    _builtin_table[id(math.log10)] = "aten::log10"
+    _builtin_table[id(math.exp)] = "aten::exp"
+    _builtin_table[id(math.sqrt)] = "aten::sqrt"
+    _builtin_table[id(math.pow)] = "aten::pow"
     _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
     _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
@@ -1548,6 +1558,14 @@ def annotate(the_type, the_value):
 
 Attribute = collections.namedtuple('Attribute', ['value', 'type'])
 
+last_executed_optimized_graph = torch._C._last_executed_optimized_graph
+
+
+def _graph_for(self, *args, **kwargs):
+    self(*args, **kwargs)
+    return last_executed_optimized_graph()
+
+torch._C.ScriptMethod.graph_for = _graph_for
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
