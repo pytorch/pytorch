@@ -56,7 +56,6 @@ namespace jit {
   _(TopologicalMove)               \
   _(SubgraphUtils)                 \
   _(AliasAnalysis)                 \
-  _(AliasRegistration)             \
   _(WriteTracking)                 \
   _(Wildcards)                     \
   _(MemoryDAG)                     \

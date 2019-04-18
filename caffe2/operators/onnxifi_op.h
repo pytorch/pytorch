@@ -13,7 +13,7 @@
 
 namespace caffe2 {
 
-template <typename T, typename Context>
+template <typename Context>
 class OnnxifiOp final : public Operator<Context> {
   struct TensorInfo {
     TensorInfo() {}
