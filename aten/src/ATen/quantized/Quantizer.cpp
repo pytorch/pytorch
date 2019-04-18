@@ -25,10 +25,9 @@ QTensorImpl* get_qtensorimpl(const QTensor& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-inline QTensor new_qtensor(
+inline QTensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
-    bool is_variable,
     QuantizerPtr quantizer) {
   AT_ASSERT(options.device().is_cpu());
 
@@ -36,15 +35,15 @@ inline QTensor new_qtensor(
   auto* allocator = at::getCPUAllocator();
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
-  AT_ASSERT(isQIntType(typeMetaToScalarType(dtype)));
-  auto storage_impl = c10::make_intrusive<StorageImpl>(
+  AT_CHECK(isQIntType(typeMetaToScalarType(dtype)), "ScalarType not supported for QTensor in new_qtensor_cpu.");
+  auto storage = c10::make_intrusive<StorageImpl>(
       dtype,
       nelements,
       allocator->allocate(nelements * dtype.itemsize()),
       allocator,
       /*resizable=*/true);
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage_impl, at::CPUTensorId(), is_variable, quantizer);
+      storage, at::QuantizedCPUTensorId(), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   return tensor;
 }
@@ -73,10 +72,9 @@ QTensor PerTensorAffineQuantizer::quantize(RealTensor tensor) {
   AT_CHECK(
       tensor.options().device() == kCPU,
       "quantize only works for CPU backend right now.");
-  QTensor qv = new_qtensor(
+  QTensor qv = new_qtensor_cpu(
       sizes,
       tensor.options().dtype(at::kQInt8),
-      tensor.is_variable(),
       intrusive_from_this());
   auto qvd = qv.data<qint8>();
   tensor.contiguous();
@@ -96,7 +94,9 @@ RealTensor PerTensorAffineQuantizer::dequantize(QTensor tensor) {
   const auto* qvd = tensor.data<qint8>();
   float* rvd = rv.data<float>();
   for (auto i = 0; i < tensor.numel(); ++i) {
-    rvd[i] = (static_cast<uint32_t>(qvd[i].val_) - zero_point_) * scale_;
+    // We need to convert the qint8 value to float to ensure the subtraction
+    // subexpression returns a float
+    rvd[i] = (static_cast<float>(qvd[i].val_) - zero_point_) * scale_;
   }
   return rv;
 }
