@@ -208,8 +208,12 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     Tensor tensor = caffe2::Tensor(output);
     if (!tensor.defined() || tensor.GetDeviceType() != type) {
       // Fix tensor type
-      tensor = Tensor(type);
-      output = at::Tensor(std::move(tensor.getIntrusivePtr()));
+      output = at::Tensor(
+        c10::make_intrusive<TensorImpl>(
+            Storage::create_legacy(type, TypeMeta()),
+            c10::computeTensorTypeId(at::device(type).layout(at::kStrided))
+          )
+      );
     }
     output_tensors_[idx] = caffe2::Tensor(output);
     return &output_tensors_[idx];
@@ -258,7 +262,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     Tensor tensor =
         GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options);
     // assign it back in case it changed
-    output = at::Tensor(std::move(tensor.getIntrusivePtr()));
+    output = at::Tensor(std::move(tensor));
 
     output_tensors_[idx] = caffe2::Tensor(output);
     return &output_tensors_[idx];

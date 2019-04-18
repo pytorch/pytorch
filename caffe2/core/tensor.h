@@ -27,7 +27,7 @@ class CAFFE2_API Tensor final {
   Tensor(const Tensor& other, Unsafe _) : impl_(other.getIntrusivePtr()) {}
 
  protected:
-  using TensorImplPtr = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
+  using TensorImplPtr = c10::intrusive_ptr<TensorImpl>;
   TensorImplPtr impl_;
 
   void enforce_invariants();
@@ -54,7 +54,10 @@ class CAFFE2_API Tensor final {
     return impl_.defined();
   }
 
-  TensorImpl* unsafeGetTensorImpl() const {
+  TensorImpl * unsafeGetTensorImpl() const {
+    if (!impl_.defined()) {
+      return UndefinedTensorImpl::singleton();
+    }
     return impl_.get();
   }
 
@@ -69,7 +72,7 @@ class CAFFE2_API Tensor final {
    * you resize the tensor and then call mutable_data().
    */
   explicit Tensor(at::Device device)
-    : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
+    : impl_(c10::make_intrusive<TensorImpl>(
         Storage::create_legacy(device, TypeMeta()),
         c10::computeTensorTypeId(at::device(device).layout(at::kStrided))
       )) {
@@ -386,9 +389,12 @@ class CAFFE2_API Tensor final {
     impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, capacity);
   }
 
-  const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr()
-      const {
-    return impl_;
+  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> getIntrusivePtr() const {
+    if (!impl_.defined()) {
+      return c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>();
+    }
+    auto copy = impl_;
+    return c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(copy.release());
   }
 
   bool defined() const {

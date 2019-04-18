@@ -7,18 +7,21 @@
 namespace at {
 
 void Tensor::enforce_invariants() {
-  if (impl_.get() == nullptr) {
-    throw std::runtime_error("TensorImpl with nullptr is not supported");
+  if (impl_.get() == UndefinedTensorImpl::singleton()) {
+    throw std::runtime_error("A tensor instance should not be created with UndefinedTensorImpl but be nullptr instead.");
   }
-  // Following line throws if the method is not a POD data type or is not
-  // supported by ATen
-  scalar_type();
   if (defined()) {
+    // Following line throws if the method is not a POD data type or is not
+    // supported by ATen
+    scalar_type();
+
     // If it's a variable - we definitely not in C2 land
     if (!is_variable()) {
-      AT_ASSERTM(
-          impl_->dtype_initialized(),
-          "Partially-initialized tensor not supported by at::Tensor");
+      if (!impl_->dtype_initialized()) {
+        AT_ASSERTM(
+            impl_->dtype_initialized(),
+            "Partially-initialized tensor not supported by at::Tensor");
+      }
       AT_ASSERTM(
           !impl_->is_sparse(),
           "Sparse Tensors are supported by at::Tensor, but invariant checking isn't implemented.  Please file a bug.");

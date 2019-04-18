@@ -194,19 +194,21 @@ void ReinitializeAndCopyFrom(
 }
 
 void Tensor::enforce_invariants() {
-  if (impl_.get() == nullptr) {
-    throw std::runtime_error("TensorImpl with nullptr is not supported");
+  if (impl_.get() == UndefinedTensorImpl::singleton()) {
+    throw std::runtime_error("A tensor instance should not be created with UndefinedTensorImpl but be nullptr instead.");
   }
-  CAFFE_ENFORCE(
-      !impl_->is_variable(),
-      "Caffe2 tensor wrapper doesn't support autograd variables");
-  CAFFE_ENFORCE_EQ(
-      impl_->layout(),
-      at::kStrided,
-      "Caffe2 tensor wrapper supports only regular non-sparse tensors");
-  CAFFE_ENFORCE(
-      impl_->is_contiguous(),
-      "Caffe2 tensor wrapper supports only contiguous tensors");
+  if (impl_.defined()) {
+    CAFFE_ENFORCE(
+        !impl_->is_variable(),
+        "Caffe2 tensor wrapper doesn't support autograd variables");
+    CAFFE_ENFORCE_EQ(
+        impl_->layout(),
+        at::kStrided,
+        "Caffe2 tensor wrapper supports only regular non-sparse tensors");
+    CAFFE_ENFORCE(
+        impl_->is_contiguous(),
+        "Caffe2 tensor wrapper supports only contiguous tensors");
+  }
 }
 
 namespace {
