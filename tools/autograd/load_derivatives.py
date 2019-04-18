@@ -383,5 +383,5 @@ def match_declarations_with_differentiability_info(declarations, differentiabili
     for declaration in declarations:
         info = find_info(declaration)
         declaration['derivative'] = info['autograd_fn'] if info else None
-        declaration['non_differentiable_arg_names'] = info['non_differentiable_arg_names'] if info else None
+        declaration['non_differentiable_arg_names'] = info['non_differentiable_arg_names'] if info else []
         declaration['output_differentiability'] = info['output_differentiability'] if info else None
