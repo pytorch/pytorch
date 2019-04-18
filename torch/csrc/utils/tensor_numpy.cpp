@@ -195,7 +195,7 @@ ScalarType numpy_dtype_to_aten(int dtype) {
 
 bool is_numpy_scalar(PyObject* obj) {
   return (PyArray_IsIntegerScalar(obj) ||
-	  PyArray_IsScalar(obj, Floating));
+          PyArray_IsScalar(obj, Floating));
 }
 
 }} // namespace torch::utils

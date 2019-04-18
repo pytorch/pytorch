@@ -113,7 +113,7 @@ elseif(BLAS STREQUAL "MKL")
     message(STATUS "MKL include directory: ${MKL_INCLUDE_DIR}")
     message(STATUS "MKL OpenMP type: ${MKL_OPENMP_TYPE}")
     message(STATUS "MKL OpenMP library: ${MKL_OPENMP_LIBRARY}")
-    include_directories(SYSTEM ${MKL_INCLUDE_DIR})
+    include_directories(AFTER SYSTEM ${MKL_INCLUDE_DIR})
     list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
     set(CAFFE2_USE_MKL ON)
   else()
@@ -758,10 +758,10 @@ if(USE_CUDA)
     endif()
     if(CAFFE2_USE_CUDNN)
       IF(CUDNN_STATIC_LINKAGE)
-	LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-	  caffe2::cudnn "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" "dl")
+        LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+          caffe2::cudnn "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" "dl")
       ELSE()
-	list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+        list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
       ENDIF()
     else()
       caffe2_update_option(USE_CUDNN OFF)
@@ -1166,7 +1166,7 @@ if (NOT BUILD_ATEN_MOBILE)
 
   CHECK_C_SOURCE_COMPILES("#include <stdint.h>
       static inline void cpuid(uint32_t *eax, uint32_t *ebx,
-      			 uint32_t *ecx, uint32_t *edx)
+                               uint32_t *ecx, uint32_t *edx)
       {
         uint32_t a = *eax, b, c = *ecx, d;
         asm volatile ( \"cpuid\" : \"+a\"(a), \"=b\"(b), \"+c\"(c), \"=d\"(d) );
@@ -1302,7 +1302,7 @@ if (NOT BUILD_ATEN_MOBILE)
     INCLUDE(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
     IF(MKLDNN_FOUND)
       SET(AT_MKLDNN_ENABLED 1)
-      INCLUDE_DIRECTORIES(BEFORE SYSTEM ${MKLDNN_INCLUDE_DIR})
+      INCLUDE_DIRECTORIES(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
       IF(BUILD_CAFFE2_OPS)
         SET(CAFFE2_USE_MKLDNN ON)
         LIST(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkldnn)

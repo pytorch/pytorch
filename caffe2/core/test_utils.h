@@ -98,6 +98,15 @@ caffe2::Tensor* createTensorAndFill(
   return tensor;
 }
 
+template <typename T>
+caffe2::Tensor createTensorAndFill(
+    const std::vector<int64_t>& shape,
+    const std::vector<T>& data) {
+  Tensor tensor(caffe2::CPU);
+  fillTensor<T>(shape, data, &tensor);
+  return tensor;
+}
+
 // Fill a constant to a tensor.
 template <typename T>
 void constantFillTensor(

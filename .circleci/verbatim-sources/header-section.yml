@@ -56,8 +56,8 @@ setup_linux_system_environment: &setup_linux_system_environment
 
     cat /etc/apt/sources.list
 
-    ps ax | grep apt
-    ps ax | grep dpkg
+    ps auxfww | grep [a]pt
+    ps auxfww | grep dpkg
 
 install_doc_push_script: &install_doc_push_script
   name: Install the doc push script
@@ -223,6 +223,7 @@ setup_ci_environment: &setup_ci_environment
       linux-image-generic \
       moreutils \
       docker-ce=5:18.09.4~3-0~ubuntu-xenial \
+      nvidia-container-runtime=2.0.0+docker18.09.4-1 \
       nvidia-docker2=2.0.3+docker18.09.4-1 \
       expect-dev
 
