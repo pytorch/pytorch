@@ -511,9 +511,9 @@ def emit_body(declaration):
     non_differentiable_arg_names = func['non_differentiable_arg_names'] if func else []
     candidate_differentiable_outputs = list(filter(is_differentiable, returns))
 
-    if func is not None and func.get('output_differentiability') is not None:
+    if declaration['output_differentiability'] is not None:
         differentiable_outputs = []
-        output_differentiability = func.get('output_differentiability')
+        output_differentiability = declaration['output_differentiability']
         for differentiable, output in zip(output_differentiability, returns):
             if differentiable:
                 differentiable_outputs.append(output)
@@ -528,7 +528,8 @@ def emit_body(declaration):
         strategy == 'use_derived')
 
     if func is not None and not requires_derivative:
-        print('WARNING: derivative ignored for {}'.format(name), file=sys.stderr)
+        raise RuntimeError('ERROR: derivative ignored for {} -- specified an autograd function without derivative'
+                           .format(name))
 
     def emit_save_inputs():
         setup = []
