@@ -9,9 +9,13 @@
 #include <vector>
 
 using c10::FunctionSchema;
+using c10::OperatorName;
 using c10::Argument;
 using c10::IValue;
 using c10::ListType;
+using c10::either;
+using c10::make_right;
+using c10::make_left;
 using at::TypeKind;
 
 namespace torch {
@@ -23,16 +27,15 @@ struct SchemaParser {
   SchemaParser(const std::string& str)
       : L(str), type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
-  FunctionSchema parseDeclaration() {
-    std::string name = L.expect(TK_IDENT).text();
-    if (L.nextIf(':')) {
-      L.expect(':');
-      name = name + "::" + L.expect(TK_IDENT).text();
+  either<OperatorName, FunctionSchema> parseDeclaration() {
+    OperatorName name = parseName();
+
+    // If there is no parentheses coming, then this is just the operator name
+    // without an argument list
+    if (L.cur().kind != '(') {
+      return make_left<OperatorName, FunctionSchema>(std::move(name));
     }
-    std::string overload_name = "";
-    if (L.nextIf('.')) {
-      overload_name = L.expect(TK_IDENT).text();
-    }
+
     std::vector<Argument> arguments;
     std::vector<Argument> returns;
     bool kwarg_only = false;
@@ -62,12 +65,25 @@ struct SchemaParser {
       returns.push_back(
           parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
     }
-    return FunctionSchema{
-        std::move(name), std::move(overload_name), std::move(arguments), std::move(returns), is_vararg, false};
+    return make_right<OperatorName, FunctionSchema>(
+        std::move(name.name), std::move(name.overload_name), std::move(arguments), std::move(returns), is_vararg, false);
   }
 
-  std::vector<FunctionSchema> parseDeclarations() {
-    std::vector<FunctionSchema> results;
+  c10::OperatorName parseName() {
+    std::string name = L.expect(TK_IDENT).text();
+    if (L.nextIf(':')) {
+      L.expect(':');
+      name = name + "::" + L.expect(TK_IDENT).text();
+    }
+    std::string overload_name = "";
+    if (L.nextIf('.')) {
+      overload_name = L.expect(TK_IDENT).text();
+    }
+    return {name, overload_name};
+  }
+
+  std::vector<either<OperatorName, FunctionSchema>> parseDeclarations() {
+    std::vector<either<OperatorName, FunctionSchema>> results;
     do {
       results.push_back(parseDeclaration());
     } while (L.nextIf(TK_NEWLINE));
@@ -256,8 +272,14 @@ struct SchemaParser {
 } // namespace
 } // namespace script
 
+C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(const std::string& schemaOrName) {
+  return script::SchemaParser(schemaOrName).parseDeclarations().at(0);
+}
+
 C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
-  return script::SchemaParser(schema).parseDeclarations().at(0);
+  auto parsed = parseSchemaOrName(schema);
+  AT_CHECK(parsed.is_right(), "Tried to parse a function schema but only the operator name was given");
+  return parsed.right();
 }
 
 } // namespace jit
