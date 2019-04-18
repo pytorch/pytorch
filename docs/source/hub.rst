@@ -52,6 +52,7 @@ You can see the full script in
   handles ``pretrained``, alternatively you can put the following logic in the entrypoint definition.
 
 ::
+
     if pretrained:
         # For checkpoint saved in local repo
         model.load_state_dict(<path_to_saved_checkpoint>)
