@@ -21,15 +21,15 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   bool is_sparse() const override {
     return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA || backend() == Backend::SparseHIP;
   }
+  bool is_quantized() const override {
+    return backend() == Backend::QuantizedCPU;
+  }
   bool is_distributed() const override {
     return false;
   }
 
   Type & toBackend(Backend b) const override;
   Type & toScalarType(ScalarType s) const override;
-
-  Tensor copy(const Tensor & src, bool non_blocking=false, optional<Device> to_device={}) const override;
-  Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const override;
 
   void backward(
       Tensor& self,

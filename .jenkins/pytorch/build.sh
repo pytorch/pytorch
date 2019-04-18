@@ -4,7 +4,9 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
+# shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
+
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # For distributed, four environmental configs:
@@ -31,7 +33,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-py3-clang5-asan* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" $*
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
 echo "Python version:"
@@ -114,7 +116,7 @@ fi
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
 if [ -z "$MAX_JOBS" ]; then
   if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]) && which sccache > /dev/null; then
-    export MAX_JOBS=`expr $(nproc) - 1`
+    export MAX_JOBS=$(($(nproc) - 1))
   fi
 fi
 
@@ -213,7 +215,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # Bazel dependencies
   sudo apt-get -qq install pkg-config zip zlib1g-dev unzip
   # XLA build requires Bazel
-  wget https://github.com/bazelbuild/bazel/releases/download/0.21.0/bazel-0.21.0-installer-linux-x86_64.sh
+  wget https://github.com/bazelbuild/bazel/releases/download/0.24.1/bazel-0.24.1-installer-linux-x86_64.sh
   chmod +x bazel-*.sh
   sudo ./bazel-*.sh
   BAZEL="$(which bazel)"

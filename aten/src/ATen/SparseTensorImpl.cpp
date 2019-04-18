@@ -36,7 +36,7 @@ SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeM
       , at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(data_type))) {}
 
 SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
-    : TensorImpl(type_id, data_type, values.device(), false)
+    : TensorImpl(type_id, data_type, values.device())
     , sparse_dim_(1)
     , dense_dim_(0)
     , indices_(std::move(indices))
