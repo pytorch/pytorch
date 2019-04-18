@@ -244,7 +244,7 @@ endif()
 # ---[ Caffe2 Int8 operators (enabled by USE_QNNPACK) depend on gemmlowp and neon2sse headers
 if(USE_QNNPACK)
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
+  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}")
   include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/neon2sse")
 endif()
 
