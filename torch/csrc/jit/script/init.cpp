@@ -375,18 +375,19 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<OverloadedFunctionValue>(
           self_, py::cast<std::vector<std::string>>(overloads));
     }
-
     if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
       if (py::isinstance<py::function>(attr) &&
-          py::hasattr(attr, "_is_parameter_list") &&
-          py::cast<bool>(py::getattr(attr, "_is_parameter_list"))) {
+          py::hasattr(attr, "_parameter_names_fn")) {
+        // Fetch the names of the parameters in the list so they're in the
+        // right order
+        auto fn_self = py::getattr(attr, "__self__");
+        auto param_names = py::getattr(attr, "_parameter_names_fn")(fn_self);
+
         Graph& g = *m.graph();
         // Add all module parameters as inputs to the graph
         std::vector<Value*> params;
-        const auto& param_list = module_->get_parameters();
-        for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
-          auto& param = *it;
-          params.emplace_back(g.insertGetAttr(self_, param.name()));
+        for (auto name : param_names) {
+          params.emplace_back(g.insertGetAttr(self_, py::str(name)));
         }
         auto list = g.insertNode(g.createTuple(params))->output();
         return std::make_shared<ConstantParameterList>(list);
