@@ -5043,7 +5043,23 @@ a")
         def test_floor():
             return math.floor(1.5)
 
+        def test_fmod(x, y):
+            return math.fmod(x, y)
+
+        def test_modf(x):
+            return math.modf(x)
+
+        def test_remainder(x, y):
+            return math.fmod((y + math.fmod(x, y)), y)
+
+        def test_acos(x):
+            return math.acos(x)
+
         self.checkScript(test_floor, ())
+        self.checkScript(test_fmod, (1.5, 1.))
+        self.checkScript(test_modf, (1.5,))
+        self.checkScript(test_remainder, (1.5, 1.))
+        self.checkScript(test_acos, (0.5,))
 
     def test_if_nest_while(self):
         def func(a, b):

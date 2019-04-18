@@ -1885,9 +1885,40 @@ RegisterOperators reg2({
           push(stack, a / b);
           return 0;
         }),
-
     Operator(
-        "aten::floor(float a) -> int",
+        "aten::fmod(float a, float b) -> float",
+        [](Stack& stack) {
+          double a, b;
+          pop(stack, a, b);
+          push(stack, std::fmod(a, b));
+          return 0;
+        }),
+    Operator(
+        "aten::modf(float a, float b) -> float",
+        [](Stack& stack) {
+          double a, b;
+          pop(stack, a, b);
+          push(stack, std::modf(a, &b));
+          return 0;
+        }),
+    Operator(
+        "aten::acos(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::acos(a));
+          return 0;
+        }),
+    Operator(
+        "aten::remainder(float a, float b) -> float",
+        [](Stack& stack) {
+          double a, b;
+          pop(stack, a, b);
+          push(stack, std::fmod((b + std::fmod(a, b)), b));
+          return 0;
+        }),
+    Operator(
+        "aten::floor(float a) -> float",
         [](Stack& stack) {
           double a;
           pop(stack, a);
