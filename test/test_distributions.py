@@ -4264,7 +4264,6 @@ class TestJit(TestCase):
                 return dist.sample()
 
             traced_f = torch.jit.trace(f, values, check_trace=False)
-            print(traced_f.graph)
 
             # FIXME Schema not found for node
             xfail = [

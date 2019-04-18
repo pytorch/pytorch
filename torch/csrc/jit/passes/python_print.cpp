@@ -515,7 +515,6 @@ struct PythonPrintPass {
           fmap(sorted_indices, [&](size_t index) { return lhs.at(index); });
       std::vector<Value*> rhs_sorted =
           fmap(sorted_indices, [&](size_t index) { return rhs.at(index); });
-      // printValueList
       printValueList(out, lhs_sorted);
       out << " = ";
       printValueList(out, rhs_sorted);
