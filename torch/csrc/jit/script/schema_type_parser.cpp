@@ -1,10 +1,30 @@
 #include <torch/csrc/jit/script/schema_type_parser.h>
 #include <ATen/core/interned_strings.h>
-#include <torch/csrc/jit/alias_info.h>
-#include <torch/csrc/jit/ir.h>
+#include <ATen/core/alias_info.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <string>
+
+using c10::Symbol;
+using c10::GeneratorType;
+using c10::IntType;
+using c10::DeviceObjType;
+using c10::NumberType;
+using c10::StringType;
+using c10::BoolType;
+using c10::NoneType;
+using c10::FloatType;
+using c10::OptionalType;
+using c10::TupleType;
+using c10::TensorType;
+using c10::DimensionedTensorType;
+using c10::CompleteTensorType;
+using c10::FutureType;
+using c10::DictType;
+using c10::ListType;
+using c10::VarType;
+using c10::AliasInfo;
 
 namespace torch {
 namespace jit {
