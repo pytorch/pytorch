@@ -160,7 +160,7 @@ class BenchmarkRunner(object):
             run_time = 0
             iters = self.iters
             while True:
-                # Use Python's timeit module to measure execution time.
+                # Use Python's timeit module to measure execution time (unit: second).
                 # Each experiment consists of repeated execution of
                 # the benchmark_func a number of times (self.iters)
                 # because otherwise the duration is too short to get
@@ -170,8 +170,8 @@ class BenchmarkRunner(object):
                 # (num_repeats) and we then take the minimum execution
                 # time as the final measurement result (this is also
                 # recommended by timeit's doc).
-                run_time = run_time + min(timeit.repeat(functools.partial(benchmark_func, iters),
-                                          repeat=1, number=1))
+                run_time = min(timeit.repeat(functools.partial(benchmark_func, iters),
+                               repeat=1, number=1))
                 # Analyze time after each run to decide if the result is stable
                 results_are_significant = self.has_explicit_iteration_count or \
                     self._report_iteration_result(iters, run_time)
