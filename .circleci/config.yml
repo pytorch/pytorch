@@ -60,7 +60,7 @@ setup_linux_system_environment: &setup_linux_system_environment
     ps auxfww | grep dpkg
 
     # Try even harder to kill apt-get
-    pkill apt-get
+    pkill apt-get || true
 
     ps auxfww | grep [a]pt
     ps auxfww | grep dpkg
