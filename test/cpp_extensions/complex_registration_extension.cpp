@@ -42,7 +42,7 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
     AT_ASSERT(options.device().is_cpu());
 
     for (auto x: size) {
-      AT_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
+      AT_CHECK(x >= 0, "Trying to create tensor using size with negative dimension: ", size);
     }
     auto* allocator = at::getCPUAllocator();
     int64_t nelements = at::prod_intlist(size);
