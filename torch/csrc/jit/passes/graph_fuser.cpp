@@ -1425,15 +1425,31 @@ bool trackSingleGradSumToSizeToOutputs(
   return true;
 }
 
-void FuseGraph(std::shared_ptr<Graph>& graph) {
-  GraphFuser(graph->block(), graph).run();
-  // After FuseGraph some common subexpressions may come back
-  EliminateCommonSubexpression(graph);
-  // We might have emitted a fair amount of useless shape propagating code, so
-  // remove it
-  EliminateDeadCode(graph);
-  // Improve the quality of shape propagation code that was left
-  PeepholeOptimizeShapeExpressions(graph->block());
+namespace {
+
+bool shouldFuse(const ArgumentSpec& spec) {
+  bool should_fuse = canFuseOnCPU();
+  for (size_t i = 0; i < spec.size(); ++i) {
+    if (ConvertIntToCPUOrCUDA(spec.at(i).device()).is_cuda()) {
+      should_fuse = true;
+    }
+  }
+  return should_fuse;
+}
+
+}  // namespace
+
+void FuseGraph(std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
+  if (shouldFuse(spec)) {
+    GraphFuser(graph->block(), graph).run();
+    // After FuseGraph some common subexpressions may come back
+    EliminateCommonSubexpression(graph);
+    // We might have emitted a fair amount of useless shape propagating code, so
+    // remove it
+    EliminateDeadCode(graph);
+    // Improve the quality of shape propagation code that was left
+    PeepholeOptimizeShapeExpressions(graph->block());
+  }
 }
 
 } // namespace jit

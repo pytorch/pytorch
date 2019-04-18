@@ -433,7 +433,11 @@ class JitTestCase(TestCase):
         torch._C._jit_pass_lint(graph)
         self.assertExpected(str(graph), *args, **kwargs)
 
-    def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
+    def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes, f_args_variable, kwargs_variable):
+        if (not any(isinstance(x, torch.Tensor) and x.is_cuda for x in f_args_variable)) and \
+            (not any(isinstance(v, torch.Tensor) and v.is_cuda for k, v in kwargs_variable.items())):
+            nonfusible_nodes = nonfusible_nodes + fusible_nodes
+            fusible_nodes = []
         diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
         diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
 
@@ -3853,7 +3857,7 @@ a")
             output_ref = torch.cat((x, x), y)
             self.assertEqual(output, output_ref)
 
-            self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::cat'], [])
+            self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::cat'], [], [x], {})
 
             grad = torch.autograd.grad(output.sum(), x)
             grad_ref = torch.autograd.grad(output_ref.sum(), x)
@@ -3895,7 +3899,7 @@ a")
             output_ref = torch.stack((x, y), 0)
             self.assertEqual(output, output_ref)
 
-            self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::stack'], [])
+            self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::stack'], [], [x], {})
 
             grads = torch.autograd.grad(output.sum(), (x, y))
             grads_ref = torch.autograd.grad(output_ref.sum(), (x, y))
@@ -3913,7 +3917,7 @@ a")
             outputs_ref = torch.unbind(x, dim=y)
             self.assertEqual(outputs, outputs_ref)
 
-            self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [])
+            self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [], [x], {})
 
             grad = torch.autograd.grad(_sum_of_list(outputs), x)
             grad_ref = torch.autograd.grad(_sum_of_list(outputs_ref), x)
@@ -3933,7 +3937,7 @@ a")
             outputs = func(inputs)
             self.assertEqual(outputs, outputs_ref)
 
-            self.assertAutodiffNode(func.graph_for(inputs), True, ['aten::meshgrid'], [])
+            self.assertAutodiffNode(func.graph_for(inputs), True, ['aten::meshgrid'], [], inputs, {})
 
             grads = torch.autograd.grad(_sum_of_list(outputs), inputs)
             grads_ref = torch.autograd.grad(_sum_of_list(outputs_ref), inputs)
@@ -12555,7 +12559,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         input = torch.rand(6, 10).requires_grad_()
         with disable_autodiff_subgraph_inlining():
             output = func(input)
-            self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
+            self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [], [input], {})
 
     def test_simple_merge(self):
         # o --> o
@@ -13151,7 +13155,7 @@ def add_autograd_test(
                             check_against_reference(self, traced_fn,
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
-                            self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
+                            self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes, (self_variable,) + args_variable, kwargs_variable)
 
                         if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                             script_fn = create_script_fn(self, name, 'method', output_process_fn)
@@ -13162,7 +13166,7 @@ def add_autograd_test(
                             self.assertAutodiffNode(script_fn.last_graph,
                                                     should_autodiff_node and test_name not in EXCLUDE_SCRIPT_AD_CHECK,
                                                     autodiff_nodes,
-                                                    fusible_nodes)
+                                                    fusible_nodes, (self_variable,) + args_variable, kwargs_variable)
 
                     # functional interface tests
                     if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
@@ -13243,8 +13247,9 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                 with disable_autodiff_subgraph_inlining(should_autodiff_node):
                     script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn)
                     check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
+
                     # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
-                    self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
+                    self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes, f_args_variable, kwargs_variable)
 
             if test_name in EXCLUDE_PYTHON_PRINT:
                 with self.disableModuleHook():
