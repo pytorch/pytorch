@@ -45,18 +45,18 @@ static void sigmoid_kernel(TensorIterator& iter) {
   });
 }
 
-static void fill_kernel(TensorIterator& iter, Scalar value) {
+static void fill_kernel_forward(TensorIterator& iter, Scalar value) {
   if (iter.dtype() == at::ScalarType::Half) {
     at::Half fill_value = value.to<at::Half>();
-    unary_kernel(iter, [=](at::Half a) -> at::Half { return fill_value; });
+    fill_kernel(iter, [=]() -> at::Half { return fill_value; });
   } else {
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "fill_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "fill_cpu", [&]() {
       scalar_t fill_value = value.to<scalar_t>();
       Vec256<scalar_t> fill_vec_value = Vec256<scalar_t>(fill_value);
-      unary_kernel_vec(
+      fill_kernel_vec(
           iter,
-          [=](scalar_t a) -> scalar_t { return fill_value; },
-          [=](Vec256<scalar_t> a) { return fill_vec_value; });
+          [=]() -> scalar_t { return fill_value; },
+          [=]() { return fill_vec_value; });
     });
   }
 }
@@ -203,7 +203,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel)
-REGISTER_DISPATCH(fill_stub, &fill_kernel)
+REGISTER_DISPATCH(fill_stub, &fill_kernel_forward)
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);

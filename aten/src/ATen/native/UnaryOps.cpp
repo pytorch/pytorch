@@ -86,12 +86,7 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 }
 
 Tensor& _fill__cpu(Tensor& self, Scalar value) {
-  auto iter = TensorIterator::unary_op(self, self);
-  if (iter->dtype() == at::ScalarType::Bool) {
-    // TODO: Replace this with TensorIterator
-    // It is undefined behavior to load values other than 0 or 1.
-    return at::legacy::th::_th_fill_(self, value);
-  }
+  auto iter = TensorIterator::fill_op(self);
   fill_stub(iter->device_type(), *iter, value);
   return self;
 }
