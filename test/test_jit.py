@@ -5390,8 +5390,13 @@ a")
             # type: (float, int) -> float
             return math.pow(x, y)
 
+        def test_copysign(x, y):
+            # type: (Union[float, int], Union[float, int]) -> float
+            return math.copysign(x, y)
+
         self.checkScript(test_floor, (1.5,))
         self.checkScript(test_ceil, (1.5,))
+        self.checkScript(test_copysign, ((1, -1), (1.0, -1), (1, -1.0), (1.0, -1.0)))
         self.checkScript(test_log_int, (2,))
         self.checkScript(test_log_float, (2.0,))
         self.checkScript(test_log1p_int, (1,))

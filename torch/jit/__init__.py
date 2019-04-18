@@ -1515,6 +1515,7 @@ def _get_builtin_table():
 
     _builtin_table[id(math.floor)] = "aten::floor"
     _builtin_table[id(math.ceil)] = "aten::ceil"
+    _builtin_table[id(math.copysign)] = "aten::copysign"
     _builtin_table[id(math.log)] = "aten::log"
     _builtin_table[id(math.log1p)] = "aten::log1p"
     _builtin_table[id(math.log10)] = "aten::log10"

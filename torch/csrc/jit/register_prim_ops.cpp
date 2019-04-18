@@ -1921,6 +1921,9 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
 
+    DEFINE_GENERIC_OP(aten::copysign, std::copysign(a, b), std::copysign(a, b), float, float),
+    DEFINE_INT_FLOAT_OP(aten:copysign, std::copysign(a,b), float),
+
     Operator(
         "prim::abs(int x) -> int",
         [](Stack& stack) {
@@ -1972,6 +1975,7 @@ RegisterOperators reg2({
           push(stack, std::pow(a, b));
           return 0;
         }),
+
     Operator(
         "aten::pow(float a, int b) -> float",
         [](Stack& stack) {
@@ -1981,6 +1985,7 @@ RegisterOperators reg2({
           push(stack, std::pow(a, b));
           return 0;
         }),
+
 
     Operator(
         "aten::floor(float a) -> float",
