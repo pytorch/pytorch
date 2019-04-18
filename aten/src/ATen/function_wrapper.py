@@ -219,6 +219,7 @@ scalar_types = [
     ('Half', 'Half', 'Double', True),
 ]
 
+
 class NYIError(Exception):
     """Indicates we don't support this declaration yet"""
 
@@ -1472,8 +1473,8 @@ def create_derived(backend_type_env, declarations):
                         # "name" instead, but keep "name_" for tensor to avoid an extra function call.
                         if wrap_dim_target not in seen_tensorlists:
                             wrap_dim_target = wrap_dim_target + "_"
-                        case_body.append("{} = maybe_wrap_dim({}, {});"
-                                    .format(arg['name'], arg['name'], wrap_dim_target))
+                        case_body.append("{} = maybe_wrap_dim({}, {});".format(
+                            arg['name'], arg['name'], wrap_dim_target))
 
                     # only generated checked casts the first time we see it
                     if arg['name'] not in seen_names and requires_checked_cast(arg):
