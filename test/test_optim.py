@@ -180,8 +180,10 @@ class TestOptim(TestCase):
             self.assertEqual(weight, weight_cuda)
             self.assertEqual(bias, bias_cuda)
 
-        # validate deepcopy() copies all attributes
-        self.assertEqual(set(optimizer.__dict__), set(deepcopy(optimizer).__dict__))
+        # validate deepcopy() copies all public attributes
+        def getPublicAttr(obj):
+            return set(k for k in obj.__dict__ if not k.startswith('_'))
+        self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
 
     def _test_basic_cases(self, constructor, scheduler_constructors=None,
                           ignore_multidevice=False):
