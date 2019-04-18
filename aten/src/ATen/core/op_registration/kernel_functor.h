@@ -49,6 +49,7 @@ namespace detail {
 
   template<class Functor, size_t... ivalue_arg_indices>
   typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_ivalue_args_(Functor* functor, ArrayRef<IValue> ivalue_args, guts::index_sequence<ivalue_arg_indices...>) {
+    (void)(ivalue_args); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
     using IValueArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
     return (*functor)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(ivalue_args[ivalue_arg_indices])...);
   }
@@ -75,7 +76,7 @@ namespace detail {
   private:
     template<size_t... indices>
     static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, guts::index_sequence<indices...>) {
-      (void)(stack); // silence compiler warning of weird compilers somehow thinking this parameter is unused.
+      (void)(stack); // when sizeof...(indices) == 0, this argument would be unused and we have to silence the compiler warning.
       // iterate over all outputs and push them
       (void)std::initializer_list<int>{(
         torch::jit::push(*stack, return_type_to_ivalue(std::move(std::get<indices>(output))))
