@@ -11,7 +11,6 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <c10/core/Tensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 
@@ -21,6 +20,7 @@ struct TensorOptions;
 namespace at {
 struct Generator;
 struct Type;
+class DeprecatedTypeProperties;
 class Tensor;
 } // namespace at
 
@@ -70,18 +70,6 @@ class CAFFE2_API Tensor {
     Tensor r(std::move(tensor_impl));
     r.enforce_invariants();
     return r;
-  }
-
-  explicit Tensor(C10Tensor tensor) : impl_(std::move(tensor).impl()) {
-    enforce_invariants();
-  }
-
-  explicit operator C10Tensor() const & {
-    return C10Tensor(impl_);
-  }
-
-  explicit operator C10Tensor() && {
-    return C10Tensor(std::move(impl_));
   }
 
   int64_t dim() const {
@@ -199,7 +187,9 @@ class CAFFE2_API Tensor {
 
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(type_id()), scalar_type());
+        tensorTypeIdToBackend(type_id()),
+        scalar_type(),
+        is_variable() && !at::NonVariableTypeMode::is_enabled());
   }
   Type & dispatch_type() const {
     return legacyTensorType(*impl_);
@@ -219,8 +209,7 @@ class CAFFE2_API Tensor {
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
-  Tensor toType(const Type & t, bool non_blocking=false) const;
-  Tensor & copy_(const Tensor & src, bool non_blocking=false);
+  Tensor toType(const DeprecatedTypeProperties & t, bool non_blocking=false) const;
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
@@ -248,6 +237,9 @@ class CAFFE2_API Tensor {
 
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
+
+  /// Returns if a `Tensor` has quantized backend.
+  bool is_quantized() const;
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
@@ -375,6 +367,7 @@ class CAFFE2_API Tensor {
   Tensor clamp_min(Scalar min) const;
   Tensor & clamp_min_(Scalar min);
   Tensor contiguous() const;
+  Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor cos() const;
   Tensor & cos_();
   Tensor cosh() const;
@@ -584,6 +577,7 @@ class CAFFE2_API Tensor {
   Tensor dequantize() const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;
+  Tensor int_repr() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;

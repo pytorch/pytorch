@@ -84,6 +84,7 @@ enum class TypeID {
   SparseCUDALong,
   SparseCUDAShort,
   SparseCUDAQInt8,
+  QuantizedCPUQInt8,
   MSNPUBool,
   MSNPUByte,
   MSNPUChar,
@@ -124,6 +125,7 @@ struct CAFFE2_API Type {
   virtual bool is_cuda() const = 0;
   virtual bool is_hip() const = 0;
   virtual bool is_sparse() const = 0;
+  virtual bool is_quantized() const = 0;
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
   bool is_undefined() const noexcept { return is_undefined_; }
@@ -161,12 +163,6 @@ struct CAFFE2_API Type {
   DeviceType device_type() const {
     return backendToDeviceType(backend());
   }
-
-  virtual Tensor copy(
-      const Tensor& src,
-      bool non_blocking = false,
-      c10::optional<Device> to_device = {}) const = 0;
-  virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const = 0;
 
   virtual void backward(
       Tensor& self,
@@ -249,6 +245,7 @@ struct CAFFE2_API Type {
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;
   virtual Tensor & clamp_min_(Tensor & self, Scalar min) const = 0;
   virtual Tensor contiguous(const Tensor & self) const = 0;
+  virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
   virtual Tensor cos(const Tensor & self) const = 0;
   virtual Tensor & cos_(Tensor & self) const = 0;
   virtual Tensor cosh(const Tensor & self) const = 0;
@@ -459,6 +456,7 @@ struct CAFFE2_API Type {
   virtual Tensor dequantize(const Tensor & self) const = 0;
   virtual Scalar q_scale(const Tensor & self) const = 0;
   virtual Scalar q_zero_point(const Tensor & self) const = 0;
+  virtual Tensor int_repr(const Tensor & self) const = 0;
   virtual Tensor to(const Tensor & self, const TensorOptions & options, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
