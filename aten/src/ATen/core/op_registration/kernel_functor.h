@@ -29,6 +29,7 @@ namespace detail {
   // cast it to the type that should be passed to the kernel function.
   // Examples: If the IValue contains a plain type like an int, return that.
   //           If the IValue contains an IntList, return it as ArrayRef<int>.
+  // TODO Should we move the IValue so we can avoid bumping the Tensor refcount?
   template<class T>
   struct ivalue_to_arg_type {
     static T call(const IValue& v) {
@@ -41,10 +42,34 @@ namespace detail {
       return v.to<intrusive_ptr<ivalue::List<T>>>()->elements();
     }
   };
+  template<class T>
+  struct ivalue_to_arg_type<optional<T>> {
+    static optional<T> call(const IValue& v) {
+      if (v.isNone()) {
+        return nullopt;
+      }
+      return v.to<T>();
+    }
+  };
 
   template<class T>
-  IValue return_type_to_ivalue(T&& t) {
-    return IValue(std::forward<T>(t));
+  struct return_type_to_ivalue_ {
+    static IValue call(T&& v) {
+      return IValue(std::move(v));
+    }
+  };
+  template<class T>
+  struct return_type_to_ivalue_<optional<T>> {
+    static IValue call(optional<T>&& v) {
+      if (!v.has_value()) {
+        return IValue();
+      }
+      return IValue(std::move(*v));
+    }
+  };
+  template<class T>
+  IValue return_type_to_ivalue(T&& v) {
+    return return_type_to_ivalue_<guts::decay_t<T>>::call(std::move(v));
   }
 
   template<class Functor, size_t... ivalue_arg_indices>
