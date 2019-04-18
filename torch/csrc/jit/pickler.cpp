@@ -594,7 +594,10 @@ std::string Unpickler::readString() {
     }
 
     // Simple check just in case there is no terminating '\n'
-    AT_ASSERT(c >= '0' && c <= 'z');
+    AT_CHECK(
+        c == '_' || (c >= '0' && c <= 'z'),
+        "Found character '", c, "' in string, "
+        "strings must be Python identifiers");
 
     // Increment after to exclude newline from string
     ++n;
