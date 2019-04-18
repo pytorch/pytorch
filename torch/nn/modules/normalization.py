@@ -2,7 +2,6 @@ import torch
 import numbers
 from torch.nn.parameter import Parameter
 from .module import Module
-from .batchnorm import _BatchNorm
 from .. import functional as F
 from .. import init
 from ..._jit_internal import weak_module, weak_script_method

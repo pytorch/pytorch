@@ -181,6 +181,26 @@ Operator createOperator(
 
   auto schema = torch::jit::detail::inferAndCheckSchema<Traits>(schemaOrName);
 
+  // [custom operator aliasing] Currently, we have no way for the user to
+  // specify the alias annotations for a custom op. Therefore, we have to:
+  //   1. Assume that custom ops will mutate all inputs, have side effects, and
+  //      produce wildcard outputs.
+  //   2. Have some way of distinguishing between a custom op and a builtin op
+  //      so that we can apply the above rule.
+  // We do this by manually whitelisting "aten" and "prim" namespaces as
+  // builtins.
+  //
+  // We don't want to preserve this distinction between custom/builtin ops, as
+  // it is fragile and hard to maintain. When we provide a way for op
+  // registration to specify alias annotations, we should fix up builtins to
+  // use that and remove all references to this note.
+  Symbol name = Symbol::fromQualString(schema.name());
+  if (name.is_aten() || name.is_prim() || name.is_onnx()) {
+    AT_ERROR(
+        "Tried to register a custom operator to a reserved namespace: ",
+        name.ns().toUnqualString());
+  }
+
   return Operator(schema, [implementation, schema](Stack& stack) {
     ArgumentTuple tuple;
     torch::jit::detail::callOperatorWithTuple(

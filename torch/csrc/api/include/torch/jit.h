@@ -32,7 +32,7 @@ namespace jit {
 ///   )JIT");
 ///   IValue output = module->run_method("relu_script", a, b);
 /// \endrst
-TORCH_API std::shared_ptr<script::Module> compile(const std::string& source);
+TORCH_API std::shared_ptr<script::CompilationUnit> compile(const std::string& source);
 
 } // namespace jit
 } // namespace torch

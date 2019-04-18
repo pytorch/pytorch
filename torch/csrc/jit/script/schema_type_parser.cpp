@@ -1,10 +1,31 @@
 #include <torch/csrc/jit/script/schema_type_parser.h>
 #include <ATen/core/interned_strings.h>
-#include <torch/csrc/jit/alias_info.h>
-#include <torch/csrc/jit/ir.h>
+#include <ATen/core/alias_info.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
+#include <c10/util/string_utils.h>
 #include <string>
+
+using c10::Symbol;
+using c10::GeneratorType;
+using c10::IntType;
+using c10::DeviceObjType;
+using c10::NumberType;
+using c10::StringType;
+using c10::BoolType;
+using c10::NoneType;
+using c10::FloatType;
+using c10::OptionalType;
+using c10::TupleType;
+using c10::TensorType;
+using c10::DimensionedTensorType;
+using c10::CompleteTensorType;
+using c10::FutureType;
+using c10::DictType;
+using c10::ListType;
+using c10::VarType;
+using c10::AliasInfo;
 
 namespace torch {
 namespace jit {
@@ -21,9 +42,14 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"float", FloatType::get()},
       {"int", IntType::get()},
       {"bool", BoolType::get()},
+      {"None", NoneType::get()},
   };
-  auto tok = L.expect(TK_IDENT);
-  auto text = tok.text();
+  auto tok = L.cur();
+  if (!L.nextIf(TK_NONE)) {
+    L.expect(TK_IDENT);
+  }
+  std::string text = tok.text();
+
   auto it = type_map.find(text);
   if (it == type_map.end()) {
     if (text.size() > 0 && islower(text[0])) {
@@ -80,7 +106,7 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
     L.expect(')');
   } else if (L.nextIf('!')) {
     alias_info.addBeforeSet(
-        Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
+        Symbol::fromQualString("alias::$" + c10::guts::to_string(next_id++)));
     alias_info.setIsWrite(true);
   } else {
     return c10::nullopt;
@@ -122,7 +148,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     parseList(TK_NOTHING, ',', ')', [&] {
       const std::string& num = L.expect(TK_NUMBER).text();
       std::string::size_type num_len;
-      size_t dim = std::stoi(num, &num_len);
+      size_t dim = c10::stoi(num, &num_len);
       AT_ASSERTM(
           num_len == num.size(),
           "Bad tensor dimension size. Strides not yet supported in parsing",

@@ -15,17 +15,31 @@ void where_cpu(
     const at::Tensor& condition,
     const at::Tensor& self,
     const at::Tensor& other) {
-  at::CPU_tensor_apply4<scalar_t, uint8_t, scalar_t, scalar_t>(
-      ret,
-      condition,
-      self,
-      other,
-      [](scalar_t& ret_val,
-         const uint8_t& cond_val,
-         const scalar_t& self_val,
-         const scalar_t& other_val) {
-        ret_val = cond_val ? self_val : other_val;
-      });
+  if (condition.scalar_type() == at::ScalarType::Byte) {
+    at::CPU_tensor_apply4<scalar_t, uint8_t, scalar_t, scalar_t>(
+        ret,
+        condition,
+        self,
+        other,
+        [](scalar_t& ret_val,
+           const uint8_t& cond_val,
+           const scalar_t& self_val,
+           const scalar_t& other_val) {
+          ret_val = cond_val ? self_val : other_val;
+        });
+    } else {
+      at::CPU_tensor_apply4<scalar_t, bool, scalar_t, scalar_t>(
+          ret,
+          condition,
+          self,
+          other,
+          [](scalar_t& ret_val,
+             const bool& cond_val,
+             const scalar_t& self_val,
+             const scalar_t& other_val) {
+            ret_val = cond_val ? self_val : other_val;
+          });
+    }
 }
 } // namespace
 
@@ -80,7 +94,7 @@ bool is_nonzero(const Tensor& self) {
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  if (condition.scalar_type() != ScalarType::Byte) {
+  if (condition.scalar_type() != ScalarType::Byte && condition.scalar_type() != ScalarType::Bool) {
     AT_ERROR("Expected condition to have ScalarType Byte, but got ScalarType ",
                   toString(condition.scalar_type()));
   }

@@ -13,7 +13,7 @@
 
 namespace caffe2 {
 
-template <typename T, typename Context>
+template <typename Context>
 class OnnxifiOp final : public Operator<Context> {
   struct TensorInfo {
     TensorInfo() {}
@@ -30,6 +30,7 @@ class OnnxifiOp final : public Operator<Context> {
     lib_ = onnx::initOnnxifiLibrary();
     backend_graph_map_ptr_ = onnx::getOnnxBackendGraphMap();
     CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
+    use_onnx_ = this->template GetSingleArgument<int>("use_onnx", 0);
     auto onnx_model_str =
         this->template GetSingleArgument<std::string>("onnx_model", "");
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
@@ -64,28 +65,32 @@ class OnnxifiOp final : public Operator<Context> {
       ++output_idx;
     }
 
+    // Get output resizing hints
+    auto output_resize_hints =
+        this->template GetRepeatedArgument<int>("output_resize_hints");
+    CAFFE_ENFORCE_EQ(
+        output_resize_hints.size() % 2,
+        0,
+        "output_resize_hints must have even size: ",
+        output_resize_hints.size());
+    for (int i = 0; i < output_resize_hints.size(); ++i) {
+      auto k = output_resize_hints[i++];
+      batch_pos_map_.emplace(k, output_resize_hints[i]);
+    }
+
     // Encode arguments starting with "custom_" to backend
     std::vector<uint64_t> property_pointers;
     std::vector<int64_t> int_args;
     std::vector<float> float_args;
-    BuildPropertyList(operator_def, &property_pointers, &int_args, &float_args);
+    buildPropertyList(operator_def, &property_pointers, &int_args, &float_args);
 
-    // Pull the weights from workspace and feed it to the backend through
-    // setGraphIO. Notice that since we may have rewritten the net, we need to
-    // map the weight names
-    auto initializers =
-        this->template GetRepeatedArgument<std::string>("initializers");
-    std::unordered_set<std::string> initializer_set;
-    for (auto it = initializers.begin(); it != initializers.end(); ++it) {
-      auto key = *it;
-      initializer_set.emplace(key);
-    }
-    std::vector<std::string> weight_names;
-    std::vector<std::vector<uint64_t>> weight_shapes;
-    auto weight_descs = buildInitializationList(
-        ws, &initializer_set, &weight_names, &weight_shapes);
-
-    BuildBackendAndGraph(property_pointers, onnx_model_str, weight_descs);
+    // Initialize the backend if it has not been already created. When we
+    // initialized the backend, we will get the weights (initializers) from the
+    // workspace and offload onto the backend. This should be done only once.
+    // Subsequent call of this function with the same model id should find a
+    // cached backend and therefore there is no need to repeat the above
+    // process.
+    buildBackendAndGraph(ws, property_pointers, onnx_model_str);
   }
 
   ~OnnxifiOp() {
@@ -109,7 +114,7 @@ class OnnxifiOp final : public Operator<Context> {
     return type;
   }
 
-  void BuildPropertyList(
+  void buildPropertyList(
       const OperatorDef& /* unused */,
       std::vector<uint64_t>* property_list,
       std::vector<int64_t>* /* unused */,
@@ -117,26 +122,28 @@ class OnnxifiOp final : public Operator<Context> {
     property_list->push_back(ONNXIFI_BACKEND_PROPERTY_NONE);
   }
 
-  void BuildBackendAndGraph(
+  void buildBackendAndGraph(
+      Workspace* ws,
       const std::vector<uint64_t>& property_pointers,
-      const std::string& onnx_model_str,
-      const std::vector<onnxTensorDescriptorV1>& weight_descs) {
+      const std::string& onnx_model_str) {
     op_id_string_ =
         this->template GetSingleArgument<std::string>("model_id", "") + ":" +
         this->template GetSingleArgument<std::string>("net_pos", "");
 
+    auto initializers =
+        this->template GetRepeatedArgument<std::string>("initializers");
     // Build the Onnxifi engine
     auto backend_index = this->template GetSingleArgument<int>("backend_id", 0);
-    onnxifi_library* lib = lib_;
-    auto creator = [lib,
+    auto creator = [this,
+                    ws,
                     property_pointers,
                     backend_index,
                     &onnx_model_str,
-                    &weight_descs]() {
+                    &initializers]() {
       std::vector<onnxBackendID> backend_ids;
       size_t num_backends{0};
       CAFFE_ENFORCE_EQ(
-          lib->onnxGetBackendIDs(nullptr, &num_backends),
+          lib_->onnxGetBackendIDs(nullptr, &num_backends),
           ONNXIFI_STATUS_FALLBACK);
       CAFFE_ENFORCE_GT(
           num_backends, 0, "At least 1 onnxifi backend should be available");
@@ -149,14 +156,14 @@ class OnnxifiOp final : public Operator<Context> {
           num_backends);
       backend_ids.resize(num_backends);
       CAFFE_ENFORCE_EQ(
-          lib->onnxGetBackendIDs(backend_ids.data(), &num_backends),
+          lib_->onnxGetBackendIDs(backend_ids.data(), &num_backends),
           ONNXIFI_STATUS_SUCCESS);
 
       onnxBackendID backend_id = backend_ids[backend_index];
       onnxBackend backend{nullptr};
 
       CAFFE_ENFORCE_EQ(
-          lib->onnxInitBackend(backend_id, property_pointers.data(), &backend),
+          lib_->onnxInitBackend(backend_id, property_pointers.data(), &backend),
           ONNXIFI_STATUS_SUCCESS);
 
       // Release unused backend ids.
@@ -164,11 +171,18 @@ class OnnxifiOp final : public Operator<Context> {
         if (i == backend_index) {
           continue;
         }
-        lib->onnxReleaseBackendID(backend_ids[i]);
+        lib_->onnxReleaseBackendID(backend_ids[i]);
       }
+
+      // Get weights
+      std::vector<std::string> weight_names;
+      std::vector<std::vector<uint64_t>> weight_shapes;
+      auto weight_descs = buildInitializationList(
+          ws, initializers, &weight_names, &weight_shapes);
+
       onnxGraph graph{nullptr};
       CAFFE_ENFORCE_EQ(
-          lib->onnxInitGraph(
+          lib_->onnxInitGraph(
               backend,
               nullptr,
               onnx_model_str.size(),
@@ -179,7 +193,7 @@ class OnnxifiOp final : public Operator<Context> {
           ONNXIFI_STATUS_SUCCESS);
 
       return std::make_shared<onnx::BackendGraphInfo>(
-          backend_id, backend, graph, lib);
+          backend_id, backend, graph, lib_);
     };
     backend_graph_shared_ptr_ =
         backend_graph_map_ptr_->insert(op_id_string_, creator);
@@ -202,9 +216,14 @@ class OnnxifiOp final : public Operator<Context> {
 #endif
   }
 
+  std::vector<int> extractOutputBatchSizes() const;
+
+  void maybeAdjustOutputBatchSizes(
+      const std::vector<int>& real_output_batch_sizes);
+
   std::vector<onnxTensorDescriptorV1> buildInitializationList(
       Workspace* ws,
-      std::unordered_set<std::string>* initialization_list,
+      const std::vector<std::string>& initializers,
       std::vector<std::string>* weight_names,
       std::vector<std::vector<uint64_t>>* weight_shapes);
 
@@ -233,6 +252,7 @@ class OnnxifiOp final : public Operator<Context> {
       onnxMemoryFenceV1*,
       onnxTraceEventList*);
 #endif
+  bool use_onnx_{false};
 
   // We bind the op input/output by position while ONNXIFI binds input/output by
   // names. In addition, op input/output names can be writtten by, for example,
@@ -246,6 +266,12 @@ class OnnxifiOp final : public Operator<Context> {
 
   // output shape hints
   std::unordered_map<int, TensorInfo> output_shape_hints_;
+
+  // Output resizing hint map
+  // key: max batch size
+  // value: position of the input where the real batch size can be extracted
+  // from its first dimension
+  std::unordered_map<int, int> batch_pos_map_;
 };
 
 } // namespace caffe2

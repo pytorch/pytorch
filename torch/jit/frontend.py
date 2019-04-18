@@ -5,8 +5,6 @@ import ast
 import inspect
 import string
 from textwrap import dedent
-from functools import partial
-from collections import namedtuple
 from torch._six import PY2
 from torch._C._jit_tree_views import *
 
@@ -416,6 +414,11 @@ class ExprBuilder(Builder):
         return Apply(func, args, kwargs)
 
     @staticmethod
+    def build_Ellipsis(ctx, expr):
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 3)  # len("...") == 3
+        return Dots(r)
+
+    @staticmethod
     def build_Name(ctx, expr):
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(expr.id))
         if expr.id.startswith(_reserved_prefix):
@@ -533,6 +536,8 @@ class ExprBuilder(Builder):
                     sub_exprs.append(build_Index(ctx, base, expr))
                 elif sub_type is ast.Slice:
                     sub_exprs.append(build_SliceExpr(ctx, base, expr))
+                elif sub_type is ast.Ellipsis:
+                    sub_exprs.append(Dots(base.range()))
                 else:
                     raise NotSupportedError(base.range(),
                                             "slicing multiple dimensions with "

@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/testing/file_check.h>
 #include "test/cpp/jit/test_base.h"
 
 #include <sstream>
@@ -210,6 +211,19 @@ graph(%0 : Tensor,
       error_thrown = true;
     }
     AT_ASSERT(error_thrown);
+  }
+
+  {
+    auto graph = std::make_shared<Graph>();
+    const std::string& text =
+        R"IR(
+    graph(%a):
+    # CHECK: return
+      return (%a))IR";
+
+    script::parseIR(text, &*graph);
+    graph->inputs()[0]->type()->expect<TensorType>();
+    torch::jit::testing::FileCheck().run(text, *graph);
   }
 }
 } // namespace jit

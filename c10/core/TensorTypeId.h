@@ -35,7 +35,7 @@ class C10_API TensorTypeId final
   friend C10_API std::string toString(TensorTypeId);
 };
 
-std::string toString(TensorTypeId id);
+C10_API std::string toString(TensorTypeId id);
 
 C10_API std::ostream& operator<<(std::ostream&, c10::TensorTypeId);
 

@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cpu/CopyKernel.h>
 
@@ -20,7 +21,7 @@ void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
 template <typename self_T>
 void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
   AT_CHECK(self.numel() == src.numel(), "sizes do not match");
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, src.scalar_type(), "_copy__cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, src.scalar_type(), "_copy__cpu", [&]() {
     _copy__cpu<self_T, scalar_t>(self, src);
   });
 }
@@ -37,13 +38,26 @@ bool copy_transpose_valid(const at::Tensor& self, const at::Tensor& src) {
 namespace at {
 namespace native {
 
+Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
+  Tensor b_src;
+  if (self.is_sparse() && src.is_sparse()) {
+    return at::copy_sparse_to_sparse_(self, src, non_blocking);
+  }
+  if (!self.is_sparse() && !src.is_sparse()) {
+    std::tie(b_src) = expand_inplace(self, src, "copy");
+    return s_copy_(self, b_src, non_blocking);
+  }
+  AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ",
+           self.type(), " and src type = ", src.type());
+}
+
 Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
   if (src.type_id() != CPUTensorId()) {
     _s_copy_from(src, self, non_blocking);
     return self;
   }
-  AT_DISPATCH_ALL_TYPES_AND(
-    at::ScalarType::Half, self.scalar_type(), "_copy__cpu", [&]() { ::_copy__cpu<scalar_t>(self, src); });
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool,
+      self.scalar_type(), "_copy__cpu", [&]() { ::_copy__cpu<scalar_t>(self, src); });
   return self;
 }
 
@@ -105,6 +119,7 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
     return;
   }
 
+  // TODO: Replace this with TensorIterator!
   bool serial_path = false;
   if (self.numel() == src.numel()) {
     if (self.is_contiguous() && src.is_contiguous()) {

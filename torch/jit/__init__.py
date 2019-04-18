@@ -1,34 +1,31 @@
 import torch._C
-from torch import Tensor
 from torch.autograd import Variable, function
 from torch.serialization import validate_cuda_device
-from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
+from torch.nn import Module, ModuleList, Parameter, Sequential
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
-from torch._six import raise_from, with_metaclass, get_function_from_type, \
+from torch._six import with_metaclass, get_function_from_type, \
     string_classes
-from torch._jit_internal import ignore
+from torch._jit_internal import ignore  # noqa: F401
+from torch.jit._pickle import Unpickler  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
 
 import math
-from collections import defaultdict, OrderedDict, namedtuple
+from collections import OrderedDict, namedtuple
 import textwrap
 import sys
 import warnings
-import itertools
 import weakref
 import types
 import contextlib
 import os
 import functools
 import copy
-import numbers
 import collections
-import re
 import inspect
 import pickle
 if sys.version_info[0] > 2:
@@ -57,7 +54,6 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 _jit_script_class_compile = torch._C._jit_script_class_compile
-BatchTensor = torch._C._jit.BatchTensor
 
 Future = torch._C.Future
 _fork = torch._C.fork
@@ -220,14 +216,20 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_input
 
 
 def _unique_state_dict(module, keep_vars=False):
-    state_dict = module.state_dict(keep_vars=keep_vars)
+    # since Parameter.data always creates a new torch.Tensor instance,
+    # id(v) doesn't work with it. So we always get the Parameter or Buffer
+    # as values, and deduplicate the params using Parameters and Buffers
+    state_dict = module.state_dict(keep_vars=True)
     filtered_dict = type(state_dict)()
     seen_ids = set()
     for k, v in state_dict.items():
         if id(v) in seen_ids:
             continue
         seen_ids.add(id(v))
-        filtered_dict[k] = v
+        if keep_vars:
+            filtered_dict[k] = v
+        else:
+            filtered_dict[k] = v.data
     return filtered_dict
 
 
@@ -700,14 +702,8 @@ def _try_get_dispatched_fn(fn):
     return _jit_internal.boolean_dispatched.get(fn)
 
 
-def _try_get_overloaded_fn(fn):
-    if not hasattr(fn, '__self__') or not isinstance(fn.__self__, ScriptModule):
-        # Only allow overloads for bound methods
-        return None
-    overloads = fn.__self__._overloads.get(fn.__name__, None)
-    if overloads is None:
-        return None
-    return [getattr(fn.__self__, overload) for overload in overloads]
+def _try_get_overloaded_fn(mod, field):
+    return mod._overloads.get(field, None) if isinstance(mod, ScriptModule) else None
 
 
 def _try_compile_weak_script(fn):
@@ -736,20 +732,20 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         return obj
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-    mod = ScriptModule()
     if inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
         ast = get_jit_class_def(obj)
-        _jit_script_class_compile(mod, ast, _rcb)
+        _jit_script_class_compile(ast, _rcb)
         _add_script_class(obj, obj.__name__)
         return obj
     else:
+        mod = ScriptModule()
         ast = get_jit_def(obj)
         _jit_script_compile(mod, ast, _rcb, get_default_args(obj))
-    # Forward docstrings
-    mod.__doc__ = obj.__doc__
-    return mod
+        # Forward docstrings
+        mod.__doc__ = obj.__doc__
+        return mod
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -798,38 +794,6 @@ def _is_weak_type(cls):
     Check if a type has been annotated with `weak_module`
     """
     return cls in _jit_internal.weak_types
-
-
-def batch(batch_size=1, optimize=True, _frames_up=0):
-    def decorator(fn):
-        if not _enabled:
-            return fn
-        import torch.jit.batchop
-        mod = script(fn, optimize, _frames_up)
-        res_graph = torch.to_batch_graph(mod.graph)
-        res_mod = ScriptModule()
-        res_mod._create_method_from_graph('forward', res_graph)
-
-        def wrapper(*args):
-            new_args = []
-            for arg in args:
-                if isinstance(arg, torch.Tensor):
-                    arg = BatchTensor(arg, batch_size)
-                if isinstance(arg, BatchTensor):
-                    new_args.extend([arg.get_data(), arg.get_mask(), arg.get_dims()])
-                else:
-                    new_args.append(arg)
-            res = res_mod(*new_args)
-            assert len(res) % 3 == 0
-            if len(res) % 3 != 0:
-                raise "non-batched-tensor output is not supported yet"
-            result = [BatchTensor(*res[i * 3: i * 3 + 3]) for i in range(len(res) // 3)]
-            if len(result) == 1:
-                return result[0]
-            return result
-        wrapper.__doc__ = fn.__doc__
-        return wrapper
-    return decorator
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -1164,6 +1128,8 @@ if _enabled:
                     return self._get_method(attr)
             if attr == 'graph' and self._has_method('forward'):
                 return self.__getattr__('forward').graph
+            if self._has_attribute(attr):
+                return self._get_attribute(attr)
             return Module.__getattr__(self, attr)
 
         def __setattr__(self, attr, value):
@@ -1241,6 +1207,9 @@ if _enabled:
                 "ScriptModules cannot be saved using torch.save. " +
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
+
+        def graph_for(self, *args, **kwargs):
+            return self._get_method('forward').graph_for(*args, **kwargs)
 
     class WeakScriptModuleProxy(ScriptModule):
         def __init__(self, original, stubs):
@@ -1524,6 +1493,13 @@ def _get_builtin_table():
     _builtin_table[id(torch.nn.functional._no_grad_embedding_renorm_)] = "aten::_no_grad_embedding_renorm_"
 
     _builtin_table[id(math.floor)] = "aten::floor"
+    _builtin_table[id(math.ceil)] = "aten::ceil"
+    _builtin_table[id(math.log)] = "aten::log"
+    _builtin_table[id(math.log1p)] = "aten::log1p"
+    _builtin_table[id(math.log10)] = "aten::log10"
+    _builtin_table[id(math.exp)] = "aten::exp"
+    _builtin_table[id(math.sqrt)] = "aten::sqrt"
+    _builtin_table[id(math.pow)] = "aten::pow"
     _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
     _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
@@ -1582,6 +1558,14 @@ def annotate(the_type, the_value):
 
 Attribute = collections.namedtuple('Attribute', ['value', 'type'])
 
+last_executed_optimized_graph = torch._C._last_executed_optimized_graph
+
+
+def _graph_for(self, *args, **kwargs):
+    self(*args, **kwargs)
+    return last_executed_optimized_graph()
+
+torch._C.ScriptMethod.graph_for = _graph_for
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

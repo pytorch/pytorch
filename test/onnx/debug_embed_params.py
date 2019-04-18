@@ -4,12 +4,10 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import sys
-import itertools
 
 import torch
 import torch.jit
 from torch.autograd import Variable
-import torch.autograd.function as function
 
 import onnx
 import caffe2.python.onnx.backend as c2

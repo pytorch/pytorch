@@ -9,6 +9,7 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/Parallel.h>
 #include <c10/util/Exception.h>
 
 #include <atomic>
@@ -204,7 +205,7 @@ Engine::Engine() = default;
 Engine::~Engine() = default;
 
 auto Engine::thread_init(int device) -> void {
-  THInferNumThreads();
+  at::init_num_threads();
   // Note [Allocating GPUs to autograd threads]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // What's our strategy here?  Originally, the autograd engine was written
@@ -371,7 +372,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       }
       grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
-    if (!is_compatible_type(metadata.type(), grads[i].type())) {
+    if (!is_compatible_type(metadata.type(), grads[i].dispatch_type())) {
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected type ";
       ss << metadata.type() << " but got " << grads[i].type();

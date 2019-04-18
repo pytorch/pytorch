@@ -1,11 +1,7 @@
 import torch
-import copy
-import numbers
-from typing import Tuple, Optional
+from typing import Tuple, Optional  # noqa: F401
 from torch import Tensor
-from torch.jit import ScriptModule
 
-from torch.nn.utils.rnn import PackedSequence
 from torch.nn import _VF
 
 
