@@ -2192,11 +2192,15 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         @contextmanager
-        def plan_cache_max_size(n):
-            original = torch.backends.cuda.cufft_plan_cache.max_size
-            torch.backends.cuda.cufft_plan_cache.max_size = n
+        def plan_cache_max_size(n, device=None):
+            if device is None:
+                plan_cache = torch.backends.cuda.cufft_plan_cache
+            else:
+                plan_cache = torch.backends.cuda.cufft_plan_cache[device]
+            original = plan_cache.max_size
+            plan_cache.max_size = n
             yield
-            torch.backends.cuda.cufft_plan_cache.max_size = original
+            plan_cache.max_size = original
 
         with plan_cache_max_size(max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
             _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
@@ -2215,6 +2219,44 @@ class TestCuda(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"read-only property"):
             torch.backends.cuda.cufft_plan_cache.size = -1
+
+        with self.assertRaisesRegex(RuntimeError, r"but got device with index"):
+            torch.backends.cuda.cufft_plan_cache[torch.cuda.device_count() + 10]
+
+        if TEST_MULTIGPU:
+            # Test that different GPU has different cache
+            x0 = torch.randn(2, 3, 3, device='cuda:0')
+            x1 = x0.cuda(1)
+            self.assertEqual(x0.rfft(2), x1.rfft(2))
+            # If a plan is used across different devices, the following line (or
+            # the assert above) would trigger illegal memory access. Other ways
+            # to trigger the error include
+            #   (1) setting CUDA_LAUNCH_BLOCKING=1 (pytorch/pytorch#19224) and
+            #   (2) printing a device 1 tensor.
+            x0.copy_(x1)
+
+            # Test that un-indexed `torch.backends.cuda.cufft_plan_cache` uses current device
+            with plan_cache_max_size(10, device='cuda:0'):
+                with plan_cache_max_size(11, device='cuda:1'):
+                    self.assertEqual(torch.backends.cuda.cufft_plan_cache[0].max_size, 10)
+                    self.assertEqual(torch.backends.cuda.cufft_plan_cache[1].max_size, 11)
+
+                    self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
+                    with torch.cuda.device(1):
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
+                        with torch.cuda.device(0):
+                            self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
+
+                self.assertEqual(torch.backends.cuda.cufft_plan_cache[0].max_size, 10)
+                with torch.cuda.device(1):
+                    with plan_cache_max_size(11):  # default is cuda:1
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache[0].max_size, 10)
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache[1].max_size, 11)
+
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
+                        with torch.cuda.device(0):
+                            self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
     def test_stft(self):
         _TestTorchMixin._test_stft(self, device=torch.device('cuda'))
