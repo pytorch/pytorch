@@ -100,7 +100,7 @@ as arguments for quant ops in quantization pass.
 
 
 class QuantConfigTemplate:
-    def __init__(self, tensorType=None, observerImpl=None, calcQParamImpl=None):
+    def __init__(self, tensorType, observerImpl=None, calcQParamImpl=None):
         self.value_stats = {}
         self.qparam_dict = {}
         self.averaging_constant = 0.001
@@ -185,7 +185,8 @@ class QuantizerTestCase(TestCase):
         # Eager mode
 
         # Create QuantConfig object for eager mode
-        eagerQuantObj = QuantConfigTemplate(observerImpl=activationObserver,
+        eagerQuantObj = QuantConfigTemplate(tensorType='activation',
+                                            observerImpl=activationObserver,
                                             calcQParamImpl=calcQParamFunc)
         eagerM = TestM(quantObj=eagerQuantObj)
 
@@ -197,32 +198,34 @@ class QuantizerTestCase(TestCase):
         scriptM = TestScriptM()
 
         # Create QuantConfig object for script mode
-        activationQuantObj = QuantConfigTemplate(observerImpl=activationObserver,
+        activationQuantObj = QuantConfigTemplate(tensorType='activation',
+                                                 observerImpl=activationObserver,
                                                  calcQParamImpl=calcQParamFunc)
-        paramQuantObj = QuantConfigTemplate(observerImpl=weightObserver,
-                                            calcQParamImpl=calcQParamFunc)
+        weightQuantObj = QuantConfigTemplate(tensorType='param',
+                                             observerImpl=weightObserver,
+                                             calcQParamImpl=calcQParamFunc)
 
         # This performs type analysis to identify tensors from other
         # types. This info needed for further quantizer passes
         torch._C._jit_pass_constant_propagation(scriptM.graph)
 
         # Create sub-module quantconfigobject dict
-        observer_dict = {'__main__': {'activation': activationQuantObj,
-                                      'param': paramQuantObj}
-                         }
+        qconfigobject_dict = {'__main__': {'activation': activationQuantObj,
+                                           'param': weightQuantObj}
+                              }
 
         # Insert observers
-        torch._C._jit_pass_insert_observers(scriptM, observer_dict)
+        torch._C._jit_pass_insert_observers(scriptM, qconfigobject_dict)
 
         # Run ScriptM Model and Collect statistics
         scriptM.forward(data)
         activationQuantObj.calcQParam()
-        paramQuantObj.calcQParam()
+        weightQuantObj.calcQParam()
 
         # Compare results for eager and graph mode
         eagerDict = eagerQuantObj.getQParamDict()
         activationDict = activationQuantObj.getQParamDict()
-        paramDict = paramQuantObj.getQParamDict()
+        weightDict = weightQuantObj.getQParamDict()
 
         self.assertTrue('z' in eagerDict and 'z' in activationDict)
         self.assertAlmostEqual(eagerDict["z"][0], activationDict["z"][0], places=15)
