@@ -538,4 +538,9 @@ void convert(const src_T *src, dst_T *dst, int64_t n) {
   }
 }
 
+template<typename src_T>
+void convert(const src_T *src, src_T *dst, int64_t n) {
+  memcpy(dst, src, sizeof(src_T) * n);
+}
+
 }}}
