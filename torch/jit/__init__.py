@@ -1229,6 +1229,17 @@ if _enabled:
                     object.__setattr__(self, name, item)
                 elif isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
                     ScriptModule.__setattr__(self, name, item)
+                else:
+                    # if we can, register it as an attribute
+                    is_attribute = False
+                    try:
+                        the_type = torch.jit.annotations.ann_to_type(type(item))
+                        is_attribute = True
+                    except ValueError as e:
+                        pass
+                    if is_attribute:
+                        attr = Attribute(item, type(item))
+                        ScriptModule.__setattr__(self, name, attr)
             for name in original._buffers:
                 if original._buffers[name] is None:
                     object.__setattr__(self, name, None)

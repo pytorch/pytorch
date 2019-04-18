@@ -10679,6 +10679,20 @@ a")
 
         self.assertEqual(opt_list_tuple_caller((2., 3.)), 4)
 
+    def test_weak_attributes(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.linear = torch.nn.Linear(10, 20)
+
+            def forward(self):
+                # type: (int) -> Tuple[int, int]
+                return (self.linear.in_features, self.linear.out_features)
+
+        out = M()()
+        self.assertEqual(out[0], 10)
+        self.assertEqual(out[1], 20)
+
     def test_lhs_indexing(self):
         def foo(a, b):
             a = a.clone()
