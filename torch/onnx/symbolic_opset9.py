@@ -1446,7 +1446,7 @@ def nonzero(g, input):
 @parse_args('v')
 def isnan(g, input):
     output = g.op('IsNaN', input)
-    output = sym_help._cast_func_template(cast_pytorch_to_onnx['Byte'], g, output, None)
+    output = sym_help._cast_func_template(sym_help.cast_pytorch_to_onnx['Byte'], g, output, None)
     return output
 
 

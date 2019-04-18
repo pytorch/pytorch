@@ -563,7 +563,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 # Export it regularly
                 attrs = {k: n[k] for k in n.attributeNames()}
                 if not is_exportable_aten_op:
-                    raise RuntimeError("ONNX export failed on ATen operator {} because torch.onnx.symbolic_opset{}.{} does not exist"
+                    raise RuntimeError("ONNX export failed on ATen operator {} because "
+                                       "torch.onnx.symbolic_opset{}.{} does not exist"
                                        .format(op_name, opset_version, op_name))
                 op_fn = sym_registry.get_registered_op(op_name, '', opset_version)
                 return op_fn(g, *inputs, **attrs)
@@ -605,7 +606,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         # custom ops
         elif sym_registry.is_registered_version(ns, 0):
             if not sym_registry.is_registered_op(op_name, ns, 0):
-                raise RuntimeError("ONNX export failed on custom operator {}::{} because torch.onnx.symbolic_opset{}.{} does not exist. "
+                raise RuntimeError("ONNX export failed on custom operator {}::{} because "
+                                   "torch.onnx.symbolic_opset{}.{} does not exist. "
                                    "Have you registered your symbolic function with "
                                    "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
                                    .format(ns, op_name, opset_version, op_name))
