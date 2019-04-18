@@ -455,7 +455,7 @@ OpCode Unpickler::readInstruction() {
       }
     } break;
     default:
-      AT_ERROR("Unknown opcode for unpickling: ", static_cast<char>(opcode));
+      AT_ERROR("Unknown opcode for unpickling: ", static_cast<uint8_t>(opcode));
   }
   return opcode;
 }
