@@ -1920,9 +1920,11 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__and__, a& b),
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
+    DEFINE_INT_OP(aten::gcd, std::gcd(a,b))
 
     DEFINE_GENERIC_OP(aten::copysign, std::copysign(a, b), std::copysign(a, b), float, float),
-    DEFINE_INT_FLOAT_OP(aten:copysign, std::copysign(a,b), float),
+    DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a,b), float),
+
 
     Operator(
         "prim::abs(int x) -> int",

@@ -5332,6 +5332,7 @@ a")
         inputs = self._make_scalar_vars([-1234, 4321], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+
     def test_math_ops(self):
 
         def test_floor(x):
@@ -5394,9 +5395,12 @@ a")
             # type: (Union[float, int], Union[float, int]) -> float
             return math.copysign(x, y)
 
+        def test_gcd(x, y):
+            # type (int, int) -> int
+            return math.gcd(x, y)
+
         self.checkScript(test_floor, (1.5,))
         self.checkScript(test_ceil, (1.5,))
-        self.checkScript(test_copysign, ((1, -1), (1.0, -1), (1, -1.0), (1.0, -1.0)))
         self.checkScript(test_log_int, (2,))
         self.checkScript(test_log_float, (2.0,))
         self.checkScript(test_log1p_int, (1,))
@@ -5409,6 +5413,8 @@ a")
         self.checkScript(test_sqrt_float, (2.0,))
         self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
+        for inputs in ((1, -1), (1.0, -1), (1, -1.0), (1.0, -1.0)):
+            self.checkScript(test_copysign, inputs)
 
     def test_if_nest_while(self):
         def func(a, b):
