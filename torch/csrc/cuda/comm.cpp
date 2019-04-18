@@ -52,13 +52,13 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
                              "first on devices list");
   std::vector<Tensor> tensors;
   tensors.reserve(devices.size());
-  at::cuda::OptionalCUDAGuard _device_guard;
 #ifdef USE_NCCL
   if (nccl::is_available({tensor})) {
     tensors.push_back(tensor);
     for (auto device : devices.slice(1)) {
-      _device_guard.set_index(device);
-      tensors.push_back(at::empty(tensor.sizes(), type.options(tensor.scalar_type())));
+      tensors.push_back(
+          at::empty(tensor.sizes(),
+          tensor.options().device(at::Device(kCUDA, device))));
     }
     nccl::broadcast(tensors);
   } else {
@@ -70,9 +70,8 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
     }
     IntArrayRef loop_devices = tensor.is_cuda() ? devices.slice(1) : devices;
     for (auto device : loop_devices) {
-      _device_guard.set_index(device);
       tensors.push_back(tensor.to(
-          kCUDA,
+          at::Device(kCUDA, device),
           tensor.scalar_type(),
           /*non_blocking*/true,
           /*copy*/true));
