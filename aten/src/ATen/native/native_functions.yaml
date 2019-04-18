@@ -1910,7 +1910,6 @@
   variants: method
 
 - func: unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: unique_dim_cpu
@@ -1929,7 +1928,6 @@
     CUDA: unique_dim_consecutive_cuda
 
 - func: unique(Tensor self, bool sorted=True, bool return_inverse=False, bool return_counts=False, int? dim=None) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: unique_cpu
