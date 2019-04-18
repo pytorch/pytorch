@@ -1042,34 +1042,44 @@ for k, v in sym_help.cast_pytorch_to_onnx.items():
     globals()[name] = parse_args('v', 'i')(partial(sym_help._cast_func_template, v))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def zeros(g, sizes, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def zeros(g, sizes, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def zeros_like(g, input, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def zeros_like(g, input, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def ones(g, sizes, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def ones(g, sizes, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def ones_like(g, input, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def ones_like(g, input, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-def full(g, sizes, value, dtype, layout, device):
+def full(g, sizes, value, dtype, layout, device, pin_memory=False):
+    if pin_memory and _parse_arg(pin_memory, 'b'):
+        raise RuntimeError("onnx pin_memory support is not implemented")
     const_value = sym_help._maybe_get_const(value, 't')
     if sym_help._is_value(const_value):
         tmp = zeros(sizes, dtype, layout, device)
@@ -1080,8 +1090,10 @@ def full(g, sizes, value, dtype, layout, device):
                     value_t=torch.tensor([const_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v')
-def full_like(g, input, fill_value, dtype, layout, device):
+@parse_args('v', 'f', 'i', 'v', 'v', 'b')
+def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
@@ -1144,6 +1156,11 @@ def to(g, self, *args):
         return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 5:
         # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
+        dtype = sym_help._get_const(args[0], 'i', 'dtype')
+        # Layout and device are ignored
+        return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
+    elif len(args) == 6:
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool) -> Tensor
         dtype = sym_help._get_const(args[0], 'i', 'dtype')
         # Layout and device are ignored
         return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])

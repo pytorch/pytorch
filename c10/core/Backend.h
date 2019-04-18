@@ -223,12 +223,6 @@ static inline Backend backendToHIP(Backend b) {
   }
 }
 
-constexpr DeviceType kCPU = DeviceType::CPU;
-constexpr DeviceType kCUDA = DeviceType::CUDA;
-constexpr DeviceType kHIP = DeviceType::HIP;
-constexpr DeviceType kMSNPU = DeviceType::MSNPU;
-constexpr DeviceType kXLA = DeviceType::XLA;
-
 static inline const char* toString(Backend b) {
   switch (b) {
     case Backend::CPU:

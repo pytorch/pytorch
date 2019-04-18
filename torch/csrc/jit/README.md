@@ -124,8 +124,8 @@ def f(a, b):
 
 The frontend, described later in this document will turn into a `Graph`:
 ```
-graph(%0 : Double(2)
-      %1 : Double(2)) {
+graph(%0 : Double(2),
+      %1 : Double(2)):
   %2 : int = prim::Constant[value=1]()
   %3 : Double(2) = aten::add(%0, %1, %2)
   %4 : Double(2) = aten::mul(%3, %3)
@@ -133,8 +133,7 @@ graph(%0 : Double(2)
   %6 : Double(2) = aten::tanh(%5)
   %7 : Double(2) = aten::add(%6, %6, %2)
   %8 : Double(2) = aten::add(%5, %7, %2)
-  return (%8);
-}
+  return (%8)
 ```
 
 This is the canonical textual representation of the IR. You should be able to easily find (almost all) of the elements we discussed above.
@@ -214,14 +213,12 @@ For if-statements (`prim::If`) the Blocks have no inputs, and the outputs are th
 Example IR for an if-statement looks like:
 ```
 %y_1, ..., %y_r = prim::If(%condition)
-  block0() { # TRUE BRANCH, never takes arguments, has to return r outputs
+  block0():  # TRUE BRANCH, never takes arguments, has to return r outputs
     %t_1, ..., %t_k = some::node(%a_value_from_outer_block)
     -> (%t_1, ..., %t_r)
-  }
-  block1() { # FALSE BRANCH, never takes arguments, has to return r outputs
+  block1():  # FALSE BRANCH, never takes arguments, has to return r outputs
     %f_1, ..., %f_m = some::node(%a_value_from_outer_block)
     -> (%f_1, ..., %f_r)
-  }
 ```
 
 Values corresponding to `%y_1, ..., %y_r` will become either `%t_1, ..., %t_r`, or `%f_1, ..., %f_r` depending on the value of `%condition` at runtime (you can see that the node kind of acts as a Phi node in conventional SSA).
@@ -239,24 +236,22 @@ def f(a, b, c):
 ```
 
 ```
-graph(%a : Dynamic
-      %b : Dynamic
-      %c : Dynamic) {
+graph(%a : Dynamic,
+      %b : Dynamic,
+      %c : Dynamic):
   %2 : int = prim::Constant[value=1]()
   %3 : Dynamic = aten::add(%a, %b, %2)
   %5 : Dynamic = prim::If(%c)
-    block0() {
+    block0():
       %6 : int = prim::Constant[value=1]()
       %7 : Dynamic = aten::add(%3, %3, %6)
       -> (%7)
     }
-    block1() {
+    block1():
       %8 : int = prim::Constant[value=1]()
       %9 : Dynamic = aten::add(%b, %3, %8)
       -> (%9)
-    }
-  return (%5);
-}
+  return (%5)
 ```
 
 The outputs of the if-statement serve a role similar to "phi" nodes in traditional SSA control-flow graphs.
@@ -265,11 +260,10 @@ The outputs of the if-statement serve a role similar to "phi" nodes in tradition
 Loops are implemented with `prim::Loop` which covers both `while` and `for` loops. A valid instantiation of this node always looks like this:
 ```
 %y_1, ..., %y_r = prim::Loop(%max_trip_count, %initial_condition, %x_1, ..., %x_r)
-  block0(%i, %a_1, ..., %a_r) {
+  block0(%i, %a_1, ..., %a_r):
     %b_1, ..., %b_m = some::node(%a_value_from_outer_block, %a_1)
     %iter_condition = some::other_node(%a_2)
     -> (%iter_condition, %b_1, ..., %b_r)
-  }
 ```
 
 The simplest way to explain the semantics is to consider this Python-like pseudo-code:
@@ -306,17 +300,15 @@ def f(x):
 can be translated as:
 
 ```
-graph(%z.1 : Dynamic) {
+graph(%z.1 : Dynamic):
   %3 : bool = prim::Constant[value=1]()
   %1 : int = prim::Constant[value=0]()
   %2 : int = aten::size(%z.1, %1)
   %z : Dynamic = prim::Loop(%2, %3, %z.1)
-    block0(%i : int, %5 : Dynamic) {
+    block0(%i : int, %5 : Dynamic):
       %z.2 : Dynamic = aten::mul(%5, %5)
       -> (%3, %z.2)
-    }
-  return (%z);
-}
+  return (%z)
 ```
 
 ## Value ##
@@ -691,13 +683,13 @@ Unlike typical interpreters, we not attempt to do careful register allocation. S
 However, we do need to ensure that values are destructed immediately after their last use. Because Torch reference counts Tensors, they will be deallocated immediately when their last reference is gone. To ensure we use a minimum amount of memory we want to ensure that the interpreter releases the reference as soon as it is no longer used. To do this, each Instruction also has set of flags which indicate the inputs to the operation which will no longer be used after the operation. For these inputs, the IValue is moved rather than copied from the register file, ensuring the reference will go dead as soon as the Operation no longer needs it.  extra instructions may be inserted into the program to explicitly drop references for values whose last use depends on the control flow of the program.
 
 ```
-graph(%x : Tensor
-      %hx : Tensor
-      %cx : Tensor
-      %w_ih : Tensor
-      %w_hh : Tensor
-      %b_ih : Tensor
-      %b_hh : Tensor) {
+graph(%x : Tensor,
+      %hx : Tensor,
+      %cx : Tensor,
+      %w_ih : Tensor,
+      %w_hh : Tensor,
+      %b_ih : Tensor,
+      %b_hh : Tensor):
   %7 : int = prim::Constant[value=4]()
   %8 : int = prim::Constant[value=1]()
   %9 : Tensor = aten::t(%w_ih)
@@ -719,8 +711,7 @@ graph(%x : Tensor
   %28 : Tensor = aten::tanh(%cy)
   %hy : Tensor = aten::mul(%outgate, %28)
   %30 : (Tensor, Tensor) = prim::TupleConstruct(%hy, %cy)
-  return (%30);
-}
+  return (%30)
 ```
 
 ```
@@ -775,13 +766,13 @@ def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
 After going through the the frontend, we get start with this unoptimized graph:
 
 ```
-graph(%x : Tensor
-      %hx : Tensor
-      %cx : Tensor
-      %w_ih : Tensor
-      %w_hh : Tensor
-      %b_ih : Tensor
-      %b_hh : Tensor) {
+graph(%x : Tensor,
+      %hx : Tensor,
+      %cx : Tensor,
+      %w_ih : Tensor,
+      %w_hh : Tensor,
+      %b_ih : Tensor,
+      %b_hh : Tensor):
   %7 : int = prim::Constant[value=4]()
   %8 : int = prim::Constant[value=1]()
   %9 : Tensor = aten::t(%w_ih)
@@ -803,8 +794,7 @@ graph(%x : Tensor
   %28 : Tensor = aten::tanh(%cy)
   %hy : Tensor = aten::mul(%outgate, %28)
   %30 : (Tensor, Tensor) = prim::TupleConstruct(%hy, %cy)
-  return (%30);
-}
+  return (%30)
 ```
 
 Execution starts in `GraphExecutor::run`, which takes takes a Stack of inputs.
@@ -824,13 +814,13 @@ The ArgumentSpec object is used as a key into a cache that holds pre-optimized C
 
 ```
 # post specialization, inputs are now specialized types
-graph(%x : Float(*, *)
-      %hx : Float(*, *)
-      %cx : Float(*, *)
-      %w_ih : Float(*, *)
-      %w_hh : Float(*, *)
-      %b_ih : Float(*)
-      %b_hh : Float(*)) {
+graph(%x : Float(*, *),
+      %hx : Float(*, *),
+      %cx : Float(*, *),
+      %w_ih : Float(*, *),
+      %w_hh : Float(*, *),
+      %b_ih : Float(*),
+      %b_hh : Float(*)):
   %7 : int = prim::Constant[value=4]()
   %8 : int = prim::Constant[value=1]()
   %9 : Tensor = aten::t(%w_ih)
@@ -852,8 +842,7 @@ graph(%x : Float(*, *)
   %28 : Tensor = aten::tanh(%cy)
   %hy : Tensor = aten::mul(%outgate, %28)
   %30 : (Tensor, Tensor) = prim::TupleConstruct(%hy, %cy)
-  return (%30);
-}
+  return (%30)
 ```
 
 It then runs "required passes", which are graph transformations necessary to generate legal graphs for the interpreter. (Some passes such as differentiation will introduce Nodes that are not defined by operators and require passes to clean up. The combination of `specializeUndef` and `LowerGradOf` clean up these operations.) These passes also remove broadcasting "expand" nodes that get implicitly inserted by the tracer but are not valid for all sizes.
@@ -864,13 +853,13 @@ It then runs inference passes to calculate properties of the graph given this pa
 * It propagates the input ranks, dtypes, devices, and requires_grad information to the rest of the graph where possible.
 
 ```
-graph(%x : Float(*, *)
-      %hx : Float(*, *)
-      %cx : Float(*, *)
-      %w_ih : Float(*, *)
-      %w_hh : Float(*, *)
-      %b_ih : Float(*)
-      %b_hh : Float(*)) {
+graph(%x : Float(*, *),
+      %hx : Float(*, *),
+      %cx : Float(*, *),
+      %w_ih : Float(*, *),
+      %w_hh : Float(*, *),
+      %b_ih : Float(*),
+      %b_hh : Float(*)):
   %8 : int = prim::Constant[value=1]()
   %9 : Float(*, *) = aten::t(%w_ih)
   %10 : Float(*, *) = aten::mm(%x, %9)
@@ -890,8 +879,7 @@ graph(%x : Float(*, *)
   %28 : Float(*, *) = aten::tanh(%cy)
   %hy : Float(*, *) = aten::mul(%outgate, %28)
   %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
-  return (%30);
-}
+  return (%30)
 ```
 
 
@@ -905,13 +893,13 @@ It then runs a number of *derivative preserving* optimization passes. If a compu
 * Batching matrix multiplications that result from unrolling loops.
 
 ```
-graph(%x : Float(*, *)
-      %hx : Float(*, *)
-      %cx : Float(*, *)
-      %w_ih : Float(*, *)
-      %w_hh : Float(*, *)
-      %b_ih : Float(*)
-      %b_hh : Float(*)) {
+graph(%x : Float(*, *),
+      %hx : Float(*, *),
+      %cx : Float(*, *),
+      %w_ih : Float(*, *),
+      %w_hh : Float(*, *),
+      %b_ih : Float(*),
+      %b_hh : Float(*)):
   %8 : int = prim::Constant[value=1]()
   %9 : Float(*, *) = aten::t(%w_ih)
   %10 : Float(*, *) = aten::mm(%x, %9)
@@ -931,8 +919,7 @@ graph(%x : Float(*, *)
   %28 : Float(*, *) = aten::tanh(%cy)
   %hy : Float(*, *) = aten::mul(%outgate, %28)
   %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
-  return (%30);
-}
+  return (%30)
 ```
 
 *Post-derivative optimization* The next optimization depends on whether any part of the graph actual requires a gradient to be calculated, which is determined by `needsGradient`. In the case where no gradients are required (i.e. for inference graphs), then we can directly apply optimizations that generate graphs that may not have valid gradients defined. For now this is the `FuseGraph` pass, which looks for adjacent point-wise operations along with reviewing operations such as `split` and `concat`, and creates `prim::FusionGroup` Nodes in the graph to replace these operations. The Operator registered to execute `prim:FusionGroup` nodes will generate a new CUDA kernel for each unique Node, which replaces the original separate execution.
@@ -942,13 +929,13 @@ Note the two phases for compilation of fusion groups: First, the `FuseGraph` pas
 In the case where no gradients are required, the optimization process is finished, a Code object is constructed from the Graph, it is added to the code cache, and then an InterpreterState is constructed and run.
 
 ```
-graph(%x : Float(*, *)
-      %hx : Float(*, *)
-      %cx : Float(*, *)
-      %w_ih : Float(*, *)
-      %w_hh : Float(*, *)
-      %b_ih : Float(*)
-      %b_hh : Float(*)) {
+graph(%x : Float(*, *),
+      %hx : Float(*, *),
+      %cx : Float(*, *),
+      %w_ih : Float(*, *),
+      %w_hh : Float(*, *),
+      %b_ih : Float(*),
+      %b_hh : Float(*)):
   %9 : Float(*, *) = aten::t(%w_ih)
   %10 : Float(*, *) = aten::mm(%x, %9)
   %11 : Float(*, *) = aten::t(%w_hh)
@@ -959,12 +946,12 @@ graph(%x : Float(*, *)
   %hy : Float(*, *), %cy : Float(*, *) = prim::FusionGroup_0(%cx, %82, %81, %80, %79)
   %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
   return (%30);
-}
-with prim::FusionGroup_0 = graph(%13 : Float(*, *)
-      %71 : Tensor
-      %76 : Tensor
-      %81 : Tensor
-      %86 : Tensor) {
+
+with prim::FusionGroup_0 = graph(%13 : Float(*, *),
+      %71 : Tensor,
+      %76 : Tensor,
+      %81 : Tensor,
+      %86 : Tensor):
   %87 : Float(*, *), %88 : Float(*, *), %89 : Float(*, *), %90 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%86)
   %82 : Float(*, *), %83 : Float(*, *), %84 : Float(*, *), %85 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%81)
   %77 : Float(*, *), %78 : Float(*, *), %79 : Float(*, *), %80 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%76)
@@ -991,8 +978,7 @@ with prim::FusionGroup_0 = graph(%13 : Float(*, *)
   %cy : Float(*, *) = aten::add(%14, %11, %69)
   %4 : Float(*, *) = aten::tanh(%cy)
   %hy : Float(*, *) = aten::mul(%outgate, %4)
-  return (%hy, %cy);
-}
+  return (%hy, %cy)
 ```
 
 
@@ -1001,25 +987,24 @@ with prim::FusionGroup_0 = graph(%13 : Float(*, *)
 The creating of derivative subgraphs is done using a similar approach to finding fusion groups: adjacent operations with known gradient formulas are grouped together into `prim::DifferentiableGraph` nodes. We only generate these nodes if we can find a large enough subgraph where optimization is likely to be profitable since there is some overhead involved in entering and exiting a differentiable subgraph.
 
 ```
-graph(%x : Float(*, *)
-      %hx : Float(*, *)
-      %cx : Float(*, *)
-      %w_ih : Float(*, *)
-      %w_hh : Float(*, *)
-      %b_ih : Float(*)
-      %b_hh : Float(*)) {
+graph(%x : Float(*, *),
+      %hx : Float(*, *),
+      %cx : Float(*, *),
+      %w_ih : Float(*, *),
+      %w_hh : Float(*, *),
+      %b_ih : Float(*),
+      %b_hh : Float(*)):
   %8 : int = prim::Constant[value=1]()
   %hy : Float(*, *), %cy : Float(*, *) = prim::DifferentiableGraph_0(%cx, %b_hh, %b_ih, %hx, %w_hh, %x, %w_ih)
   %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
-  return (%30);
-}
-with prim::DifferentiableGraph_0 = graph(%13 : Float(*, *)
-      %29 : Float(*)
-      %33 : Float(*)
-      %40 : Float(*, *)
-      %43 : Float(*, *)
-      %45 : Float(*, *)
-      %48 : Float(*, *)) {
+  return (%30)
+with prim::DifferentiableGraph_0 = graph(%13 : Float(*, *),
+      %29 : Float(*),
+      %33 : Float(*),
+      %40 : Float(*, *),
+      %43 : Float(*, *),
+      %45 : Float(*, *),
+      %48 : Float(*, *)):
   %49 : Float(*, *) = aten::t(%48)
   %47 : Float(*, *) = aten::mm(%45, %49)
   %44 : Float(*, *) = aten::t(%43)
@@ -1038,8 +1023,7 @@ with prim::DifferentiableGraph_0 = graph(%13 : Float(*, *)
   %cy : Float(*, *) = aten::add(%14, %11, %38)
   %4 : Float(*, *) = aten::tanh(%cy)
   %hy : Float(*, *) = aten::mul(%outgate, %4)
-  return (%hy, %cy);
-}
+  return (%hy, %cy)
 ```
 
 ## DifferentiableGraphOp ##

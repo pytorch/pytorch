@@ -153,11 +153,22 @@ class DistributedDataParallel(Module):
 
     Args:
         module (Module): module to be parallelized
-        device_ids (list of int or torch.device): CUDA devices (default: all devices)
-        output_device (int or torch.device): device location of output (default: device_ids[0])
+        device_ids (list of int or torch.device): CUDA devices. This should
+                   only be provided when the input module resides on a single
+                   CUDA device. For single-device modules, the ``i``th
+                   :attr:`module` replica is placed on ``device_ids[i]``. For
+                   multi-device modules and CPU modules, device_ids must be None
+                   or an empty list, and input data for the forward pass must be
+                   placed on the correct device. (default: all devices for
+                   single-device modules)
+        output_device (int or torch.device): device location of output for
+                      single-device CUDA modules. For multi-device modules and
+                      CPU modules, it must be None, and the module itself
+                      dictates the output location. (default: device_ids[0] for
+                      single-device modules)
         broadcast_buffers (bool): flag that enables syncing (broadcasting) buffers of
-                           the module at beginning of the forward function.
-                           (default: ``True``)
+                          the module at beginning of the forward function.
+                          (default: ``True``)
         process_group: the process group to be used for distributed data
                        all-reduction. If ``None``, the default process group, which
                        is created by ```torch.distributed.init_process_group```,
@@ -192,12 +203,35 @@ class DistributedDataParallel(Module):
 
         super(DistributedDataParallel, self).__init__()
 
-        # Use all devices by default
-        if device_ids is None:
-            device_ids = list(range(torch.cuda.device_count()))
+        self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
+        self.is_cuda = all([p.device.type == 'cuda' for p in module.parameters()])
 
-        if output_device is None:
-            output_device = device_ids[0]
+        if not self.is_cuda or self.is_multi_device_module:
+            assert not device_ids and not output_device, (
+                "DistributedDataParallel device_ids and output_device arguments "
+                "only work with single-device CUDA modules, but got "
+                "device_ids {}, output_device {}, and module parameters {}."
+            ).format(device_ids, output_device, {p.device for p in module.parameters()})
+
+            self.device_ids = None
+            self.output_device = None
+        else:
+            # Use all devices by default for single-device CUDA modules
+            if device_ids is None:
+                device_ids = list(range(torch.cuda.device_count()))
+
+            self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
+
+            if output_device is None:
+                output_device = device_ids[0]
+
+            self.output_device = _get_device_index(output_device, True)
+
+        if self.is_multi_device_module:
+            assert self.is_cuda, (
+                "DistributedDataParallel with multi-device module only works "
+                "with CUDA devices, but module parameters locate in {}."
+            ).format({p.device for p in module.parameters()})
 
         if process_group is None:
             self.process_group = _get_default_group()
@@ -206,9 +240,8 @@ class DistributedDataParallel(Module):
 
         self.dim = dim
         self.module = module
-        self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
-        self.output_device = _get_device_index(output_device, True)
         self.broadcast_buffers = broadcast_buffers
+
         if check_reduction:
             # This argument is no longer used since the reducer
             # will ensure reduction completes even if some parameters
@@ -241,7 +274,9 @@ class DistributedDataParallel(Module):
         (4) registering the grad hooks
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
-        if len(self.device_ids) > 1:
+        if self.device_ids and len(self.device_ids) > 1:
+            # only create replicas for single-device CUDA modules
+            #
             # TODO: we don't need to replicate params in here. they're always going to
             # be broadcasted using larger blocks in broadcast_coalesced, so it might be
             # better to not pollute the caches with these small blocks
@@ -311,13 +346,16 @@ class DistributedDataParallel(Module):
                                "process_group argument to DDP constructor")
 
     def forward(self, *inputs, **kwargs):
-        inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
         self._sync_params()
-        if len(self.device_ids) == 1:
-            output = self.module(*inputs[0], **kwargs[0])
+        if self.device_ids:
+            inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
+            if len(self.device_ids) == 1:
+                output = self.module(*inputs[0], **kwargs[0])
+            else:
+                outputs = self.parallel_apply(self._module_copies[:len(inputs)], inputs, kwargs)
+                output = self.gather(outputs, self.output_device)
         else:
-            outputs = self.parallel_apply(self._module_copies[:len(inputs)], inputs, kwargs)
-            output = self.gather(outputs, self.output_device)
+            output = self.module(*inputs, **kwargs)
 
         # We'll return the output object verbatim since it is a freeform object.
         # We need to find any tensors in this object, though, because we need to
@@ -352,7 +390,9 @@ class DistributedDataParallel(Module):
 
     def _sync_params(self):
         with torch.no_grad():
-            if len(self.device_ids) > 1:
+            # only do intra-node parameters sync for replicated single-device
+            # CUDA modules
+            if self.device_ids and len(self.device_ids) > 1:
                 # intra-node parameter sync
                 result = broadcast_coalesced(self.modules_params[0],
                                              self.device_ids,
@@ -374,7 +414,9 @@ class DistributedDataParallel(Module):
                 # cross-node buffer sync
                 self._dist_broadcast_coalesced(self.modules_buffers[0],
                                                self.broadcast_bucket_size)
-                if len(self.device_ids) > 1:
+                # only do intra-node buffer sync for replicated single-device
+                # CUDA modules
+                if self.device_ids and len(self.device_ids) > 1:
                     # intra-node buffer sync
                     result = broadcast_coalesced(self.modules_buffers[0],
                                                  self.device_ids,
@@ -388,4 +430,6 @@ class DistributedDataParallel(Module):
         for dev_idx, module in enumerate(module_copies):
             for layer in module.modules():
                 if isinstance(layer, torch.nn.modules.SyncBatchNorm):
-                    layer._specify_ddp_gpu_num(len(self.device_ids))
+                    assert self.is_cuda, "SyncBatchNorm layers only work with CUDA modules"
+                    layer._specify_ddp_gpu_num(
+                        len(self.device_ids) if self.device_ids else 1)

@@ -72,6 +72,8 @@ def _parse_arg(value, desc):
             return int(tval)
         elif desc == 'f':
             return float(tval)
+        elif desc == 'b':
+            return bool(tval)
         elif desc == 't':
             return tval
         elif desc == 'is':
