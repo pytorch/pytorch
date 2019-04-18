@@ -29,32 +29,32 @@ struct ThrustLTOp {
   }
 };
 
-template <typename T, bool handleNaN = true>
+template <typename T, typename IndT, bool handleNaN = true>
 struct ThrustSliceGTOp {
 ThrustSliceGTOp(int64_t size) : sliceSize(size) {}
   __device__ bool operator()(const thrust::tuple<int64_t, T>& lhs, const thrust::tuple<int64_t, T>& rhs) const {
-    int64_t segA = thrust::get<0>(lhs) / sliceSize;
-    int64_t segB = thrust::get<0>(rhs) / sliceSize;
+    IndT segA = (IndT)thrust::get<0>(lhs) / sliceSize;
+    IndT segB = (IndT)thrust::get<0>(rhs) / sliceSize;
     if (segA != segB)
         return segA < segB;
     else
         return (handleNaN && THCNumerics<T>::isnan(thrust::get<1>(lhs)) && !THCNumerics<T>::isnan(thrust::get<1>(rhs))) || THCNumerics<T>::gt(thrust::get<1>(lhs), thrust::get<1>(rhs));
   }
-  const int64_t sliceSize;
+  const IndT sliceSize;
 };
 
-template <typename T, bool handleNaN = true>
+template <typename T, typename IndT, bool handleNaN = true>
 struct ThrustSliceLTOp {
 ThrustSliceLTOp(int64_t size) : sliceSize(size) {}
   __device__ bool operator()(const thrust::tuple<int64_t, T>& lhs, const thrust::tuple<int64_t, T>& rhs) const {
-    int64_t segA = thrust::get<0>(lhs) / sliceSize;
-    int64_t segB = thrust::get<0>(rhs) / sliceSize;
+    IndT segA = (IndT)thrust::get<0>(lhs) / sliceSize;
+    IndT segB = (IndT)thrust::get<0>(rhs) / sliceSize;
     if (segA != segB)
         return segA < segB;
     else
-        return (handleNaN && THCNumerics<T>::isnan(thrust::get<1>(lhs)) && !THCNumerics<T>::isnan(thrust::get<1>(rhs))) || THCNumerics<T>::lt(thrust::get<1>(lhs), thrust::get<1>(rhs));
+        return (handleNaN && THCNumerics<T>::isnan(thrust::get<1>(rhs)) && !THCNumerics<T>::isnan(thrust::get<1>(lhs))) || THCNumerics<T>::lt(thrust::get<1>(lhs), thrust::get<1>(rhs));
   }
-  const int64_t sliceSize;
+  const IndT sliceSize;
 };
 
 
