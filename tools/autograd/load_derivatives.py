@@ -41,8 +41,7 @@ def create_differentiability_info(signature, output_differentiability,
 
 # How do you feel about pasting declaration inside autograd function...
 def create_autograd_function(name, derivatives, args_with_derivatives,
-                             declaration, output_differentiability,
-                             non_differentiable_arg_names):
+                             declaration, non_differentiable_arg_names):
     op = to_camel_case(name) + 'Backward'
     op = op.replace('ForwardBackward', 'Backward')
     return {
@@ -222,7 +221,7 @@ def process_definition(defn, declarations_by_signature):
     # only create an autograd function if we are actually going to calculate a derivative
     if len(args_with_derivatives) > 0:
         autograd_fn = create_autograd_function(defn_name, derivatives, args_with_derivatives,
-                                               canonical, output_differentiability, non_differentiable_arg_names)
+                                               canonical, non_differentiable_arg_names)
 
     return create_differentiability_info(signature, output_differentiability, autograd_fn)
 
