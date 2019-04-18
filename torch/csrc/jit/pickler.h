@@ -83,7 +83,14 @@ enum class OpCode : char {
   FRAME = '\x95'
 };
 
-enum PicklerClass : uint8_t { TENSOR = 0, INTLIST = 1 };
+enum PicklerClass : uint8_t {
+  // A reference to the tensor table
+  TENSOR = 0,
+  // List[int]
+  INTLIST = 1,
+  // A tensor that is stored entirely in the pickle file
+  LITERAL_TENSOR = 2,
+};
 
 using ::c10::IValue;
 
@@ -91,28 +98,33 @@ class Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
-  Pickler(std::vector<at::Tensor>* tensor_table)
+  Pickler(std::vector<at::Tensor>* tensor_table = nullptr)
       : tensor_table_(tensor_table) {}
 
   const std::vector<char>& stack();
-  void start();
+  void start(bool wrap_in_list = true);
   void finish();
   void addIValue(const IValue& ivalue);
 
  private:
-  void pushBinGet(uint32_t memo_id);
-  void pushMemoizedString(const IValue& ivalue);
-  void pushString(const std::string& string);
-  void pushTensor(const IValue& ivalue);
-  void pushDouble(const IValue& ivalue);
-  void pushMemoization(const void* item);
-  void pushMemoization(const IValue& ivalue);
-  void pushList(const IValue& ivalue);
-  void pushIntList(const IValue& ivalue);
-  void pushTuple(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
-  void pushClass(PicklerClass cls);
+  void pushDouble(const IValue& ivalue);
   void pushInt(const IValue& ivalue);
+  void pushIntList(const IValue& ivalue);
+  void pushList(const IValue& ivalue);
+  void pushLiteralTensor(const IValue& ivalue);
+  void pushMemoization(const IValue& ivalue);
+  void pushMemoizedString(const IValue& ivalue);
+  void pushTensor(const IValue& ivalue);
+  void pushTensorReference(const IValue& ivalue);
+  void pushTuple(const IValue& ivalue);
+
+  void pushBinGet(uint32_t memo_id);
+  void pushClass(PicklerClass cls);
+  void pushGlobal(const std::string& name);
+  void pushMemoization(const void* item);
+  void pushString(const std::string& string);
+
   const void* getPointer(const IValue& ivalue);
 
   // These convert values to bytes and add them to the stack (NB: since T is to
@@ -132,12 +144,18 @@ class Pickler {
   // BINPUT opcodes) to enable shared references
   std::unordered_map<const void*, uint32_t> memo_map_;
 
-  // External table of tensors to serialize
+  // External table of tensors to serialize. If this is missing, then tensors
+  // are serialized directly into the pickle
   std::vector<at::Tensor>* tensor_table_;
+
+  // List of tensors to serialize in the same binary as the pickle data
+  std::vector<at::Tensor> literal_tensors_;
 
   // TODO: only use this if necessary (add a pass to find all shared ivalues,
   // and only memoize those)
   uint32_t memo_id = 0;
+
+  bool wrap_in_list_ = true;
 };
 
 class Unpickler {
@@ -170,11 +188,11 @@ class Unpickler {
   }
 
   double readFloat();
-  void run();
   OpCode readInstruction();
-  std::string readString();
   OpCode readOpCode();
+  std::string readString();
   void readList();
+  void run();
 
   std::vector<IValue> stack_;
   std::vector<IValue> memo_table_;

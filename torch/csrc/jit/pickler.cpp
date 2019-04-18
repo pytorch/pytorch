@@ -1,54 +1,84 @@
 #include <torch/csrc/jit/pickler.h>
+#include <string>
 
 namespace torch {
 namespace jit {
 
 using ::c10::IValue;
 
-PicklerClass getClass(const std::string& str) {
-  if (str == "TensorID") {
-    return PicklerClass::TENSOR;
-  } else if (str == "IntList") {
-    return PicklerClass::INTLIST;
-  }
-  AT_ERROR("Unknown class name for unpickler: ", str);
-}
+const static std::unordered_map<std::string, PicklerClass> name_to_class{
+  {"TensorID", PicklerClass::TENSOR},
+  {"IntList", PicklerClass::INTLIST},
+  {"LiteralTensor", PicklerClass::LITERAL_TENSOR},
+  {"_rebuild_tensor_v2", PicklerClass::REBUILD_TENSOR},
+};
 
-const std::string& getClassName(PicklerClass cls) {
-  static const std::string tensor_class("TensorID\n");
-  static const std::string intlist_class("IntList\n");
-  switch (cls) {
-    case PicklerClass::TENSOR:
-      return tensor_class;
-    case PicklerClass::INTLIST:
-      return intlist_class;
-    default:
-      AT_ERROR("Unknown class for pickler");
-  }
-}
+const static std::unordered_map<PicklerClass, std::string, std::hash<uint8_t>>
+    class_to_name{
+        {PicklerClass::TENSOR, "TensorID\n"},
+        {PicklerClass::INTLIST, "IntList\n"},
+        {PicklerClass::LITERAL_TENSOR, "LiteralTensor\n"},
+    };
 
-const std::string& getModuleName() {
-  static const std::string module_name("__main__\n");
-  return module_name;
-}
+static std::string module_name = "__main__\n";
+
+// Protocol 2 is the highest that can be decoded by Python 2
+// See https://docs.python.org/3/library/pickle.html#data-stream-format
+constexpr static uint8_t PROTOCOL_VERSION = 2;
 
 const std::vector<char>& Pickler::stack() {
   return stack_;
 }
 
-void Pickler::start() {
+void Pickler::start(bool wrap_in_list) {
   push<OpCode>(OpCode::PROTO);
-  push<uint8_t>(2);
+  push<uint8_t>(PROTOCOL_VERSION);
 
   // All attributes get pushed into a list and their indices saved in the
   // module def
-  push<OpCode>(OpCode::EMPTY_LIST);
-  push<OpCode>(OpCode::MARK);
+  wrap_in_list_ = wrap_in_list;
+  if (wrap_in_list_) {
+    push<OpCode>(OpCode::EMPTY_LIST);
+    push<OpCode>(OpCode::MARK);
+  }
 }
 
 void Pickler::finish() {
-  push<OpCode>(OpCode::APPENDS);
+  if (wrap_in_list_) {
+    push<OpCode>(OpCode::APPENDS);
+  }
   push<OpCode>(OpCode::STOP);
+
+  // Add the binary data for all the tensors to be included in the same binary
+  // TODO: The pickler should be refactored to stream out to a file directly
+  // instead of staging in the stack_ array
+
+  // Insert storage keys
+  if (literal_tensors_.size() > 0) {
+    Pickler p;
+    p.start(/*wrap_in_list=*/false);
+    auto storage_keys = IValue(c10::ivalue::GenericList::create({}));
+    size_t index = 0;
+    for (auto tensor : literal_tensors_) {
+      storage_keys.toGenericList()->elements().push_back(std::to_string(index));
+      index++;
+    }
+    p.addIValue(storage_keys);
+    p.finish();
+    stack_.insert(
+        stack_.end(), p.stack().data(), p.stack().data() + p.stack().size());
+
+    for (auto tensor : literal_tensors_) {
+      // first dump size
+      auto numel = tensor.numel();
+      auto numel_ptr = reinterpret_cast<const char*>(&numel);
+      stack_.insert(stack_.end(), numel_ptr, numel_ptr + sizeof(numel));
+
+      uint64_t record_size = tensor.element_size() * tensor.numel();
+      auto storage_ptr = reinterpret_cast<const char*>(tensor.storage().data());
+      stack_.insert(stack_.end(), storage_ptr, storage_ptr + record_size);
+    }
+  }
 }
 
 void Pickler::addIValue(const IValue& ivalue) {
@@ -151,28 +181,109 @@ void Pickler::pushString(const std::string& string) {
   stack_.insert(stack_.end(), string.begin(), string.end());
 }
 
-void Pickler::pushClass(PicklerClass cls) {
-  const auto& name = getClassName(cls);
-  // Write it to the tensor table
+void Pickler::pushGlobal(const std::string& name) {
   auto memo_entry = memo_map_.find(&name);
   if (memo_entry == memo_map_.end()) {
     push<OpCode>(OpCode::GLOBAL);
-    // Module name + "\n"
-    pushString(getModuleName());
-    // Class name + "\n"
     pushString(name);
     pushMemoization((void*)&name);
   } else {
     pushBinGet(memo_entry->second);
   }
+}
+
+void Pickler::pushClass(PicklerClass cls) {
+  pushGlobal(module_name + class_to_name.at(cls));
 
   push<OpCode>(OpCode::EMPTY_TUPLE);
   push<OpCode>(OpCode::NEWOBJ);
 }
 
 void Pickler::pushTensor(const IValue& ivalue) {
-  pushClass(PicklerClass::TENSOR);
+  if (tensor_table_ == nullptr) {
+    pushLiteralTensor(ivalue);
+  } else {
+    pushTensorReference(ivalue);
+  }
+}
 
+void Pickler::pushLiteralTensor(const IValue& ivalue) {
+  // In contrast to tensor references, literal tensors are included in the
+  // pickle program binary blob. They are written to the file after the STOP
+  // opcode. They can't be included in the pickle program itself without a bunch
+  // of extra machinery since byte strings are limited to 4 GB.
+  //
+  // The format here is the same one used by `torch.save()`. The code for the
+  // format can be found in `torch/serialization.py`.
+  auto tensor = ivalue.toTensor();
+
+  // The arguments to this function are:
+  //    storage, storage_offset, size, stride, requires_grad, backward_hooks
+  pushGlobal("torch._utils\n_rebuild_tensor_v2\n");
+  push<OpCode>(OpCode::MARK);
+
+  // Tuple for persistent_load
+  push<OpCode>(OpCode::MARK);
+  // typename
+  pushMemoizedString(std::string("storage"));
+  // data_type
+  std::stringstream data_type;
+  data_type << "torch\n" << toString(tensor.scalar_type()) << "Storage\n";
+  pushGlobal(data_type.str());
+  // root_key
+  pushMemoizedString(std::to_string(literal_tensors_.size()));
+  // location
+  pushMemoizedString(std::string("cpu"));
+  // size
+  pushInt(tensor.numel());
+  // view_metadata
+  push<OpCode>(OpCode::NONE);
+  push<OpCode>(OpCode::TUPLE);
+
+
+  push<OpCode>(OpCode::BINPERSID);
+
+  // storage offset
+  int64_t storage_offset = 0;
+  pushInt(storage_offset);
+
+  // size
+  std::vector<IValue> size_ivalues;
+  for (auto size : tensor.sizes()) {
+    size_ivalues.push_back(size);
+  }
+  auto sizes = c10::ivalue::Tuple::create(size_ivalues);
+  addIValue(sizes);
+
+  // stride
+  std::vector<IValue> stride_ivalues;
+  for (auto stride : tensor.strides()) {
+    stride_ivalues.push_back(stride);
+  }
+  auto strides = c10::ivalue::Tuple::create(stride_ivalues);
+  addIValue(strides);
+
+  // requires_grad
+  addIValue(tensor.requires_grad());
+
+  // backward_hooks
+  pushGlobal("collections\nOrderedDict\n");
+  push<OpCode>(OpCode::EMPTY_TUPLE);
+  // Construct the collections.OrderedDict for the backward_hooks
+  push<OpCode>(OpCode::REDUCE);
+
+  push<OpCode>(OpCode::TUPLE);
+
+  // Call torch._utils._rebuild_tensor_v2
+  push<OpCode>(OpCode::REDUCE);
+
+  // Store tensor so it can be placed into the binary after the pickle program
+  literal_tensors_.push_back(ivalue.toTensor());
+}
+
+
+void Pickler::pushTensorReference(const IValue& ivalue) {
+  pushClass(PicklerClass::TENSOR);
   tensor_table_->push_back(ivalue.toTensor());
   auto tensor_id = tensor_table_->size() - 1;
   push<OpCode>(OpCode::BININT);
@@ -421,9 +532,10 @@ OpCode Unpickler::readInstruction() {
     case OpCode::STOP:
       break;
     case OpCode::GLOBAL: {
-      AT_ASSERT(readString() == "__main__");
+      auto module = readString();
+      auto attr = readString();
       // Push class name to stack
-      stack_.emplace_back(static_cast<uint8_t>(getClass(readString())));
+      stack_.emplace_back(static_cast<uint8_t>(name_to_class.at(attr)));
     } break;
     case OpCode::NEWOBJ: {
       // pop empty tuple

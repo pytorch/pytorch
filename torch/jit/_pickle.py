@@ -12,6 +12,9 @@ class IntList(object):
 
 
 class Unpickler(pickle.Unpickler):
+    def persistent_load(self, pid):
+        raise NotImplementedError("persistent load not yet supported")
+
     def find_class(self, module, name):
         if not module == '__main__':
             return None
@@ -20,5 +23,3 @@ class Unpickler(pickle.Unpickler):
             return TensorID
         elif name == 'IntList':
             return IntList
-        elif name == 'LiteralTensor':
-            return LiteralTensor

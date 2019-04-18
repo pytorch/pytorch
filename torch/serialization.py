@@ -292,10 +292,10 @@ def _save(obj, f, pickle_module, pickle_protocol):
     pickle_module.dump(MAGIC_NUMBER, f, protocol=pickle_protocol)
     pickle_module.dump(PROTOCOL_VERSION, f, protocol=pickle_protocol)
     pickle_module.dump(sys_info, f, protocol=pickle_protocol)
+
     pickler = pickle_module.Pickler(f, protocol=pickle_protocol)
     pickler.persistent_id = persistent_id
     pickler.dump(obj)
-
     serialized_storage_keys = sorted(serialized_storages.keys())
     pickle_module.dump(serialized_storage_keys, f, protocol=pickle_protocol)
     f.flush()
@@ -561,14 +561,15 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 
-    magic_number = pickle_module.load(f, **pickle_load_args)
-    if magic_number != MAGIC_NUMBER:
-        raise RuntimeError("Invalid magic number; corrupt file?")
-    protocol_version = pickle_module.load(f, **pickle_load_args)
-    if protocol_version != PROTOCOL_VERSION:
-        raise RuntimeError("Invalid protocol version: %s" % protocol_version)
+    # magic_number = pickle_module.load(f, **pickle_load_args)
+    # if magic_number != MAGIC_NUMBER:
+    #     raise RuntimeError("Invalid magic number; corrupt file?")
+    # protocol_version = pickle_module.load(f, **pickle_load_args)
+    # if protocol_version != PROTOCOL_VERSION:
+    #     raise RuntimeError("Invalid protocol version: %s" % protocol_version)
 
-    _sys_info = pickle_module.load(f, **pickle_load_args)
+    # _sys_info = pickle_module.load(f, **pickle_load_args)
+
     unpickler = pickle_module.Unpickler(f, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()
