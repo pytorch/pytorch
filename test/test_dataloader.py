@@ -13,7 +13,7 @@ from torch import multiprocessing as mp
 from torch.utils.data import _utils, Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
-from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC,
+from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                           IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
                           load_tests)
 
@@ -46,7 +46,15 @@ if not NO_MULTIPROCESSING_SPAWN:
     mp = mp.get_context(method='spawn')
 
 
-JOIN_TIMEOUT = 17.0 if (IS_WINDOWS or IS_PPC) else 13.0
+# 60s of timeout?
+# Yes, in environments where physical CPU resources are shared, e.g., CI, the
+# time for a inter-process communication can be highly varying.  With 15~17s of
+# timeout, we have observed flakiness in some CI builds (see
+# pytorch/pytorch#14501, pytoch/pytorch#16608).  We follow the CPython
+# multiprocessing setup and set the timeout to 60s here:
+#
+# https://github.com/python/cpython/blob/e8113f51a8bdf33188ee30a1c038a298329e7bfa/Lib/test/_test_multiprocessing.py#L73
+JOIN_TIMEOUT = 60.0  # seconds
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -721,7 +729,6 @@ class TestDataLoader(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
-    @unittest.skip("this test is flaky, see https://github.com/pytorch/pytorch/issues/14501")
     def test_proper_exit(self):
         (r'''There might be ConnectionResetError or leaked semaphore warning '''
          r'''(due to dirty process exit), but they are all safe to ignore''')
@@ -813,8 +820,19 @@ class TestDataLoader(TestCase):
                             self.assertIsInstance(loader_p.exception, RuntimeError, desc)
                             self.assertIn('Loader error', str(loader_p.exception), desc)
                         elif exit_method == 'worker_kill':
-                            self.assertIsInstance(loader_p.exception, RuntimeError, desc)
-                            self.assertIn('DataLoader worker (pid', str(loader_p.exception), desc)
+                            if isinstance(loader_p.exception, RuntimeError):
+                                self.assertIn('DataLoader worker (pid', str(loader_p.exception), desc)
+                            elif isinstance(loader_p.exception, ConnectionRefusedError):
+                                # Sometimes, when the worker is being killed and is freeing its
+                                # resources, the unpickling in loader process will be met an
+                                # a `ConnectionRefusedError` as it can not open a socket to receive
+                                # resource. In such cases, the worker may not have fully exited,
+                                # and the loader can't know this via `is_alive` check or `SIGCHLD`
+                                # handler. So we permit this as an allowed error as well.
+                                # After all, we are happy as long as it terminates.
+                                pass
+                            else:
+                                self.fail(desc)
                         elif exit_method == 'worker_error':
                             self.assertIsInstance(loader_p.exception, RuntimeError, desc)
                             self.assertIn('Worker error', str(loader_p.exception), desc)
