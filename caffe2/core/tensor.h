@@ -8,7 +8,6 @@
 #include <c10/util/intrusive_ptr.h>
 #include "ATen/core/Tensor.h"
 #include <c10/core/TensorOptions.h>
-#include <c10/core/Tensor.h>
 
 namespace caffe2 {
 
@@ -127,24 +126,6 @@ class CAFFE2_API Tensor final {
 
   explicit operator at::Tensor() && {
     return at::Tensor::wrap_tensor_impl(std::move(impl_));
-  }
-
-  /**
-   * @brief Mutual conversion with C10Tensor
-   *
-   * The tensor will share the same instance (data, strides, sizes, etc) but
-   * a different subset of APIs would be available
-   */
-  explicit Tensor(C10Tensor tensor) : impl_(std::move(tensor).impl()) {
-    enforce_invariants();
-  }
-
-  explicit operator C10Tensor() const & {
-    return C10Tensor(impl_);
-  }
-
-  explicit operator C10Tensor() && {
-    return C10Tensor(std::move(impl_));
   }
 
   bool is_same(const Tensor& other) const noexcept {

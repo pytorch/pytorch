@@ -1,9 +1,13 @@
 #pragma once
 #include <c10/util/Exception.h>
+#include <c10/util/C++17.h>
 #include <torch/csrc/jit/source_range.h>
-#include <torch/csrc/utils/memory.h>
+#include <torch/csrc/jit/script/strtod.h>
+#include <ATen/core/Macros.h>
 #include <algorithm>
 #include <clocale>
+#include <cstring>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -111,8 +115,8 @@ enum TokenKind {
 #undef DEFINE_TOKEN
 };
 
-std::string kindToString(int kind);
-int stringToKind(const std::string& str);
+CAFFE2_API std::string kindToString(int kind);
+CAFFE2_API int stringToKind(const std::string& str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;
@@ -134,7 +138,7 @@ struct TokenTrie {
     }
 
     child_chars.emplace_back(*str);
-    child_tries.emplace_back(torch::make_unique<TokenTrie>());
+    child_tries.emplace_back(c10::guts::make_unique<TokenTrie>());
     child_tries.back()->insert(str + 1, tok);
   }
   int kind; // 0 == invalid token
@@ -145,7 +149,7 @@ struct TokenTrie {
 
 // stuff that is shared against all TC lexers/parsers and is initialized only
 // once.
-struct SharedParserData {
+struct CAFFE2_API SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
     std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
@@ -160,19 +164,7 @@ struct SharedParserData {
     TC_FORALL_TOKEN_KINDS(ADD_CASE)
 #undef ADD_CASE
   }
-#ifdef _WIN32
-  static double strtod_c(const char* str, char** end) {
-    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
-    static _locale_t loc = _create_locale(LC_ALL, "C");
-    return _strtod_l(str, end, loc);
-  }
-#else
-  static double strtod_c(const char* str, char** end) {
-    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
-    static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
-    return strtod_l(str, end, loc);
-  }
-#endif
+
   // 1. skip whitespace
   // 2. handle comment or newline
   //
@@ -186,7 +178,7 @@ struct SharedParserData {
       return false;
     const char* startptr = str.c_str() + start;
     char* endptr;
-    strtod_c(startptr, &endptr);
+    torch::jit::script::strtod_c(startptr, &endptr);
     *len = endptr - startptr;
     return *len > 0;
   }
@@ -361,7 +353,7 @@ struct SharedParserData {
   TokenTrieRef head;
 };
 
-SharedParserData& sharedParserData();
+CAFFE2_API SharedParserData& sharedParserData();
 
 struct Token {
   int kind;
@@ -478,7 +470,7 @@ struct Lexer {
             indent_stack.pop_back();
             next_tokens.emplace_back(TK_DEDENT, r.range);
             if (indent_stack.size() == 0) {
-              reportError("invalid indent level " + std::to_string(depth), r);
+              reportError("invalid indent level " + c10::guts::to_string(depth), r);
             }
           }
           return; // We've already queued the tokens

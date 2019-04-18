@@ -4,7 +4,7 @@ import torch
 import torch.jit
 import numpy as np
 import unittest
-from common_utils import TestCase, run_tests
+from common_utils import TestCase, run_tests, skipIfNotRegistered
 
 
 def canonical(graph):
@@ -23,7 +23,8 @@ def _dequantize(qx, scale, zero_point):
     return x
 
 
-@unittest.skip("Skipping due to the protobuf dependency in the CI's")
+@skipIfNotRegistered("Relu_ENGINE_DNNLOWP",
+                     "fbgemm-based Caffe2 ops are not linked")
 class TestQuantized(TestCase):
     def test_relu(self):
         a = (torch.tensor([4, 6, 1, 10], dtype=torch.uint8), 0.01, 5)
@@ -59,7 +60,7 @@ graph(%x : (Tensor, float, int)):
 class TestQuantizedOps(unittest.TestCase):
     """Tests the correctness of the quantized::relu op."""
     def test_qrelu(self):
-        relu = torch.ops.quantized.relu
+        relu = torch.ops.aten.quantized_relu
 
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
