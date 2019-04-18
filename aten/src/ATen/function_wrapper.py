@@ -399,6 +399,8 @@ class nested_dict(object):
 
 
 Environment = TypedDict('Environment', {
+    'state': str,
+    'ScalarType': str,
     'ScalarName': str,
     'THTensor': str,
     'THType': str,
@@ -1443,19 +1445,19 @@ def create_derived(backend_type_env, declarations):
                 count = 0
                 output_count = 0
 
-                case_env = {}
-                case_env['Backend'] = env['Backend']
-                case_env['state'] = env['state']
-                case_env['ScalarType'] = c_type
-                case_env['ScalarName'] = scalar_name
-                case_env['AccScalarName'] = accreal
+                case_env = {
+                    'Backend': env['Backend'],
+                    'state': env['state'],
+                    'ScalarType': c_type,
+                    'ScalarName': scalar_name,
+                    'AccScalarName': accreal,
+                    'THType': scalar_name,
+                    'THTensor': 'TH{}Tensor'.format(scalar_name)
+                }  # type: Environment
                 if case_env['Backend'] == 'CUDA':
                     sname = '' if scalar_name == "Float" else scalar_name
                     case_env['THType'] = 'Cuda{}'.format(sname)
                     case_env['THTensor'] = 'THCuda{}Tensor'.format(sname)
-                else:
-                    case_env['THType'] = scalar_name
-                    case_env['THTensor'] = 'TH{}Tensor'.format(scalar_name)
 
                 for arg in option['arguments']:
                     if is_real_argument_to_wrapper(arg):
