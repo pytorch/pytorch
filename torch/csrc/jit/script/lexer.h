@@ -1,7 +1,7 @@
 #pragma once
 #include <c10/util/Exception.h>
+#include <c10/util/C++17.h>
 #include <torch/csrc/jit/source_range.h>
-#include <torch/csrc/utils/memory.h>
 #include <algorithm>
 #include <clocale>
 #include <iostream>
@@ -134,7 +134,7 @@ struct TokenTrie {
     }
 
     child_chars.emplace_back(*str);
-    child_tries.emplace_back(torch::make_unique<TokenTrie>());
+    child_tries.emplace_back(c10::guts::make_unique<TokenTrie>());
     child_tries.back()->insert(str + 1, tok);
   }
   int kind; // 0 == invalid token
