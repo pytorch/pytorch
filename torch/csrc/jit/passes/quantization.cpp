@@ -169,6 +169,18 @@ void InsertObserverNodes(std::shared_ptr<Graph>& graph, Node* observer_node) {
   }
 }
 
+std::shared_ptr<script::Module> InsertObserverNodes(
+    std::shared_ptr<script::Module> module,
+    Node* observer_node) {
+  // TODO: Deep-copy the module
+  const auto& methods = module->get_methods();
+  for (const auto& m : methods) {
+    auto g = m->function().graph();
+    InsertObserverNodes(g, observer_node);
+  }
+  return module;
+}
+
 void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());

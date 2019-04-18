@@ -1178,7 +1178,7 @@ graph(%x : Tensor,
 
         m = torch.jit.script(fn)
         # Insert observers
-        torch._C._jit_pass_insert_observers(m.graph, observe)
+        torch._C._jit_pass_insert_observers(m, observe)
 
         # Collect statistics
         m.forward(x1, y1)

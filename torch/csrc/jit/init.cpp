@@ -39,6 +39,7 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/init.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
 
@@ -117,14 +118,17 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<Graph>& g, py::function pyObserverFunction) {
+          [](std::shared_ptr<script::Module> mod,
+             py::function pyObserverFunction) {
             // Create a new node that would be used in the insert observer pass:
             // all observer nodes will be cloned from this one.
-            Node* new_node = g->createPythonOp(
+            Graph g;
+            Node* new_node = g.createPythonOp(
                 THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(g, new_node);
+            mod = InsertObserverNodes(mod, new_node);
             // We don't need this node anymore, don't forget to remove it.
             new_node->destroy();
+            return mod;
           })
       .def(
           "_jit_pass_insert_quantdequant",
