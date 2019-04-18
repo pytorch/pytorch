@@ -10928,6 +10928,17 @@ a")
         self.checkScript(fn3, ("abcdefghi",))
         self.checkScript(fn4, ("abcdefghi",))
 
+    def test_early_return_type_refinement(self):
+        @torch.jit.script
+        def test(x):
+            # type: (Optional[int]) -> int
+            if x is None:
+                return 1
+            else:
+                return x
+        self.assertEqual(test(None), 1)
+        self.assertEqual(test(2), 2)
+
     def test_non_final_return(self):
         def simple(x):
             if bool(x > 3):

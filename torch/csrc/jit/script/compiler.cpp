@@ -1202,7 +1202,7 @@ struct to_ir {
     //   a =
     // ... = a # OK, a is defined along all paths
 
-    // unordered set, because we sort block outputs on printing
+    // ordered set, because we sort block outputs on printing
     std::unordered_set<std::string> mutated_variables;
 
     for (auto& v : save_true->definedVariables()) {
