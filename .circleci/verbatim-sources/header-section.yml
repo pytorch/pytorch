@@ -59,6 +59,12 @@ setup_linux_system_environment: &setup_linux_system_environment
     ps auxfww | grep [a]pt
     ps auxfww | grep dpkg
 
+    # Try even harder to kill apt-get
+    pkill apt-get
+
+    ps auxfww | grep [a]pt
+    ps auxfww | grep dpkg
+
 install_doc_push_script: &install_doc_push_script
   name: Install the doc push script
   no_output_timeout: "2m"
