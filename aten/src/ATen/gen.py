@@ -407,7 +407,7 @@ def generate_legacy_th_dispatcher(backend, density, scalar_type, declarations):
 def iterate_types():
     for backend in backends:
         for density in densities:
-            for scalar_type in scalar_types:
+            for scalar_type in (scalar_types + quantized_scalar_types):
                 if density == 'Mkldnn' and (backend != 'CPU' or scalar_type[0] != 'Float'):
                     continue
                 if density == 'Sparse' and scalar_type[0] == 'Half':
