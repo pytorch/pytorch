@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/python_print.h>
+#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
@@ -489,12 +490,35 @@ struct PythonPrintPass {
     stmt << end;
   }
 
+  template <typename T>
+  std::vector<size_t> sort_indexes(const std::vector<T>& v) {
+    // initialize original index locations
+    std::vector<size_t> idx(v.size());
+    std::iota(idx.begin(), idx.end(), 0);
+
+    // sort indexes based on comparing values in v
+    std::sort(idx.begin(), idx.end(), [&v](size_t i1, size_t i2) {
+      return v[i1] < v[i2];
+    });
+
+    return idx;
+  }
+
   void printAssignment(at::ArrayRef<Value*> lhs, at::ArrayRef<Value*> rhs) {
     if (lhs.size() > 0) {
       indent();
-      printValueList(out, lhs);
+
+      std::vector<std::string> value_names =
+          fmap(lhs, [&](Value* v) { return useOf(v); });
+      std::vector<size_t> sorted_indices = sort_indexes(value_names);
+      std::vector<Value*> lhs_sorted =
+          fmap(sorted_indices, [&](size_t index) { return lhs.at(index); });
+      std::vector<Value*> rhs_sorted =
+          fmap(sorted_indices, [&](size_t index) { return rhs.at(index); });
+      // printValueList
+      printValueList(out, lhs_sorted);
       out << " = ";
-      printValueList(out, rhs);
+      printValueList(out, rhs_sorted);
       out << "\n";
     }
   }
@@ -1133,9 +1157,7 @@ struct PythonPrintPass {
         [](const Argument& arg) { return arg.default_value(); });
     printFunction(graph, name, is_class, defaults, ivalue_names);
   }
-  void printFunction(
-      script::Function& method,
-      bool is_class) {
+  void printFunction(script::Function& method, bool is_class) {
     const std::string& name = method.name();
     Graph& graph = *method.graph();
     auto defaults = fmap(

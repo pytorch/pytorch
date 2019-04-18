@@ -1202,8 +1202,8 @@ struct to_ir {
     //   a =
     // ... = a # OK, a is defined along all paths
 
-    // ordered set, because we want deterministic graph output
-    std::set<std::string> mutated_variables;
+    // unordered set, because we sort block outputs on printing
+    std::unordered_set<std::string> mutated_variables;
 
     for (auto& v : save_true->definedVariables()) {
       if (save_false->findInAnyFrame(v) || false_exits) {

@@ -5492,7 +5492,7 @@ a")
         self.checkScript(one_return, [a], optimize=True)
         self.checkScript(multiple_returns, [a], optimize=True)
 
-        with self.assertRaisesRegex(RuntimeError, "but is actually of type None"):
+        with self.assertRaisesRegex(RuntimeError, "but is actually of type Optional\[Tensor\]"):  # noqa
             torch.jit.CompilationUnit('''
             def no_return_bad_annotation(a):
                 # type: (Tensor) -> Tensor
@@ -10983,12 +10983,10 @@ a")
                 s += "5"
             return 7, s
 
-        # small jitter issue
-        with self.disableModuleHook():
-            for i in range(3):
-                for func in [simple, nest, early_ret, nest_early_ret, not_early_ret,
-                             not_total_ret]:
-                    self.checkScript(func, (torch.tensor(2.5 + i),))
+        for i in range(3):
+            for func in [simple, nest, early_ret, nest_early_ret, not_early_ret,
+                         not_total_ret]:
+                self.checkScript(func, (torch.tensor(2.5 + i),))
 
         def vars_used_after_ret(x):
             # type: (int) -> int
@@ -10999,9 +10997,8 @@ a")
                 z = 3
             return x + y * z
 
-        with self.disableModuleHook():
-            self.checkScript(vars_used_after_ret, (1,))
-            self.checkScript(vars_used_after_ret, (0,))
+        self.checkScript(vars_used_after_ret, (1,))
+        self.checkScript(vars_used_after_ret, (0,))
 
         def complicated(x):
             # type: (int) -> int
@@ -11022,25 +11019,23 @@ a")
             return a + b
             assert False
 
-        with self.disableModuleHook():
-            for i in range(4):
-                self.checkScript(complicated, (i,))
+        for i in range(4):
+            self.checkScript(complicated, (i,))
 
     def test_partial_returns_shape_prop(self):
-        with self.disableModuleHook():
-            @torch.jit.script
-            def test_shape_prop(x):
-                # type: (int) -> int
-                if not bool(x):
-                    return x
-                else:
-                    z = torch.zeros([2, 2], dtype=torch.int64)
-                return int(z[0])
+        @torch.jit.script
+        def test_shape_prop(x):
+            # type: (int) -> int
+            if not bool(x):
+                return x
+            else:
+                z = torch.zeros([2, 2], dtype=torch.int64)
+            return int(z[0])
 
-            test_shape_prop(torch.tensor(0.5))
-            graph = test_shape_prop.graph_for(torch.tensor(0.5))
-            # Shape analysis of z should propagate through if statement
-            FileCheck().check("Long(*, *)").check("prim::If").run(graph)
+        test_shape_prop(torch.tensor(0.5))
+        graph = test_shape_prop.graph_for(torch.tensor(0.5))
+        # Shape analysis of z should propagate through if statement
+        FileCheck().check("Long(*, *)").check("prim::If").run(graph)
 
     def test_partial_returns(self):
         with self.assertRaisesRegex(RuntimeError, "does not return on all paths"):
