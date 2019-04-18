@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
 
@@ -113,6 +114,17 @@ static at::Tensor to_dispatch(
 
 RegisterOperators reg(
     {Operator(
+         "prim::profile(...) -> ()",
+         [](const Node* node) {
+           return [node](Stack& stack) {
+             auto addr = node->i(attr::data);
+             std::function<void(Stack&)>& callback =
+                 *reinterpret_cast<std::function<void(Stack&)>*>(addr);
+             callback(stack);
+             return 0;
+           };
+         }),
+     Operator(
          prim::FusionGroup,
          [](const Node* node) {
            const auto key = registerFusion(node);
@@ -258,7 +270,7 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Int(Scalar a) -> float",
+         "prim::Int(Scalar a) -> int",
          [](Stack& stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -1600,11 +1612,13 @@ RegisterOperators reg2({
     DEFINE_STRING_OP(aten::ne, a != b, bool),
     DEFINE_STRING_OP(aten::add, a + b, str),
 #undef DEFINE_STRING_OP
-    Operator("aten::len(str s) -> int", [](Stack& stack) {
-        auto string = pop(stack).toStringRef();
-        push(stack, static_cast<int64_t>(string.size()));
-        return 0;
-    }),
+    Operator(
+        "aten::len(str s) -> int",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          push(stack, static_cast<int64_t>(string.size()));
+          return 0;
+        }),
     // tensor length op (size of 1st dimension)
     Operator(
         "aten::len(Tensor t) -> int",
@@ -2019,7 +2033,7 @@ RegisterOperators reg2({
     DEFINE_COMPARISON_OP(aten::le, a <= b),
     DEFINE_COMPARISON_OP(aten::ge, a >= b),
 
-    DEFINE_BOOL_OP(aten::__and__, a && b),
+    DEFINE_BOOL_OP(aten::__and__, a&& b),
     DEFINE_BOOL_OP(aten::__or__, a || b),
     DEFINE_BOOL_OP(aten::__xor__, a != b),
 

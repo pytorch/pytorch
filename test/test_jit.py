@@ -3448,6 +3448,8 @@ a")
             scalar = x.item()
             return int(scalar), float(scalar)
 
+        graph = torch.jit.script(test_scalar_cast).graph
+        FileCheck().check("(int, float) = prim::TupleConstruct").run(graph)
         self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
         self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
 
@@ -4981,6 +4983,20 @@ a")
 
         self.checkScriptRaisesRegex(test_bool_cast_tensor, (torch.tensor([1, 1]),), Exception,
                                     "bool value of Tensor with more than one value")
+
+        def test_not_cast(x):
+            if not x:
+                return 1
+            else:
+                return 0
+
+        self.checkScript(test_not_cast, (torch.tensor(1),))
+        self.checkScript(test_not_cast, (torch.tensor(0),))
+
+        with self.assertRaisesRegex(RuntimeError, "expected"):
+            @torch.jit.script
+            def test_mult(x, y):
+                return not(x, y)
 
         def test_cast_int(x):
             # type: (int) -> int
@@ -11369,7 +11385,8 @@ a")
                 def forward(self,
                     _0: Tensor) -> Tensor:
                   _1 = torch.zeros([10], dtype=6, layout=0, device=torch.device("cpu"))
-                  result = torch.to(torch.fill_(_1, 5), dtype=6, layout=0, device=torch.device("cpu"), non_blocking=False, copy=False)
+                  result = torch.to(torch.fill_(_1, 5), dtype=6, layout=0, device=torch.device("cpu"),
+                                    non_blocking=False, copy=False)
                   result2 = torch.rand([10], dtype=6, layout=0, device=torch.device("cpu"))
                   result3 = torch.rand_like(result2, dtype=6, layout=0, device=torch.device("cpu"))
                   _2 = torch.add(torch.add(result, result2, alpha=1), result3, alpha=1)
