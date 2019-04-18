@@ -113,6 +113,7 @@ libtorch_sources = [
     "torch/csrc/jit/hooks_for_testing.cpp",
     "torch/csrc/jit/script/builtin_functions.cpp",
     "torch/csrc/jit/script/lexer.cpp",
+    "torch/csrc/jit/script/strtod.cpp",
     "torch/csrc/jit/script/module.cpp",
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
