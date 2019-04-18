@@ -425,7 +425,6 @@ def gen_pyi(declarations_path, out):
         'numpy': ['def numpy(self) -> Any: ...'],
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
         'map_': ['def map_(tensor: Tensor, callable: Callable) -> Tensor: ...'],
-        'copy_': ['def copy_(self, src: Tensor, non_blocking: bool=False) -> Tensor: ...'],
         'storage': ['def storage(self) -> Storage: ...'],
         'type': ['def type(self, dtype: Union[None, str, _dtype]=None, non_blocking: bool=False)'
                  ' -> Union[str, Tensor]: ...'],
