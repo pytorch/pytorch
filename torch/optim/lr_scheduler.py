@@ -672,9 +672,10 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         T_0 (int): Number of iterations for the first restart.
-        T_mult (float): A factor increases :math:`\T_{i}` after a restart. Default: 1.
-        eta_min (float): Minimum learning rate. Default: 0.
-        last_epoch (int): The index of last epoch. Default: -1.
+        T_mult (int, optional): A factor increases :math:`\T_{i}` after a restart.
+            If T_mult is float, T_mult will be converted to int. Default: 1.
+        eta_min (float, optional): Minimum learning rate. Default: 0.
+        last_epoch (int, optional): The index of last epoch. Default: -1.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
@@ -682,6 +683,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
 
     def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1):
         T_0 = int(T_0)
+        T_mult = int(T_mult)
         if T_0 <= 0:
             raise ValueError("Expected positive T_0, but got {}".format(T_0))
         if T_mult < 1:

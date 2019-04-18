@@ -1072,7 +1072,7 @@ class TestLRScheduler(TestCase):
                 T_cur += 1
                 if T_cur >= T_i:
                     T_cur = T_cur - T_i
-                    T_i = T_mult * T_i
+                    T_i = int(T_mult) * T_i
                 targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
                 targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
             self._test(scheduler, targets, iters)
@@ -1090,7 +1090,7 @@ class TestLRScheduler(TestCase):
                 T_cur = round(T_cur + 0.1, 1)
                 if T_cur >= T_i:
                     T_cur = T_cur - T_i
-                    T_i = T_mult * T_i
+                    T_i = int(T_mult) * T_i
                 targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
                 targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
             self._test_CosineAnnealingWarmRestarts(scheduler, targets, iters)
@@ -1101,12 +1101,12 @@ class TestLRScheduler(TestCase):
                               [0, 0.1, 0.2, 0.3, 1.3, 2.3, 17.5, 18.5, 19.5, 29.5, 30.5, 31.5, 50]]
         T_curs_for_T_mults = [[1, 2, 3, 4, 5, 2, 7, 3, 4, 5, 6, 3],
                               [1, 2, 3, 4, 5, 15, 2, 3, 4, 10, 11, 3],
-                              [0.1, 0.2, 0.3, 1.3, 2.3, 7.5, 8.5, 9.5, 4.5, 5.5, 6.5, 2.5]]
+                              [0.1, 0.2, 0.3, 1.3, 2.3, 7.5, 8.5, 9.5, 19.5, 20.5, 21.5, 10]]
         T_is_for_T_mults = [[10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
                             [10, 10, 10, 10, 10, 20, 40, 40, 40, 80, 80, 10],
-                            [10, 10, 10, 10, 10, 15, 15, 15, 22.5, 22.5, 22.5, 33.75]]
+                            [10, 10, 10, 10, 10, 30, 30, 30, 30, 30, 30, 90]]
         eta_min = 1e-10
-        T_mults = [1, 2, 1.5]
+        T_mults = [1, 2, 3.5]
         for epochs, T_mult, T_curs, T_is in zip(epochs_for_T_mults, T_mults, T_curs_for_T_mults, T_is_for_T_mults):
             targets = [[0.05], [0.5]]
             scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=T_mult, eta_min=eta_min)
