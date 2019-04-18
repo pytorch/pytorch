@@ -69,6 +69,12 @@ struct TypedStack : public std::pair<Stack, TupleTypePtr>
 {
   using pair::pair;
 
+  // NB: The inherited default constructor gives nullptr for |type|,
+  //     so we provide a saner one.
+  TypedStack()
+    : pair({}, TupleType::create({}))
+  {}
+
   Stack& stack() {
     return this->first;
   }
