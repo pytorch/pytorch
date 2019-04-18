@@ -269,15 +269,16 @@ void AliasDb::dump() const {
   std::cout << "\n";
 }
 
-// TODO: need to create a dummy "graph input alias" value in MemoryDAG for all
-// inputs of the same type to point to. Currently they all point to the first
-// element, which is technically wrong.
+// TODO: need to make values which can contain other values like
+// Tuple[Tensor] and Tensor point to the same base Tensor element
 void AliasDb::makeAllAlias(const std::vector<Value*>& values) {
-  if (values.size() > 0) {
-    giveFreshAlias(values[0]);
+  if (values.size() == 0 || !shouldAnnotate(values[0])) {
+    return;
   }
-  for (const auto value : values) {
-    makePointerTo(value, values[0]);
+
+  giveFreshAlias(values[0]);
+  for (size_t i = 1; i < values.size(); ++i) {
+    elementMap_[values[i]] = elementMap_[values[0]];
   }
 }
 
