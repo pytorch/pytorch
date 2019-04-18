@@ -6010,7 +6010,7 @@ a")
             # type: (float, int) -> float
             return math.pow(x, y)
 
-        def test_isnan(x):    #HERE
+        def test_isnan(x):
             # type: (float) -> boolean
             return math.isnan(x)
 
@@ -6069,8 +6069,11 @@ a")
         self.checkScript(test_sqrt_float, (2.0,))
         self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
-        
-        self.checkScript(test_isnan, (2,))
+
+        num_list = [-1000000, -1000, -2, 0, 1, 3, 1000, 10000000]
+        for i in list:
+            self.checkScript(test_isnan, (i,))
+
         self.checkScript(test_asinh_int, (2,))
         self.checkScript(test_asinh_float, (2.0,))
         self.checkScript(test_atanh_int, (2,))
