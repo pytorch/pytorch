@@ -8,7 +8,7 @@ import numpy as np
 import timeit
 import json
 
-from caffe2.benchmarks.operator_benchmark import benchmark_utils
+from benchmarks.operator_benchmark import benchmark_utils
 
 """Performance microbenchmarks.
 
@@ -40,7 +40,7 @@ def add_benchmark_tester(framework, op_name, input_shapes, op_args, run_mode, fu
         BENCHMARK_TESTER[mode][func_name] = func
 
 
-def benchmark_test_group(func):
+def register_test(func):
     """Decorator to register a benchmark test group.
     A benchmark test group is a function that returns a list of benchmark test
     case objects to be run.
