@@ -263,7 +263,6 @@ static inline void vectorized_outer_reduction(char** data, int64_t inner_stride,
 
 template <typename func_t>
 void unary_kernel(TensorIterator& iter, func_t op) {
-  AT_ASSERT(iter.ntensors() > 1);
   using traits = unary_function_traits<func_t>;
 
   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
@@ -278,7 +277,6 @@ void unary_kernel(TensorIterator& iter, func_t op) {
 
 template <typename func_t, typename vec_func_t>
 void unary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
-  AT_ASSERT(iter.ntensors() > 1);
   using traits = unary_function_traits<func_t>;
   static_assert(
     std::is_same<typename traits::result_type, typename traits::arg1_t>::value,
