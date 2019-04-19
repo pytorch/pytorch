@@ -435,9 +435,6 @@ def iterate_types():
             for scalar_type in scalar_types:
                 if density == 'Mkldnn' and (backend != 'CPU' or scalar_type[0] != 'Float'):
                     continue
-                if density == 'Sparse' and scalar_type[0] == 'Half':
-                    # THS does not do half type yet.
-                    continue
                 if backend in quantized_backends:
                     if density == 'Dense' and scalar_type in quantized_scalar_types:
                         yield (backend, density, scalar_type)
