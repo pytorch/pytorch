@@ -53,7 +53,7 @@ static void gatherParametersAndBuffers(Value* self_value, const script::Module& 
 
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     const py::function& func,
-    Stack trace_inputs,
+    TypedStack trace_inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
     const std::shared_ptr<script::Module>& self) {
@@ -169,7 +169,7 @@ void initPythonTracerBindings(PyObject* module) {
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
   m.def("_tracer_enter", [](py::args trace_inputs) {
-    return tracer::enter(toStack(trace_inputs));
+    return tracer::enter(toTypedStack(trace_inputs));
   });
   m.def("_tracer_exit", [](py::tuple var_outputs) {
     tracer::exit(toStack(var_outputs));

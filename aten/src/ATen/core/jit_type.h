@@ -43,6 +43,7 @@ _(GeneratorType) \
 _(BoolType) \
 _(OptionalType) \
 _(VarType) \
+_(ProfiledTensorType) \
 _(DeviceObjType) \
 _(ClassType) \
 
@@ -391,6 +392,185 @@ protected:
   int64_t dim_;
 };
 
+
+template <typename T>
+inline c10::optional<T> merge_primitive (const c10::optional<T>& a, const c10::optional<T>& b)
+{
+  if (a.has_value() && b.has_value() &&
+      a.value() == b.value()) {
+    return a;
+  }
+  return c10::optional<T>{};
+}
+
+// `VaryingShape` tracks if individual dimensions or a rank vary across
+// profiled runs. A *varying* or *dynamic* dimension is expressed as
+// an empty c10::optional in `sizes_`. If a rank is dynamic, the entire
+// `sizes_` becomes the empty optional.
+struct CAFFE2_API VaryingShape {
+
+  VaryingShape(const IntArrayRef& ref)
+  : size_(ref.size())
+  , dims_(ref.begin(), ref.end())
+  {
+  }
+
+  VaryingShape(const std::vector<int64_t>& vec)
+  : size_(vec.size())
+  , dims_(vec.begin(), vec.end())
+  {
+  }
+
+  VaryingShape(c10::optional<size_t> size)
+  : size_(size)
+  , dims_(size ? size.value() : 0)
+  {
+  }
+
+  bool operator ==(const VaryingShape &other) const
+  {
+    return size_ != other.size_ && dims_ == dims_;
+  }
+
+  const c10::optional<int64_t>& operator [] (int i) const
+  {
+      if (!size_)
+      {
+        throw std::runtime_error("Rank isn't fixed");
+      }
+      return dims_[i];
+  }
+
+  c10::optional<size_t> size() const
+  {
+    AT_ASSERT(size_ == dims_.size());
+    return size_;
+  }
+
+  VaryingShape merge(const VaryingShape& other) const;
+
+  c10::optional<std::vector<int64_t>> concrete_sizes() const
+  {
+    c10::optional<std::vector<int64_t>> empty{};
+    std::vector<int64_t> sizes;
+    if (!size_)
+    {
+      return empty;
+    }
+    for (auto d : dims_)
+    {
+      if (!d)
+      {
+        return empty;
+      }
+      sizes.push_back(d.value());
+    }
+
+    return sizes;
+  }
+
+private:
+  c10::optional<size_t> size_;
+  std::vector<c10::optional<int64_t>> dims_;
+};
+
+using VaryingStrides = VaryingShape;
+
+struct ProfiledTensorType;
+using ProfiledTensorTypePtr = std::shared_ptr<ProfiledTensorType>;
+// This type represents a single Tensor with a specific size
+struct CAFFE2_API ProfiledTensorType : public TensorType {
+
+  static ProfiledTensorTypePtr create(const at::Tensor& t) {
+    return ProfiledTensorTypePtr(new ProfiledTensorType(t));
+  }
+
+  static ProfiledTensorTypePtr create(c10::optional<at::ScalarType> scalar_type, c10::optional<Device> device,const VaryingShape& sizes, const VaryingStrides& strides, c10::optional<bool> requires_grad)
+  {
+      return ProfiledTensorTypePtr(new ProfiledTensorType(scalar_type, device, sizes, strides, requires_grad));
+  }
+
+  const VaryingShape& sizes() const { return sizes_; }
+  const VaryingStrides& strides() const { return strides_; }
+  c10::optional<at::Device> device() const { return device_; }
+  c10::optional<at::ScalarType> scalarType() const { return scalar_type_; }
+  c10::optional<bool> requiresGrad() const { return requires_grad_; }
+
+  bool operator==(const Type& rhs) const override {
+    if(rhs.kind() != kind())
+    {
+      return false;
+    }
+
+    auto rt = rhs.expect<ProfiledTensorType>();
+    return scalar_type_ == rt->scalarType() &&
+           sizes() == rt->sizes() &&
+           strides() == rt->strides() &&
+           device() == rt->device();
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    if (rhs->kind() == TypeKind::ProfiledTensorType)
+      return *expect<ProfiledTensorType>() == *rhs;
+    return rhs->kind() == TypeKind::TensorType ||
+           TensorType::isSubtypeOf(rhs);
+  }
+  bool isSubclass(const TypeKind kind) const override {
+    return kind == TypeKind::TensorType ||
+           kind == TypeKind::ProfiledTensorType;
+  }
+  std::string str() const override;
+
+  c10::optional<size_t> numel() const
+  {
+    size_t prod = 1;
+    const auto& shape = sizes();
+
+    for(size_t i = 0; i < shape.size(); i++) {
+      if (!shape[i])
+      {
+        return c10::optional<size_t>{};
+      }
+      prod *= shape[i].value();
+    }
+    return prod;
+  }
+
+  ProfiledTensorTypePtr merge(ProfiledTensorTypePtr other)
+  {
+    auto scalar_type = merge_primitive(scalarType(), other->scalarType());
+    auto dev = merge_primitive(device(), other->device());
+    auto sz = sizes().merge(other->sizes());
+    auto srs = strides().merge(other->strides());
+    auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
+    return ProfiledTensorType::create(scalar_type, dev, sz, srs, gr);
+  }
+
+  static const TypeKind Kind = TypeKind::ProfiledTensorType;
+
+private:
+  ProfiledTensorType(const at::Tensor& tensor)
+    : TensorType()
+    , scalar_type_(tensor.scalar_type())
+    , device_(tensor.device())
+    , sizes_(tensor.sizes().vec())
+    , strides_(tensor.strides().vec())
+    , requires_grad_(tensor.requires_grad()) {}
+    ProfiledTensorType(c10::optional<at::ScalarType> scalar_type, c10::optional<Device> device,const VaryingShape& sizes, const VaryingStrides& strides, c10::optional<bool> requires_grad)
+    : TensorType()
+    , scalar_type_(scalar_type)
+    , device_(device)
+    , sizes_(sizes)
+    , strides_(strides)
+    , requires_grad_(requires_grad)
+    {}
+
+  c10::optional<at::ScalarType> scalar_type_;
+  c10::optional<at::Device> device_;
+  VaryingShape sizes_;
+  VaryingStrides strides_;
+  c10::optional<bool> requires_grad_;
+};
+
 struct CompleteTensorType;
 using CompleteTensorTypePtr = std::shared_ptr<CompleteTensorType>;
 // This type represents a single Tensor with a specific size
@@ -433,7 +613,10 @@ struct CAFFE2_API CompleteTensorType : public DimensionedTensorType {
 
   bool operator==(const Type& rhs) const override {
     if(rhs.kind() != kind())
+    {
       return false;
+    }
+
     auto rt = rhs.expect<CompleteTensorType>();
     return scalarType() == rt->scalarType() &&
            sizes() == rt->sizes() &&
@@ -456,7 +639,7 @@ struct CAFFE2_API CompleteTensorType : public DimensionedTensorType {
     // don't want to reveal underlying size information.
     return "Tensor";
   }
-  bool numel() const {
+  size_t numel() const {
     size_t prod = 1;
     for(auto s : sizes()) {
       prod *= s;
@@ -736,7 +919,10 @@ private:
 
   bool compare(const Type& rhs, std::function<bool(const TypePtr, const TypePtr)> fn) const {
     if(rhs.kind() != kind())
+    {
       return false;
+    }
+
     const auto & l_elements = elements();
     const auto & r_elements = rhs.cast<TupleType>()->elements();
     if(l_elements.size() != r_elements.size())
@@ -986,6 +1172,7 @@ private:
 };
 
 CAFFE2_API std::ostream& operator<<(std::ostream & out, const Type & t);
+CAFFE2_API std::ostream& operator<<(std::ostream & out, const VaryingShape & t);
 // what is the type, ignoring extra size/shape information?
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 

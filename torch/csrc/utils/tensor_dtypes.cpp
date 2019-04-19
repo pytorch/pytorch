@@ -60,9 +60,7 @@ void initializeDtypes() {
   for (at::ScalarType scalarType : all_scalar_types) {
     std::string primary_name, legacy_name;
     std::tie(primary_name, legacy_name) = getDtypeNames(scalarType);
-    std::string name =
-        std::string(PyModule_GetName(torch_module.get())) + '.' + primary_name;
-    PyObject* dtype = THPDtype_New(scalarType, name);
+    PyObject *dtype = THPDtype_New(scalarType, primary_name);
     torch::registerDtypeObject((THPDtype*)dtype, scalarType);
     Py_INCREF(dtype);
     if (PyModule_AddObject(torch_module.get(), primary_name.c_str(), dtype) !=

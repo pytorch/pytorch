@@ -394,15 +394,17 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 
     if (py::object attr = py::getattr(py_module_, field.c_str(), py::none())) {
       if (py::isinstance<py::function>(attr) &&
-          py::hasattr(attr, "_is_parameter_list") &&
-          py::cast<bool>(py::getattr(attr, "_is_parameter_list"))) {
+          py::hasattr(attr, "_parameter_names_fn")) {
+        // Fetch the names of the parameters in the list so they're in the
+        // right order
+        auto fn_self = py::getattr(attr, "__self__");
+        auto param_names = py::getattr(attr, "_parameter_names_fn")(fn_self);
+
         Graph& g = *m.graph();
         // Add all module parameters as inputs to the graph
         std::vector<Value*> params;
-        const auto& param_list = module_->get_parameters();
-        for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
-          auto& param = *it;
-          params.emplace_back(g.insertGetAttr(self_, param.name()));
+        for (auto name : param_names) {
+          params.emplace_back(g.insertGetAttr(self_, py::str(name)));
         }
         auto list = g.insertNode(g.createTuple(params))->output();
         return std::make_shared<ConstantParameterList>(list);
@@ -906,9 +908,9 @@ void initJitScriptBindings(PyObject* module) {
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
-            Stack inputs = toStack(input_tuple);
+            auto typed_inputs = toTypedStack(input_tuple);
             auto graph = tracer::createGraphByTracing(
-                func, inputs, var_lookup_fn, force_outplace, self);
+                func, typed_inputs, var_lookup_fn, force_outplace, self);
             self->module_object()->type()->compilation_unit().create_function(
                 name, graph);
             didFinishEmitModule(self);
