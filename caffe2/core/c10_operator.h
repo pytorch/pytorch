@@ -2,6 +2,7 @@
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <torch/csrc/jit/script/function_schema_parser.h>
 #include <vector>
 
 namespace caffe2 {
@@ -86,21 +87,23 @@ void call_caffe2_op_from_c10(
   _call_caffe2_op_from_c10(stack, Schema(), &_call_caffe2_op<Caffe2Operator>);
 }
 
-inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName, std::vector<c10::Argument> inputs, std::vector<c10::Argument> outputs) {
-  // actual_inputs is the real inputs plus an optional tensor list argument
-  // for preallocated outputs
-  std::vector<c10::Argument> actual_inputs = std::move(inputs);
-  actual_inputs.emplace_back(
+inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
+  c10::FunctionSchema parsed_schema = torch::jit::parseSchema(schema_str);
+  std::vector<c10::Argument> arguments = parsed_schema.arguments();
+  arguments.emplace_back(
       PREALLOCATED_OUTPUT_ARGNAME,
       c10::OptionalType::create(c10::ListType::ofTensors()),
       nullopt,
       IValue());
 
-  return c10::FunctionSchema(
-      std::string("_caffe2::") + OperatorName,
-      "",
-      std::move(actual_inputs),
-      std::move(outputs));
+  return FunctionSchema(
+    parsed_schema.name(),
+    parsed_schema.overload_name(),
+    std::move(arguments),
+    parsed_schema.returns(),
+    parsed_schema.is_vararg(),
+    parsed_schema.is_varret()
+  );
 }
 
 inline std::unique_ptr<c10::KernelCache> noCache() {
@@ -123,14 +126,7 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
  *
  * > C10_REGISTER_CAFFE2_OPERATOR_CPU(
  * >    C10MyOperator,
- * >    (std::vector<c10::Argument>{
- * >      c10::Argument("input1"),
- * >      c10::Argument("argument2", c10::IntType::get()),
- * >      c10::Argument("argument3", c10::FloatType::get())
- * >    }), (std::vector<c10::Argument>{
- * >      c10::Argument("output1"),
- * >      c10::Argument("output2")
- * >    }),
+ * >    "_caffe2::C10MyOperator(Tensor input1, int argument2, float argument3) -> (Tensor output1, Tensor output2)"
  * >    caffe2::MyOperator<caffe2::CPUContext> // This is the caffe2 operator
  * >                                           // class template
  * > )
@@ -158,20 +154,18 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
 #define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)                  \
   namespace caffe2 {                                               \
   namespace _c10_ops {                                             \
-  CAFFE2_API const ::c10::FunctionSchema& schema_##OperatorName(); \
+  CAFFE2_API const FunctionSchema& schema_##OperatorName();        \
   }                                                                \
   }
 
-// TODO This macro should take a JIT schema string instead of a vector of inputs and outputs.
 #define C10_REGISTER_CAFFE2_OPERATOR_CPU(                                    \
-    OperatorName, Inputs, Outputs, OperatorClass)                            \
+    OperatorName, OperatorSchema, OperatorClass)                             \
   /* Register the op schema with the c10 dispatcher */                       \
   namespace caffe2 {                                                         \
   namespace _c10_ops {                                                       \
-  C10_EXPORT const ::c10::FunctionSchema& schema_##OperatorName() {          \
-    static ::c10::FunctionSchema schema =                                    \
-        ::caffe2::detail::make_function_schema_for_c10(                      \
-            #OperatorName, Inputs, Outputs);                                 \
+  C10_EXPORT const FunctionSchema& schema_##OperatorName() {                 \
+    static const FunctionSchema schema =                                     \
+        ::caffe2::detail::make_function_schema_for_c10(OperatorSchema);      \
     return schema;                                                           \
   }                                                                          \
   }                                                                          \
@@ -217,7 +211,7 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
 #else
 // Don't use c10 dispatcher on mobile because of binary size
 #define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)
-#define C10_REGISTER_CAFFE2_OPERATOR_CPU(OperatorName, Inputs, Outputs, OperatorClass)
+#define C10_REGISTER_CAFFE2_OPERATOR_CPU(OperatorName, OperatorSchema, OperatorClass)
 #define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)
 #define C10_REGISTER_CAFFE2_OPERATOR_HIP(OperatorName, OperatorClass)
 #endif

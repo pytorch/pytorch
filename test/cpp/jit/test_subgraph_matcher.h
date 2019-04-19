@@ -146,7 +146,7 @@ void testLinear2() {
  *     eee
  */
 void testDiamond1() {
-  Graph graph, pattern;
+  Graph graph, pattern1, pattern2;
   script::parseIR(
       R"IR(
 graph(%0):
@@ -158,6 +158,7 @@ graph(%0):
   %e = e::eee(%d)
   return (%e))IR",
       &graph);
+
   script::parseIR(
       R"IR(
 graph(%0):
@@ -166,8 +167,20 @@ graph(%0):
   %c = c::ccc(%a)
   %d = d::ddd(%b, %c)
   return (%d))IR",
-      &pattern);
-  AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+      &pattern1);
+  AT_ASSERT(!findPatternMatches(pattern1, graph).empty());
+
+  // Check that order of nodes inside the diamond does not affect the result
+  script::parseIR(
+      R"IR(
+graph(%0):
+  %a = a::aaa(%0)
+  %c = c::ccc(%a)
+  %b = b::bbb(%a)
+  %d = d::ddd(%b, %c)
+  return (%d))IR",
+      &pattern2);
+  AT_ASSERT(!findPatternMatches(pattern2, graph).empty());
 }
 
 /**
