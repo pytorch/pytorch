@@ -126,7 +126,7 @@ class C10OperatorWrapper final : public Operator<Context> {
   void popOutputs_() {
     AT_ASSERT(stack_.size() == op_.schema().returns().size());
     for (size_t i = 0; i < op_.schema().returns().size(); ++i) {
-      OperatorBase::SetOutputTensor(i, Tensor(C10Tensor(std::move(stack_[i]).toTensor())));
+      OperatorBase::SetOutputTensor(i, Tensor(std::move(stack_[i]).toTensor()));
     }
     stack_.clear();
   }

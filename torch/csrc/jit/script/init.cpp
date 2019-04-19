@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/testing/file_check.h>
 
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/irparser.h>
@@ -374,18 +375,19 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<OverloadedFunctionValue>(
           self_, py::cast<std::vector<std::string>>(overloads));
     }
-
     if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
       if (py::isinstance<py::function>(attr) &&
-          py::hasattr(attr, "_is_parameter_list") &&
-          py::cast<bool>(py::getattr(attr, "_is_parameter_list"))) {
+          py::hasattr(attr, "_parameter_names_fn")) {
+        // Fetch the names of the parameters in the list so they're in the
+        // right order
+        auto fn_self = py::getattr(attr, "__self__");
+        auto param_names = py::getattr(attr, "_parameter_names_fn")(fn_self);
+
         Graph& g = *m.graph();
         // Add all module parameters as inputs to the graph
         std::vector<Value*> params;
-        const auto& param_list = module_->get_parameters();
-        for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
-          auto& param = *it;
-          params.emplace_back(g.insertGetAttr(self_, param.name()));
+        for (auto name : param_names) {
+          params.emplace_back(g.insertGetAttr(self_, py::str(name)));
         }
         auto list = g.insertNode(g.createTuple(params))->output();
         return std::make_shared<ConstantParameterList>(list);
@@ -661,6 +663,10 @@ struct PythonResolver : public Resolver {
  private:
   ResolutionCallback rcb_;
 };
+
+std::shared_ptr<PythonResolver> pythonResolver(ResolutionCallback rcb) {
+  return std::make_shared<PythonResolver>(rcb);
+}
 } // namespace
 
 FunctionSchema getSchemaWithNameAndDefaults(
@@ -802,12 +808,11 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb,
              bool has_self) {
-            auto resolver = std::make_shared<PythonResolver>(rcb);
             if (has_self) {
               m->class_compilation_unit().define(
-                  script, std::move(resolver), moduleSelf(m));
+                  script, pythonResolver(rcb), moduleSelf(m));
             } else {
-              m->_define_lowered(script, std::move(resolver));
+              m->_define_lowered(script, pythonResolver(rcb));
             }
             didFinishEmitModule(m);
           })
@@ -820,9 +825,7 @@ void initJitScriptBindings(PyObject* module) {
             std::vector<ResolverPtr> resolvers;
             resolvers.reserve(rcbs.size());
             for (auto& callback : rcbs) {
-              const auto pythonResolver =
-                  std::make_shared<PythonResolver>(callback);
-              resolvers.push_back(pythonResolver);
+              resolvers.push_back(pythonResolver(callback));
             }
             m->class_compilation_unit().define(defs, resolvers, moduleSelf(m));
             // Stitch in default arguments for each Def if provided
@@ -965,23 +968,6 @@ void initJitScriptBindings(PyObject* module) {
             didFinishEmitModule(self);
           })
       .def(
-          "graph_for",
-          [](py::args args, py::kwargs kwargs) {
-            // [pybind11 varargs] note: old version of pybind11 have a bug that
-            // leaks memory when py::args is mixed with positional arguments
-            // https://github.com/pybind/pybind11/pull/1216
-            // we work around this by not mixing positional arguments with
-            // varargs
-            Module& self = py::cast<Module&>(args[0]);
-            if (self.find_method("forward")) {
-              Method& m = self.get_method("forward");
-              return m.graph_for(createStackForSchema(
-                  m.getSchema(), tuple_slice(std::move(args), 1), kwargs));
-            }
-            throw std::runtime_error(
-                "Attempted to call graph_for on a Module without a compiled forward()");
-          })
-      .def(
           "get_debug_state",
           [](Module& self) {
             if (self.find_method("forward")) {
@@ -1060,14 +1046,6 @@ void initJitScriptBindings(PyObject* module) {
             }
             return tensors;
           })
-      .def(
-          "graph_for",
-          [](py::args args, py::kwargs kwargs) {
-            // see: [pybind11 varargs]
-            Method& self = py::cast<Method&>(args[0]);
-            return self.graph_for(createStackForSchema(
-                self.getSchema(), tuple_slice(std::move(args), 1), kwargs));
-          })
       .def_property_readonly("schema", &Method::getSchema)
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
@@ -1085,8 +1063,7 @@ void initJitScriptBindings(PyObject* module) {
          FunctionDefaults defaults) {
         auto def_f = def.withName("forward");
 
-        auto pythonResolver = std::make_shared<PythonResolver>(rcb);
-        mod->_define_lowered({def_f}, {std::move(pythonResolver)});
+        mod->_define_lowered({def_f}, {pythonResolver(rcb)});
         auto& func = mod->lowered_methods().get_function("forward");
         func.setSchema(getSchemaWithNameAndDefaults(
             def.range(), func.getSchema(), def.name().name(), defaults));
@@ -1105,9 +1082,8 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
-          auto pythonResolver = std::make_shared<PythonResolver>(rcb);
           methodDefs.push_back(def);
-          rcbs.push_back(std::move(pythonResolver));
+          rcbs.push_back(pythonResolver(rcb));
         }
         cu->define(methodDefs, rcbs, simpleSelf(classType));
       });
@@ -1151,7 +1127,8 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
   m.def("_jit_clear_class_registry", ClassType::clearRegistry);
   m.def(
-      "_debug_set_autodiff_subgraph_inlining", debugSetAutodiffSubgraphInlining);
+      "_debug_set_autodiff_subgraph_inlining",
+      debugSetAutodiffSubgraphInlining);
   m.def("_propagate_shapes", _propagate_shapes);
   m.def(
       "_propagate_and_assign_input_and_output_shapes",
@@ -1169,6 +1146,10 @@ void initJitScriptBindings(PyObject* module) {
     }
     return std::make_pair(ss.str(), std::move(constants));
   });
+  m.def(
+      "_last_executed_optimized_graph",
+      []() { return lastExecutedOptimizedGraph(); },
+      "Retrieve the optimized graph that was run the last time the graph executor ran on this thread");
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())

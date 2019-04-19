@@ -11,8 +11,7 @@ namespace jit {
 
 std::shared_ptr<script::CompilationUnit> compile(const std::string& source) {
   auto module = std::make_shared<script::CompilationUnit>();
-  auto resolver = std::make_shared<script::NativeResolver>();
-  module->define(source, std::move(resolver), nullptr);
+  module->define(source, script::nativeResolver(), nullptr);
   return module;
 }
 
