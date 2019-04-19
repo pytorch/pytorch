@@ -343,7 +343,7 @@ Method& Module::_define_lowered(
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
   class_cu().define(
       src,
-      resolver ? resolver : std::make_shared<NativeResolver>(),
+      resolver ? resolver : script::nativeResolver(),
       simpleSelf(module_object()->type()));
 }
 

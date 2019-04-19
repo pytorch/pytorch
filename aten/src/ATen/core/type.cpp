@@ -23,6 +23,17 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
     }
     out << ")";
+  } else if (auto value = t.cast<ProfiledTensorType>()) {
+    out << "Tensor(dtype = ";
+    if  (value->scalarType().has_value())
+    {
+        out << *value->scalarType();
+    }
+    else
+    {
+      out << " dynamic";
+    }
+    out << " , shape = " << value->sizes();
   } else if (auto value = t.cast<DimensionedTensorType>()) {
     out << toString(value->scalarType()) << "(";
     for (int64_t i = 0; i < value->dim(); ++i) {
@@ -176,6 +187,15 @@ TypePtr attemptToRecoverType(const IValue& ivalue) {
 
 // Checks if input_ivalue is a subvalue of type.
 bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
+  if (auto optional = type->cast<OptionalType>()) {
+    // Unwrap the optional if the ivalue is not none
+    if (ivalue.isNone()) {
+      return true;
+    } else {
+      return isSubvalueOf(ivalue, optional->getElementType());
+    }
+  }
+
   if (ivalue.isTuple()) {
     const auto& ivalue_elem = ivalue.toTuple()->elements();
     auto tuple_type = type->cast<TupleType>();
@@ -498,6 +518,51 @@ ClassTypePtr ClassType::get(const std::string& qualifiedName) {
 
 void ClassType::clearRegistry() {
   getRegistry().clear();
+}
+
+std::string ProfiledTensorType::str() const {
+  return "Tensor";
+}
+
+VaryingShape VaryingShape::merge(const VaryingShape& other) const
+{
+  if (size_ != other.size_) {
+    return VaryingShape(c10::optional<size_t>{});
+  }
+
+  VaryingShape vs(c10::optional<size_t>(dims_.size()));
+  for (size_t i = 0; i < dims_.size(); i++)
+  {
+    vs.dims_[i] = merge_primitive(dims_[i], other.dims_[i]);
+  }
+
+  return vs;
+}
+
+std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
+
+    out << "(";
+    if (!vs.size()) {
+      out << "*)";
+      return out;
+    }
+
+    for (size_t i = 0; i < vs.size(); i++)
+    {
+      if (i > 0) {
+        out << ", ";
+      }
+      if (vs[i].has_value())
+      {
+        out << vs[i].value();
+      }
+      else
+      {
+        out << "*";
+      }
+    }
+    out << ")";
+    return out;
 }
 
 ClassType::ClassType(
