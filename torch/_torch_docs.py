@@ -1137,7 +1137,7 @@ Example::
 
 add_docstr(torch.cumprod,
            r"""
-cumprod(input, dim, dtype=None) -> Tensor
+cumprod(input, dim, out=None, dtype=None) -> Tensor
 
 Returns the cumulative product of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -1152,6 +1152,7 @@ Args:
     input (Tensor): the input tensor
     dim  (int): the dimension to do the operation over
     {dtype}
+    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -1186,6 +1187,7 @@ Args:
     input (Tensor): the input tensor
     dim  (int): the dimension to do the operation over
     {dtype}
+    out (Tensor, optional): the output tensor
 
 Example::
 
