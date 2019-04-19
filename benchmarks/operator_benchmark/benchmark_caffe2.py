@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
-from caffe2.benchmarks.operator_benchmark import benchmark_core, benchmark_utils
+from benchmarks.operator_benchmark import benchmark_core, benchmark_utils
 
 """Caffe2 performance microbenchmarks.
 
@@ -15,10 +15,6 @@ microbenchmarks.
 
 def Caffe2OperatorTestCase(test_name, op_type, input_shapes, op_args, run_mode):
     """Benchmark Tester function for Caffe2 framework.
-    test_case is expected to be a Caffe2OperatorTestCase object. If not, the
-    function will return False.
-    It returns a function that contains the code to benchmarked
-    (operator execution).
     """
     idx = 0
     input_blobs = []

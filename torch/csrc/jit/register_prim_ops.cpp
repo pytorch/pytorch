@@ -8,9 +8,10 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/script/logging.h>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtils.h>
@@ -113,11 +114,22 @@ static at::Tensor to_dispatch(
 
 RegisterOperators reg(
     {Operator(
+         "prim::profile(...) -> ()",
+         [](const Node* node) {
+           return [node](Stack& stack) {
+             auto addr = node->i(attr::data);
+             std::function<void(Stack&)>& callback =
+                 *reinterpret_cast<std::function<void(Stack&)>*>(addr);
+             callback(stack);
+             return 0;
+           };
+         }),
+     Operator(
          prim::FusionGroup,
          [](const Node* node) {
            const auto key = registerFusion(node);
            return [key](Stack& stack) {
-             autograd::profiler::RecordFunction record("FusionGroup");
+             RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
              runFusion(key, stack);
              return 0;
            };
@@ -139,7 +151,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            at::Tensor a;
            pop(stack, a);
-           push(stack, a.item<int64_t>() != 0);
+           push(stack, a.is_nonzero());
            return 0;
          }),
      Operator(
@@ -258,7 +270,7 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Int(Scalar a) -> float",
+         "prim::Int(Scalar a) -> int",
          [](Stack& stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -660,7 +672,8 @@ RegisterOperators reg(
              return v->uses().size() > 0;
            });
            return [=](Stack& stack) {
-             autograd::profiler::RecordFunction record("chunk");
+             RECORD_FUNCTION("chunk", last(stack, 1));
+
              at::Tensor t;
              pop(stack, t);
              auto result = at::chunk(t, chunks, dim);
@@ -858,10 +871,9 @@ RegisterOperators reg(
          prim::CreateObject,
          [](const Node* node) {
            const auto type = node->output()->type()->expect<ClassType>();
-           const auto name = Symbol::user(type->name());
            const size_t numAttrs = type->numAttributes();
-           return [name, numAttrs](Stack& stack) {
-             auto userObj = c10::ivalue::Object::create(name, numAttrs);
+           return [type, numAttrs](Stack& stack) {
+             auto userObj = c10::ivalue::Object::create(type, numAttrs);
              push(stack, std::move(userObj));
              return 0;
            };
@@ -889,46 +901,47 @@ RegisterOperators reg(
          userObj->setSlot(slot, std::move(v));
          return 0;
        };
-     })
-     });
+     })});
 
-RegisterOperators logging_operators({
-    Operator("prim::AddStatValue(str key, int val) -> ()", [](Stack& stack) {
-          auto val = pop(stack).toInt();
-          auto key = pop(stack).toString();
+RegisterOperators logging_operators(
+    {Operator(
+         "prim::AddStatValue(str key, int val) -> ()",
+         [](Stack& stack) {
+           auto val = pop(stack).toInt();
+           auto key = pop(stack).toString();
 
-          auto schema = parseSchema("prim::AddStatValue(str key, int val) -> ()");
-          // TODO: remove this custom tracing code once the custom op bugfix lands
-          if (jit::tracer::isTracing()) {
-            const auto& graph = tracer::getTracingState()->graph;
-            Node* node = graph->create(prim::AddStatValue, /*num_outputs=*/0);
-            tracer::recordSourceLocation(node);
-            node->addInput(insertConstant(*graph, key));
-            tracer::addInputs(node, "val", val);
-            graph->insertNode(node);
-          }
-          torch::jit::logging::getLogger()->addStatValue(*key, val);
-          return 0;
-    }),
-    Operator("prim::TimePoint() -> int", [](Stack& stack) {
-        auto schema = parseSchema("prim::TimePoint() -> int");
-        Node* node = nullptr;
-        // TODO: remove this custom tracing code once the custom op bugfix lands
-        if (jit::tracer::isTracing()) {
-            const auto& graph = tracer::getTracingState()->graph;
-            Node* node = graph->create(prim::TimePoint, /*num_outputs=*/0);
-            tracer::recordSourceLocation(node);
-            graph->insertNode(node);
-        }
-        auto output = autograd::profiler::getTime();
-        push(stack, output);
-        if (jit::tracer::isTracing()) {
-          jit::tracer::addOutput(node, output);
-        }
-        return 0;
-    })
-});
-
+           auto schema =
+               parseSchema("prim::AddStatValue(str key, int val) -> ()");
+           // TODO: remove this custom tracing code once the custom op bugfix
+           // lands
+           if (jit::tracer::isTracing()) {
+             const auto& graph = tracer::getTracingState()->graph;
+             Node* node = graph->create(prim::AddStatValue, /*num_outputs=*/0);
+             tracer::recordSourceLocation(node);
+             node->addInput(insertConstant(*graph, key));
+             tracer::addInputs(node, "val", val);
+             graph->insertNode(node);
+           }
+           torch::jit::logging::getLogger()->addStatValue(*key, val);
+           return 0;
+         }),
+     Operator("prim::TimePoint() -> int", [](Stack& stack) {
+       auto schema = parseSchema("prim::TimePoint() -> int");
+       Node* node = nullptr;
+       // TODO: remove this custom tracing code once the custom op bugfix lands
+       if (jit::tracer::isTracing()) {
+         const auto& graph = tracer::getTracingState()->graph;
+         Node* node = graph->create(prim::TimePoint, /*num_outputs=*/0);
+         tracer::recordSourceLocation(node);
+         graph->insertNode(node);
+       }
+       auto output = autograd::profiler::getTime();
+       push(stack, output);
+       if (jit::tracer::isTracing()) {
+         jit::tracer::addOutput(node, output);
+       }
+       return 0;
+     })});
 
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
@@ -1527,15 +1540,33 @@ int dictKeys(Stack& stack) {
   return 0;
 }
 
-int dictValues(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
-  std::vector<IValue> values;
+template <typename Elem>
+std::vector<Elem> makeListForDictValues(const c10::ivalue::UnorderedMap& dict) {
+  std::vector<Elem> values;
   values.reserve(dict.size());
   for (auto item : dict) {
-    values.push_back(item.second);
+    values.push_back(item.second.to<Elem>());
   }
-  push(stack, IValue(values));
-  return 0;
+  return values;
+}
+
+Operation dictValues(const Node* n) {
+  auto outputType = n->output()->type()->expect<ListType>();
+  return [=](Stack& stack) -> int {
+    auto dict = pop(stack).toGenericDictRef();
+    if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
+      push(stack, makeListForDictValues<at::Tensor>(dict));
+    } else if (outputType->getElementType() == IntType::get()) {
+      push(stack, makeListForDictValues<int64_t>(dict));
+    } else if (outputType->getElementType() == FloatType::get()) {
+      push(stack, makeListForDictValues<double>(dict));
+    } else if (outputType->getElementType() == BoolType::get()) {
+      push(stack, makeListForDictValues<bool>(dict));
+    } else {
+      push(stack, makeListForDictValues<IValue>(dict));
+    }
+    return 0;
+  };
 }
 
 int dictIndex(Stack& stack) {
@@ -1577,7 +1608,7 @@ int dictGetDefault(Stack& stack) {
   return 0;
 }
 
-template<typename T>
+template <typename T>
 int hashValue(Stack& stack) {
   auto value = pop(stack);
   auto hash = std::hash<T>()(value.to<T>());
@@ -1599,7 +1630,13 @@ RegisterOperators reg2({
     DEFINE_STRING_OP(aten::ne, a != b, bool),
     DEFINE_STRING_OP(aten::add, a + b, str),
 #undef DEFINE_STRING_OP
-
+    Operator(
+        "aten::len(str s) -> int",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          push(stack, static_cast<int64_t>(string.size()));
+          return 0;
+        }),
     // tensor length op (size of 1st dimension)
     Operator(
         "aten::len(Tensor t) -> int",
@@ -1727,7 +1764,7 @@ RegisterOperators reg2({
 #undef CREATE_MUTABLE_LIST_OPS
 
 #define CREATE_LIST_OPS(decl_type, c_type)                                          \
-      Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),     \
+  Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
       Operator(                                                                     \
           "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
           "[]",                                                                     \
@@ -1887,11 +1924,123 @@ RegisterOperators reg2({
         }),
 
     Operator(
-        "aten::floor(float a) -> int",
+        "aten::pow(float a, float b) -> float",
+        [](Stack& stack) {
+          double a, b;
+          pop(stack, a, b);
+          push(stack, std::pow(a, b));
+          return 0;
+        }),
+    Operator(
+        "aten::pow(float a, int b) -> float",
+        [](Stack& stack) {
+          double a;
+          int b;
+          pop(stack, a, b);
+          push(stack, std::pow(a, b));
+          return 0;
+        }),
+
+    Operator(
+        "aten::floor(float a) -> float",
         [](Stack& stack) {
           double a;
           pop(stack, a);
-          push(stack, static_cast<int64_t>(std::floor(a)));
+          push(stack, std::floor(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::ceil(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::ceil(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::log(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::log(a));
+          return 0;
+        }),
+    Operator(
+        "aten::log(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::log(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::log1p(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::log1p(a));
+          return 0;
+        }),
+    Operator(
+        "aten::log1p(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::log1p(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::log10(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::log10(a));
+          return 0;
+        }),
+    Operator(
+        "aten::log10(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::log10(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::exp(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::exp(a));
+          return 0;
+        }),
+    Operator(
+        "aten::exp(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::exp(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::sqrt(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::sqrt(a));
+          return 0;
+        }),
+    Operator(
+        "aten::sqrt(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::sqrt(a));
           return 0;
         }),
 
@@ -1966,35 +2115,33 @@ RegisterOperators reg2({
           push(stack, t);
           return 0;
         }),
-#define CREATE_DICT_OPS(key_type)                                            \
-  Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen),         \
-      Operator(                                                              \
-          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[](*)",     \
-          dictKeys),                                                         \
-      Operator(                                                              \
-          "aten::values(Dict(" key_type ", t) self) -> t[](*)", dictValues), \
-      Operator(                                                              \
-          "prim::DictIndex(Dict(" key_type ", t) self, " key_type            \
-          " key) -> t(*)",                                                   \
-          dictIndex),                                                        \
-      Operator(                                                              \
-          "aten::get(Dict(" key_type ", t) self, " key_type                  \
-          " key) -> t(*)?",                                                   \
-          dictGet),                                                          \
-      Operator(                                                              \
-          "aten::get(Dict(" key_type ", t) self, " key_type                  \
-          " key, t default_value) -> t(*)",                                  \
-          dictGetDefault),                                                   \
-      Operator(                                                              \
-          "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type           \
-          " idx, t v) -> ()",                                                \
+#define CREATE_DICT_OPS(key_type)                                             \
+  Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen),          \
+      Operator(                                                               \
+          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[](*)",      \
+          dictKeys),                                                          \
+      Operator(                                                               \
+          "aten::values(Dict(" key_type ", t) self) -> t[](*)", dictValues),  \
+      Operator(                                                               \
+          "prim::DictIndex(Dict(" key_type ", t) self, " key_type             \
+          " key) -> t(*)",                                                    \
+          dictIndex),                                                         \
+      Operator(                                                               \
+          "aten::get(Dict(" key_type ", t) self, " key_type " key) -> t(*)?", \
+          dictGet),                                                           \
+      Operator(                                                               \
+          "aten::get(Dict(" key_type ", t) self, " key_type                   \
+          " key, t default_value) -> t(*)",                                   \
+          dictGetDefault),                                                    \
+      Operator(                                                               \
+          "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
+          " idx, t v) -> ()",                                                 \
           dictSetItem)
 
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("float"),
 #undef CREATE_DICT_OPS
-
 
     Operator("aten::hash(str t) -> int", hashValue<std::string>),
     Operator("aten::hash(int t) -> int", hashValue<int>),

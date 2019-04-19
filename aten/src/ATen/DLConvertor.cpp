@@ -56,10 +56,10 @@ static DLDataType getDLDataType(const Tensor& t) {
   return dtype;
 }
 
-static DLContext getDLContext(const Type& type, const int64_t& device_id) {
+static DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
   DLContext ctx;
   ctx.device_id = device_id;
-  if (type.is_cuda()) {
+  if (tensor.is_cuda()) {
     ctx.device_type = DLDeviceType::kDLGPU;
   } else {
     ctx.device_type = DLDeviceType::kDLCPU;
@@ -67,21 +67,20 @@ static DLContext getDLContext(const Type& type, const int64_t& device_id) {
   return ctx;
 }
 
-static DeviceType getATenDeviceType(const DLContext& ctx) {
+static Device getATenDevice(const DLContext& ctx) {
   switch (ctx.device_type) {
     case DLDeviceType::kDLCPU:
-      return DeviceType::CPU;
+      return at::Device(DeviceType::CPU);
     case DLDeviceType::kDLGPU:
-      return DeviceType::CUDA;
+      return at::Device(DeviceType::CUDA, ctx.device_id);
     case DLDeviceType::kDLOpenCL:
-      return DeviceType::OPENCL;
+      return at::Device(DeviceType::OPENCL, ctx.device_id);
     case DLDeviceType::kDLROCM:
-      return DeviceType::HIP;
+      return at::Device(DeviceType::HIP, ctx.device_id);
     default:
       throw std::logic_error(
           "Unsupported device_type: " + std::to_string(ctx.device_type));
   }
-  return DeviceType::CPU; // impossible
 }
 
 ScalarType toScalarType(const DLDataType& dtype) {
@@ -161,7 +160,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   if (src.is_cuda()) {
     device_id = src.get_device();
   }
-  atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src.type(), device_id);
+  atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src, device_id);
   atDLMTensor->tensor.dl_tensor.ndim = src.dim();
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape =
@@ -173,16 +172,23 @@ DLManagedTensor* toDLPack(const Tensor& src) {
 }
 
 Tensor fromDLPack(const DLManagedTensor* src) {
-  DeviceType device_type = getATenDeviceType(src->dl_tensor.ctx);
+  Device device = getATenDevice(src->dl_tensor.ctx);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   auto deleter = [src](void* self) {
     src->deleter(const_cast<DLManagedTensor*>(src));
   };
+  if (!src->dl_tensor.strides) {
+    return at::from_blob(src->dl_tensor.data,
+        IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
+        deleter,
+        at::device(device).dtype(stype));
+  }
+
   return at::from_blob(
       src->dl_tensor.data,
       IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
       IntArrayRef(src->dl_tensor.strides, src->dl_tensor.ndim),
       deleter,
-      at::device(device_type).dtype(stype));
+      at::device(device).dtype(stype));
 }
 } // namespace at

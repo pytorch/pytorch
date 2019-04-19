@@ -52,9 +52,9 @@ static void check_out_type_matches(Tensor result,
   }
   auto scalarType_arg = scalarType_is_none ? result.scalar_type() : scalarType;
   auto layout_arg = layout_is_none ? *torch::getLayout(result.type().backend()) : layout;
-  auto device_type_arg = device_is_none ? torch::getDeviceType(result.type()) : device.type();
+  auto device_type_arg = device_is_none ? result.device().type() : device.type();
   const auto& type = torch::getVariableType(scalarType_arg, layout_arg, device_type_arg);
-  if (result.type() != type) {
+  if (result.dispatch_type() != type) {
     AT_ERROR(
         "type corresponding to ", type.toString(),
         " does not match type of out parameter (", result.type().toString(), ")");
@@ -116,7 +116,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
           .pinned_memory(r.toBool(5));
       return wrap(dispatch_arange(end, options));
     } else {
-      AT_ASSERTM(!r.toBool(5), " `pin_memory` and `out` parameters are incompatible");
+      AT_CHECK(!r.toBool(5), " `pin_memory` and `out` parameters are incompatible");
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2), r.layout(3), r.isNone(3),
                              r.device(4), r.isNone(4));
       return wrap(dispatch_arange(r.scalar(0), r.tensor(1)).set_requires_grad(r.toBool(6)));
@@ -136,7 +136,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
           .pinned_memory(r.toBool(7));
       return wrap(dispatch_arange(start, end, step, options));
     } else {
-      AT_ASSERTM(!r.toBool(7), " `pin_memory` and `out` parameters are incompatible");
+      AT_CHECK(!r.toBool(7), " `pin_memory` and `out` parameters are incompatible");
       check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4), r.layout(5), r.isNone(5),
                                r.device(6), r.isNone(6));
       return wrap(dispatch_arange(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(8)));
@@ -328,7 +328,7 @@ static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.as_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::as_tensor(default_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::as_tensor(default_type(), default_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -361,7 +361,7 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.sparse_coo_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(default_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(default_type(), default_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -369,7 +369,7 @@ static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::tensor_ctor(default_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::tensor_ctor(default_type(), default_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 

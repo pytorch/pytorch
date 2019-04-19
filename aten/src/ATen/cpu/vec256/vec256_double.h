@@ -141,6 +141,7 @@ public:
   Vec256<double> floor() const {
     return _mm256_floor_pd(values);
   }
+  Vec256<double> frac() const;
   Vec256<double> neg() const {
     return _mm256_xor_pd(_mm256_set1_pd(-0.), values);
   }
@@ -214,6 +215,11 @@ Vec256<double> inline operator*(const Vec256<double>& a, const Vec256<double>& b
 template <>
 Vec256<double> inline operator/(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_div_pd(a, b);
+}
+
+// frac. Implement this here so we can use subtraction.
+Vec256<double> Vec256<double>::frac() const {
+  return *this - this->trunc();
 }
 
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if

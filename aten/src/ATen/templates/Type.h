@@ -66,13 +66,12 @@ struct CAFFE2_API Type {
   virtual bool is_cuda() const = 0;
   virtual bool is_hip() const = 0;
   virtual bool is_sparse() const = 0;
+  virtual bool is_quantized() const = 0;
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
   bool is_undefined() const noexcept { return is_undefined_; }
   virtual Allocator * allocator() const = 0;
   virtual Device getDeviceFromPtr(void * data) const = 0;
-  virtual Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
-  virtual Storage storageWithAllocator(int64_t size, Allocator* allocator) const = 0;
   virtual std::unique_ptr<Generator> generator() const = 0;
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual Storage unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
@@ -106,23 +105,12 @@ struct CAFFE2_API Type {
     return backendToDeviceType(backend());
   }
 
-  virtual Tensor copy(
-      const Tensor& src,
-      bool non_blocking = false,
-      c10::optional<Device> to_device = {}) const = 0;
-  virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const = 0;
-
   virtual void backward(
       Tensor& self,
       c10::optional<Tensor> gradient,
       bool keep_graph,
       bool create_graph) const = 0;
   virtual void set_data(Tensor & self, Tensor new_data) const = 0;
-
-  virtual Tensor tensorFromBlob(void * data, IntArrayRef sizes, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
-  virtual Tensor tensorFromBlob(void * data, IntArrayRef sizes, IntArrayRef strides, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
-  virtual Tensor tensorWithAllocator(IntArrayRef sizes, Allocator* allocator) const = 0;
-  virtual Tensor tensorWithAllocator(IntArrayRef sizes, IntArrayRef strides, Allocator* allocator) const = 0;
 
   bool operator==(const Type& other) const {
     return this == &other;
