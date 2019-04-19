@@ -18,6 +18,11 @@ using ResolverPtr = std::shared_ptr<Resolver>;
  * references to names which are not defined internal to the graph.
  *
  * Example: PythonResolver looks at the enclosing Python scope for `name`.
+ *
+ * NOTE: When adding methods, keep this an abstract class (i.e. all new methods
+ * should be purely virtual). Resist the urge to provide a default
+ * implementation; you should explicitly think about how each resolver would
+ * handle the method.
  */
 struct Resolver {
   virtual ~Resolver() {}
@@ -43,6 +48,10 @@ struct NativeResolver : public Resolver {
     return nullptr;
   }
 };
+
+inline std::shared_ptr<NativeResolver> nativeResolver() {
+  return std::make_shared<NativeResolver>();
+}
 } // namespace script
 } // namespace jit
 } // namespace torch

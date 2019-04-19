@@ -3292,6 +3292,27 @@ a")
         self.checkScript(func, (a, b), optimize=True)
         self.checkScript(func2, (a, b, c, d), optimize=True)
 
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_pow_scalar_backward_cuda(self):
+        # see that scalar exponent works with cuda base (#19253)
+
+        for dtype in [torch.float, torch.double]:
+            @torch.jit.script
+            def func(a, b):
+                # type: (Tensor, float) -> Tensor
+                return (a * 2) ** b
+
+            a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
+            func(a, 1).backward()
+
+            @torch.jit.script
+            def func(a, b):
+                # type: (float, Tensor) -> Tensor
+                return a ** (b * 2 + 1)
+
+            a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
+            func(2, a).backward()
+
     def test_triple(self):
         def func(x):
             return 3. * x
@@ -3448,6 +3469,8 @@ a")
             scalar = x.item()
             return int(scalar), float(scalar)
 
+        graph = torch.jit.script(test_scalar_cast).graph
+        FileCheck().check("(int, float) = prim::TupleConstruct").run(graph)
         self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
         self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
 
@@ -4982,6 +5005,20 @@ a")
         self.checkScriptRaisesRegex(test_bool_cast_tensor, (torch.tensor([1, 1]),), Exception,
                                     "bool value of Tensor with more than one value")
 
+        def test_not_cast(x):
+            if not x:
+                return 1
+            else:
+                return 0
+
+        self.checkScript(test_not_cast, (torch.tensor(1),))
+        self.checkScript(test_not_cast, (torch.tensor(0),))
+
+        with self.assertRaisesRegex(RuntimeError, "expected"):
+            @torch.jit.script
+            def test_mult(x, y):
+                return not(x, y)
+
         def test_cast_int(x):
             # type: (int) -> int
             if x:
@@ -5159,10 +5196,76 @@ a")
 
     def test_math_ops(self):
 
-        def test_floor():
-            return math.floor(1.5)
+        def test_floor(x):
+            # type: (float) -> float
+            return math.floor(x)
 
-        self.checkScript(test_floor, ())
+        def test_ceil(x):
+            # type: (float) -> float
+            return math.ceil(x)
+
+        def test_log_int(x):
+            # type: (int) -> float
+            return math.log(x)
+
+        def test_log_float(x):
+            # type: (float) -> float
+            return math.log(x)
+
+        def test_log1p_int(x):
+            # type: (int) -> float
+            return math.log1p(x)
+
+        def test_log1p_float(x):
+            # type: (float) -> float
+            return math.log1p(x)
+
+        def test_log10_int(x):
+            # type: (int) -> float
+            return math.log10(x)
+
+        def test_log10_float(x):
+            # type: (float) -> float
+            return math.log10(x)
+
+        def test_exp_int(x):
+            # type: (int) -> float
+            return math.exp(x)
+
+        def test_exp_float(x):
+            # type: (float) -> float
+            return math.exp(x)
+
+        def test_sqrt_int(x):
+            # type: (int) -> float
+            return math.sqrt(x)
+
+        def test_sqrt_float(x):
+            # type: (float) -> float
+            return math.sqrt(x)
+
+        def test_pow_float(x, y):
+            # type: (float, float) -> float
+            return math.pow(x, y)
+
+        def test_pow_int(x, y):
+            # type: (float, int) -> float
+            return math.pow(x, y)
+
+        self.checkScript(test_floor, (1.5,))
+        self.checkScript(test_ceil, (1.5,))
+        self.checkScript(test_log_int, (2,))
+        self.checkScript(test_log_float, (2.0,))
+        self.checkScript(test_log1p_int, (1,))
+        self.checkScript(test_log1p_float, (1.0,))
+        self.checkScript(test_log10_int, (2,))
+        self.checkScript(test_log10_float, (2.0,))
+        self.checkScript(test_exp_int, (2,))
+        self.checkScript(test_exp_float, (2.0,))
+        self.checkScript(test_sqrt_int, (2,))
+        self.checkScript(test_sqrt_float, (2.0,))
+        self.checkScript(test_pow_float, (2.0, 2.0))
+        self.checkScript(test_pow_int, (2.0, 2))
 
     def test_if_nest_while(self):
         def func(a, b):
@@ -10991,6 +11094,30 @@ a")
 
         self.checkScript(foo, [torch.rand(2, 3)])
 
+    def test_nn_LSTM_with_layers(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.rnn = nn.LSTM(2, 3, 2)
+
+            @torch.jit.script_method
+            def forward(self, x, lengths, h0, c0):
+                return self.rnn(x, (h0, c0))[0]
+
+        class Eager(torch.nn.Module):
+            def __init__(self):
+                super(Eager, self).__init__()
+                self.rnn = nn.LSTM(2, 3, 2)
+
+            def forward(self, x, lengths, h0, c0):
+                return self.rnn(x, (h0, c0))[0]
+
+        inputs = (torch.randn(1, 1, 2), torch.LongTensor([7]), torch.randn(2, 1, 3), torch.randn(2, 1, 3))
+        eager_out = self.runAndSaveRNG(lambda: Eager()(*inputs), ())[0]
+        script_out = self.runAndSaveRNG(lambda: M()(*inputs), ())[0]
+
+        self.assertEqual(eager_out, script_out)
+
     def test_nn_LSTM(self):
         input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
 
@@ -11229,6 +11356,7 @@ a")
                 self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
                 self.float = torch.jit.Attribute(2.3, float)
                 self.int = torch.jit.Attribute(99, int)
+                self.bool = torch.jit.Attribute(False, bool)
                 self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
                 self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
                 self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
@@ -11236,11 +11364,20 @@ a")
 
             @torch.jit.script_method
             def forward(self):
-                return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
+                return (self.table, self.float, self.int, self.bool, self.tuple, self.list, self.int_list)
 
         m = M()
         imported_m = self.getExportImportCopy(m)
         self.assertEqual(m(), imported_m())
+
+    def test_string_len(self):
+        def fn(x):
+            # type: (str) -> int
+            return len(x)
+
+        self.checkScript(fn, ("",))
+        self.checkScript(fn, ("h",))
+        self.checkScript(fn, ("hello",))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_attribute_unpickling(self):
@@ -11294,7 +11431,8 @@ a")
                 def forward(self,
                     _0: Tensor) -> Tensor:
                   _1 = torch.zeros([10], dtype=6, layout=0, device=torch.device("cpu"))
-                  result = torch.to(torch.fill_(_1, 5), dtype=6, layout=0, device=torch.device("cpu"), non_blocking=False, copy=False)
+                  result = torch.to(torch.fill_(_1, 5), dtype=6, layout=0, device=torch.device("cpu"),
+                                    non_blocking=False, copy=False)
                   result2 = torch.rand([10], dtype=6, layout=0, device=torch.device("cpu"))
                   result3 = torch.rand_like(result2, dtype=6, layout=0, device=torch.device("cpu"))
                   _2 = torch.add(torch.add(result, result2, alpha=1), result3, alpha=1)
