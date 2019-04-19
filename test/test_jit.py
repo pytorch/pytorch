@@ -1165,7 +1165,7 @@ graph(%x : Tensor,
         # Custom observer function
         value_stats = {}
 
-        def observer(x, name):
+        def observe(x, name):
             if name not in value_stats:
                 value_stats[name] = []
             value_stats[name].append(x)
@@ -1175,7 +1175,7 @@ graph(%x : Tensor,
         # Insert observers
         # Create module observer dict. Currently it has entry for
         # top level module only for debug purpose
-        observer_dict = {'__main__': observer}
+        observer_dict = {'__main__': observe}
 
         torch._C._jit_pass_insert_observers(m, observer_dict)
         # Collect statistics
