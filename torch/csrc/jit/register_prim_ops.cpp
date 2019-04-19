@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
 
@@ -113,6 +114,17 @@ static at::Tensor to_dispatch(
 
 RegisterOperators reg(
     {Operator(
+         "prim::profile(...) -> ()",
+         [](const Node* node) {
+           return [node](Stack& stack) {
+             auto addr = node->i(attr::data);
+             std::function<void(Stack&)>& callback =
+                 *reinterpret_cast<std::function<void(Stack&)>*>(addr);
+             callback(stack);
+             return 0;
+           };
+         }),
+     Operator(
          prim::FusionGroup,
          [](const Node* node) {
            const auto key = registerFusion(node);
@@ -258,7 +270,7 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Int(Scalar a) -> float",
+         "prim::Int(Scalar a) -> int",
          [](Stack& stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -1600,7 +1612,13 @@ RegisterOperators reg2({
     DEFINE_STRING_OP(aten::ne, a != b, bool),
     DEFINE_STRING_OP(aten::add, a + b, str),
 #undef DEFINE_STRING_OP
-
+    Operator(
+        "aten::len(str s) -> int",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          push(stack, static_cast<int64_t>(string.size()));
+          return 0;
+        }),
     // tensor length op (size of 1st dimension)
     Operator(
         "aten::len(Tensor t) -> int",
@@ -1888,11 +1906,123 @@ RegisterOperators reg2({
         }),
 
     Operator(
-        "aten::floor(float a) -> int",
+        "aten::pow(float a, float b) -> float",
+        [](Stack& stack) {
+          double a, b;
+          pop(stack, a, b);
+          push(stack, std::pow(a, b));
+          return 0;
+        }),
+    Operator(
+        "aten::pow(float a, int b) -> float",
+        [](Stack& stack) {
+          double a;
+          int b;
+          pop(stack, a, b);
+          push(stack, std::pow(a, b));
+          return 0;
+        }),
+
+    Operator(
+        "aten::floor(float a) -> float",
         [](Stack& stack) {
           double a;
           pop(stack, a);
-          push(stack, static_cast<int64_t>(std::floor(a)));
+          push(stack, std::floor(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::ceil(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::ceil(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::log(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::log(a));
+          return 0;
+        }),
+    Operator(
+        "aten::log(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::log(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::log1p(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::log1p(a));
+          return 0;
+        }),
+    Operator(
+        "aten::log1p(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::log1p(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::log10(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::log10(a));
+          return 0;
+        }),
+    Operator(
+        "aten::log10(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::log10(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::exp(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::exp(a));
+          return 0;
+        }),
+    Operator(
+        "aten::exp(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::exp(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::sqrt(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::sqrt(a));
+          return 0;
+        }),
+    Operator(
+        "aten::sqrt(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::sqrt(a));
           return 0;
         }),
 

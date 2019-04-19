@@ -345,28 +345,12 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
-    def unique(self, sorted=True, return_inverse=False, dim=None):
-        r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
+    def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
+        r"""Returns the unique elements of the input tensor.
 
         See :func:`torch.unique`
         """
-        if dim is not None:
-            output, inverse_indices = torch._unique_dim(
-                self,
-                sorted=sorted,
-                return_inverse=return_inverse,
-                dim=dim
-            )
-        else:
-            output, inverse_indices = torch._unique(
-                self,
-                sorted=sorted,
-                return_inverse=return_inverse
-            )
-        if return_inverse:
-            return output, inverse_indices
-        else:
-            return output
+        return torch.unique(self, sorted=sorted, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
     def unique_consecutive(self, return_inverse=False, return_counts=False, dim=None):
         r"""Eliminates all but the first element from every consecutive group of equivalent elements.
