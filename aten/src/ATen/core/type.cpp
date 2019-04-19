@@ -187,6 +187,15 @@ TypePtr attemptToRecoverType(const IValue& ivalue) {
 
 // Checks if input_ivalue is a subvalue of type.
 bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
+  if (auto optional = type->cast<OptionalType>()) {
+    // Unwrap the optional if the ivalue is not none
+    if (ivalue.isNone()) {
+      return true;
+    } else {
+      return isSubvalueOf(ivalue, optional->getElementType());
+    }
+  }
+
   if (ivalue.isTuple()) {
     const auto& ivalue_elem = ivalue.toTuple()->elements();
     auto tuple_type = type->cast<TupleType>();

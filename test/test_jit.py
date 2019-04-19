@@ -1888,6 +1888,11 @@ graph(%x : Tensor,
         FileCheck().check("mul").check("add").run(str(trace))
 
     def test_trace_c10_ops(self):
+        try:
+            _ = torch.ops._caffe2.GenerateProposals
+        except RuntimeError:
+            self.skipTest("Skip the test since c2 ops are not registered.")
+
         class MyModel(torch.nn.Module):
             def __init__(self):
                 super(MyModel, self).__init__()
@@ -3407,6 +3412,27 @@ a")
         d = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
         self.checkScript(func2, (a, b, c, d), optimize=True)
+
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_pow_scalar_backward_cuda(self):
+        # see that scalar exponent works with cuda base (#19253)
+
+        for dtype in [torch.float, torch.double]:
+            @torch.jit.script
+            def func(a, b):
+                # type: (Tensor, float) -> Tensor
+                return (a * 2) ** b
+
+            a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
+            func(a, 1).backward()
+
+            @torch.jit.script
+            def func(a, b):
+                # type: (float, Tensor) -> Tensor
+                return a ** (b * 2 + 1)
+
+            a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
+            func(2, a).backward()
 
     def test_triple(self):
         def func(x):
@@ -11038,6 +11064,13 @@ a")
         self.checkScript(fn, ("h"))
         self.checkScript(fn, ("y"))
 
+        def index_str_to_tensor(s):
+            # type: (str) -> int
+            return torch.tensor(ord(s))
+
+        s = u'\u00a3'.encode('utf8')[:1]
+        self.checkScript(index_str_to_tensor, (s,))
+
     def test_string_slicing(self):
         def fn1(x):
             # type: (str) -> str
@@ -11451,6 +11484,7 @@ a")
                 self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
                 self.float = torch.jit.Attribute(2.3, float)
                 self.int = torch.jit.Attribute(99, int)
+                self.bool = torch.jit.Attribute(False, bool)
                 self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
                 self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
                 self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
@@ -11458,7 +11492,7 @@ a")
 
             @torch.jit.script_method
             def forward(self):
-                return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
+                return (self.table, self.float, self.int, self.bool, self.tuple, self.list, self.int_list)
 
         m = M()
         imported_m = self.getExportImportCopy(m)

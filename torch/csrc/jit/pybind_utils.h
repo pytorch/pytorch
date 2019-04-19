@@ -61,6 +61,8 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
 }
 
 inline TypedIValue trySpecializeTensorList(std::vector<IValue> &elems, TypePtr type) {
+  // Since we only call this function for trace inputs, the only options are
+  // generic list, and list of tensors. We do not need to check for primitive types.
   if (!type->isSubtypeOf(TensorType::get())) {
     return TypedIValue(elems, ListType::create(type));
   }

@@ -1979,6 +1979,96 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # The expected result of the allreduce should be the average
         self.assertEqual(grads_batch[0], (torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0).chunk(5))
 
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_arbitrary_forward_return_value(self):
+        """
+        Note: this test can be sped up by only running it on a CPU module
+        once DistributedDataParallel supports them.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class ForwardReturnValueModule(nn.Module):
+            def __init__(self):
+                super(ForwardReturnValueModule, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.fc3 = nn.Linear(4, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x, fn):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                # The first softmax does NOT include fc3 in its autograd graph
+                # whereas the second softmax DOES. If we pass only the first
+                # tensor we see in the output to the reducer, it marks the
+                # gradient for fc3 as ready (because it doesn't show up). If
+                # downstream uses of this return value choose to differentiate
+                # against the second output tensor, it would still receive a
+                # gradient and a callback for this tensor, resulting in a crash.
+                return fn(
+                    F.softmax(x, dim=1),
+                    F.softmax(self.fc3(x), dim=1),
+                )
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = DistributedDataParallel(
+            ForwardReturnValueModule().float().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+
+        # Always run "backward" to ensure the reducer is called by autograd.
+        # If we don't correctly capture the output tensors from the return value,
+        # the reducer won't see a hook for the unused parameter, and throw an error.
+        # The correct capture is what we're testing in this function.
+        def test(box, unbox):
+            output = model(input, fn=box)
+            loss = criterion(unbox(output), target)
+            loss.backward()
+
+        # Test with identity return value
+        test(
+            box=lambda x, y: (x, y),
+            unbox=lambda obj: obj[1],
+        )
+
+        # Test with list return value
+        test(
+            box=lambda x, y: ["foo", x, "bar", y],
+            unbox=lambda obj: obj[3],
+        )
+
+        # Test with tuple return value
+        test(
+            box=lambda x, y: ("foo", x, "bar", y),
+            unbox=lambda obj: obj[3],
+        )
+
+        # Test with dict return value
+        test(
+            box=lambda x, y: {"foo": "bar", "a": x, "b": y},
+            unbox=lambda obj: obj["b"],
+        )
+
+        # Test with list with dict return value
+        test(
+            box=lambda x, y: ["foo", "bar", {"a": x, "b": y}],
+            unbox=lambda obj: obj[2]["b"],
+        )
+
+        # Test with dict with list return value
+        test(
+            box=lambda x, y: {"foo": "bar", "list": [0, x, 1, y]},
+            unbox=lambda obj: obj["list"][3],
+        )
+
 
 class ReducerModule(nn.Module):
     def __init__(self):
