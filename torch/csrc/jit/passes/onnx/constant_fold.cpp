@@ -40,7 +40,7 @@ ValueToParamPairMap buildValueToParamsMap(
   for (auto& input : b->inputs()) {
     auto it = paramsDict.find(input->uniqueName());
     if (it != paramsDict.end()) {
-      valsToParamsMap[input] = *it;
+      valsToParamsMap.emplace(input, *it);
     }
   }
   return valsToParamsMap;
@@ -50,7 +50,7 @@ void buildParamsMapFromValueToParamsMap(
     const ValueToParamPairMap& valsToParamsMap,
     ParamMap& paramsDict) {
   paramsDict.clear();
-  for (auto& nameTensorParamPair : valsToParamsMap) {
+  for (const auto& nameTensorParamPair : valsToParamsMap) {
     paramsDict.insert(nameTensorParamPair.second);
   }
 }
@@ -247,10 +247,9 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
     // by eraseUnusedBlockInputs() call (below) outside the loop.
     auto onnxConstParents = getOnnxConstParents(node);
     node->removeAllInputs();
-    std::for_each(
-        onnxConstParents.begin(), onnxConstParents.end(), [](Node* n) {
-          n->destroy();
-        });
+    for (auto* n : onnxConstParents) {
+      n->destroy();
+    }
     it.destroyCurrent();
   }
   eraseUnusedValuesFromMap(valsToParamsMap);
