@@ -57,6 +57,12 @@ signature.
   `Tensor!` - shorthand for Tensor(fresh\_identifier!)
   `Tensor(a! -> a|b)` - Tensor is in set `a`, written to, and after the write is in set `a` AND `b`.
   For more details on when and why this needs to happen, please see the section on annotations.
+- Tensors of specific types.  At the moment, valid type names are:
+    - `IntegerTensor` (a.k.a. `LongTensor`)
+    - `BoolTensor` (a.k.a. `ByteTensor`)
+    - `IndexTensor` (a.k.a. `IntTensor`)
+  These type names were inherited from TH, and may be renamed soon, so
+  don't commit them to memory.
 - `Tensor[]`.  A `Tensor[]` argument translates into a C++ argument of type `ArrayRef<Tensor>`
   (a.k.a. `TensorList`)
 - `int[]`.  `int[]` accepts an optional length specifier, e.g., `int[2]`, which

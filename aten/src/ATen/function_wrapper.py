@@ -969,6 +969,8 @@ def create_generic(top_env, declarations):
                 # type: (bool) -> Dict[str, str]
                 return {
                     'Tensor': 'const Tensor &' if const else 'Tensor &',
+                    'BoolTensor': 'const Tensor &' if const else 'Tensor &',
+                    'IndexTensor': 'const Tensor &' if const else 'Tensor &',
                     'Type': 'const Type &' if const else 'Type &',
                     'TensorOptions': 'const TensorOptions &' if const else 'TensorOptions &',
                     'TensorList': 'TensorList',
