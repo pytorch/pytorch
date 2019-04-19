@@ -34,6 +34,9 @@ struct Resolver {
       const std::string& name,
       Function& m,
       const SourceRange& loc) const = 0;
+
+  // Resolve `name` to a TypePtr.
+  virtual TypePtr resolveType(const std::string& name) const = 0;
 };
 
 // A resolver that only understands "torch.foo()" lookups.
@@ -46,6 +49,10 @@ struct NativeResolver : public Resolver {
       return std::make_shared<BuiltinModule>("aten");
     }
     return nullptr;
+  }
+
+  TypePtr resolveType(const std::string& name) const override {
+    return ClassType::get(name);
   }
 };
 
