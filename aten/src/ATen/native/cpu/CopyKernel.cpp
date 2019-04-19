@@ -25,7 +25,7 @@ void copy_kernel_cast_t_impl(Tensor& self, const Tensor& src) {
       at::ScalarType::Half,
       at::ScalarType::Bool,
       src.scalar_type(),
-      "_copy_same_type_",
+      "copy_kernel_cast",
       [&] {
         at::native::unary_kernel(*iter, [=](scalar_t a) -> self_T {
           return static_cast<self_T>(
@@ -36,7 +36,7 @@ void copy_kernel_cast_t_impl(Tensor& self, const Tensor& src) {
 
 static void copy_kernel_cast_impl(Tensor& self, const Tensor& src) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool,
-      self.scalar_type(), "_copy__cpu", [&]() { copy_kernel_cast_t_impl<scalar_t>(self, src); });
+      self.scalar_type(), "copy_kernel_cast", [&]() { copy_kernel_cast_t_impl<scalar_t>(self, src); });
 }
 
 static void copy_kernel_same_type_impl(Tensor& self, const Tensor& src) {
@@ -50,7 +50,7 @@ static void copy_kernel_same_type_impl(Tensor& self, const Tensor& src) {
     unary_kernel(*iter, [=](at::Half a) -> at::Half { return a; });
   } else {
     AT_DISPATCH_ALL_TYPES_AND(
-        at::ScalarType::Bool, self.scalar_type(), "_copy_same_type_", [&] {
+        at::ScalarType::Bool, self.scalar_type(), "copy_kernel_same_type", [&] {
           unary_kernel_vec(
               *iter,
               [=](scalar_t a) -> scalar_t { return a; },
