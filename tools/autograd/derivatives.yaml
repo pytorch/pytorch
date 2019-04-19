@@ -957,6 +957,13 @@
   weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse, per_sample_weights)
   per_sample_weights: _embedding_bag_per_sample_weights_backward(grad, weight, indices, result1, mode)
 
+- name: _embedding_bag_dense_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, Tensor per_sample_weights)
+  indices: non_differentiable
+  offsets: non_differentiable
+  offset2bag: non_differentiable
+  bag_size: non_differentiable
+  maximum_indices: non_differentiable
+
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   indices: non_differentiable
   self: not_implemented("embedding_renorm")
