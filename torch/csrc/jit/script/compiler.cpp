@@ -190,7 +190,7 @@ static bool meaningfulName(const std::string& name) {
 struct Environment {
   Environment(
       Function& method,
-      Resolver resolver,
+      ResolverPtr resolver,
       Block* b,
       std::shared_ptr<Environment> next = nullptr)
       : method(method),
@@ -199,7 +199,7 @@ struct Environment {
         next(std::move(next)) {}
 
   Function& method;
-  Resolver resolver;
+  ResolverPtr resolver;
   std::vector<std::string> captured_inputs;
   std::unordered_map<std::string, std::string> error_messages;
   Block* b;
@@ -419,7 +419,7 @@ struct Environment {
     }
 
     if (!retval) {
-      retval = resolver(ident, method, range);
+      retval = resolver->resolveValue(ident, method, range);
     }
 
     if (!retval && required) {
@@ -516,7 +516,7 @@ struct DefContext {
 struct to_ir {
   to_ir(
       const Def& def,
-      Resolver resolver_,
+      ResolverPtr resolver_,
       const Self& self,
       Function& method) // method being constructed
       : method(method),
@@ -542,7 +542,7 @@ struct to_ir {
  private:
   Function& method;
   std::shared_ptr<Graph> graph;
-  Resolver resolver;
+  ResolverPtr resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
   ScriptTypeParser typeParser_;
@@ -2784,9 +2784,31 @@ struct to_ir {
   }
 };
 
+struct MethodResolver : public Resolver {
+  explicit MethodResolver(
+      const Resolver* otherResolver,
+      const std::unordered_map<std::string, Function*>& functionTable)
+      : otherResolver_(otherResolver), functionTable_(functionTable) {}
+
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) const override {
+    auto it = functionTable_.find(name);
+    if (it != functionTable_.end()) {
+      return std::make_shared<MethodValue>(c10::nullopt, *it->second);
+    }
+    return otherResolver_->resolveValue(name, m, loc);
+  }
+
+ private:
+  const Resolver* otherResolver_;
+  const std::unordered_map<std::string, Function*>& functionTable_;
+};
+
 void CompilationUnit::define(
     const std::vector<Def>& definitions,
-    const std::vector<Resolver>& resolvers,
+    const std::vector<ResolverPtr>& resolvers,
     const Self& self) {
   AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
@@ -2794,22 +2816,14 @@ void CompilationUnit::define(
   std::unordered_map<std::string, Function*> function_table;
   for (const Def& def : definitions) {
     const std::string& name = def.name().name();
-    auto resolver = *resolver_it++;
+    ResolverPtr resolver = *resolver_it++;
     AT_ASSERT(resolver);
     if (!self) {
       // if self is defined, then these are methods and do not go into the
       // global namespace otherwise, they get defined together so we add them to
       // the function table so the methods can see each other
-      resolver = [resolver, &function_table](
-                     const std::string& name,
-                     Function& m,
-                     const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
-        auto it = function_table.find(name);
-        if (it != function_table.end()) {
-          return std::make_shared<MethodValue>(c10::nullopt, *it->second);
-        }
-        return resolver(name, m, loc);
-      };
+      resolver =
+          std::make_shared<MethodResolver>(resolver.get(), function_table);
     }
     auto creator = [def, resolver, self](Function& method) {
       AT_ASSERT(resolver);
@@ -2828,11 +2842,11 @@ void CompilationUnit::define(
 
 void CompilationUnit::define(
     const std::string& source,
-    const Resolver& resolver,
+    const ResolverPtr& resolver,
     const Self& self) {
   Parser p(source);
   std::vector<Def> definitions;
-  std::vector<Resolver> resolvers;
+  std::vector<ResolverPtr> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
     definitions.push_back(def);
