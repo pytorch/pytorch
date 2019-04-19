@@ -25,6 +25,7 @@
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
 #include <test/cpp/jit/test_peephole_optimize.h>
+#include <test/cpp/jit/test_subgraph_matcher.h>
 #include <test/cpp/jit/test_subgraph_utils.h>
 
 using namespace torch::jit::script;
@@ -70,6 +71,7 @@ namespace jit {
   _(Profiler)                      \
   _(PeepholeOptimize)              \
   _(RecordFunction)                \
+  _(SubgraphMatching)              \
   _(ModuleDefine)
 
 #define TH_FORALL_TESTS_CUDA(_) \
