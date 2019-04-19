@@ -201,9 +201,6 @@ class QuantizerTestCase(TestCase):
         activationQuantObj = QuantConfigTemplate(tensorType='activation',
                                                  observerImpl=activationObserver,
                                                  calcQParamImpl=calcQParamFunc)
-        weightQuantObj = QuantConfigTemplate(tensorType='param',
-                                             observerImpl=weightObserver,
-                                             calcQParamImpl=calcQParamFunc)
 
         # This performs type analysis to identify tensors from other
         # types. This info needed for further quantizer passes
@@ -215,12 +212,10 @@ class QuantizerTestCase(TestCase):
         # Run ScriptM Model and Collect statistics
         scriptM.forward(data)
         activationQuantObj.calcQParam()
-        weightQuantObj.calcQParam()
 
         # Compare results for eager and graph mode
         eagerDict = eagerQuantObj.getQParamDict()
         activationDict = activationQuantObj.getQParamDict()
-        weightDict = weightQuantObj.getQParamDict()
 
         self.assertTrue('z' in eagerDict and 'z' in activationDict)
         self.assertAlmostEqual(eagerDict["z"][0], activationDict["z"][0], places=15)
