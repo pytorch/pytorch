@@ -25,9 +25,11 @@ Output:
 
 
 def weightObserver(value, stats):
+    if stats is None:
+        stats = torch.zeros(2)
     stats[0] = torch.min(value)
     stats[1] = torch.max(value)
-    return value
+    return stats
 
 
 r"""
@@ -45,12 +47,14 @@ Output:
 
 
 def activationObserver(value, stats):
+    if stats is None:
+        stats = torch.zeros(2)
     averaging_constant = 0.001
     stats[0] = (1 - averaging_constant) * stats[0] + \
         averaging_constant * torch.min(value)
     stats[1] = (1 - averaging_constant) * stats[1] + \
         averaging_constant * torch.max(value)
-    return value
+    return stats
 
 
 r"""
@@ -117,10 +121,10 @@ class QuantTemplate:
             return
         if name not in self.value_stats:
             self.value_stats[name] = []
-            stats = torch.zeros(2)
+            stats = None
         else:
             stats = self.value_stats[name]
-        self.observerImpl(value, stats)
+        stats = self.observerImpl(value, stats)
         self.value_stats.update({name: stats})
         return value
 
@@ -129,10 +133,8 @@ class QuantTemplate:
         if self.calcQParamImpl is None:
             return
         for name in self.value_stats:
-            scaleT = 2.0 * (torch.max(self.value_stats[name][1],
-                            -self.value_stats[name][0]) / 255.0)
-            scale = scaleT.item()
-            zero_point = 0
+            # This can change depending on type of quantization which will
+            # be known to QuantTemplate object
             scale, zero_point = self.calcQParamImpl(name, self.value_stats)
             self.qparam_dict.update({name: (self.tensor_type, scale, zero_point)})
 
