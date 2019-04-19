@@ -119,25 +119,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_insert_observers",
           [](std::shared_ptr<script::Module>& moduleObj,
-              py::dict& pyObserverDict) {
-            // Create a new node that would be used in the insert observer pass:
-            // all observer nodes will be cloned from this one.
-            if (!pyObserverDict.size()) {
-              // If observer dict is empty, this is not treated as fatal error
-              // We skip inserting observers and return
-              return;
-            }
-            auto observerDict = py::cast<std::unordered_map<std::string,
-              py::function>>(pyObserverDict);
-
-            // Lookup for the top level module observer
-            // TODO Iterate over module hierarchy to extract the observer
-            // for each module.
-            if (!observerDict.count(moduleObj->name())) {
-              return;
-            }
-            auto pyObserverFunction = observerDict[moduleObj->name()];
-
+              py::function pyObserverFunction) {
             // Create a new node that would be used in the insert observer pass:
            // all observer nodes will be cloned from this one.
             Graph g;

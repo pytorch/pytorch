@@ -1173,11 +1173,8 @@ graph(%x : Tensor,
 
         m = torch.jit.script(fn)
         # Insert observers
-        # Create module observer dict. Currently it has entry for
-        # top level module only for debug purpose
-        observer_dict = {'__main__': observe}
+        torch._C._jit_pass_insert_observers(m, observe)
 
-        torch._C._jit_pass_insert_observers(m, observer_dict)
         # Collect statistics
         m.forward(x1, y1)
 
