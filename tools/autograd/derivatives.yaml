@@ -208,6 +208,9 @@
   self: not_implemented("cholesky_solve")
   input2: not_implemented("cholesky_solve")
 
+- name: cholesky_inverse(Tensor self, bool upper)
+  self: not_implemented("cholesky_inverse")
+
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
 - name: clamp(Tensor self, Scalar? min, Scalar? max)
@@ -636,9 +639,6 @@
 
 - name: poisson(Tensor self, Generator generator)
   self: zeros_like(self)
-
-- name: potri(Tensor self, bool upper)
-  self: not_implemented("potri")
 
 - name: pow(Tensor self, Scalar exponent)
   self: pow_backward(grad, self, exponent)
