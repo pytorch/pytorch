@@ -144,8 +144,8 @@ void initJITBindings(PyObject* module) {
             Node* new_node = g.createPythonOp(
                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
             const auto& methods = moduleObj->get_methods();
-            for (const auto& m : methods) {
-              InsertObserverNodes(m, new_node);
+            for (const auto& metd : methods) {
+              InsertObserverNodes(metd, new_node);
             }
             // We don't need this node anymore, don't forget to remove it.
             new_node->destroy();
