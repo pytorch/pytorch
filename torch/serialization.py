@@ -561,21 +561,20 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 
-    # magic_number = pickle_module.load(f, **pickle_load_args)
-    # if magic_number != MAGIC_NUMBER:
-    #     raise RuntimeError("Invalid magic number; corrupt file?")
-    # protocol_version = pickle_module.load(f, **pickle_load_args)
-    # if protocol_version != PROTOCOL_VERSION:
-    #     raise RuntimeError("Invalid protocol version: %s" % protocol_version)
+    if not getattr(pickle_module, '_unpickle_skip_metadata', False):
+        magic_number = pickle_module.load(f, **pickle_load_args)
+        if magic_number != MAGIC_NUMBER:
+            raise RuntimeError("Invalid magic number; corrupt file?")
+        protocol_version = pickle_module.load(f, **pickle_load_args)
+        if protocol_version != PROTOCOL_VERSION:
+            raise RuntimeError("Invalid protocol version: %s" % protocol_version)
 
-    # _sys_info = pickle_module.load(f, **pickle_load_args)
+        _sys_info = pickle_module.load(f, **pickle_load_args)
 
     unpickler = pickle_module.Unpickler(f, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()
-
     deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
-
     offset = f.tell() if f_should_read_directly else None
     for key in deserialized_storage_keys:
         assert key in deserialized_objects

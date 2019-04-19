@@ -11571,7 +11571,7 @@ a")
             m = M()
             m(torch.ones(2, 2))
             with open(fname, "rb") as handle:
-                loaded_tensor = torch.load(fname)
+                loaded_tensor = torch.load(fname, pickle_module=torch.jit._pickle)
                 self.assertEqual(loaded_tensor, torch.ones(2, 2) * 2)
 
     def test_split(self):

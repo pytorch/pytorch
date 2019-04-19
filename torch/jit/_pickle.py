@@ -1,5 +1,9 @@
 import pickle
 
+# This flag has torch.load skip looking for a magic number, protocol version,
+# and sys info
+_unpickle_skip_metadata = True
+
 
 class TensorID(object):
     def __setstate__(self, id):
@@ -12,14 +16,17 @@ class IntList(object):
 
 
 class Unpickler(pickle.Unpickler):
-    def persistent_load(self, pid):
-        raise NotImplementedError("persistent load not yet supported")
+    # def persistent_load(self, pid):
+    #     raise NotImplementedError("persistent load not yet supported")
 
     def find_class(self, module, name):
-        if not module == '__main__':
-            return None
-
         if name == 'TensorID':
             return TensorID
         elif name == 'IntList':
             return IntList
+
+        return super(Unpickler, self).find_class(module, name)
+
+
+def load(*args):
+    return pickle.load(*args)
