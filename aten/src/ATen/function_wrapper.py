@@ -1420,20 +1420,6 @@ def create_derived(backend_type_env, declarations):
             body += only_zero_dim_check
             return body
 
-        # scalar_check is the heuristic conditions when a result may be a scalar_check
-        # if there is a IntArrayRefSize argument, then its dimensions are used to determine scalar.
-        # otherwise, it is true if all the input tensors are scalars,
-        scalar_check_is_from_size = False
-        scalar_check_is_from_option = False
-        scalar_check = None
-        scalar_check_opt = option.get('scalar_check')
-        if scalar_check_opt is not None:
-            if isinstance(scalar_check_opt, bool):
-                scalar_check = str(scalar_check_opt).lower()
-            else:
-                scalar_check = scalar_check_opt
-            scalar_check_is_from_option = True
-
         cases = []
         for scalar_name, c_type, accreal, _ in scalar_types:
             if scalar_name in scalar_type_cases:
@@ -1458,6 +1444,20 @@ def create_derived(backend_type_env, declarations):
                     sname = '' if scalar_name == "Float" else scalar_name
                     case_env['THType'] = 'Cuda{}'.format(sname)
                     case_env['THTensor'] = 'THCuda{}Tensor'.format(sname)
+
+                # scalar_check is the heuristic conditions when a result may be a scalar_check
+                # if there is a IntArrayRefSize argument, then its dimensions are used to determine scalar.
+                # otherwise, it is true if all the input tensors are scalars,
+                scalar_check_is_from_size = False
+                scalar_check_is_from_option = False
+                scalar_check = None
+                scalar_check_opt = option.get('scalar_check')
+                if scalar_check_opt is not None:
+                    if isinstance(scalar_check_opt, bool):
+                        scalar_check = str(scalar_check_opt).lower()
+                    else:
+                        scalar_check = scalar_check_opt
+                    scalar_check_is_from_option = True
 
                 for arg in option['arguments']:
                     if is_real_argument_to_wrapper(arg):
