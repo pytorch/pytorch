@@ -16,15 +16,13 @@ bool checkIfNodeQuantizable(Node* n) {
   AT_ASSERT(n != nullptr);
   // This is map for quantizable nodes. It will be expanded in future to
   // support more ops and patterns.
-  static const OperatorSet quantnodeLookup =
-   {
-     "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] \
+  static const OperatorSet quantnodeLookup = {
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] \
 stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
-     "aten::relu(Tensor self) -> Tensor",
-     "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] \
+      "aten::relu(Tensor self) -> Tensor",
+      "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] \
 stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, \
-int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"
-   };
+int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"};
   return quantnodeLookup.find(n);
 }
 
@@ -38,9 +36,8 @@ void insertQuantNodeParams(Node* quant, std::tuple<float, int> qparam) {
 
 // Create Quant-Dequant node pair for quantizable Value
 std::pair<Node*, Node*> createQuantDeQuantNodes(Value* v, Node* n) {
-  Node* quant =
-      n->owningGraph()->create(at::Symbol::fromQualString(
-        "aten::quantize_linear"));
+  Node* quant = n->owningGraph()->create(
+      at::Symbol::fromQualString("aten::quantize_linear"));
   AT_ASSERTM(quant != nullptr, "Failed to create quant node");
   quant->output()->setUniqueName(v->uniqueName() + ".quant");
 
@@ -196,7 +193,7 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
 
       // We iterate over node inputs to identify which Values
       // need to be quantized depending on node type
-      for (auto &v : n->inputs()) {
+      for (auto& v : n->inputs()) {
         if (!v->type()->isSubtypeOf(TensorType::get())) {
           // Skip quantization for non tensors
           continue;
@@ -235,10 +232,10 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
     auto outputVals = b->outputs();
     for (auto& v : outputVals) {
       if (checkIfNodeQuantizable(v->node()) &&
-        v->type()->isSubtypeOf(TensorType::get())) {
+          v->type()->isSubtypeOf(TensorType::get())) {
         quantOutputs.emplace_back(v);
       }
-    } //end for
+    } // end for
   } // end Block traversal
 
   // Insert the quant-dequant pair for values output from quantizable nodes

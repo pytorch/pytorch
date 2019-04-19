@@ -1,7 +1,5 @@
 #include "caffe2/operators/layer_norm_op.h"
 
-#include <c10/core/Tensor.h>
-
 #include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/utils/eigen_utils.h"
 
@@ -188,13 +186,7 @@ to the end.)
 
 C10_REGISTER_CAFFE2_OPERATOR_CPU(
     LayerNorm,
-    (std::vector<c10::Argument>{
-        c10::Argument("input"),
-        c10::Argument("axis", c10::IntType::get()),
-        c10::Argument("epsilon", c10::FloatType::get())}),
-    (std::vector<c10::Argument>{c10::Argument("output"),
-                                c10::Argument("mean"),
-                                c10::Argument("stdev")}),
+    "_caffe2::LayerNorm(Tensor input, int axis, float epsilon) -> (Tensor output, Tensor mean, Tensor stdev)",
     caffe2::LayerNormOp<caffe2::CPUContext>)
 
 namespace caffe2 {
