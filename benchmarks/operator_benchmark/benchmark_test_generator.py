@@ -3,9 +3,10 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.benchmarks.operator_benchmark.benchmark_caffe2 import Caffe2OperatorTestCase
-from caffe2.benchmarks.operator_benchmark.benchmark_pytorch import PyTorchOperatorTestCase
-from caffe2.benchmarks.operator_benchmark.benchmark_utils import * # noqa
+
+from benchmarks.operator_benchmark.benchmark_caffe2 import Caffe2OperatorTestCase
+from benchmarks.operator_benchmark.benchmark_pytorch import PyTorchOperatorTestCase
+from benchmarks.operator_benchmark.benchmark_utils import * # noqa
 
 
 def generate_test(configs, map_config, ops, OperatorTestCase):
@@ -17,9 +18,14 @@ def generate_test(configs, map_config, ops, OperatorTestCase):
     """
     for config in configs:
         for case in config:
-            shapes_args_config = case[:-1]
-            mode = case[-1]
-            shapes_args = map_config(*shapes_args_config)
+            shapes = {}
+            for item in case:
+                if 'mode' in item:
+                    run_mode = item['mode']
+                    continue
+                shapes.update(item)
+            assert run_mode is not None, "Missing mode in configs"
+            shapes_args = map_config(**shapes)
             if shapes_args is not None:
                 for op in ops:
                     OperatorTestCase(
@@ -27,7 +33,7 @@ def generate_test(configs, map_config, ops, OperatorTestCase):
                         op_type=op[1],
                         input_shapes=shapes_args[0],
                         op_args=shapes_args[1],
-                        run_mode=mode)
+                        run_mode=run_mode)
 
 
 def generate_pt_test(configs, pt_map_func, pt_ops):
