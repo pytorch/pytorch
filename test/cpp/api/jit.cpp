@@ -112,3 +112,19 @@ TEST(TorchScriptTest, TestTupleArgMatching) {
   module->run_method("tuple_op", tuple_generic_list);
 
 }
+
+TEST(TorchScriptTest, TestOptionalArgMatching) {
+  auto module = torch::jit::compile(R"JIT(
+      def optional_tuple_op(a: Optional[Tuple[int, str]]):
+        if a is None:
+          return 0
+        else:
+          return a[0]
+    )JIT");
+
+  auto optional_tuple = torch::jit::Tuple::create({2, std::string("hi")});
+
+  ASSERT_EQ(2, module->run_method("optional_tuple_op", optional_tuple));
+  ASSERT_EQ(0, module->run_method("optional_tuple_op", IValue()));
+
+}
