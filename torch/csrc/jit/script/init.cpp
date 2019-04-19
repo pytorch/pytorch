@@ -1018,7 +1018,7 @@ void initJitScriptBindings(PyObject* module) {
             py::object result = invokeScriptMethodFromPython(
                 callee, tuple_slice(std::move(args), 1), std::move(kwargs));
             if (tracing) {
-              tracer::getTracingState()->graph->push_scope(callee.name());
+              tracer::getTracingState()->graph->pop_scope();
             }
             return result;
           })
