@@ -45,6 +45,10 @@ class AliasDb {
   bool writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks = false)
       const;
 
+  // Does `a` and `b` potentially share a memory location or do either
+  // hold in memory any element that exists in the other
+  bool mayContainAlias(const Value* a, const Value* b) const;
+
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
@@ -165,6 +169,10 @@ class AliasDb {
   // Returns nullopt if there are no wildcard nodes
   c10::optional<const Node*> getLastWildcard() const;
 
+  // Is the element a wildcard or an unhandled container type,
+  // or does the element contain an element for which that's true
+  bool cannotCheckAliasContainment(const Value* elem) const;
+
   /**
    * Special analysis methods
    */
@@ -182,6 +190,7 @@ class AliasDb {
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
   void analyzeSetAttr(Node* node);
+  void analyzeTupleConstruct(Node* node);
   void analyzeCustomOp(Node* node);
 
   /**
@@ -189,11 +198,16 @@ class AliasDb {
    */
   void makeAllAlias(const std::vector<Value*>& values);
   void makePointerTo(const Value* value, const Value* to);
+  void addToContainedElements(const Value* element, const Value* container);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
   void giveFreshAlias(const Value* value);
+  Element* getOrCreateElement(const Value* value);
 
   static bool shouldAnnotate(const Value* v);
   static bool shouldAnnotate(const TypePtr& type);
+
+  static bool isContainerType(const TypePtr& type);
+
   bool hasUsesAfter(Symbol alias, const Node* n) const;
   bool isBeforeSameGraph(const Node* lhs, const Node* rhs) const;
 
