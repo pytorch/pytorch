@@ -43,6 +43,15 @@ namespace detail {
     }
   };
   template<class T>
+  struct ivalue_to_arg_type<std::vector<T>> {
+    static ArrayRef<T> call(const IValue& v) {
+      // We don't support std::vector because that would prevent us from doing
+      // internal optimization to how we represent lists (e.g. SmallVector).
+      // Users should use ArrayRef instead.
+      static_assert(guts::false_t<std::vector<T>>::value, "You tried to register a kernel with an unsupported argument type: std::vector<T>. Please use c10::ArrayRef<T> instead.");
+    }
+  };
+  template<class T>
   struct ivalue_to_arg_type<optional<T>> {
     static optional<T> call(const IValue& v) {
       if (v.isNone()) {
