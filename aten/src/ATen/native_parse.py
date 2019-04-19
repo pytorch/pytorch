@@ -214,10 +214,14 @@ def parse_arguments(args, func_variants, declaration, func_return):
     # add explicit support for what is needed for tril_indices / triu_indices
     supported_topt_arguments.append(
         [
-            {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True, 'default': 'long', 'is_nullable': True},
-            {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True, 'default': 'c10::nullopt', 'is_nullable': True},
-            {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True, 'default': 'c10::nullopt', 'is_nullable': True},
-            {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True, 'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True,
+             'default': 'long', 'is_nullable': True},
+            {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
         ]
     )
 
