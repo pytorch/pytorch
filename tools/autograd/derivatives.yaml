@@ -817,9 +817,6 @@
 - name: t(Tensor self)
   self: grad.t()
 
-- name: one_hot(Tensor self, int64_t num_classes)
-  self: non_differentiable
-
 - name: flip(Tensor self, IntArrayRef dims)
   self: grad.flip(dims)
 
