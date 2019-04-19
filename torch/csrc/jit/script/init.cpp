@@ -641,16 +641,27 @@ static void gatherParametersAndBuffers(
 
 namespace {
 
-Resolver pythonResolver(const ResolutionCallback& rcb) {
-  return [rcb](const std::string& name, Function& m, const SourceRange& loc)
-             -> std::shared_ptr<SugaredValue> {
+// A resolver that will inspect the outer Python scope to find `name`.
+struct PythonResolver : public Resolver {
+  explicit PythonResolver(ResolutionCallback rcb) : rcb_(std::move(rcb)) {}
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) const override {
     AutoGIL ag;
-    py::object obj = rcb(name);
+    py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
     }
     return toSugaredValue(obj, m, loc);
-  };
+  }
+
+ private:
+  ResolutionCallback rcb_;
+};
+
+std::shared_ptr<PythonResolver> pythonResolver(ResolutionCallback rcb) {
+  return std::make_shared<PythonResolver>(rcb);
 }
 } // namespace
 
@@ -793,7 +804,6 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb,
              bool has_self) {
-            c10::optional<Self> self;
             if (has_self) {
               m->class_compilation_unit().define(
                   script, pythonResolver(rcb), moduleSelf(m));
@@ -808,7 +818,7 @@ void initJitScriptBindings(PyObject* module) {
              const std::vector<Def>& defs,
              const std::vector<ResolutionCallback>& rcbs,
              const std::vector<FunctionDefaults>& defaults) {
-            std::vector<Resolver> resolvers;
+            std::vector<ResolverPtr> resolvers;
             resolvers.reserve(rcbs.size());
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
@@ -1071,7 +1081,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const ClassDef& classDef, ResolutionCallback rcb) {
         auto cu = std::make_shared<CompilationUnit>();
         auto classType = ClassType::create(classDef.name().name(), cu);
-        std::vector<Resolver> rcbs;
+        std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
           methodDefs.push_back(def);
