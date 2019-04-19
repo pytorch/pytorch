@@ -120,6 +120,11 @@ def _unpack_list(list_value):
     return list(list_node.inputs())
 
 
+def _is_packed_list(list_value):
+    list_node = list_value.node()
+    return list_node.kind() == "prim::ListConstruct"
+
+
 def parse_args(*arg_descriptors):
     def decorator(fn):
         def wrapper(g, *args):

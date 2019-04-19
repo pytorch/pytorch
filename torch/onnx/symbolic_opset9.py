@@ -1600,3 +1600,17 @@ def log2(g, self):
 
 def prim_shape(g, self):
     return g.op('Shape', self)
+
+
+def index(g, self, index):
+    if sym_help._is_packed_list(index):
+        indices = sym_help._unpack_list(index)
+    else:
+        indices = [index]
+
+    if len(indices) == 1:
+        if indices[0].type().scalarType() == "Byte":
+            indices[0] = squeeze(g, nonzero(g, indices[0]), dim=1)
+        return index_select(g, self, 0, indices[0])
+    else:
+        raise NotImplementedError("Unsupported aten::index operator with more than 1 indices tensor. ")

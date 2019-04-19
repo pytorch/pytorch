@@ -621,6 +621,21 @@ class TestCaffe2Backend(unittest.TestCase):
         self._test_index_generic(lambda input: input[0:-1, 0:-1])
     """
 
+    def test_tensor_index_1d(self):
+        self._test_index_generic(lambda input: input[torch.tensor([0, 2], dtype=torch.long)])
+
+    def test_tensor_index_2d_1dconstant(self):
+        self._test_index_generic(lambda input: input[1, torch.tensor([0, 2], dtype=torch.long)])
+
+    def test_tensor_index_2d_1dslice(self):
+        self._test_index_generic(lambda input: input[torch.tensor([0, 2], dtype=torch.long), 0:1])
+
+    # Slicing first will create aten::index(%1, %2, %3) that takes more than 2 inputs, which is currently not supported.
+    """
+    def test_tensor_index_2d_1dslice_first(self):
+        self._test_index_generic(lambda input: input[0:1, torch.tensor([0, 2], dtype=torch.long)])
+    """
+
     def test_chunk(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
