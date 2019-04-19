@@ -233,7 +233,8 @@ def parse_arguments(args, func_variants, declaration, func_return):
     corresponding_topts.append(corresponding_topts[1].copy())
     corresponding_topts[2]['default'] = '{}'
     corresponding_topts.append(
-        {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None, 'kwarg_only': True, 'default': 'at::kLong'})
+        {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
+         'kwarg_only': True, 'default': 'at::kLong'})
 
     def check_topt_representation(topt_representation):
         for idx, supported_topt in enumerate(supported_topt_arguments):
