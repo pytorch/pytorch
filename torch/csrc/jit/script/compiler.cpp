@@ -522,6 +522,7 @@ struct to_ir {
       : method(method),
         graph(method.graph()),
         resolver(std::move(resolver_)),
+        typeParser_(resolver),
         environment_stack(nullptr) {
     AT_ASSERT(resolver);
     pushFrame(graph->block(), /*starts_def=*/true);
@@ -2799,6 +2800,10 @@ struct MethodResolver : public Resolver {
       return std::make_shared<MethodValue>(c10::nullopt, *it->second);
     }
     return otherResolver_->resolveValue(name, m, loc);
+  }
+
+  TypePtr resolveType(const std::string& name) const override {
+    return otherResolver_->resolveType(name);
   }
 
  private:
