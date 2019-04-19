@@ -6,34 +6,8 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cpu/CopyKernel.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 
 namespace {
-
-template <typename self_T>
-void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
-  AT_CHECK(self.numel() == src.numel(), "sizes do not match");
-
-  auto builder = at::TensorIterator::Builder();
-  builder.add_output(self);
-  builder.add_input(src);
-  builder.dont_resize_outputs();
-  builder.dont_compute_common_dtype();
-  auto iter = builder.build();
-
-  AT_DISPATCH_ALL_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::Bool,
-      src.scalar_type(),
-      "_copy_same_type_",
-      [&] {
-        at::native::unary_kernel(*iter, [=](scalar_t a) -> self_T {
-          return static_cast<self_T>(
-              static_cast<at::native::inter_copy_type_t<self_T>>(a));
-        });
-      });
-}
 
 bool copy_transpose_valid(const at::Tensor& self, const at::Tensor& src) {
   const int MIN_SZ = 60 * 60;
@@ -65,8 +39,13 @@ Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
     _s_copy_from(src, self, non_blocking);
     return self;
   }
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool,
-      self.scalar_type(), "_copy__cpu", [&]() { ::_copy__cpu<scalar_t>(self, src); });
+
+  if (self.scalar_type() == src.scalar_type()) {
+    copy_kernel_same_type(kCPU, self, src);
+  }
+
+  AT_CHECK(self.numel() == src.numel(), "sizes do not match");
+  copy_kernel_cast(kCPU, self, src);
   return self;
 }
 
@@ -128,34 +107,15 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
     return;
   }
 
-  if (self.numel() == src.numel()) {
-    if (self.is_contiguous() && src.is_contiguous()) {
-      return copy_kernel(kCPU, self, src);
-    } else if (copy_transpose_valid(self, src)) {
-      return _copy_same_type_transpose_(self, src);
-    }
+  if (self.numel() == src.numel() && copy_transpose_valid(self, src)) {
+    return _copy_same_type_transpose_(self, src);
   }
 
-  auto builder = TensorIterator::Builder();
-  builder.add_output(self);
-  builder.add_input(src);
-  builder.dont_resize_outputs();
-  auto iter = builder.build();
-
-  if (self.scalar_type() == at::ScalarType::Half) {
-    unary_kernel(*iter, [=](at::Half a) -> at::Half { return a; });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND(
-        at::ScalarType::Bool, self.scalar_type(), "_copy_same_type_", [&] {
-          unary_kernel_vec(
-              *iter,
-              [=](scalar_t a) -> scalar_t { return a; },
-              [=](Vec256<scalar_t> a) { return a; });
-        });
-  }
+  copy_kernel_same_type(kCPU, self, src);
 }
 
-DEFINE_DISPATCH(copy_kernel);
+DEFINE_DISPATCH(copy_kernel_cast);
+DEFINE_DISPATCH(copy_kernel_same_type);
 
 } // namespace native
 } // namespace at
