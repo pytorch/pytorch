@@ -406,37 +406,52 @@ struct TORCH_API Module {
 
   void copy_into(
       ModuleLookup module_lookup,
-      // parameter_remap is needed when a parent module uses a parameter of a
-      // submodule
-      std::unordered_map<Slot, Slot>& parameter_remap,
+      // translate current module singleton type to new module
+      // singleton type.
+      std::unordered_map<TypePtr, TypePtr>& type_remap,
       std::vector<std::string> names = {}) const {
     auto curr = module_lookup(names);
+    type_remap[module_object()->type()] = curr->module_object()->type();
     for (auto& param : get_parameters()) {
       curr->register_parameter(
           param.name(),
           param.value().toTensor(),
           /*is_buffer=*/false);
-      parameter_remap[param] = curr->parameter_slot(param.name());
     }
     for (auto& attr : get_attributes()) {
-      if (attr.type()->isSubtypeOf(TensorType::get())) {
-        curr->register_buffer(attr.name(), attr.value().toTensor());
-        parameter_remap[attr] = *curr->find_buffer(attr.name());
-      } else {
-        curr->register_attribute(attr.name(), attr.type(), attr.value());
-        parameter_remap[attr] = *curr->find_attribute(attr.name());
-      }
+      curr->register_attribute(attr.name(), attr.type(), attr.value());
     }
+
     for (auto& mod : get_modules()) {
       names.push_back(mod->name());
       // Submodules must be translated first, otherwise parameter_remap entries
       // will not be filled in for methods of this module.
-      mod->copy_into(module_lookup, parameter_remap, names);
+      mod->copy_into(module_lookup, type_remap, names);
       names.pop_back();
     }
 
     for (auto& fn : class_compilation_unit().get_functions()) {
-      curr->class_compilation_unit().clone_function(*fn);
+      // type remapping - when we copy method implementations from one module
+      // singleton to another, we need to update the types of the self arguments
+      // to match the new module.
+      // XXX - this only handles modules that occur as variables, not modules
+      // that appear in aggregate types. Currently this works fine because
+      // we restrict how modules can be used during the lowering step. Eventually,
+      // we will need to decide what it means for us to 'copy' a module.
+      // For instance, we can copy just the state (parameters, attributes),
+      // but share the code. Or we can copy the code. If we choose to copy the
+      // code, what should we do about aggregate types that contain a module?
+      auto type_remap_fn = [&](TypePtr in) {
+        auto it = type_remap.find(in);
+        if (it == type_remap.end())
+          return in;
+        return it->second;
+      };
+      auto graph = fn->graph()->copy();
+      graph->remapTypes(type_remap_fn);
+      auto schema = fn->getSchema().cloneWithRemappedTypes(type_remap_fn);
+      auto copied = curr->class_compilation_unit().create_function(fn->name(), graph);
+      copied->setSchema(std::move(schema));
     }
   }
 

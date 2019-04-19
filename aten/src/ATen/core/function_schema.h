@@ -50,6 +50,10 @@ struct Argument {
     return alias_info_;
   }
 
+  Argument cloneWithType(TypePtr new_type) const {
+    return Argument(name_, new_type, N_, default_value_, kwarg_only_, alias_info_);
+  }
+
 private:
   std::string name_;
   TypePtr type_;
@@ -105,8 +109,7 @@ struct FunctionSchema {
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
-      bool is_varret = false,
-      std::vector<std::string> writes = {})
+      bool is_varret = false)
       : FunctionSchema(
             name.toQualString(),
             std::move(overload_name),
@@ -175,6 +178,8 @@ public:
         is_vararg(),
         is_varret());
   }
+
+  FunctionSchema cloneWithRemappedTypes(const std::function<TypePtr(TypePtr)> type_map) const;
 
   // Check that inputs have the correct types and appends any missing default
   // values.

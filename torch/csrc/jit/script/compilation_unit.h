@@ -220,10 +220,6 @@ struct TORCH_API CompilationUnit {
       const Resolver& resolver,
       const Self& self);
 
-  void clone_function(const Function& remote) {
-    create_function(remote.name(), remote.graph()->copy());
-  }
-
   std::shared_ptr<Function> create_function(std::string name, std::shared_ptr<Graph> graph) {
     auto fn = std::make_shared<Function>(
         std::move(name), is_optimized(), std::move(graph), nullptr);
