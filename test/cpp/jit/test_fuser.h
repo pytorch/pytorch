@@ -186,7 +186,7 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
     d.value()->setUniqueName(dname);
     graph->registerOutput(d.value());
     torch::jit::overrideCanFuseOnCPU(true);
-    FuseGraph(graph, ArgumentSpec(0));
+    FuseGraph(graph);
     torch::jit::overrideCanFuseOnCPU(false);
     return graph;
   };

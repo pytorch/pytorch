@@ -210,7 +210,22 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
-    return isFusableMap(node) || isFusableNorm(node);
+    bool has_cuda_output = std::any_of(
+      node->outputs().begin(),
+      node->outputs().end(),
+      [](Value *v) {
+        auto tensor_type = v->type()->cast<DimensionedTensorType>();
+        if (!tensor_type) {
+          return false;
+        }
+        return tensor_type->device().is_cuda();
+      });
+    auto node_fusable = (isFusableMap(node) || isFusableNorm(node));
+    if (has_cuda_output) {
+      return canFuseOnGPU() && node_fusable;
+    } else {
+      return canFuseOnCPU() && node_fusable;
+    }
   }
 
   bool isFusableMap(Node* node) {
@@ -1425,31 +1440,15 @@ bool trackSingleGradSumToSizeToOutputs(
   return true;
 }
 
-namespace {
-
-bool shouldFuse(const ArgumentSpec& spec) {
-  bool should_fuse = canFuseOnCPU();
-  for (size_t i = 0; i < spec.size(); ++i) {
-    if (ConvertIntToCPUOrCUDA(spec.at(i).device()).is_cuda()) {
-      should_fuse = true;
-    }
-  }
-  return should_fuse;
-}
-
-}  // namespace
-
-void FuseGraph(std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
-  if (shouldFuse(spec)) {
-    GraphFuser(graph->block(), graph).run();
-    // After FuseGraph some common subexpressions may come back
-    EliminateCommonSubexpression(graph);
-    // We might have emitted a fair amount of useless shape propagating code, so
-    // remove it
-    EliminateDeadCode(graph);
-    // Improve the quality of shape propagation code that was left
-    PeepholeOptimizeShapeExpressions(graph->block());
-  }
+void FuseGraph(std::shared_ptr<Graph>& graph) {
+  GraphFuser(graph->block(), graph).run();
+  // After FuseGraph some common subexpressions may come back
+  EliminateCommonSubexpression(graph);
+  // We might have emitted a fair amount of useless shape propagating code, so
+  // remove it
+  EliminateDeadCode(graph);
+  // Improve the quality of shape propagation code that was left
+  PeepholeOptimizeShapeExpressions(graph->block());
 }
 
 } // namespace jit

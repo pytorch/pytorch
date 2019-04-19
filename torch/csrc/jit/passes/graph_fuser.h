@@ -18,7 +18,7 @@ constexpr size_t fusion_kernel_args_limit = 128;
 // NB: Be sure to run DCE before fusion, because dead instructions
 // can prevent fusion opportunities from being exploited.
 // On Windows will noop, NYI
-TORCH_API void FuseGraph(std::shared_ptr<Graph>& graph, const ArgumentSpec& spec);
+TORCH_API void FuseGraph(std::shared_ptr<Graph>& graph);
 
 TORCH_API bool trackSingleGradSumToSizeToOutputs(
     Value* gradSumToSizeOutput,
