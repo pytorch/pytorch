@@ -112,7 +112,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId());
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -144,13 +144,12 @@ Tensor& empty_out(Tensor& result, IntArrayRef size) {
 
 #define DEFINE_CAST_OP(_1, n, _2)                                \
   Tensor _cast_##n(const Tensor& self, bool non_blocking) {      \
-    auto& target_type = self.type().toScalarType(ScalarType::n); \
-    if (self.type() == target_type)                              \
+    if (self.scalar_type() == ScalarType::n)                     \
       return self;                                               \
-    return target_type.copy(self, non_blocking);                 \
+    return self.to(ScalarType::n, non_blocking);                 \
   }
 
-AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
@@ -734,7 +733,7 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {

@@ -216,14 +216,20 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_input
 
 
 def _unique_state_dict(module, keep_vars=False):
-    state_dict = module.state_dict(keep_vars=keep_vars)
+    # since Parameter.data always creates a new torch.Tensor instance,
+    # id(v) doesn't work with it. So we always get the Parameter or Buffer
+    # as values, and deduplicate the params using Parameters and Buffers
+    state_dict = module.state_dict(keep_vars=True)
     filtered_dict = type(state_dict)()
     seen_ids = set()
     for k, v in state_dict.items():
         if id(v) in seen_ids:
             continue
         seen_ids.add(id(v))
-        filtered_dict[k] = v
+        if keep_vars:
+            filtered_dict[k] = v
+        else:
+            filtered_dict[k] = v.data
     return filtered_dict
 
 
@@ -650,7 +656,7 @@ def trace(func,
         return func
     executor_options = {'optimize': bool(optimize)}
     # Special case for common case of passing a single Tensor
-    if isinstance(example_inputs, torch.Tensor):
+    if isinstance(example_inputs, (torch.Tensor, dict)):
         example_inputs = (example_inputs,)
     # done primarily so that weird iterables fail here and not pybind11 code
     elif not isinstance(example_inputs, tuple):
@@ -696,14 +702,8 @@ def _try_get_dispatched_fn(fn):
     return _jit_internal.boolean_dispatched.get(fn)
 
 
-def _try_get_overloaded_fn(fn):
-    if not hasattr(fn, '__self__') or not isinstance(fn.__self__, ScriptModule):
-        # Only allow overloads for bound methods
-        return None
-    overloads = fn.__self__._overloads.get(fn.__name__, None)
-    if overloads is None:
-        return None
-    return [getattr(fn.__self__, overload) for overload in overloads]
+def _try_get_overloaded_fn(mod, field):
+    return mod._overloads.get(field, None) if isinstance(mod, ScriptModule) else None
 
 
 def _try_compile_weak_script(fn):
@@ -732,20 +732,20 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         return obj
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-    mod = ScriptModule()
     if inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
         ast = get_jit_class_def(obj)
-        _jit_script_class_compile(mod, ast, _rcb)
+        _jit_script_class_compile(ast, _rcb)
         _add_script_class(obj, obj.__name__)
         return obj
     else:
+        mod = ScriptModule()
         ast = get_jit_def(obj)
         _jit_script_compile(mod, ast, _rcb, get_default_args(obj))
-    # Forward docstrings
-    mod.__doc__ = obj.__doc__
-    return mod
+        # Forward docstrings
+        mod.__doc__ = obj.__doc__
+        return mod
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -1208,6 +1208,9 @@ if _enabled:
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
 
+        def graph_for(self, *args, **kwargs):
+            return self._get_method('forward').graph_for(*args, **kwargs)
+
     class WeakScriptModuleProxy(ScriptModule):
         def __init__(self, original, stubs):
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
@@ -1490,6 +1493,13 @@ def _get_builtin_table():
     _builtin_table[id(torch.nn.functional._no_grad_embedding_renorm_)] = "aten::_no_grad_embedding_renorm_"
 
     _builtin_table[id(math.floor)] = "aten::floor"
+    _builtin_table[id(math.ceil)] = "aten::ceil"
+    _builtin_table[id(math.log)] = "aten::log"
+    _builtin_table[id(math.log1p)] = "aten::log1p"
+    _builtin_table[id(math.log10)] = "aten::log10"
+    _builtin_table[id(math.exp)] = "aten::exp"
+    _builtin_table[id(math.sqrt)] = "aten::sqrt"
+    _builtin_table[id(math.pow)] = "aten::pow"
     _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
     _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
@@ -1548,6 +1558,14 @@ def annotate(the_type, the_value):
 
 Attribute = collections.namedtuple('Attribute', ['value', 'type'])
 
+last_executed_optimized_graph = torch._C._last_executed_optimized_graph
+
+
+def _graph_for(self, *args, **kwargs):
+    self(*args, **kwargs)
+    return last_executed_optimized_graph()
+
+torch._C.ScriptMethod.graph_for = _graph_for
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

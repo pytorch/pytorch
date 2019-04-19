@@ -157,7 +157,7 @@ Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
 
 Tensor mm(const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm(at::zeros({}, mat2.type()), self, mat2, 0, 1);
+    return at::zeros({}, mat2.options()).addmm(self, mat2, 0, 1);
   }
   return at::legacy::th::_th_mm(self, mat2);
 }
@@ -297,8 +297,8 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   }
 
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
-    return (t.stride(2) == 1 && t.stride(1) == t.size(2))
-            || (t.stride(1) == 1 && t.stride(2) == t.size(1));
+    return (t.stride(2) == 1 && t.stride(1) >= t.size(2))
+            || (t.stride(1) == 1 && t.stride(2) >= t.size(1));
   };
 
   if (contraction_size * res_rows * res_cols < 400) {
@@ -368,8 +368,9 @@ Tensor dot(const Tensor& self, const Tensor& tensor) {
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
   result.resize_({});
-  // dispatching through type ensures we don't allow mismatched types.
-  return self.type().fill_(result, self.dot(tensor));
+  AT_CHECK(result.scalar_type() == self.scalar_type(),
+           "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  return result.fill_(self.dot(tensor));
 }
 
 /*

@@ -348,7 +348,6 @@ ccache -F 0
 
 # deploy (and add to ~/.bashrc for later)
 export PATH="/usr/lib/ccache:$PATH"
-export CUDA_NVCC_EXECUTABLE=/usr/lib/ccache/nvcc
 ```
 
 ## CUDA Development tips

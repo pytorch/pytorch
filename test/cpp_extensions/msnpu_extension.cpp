@@ -10,8 +10,7 @@ Tensor get_dtype_tensor(caffe2::TypeMeta dtype) {
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
           dtype, 0, at::DataPtr(nullptr, Device(DeviceType::MSNPU, 0)), nullptr, false),
-      MSNPUTensorId(),
-      false);
+      MSNPUTensorId());
   return Tensor(std::move(tensor_impl));
 }
 

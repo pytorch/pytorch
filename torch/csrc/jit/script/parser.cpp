@@ -162,6 +162,10 @@ struct ParserImpl {
       case TK_STRINGLITERAL: {
         prefix = parseConcatenatedStringLiterals();
       } break;
+      case TK_DOTS: {
+        prefix = Dots::create(L.cur().range);
+        L.next();
+      } break;
       default: {
         Ident name = parseIdent();
         prefix = Var::create(name.range(), name);

@@ -454,11 +454,11 @@ void testAliasAnalysis() {
 }
 
 void testWriteTracking() {
-  RegisterOperators reg({createOperator(
-      "foo::creates_alias(Tensor(a) x) -> Tensor(a)",
-      [](at::Tensor a) { return a; })});
-  const auto creates_alias = Symbol::fromQualString("foo::creates_alias");
-  const auto returns_wildcard = Symbol::fromQualString("foo::returns_wildcard");
+  RegisterOperators reg(
+      {Operator("prim::creates_alias(Tensor(a) x) -> Tensor(a)", [](Stack& s) {
+        return 0;
+      })});
+  const auto creates_alias = Symbol::fromQualString("prim::creates_alias");
   {
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
@@ -491,14 +491,16 @@ void testWriteTracking() {
 }
 
 void testWildcards() {
-  RegisterOperators reg({createOperator(
-                             "foo::returns_wildcard(Tensor a) -> Tensor(*)",
-                             [](at::Tensor a) { return a; }),
-                         createOperator(
-                             "foo::writes(Tensor(z!) a) -> Tensor(a)",
-                             [](at::Tensor a) { return a; })});
-  const auto returns_wildcard = Symbol::fromQualString("foo::returns_wildcard");
-  const auto writes = Symbol::fromQualString("foo::writes");
+  RegisterOperators reg(
+      {Operator(
+           "prim::returns_wildcard(Tensor a) -> Tensor(*)",
+           [](Stack& stack) { return 0; }),
+       Operator("prim::writes(Tensor(z!) a) -> Tensor(a)", [](Stack& stack) {
+         return 0;
+       })});
+  const auto returns_wildcard =
+      Symbol::fromQualString("prim::returns_wildcard");
+  const auto writes = Symbol::fromQualString("prim::writes");
 
   auto graph = std::make_shared<Graph>();
   const auto a = graph->addInput();

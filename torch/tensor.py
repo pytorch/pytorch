@@ -296,9 +296,16 @@ class Tensor(torch._C._TensorBase):
     def btrifact_with_info(self, pivot=True):
         r"""See :func:`torch.lu`"""
         warnings.warn("torch.btrifact_with_info is deprecated in favour of torch.lu with the "
-                      "and will be removed in the next release. Please use torch.lu with the "
-                      "get_infos argument set to True instead.", stacklevel=2)
+                      "get_infos argument and will be removed in the next release. Please use "
+                      "torch.lu with the get_infos argument set to True instead.", stacklevel=2)
         return torch._lu_with_info(self, pivot=pivot, check_errors=False)
+
+    def btrisolve(self, LU_data, LU_pivots):
+        r"""See :func:`torch.lu_solve`"""
+        warnings.warn("torch.btrisolve is deprecated in favour of torch.lu_solve and will be "
+                      "removed in the next release. Please use torch.lu_solve instead.",
+                      stacklevel=2)
+        return super(Tensor, self).lu_solve(LU_data=LU_data, LU_pivots=LU_pivots)
 
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
@@ -338,28 +345,19 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
-    def unique(self, sorted=True, return_inverse=False, dim=None):
-        r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
+    def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
+        r"""Returns the unique elements of the input tensor.
 
         See :func:`torch.unique`
         """
-        if dim is not None:
-            output, inverse_indices = torch._unique_dim(
-                self,
-                sorted=sorted,
-                return_inverse=return_inverse,
-                dim=dim
-            )
-        else:
-            output, inverse_indices = torch._unique(
-                self,
-                sorted=sorted,
-                return_inverse=return_inverse
-            )
-        if return_inverse:
-            return output, inverse_indices
-        else:
-            return output
+        return torch.unique(self, sorted=sorted, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
+
+    def unique_consecutive(self, return_inverse=False, return_counts=False, dim=None):
+        r"""Eliminates all but the first element from every consecutive group of equivalent elements.
+
+        See :func:`torch.unique_consecutive`
+        """
+        return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)

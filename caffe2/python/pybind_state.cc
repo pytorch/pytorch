@@ -25,12 +25,21 @@
 #include "caffe2/opt/onnxifi_transformer.h"
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
+#include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
+
+// Because of CMake setup, we can't depend on script module here just yet -
+// it pulls in generated files from a different directory and it
+// probabilistically breaks the build.
+// TODO: enable if once shared libraries are unified in CMake
+#ifdef FBCODE_CAFFE2
+#include "torch/script.h"
+#endif
 
 namespace caffe2 {
 namespace python {
@@ -77,6 +86,19 @@ class StringFetcher : public BlobFetcherBase {
   }
 };
 REGISTER_BLOB_FETCHER((TypeMeta::Id<string>()), StringFetcher);
+
+#ifdef FBCODE_CAFFE2
+class ScriptModuleFetcher : public BlobFetcherBase {
+ public:
+  pybind11::object Fetch(const Blob& blob) override {
+    return py::cast(blob.Get<std::shared_ptr<torch::jit::script::Module>>());
+  }
+};
+
+REGISTER_BLOB_FETCHER(
+    (TypeMeta::Id<std::shared_ptr<torch::jit::script::Module>>()),
+    caffe2::python::ScriptModuleFetcher);
+#endif
 
 static_assert(
     sizeof(int) == sizeof(int32_t),
@@ -193,6 +215,45 @@ py::object fetchBlob(Workspace* ws, const std::string& name) {
        << blob.TypeName() << ".";
     return py::bytes(ss.str());
   }
+}
+
+// This function can only return true, but keeping it for backward compatibility
+bool feedBlob(
+    Blob* blob,
+    const py::object& arg,
+    const py::object device_option) {
+  DeviceOption option;
+  if (!device_option.is(py::none())) {
+    // If we have a device option passed in, read it.
+    CAFFE_ENFORCE(ParseProtoFromLargeString(
+        py::bytes(device_option).cast<std::string>(), &option));
+  }
+#ifdef USE_NUMPY
+  if (PyArray_Check(arg.ptr())) { // numpy array
+    PyArrayObject* array = reinterpret_cast<PyArrayObject*>(arg.ptr());
+    auto feeder = CreateFeeder(option.device_type());
+    CAFFE_ENFORCE(feeder, "Unknown device type encountered in FeedBlob.");
+    feeder->Feed(option, array, blob, true); /* default to inplace feed */
+    return true;
+  }
+#else
+  CAFFE_THROW("Caffe2 compiled without NumPy support.");
+#endif // USE_NUMPY
+  if (PyBytes_Check(arg.ptr()) || PyUnicode_Check(arg.ptr())) {
+    *blob->GetMutable<std::string>() = arg.cast<std::string>();
+    return true;
+  }
+#ifdef FBCODE_CAFFE2
+  if (py::isinstance<torch::jit::script::Module>(arg)) {
+    *blob->GetMutable<std::shared_ptr<torch::jit::script::Module>>() =
+        arg.cast<std::shared_ptr<torch::jit::script::Module>>();
+    return true;
+  }
+#endif
+  CAFFE_THROW(
+      "Unexpected type of argument - only numpy array or string are "
+      "supported for feeding");
+  return false;
 }
 } // namespace python_detail
 
@@ -352,36 +413,7 @@ void addObjectMethods(py::module& m) {
           py::return_value_policy::reference_internal)
       .def(
           "_feed",
-          [](Blob* blob,
-             const py::object& arg,
-             const py::object device_option) {
-            DeviceOption option;
-            if (!device_option.is(py::none())) {
-              // If we have a device option passed in, read it.
-              CAFFE_ENFORCE(ParseProtoFromLargeString(
-                  py::bytes(device_option).cast<std::string>(), &option));
-            }
-#ifdef USE_NUMPY
-            if (PyArray_Check(arg.ptr())) { // numpy array
-              PyArrayObject* array
-                = reinterpret_cast<PyArrayObject*>(arg.ptr());
-              auto feeder = CreateFeeder(option.device_type());
-              CAFFE_ENFORCE(
-                  feeder, "Unknown device type encountered in FeedBlob.");
-              feeder->Feed(option, array, blob, true); /* default to inplace feed */
-              return true;
-            }
-#else
-            CAFFE_THROW("Caffe2 compiled without NumPy support.");
-#endif // USE_NUMPY
-            if (PyBytes_Check(arg.ptr()) || PyUnicode_Check(arg.ptr())) {
-              *blob->GetMutable<std::string>() = arg.cast<std::string>();
-              return true;
-            }
-            CAFFE_THROW(
-                "Unexpected type of argument - only numpy array or string are "
-                "supported for feeding");
-          },
+          &python_detail::feedBlob,
           "Feed an input array or string, with the (optional) DeviceOption",
           py::arg("arg"),
           py::arg("device_option") = py::none())
@@ -1115,6 +1147,19 @@ void addGlobalMethods(py::module& m) {
     return gWorkspace->HasBlob(name);
   });
   m.def(
+      "fill_random_network_inputs",
+      [](const py::bytes& net_def,
+         const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
+         const std::vector<std::vector<std::string>>& inputTypes) {
+        CAFFE_ENFORCE(gWorkspace);
+        py::gil_scoped_release g;
+        NetDef net;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(net_def.cast<std::string>(), &net));
+        caffe2::emulator::fillRandomNetworkInputs(
+            net, inputDims, inputTypes, gWorkspace);
+      });
+  m.def(
       "create_net",
       [](py::bytes net_def, bool overwrite) {
         CAFFE_ENFORCE(gWorkspace);
@@ -1190,6 +1235,10 @@ void addGlobalMethods(py::module& m) {
         NetBase* net = gWorkspace->GetNet(net_name);
         net->DetachObserver(observer);
       });
+  m.def("clear_global_net_observer", []() {
+    py::gil_scoped_release g;
+    caffe2::ClearGlobalNetObservers();
+  });
   m.def("num_observers_on_net", [](const std::string& net_name) {
     CAFFE_ENFORCE(gWorkspace);
     CAFFE_ENFORCE(gWorkspace->GetNet(net_name), "Can't find net ", net_name);
@@ -1225,6 +1274,22 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(ParseProtoFromLargeString(op_def.cast<std::string>(), &def));
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunOperatorOnce(def));
+    return true;
+  });
+  // Run an operator multiple times.
+  // This is needed for microbenchmarking as we want the benchmark loop to be in
+  // C++ to minimize overhead.
+  m.def("run_operator_multiple", [](const py::bytes& op_def, int num_runs) {
+    CAFFE_ENFORCE(gWorkspace);
+    OperatorDef def;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(op_def.cast<std::string>(), &def));
+    py::gil_scoped_release g;
+    std::unique_ptr<OperatorBase> op(CreateOperator(def, gWorkspace));
+    for (int i = 0; i < num_runs; i++) {
+      if (!op->Run()) {
+        return false;
+      }
+    }
     return true;
   });
   m.def(
@@ -1441,35 +1506,8 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "feed_blob",
       [](const std::string& name, py::object arg, py::object device_option) {
-        DeviceOption option;
-        if (!device_option.is(py::none())) {
-          // If we have a device option passed in, read it.
-          CAFFE_ENFORCE(ParseProtoFromLargeString(
-              py::bytes(device_option).cast<std::string>(), &option));
-        }
         auto* blob = gWorkspace->CreateBlob(name);
-#ifdef USE_NUMPY
-        if (PyArray_Check(arg.ptr())) { // numpy array
-          PyArrayObject* array = reinterpret_cast<PyArrayObject*>(arg.ptr());
-          auto feeder = CreateFeeder(option.device_type());
-          CAFFE_ENFORCE(
-              feeder,
-              "Unknown device type encountered in FeedBlob: ",
-              option.device_type());
-          feeder->Feed(option, array, blob);
-          return true;
-        }
-#else
-        CAFFE_THROW("Caffe2 was compiled without NumPy support.");
-#endif // USE_NUMPY
-        if (PyBytes_Check(arg.ptr()) || PyUnicode_Check(arg.ptr())) { // string
-          *blob->GetMutable<std::string>() = arg.cast<std::string>();
-          return true;
-        }
-        CAFFE_THROW(
-            "Unexpected type of argument - only numpy array or string are "
-            "supported for feeding");
-        return false;
+        return python_detail::feedBlob(blob, arg, device_option);
       },
       "",
       py::arg("name"),

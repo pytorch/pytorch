@@ -73,7 +73,7 @@ void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info) {
 template<class scalar_t>
 void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
   AT_ERROR("triangular_solve only takes float or double Tensors");
-} 
+}
 
 #ifdef USE_LAPACK
 template<> void lapackSolve<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
@@ -140,7 +140,7 @@ static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
 
-  auto ipiv = at::empty({n}, b.type().toScalarType(kInt));
+  auto ipiv = at::empty({n}, b.options().dtype(kInt));
 
   int info;
   if (b.dim() == 2) {
@@ -211,7 +211,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
   auto batch_size = batchCount(self);
   auto n = self.size(-2);
 
-  auto ipiv = at::empty({n}, self.type().toScalarType(kInt));
+  auto ipiv = at::empty({n}, self.options().dtype(kInt));
   int lwork;
   scalar_t wkopt;
   Tensor work;
@@ -230,7 +230,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
     lapackGetri<scalar_t>(n, self_working_ptr, n, ipiv.data<int>(), &wkopt, lwork, &info);
 
     lwork = static_cast<int>(wkopt);
-    work = at::empty({lwork}, self.type());
+    work = at::empty({lwork}, self.options());
 
     // now to compute the actual inverse
     lapackGetri<scalar_t>(n, self_working_ptr, n, ipiv.data<int>(), work.data<scalar_t>(), lwork, &info);

@@ -52,23 +52,12 @@ inline TensorImpl* resize_impl_cpu_(
   return self;
 }
 
-static inline int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
-  int64_t storage_size = 1;
-  for (size_t dim = 0; dim < sizes.size(); ++dim) {
-    if (sizes[dim] == 0) {
-      return 0;
-    }
-    storage_size += strides[dim] * (sizes[dim] - 1);
-  }
-  return storage_size;
-}
-
 static inline void checkInBoundsForStorage(
     IntArrayRef size,
     IntArrayRef stride,
     int64_t storage_offset,
     const Storage& new_storage) {
-  int64_t storage_size = computeStorageSize(size, stride);
+  int64_t storage_size = detail::computeStorageSize(size, stride);
   if (storage_size == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
