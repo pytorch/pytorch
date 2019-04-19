@@ -5332,7 +5332,6 @@ a")
         inputs = self._make_scalar_vars([-1234, 4321], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
-
     def test_math_ops(self):
 
         def test_floor(x):
@@ -5391,6 +5390,10 @@ a")
             # type: (float, int) -> float
             return math.pow(x, y)
 
+        def test_erf(x):
+            # type (float) -> float
+            return math.erf(x)
+
         def test_copysign(x, y):
             # type: (Union[float, int], Union[float, int]) -> float
             return math.copysign(x, y)
@@ -5413,6 +5416,7 @@ a")
         self.checkScript(test_sqrt_float, (2.0,))
         self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
+        self.checkScript(test_erf, (1.5,))
         for inputs in ((1, -1), (1.0, -1), (1, -1.0), (1.0, -1.0)):
             self.checkScript(test_copysign, inputs)
 
