@@ -9,10 +9,10 @@
 
 namespace torch { namespace nn {
 
-inline bool check_type(PyObject* obj, at::TensorTypeId id, at::ScalarType dtype) {
+inline bool check_type(PyObject* obj, at::TypeID typeID) {
   if (THPVariable_Check(obj)) {
     auto& tensor = ((THPVariable*)obj)->cdata;
-    return tensor.type_id() == id && tensor.dtype() == dtype;
+    return at::globalContext().getNonVariableType(tensor.type().backend(), tensor.scalar_type()).ID() == typeID;
   }
   return false;
 }
@@ -38,19 +38,19 @@ static inline int get_device(PyObject* args) {
 }
 
 static inline bool THNN_FloatTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CPUTensorId(), at::kFloat);
+  return torch::nn::check_type(obj, at::TypeID::CPUFloat);
 }
 
 static inline bool THNN_DoubleTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CPUTensorId(), at::kDouble);
+  return torch::nn::check_type(obj, at::TypeID::CPUDouble);
 }
 
 static inline bool THNN_LongTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CPUTensorId(), at::kLong);
+  return torch::nn::check_type(obj, at::TypeID::CPULong);
 }
 
 static inline bool THNN_IntTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CPUTensorId(), at::kInt);
+  return torch::nn::check_type(obj, at::TypeID::CPUInt);
 }
 
 static inline THFloatTensor* THNN_FloatTensor_Unpack(PyObject* obj) {
@@ -72,19 +72,19 @@ static inline THIntTensor* THNN_IntTensor_Unpack(PyObject* obj) {
 #ifdef USE_CUDA
 
 static inline bool THNN_CudaHalfTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CUDATensorId(), at::kHalf);
+  return torch::nn::check_type(obj, at::TypeID::CUDAHalf);
 }
 
 static inline bool THNN_CudaFloatTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CUDATensorId(), at::kFloat);
+  return torch::nn::check_type(obj, at::TypeID::CUDAFloat);
 }
 
 static inline bool THNN_CudaDoubleTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CUDATensorId(), at::kDouble);
+  return torch::nn::check_type(obj, at::TypeID::CUDADouble);
 }
 
 static inline bool THNN_CudaLongTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, at::CUDATensorId(), at::kLong);
+  return torch::nn::check_type(obj, at::TypeID::CUDALong);
 }
 
 static inline THCudaHalfTensor* THNN_CudaHalfTensor_Unpack(PyObject* obj) {
