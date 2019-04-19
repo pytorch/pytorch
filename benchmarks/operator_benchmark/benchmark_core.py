@@ -8,7 +8,7 @@ import numpy as np
 import timeit
 import json
 
-from caffe2.benchmarks.operator_benchmark import benchmark_utils
+from benchmarks.operator_benchmark import benchmark_utils
 
 """Performance microbenchmarks.
 
