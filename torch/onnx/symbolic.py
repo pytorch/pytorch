@@ -217,7 +217,7 @@ _export_onnx_opset_version = _default_onnx_opset_version
 
 def _set_opset_version(opset_version):
     global _export_onnx_opset_version
-    if opset_version == _default_onnx_opset_version:
+    if opset_version == _export_onnx_opset_version:
         return
     if opset_version in _onnx_stable_opsets + [_onnx_master_opset]:
         _export_onnx_opset_version = opset_version
@@ -1348,7 +1348,7 @@ def ones_like(g, input, dtype, layout, device, pin_memory=False):
 
 
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
-    if pin_memory and _parse_arg(pin_memory,'b'):
+    if pin_memory and _parse_arg(pin_memory, 'b'):
         raise RuntimeError("onnx pin_memory support is not implemented")
     const_value = _maybe_get_const(value, 't')
     if _is_value(const_value):

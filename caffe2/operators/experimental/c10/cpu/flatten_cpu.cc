@@ -13,8 +13,8 @@ void flatten_op_cpu_impl(
     const at::Tensor& input_,
     const at::Tensor& output_,
     int64_t axis) {
-  Tensor input{C10Tensor(input_)};
-  Tensor output{C10Tensor(output_)};
+  Tensor input(input_);
+  Tensor output(output_);
   CPUContext context;
   CAFFE_ENFORCE_GE(
       input.sizes().size(), axis, "The rank of the tensor must be >= axis.");
