@@ -277,6 +277,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_select
    .. automethod:: indices
    .. automethod:: int
+   .. automethod:: int_repr
    .. automethod:: inverse
    .. automethod:: irfft
    .. automethod:: is_contiguous

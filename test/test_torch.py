@@ -2663,13 +2663,26 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
         self.assertFalse(r.is_quantized)
+        # slicing and int_repr
+        int_repr = qr.int_repr()
+        for num in int_repr:
+            self.assertEqual(num, 3)
+        for num in qr[2:].int_repr():
+            self.assertEqual(num, 3)
+        # dequantize
         rqr = qr.dequantize()
         for i in range(num_elements):
             self.assertEqual(r[i], rqr[i])
-        # Testing item
+        # Scalar Tensor
+        # item
         r = torch.ones(1, dtype=torch.float)
         qr = r.quantize_linear(scale, zero_point)
         self.assertEqual(qr.item(), 1)
+        self.assertEqual(qr[0].item(), 1)
+        # assignment
+        # This calls _th_fill_
+        # qr[0] = 8 # float asignment
+        # self.assertEqual(qr.item(), 8)
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
@@ -2680,7 +2693,20 @@ class _TestTorchMixin(object):
         rqr = qr.dequantize()
         print(r.numpy())
         print(rqr.numpy())
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2/scale))
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+
+    def test_qtensor_creation(self):
+        scale = 0.5
+        zero_point = 10
+        val = 100
+        numel = 10
+        q = torch._empty_affine_quantized(numel, dtype=torch.qint8, scale=scale, zero_point=zero_point)
+        # for i in range(numel):
+        #     # wait for th_fill
+        #     q[i] = val
+        # r = q.dequantize()
+        # for i in range(numel):
+        #     self.assertEqual(r[i], (val - zero_point) * scale)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
@@ -3894,11 +3920,11 @@ class _TestTorchMixin(object):
                     return t0_fn(1.0, t1, t2)
                 else:
                     return t0_fn(t1)
-            r1 = tensorfn_inplace(large_expanded, small_expanded, small2_expanded)
-            r2 = tensorfn_inplace(large_expanded_clone, small, small2)
             # in-place pointwise operations don't actually work if the in-place
             # tensor is 0-strided (numpy has the same issue)
             if (0 not in large_expanded.stride() and 0 not in large_expanded_clone.stride()):
+                r1 = tensorfn_inplace(large_expanded, small_expanded, small2_expanded)
+                r2 = tensorfn_inplace(large_expanded_clone, small, small2)
                 self.assertEqual(r1, r2)
 
             def broadcastable(t0, t1, t2=None):
@@ -8833,6 +8859,13 @@ class _TestTorchMixin(object):
         self.assertEqual(a.requires_grad, b.requires_grad)
         self.assertEqual(a, b)
 
+    def test_pickle_dtype(self):
+        t = torch.float32
+        serialized = pickle.dumps(t)
+        b = pickle.loads(serialized)
+        self.assertTrue(isinstance(b, torch.dtype))
+        self.assertEqual(id(b), id(t))
+
     def test_norm_fastpaths(self):
         x = torch.randn(3, 5)
 
@@ -10626,7 +10659,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             x_unique = x.unique(sorted=True)
             self.assertEqual(expected_unique, x_unique)
 
-            x_unique, _, x_counts = torch._unique2_temporary_will_remove_soon(x, sorted=True, return_counts=True)
+            x_unique, x_counts = torch.unique(x, sorted=True, return_counts=True)
             self.assertEqual(expected_counts, x_counts)
 
             x_unique, x_inverse = torch.unique(
@@ -10634,7 +10667,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique, x_unique)
             self.assertEqual(expected_inverse, x_inverse)
 
-            x_unique, x_inverse, x_counts = torch._unique2_temporary_will_remove_soon(
+            x_unique, x_inverse, x_counts = torch.unique(
                 x, sorted=True, return_inverse=True, return_counts=True)
             self.assertEqual(expected_unique, x_unique)
             self.assertEqual(expected_inverse, x_inverse)
@@ -10646,14 +10679,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique, y_unique)
             self.assertEqual(expected_inverse.view(y.size()), y_inverse)
 
-            y_unique, y_inverse, y_counts = torch._unique2_temporary_will_remove_soon(
+            y_unique, y_inverse, y_counts = torch.unique(
                 y, sorted=True, return_inverse=True, return_counts=True)
             self.assertEqual(expected_unique, y_unique)
             self.assertEqual(expected_inverse.view(y.size()), y_inverse)
             self.assertEqual(expected_counts, y_counts)
 
             # Tests unique on other types.
-            int_unique, int_inverse, int_counts = torch._unique2_temporary_will_remove_soon(
+            int_unique, int_inverse, int_counts = torch.unique(
                 torch.tensor([2, 1, 2], dtype=torch.int, device=device),
                 sorted=True,
                 return_inverse=True,
@@ -10663,7 +10696,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.tensor([1, 0, 1], dtype=torch.long, device=device), int_inverse)
             self.assertEqual(torch.tensor([1, 2], dtype=torch.long, device=device), int_counts)
 
-            double_unique, double_inverse, double_counts = torch._unique2_temporary_will_remove_soon(
+            double_unique, double_inverse, double_counts = torch.unique(
                 torch.tensor([2., 1.5, 2.1, 2.], dtype=torch.double, device=device),
                 sorted=True,
                 return_inverse=True,
@@ -10673,7 +10706,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.tensor([1, 0, 2, 1], dtype=torch.long, device=device), double_inverse)
             self.assertEqual(torch.tensor([1, 2, 1], dtype=torch.long, device=device), double_counts)
 
-            byte_unique, byte_inverse, byte_counts = torch._unique2_temporary_will_remove_soon(
+            byte_unique, byte_inverse, byte_counts = torch.unique(
                 torch.tensor([133, 7, 7, 7, 42, 128], dtype=torch.uint8, device=device),
                 sorted=True,
                 return_inverse=True,
@@ -11113,6 +11146,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             inplace_op(tensor)
 
     @staticmethod
+    def binary_check_mem_overlap(self, inplace_op, value=-0.5, device='cpu'):
+        if isinstance(inplace_op, str):
+            inplace_op = getattr(torch.Tensor, inplace_op)
+        tensor = torch.tensor(value, device=device).expand(3, 3)
+        other = torch.rand_like(tensor)
+        with self.assertRaisesRegex(RuntimeError, 'single memory location'):
+            inplace_op(tensor, other)
+
+    @staticmethod
     def _test_inplace_unary_mem_overlap(self, device='cpu'):
         TestTorch.unary_check_mem_overlap(self, lambda t: t.acos_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.asin_(), device=device)
@@ -11136,8 +11178,17 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         TestTorch.unary_check_mem_overlap(self, lambda t: t.tanh_(), device=device)
         TestTorch.unary_check_mem_overlap(self, lambda t: t.trunc_(), device=device)
 
+    @staticmethod
+    def _test_inplace_binary_mem_overlap(self, device='cpu'):
+        binary_ops = ['add_', 'mul_', 'div_', 'sub_']
+        for op in binary_ops:
+            TestTorch.binary_check_mem_overlap(self, op, device=device)
+
     def test_inplace_unary_mem_overlap(self):
         return self._test_inplace_unary_mem_overlap(self)
+
+    def test_inplace_binary_mem_overlap(self):
+        return self._test_inplace_binary_mem_overlap(self)
 
     @unittest.expectedFailure
     def test_abs_unary_mem_overlap(self):
