@@ -600,6 +600,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
     if (!compiled_fn.is(py::none())) {
       auto mod = as_module(compiled_fn);
+      AT_ASSERT(mod);
       return moduleToMethod(mod);
     }
   }
