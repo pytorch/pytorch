@@ -91,7 +91,7 @@ def getAllQParamDict(allqparam_dict, quantObj):
 
 
 r"""
-This is an example QuantConfigTemplate which will be used to collect
+This is an example QuantTemplate which will be used to collect
 stats across batches by running torch script/trace module, from the
 observer nodes inserted in the graph. These stats are used to compute
 Quantization Parameters. These will be passed to quantizer to be used
@@ -99,7 +99,7 @@ as arguments for quant ops in quantization pass.
 """
 
 
-class QuantConfigTemplate:
+class QuantTemplate:
     def __init__(self, tensorType, observerImpl=None, calcQParamImpl=None):
         self.value_stats = {}
         self.qparam_dict = {}
@@ -185,9 +185,9 @@ class QuantizerTestCase(TestCase):
         # Eager mode
 
         # Create QuantConfig object for eager mode
-        eagerQuantObj = QuantConfigTemplate(tensorType='activation',
-                                            observerImpl=activationObserver,
-                                            calcQParamImpl=calcQParamFunc)
+        eagerQuantObj = QuantTemplate(tensorType='activation',
+                                      observerImpl=activationObserver,
+                                      calcQParamImpl=calcQParamFunc)
         eagerM = TestM(quantObj=eagerQuantObj)
 
         # Run EagerMode Model and Collect stats
@@ -198,9 +198,9 @@ class QuantizerTestCase(TestCase):
         scriptM = TestScriptM()
 
         # Create QuantConfig object for script mode
-        activationQuantObj = QuantConfigTemplate(tensorType='activation',
-                                                 observerImpl=activationObserver,
-                                                 calcQParamImpl=calcQParamFunc)
+        activationQuantObj = QuantTemplate(tensorType='activation',
+                                           observerImpl=activationObserver,
+                                           calcQParamImpl=calcQParamFunc)
 
         # This performs type analysis to identify tensors from other
         # types. This info needed for further quantizer passes
