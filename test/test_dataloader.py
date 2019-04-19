@@ -744,8 +744,9 @@ class TestDataLoader(TestCase):
             # not be called before process end. It is important to see that the
             # processes still exit in both cases.
 
-            if pin_memory and (not TEST_CUDA or NO_MULTIPROCESSING_SPAWN):
+            if pin_memory and (not TEST_CUDA or NO_MULTIPROCESSING_SPAWN or IS_WINDOWS):
                 # Can't use CUDA without spawn
+                # For windows, pin_memory sometimes causes CUDA oom.
                 continue
 
             # `exit_method` controls the way the loader process ends.
