@@ -149,7 +149,8 @@ static bool outputsNeedToBeObserved(Node* n) {
   return n->kind() != prim::Constant && n->kind() != prim::PythonOp;
 }
 
-void InsertObserverNodes(script::Method* method, Node* observer_node) {
+void InsertObserverNodes(const std::unique_ptr<script::Method>& method,
+  Node* observer_node) {
   AT_ASSERT(method != nullptr);
   auto graph = method->graph();
   AT_ASSERT(graph != nullptr);

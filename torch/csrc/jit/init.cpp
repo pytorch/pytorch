@@ -137,15 +137,16 @@ void initJITBindings(PyObject* module) {
               return;
             }
             auto pyObserverFunction = observerDict[moduleObj->name()];
-            script::Method* method = moduleObj->find_method("forward");
-            AT_ASSERT(method != nullptr);
 
-            auto g = method->graph();
             // Create a new node that would be used in the insert observer pass:
            // all observer nodes will be cloned from this one.
-            Node* new_node = g->createPythonOp(
+            Graph g;
+            Node* new_node = g.createPythonOp(
                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(method, new_node);
+            const auto& methods = moduleObj->get_methods();
+            for (const auto& m : methods) {
+              InsertObserverNodes(m, new_node);
+            }
             // We don't need this node anymore, don't forget to remove it.
             new_node->destroy();
           })

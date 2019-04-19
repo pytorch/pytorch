@@ -28,7 +28,7 @@ TORCH_API void PropagateQuantInfo(std::shared_ptr<Graph>& graph);
  * will be cloned into all the places where we need to add instrumentation.
  */
 TORCH_API void InsertObserverNodes(
-    script::Method* method,
+    const std::unique_ptr<script::Method>& method,
     Node* observer_node);
 
 /** \brief Inserts quant-dequant nodes.
