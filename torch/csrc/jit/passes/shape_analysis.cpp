@@ -427,9 +427,8 @@ class ShapePropagator {
     auto list_type = input_type->cast<ListType>();
     while (list_type) {
       dims++;
-      list_type = list_type->getElementType();
-      input_base_type = list_type;
-      list_type = list_type->cast<ListType>();
+      input_base_type = list_type->getElementType();
+      list_type = input_base_type->cast<ListType>();
     }
 
     at::ScalarType default_type = scalarTypeFromJitType(input_base_type);

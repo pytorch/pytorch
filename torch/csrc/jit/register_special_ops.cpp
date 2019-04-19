@@ -1,3 +1,5 @@
+#include <aten/src/ATen/Context.h>
+
 #include <ATen/core/jit_type.h>
 #include <aten/src/ATen/ExpandUtils.h>
 #include <torch/csrc/api/include/torch/utils.h>
