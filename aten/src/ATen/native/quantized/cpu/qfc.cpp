@@ -165,12 +165,12 @@ static auto registry = c10::RegisterOperators().op(
             c10::Argument("W_scale", FloatType::get()),
             c10::Argument("W_zero_point", IntType::get()),
             c10::Argument("b", TensorType::get()),
-            c10::Argument("Y_scale", FloatType::get()),
-            c10::Argument("Y_zero_point", IntType::get())},
+            c10::Argument("Y_scale_i", FloatType::get()),
+            c10::Argument("Y_zero_point_i", IntType::get())},
         std::vector<c10::Argument>{
             c10::Argument("Y", TensorType::get()),
-            c10::Argument("Y_scale", FloatType::get()),
-            c10::Argument("Y_zero_point", IntType::get())}),
+            c10::Argument("Y_scale_o", FloatType::get()),
+            c10::Argument("Y_zero_point_o", IntType::get())}),
     c10::kernel<QFCInt8>(),
     c10::dispatchKey(CPUTensorId()));
 } // namespace

@@ -48,7 +48,6 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     }
   }
 
-  // std::tuple<at::Tensor, at::Tensor> operator()(
   at::Tensor operator()(const at::Tensor& weight, int64_t weight_zero_point) {
     auto N = weight.size(0);
     auto K = weight.size(1);
