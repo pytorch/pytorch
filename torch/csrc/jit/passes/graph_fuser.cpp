@@ -285,7 +285,7 @@ struct GraphFuser {
            const char* source,
            const std::string& method_name) {
           script::CompilationUnit cu;
-          cu.define(source, script::nativeResolver, nullptr);
+          cu.define(source, script::nativeResolver(), nullptr);
           *graph_ptr = cu.get_function(method_name).graph();
         },
         &nm_graph,
