@@ -2683,6 +2683,11 @@ class _TestTorchMixin(object):
         # This calls _th_fill_
         # qr[0] = 8 # float asignment
         # self.assertEqual(qr.item(), 8)
+        # we can also print a qtensor
+        print(qr)
+        # tensor(is_quantized=True, qscheme=per_tensor_affine,
+        # float_values=tensor([1.]),
+        # int_repr=tensor([3]), size=(1,), dtype=torch.qint8)
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
