@@ -44,12 +44,24 @@ void DumpGraph(NNGraph* g) {
     assert(node->data() && "Node doesn't have data, can't render it");
     if (isa<NeuralNetOperator>(node->data())) {
       auto* op = dyn_cast<NeuralNetOperator>(node->data().get());
+      const auto& op_def =
+          dyn_cast<Caffe2Annotation>(op->getAnnotation())->getOperatorDef();
+      int pos = -1;
+      for (const auto& arg : op_def.arg()) {
+        if (arg.name() == "net_pos") {
+          if (arg.has_i()) {
+            pos = arg.i();
+          }
+          break;
+        }
+      }
       labelMap["label"] =
           op->getName() + " (" + c10::to_string((unsigned long long)node) + ")";
       auto* annotation = op->getAnnotation();
       if (annotation && isa<Caffe2Annotation>(annotation)) {
         auto device_annotation = dyn_cast<Caffe2Annotation>(annotation);
-        labelMap["label"] += "\\n[" + device_annotation->getDevice() + "]";
+        labelMap["label"] += "\\n[" + device_annotation->getDevice() +
+            ", pos=" + c10::to_string(pos) + "]";
         auto hash = std::hash<std::string>{}(device_annotation->getDevice());
         std::stringstream hex_stream;
         hex_stream << std::hex << hash;
