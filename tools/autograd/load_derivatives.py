@@ -19,18 +19,29 @@ def load_derivatives(path, declarations):
     for declaration in declarations:
         declarations_by_signature[get_signature(declaration)].append(declaration)
 
-    autograd_functions = [
+    differentiability_infos = [
         process_definition(defn, declarations_by_signature)
         for defn in definitions]
+
+    autograd_functions = [d['autograd_fn'] for d in differentiability_infos if d['autograd_fn'] is not None]
     ensure_unique_names(autograd_functions)
-    match_declarations_with_autograd_functions(declarations, autograd_functions)
+    match_declarations_with_differentiability_info(declarations, differentiability_infos)
 
     return autograd_functions
 
 
+def create_differentiability_info(signature, output_differentiability,
+                                  autograd_fn):
+    return {
+        'signature': signature,
+        'output_differentiability': output_differentiability,
+        'autograd_fn': autograd_fn,
+    }
+
+
 # How do you feel about pasting declaration inside autograd function...
-def create_autograd_function(name, derivatives, args_with_derivatives, non_differentiable_arg_names,
-                             signature, declaration, output_differentiability):
+def create_autograd_function(name, derivatives, args_with_derivatives,
+                             declaration, non_differentiable_arg_names):
     op = to_camel_case(name) + 'Backward'
     op = op.replace('ForwardBackward', 'Backward')
     return {
@@ -39,11 +50,9 @@ def create_autograd_function(name, derivatives, args_with_derivatives, non_diffe
         'declaration': declaration,
         'args_with_derivatives': args_with_derivatives,
         'non_differentiable_arg_names': non_differentiable_arg_names,
-        'signature': signature,
         'derivatives': derivatives,
         'saved_inputs': all_saved_variables(derivatives, 'saved_inputs'),
         'saved_outputs': all_saved_variables(derivatives, 'saved_outputs'),
-        'output_differentiability': output_differentiability,
     }
 
 
@@ -207,8 +216,14 @@ def process_definition(defn, declarations_by_signature):
                                .format(i, defn_name, x, y))
 
     derivatives, args_with_derivatives, non_differentiable_arg_names = set_up_derivatives(defn_name, defn, canonical)
-    return create_autograd_function(defn_name, derivatives, args_with_derivatives, non_differentiable_arg_names,
-                                    signature, canonical, output_differentiability)
+    autograd_fn = None
+
+    # only create an autograd function if we are actually going to calculate a derivative
+    if len(args_with_derivatives) > 0:
+        autograd_fn = create_autograd_function(defn_name, derivatives, args_with_derivatives,
+                                               canonical, non_differentiable_arg_names)
+
+    return create_differentiability_info(signature, output_differentiability, autograd_fn)
 
 
 def ensure_unique_names(autograd_functions):
@@ -343,24 +358,27 @@ def to_camel_case(name):
     return ''.join([p.title() for p in name.split('_')])
 
 
-def match_declarations_with_autograd_functions(declarations, autograd_functions):
-    """Sets the "derivative" key on declarations to matching autograd functions
+def match_declarations_with_differentiability_info(declarations, differentiability_infos):
+    """Sets the "derivative" and "output_differentiability" key on declarations
+    to matching differentiability info
 
     In-place functions will use the out-of-place derivative definition if there
     is no in-place specific derivative.
     """
 
-    functions_by_signature = {f['signature']: f for f in autograd_functions}
+    infos_by_signature = {f['signature']: f for f in differentiability_infos}
 
-    def find_function(declaration):
+    def find_info(declaration):
         signature = get_signature(declaration)
-        if signature in functions_by_signature:
-            return functions_by_signature[signature]
+        if signature in infos_by_signature:
+            return infos_by_signature[signature]
 
         # if there is no exact match look for the out-of-place signature.
         # i.e mul() for mul_() or mul_out()
         signature = get_signature(declaration, use_base_variant=True)
-        return functions_by_signature.get(signature)
+        return infos_by_signature.get(signature)
 
     for declaration in declarations:
-        declaration['derivative'] = find_function(declaration)
+        info = find_info(declaration)
+        declaration['derivative'] = info['autograd_fn'] if info else None
+        declaration['output_differentiability'] = info['output_differentiability'] if info else None
