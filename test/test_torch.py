@@ -10659,7 +10659,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             x_unique = x.unique(sorted=True)
             self.assertEqual(expected_unique, x_unique)
 
-            x_unique, _, x_counts = torch._unique2_temporary_will_remove_soon(x, sorted=True, return_counts=True)
+            x_unique, x_counts = torch.unique(x, sorted=True, return_counts=True)
             self.assertEqual(expected_counts, x_counts)
 
             x_unique, x_inverse = torch.unique(
@@ -10667,7 +10667,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique, x_unique)
             self.assertEqual(expected_inverse, x_inverse)
 
-            x_unique, x_inverse, x_counts = torch._unique2_temporary_will_remove_soon(
+            x_unique, x_inverse, x_counts = torch.unique(
                 x, sorted=True, return_inverse=True, return_counts=True)
             self.assertEqual(expected_unique, x_unique)
             self.assertEqual(expected_inverse, x_inverse)
@@ -10679,14 +10679,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique, y_unique)
             self.assertEqual(expected_inverse.view(y.size()), y_inverse)
 
-            y_unique, y_inverse, y_counts = torch._unique2_temporary_will_remove_soon(
+            y_unique, y_inverse, y_counts = torch.unique(
                 y, sorted=True, return_inverse=True, return_counts=True)
             self.assertEqual(expected_unique, y_unique)
             self.assertEqual(expected_inverse.view(y.size()), y_inverse)
             self.assertEqual(expected_counts, y_counts)
 
             # Tests unique on other types.
-            int_unique, int_inverse, int_counts = torch._unique2_temporary_will_remove_soon(
+            int_unique, int_inverse, int_counts = torch.unique(
                 torch.tensor([2, 1, 2], dtype=torch.int, device=device),
                 sorted=True,
                 return_inverse=True,
@@ -10696,7 +10696,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.tensor([1, 0, 1], dtype=torch.long, device=device), int_inverse)
             self.assertEqual(torch.tensor([1, 2], dtype=torch.long, device=device), int_counts)
 
-            double_unique, double_inverse, double_counts = torch._unique2_temporary_will_remove_soon(
+            double_unique, double_inverse, double_counts = torch.unique(
                 torch.tensor([2., 1.5, 2.1, 2.], dtype=torch.double, device=device),
                 sorted=True,
                 return_inverse=True,
@@ -10706,7 +10706,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.tensor([1, 0, 2, 1], dtype=torch.long, device=device), double_inverse)
             self.assertEqual(torch.tensor([1, 2, 1], dtype=torch.long, device=device), double_counts)
 
-            byte_unique, byte_inverse, byte_counts = torch._unique2_temporary_will_remove_soon(
+            byte_unique, byte_inverse, byte_counts = torch.unique(
                 torch.tensor([133, 7, 7, 7, 42, 128], dtype=torch.uint8, device=device),
                 sorted=True,
                 return_inverse=True,
