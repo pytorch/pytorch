@@ -2700,7 +2700,7 @@ class _TestTorchMixin(object):
         zero_point = 10
         val = 100
         numel = 10
-        q = torch.empty_affine_quantized(numel, dtype=torch.qint8, scale=scale, zero_point=zero_point)
+        q = torch._empty_affine_quantized(numel, dtype=torch.qint8, scale=scale, zero_point=zero_point)
         # for i in range(numel):
         #     # wait for th_fill
         #     q[i] = val
