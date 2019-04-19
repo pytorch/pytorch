@@ -17,6 +17,5 @@ def get_enum(qscheme):
     elif qscheme == 'per_channel_symmetric':
         ret = 4
     else:
-        ret = -1  # TODO: remove once JIT exceptions support control flow
         raise ValueError(qscheme + " is not a valid value for qscheme")
     return ret
