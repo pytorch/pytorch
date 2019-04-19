@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import sys
 import argparse
 
-from caffe2.python import workspace
+#from caffe2.python import workspace
 
 from benchmarks.operator_benchmark import benchmark_core
 
@@ -78,8 +78,8 @@ def main():
 
     args = parser.parse_args()
 
-    workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
-    workspace.ClearGlobalNetObserver()
+    #workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
+    #workspace.ClearGlobalNetObserver()
 
     benchmark_core.BenchmarkRunner(args).run()
 
