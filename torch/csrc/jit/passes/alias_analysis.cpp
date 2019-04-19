@@ -247,6 +247,13 @@ void AliasDb::dump() const {
       }
       std::cout << "\n";
     }
+    if (element->contained_elements.size() > 0) {
+      std::cout << element->value->uniqueName() << " contains: ";
+      for (const auto contained : element->contained_elements) {
+        std::cout << contained->value->uniqueName() << ", ";
+      }
+      std::cout << "\n";
+    }
   }
 
   std::cout << "\n===3. WILDCARDS===\n";
@@ -269,16 +276,15 @@ void AliasDb::dump() const {
   std::cout << "\n";
 }
 
-// TODO: need to make values which can contain other values like
-// Tuple[Tensor] and Tensor point to the same base Tensor element
+// TODO: need to create a dummy "graph input alias" value in MemoryDAG for all
+// inputs of the same type to point to. Currently they all point to the first
+// element, which is technically wrong.
 void AliasDb::makeAllAlias(const std::vector<Value*>& values) {
-  if (values.size() == 0 || !shouldAnnotate(values[0])) {
-    return;
+  if (values.size() > 0) {
+    giveFreshAlias(values[0]);
   }
-
-  giveFreshAlias(values[0]);
-  for (size_t i = 1; i < values.size(); ++i) {
-    elementMap_[values[i]] = elementMap_[values[0]];
+  for (const auto value : values) {
+    makePointerTo(value, values[0]);
   }
 }
 

@@ -41,31 +41,31 @@ bool MemoryDAG::mayContainAlias(Element* a, Element* b) const {
   return mayContainAliasImpl(a, b);
 }
 
-void collectContainedElems(
+void collectAllContainedMemoryLocations(
     const Element* elem,
     std::unordered_set<const Element*>& cont) {
-  cont.insert(elem->contained_elements.begin(), elem->contained_elements.end());
-  for (const auto& e : elem->contained_elements) {
-    collectContainedElems(e, cont);
+  // we have already recursed on this element
+  if (cont.count(elem)) {
+    return;
   }
-}
 
-std::unordered_set<const Element*> collectAllContainedMemoryLocations(
-    const Element* elem) {
-  std::unordered_set<const Element*> elem_contained = {elem};
-  collectContainedElems(elem, elem_contained);
+  cont.insert(elem);
 
-  std::unordered_set<const Element*> all_elem_mlocs;
-  for (const auto& e : elem_contained) {
-    const auto& e_loc = e->getMemoryLocations();
-    all_elem_mlocs.insert(e_loc.begin(), e_loc.end());
+  for (const auto& mem_loc : elem->getMemoryLocations()) {
+    collectAllContainedMemoryLocations(mem_loc, cont);
   }
-  return elem_contained;
+
+  for (const auto& contained : elem->contained_elements) {
+    collectAllContainedMemoryLocations(contained, cont);
+  }
 }
 
 bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
-  auto all_a_mlocs = collectAllContainedMemoryLocations(a);
-  auto all_b_mlocs = collectAllContainedMemoryLocations(b);
+  std::unordered_set<const Element*> all_a_mlocs;
+  std::unordered_set<const Element*> all_b_mlocs;
+
+  collectAllContainedMemoryLocations(a, all_a_mlocs);
+  collectAllContainedMemoryLocations(b, all_b_mlocs);
 
   for (const auto a_mem : all_a_mlocs) {
     for (const auto b_mem : all_b_mlocs) {
