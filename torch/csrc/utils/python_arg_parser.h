@@ -415,8 +415,9 @@ inline c10::optional<int64_t> PythonArgs::toInt64Optional(int i) {
 }
 
 inline c10::optional<bool> PythonArgs::toBoolOptional(int i) {
-  if (!args[i])
+  if (!args[i]) {
     return c10::nullopt;
+  }
   return toBool(i);
 }
 

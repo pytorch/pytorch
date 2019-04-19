@@ -747,7 +747,7 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
       THMapAllocator::makeDataPtr(
           filename.c_str(), flags, my_size * dtype.itemsize(), nullptr),
       /*allocator=*/nullptr,
-      /*resizeable=*/false);
+      /*resizable=*/false);
     auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
     return tensor;
