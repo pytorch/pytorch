@@ -334,9 +334,8 @@ void py_set_default_tensor_type(PyObject* obj) {
 }
 
 void py_set_default_dtype(PyObject* obj) {
-  PyTensorType *type;
   if (THPDtype_Check(obj)) {
-    set_default_tensor_type(*type->aten_type(), ((THPDtype*)obj)->scalar_type);
+    set_default_tensor_type(*default_tensor_type, ((THPDtype*)obj)->scalar_type);
   } else {
     throw TypeError("invalid type object");
   }
