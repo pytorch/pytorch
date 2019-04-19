@@ -20,7 +20,8 @@
 #include <cstddef>
 #include <cmath>
 
-int const threadsPerBlock = 512;
+// This is to keep thread safety in curand with curandStateMtgp32
+int const threadsPerBlock = 256;
 
 namespace at {
 namespace native {
@@ -426,8 +427,9 @@ __global__ void generate_samples(
   curandStateMtgp32 *state
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t s = curand(&state[blockIdx.x]) % (thread_id + k + 1);
   if (thread_id < n){
-    samples[thread_id] = curand(state) % (thread_id + k + 1);
+    samples[thread_id] = s;
   }
 }
 
@@ -439,8 +441,8 @@ __global__ void generate_keys(
   curandStateMtgp32 *state
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  float u = curand_uniform(&state[blockIdx.x]);
   if(thread_id < n){
-    float u = curand_uniform(state);
     keys[thread_id] = weights[thread_id] > 0? (scalar_t) __powf(u, (float) 1/weights[thread_id]):-1;
   }
 }
@@ -454,8 +456,8 @@ __global__ void sampling_with_replacement_kernel(
   curandStateMtgp32 *state
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  scalar_t u = curand_uniform(&state[blockIdx.x]);
   if(thread_id < k){
-    scalar_t u = curand_uniform(state);
     auto ptr = thrust::lower_bound(thrust::device, cdf, cdf + n, u);
     samples[thread_id] = thrust::distance(cdf, ptr);
   }
@@ -502,8 +504,6 @@ Tensor reservoir_sampling_cuda(
   dim3 threads(threadsPerBlock);
 
   THCState *state = at::globalContext().getTHCState();
-  int64_t seed = at::randint(0, 2147483647, {1}).item().toLong();
-  THCRandom_manualSeedAll(state, seed);
   curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
 
   if (weights.numel() == 0){
@@ -609,8 +609,6 @@ Tensor sampling_with_replacement_cuda(
   } else {
 
     THCState *state = at::globalContext().getTHCState();
-    int64_t seed = at::randint(0, 2147483647, {1}).item().toLong();
-    THCRandom_manualSeedAll(state, seed);
     curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
 
     samples = at::empty({k}, x.options().dtype(at::kLong));
