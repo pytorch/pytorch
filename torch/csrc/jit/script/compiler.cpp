@@ -1202,8 +1202,8 @@ struct to_ir {
     //   a =
     // ... = a # OK, a is defined along all paths
 
-    // ordered set, because we sort block outputs on printing
-    std::unordered_set<std::string> mutated_variables;
+    // ordered set, because we want deterministic graph output
+    std::set<std::string> mutated_variables;
 
     for (auto& v : save_true->definedVariables()) {
       if (save_false->findInAnyFrame(v) || false_exits) {
@@ -1223,12 +1223,8 @@ struct to_ir {
 
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
-      auto tv = save_true->findInAnyFrame(x)
-          ? save_true->getVar(x, stmt.range())
-          : b_val;
-      auto fv = save_false->findInAnyFrame(x)
-          ? save_false->getVar(x, stmt.range())
-          : b_val;
+      auto tv = true_exits ? b_val : save_true->getVar(x, stmt.range());
+      auto fv = false_exits ? b_val : save_false->getVar(x, stmt.range());
       auto unified = unifyTypes(tv->type(), fv->type());
 
       // attempt to unify the types. we allow variables to be set to different
