@@ -38,20 +38,6 @@ void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
   }
 }
 
-at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
-  if (type == FloatType::get()) {
-    return at::ScalarType::Double;
-  } else if (type == IntType::get()) {
-    return at::ScalarType::Long;
-  } else if (type == BoolType::get()) {
-    return at::ScalarType::Byte;
-  }
-  AT_ASSERTM(
-      0,
-      "Add new condition, expected Float, Int, or Bool but got",
-      type->str());
-}
-
 int64_t list_size(const IValue& list) {
   if (list.isGenericList()) {
     return list.toGenericListRef().size();
@@ -274,7 +260,7 @@ RegisterOperators reg(
   Operator(                                                                   \
       "aten::tensor(" #operator_type                                          \
       " t, *, ScalarType? dtype=None, Device? device=None"                    \
-      ") -> Tensor",                                                          \
+      ", bool requires_grad=False) -> Tensor",                                \
       [](const Node* node) {                                                  \
         auto initial_scalar_type =                                            \
             scalarTypeFromJitType(node->inputs().at(0)->type());              \
@@ -282,6 +268,7 @@ RegisterOperators reg(
           c_type scalar_val;                                                  \
           IValue dtype;                                                       \
           IValue device;                                                      \
+          bool requires_grad;                                                 \
           pop(stack, scalar_val, dtype, device);                              \
           auto tensor = autograd::make_variable(tensor_creation_op);          \
           at::ScalarType scalar_type =                                        \
@@ -292,6 +279,7 @@ RegisterOperators reg(
             tensor = tensor.to(dev, scalar_type);                             \
           }                                                                   \
           push(stack, tensor);                                                \
+          tensor.set_requires_grad(requires_grad);                            \
           return 0;                                                           \
         };                                                                    \
       }),
@@ -336,7 +324,7 @@ RegisterOperators reg(
            };
          }),
      Operator(
-         "aten::tensor(t[] data, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
+         "aten::tensor(t[] data, *, ScalarType? dtype=None, Device? device=None, bool requires_grad=False) -> Tensor",
          [](const Node* node) {
            auto input = node->inputs().at(0);
            auto elem_type = input->type();
@@ -347,10 +335,11 @@ RegisterOperators reg(
            at::ScalarType initial_scalar_type =
                scalarTypeFromJitType(elem_type);
            return [initial_scalar_type, elem_type](Stack& stack) {
+             bool requires_grad;
              IValue data;
              IValue dtype;
              IValue device;
-             pop(stack, data, dtype, device);
+             pop(stack, requires_grad, data, dtype, device);
              auto sizes = compute_sizes(data);
              auto tensor = autograd::make_variable(at::empty(
                  sizes, at::initialTensorOptions().dtype(initial_scalar_type)));
@@ -386,7 +375,7 @@ RegisterOperators reg(
                    " in torchscript.\n",
                    "Pass in a dtype argument to ensure consistent behavior");
              }
-
+             tensor.set_requires_grad(requires_grad);
              push(stack, tensor);
              return 0;
            };

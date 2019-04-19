@@ -1199,6 +1199,20 @@ inline TypePtr CompleteTensorType::fromBoolType() {
   return CompleteTensorType::create(at::kLong, at::kCPU, {});
 }
 
+at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+  if (type == FloatType::get()) {
+    return at::ScalarType::Double;
+  } else if (type == IntType::get()) {
+    return at::ScalarType::Long;
+  } else if (type == BoolType::get()) {
+    return at::ScalarType::Byte;
+  }
+  AT_ASSERTM(
+      0,
+      "Add new condition, expected Float, Int, or Bool but got",
+      type->str());
+}
+
 // Attempt to find the correct supertype of t1 and t2. If none is found then
 // nullopt will be returned. If t1 == t2, or t1 is a type refinement of t2,
 // then t2 will be returned (and vice versa).
@@ -1208,6 +1222,7 @@ inline TypePtr CompleteTensorType::fromBoolType() {
 CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2);
+
 
 namespace detail {
 template <typename T> struct getTypePtr_ final {
