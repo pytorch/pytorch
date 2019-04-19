@@ -708,7 +708,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
             indices = sub(g, indices, s)
             return r, indices
         else:
-            r = g.op("MaxPool", input, outputs=2,
+            r = g.op("MaxPool", input, outputs=1,
                      kernel_shape_i=tuple_fn(kernel_size),
                      pads_i=padding,
                      strides_i=tuple_fn(stride))
