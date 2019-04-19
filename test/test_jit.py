@@ -1165,24 +1165,24 @@ graph(%x : Tensor,
         # Custom observer function
         value_stats = {}
 
-        class Observer:
-            def observer(self, x, name):
-                if name not in value_stats:
-                    value_stats[name] = []
-                value_stats[name].append(x)
-                return x
-        observerObj = Observer()
+        def observer(x, name):
+            if name not in value_stats:
+                value_stats[name] = []
+            value_stats[name].append(x)
+            return x
 
         m = torch.jit.script(fn)
         # Insert observers
-        # Create sub-module quantconfigobject dict
-        observer_dict = {'__main__': {'activation': observerObj}
-                         }
+        # Create module observer dict. Currently it has entry for
+        # top level module only for debug purpose
+        observer_dict = {'__main__': observer}
+
         torch._C._jit_pass_insert_observers(m, observer_dict)
         # Collect statistics
         m.forward(x1, y1)
 
         # Check what we collected
+        self.assertTrue('x' in value_stats and 'y' in value_stats)
         self.assertTrue('p' in value_stats and 'z' in value_stats)
         self.assertEqual(len(value_stats['p']), 1)
         self.assertEqual(len(value_stats['z']), 1)
@@ -1191,50 +1191,11 @@ graph(%x : Tensor,
 
         # Run one more time and check the updated statistics
         m.forward(x2, y2)
+        self.assertTrue('x' in value_stats and 'y' in value_stats)
         self.assertEqual(len(value_stats['p']), 2)
         self.assertEqual(len(value_stats['z']), 2)
         self.assertEqual(value_stats['p'][1], x2 + y2)
         self.assertEqual(value_stats['z'][1], x2 - y2)
-
-    def test_insert_param_observers(self):
-        x1 = torch.ones([1, 1, 1, 1])
-
-        class testModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super(testModule, self).__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1, 1)
-                self.conv1.weight.data.fill_(1.0)
-                self.conv1.bias.data.fill_(0.01)
-
-            @torch.jit.script_method
-            def forward(self, x):
-                x = self.conv1(x)
-                return x
-
-        trace = testModule()
-
-        # Custom observer function
-        value_stats = {}
-
-        class Observer:
-            def observer(self, x, name):
-                if name not in value_stats:
-                    value_stats[name] = []
-                value_stats.update({name : x})
-                return x
-        observerObj = Observer()
-
-        # Insert observers for parameters
-        observer_dict = {'__main__': {'param': observerObj}
-                         }
-
-        torch._C._jit_pass_insert_observers(trace, observer_dict)
-        # Collect statistics
-        trace.forward(x1)
-
-        # Check what we collected. Validates external input
-        self.assertTrue(trace.conv1.weight in list(value_stats.values()))
-        self.assertTrue(trace.conv1.bias in list(value_stats.values()))
 
     def test_insert_quantdequant_consecutive_qnodes_script(self):
         class testModule(torch.jit.ScriptModule):

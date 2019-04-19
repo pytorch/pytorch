@@ -23,14 +23,13 @@ TORCH_API void PropagateQuantInfo(std::shared_ptr<Graph>& graph);
  * a tensor.
  *
  * The distribution can then be used for computing qparams for quantization.
- * param method is the module method whose containing graph is instrumented.
- * param observerNodeDict contains mapping between node type and observer_node.
- * This Node represents a call to observer function. It
+ * \param method is the module method whose containing graph is instrumented.
+ * \param observer_node is a Node representing a call to observer function. It
  * will be cloned into all the places where we need to add instrumentation.
  */
 TORCH_API void InsertObserverNodes(
     script::Method* method,
-    std::unordered_map<std::string, Node*>& observerNodeDict);
+    Node* observer_node);
 
 /** \brief Inserts quant-dequant nodes.
  *

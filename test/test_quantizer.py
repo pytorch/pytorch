@@ -91,7 +91,7 @@ def getAllQParamDict(allqparam_dict, quantObj):
 
 
 r"""
-This is an example QuantConfigTemplate which will be used to collect
+This is an example QuantTemplate which will be used to collect
 stats across batches by running torch script/trace module, from the
 observer nodes inserted in the graph. These stats are used to compute
 Quantization Parameters. These will be passed to quantizer to be used
@@ -99,7 +99,7 @@ as arguments for quant ops in quantization pass.
 """
 
 
-class QuantConfigTemplate:
+class QuantTemplate:
     def __init__(self, tensorType, observerImpl=None, calcQParamImpl=None):
         self.value_stats = {}
         self.qparam_dict = {}
@@ -185,9 +185,9 @@ class QuantizerTestCase(TestCase):
         # Eager mode
 
         # Create QuantConfig object for eager mode
-        eagerQuantObj = QuantConfigTemplate(tensorType='activation',
-                                            observerImpl=activationObserver,
-                                            calcQParamImpl=calcQParamFunc)
+        eagerQuantObj = QuantTemplate(tensorType='activation',
+                                      observerImpl=activationObserver,
+                                      calcQParamImpl=calcQParamFunc)
         eagerM = TestM(quantObj=eagerQuantObj)
 
         # Run EagerMode Model and Collect stats
@@ -198,34 +198,28 @@ class QuantizerTestCase(TestCase):
         scriptM = TestScriptM()
 
         # Create QuantConfig object for script mode
-        activationQuantObj = QuantConfigTemplate(tensorType='activation',
-                                                 observerImpl=activationObserver,
-                                                 calcQParamImpl=calcQParamFunc)
-        weightQuantObj = QuantConfigTemplate(tensorType='param',
-                                             observerImpl=weightObserver,
-                                             calcQParamImpl=calcQParamFunc)
+        activationQuantObj = QuantTemplate(tensorType='activation',
+                                           observerImpl=activationObserver,
+                                           calcQParamImpl=calcQParamFunc)
 
         # This performs type analysis to identify tensors from other
         # types. This info needed for further quantizer passes
         torch._C._jit_pass_constant_propagation(scriptM.graph)
 
-        # Create sub-module quantconfigobject dict
-        qconfigobject_dict = {'__main__': {'activation': activationQuantObj,
-                                           'param': weightQuantObj}
-                              }
+        # Create sub-module observer dict. This will be extracted from
+        # module attributes
+        observer_dict = {'__main__': activationQuantObj.observer}
 
         # Insert observers
-        torch._C._jit_pass_insert_observers(scriptM, qconfigobject_dict)
+        torch._C._jit_pass_insert_observers(scriptM, observer_dict)
 
         # Run ScriptM Model and Collect statistics
         scriptM.forward(data)
         activationQuantObj.calcQParam()
-        weightQuantObj.calcQParam()
 
         # Compare results for eager and graph mode
         eagerDict = eagerQuantObj.getQParamDict()
         activationDict = activationQuantObj.getQParamDict()
-        weightDict = weightQuantObj.getQParamDict()
 
         self.assertTrue('z' in eagerDict and 'z' in activationDict)
         self.assertAlmostEqual(eagerDict["z"][0], activationDict["z"][0], places=15)

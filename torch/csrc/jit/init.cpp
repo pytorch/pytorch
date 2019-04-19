@@ -119,43 +119,35 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_insert_observers",
           [](std::shared_ptr<script::Module>& moduleObj,
-              py::dict& pyModuleObjDict) {
+              py::dict& pyObserverDict) {
             // Create a new node that would be used in the insert observer pass:
             // all observer nodes will be cloned from this one.
-            if (!pyModuleObjDict.size()) {
+            if (!pyObserverDict.size()) {
+              // If observer dict is empty, this is not treated as fatal error
+              // We skip inserting observers and return
               return;
             }
-            auto moduleObjDict = py::cast<std::unordered_map<std::string,
-              std::unordered_map<std::string,
-              py::object>>>(pyModuleObjDict);
+            auto observerDict = py::cast<std::unordered_map<std::string,
+              py::function>>(pyObserverDict);
 
-            // Lookup for the top level module quantObject
-            if (!moduleObjDict.count(moduleObj->name())) {
+            // Lookup for the top level module observer
+            // TODO Iterate over module hierarchy to extract the observer
+            // for each module.
+            if (!observerDict.count(moduleObj->name())) {
               return;
             }
-            auto& quantConfigObjDict = moduleObjDict[moduleObj->name()];
-            if (!quantConfigObjDict.size()) {
-              return;
-            }
+            auto pyObserverFunction = observerDict[moduleObj->name()];
             script::Method* method = moduleObj->find_method("forward");
             AT_ASSERT(method != nullptr);
 
             auto g = method->graph();
-            // Convert to observer dict with new (key value)
-            std::unordered_map<std::string, Node*> observerNodeDict;
-            for (auto& it : quantConfigObjDict) {
-              auto observer = py::getattr(it.second, "observer");
-              Node* new_node = g->createPythonOp(
-                  THPObjectPtr(observer.release().ptr()), "dd", {});
-              observerNodeDict.emplace(it.first, new_node);
-            }
-
-            InsertObserverNodes(method, observerNodeDict);
-            // We don't need these nodes anymore, don't forget to remove it.
-            for (auto& it : observerNodeDict) {
-              Node* node = it.second;
-              node->destroy();
-            }
+            // Create a new node that would be used in the insert observer pass:
+           // all observer nodes will be cloned from this one.
+            Node* new_node = g->createPythonOp(
+               THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
+            InsertObserverNodes(method, new_node);
+            // We don't need this node anymore, don't forget to remove it.
+            new_node->destroy();
           })
       .def(
           "_jit_pass_insert_quantdequant",

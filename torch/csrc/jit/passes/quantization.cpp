@@ -146,8 +146,7 @@ static bool outputsNeedToBeObserved(Node* n) {
   return n->kind() != prim::Constant && n->kind() != prim::PythonOp;
 }
 
-void InsertObserverNodes(script::Method* method,
-  std::unordered_map<std::string, Node*>& observerNodeDict) {
+void InsertObserverNodes(script::Method* method, Node* observer_node) {
   AT_ASSERT(method != nullptr);
   auto graph = method->graph();
   AT_ASSERT(graph != nullptr);
@@ -157,31 +156,16 @@ void InsertObserverNodes(script::Method* method,
   // For traversing all blocks in the graph including subblocks.
   std::stack<Block*> blocks_to_visit;
 
-  // Observer nodes
-  Node* activation_observer = observerNodeDict.count("activation")
-    ? observerNodeDict["activation"] : nullptr;
-  Node* param_observer = observerNodeDict.count("param")
-    ? observerNodeDict["param"] : nullptr;
+  // Add observer for external input nodes excluding parameters
+  // These are treated as activation as they vary across batches
+  // and need to be observed.
 
-  // Add observer for prim::Param nodes
-  auto inputVals = graph->inputs();
-  int inputlength = inputVals.size();
-  // Module params get appended after external inputs
-  int param_start_index = inputlength - method->initial_ivalues().size();
-  AT_ASSERT(param_start_index >= 0);
   // Insert point is the beginning of graph node
   Node* insert_node = *graph->nodes().begin();
-  for (auto idx = 0; idx < inputlength; ++idx) {
-    // This distinguish the model param from external data
-    // to insert correct observer
-    Node* observer = (idx < param_start_index) ?
-      activation_observer : param_observer;
-    if (observer == nullptr) {
-      continue;
-    }
-    auto& v = inputVals[idx];
+  for (auto idx = 0; idx < method->num_inputs(); ++idx) {
+    auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      addObserverFor(v, observer,
+      addObserverFor(v, observer_node,
         std::make_pair(insert_node, false));
     }
   }
@@ -190,7 +174,6 @@ void InsertObserverNodes(script::Method* method,
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
-
     for (Node* n : b->nodes()) {
       // Skip nodes that we don't need to observe, e.g. 'prim::Constant'.
       if (!outputsNeedToBeObserved(n)) {
@@ -202,10 +185,6 @@ void InsertObserverNodes(script::Method* method,
         blocks_to_visit.push(subblock);
       }
 
-      // Activations not observed
-      if (!activation_observer) {
-        continue;
-      }
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
@@ -217,7 +196,7 @@ void InsertObserverNodes(script::Method* method,
   // Actually add observer nodes for activations.
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      addObserverFor(v, activation_observer,
+      addObserverFor(v, observer_node,
         std::make_pair(v->node(), true));
     }
   }
