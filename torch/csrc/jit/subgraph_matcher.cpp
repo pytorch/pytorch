@@ -10,7 +10,7 @@ namespace {
  */
 class SubgraphMatcher {
  public:
-  SubgraphMatcher(const Graph& pattern) : pattern_(pattern) {}
+  explicit SubgraphMatcher(const Graph& pattern) : pattern_(pattern) {}
 
   /**
    * \brief Compare matchGraph with the part of the graph denoted by a node \p
