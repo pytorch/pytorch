@@ -19,7 +19,7 @@ example:
   wget https://download.pytorch.org/libtorch/nightly/cpu/libtorch-shared-with-deps-latest.zip
   unzip libtorch-shared-with-deps-latest.zip
 
-Note that the above link has CPU-only libtorch. If you would like to download a GPU-enabled 
+Note that the above link has CPU-only libtorch. If you would like to download a GPU-enabled
 libtorch, find the right link in the link selector on https://pytorch.org
 
 Next, we can write a minimal CMake build configuration to develop a small
@@ -73,6 +73,7 @@ We can now run the following commands to build the application from within the
   mkdir build
   cd build
   cmake -DCMAKE_PREFIX_PATH=/absolute/path/to/libtorch ..
+  cd ..
   make
 
 where ``/absolute/path/to/libtorch`` should be the absolute (!) path to the unzipped LibTorch
@@ -124,7 +125,7 @@ should now merrily print the tensor (exact output subject to randomness):
   0.2063  0.6593  0.0866
   0.0796  0.5841  0.1569
   [ Variable[CPUFloatType]{2,3} ]
-  
+
 .. tip::
   On Windows, debug and release builds are not ABI-compatible. If you plan to
   build your project in debug mode, we recommend
