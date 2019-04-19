@@ -3027,6 +3027,19 @@ class TestScript(JitTestCase):
             return sumz
         self.checkScript(test_sizes, (torch.rand(5, 4, 3, 2, 1),))
         self.checkScript(test_sizes, (torch.rand(777),))
+        self.checkScript(test_sizes, (torch.rand(0),))
+
+    def test_for_in_tensors_fail_scalar(self):
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+                @torch.jit.script
+                def test_sizes(x):
+                    # type: (float) -> int
+                    sumz = 0
+                    for s in x:
+                        sumz += 1
+                    return sumz
+
+                test_sizes(0.0)
 
     def test_for_in_tensors_nested(self):
         def test_sizes(x):
