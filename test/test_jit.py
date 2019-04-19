@@ -3292,6 +3292,27 @@ a")
         self.checkScript(func, (a, b), optimize=True)
         self.checkScript(func2, (a, b, c, d), optimize=True)
 
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_pow_scalar_backward_cuda(self):
+        # see that scalar exponent works with cuda base (#19253)
+
+        for dtype in [torch.float, torch.double]:
+            @torch.jit.script
+            def func(a, b):
+                # type: (Tensor, float) -> Tensor
+                return (a * 2) ** b
+
+            a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
+            func(a, 1).backward()
+
+            @torch.jit.script
+            def func(a, b):
+                # type: (float, Tensor) -> Tensor
+                return a ** (b * 2 + 1)
+
+            a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
+            func(2, a).backward()
+
     def test_triple(self):
         def func(x):
             return 3. * x
