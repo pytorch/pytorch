@@ -400,7 +400,7 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
         return_counts (bool): Whether to also return the counts for each unique
-            element. Currently only supported when `dim` is not None.
+            element.
         dim (int): the dimension to apply unique. If ``None``, the unique of the
             flattened input is returned. default: ``None``
 
@@ -451,13 +451,11 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
             return_counts=return_counts,
         )
     else:
-        if return_counts:
-            raise NotImplementedError(
-                "torch.unique currently does not support return_counts with dim not None")
-        output, inverse_indices = torch._unique(
+        output, inverse_indices, counts = torch._unique2(
             input,
             sorted=sorted,
-            return_inverse=return_inverse
+            return_inverse=return_inverse,
+            return_counts=return_counts,
         )
     if return_inverse and return_counts:
         return output, inverse_indices, counts

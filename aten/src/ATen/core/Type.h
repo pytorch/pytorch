@@ -164,12 +164,6 @@ struct CAFFE2_API Type {
     return backendToDeviceType(backend());
   }
 
-  virtual Tensor copy(
-      const Tensor& src,
-      bool non_blocking = false,
-      c10::optional<Device> to_device = {}) const = 0;
-  virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const = 0;
-
   virtual void backward(
       Tensor& self,
       c10::optional<Tensor> gradient,
@@ -251,6 +245,7 @@ struct CAFFE2_API Type {
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;
   virtual Tensor & clamp_min_(Tensor & self, Scalar min) const = 0;
   virtual Tensor contiguous(const Tensor & self) const = 0;
+  virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
   virtual Tensor cos(const Tensor & self) const = 0;
   virtual Tensor & cos_(Tensor & self) const = 0;
   virtual Tensor cosh(const Tensor & self) const = 0;
@@ -461,6 +456,7 @@ struct CAFFE2_API Type {
   virtual Tensor dequantize(const Tensor & self) const = 0;
   virtual Scalar q_scale(const Tensor & self) const = 0;
   virtual Scalar q_zero_point(const Tensor & self) const = 0;
+  virtual Tensor int_repr(const Tensor & self) const = 0;
   virtual Tensor to(const Tensor & self, const TensorOptions & options, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
