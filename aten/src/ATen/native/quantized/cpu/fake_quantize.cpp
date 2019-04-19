@@ -1,8 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
 
-/* Fake quantization ops will be placed here. */
-
+/* FakeQuantize Op for PerTensorAffine quantization scheme */
 namespace at { namespace native {
 namespace {
 /* Fake-quantizes the 'inputs' tensor.
@@ -24,8 +23,7 @@ Notes:
   - quantization range [0, 2^bits - 1]
 */
 
-/********* Begin FakeQuant ops (forward and backward). *********/
-class FakeQuantizeOp_forward : public c10::OperatorKernel {
+class FakeQuantizePerTensorAffineOp_forward : public c10::OperatorKernel {
  public:
   at::Tensor operator()(
       at::Tensor X,
@@ -38,6 +36,9 @@ class FakeQuantizeOp_forward : public c10::OperatorKernel {
     // Sanity checks.
     if (num_bits > 32 || num_bits < 1) {
       throw std::invalid_argument("`num_bits` should be in the [1, 32] range.");
+    }
+    if (zero_point < 0) {
+      throw std::invalid_argument("`zero_point` must be a positive integer.");
     }
     if (quant_delay < 0) {
       throw std::invalid_argument("`quant_delay` must be a positive integer.");
@@ -83,7 +84,7 @@ Notes:
     beginning of the training.
   - quantization range [0, 2^bits - 1]
 */
-class FakeQuantizeOp_backward : public c10::OperatorKernel {
+class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
  public:
   at::Tensor operator()(
       at::Tensor X,
@@ -96,6 +97,9 @@ class FakeQuantizeOp_backward : public c10::OperatorKernel {
     // Sanity checks.
     if (num_bits > 32 || num_bits < 1) {
       throw std::invalid_argument("`num_bits` should be in the [1, 32] range.");
+    }
+    if (zero_point < 0) {
+      throw std::invalid_argument("`zero_point` must be a positive integer.");
     }
     if (quant_delay < 0) {
       throw std::invalid_argument("`quant_delay` must be a positive integer.");
@@ -132,7 +136,7 @@ class FakeQuantizeOp_backward : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators()
 .op(c10::FunctionSchema(
-      "quantized::fake_quantize_forward",
+      "quantized::fake_quantize_per_tensor_affine_forward",
       "",
       {{"X", TensorType::get()},
        {"scale", FloatType::get()},
@@ -141,10 +145,10 @@ static auto registry = c10::RegisterOperators()
        {"quant_delay", IntType::get(), /*N=*/c10::nullopt, /*default_value=*/0},
        {"iter", IntType::get(), /*N=*/c10::nullopt, /*default_value=*/0}},
       {{"Y", TensorType::get()}}),
-  c10::kernel<FakeQuantizeOp_forward>(),
+  c10::kernel<FakeQuantizePerTensorAffineOp_forward>(),
   c10::dispatchKey(CPUTensorId()))
 .op(c10::FunctionSchema(
-      "quantized::fake_quantize_backward",
+      "quantized::fake_quantize_per_tensor_affine_backward",
       "",
       {{"X", TensorType::get()},
        {"dY", TensorType::get()},
@@ -154,9 +158,8 @@ static auto registry = c10::RegisterOperators()
        {"quant_delay", IntType::get(), /*N=*/c10::nullopt, /*default_value=*/0},
        {"iter", IntType::get(), /*N=*/c10::nullopt, /*default_value=*/0}},
       {{"Y", TensorType::get()}}),
-  c10::kernel<FakeQuantizeOp_backward>(),
+  c10::kernel<FakeQuantizePerTensorAffineOp_backward>(),
   c10::dispatchKey(CPUTensorId()));
-/********* End FakeQuant ops (forward and backward). *********/
 
 }  // namespace
 }}  // namespace at::native
