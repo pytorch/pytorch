@@ -676,16 +676,12 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
             return _unimplemented(name, "dilation")
         if stride is None:
             stride = kernel_size
-        padding = tuple(tule_fn(padding))
+        padding = tuple(tuple_fn(padding))
         if ceil_mode:
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
             padding = padding + tuple(numpy.add(padding_ceil, padding))
         else:
             padding = padding * 2
-        r, indices = g.op("MaxPool", input, outputs=2,
-                          kernel_shape_i=tuple_fn(kernel_size),
-                          pads_i=padding,
-                          strides_i=tuple_fn(stride))
         # easy but hacky way to get flattened indices values
         # to be used to convert the indices values to non-flattened.
         # In ONNX the indices are computed as a flatten 1-D tensor,
@@ -700,6 +696,10 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
         # For more information :
         # https://github.com/pytorch/pytorch/pull/16455#issuecomment-460776407
         if return_indices:
+            r, indices = g.op("MaxPool", input, outputs=2,
+                              kernel_shape_i=tuple_fn(kernel_size),
+                              pads_i=padding,
+                              strides_i=tuple_fn(stride))
             _, flattened_indices = g.op("MaxPool", input, outputs=2,
                                         kernel_shape_i=[1 for _ in range(ndims)],
                                         strides_i=[1 for _ in range(ndims)])
@@ -708,6 +708,10 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
             indices = sub(g, indices, s)
             return r, indices
         else:
+            r = g.op("MaxPool", input, outputs=2,
+                     kernel_shape_i=tuple_fn(kernel_size),
+                     pads_i=padding,
+                     strides_i=tuple_fn(stride))
             return r
 
     return symbolic_fn
