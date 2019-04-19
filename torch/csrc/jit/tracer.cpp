@@ -201,7 +201,7 @@ Value* getNestedOutputTrace(
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
-std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
+std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs) {
   if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
   }
@@ -234,17 +234,34 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
         elems[i] = add_input(elems[i], elem_types[i], elem_values[i]);
       }
       return Tuple::create(std::move(elems));
+    } else if (auto dict_type = type->cast<DictType>()) {
+      auto elem_pairs = input.toGenericDict()->elements();
+      auto unpack_to_list = state->graph->insert(aten::values, {value});
+      auto list_unpack = state->graph->createListUnpack(unpack_to_list, elem_pairs.size());
+      auto unpack_node = state->graph->insertNode(list_unpack);
+      auto elem_values = unpack_node->outputs();
+
+      AT_ASSERT(elem_pairs.size() == elem_values.size());
+
+      size_t i = 0;
+      for (const auto &pair : elem_pairs) {
+        elem_pairs[pair.first] = add_input(pair.second, dict_type->getValueType(), elem_values[i++]);
+      }
+
+      return c10::ivalue::GenericDict::create(std::move(elem_pairs));
     } else {
       AT_ERROR(
-          "Only tensors or tuples of tensors can be inputs to traced functions. Got ",
-          type);
+          "Only tensors or (possibly nested) dict or tuples of tensors can be "
+          "inputs to traced functions. Got ", type);
     }
   };
-  for (IValue& input : inputs) {
+  size_t i = 0;
+  auto input_types = inputs.types()->elements();
+  for (IValue& input : inputs.stack()) {
     input = add_input(
-        input, incompleteInferTypeFrom(input), state->graph->addInput());
+        input, input_types[i++], state->graph->addInput());
   }
-  return std::make_pair(state, inputs);
+  return std::make_pair(state, inputs.stack());
 }
 
 // Exit a trace, treating 'outputs' as the outputs of the trace.  These

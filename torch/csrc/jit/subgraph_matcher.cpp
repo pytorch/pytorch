@@ -43,7 +43,7 @@ class SubgraphMatcher {
 
   const Graph& pattern_;
   const Graph& graph_;
-  const Node* anchor_;
+  const Node* anchor_ = nullptr;
 };
 
 /**

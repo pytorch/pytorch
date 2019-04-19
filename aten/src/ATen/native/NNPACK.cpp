@@ -213,10 +213,10 @@ Tensor _nnpack_spatial_convolution(
   auto algorithm = nnp_convolution_algorithm_auto;
 
   // All Tensors must be float Tensors
-  if (input.device().type() != kCPU || input.scalar_type() != kFloat ||
-      weight.device().type() != kCPU || weight.scalar_type() != kFloat ||
-      output.device().type() != kCPU || output.scalar_type() != kFloat ||
-      (bias.defined() && (bias.device().type() != kCPU || bias.scalar_type() != kFloat))) {
+  if (input.dispatch_type().ID() != at::TypeID::CPUFloat ||
+      weight.dispatch_type().ID() != at::TypeID::CPUFloat ||
+      output.dispatch_type().ID() != at::TypeID::CPUFloat ||
+      (bias.defined() && bias.dispatch_type().ID() != at::TypeID::CPUFloat)) {
     throw std::runtime_error(
         "Mismatched Tensor types in NNPack convolutionOutput");
   }
