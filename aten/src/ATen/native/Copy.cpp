@@ -14,8 +14,14 @@ namespace {
 template <typename self_T>
 void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
   AT_CHECK(self.numel() == src.numel(), "sizes do not match");
-  auto iter = at::TensorIterator::unary_op(
-      self, src, /* resize_outputs = */ false, true);
+
+  auto builder = at::TensorIterator::Builder();
+  builder.add_output(self);
+  builder.add_input(src);
+  builder.dont_resize_outputs();
+  builder.dont_compute_common_dtype();
+  auto iter = builder.build();
+
   AT_DISPATCH_ALL_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::Bool,
@@ -130,7 +136,11 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
     }
   }
 
-  auto iter = TensorIterator::unary_op(self, src, /* resize_outputs = */ false);
+  auto builder = TensorIterator::Builder();
+  builder.add_output(self);
+  builder.add_input(src);
+  builder.dont_resize_outputs();
+  auto iter = builder.build();
 
   if (self.scalar_type() == at::ScalarType::Half) {
     unary_kernel(*iter, [=](at::Half a) -> at::Half { return a; });
