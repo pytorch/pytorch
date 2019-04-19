@@ -43,6 +43,12 @@ namespace detail {
     }
   };
   template<class T>
+  struct ivalue_to_arg_type<std::vector<T>> {
+    static ArrayRef<T> call(const IValue& v) {
+      static_assert(!std::is_same<std::vector<T>, std::vector<T>>::value, "You tried to register a kernel that has a std::vector<T> argument. Please use c10::ArrayRef<T> instead.");
+    }
+  };
+  template<class T>
   struct ivalue_to_arg_type<optional<T>> {
     static optional<T> call(const IValue& v) {
       if (v.isNone()) {
