@@ -22,7 +22,7 @@ class Unpickler(pickle.Unpickler):
         elif name == 'IntList':
             return IntList
 
-        return super(Unpickler, self).find_class(module, name)
+        return pickle.Unpickler.find_class(self, module, name)
 
 
 def load(*args):
