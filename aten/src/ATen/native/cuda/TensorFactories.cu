@@ -427,7 +427,7 @@ __global__ void generate_samples(
   curandStateMtgp32 *state
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-  int64_t s = curand(&state[blockIdx.x]) % (thread_id + k + 1);
+  int64_t s = curand(state) % (thread_id + k + 1);
   if (thread_id < n){
     samples[thread_id] = s;
   }
@@ -441,7 +441,7 @@ __global__ void generate_keys(
   curandStateMtgp32 *state
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-  float u = curand_uniform(&state[blockIdx.x]);
+  float u = curand_uniform(state);
   if(thread_id < n){
     keys[thread_id] = weights[thread_id] > 0? (scalar_t) __powf(u, (float) 1/weights[thread_id]):-1;
   }
@@ -456,7 +456,7 @@ __global__ void sampling_with_replacement_kernel(
   curandStateMtgp32 *state
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-  scalar_t u = curand_uniform(&state[blockIdx.x]);
+  scalar_t u = curand_uniform(state);
   if(thread_id < k){
     auto ptr = thrust::lower_bound(thrust::device, cdf, cdf + n, u);
     samples[thread_id] = thrust::distance(cdf, ptr);
