@@ -1430,7 +1430,7 @@ struct to_ir {
     auto& range = stmt.range();
 
     auto sizes_tuple = emitBuiltinCall(
-        itrs[0].range(),
+        range,
         *graph,
         aten::size,
         c10::nullopt,
@@ -1439,9 +1439,9 @@ struct to_ir {
         /*required=*/true);
 
     auto outermost_dim_index =
-        graph->insertConstant(0, nullptr, itrs[0].range());
+        graph->insertConstant(0, nullptr, range);
     auto max_trip_count_val = emitBuiltinCall(
-        itrs[0].range(),
+        range,
         *graph,
         aten::select,
         c10::nullopt,
@@ -1513,8 +1513,8 @@ struct to_ir {
     }
 
     // for-in tensors
-    auto value = siv->asValue(itrs[0].range(), method);
-    if (siv && value->type()->isSubclass(TypeKind::TensorType)) {
+    if (siv && siv->getValue()->type()->isSubclass(TypeKind::TensorType)) {
+      auto value = siv->asValue(stmt.range(), method);
       emitForInTensorLoop(stmt, value);
       return;
     }
