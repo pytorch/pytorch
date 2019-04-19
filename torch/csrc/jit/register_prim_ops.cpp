@@ -1825,7 +1825,8 @@ RegisterOperators reg2({
               string.size() == 1,
               "String for ord() must be 1 character, found",
               string.size());
-          push(stack, int64_t(string.at(0)));
+          uint8_t ord = string.at(0);
+          push(stack, int64_t(ord));
           return 0;
         }),
 #define CREATE_COPY_OP(other_type, c_type)                                 \
