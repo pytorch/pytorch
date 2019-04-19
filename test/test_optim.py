@@ -1062,7 +1062,7 @@ class TestLRScheduler(TestCase):
     def test_CosineAnnealingWarmRestarts_lr1(self):
         iters = 100
         eta_min = 1e-10
-        T_mults = [1, 2, 2.5]
+        T_mults = [1, 2, 4]
         for T_mult in T_mults:
             T_i = 10
             T_cur = 0
@@ -1080,7 +1080,7 @@ class TestLRScheduler(TestCase):
     def test_CosineAnnealingWarmRestarts_lr2(self):
         iters = 30
         eta_min = 1e-10
-        T_mults = [1, 2, 1.5]
+        T_mults = [1, 2, 4]
         for T_mult in T_mults:
             T_i = 10
             T_cur = 0
@@ -1106,7 +1106,7 @@ class TestLRScheduler(TestCase):
                             [10, 10, 10, 10, 10, 20, 40, 40, 40, 80, 80, 10],
                             [10, 10, 10, 10, 10, 30, 30, 30, 30, 30, 30, 90]]
         eta_min = 1e-10
-        T_mults = [1, 2, 3.5]
+        T_mults = [1, 2, 3]
         for epochs, T_mult, T_curs, T_is in zip(epochs_for_T_mults, T_mults, T_curs_for_T_mults, T_is_for_T_mults):
             targets = [[0.05], [0.5]]
             scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=T_mult, eta_min=eta_min)

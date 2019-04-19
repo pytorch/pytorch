@@ -659,12 +659,11 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
     of epochs between two warm restarts in SGDR:
 
     .. math::
-
         \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})(1 +
         \cos(\frac{T_{cur}}{T_{i}}\pi))
 
-    When :math:`\T_{cur}=T_{i}`, set :math:`\eta_t = \eta_{min}`.
-    When :math:`\T_{cur}=0`(after restart), set :math:`\eta_t=\eta_{max}`.
+    When :math:`T_{cur}=T_{i}`, set :math:`\eta_t = \eta_{min}`.
+    When :math:`T_{cur}=0`(after restart), set :math:`\eta_t=\eta_{max}`.
 
     It has been proposed in
     `SGDR: Stochastic Gradient Descent with Warm Restarts`_.
@@ -672,8 +671,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         T_0 (int): Number of iterations for the first restart.
-        T_mult (int, optional): A factor increases :math:`\T_{i}` after a restart.
-            If T_mult is float, T_mult will be converted to int. Default: 1.
+        T_mult (int, optional): A factor increases :math:`T_{i}` after a restart. Default: 1.
         eta_min (float, optional): Minimum learning rate. Default: 0.
         last_epoch (int, optional): The index of last epoch. Default: -1.
 
@@ -682,12 +680,10 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
     """
 
     def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1):
-        T_0 = int(T_0)
-        T_mult = int(T_mult)
-        if T_0 <= 0:
-            raise ValueError("Expected positive T_0, but got {}".format(T_0))
-        if T_mult < 1:
-            raise ValueError("Expected T_mul >= 1, but got {}".format(T_mul))
+        if T_0 <= 0 or not isinstance(T_0, int):
+            raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
+        if T_mult < 1 or not isinstance(T_mult, int):
+            raise ValueError("Expected integer T_mul >= 1, but got {}".format(T_mul))
         self.T_0 = T_0
         self.T_i = T_0
         self.T_mult = T_mult
