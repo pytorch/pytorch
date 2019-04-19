@@ -241,9 +241,9 @@ static FunctionSchema sliceFirst(const FunctionSchema& schema) {
 }
 
 Method::Method(Module* owner, Function* first_class_function)
-  : owner_(owner),
-    schema_(sliceFirst(first_class_function->getSchema())) {
-    std::tie(function_, initial_ivalues_) = owner->lower_first_class_method(first_class_function);
+    : owner_(owner), schema_(sliceFirst(first_class_function->getSchema())) {
+  std::tie(function_, initial_ivalues_) =
+      owner->lower_first_class_method(first_class_function);
 }
 
 void Module::define(const std::string& src, const Resolver& resolver) {
@@ -251,6 +251,82 @@ void Module::define(const std::string& src, const Resolver& resolver) {
       src,
       resolver ? resolver : nativeResolver,
       simpleSelf(module_object()->type()));
+}
+
+void Module::copy_into(
+    const ModuleLookup& module_lookup,
+    // translate current module singleton type to new module
+    // singleton type.
+    std::unordered_map<TypePtr, TypePtr>& type_remap,
+    std::vector<std::string> names) const {
+  auto curr = module_lookup(names);
+  type_remap[module_object()->type()] = curr->module_object()->type();
+  for (auto& param : get_parameters()) {
+    curr->register_parameter(
+        param.name(),
+        param.value().toTensor(),
+        /*is_buffer=*/false);
+  }
+  for (auto& attr : get_attributes()) {
+    curr->register_attribute(attr.name(), attr.type(), attr.value());
+  }
+
+  for (auto& mod : get_modules()) {
+    names.push_back(mod->name());
+    // Submodules must be translated first, otherwise parameter_remap entries
+    // will not be filled in for methods of this module.
+    mod->copy_into(module_lookup, type_remap, names);
+    names.pop_back();
+  }
+
+  for (auto& fn : class_compilation_unit().get_functions()) {
+    curr->clone_method(*this, fn->name(), type_remap);
+  }
+}
+
+void Module::clone_method(
+    const Module& orig,
+    const std::string& name,
+    const std::unordered_map<TypePtr, TypePtr>& type_remap) {
+  // type remapping - when we copy method implementations from one module
+  // singleton to another, we need to update the types of the self arguments
+  // to match the new module.
+  // XXX - this only handles modules that occur as variables, not modules
+  // that appear in aggregate types. Currently this works fine because
+  // we restrict how modules can be used during the lowering step. Eventually,
+  // we will need to decide what it means for us to 'copy' a module.
+  // For instance, we can copy just the state (parameters, attributes),
+  // but share the code. Or we can copy the code. If we choose to copy the
+  // code, what should we do about aggregate types that contain a module?
+  auto type_remap_fn = [&](TypePtr in) {
+    auto it = type_remap.find(in);
+    if (it == type_remap.end())
+      return in;
+    return it->second;
+  };
+  const Function& fn = orig.class_compilation_unit().get_function(name);
+  auto graph = fn.graph()->copy();
+  graph->remapTypes(type_remap_fn);
+  auto schema = fn.getSchema().cloneWithRemappedTypes(type_remap_fn);
+  auto copied = class_compilation_unit().create_function(fn.name(), graph);
+  copied->setSchema(std::move(schema));
+}
+
+void Module::clone_method(const Module& orig, const std::string& name) {
+  std::unordered_map<TypePtr, TypePtr> type_remap;
+  std::vector<std::pair<const Module*, const Module*>> to_scan = {
+      {&orig, this}};
+  while (!to_scan.empty()) {
+    auto entry = to_scan.back();
+    to_scan.pop_back();
+    type_remap[entry.first->module_object()->type()] =
+        entry.second->module_object()->type();
+    for (const auto& sub : entry.first->get_modules()) {
+      to_scan.emplace_back(
+          sub.get(), entry.second->get_module(sub->name()).get());
+    }
+  }
+  return clone_method(orig, name, type_remap);
 }
 
 } // namespace script

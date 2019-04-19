@@ -311,8 +311,8 @@ struct TORCH_API Module {
     if (Function* fn = class_compilation_unit().find_function(name).get()) {
       // lock because technically this is marked const,
       // but we have to update the internal Method cache.
-      // This can be removed when class_compilation_unit() is the source of truth for
-      // methods.
+      // This can be removed when class_compilation_unit() is the source of
+      // truth for methods.
       std::lock_guard<std::recursive_mutex> guard(create_method_guard_);
       Module* mutable_this = const_cast<Module*>(this);
       std::unique_ptr<Method> m(new Method(mutable_this, fn));
@@ -405,55 +405,18 @@ struct TORCH_API Module {
       const ExtraFilesMap& extra_files = ExtraFilesMap());
 
   void copy_into(
-      ModuleLookup module_lookup,
+      const ModuleLookup& module_lookup,
       // translate current module singleton type to new module
       // singleton type.
       std::unordered_map<TypePtr, TypePtr>& type_remap,
-      std::vector<std::string> names = {}) const {
-    auto curr = module_lookup(names);
-    type_remap[module_object()->type()] = curr->module_object()->type();
-    for (auto& param : get_parameters()) {
-      curr->register_parameter(
-          param.name(),
-          param.value().toTensor(),
-          /*is_buffer=*/false);
-    }
-    for (auto& attr : get_attributes()) {
-      curr->register_attribute(attr.name(), attr.type(), attr.value());
-    }
+      std::vector<std::string> names = {}) const;
 
-    for (auto& mod : get_modules()) {
-      names.push_back(mod->name());
-      // Submodules must be translated first, otherwise parameter_remap entries
-      // will not be filled in for methods of this module.
-      mod->copy_into(module_lookup, type_remap, names);
-      names.pop_back();
-    }
+  void clone_method(
+      const Module& orig,
+      const std::string& name,
+      const std::unordered_map<TypePtr, TypePtr>& type_remap);
 
-    for (auto& fn : class_compilation_unit().get_functions()) {
-      // type remapping - when we copy method implementations from one module
-      // singleton to another, we need to update the types of the self arguments
-      // to match the new module.
-      // XXX - this only handles modules that occur as variables, not modules
-      // that appear in aggregate types. Currently this works fine because
-      // we restrict how modules can be used during the lowering step. Eventually,
-      // we will need to decide what it means for us to 'copy' a module.
-      // For instance, we can copy just the state (parameters, attributes),
-      // but share the code. Or we can copy the code. If we choose to copy the
-      // code, what should we do about aggregate types that contain a module?
-      auto type_remap_fn = [&](TypePtr in) {
-        auto it = type_remap.find(in);
-        if (it == type_remap.end())
-          return in;
-        return it->second;
-      };
-      auto graph = fn->graph()->copy();
-      graph->remapTypes(type_remap_fn);
-      auto schema = fn->getSchema().cloneWithRemappedTypes(type_remap_fn);
-      auto copied = curr->class_compilation_unit().create_function(fn->name(), graph);
-      copied->setSchema(std::move(schema));
-    }
-  }
+  void clone_method(const Module& orig, const std::string& name);
 
   enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
 
@@ -484,8 +447,8 @@ struct TORCH_API Module {
   void define(const std::string& src, const Resolver& resolver = nullptr);
 
  private:
-
-  std::pair<std::shared_ptr<Function>, std::vector<Slot>> lower_first_class_method(Function* fn);
+  std::pair<std::shared_ptr<Function>, std::vector<Slot>>
+  lower_first_class_method(Function* fn);
 
   void to_impl(
       const c10::optional<at::Device>& device,

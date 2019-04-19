@@ -908,11 +908,7 @@ void initJitScriptBindings(PyObject* module) {
             // this was ensured in python before calling this function
             Stack inputs = toStack(input_tuple);
             auto graph = tracer::createGraphByTracing(
-                func,
-                inputs,
-                var_lookup_fn,
-                force_outplace,
-                self);
+                func, inputs, var_lookup_fn, force_outplace, self);
             self->module_object()->type()->compilation_unit().create_function(
                 name, graph);
             didFinishEmitModule(self);
@@ -939,27 +935,13 @@ void initJitScriptBindings(PyObject* module) {
       .def("apply", &Module::apply)
       .def("_copy_into", &Module::copy_into)
       .def(
-          "_copy_method",
+          "clone_method",
           [](std::shared_ptr<Module> m,
-             std::string name,
-             std::vector<std::tuple<std::shared_ptr<Module>, std::string>>
-                 params,
-             std::shared_ptr<Module> orig) {
-            std::vector<Slot> member_inputs;
-            for (auto& p : params) {
-              Slot* np = std::get<0>(p)->find_parameter(std::get<1>(p));
-              if (np == nullptr) {
-                np = std::get<0>(p)->find_buffer(std::get<1>(p));
-              }
-              AT_ASSERT(np != nullptr);
-              member_inputs.push_back(*np);
-            }
+             std::shared_ptr<Module> orig,
+             const std::string& name) { m->clone_method(*orig, name); });
 
-            Method* orig_method = orig->find_method(name);
-            AT_ERROR("NYI");
-          });
-
-  py::class_<CompilationUnit, std::shared_ptr<CompilationUnit>>(m, "CompilationUnit")
+  py::class_<CompilationUnit, std::shared_ptr<CompilationUnit>>(
+      m, "CompilationUnit")
       .def(py::init<>())
       .def("find_function", &CompilationUnit::find_function)
       .def("set_optimized", &CompilationUnit::set_optimized)
@@ -1000,9 +982,9 @@ void initJitScriptBindings(PyObject* module) {
             PythonPrint(ss, self, tensors, classes, false);
             return ss.str();
           })
-      .def("get_debug_state", [](Function& self) {
-        return self.get_executor().getDebugState();
-      })
+      .def(
+          "get_debug_state",
+          [](Function& self) { return self.get_executor().getDebugState(); })
       .def_property_readonly("name", &Function::name);
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
@@ -1035,9 +1017,7 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_jit_script_compile",
-      [](const Def& def,
-         ResolutionCallback rcb,
-         FunctionDefaults defaults) {
+      [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
         CompilationUnit cu;
         cu.define({def}, {pythonResolver(rcb)}, nullptr);
         std::shared_ptr<Function> defined = cu.get_functions().at(0);
@@ -1046,23 +1026,21 @@ void initJitScriptBindings(PyObject* module) {
         didFinishEmitFunction(defined);
         return defined;
       });
-    m.def("_create_function_from_trace",
-    [](std::string name,
-       py::function func,
-       py::tuple input_tuple,
-       py::function var_lookup_fn,
-       bool force_outplace) {
-      Stack inputs = toStack(input_tuple);
-      auto graph = tracer::createGraphByTracing(
-          func,
-          inputs,
-          var_lookup_fn,
-          force_outplace);
-      CompilationUnit cu;
-      auto result = cu.create_function(std::move(name), std::move(graph));
-      didFinishEmitFunction(result);
-      return result;
-    });
+  m.def(
+      "_create_function_from_trace",
+      [](std::string name,
+         py::function func,
+         py::tuple input_tuple,
+         py::function var_lookup_fn,
+         bool force_outplace) {
+        Stack inputs = toStack(input_tuple);
+        auto graph = tracer::createGraphByTracing(
+            func, inputs, var_lookup_fn, force_outplace);
+        CompilationUnit cu;
+        auto result = cu.create_function(std::move(name), std::move(graph));
+        didFinishEmitFunction(result);
+        return result;
+      });
 
   m.def(
       "_jit_script_class_compile",
@@ -1131,7 +1109,7 @@ void initJitScriptBindings(PyObject* module) {
     std::vector<ClassTypePtr> classes;
     if (auto self = as_module(obj)) {
       PythonPrint(ss, *self, constants, classes, true);
-    } else if (auto self = as_function(obj)){
+    } else if (auto self = as_function(obj)) {
       PythonPrint(ss, *self, constants, classes, true);
     } else {
       auto& m = py::cast<Method&>(obj);
@@ -1145,11 +1123,9 @@ void initJitScriptBindings(PyObject* module) {
       "Retrieve the optimized graph that was run the last time the graph executor ran on this thread");
   m.def(
       "_create_function_from_graph",
-      [](const std::string& name,
-         std::shared_ptr<Graph> graph) {
+      [](const std::string& name, std::shared_ptr<Graph> graph) {
         return CompilationUnit().create_function(name, graph);
       });
-
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
