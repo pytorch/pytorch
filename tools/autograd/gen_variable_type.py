@@ -478,18 +478,16 @@ def emit_body(declaration):
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)
 
-    # These exclude things like BoolTensor, int64_t, and Scalar
     def is_differentiable(arg):
         if 'TensorOptions' in arg['type']:
             return False
         if 'Tensor' not in arg['type']:
             return False
         if arg['dynamic_type'] in {'IndexTensor', 'BoolTensor'}:
-            # TODO: Enable this after native_functions.yaml schema unification.
             # These are necessary for legacy code and should be
             # used by legacy code only!
-            # assert name.startswith('_th_'), \
-            # "IndexTensor and BoolTensor are restricted to legacy _th_ functions only.
+            assert declaration['mode'] == 'TH' or declaration['mode'] == 'NN', \
+                "IndexTensor and BoolTensor are restricted to legacy TH/THNN functions only."
             return False
         return True
 
