@@ -1,19 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include "ATen/cpp_custom_type_hack.h"
+#include <ATen/cpp_custom_type_hack.h>
+#include <ATen/fbgemm_utils.h>
 
 #include <algorithm>
 #include <tuple>
-
-#ifdef USE_FBGEMM
-#include "fbgemm/Fbgemm.h"
-#include "fbgemm/QuantUtils.h"
-
-struct PackedFCWeight {
-  std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
-  std::vector<int32_t> col_offsets;
-};
-#endif // USE_FBGEMM
 
 namespace at {
 namespace native {
@@ -154,23 +145,7 @@ class QFCInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    c10::FunctionSchema(
-        "quantized::fc",
-        "",
-        std::vector<c10::Argument>{
-            c10::Argument("X", TensorType::get()),
-            c10::Argument("X_scale", FloatType::get()),
-            c10::Argument("X_zero_point", IntType::get()),
-            c10::Argument("W_prepack", TensorType::get()),
-            c10::Argument("W_scale", FloatType::get()),
-            c10::Argument("W_zero_point", IntType::get()),
-            c10::Argument("b", TensorType::get()),
-            c10::Argument("Y_scale_i", FloatType::get()),
-            c10::Argument("Y_zero_point_i", IntType::get())},
-        std::vector<c10::Argument>{
-            c10::Argument("Y", TensorType::get()),
-            c10::Argument("Y_scale_o", FloatType::get()),
-            c10::Argument("Y_zero_point_o", IntType::get())}),
+    "quantized::fc(Tensor X, float X_scale, int X_zero_point, Tensor W_prepack, float W_scale, int W_zero_point, Tensor b, float Y_scale_i, int Y_zero_point_i) -> (Tensor Y, float Y_scale_o, int Y_zero_point_o)",
     c10::kernel<QFCInt8>(),
     c10::dispatchKey(CPUTensorId()));
 } // namespace

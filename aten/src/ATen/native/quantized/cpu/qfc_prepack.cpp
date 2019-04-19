@@ -1,19 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include "ATen/cpp_custom_type_hack.h"
+#include <ATen/cpp_custom_type_hack.h>
+#include <ATen/fbgemm_utils.h>
 
 #include <algorithm>
 #include <vector>
-
-#ifdef USE_FBGEMM
-#include "fbgemm/Fbgemm.h"
-#include "fbgemm/QuantUtils.h"
-
-struct PackedFCWeight {
-  std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
-  std::vector<int32_t> col_offsets;
-};
-#endif // USE_FBGEMM
 
 namespace caffe2 {
 #ifdef USE_FBGEMM
@@ -95,14 +86,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    c10::FunctionSchema(
-        "quantized::fc_prepack",
-        "",
-        std::vector<c10::Argument>{
-            c10::Argument("W", TensorType::get()),
-            c10::Argument("W_zero_point", IntType::get())},
-        std::vector<c10::Argument>{
-            c10::Argument("W_prepack", TensorType::get())}),
+    "quantized::fc_prepack(Tensor W, int W_zero_point) -> Tensor W_prepack",
     c10::kernel<QFCPackWeightInt8>(),
     c10::dispatchKey(CPUTensorId()));
 } // namespace
