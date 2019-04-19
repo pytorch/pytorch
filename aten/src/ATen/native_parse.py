@@ -216,7 +216,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
         [
             {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True, 'default': 'long', 'is_nullable': True},
             {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True, 'default': 'c10::nullopt', 'is_nullable': True},
-            {'name': 'device', 'type': 'Device', 'annotation': None,  'kwarg_only': True, 'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True, 'default': 'c10::nullopt', 'is_nullable': True},
             {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True, 'default': 'c10::nullopt', 'is_nullable': True},
         ]
     )
