@@ -2,6 +2,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include <signal.h>
 
 namespace caffe2 {
 
