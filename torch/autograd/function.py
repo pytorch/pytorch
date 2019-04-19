@@ -255,6 +255,8 @@ def _nested_map(condition, fn, condition_msg=None):
             return None
         elif isinstance(obj, (list, tuple)):
             return type(obj)(_map(x) for x in obj)
+        elif isinstance(obj, dict):
+            return {x : _map(obj[x]) for x in obj}
         else:
             raise ValueError("Auto nesting doesn't know how to process "
                              "an input object of type " + torch.typename(obj) +
@@ -282,6 +284,11 @@ def _iter_filter(condition, allow_unknown=False, condition_msg=None,
             return
         elif isinstance(obj, (list, tuple)):
             for o in obj:
+                for var in _iter(o):
+                    yield var
+        elif isinstance(obj, dict):
+            # We only accept primitive key types, so we needn't inspect them
+            for o in obj.values():
                 for var in _iter(o):
                     yield var
         elif allow_unknown:

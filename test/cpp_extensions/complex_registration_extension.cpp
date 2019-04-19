@@ -25,15 +25,13 @@
 
 namespace at {
 
-struct CPUComplexFloatType : public at::CPUTypeDefault {
-  CPUComplexFloatType()
+struct ComplexCPUType : public at::CPUTypeDefault {
+  ComplexCPUType()
       : CPUTypeDefault(
             ComplexCPUTensorId(),
             /*is_variable=*/false,
             /*is_undefined=*/false) {}
 
-  ScalarType scalarType() const override;
-  caffe2::TypeMeta typeMeta() const override;
   Backend backend() const override;
   const char* toString() const override;
   TypeID ID() const override;
@@ -54,7 +52,7 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
         allocator,
         /*resizable=*/true);
 
-    auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::ComplexCPUTensorId());
+    auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::ComplexCPUType());
     // Default TensorImpl has size [0]
     if (size.size() != 1 || size[0] != 0) {
       tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -66,27 +64,27 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
 struct ComplexHooks : public at::ComplexHooksInterface {
   ComplexHooks(ComplexHooksArgs) {}
   void registerComplexTypes(Context* context) const override {
-    context->registerType(Backend::ComplexCPU, new CPUComplexFloatType());
+    context->registerType(Backend::ComplexCPU, new ComplexCPUType());
   }
 };
 
-ScalarType CPUComplexFloatType::scalarType() const {
+ScalarType ComplexCPUType::scalarType() const {
   return ScalarType::ComplexFloat;
 }
 
-caffe2::TypeMeta CPUComplexFloatType::typeMeta() const {
+caffe2::TypeMeta ComplexCPUType::typeMeta() const {
   return scalarTypeToTypeMeta(ScalarType::ComplexFloat);
 }
 
-Backend CPUComplexFloatType::backend() const {
+Backend ComplexCPUType::backend() const {
   return Backend::ComplexCPU;
 }
 
-const char* CPUComplexFloatType::toString() const {
-  return "CPUComplexFloatType";
+const char* ComplexCPUType::toString() const {
+  return "ComplexCPUType";
 }
 
-TypeID CPUComplexFloatType::ID() const {
+TypeID ComplexCPUType::ID() const {
   return TypeID::CPUComplexFloat;
 }
 
