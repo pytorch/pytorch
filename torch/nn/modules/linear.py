@@ -80,12 +80,11 @@ class Linear(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self):
-        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
-            init.uniform_(self.bias, -bound, bound)
+        def reset_parameters(self):
+            bound = 1 / math.sqrt(self.weight.size(1))
+            init.uniform_(self.weight, -bound, bound)
+            if self.bias is not None:
+                init.uniform_(self.bias, -bound, bound)
 
     @weak_script_method
     def forward(self, input):
