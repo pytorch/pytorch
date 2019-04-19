@@ -124,7 +124,8 @@ TEST(TorchScriptTest, TestOptionalArgMatching) {
 
   auto optional_tuple = torch::jit::Tuple::create({2, std::string("hi")});
 
-  ASSERT_EQ(2, module->run_method("optional_tuple_op", optional_tuple));
-  ASSERT_EQ(0, module->run_method("optional_tuple_op", IValue()));
+  ASSERT_EQ(2, module->run_method("optional_tuple_op", optional_tuple).toInt());
+  ASSERT_EQ(
+      0, module->run_method("optional_tuple_op", torch::jit::IValue()).toInt());
 
 }
