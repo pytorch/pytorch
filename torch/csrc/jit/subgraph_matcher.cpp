@@ -10,8 +10,7 @@ namespace {
  */
 class SubgraphMatcher {
  public:
-  SubgraphMatcher(const Graph& pattern, const Graph& graph)
-      : pattern_(pattern), graph_(graph) {}
+  SubgraphMatcher(const Graph& pattern) : pattern_(pattern) {}
 
   /**
    * \brief Compare matchGraph with the part of the graph denoted by a node \p
@@ -42,7 +41,6 @@ class SubgraphMatcher {
   std::unordered_map<const Value*, const Value*> values_map_;
 
   const Graph& pattern_;
-  const Graph& graph_;
   const Node* anchor_ = nullptr;
 };
 
@@ -174,7 +172,7 @@ std::vector<Match> findPatternMatches(
     const Graph& graph) {
   AT_ASSERT(patternGraphIsValid(pattern));
 
-  SubgraphMatcher m(pattern, graph);
+  SubgraphMatcher m(pattern);
   std::vector<Match> matches;
   std::stack<const Block*> blocks_to_visit;
 
