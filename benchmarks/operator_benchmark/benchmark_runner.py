@@ -12,6 +12,7 @@ from caffe2.benchmarks.operator_benchmark import benchmark_core
 
 import caffe2.benchmarks.operator_benchmark.benchmark_caffe2
 import caffe2.benchmarks.operator_benchmark.benchmark_pytorch
+import caffe2.benchmarks.operator_benchmark.benchmark_test_generator
 
 import caffe2.benchmarks.operator_benchmark.ops.add
 import caffe2.benchmarks.operator_benchmark.ops.matmul # noqa

@@ -40,7 +40,7 @@ def add_benchmark_tester(framework, op_name, input_shapes, op_args, run_mode, fu
         BENCHMARK_TESTER[mode][func_name] = func
 
 
-def benchmark_test_group(func):
+def register_test(func):
     """Decorator to register a benchmark test group.
     A benchmark test group is a function that returns a list of benchmark test
     case objects to be run.
