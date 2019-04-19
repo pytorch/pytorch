@@ -950,7 +950,6 @@
 
 - name: embedding_dense_backward(Tensor grad_output, Tensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq)
   grad_output: embedding_dense_double_backward(grad, indices)
-  indices: non_differentiable
 
 - name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse, Tensor per_sample_weights)
   indices: non_differentiable
