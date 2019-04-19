@@ -656,7 +656,7 @@ def trace(func,
         return func
     executor_options = {'optimize': bool(optimize)}
     # Special case for common case of passing a single Tensor
-    if isinstance(example_inputs, torch.Tensor):
+    if isinstance(example_inputs, (torch.Tensor, dict)):
         example_inputs = (example_inputs,)
     # done primarily so that weird iterables fail here and not pybind11 code
     elif not isinstance(example_inputs, tuple):
