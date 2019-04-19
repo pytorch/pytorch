@@ -1772,6 +1772,11 @@ graph(%x : Tensor,
         FileCheck().check("mul").check("add").run(str(trace))
 
     def test_trace_c10_ops(self):
+        try:
+            _ = torch.ops._caffe2.GenerateProposals
+        except RuntimeError:
+            self.skipTest("Skip the test since c2 ops are not registered.")
+
         class MyModel(torch.nn.Module):
             def __init__(self):
                 super(MyModel, self).__init__()
