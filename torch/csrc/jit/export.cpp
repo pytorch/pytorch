@@ -1003,14 +1003,15 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
     const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export,
-    ::torch::onnx::OperatorExportTypes operator_export_type) {
+    ::torch::onnx::OperatorExportTypes operator_export_type,
+    bool strip_doc_string) {
   auto graph_encoder = GraphEncoder(
       graph,
       onnx_opset_version,
       operator_export_type,
       initializers,
       defer_weight_export,
-      false);
+      strip_doc_string);
   return std::make_tuple(
       graph_encoder.get_model_proto().SerializeAsString(),
       graph_encoder.get_raw_data_export_map());
