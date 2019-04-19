@@ -1199,7 +1199,7 @@ inline TypePtr CompleteTensorType::fromBoolType() {
   return CompleteTensorType::create(at::kLong, at::kCPU, {});
 }
 
-at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   if (type == FloatType::get()) {
     return at::ScalarType::Double;
   } else if (type == IntType::get()) {
@@ -1222,7 +1222,6 @@ at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2);
-
 
 namespace detail {
 template <typename T> struct getTypePtr_ final {
