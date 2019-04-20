@@ -8720,6 +8720,7 @@ class _TestTorchMixin(object):
         self.assertEqual(v.storage()[14], v.data[2][4])
 
     def test_nonzero(self):
+        devices = torch.testing.get_all_device_types()
         num_srcs = [
             12, 12, 12, 12, 12, 125,
         ]
@@ -8733,7 +8734,7 @@ class _TestTorchMixin(object):
             'torch.DoubleTensor',
             'torch.LongTensor',
         ]
-    
+
         shapes = [
             torch.Size((12,)),
             torch.Size((12, 1)),
@@ -8742,9 +8743,9 @@ class _TestTorchMixin(object):
             torch.Size((3, 2, 2)),
             torch.Size((5, 5, 5)),
         ]
-                
+
         def is_lexicographically_sorted(inds):
-            """Check sorted ascending with 
+            """Check sorted ascending with
             i -> j -> k changing slowest to fastest"""
             assert inds.size(1) == 3
             if inds.size(0) > 1:
@@ -8756,42 +8757,43 @@ class _TestTorchMixin(object):
                 lex = torch.stack((i_ok, j_ok, k_ok), dim=1)
                 return lex
             return torch.full_like(inds, 1)
-        
-        def gen_nontrivial_input(num_src, dtype):
-             while True:
-                tensor = torch.rand(num_src).mul(2).floor().type(dtype)
+
+        def gen_nontrivial_input(num_src, dtype, device):
+            while True:
+                tensor = torch.rand(num_src).mul(2).floor().type(dtype).to(device)
                 if tensor.sum() > 0:
                     return tensor
 
-        for t in types:
-            for shape, num_src in zip(shapes, num_srcs):
-                tensor = gen_nontrivial_input(num_src, t)
-                tensor = tensor.clone().resize_(shape)
-                dst1 = torch.nonzero(tensor)
-                dst2 = tensor.nonzero()
-                dst3 = torch.LongTensor()
-                torch.nonzero(tensor, out=dst3)
-                if len(shape) == 1:
-                    dst = []
-                    for i in range(num_src):
-                        if tensor[i] != 0:
-                            dst += [i]
-
-                    self.assertEqual(dst1.select(1, 0), torch.LongTensor(dst), 0)
-                    self.assertEqual(dst2.select(1, 0), torch.LongTensor(dst), 0)
-                    self.assertEqual(dst3.select(1, 0), torch.LongTensor(dst), 0)
-                elif len(shape) == 2:
-                    # This test will allow through some False positives. It only checks
-                    # that the elements flagged positive are indeed non-zero.
-                    for i in range(dst1.size(0)):
-                        self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1]].item(), 0)
-                elif len(shape) == 3:
-                    # This test will allow through some False positives. It only checks
-                    # that the elements flagged positive are indeed non-zero.
-                    for i in range(dst1.size(0)):
-                        self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]].item(), 0)
-                    lex = is_lexicographically_sorted(dst1)
-                    self.assertEqual(torch.ones_like(lex), lex)
+        for device in devices:
+            for dtype in types:
+                for shape, num_src in zip(shapes, num_srcs):
+                    tensor = gen_nontrivial_input(num_src, dtype, device)
+                    tensor = tensor.clone().resize_(shape)
+                    dst1 = torch.nonzero(tensor)
+                    dst2 = tensor.nonzero()
+                    dst3 = torch.LongTensor(device=device)
+                    torch.nonzero(tensor, out=dst3)
+                    if len(shape) == 1:
+                        dst = []
+                        for i in range(num_src):
+                            if tensor[i] != 0:
+                                dst += [i]
+                        dst = torch.LongTensor(dst).to(device)
+                        self.assertEqual(dst1.select(1, 0), dst, 0)
+                        self.assertEqual(dst2.select(1, 0), dst, 0)
+                        self.assertEqual(dst3.select(1, 0), dst, 0)
+                    elif len(shape) == 2:
+                        # This test will allow through some False positives. It only checks
+                        # that the elements flagged positive are indeed non-zero.
+                        for i in range(dst1.size(0)):
+                            self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1]].item(), 0)
+                    elif len(shape) == 3:
+                        # This test will allow through some False positives. It only checks
+                        # that the elements flagged positive are indeed non-zero.
+                        for i in range(dst1.size(0)):
+                            self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]].item(), 0)
+                        lex = is_lexicographically_sorted(dst1)
+                        self.assertEqual(torch.ones_like(lex), lex)
 
     def test_nonzero_empty(self):
         for device in torch.testing.get_all_device_types():
