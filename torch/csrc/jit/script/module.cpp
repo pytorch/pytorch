@@ -246,10 +246,10 @@ Method::Method(Module* owner, Function* first_class_function)
       owner->lower_first_class_method(first_class_function);
 }
 
-void Module::define(const std::string& src, const Resolver& resolver) {
+void Module::define(const std::string& src, const ResolverPtr& resolver) {
   class_compilation_unit().define(
       src,
-      resolver ? resolver : nativeResolver,
+      resolver ? resolver : script::nativeResolver(),
       simpleSelf(module_object()->type()));
 }
 
@@ -283,6 +283,7 @@ void Module::copy_into(
     curr->clone_method(*this, fn->name(), type_remap);
   }
 }
+
 
 void Module::clone_method(
     const Module& orig,

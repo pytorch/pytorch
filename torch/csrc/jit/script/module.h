@@ -444,7 +444,7 @@ struct TORCH_API Module {
   }
 
   // so that C++ users can easily add methods
-  void define(const std::string& src, const Resolver& resolver = nullptr);
+  void define(const std::string& src, const ResolverPtr& resolver = nullptr);
 
  private:
   std::pair<std::shared_ptr<Function>, std::vector<Slot>>
