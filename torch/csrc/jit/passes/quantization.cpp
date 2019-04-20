@@ -11,12 +11,15 @@ namespace torch {
 namespace jit {
 namespace {
 // QuantizerUtils
+enum insert_position {
+  BEFORE_INSERTION_POINT=0, //Default behaviour
+  AFTER_INSERTION_POINT,
+};
 
-void insertNodeHelper(Node* new_n, Node* ins_node, bool insert_after) {
+void insertNodeHelper(Node* new_n, Node* ins_node, insert_position pos) {
   AT_ASSERT(ins_node != nullptr);
   AT_ASSERT(new_n != nullptr);
-  // True: After insertion point, False: Before insertion point
-  if (insert_after) {
+  if (pos == AFTER_INSERTION_POINT) {
     new_n->insertAfter(ins_node);
   } else {
     new_n->insertBefore(ins_node);
@@ -27,15 +30,13 @@ bool checkIfNodeQuantizable(Node* n) {
   AT_ASSERT(n != nullptr);
   // This is map for quantizable nodes. It will be expanded in future to
   // support more ops and patterns.
-  static const OperatorSet quantnodeLookup =
-   {
-     "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] \
+  static const OperatorSet quantnodeLookup = {
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] \
 stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
-     "aten::relu(Tensor self) -> Tensor",
-     "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] \
+      "aten::relu(Tensor self) -> Tensor",
+      "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] \
 stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, \
-int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"
-   };
+int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"};
   return quantnodeLookup.find(n);
 }
 
@@ -138,8 +139,7 @@ void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
 }
 
 static void addObserverFor(Value* v, Node* original_observer_node,
-  std::pair<Node*, bool> insert_info) {
-  Node* def = insert_info.first;
+  Node* def, insert_position pos) {
   AT_ASSERT(def != nullptr);
   WithInsertPoint ins(def);
 
@@ -152,7 +152,8 @@ static void addObserverFor(Value* v, Node* original_observer_node,
       def->owningGraph()
           ->createClone(
               &*original_observer_node, [&](Value* v) { return v; }, false);
-  insertNodeHelper(observerNode, def, insert_info.second);
+
+  insertNodeHelper(observerNode, def, pos);
   // Set the type and the name of the output of the new observer node. It will
   // be used instead of the original value v.
   Value* observedValue = observerNode->addOutput();
@@ -168,8 +169,8 @@ static bool outputsNeedToBeObserved(Node* n) {
   return n->kind() != prim::Constant && n->kind() != prim::PythonOp;
 }
 
-void InsertObserverNodes(script::Method* method,
-  std::unordered_map<std::string, Node*>& observerNodeDict) {
+void InsertObserverNodes(const std::unique_ptr<script::Method>& method,
+  Node* observer_node) {
   AT_ASSERT(method != nullptr);
   auto graph = method->graph();
   AT_ASSERT(graph != nullptr);
@@ -179,32 +180,18 @@ void InsertObserverNodes(script::Method* method,
   // For traversing all blocks in the graph including subblocks.
   std::stack<Block*> blocks_to_visit;
 
-  // Observer nodes
-  Node* activation_observer = observerNodeDict.count("activation")
-    ? observerNodeDict["activation"] : nullptr;
-  Node* param_observer = observerNodeDict.count("param")
-    ? observerNodeDict["param"] : nullptr;
+  // Add observer for external input nodes excluding parameters
+  // These are treated as activation as they vary across batches
+  // and need to be observed.
 
-  // Add observer for prim::Param nodes
-  auto inputVals = graph->inputs();
-  int inputlength = inputVals.size();
-  // Module params get appended after external inputs
-  int param_start_index = inputlength - method->initial_ivalues().size();
-  AT_ASSERT(param_start_index >= 0);
-  // Insert point is the beginning of graph node
+  // prim::Param nodes do not belong to the graph. Hence the Insert
+  // point is the beginning of graph node. This also safe guards against
+  // observing a potentially mutated value due to some in-place operation
   Node* insert_node = *graph->nodes().begin();
-  for (auto idx = 0; idx < inputlength; ++idx) {
-    // This distinguish the model param from external data
-    // to insert correct observer
-    Node* observer = (idx < param_start_index) ?
-      activation_observer : param_observer;
-    if (observer == nullptr) {
-      continue;
-    }
-    auto& v = inputVals[idx];
+  for (auto idx = 0; idx < method->num_inputs(); ++idx) {
+    auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      addObserverFor(v, observer,
-        std::make_pair(insert_node, false));
+      addObserverFor(v, observer_node, insert_node, BEFORE_INSERTION_POINT);
     }
   }
 
@@ -212,35 +199,29 @@ void InsertObserverNodes(script::Method* method,
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
-
     for (Node* n : b->nodes()) {
       // Skip nodes that we don't need to observe, e.g. 'prim::Constant'.
       if (!outputsNeedToBeObserved(n)) {
         continue;
       }
 
-      // Schedule subblocks (if any) for visiting.
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
-      }
-
-      // Activations not observed
-      if (!activation_observer) {
-        continue;
-      }
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
         values_to_observe.push_back(v);
       }
+
+      // Schedule subblocks (if any) for visiting.
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
     }
   }
 
-  // Actually add observer nodes for activations.
+  // Actually add observer nodes.
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      addObserverFor(v, activation_observer,
-        std::make_pair(v->node(), true));
+      addObserverFor(v, observer_node, v->node(), AFTER_INSERTION_POINT);
     }
   }
 }
@@ -280,7 +261,7 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph,
       if (matchQParamDictKeytoObserver<std::string, float, int>
         (n, qparam_dict, qparam_value_dict)) {
         // This is the observer node. Mark it and the second input
-        // constant nod for deletion.
+        // constant node for deletion.
         nodes_to_remove.emplace_back(n);
         nodes_to_remove.emplace_back(n->inputs()[1]->node());
         continue;
@@ -288,7 +269,7 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph,
 
       // We iterate over node inputs to identify which Values
       // need to be quantized depending on node type
-      for (auto &v : n->inputs()) {
+      for (auto& v : n->inputs()) {
         if (!v->type()->isSubtypeOf(TensorType::get())) {
           // Skip quantization for non tensors
           continue;
@@ -327,10 +308,10 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph,
     auto outputVals = b->outputs();
     for (auto& v : outputVals) {
       if (checkIfNodeQuantizable(v->node()) &&
-        v->type()->isSubtypeOf(TensorType::get())) {
+          v->type()->isSubtypeOf(TensorType::get())) {
         quantOutputs.emplace_back(v);
       }
-    } //end for
+    } // end for
   } // end Block traversal
 
   // Destory Observer Nodes

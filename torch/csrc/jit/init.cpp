@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
+#include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -102,6 +103,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+      .def(
+           "_jit_pass_onnx_constant_fold",
+           [](std::shared_ptr<Graph>& graph,
+               std::map<std::string, at::Tensor>& paramsDict) {
+           ConstantFoldONNX(graph->block(), paramsDict); // overload resolution
+           return paramsDict;
+          }, pybind11::return_value_policy::move)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -119,43 +127,18 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_insert_observers",
           [](std::shared_ptr<script::Module>& moduleObj,
-              py::dict& pyModuleObjDict) {
+              py::function pyObserverFunction) {
             // Create a new node that would be used in the insert observer pass:
-            // all observer nodes will be cloned from this one.
-            if (!pyModuleObjDict.size()) {
-              return;
+           // all observer nodes will be cloned from this one.
+            Graph g;
+            Node* new_node = g.createPythonOp(
+               THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
+            const auto& methods = moduleObj->get_methods();
+            for (const auto& metd : methods) {
+              InsertObserverNodes(metd, new_node);
             }
-            auto moduleObjDict = py::cast<std::unordered_map<std::string,
-              std::unordered_map<std::string,
-              py::object>>>(pyModuleObjDict);
-
-            // Lookup for the top level module quantObject
-            if (!moduleObjDict.count(moduleObj->name())) {
-              return;
-            }
-            auto& quantConfigObjDict = moduleObjDict[moduleObj->name()];
-            if (!quantConfigObjDict.size()) {
-              return;
-            }
-            script::Method* method = moduleObj->find_method("forward");
-            AT_ASSERT(method != nullptr);
-
-            auto g = method->graph();
-            // Convert to observer dict with new (key value)
-            std::unordered_map<std::string, Node*> observerNodeDict;
-            for (auto& it : quantConfigObjDict) {
-              auto observer = py::getattr(it.second, "observer");
-              Node* new_node = g->createPythonOp(
-                  THPObjectPtr(observer.release().ptr()), "dd", {});
-              observerNodeDict.emplace(it.first, new_node);
-            }
-
-            InsertObserverNodes(method, observerNodeDict);
-            // We don't need these nodes anymore, don't forget to remove it.
-            for (auto& it : observerNodeDict) {
-              Node* node = it.second;
-              node->destroy();
-            }
+            // We don't need this node anymore, don't forget to remove it.
+            new_node->destroy();
           })
       .def(
           "_jit_pass_insert_quantdequant",
@@ -278,9 +261,12 @@ void initJITBindings(PyObject* module) {
       });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
-  py::class_<Code>(m, "Code").def("grad_executors", [](Code& c) {
-    return py::make_iterator(
-        c.grad_executors().begin(), c.grad_executors().end());
+  py::class_<Code>(m, "Code").def("grad_executor_states", [](Code& c) {
+    std::vector<GraphExecutorState> states;
+    for (auto& e : c.grad_executors()) {
+      states.emplace_back(e->getDebugState());
+    }
+    return states;
   });
 
   py::class_<ExecutionPlanState>(m, "ExecutionPlanState")
@@ -313,50 +299,6 @@ void initJITBindings(PyObject* module) {
           [](GraphExecutorState& s) { return s.execution_plans; })
       .def_property_readonly(
           "fallback", [](GraphExecutorState& s) { return s.fallback; });
-
-  py::class_<GraphExecutor>(m, "GraphExecutor", py::dynamic_attr())
-      .def(
-          py::init([](py::function func,
-                      py::tuple inputs,
-                      py::function var_name_lookup_fn,
-                      bool optimize,
-                      bool _force_outplace) {
-            auto graph = tracer::createGraphByTracing(
-                func, toStack(inputs), var_name_lookup_fn, _force_outplace);
-            return GraphExecutor(graph, optimize);
-          }),
-          py::arg("func"),
-          py::arg("inputs"),
-          py::arg("var_name_lookup_fn"),
-          py::arg("optimize") = true,
-          py::arg("_force_outplace") = false)
-      .def(
-          py::init([](std::shared_ptr<Graph> graph, bool optimize) {
-            return GraphExecutor(std::move(graph), optimize);
-          }),
-          py::arg("graph"),
-          py::arg("optimize") = true)
-      .def(
-          "graph_for",
-          [](GraphExecutor& ge, py::args args) {
-            return ge.graphFor(evilDeprecatedBadCreateStackDoNotUse(
-                args, ge.graph()->inputs()));
-          })
-      .def_property_readonly(
-          "graph", [](GraphExecutor& ge) { return ge.graph(); })
-      .def(
-          "get_debug_state",
-          [](GraphExecutor& ge) { return ge.getDebugState(); })
-      .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
-        const auto& graph = ge.graph();
-        auto stack =
-            evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());
-        {
-          AutoNoGIL no_gil_guard;
-          ge.run(stack);
-        }
-        return createPyObjectForStack(std::move(stack));
-      });
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
@@ -424,7 +366,12 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly(
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
-          "returns", [](FunctionSchema& self) { return self.returns(); });
+          "returns", [](FunctionSchema& self) { return self.returns(); })
+      .def("__str__", [](FunctionSchema& self) {
+        std::stringstream ss;
+        ss << self;
+        return ss.str();
+      });
   py::class_<Argument>(m, "Argument")
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })

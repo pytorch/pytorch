@@ -711,8 +711,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
       const auto& packed_filter =
           this->template Input<Int8FCDNNLowPPackedWeightBlob>(1);
       CAFFE_ENFORCE(!dequantize_output_);
-      b_quantized_ = packed_filter.bias;
-      b_quantized_data_ = b_quantized_->data();
+      b_quantized_data_ = packed_filter.bias->data();
     } else {
       const auto& bias = InputTensorCPU_(2);
       if (this->template InputIsType<int8::Int8TensorCPU>(2)) {
@@ -758,6 +757,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
     if (in_qparams_[0].zero_point && column_offsets_->empty() &&
         b_quantized_data_) {
       if (b_quantized_->empty()) {
+        // When b_quantized_data_ is from pre-packed bias or Int8TensorCPU,
+        // we can't inplace modify so copy to internal b_quantized_ vector.
         b_quantized_->assign(b_quantized_data_, b_quantized_data_ + N);
         b_quantized_data_ = b_quantized_->data();
       }

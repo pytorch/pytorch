@@ -20,14 +20,16 @@ Arguments:
 wrapper
 
 Output:
-    value: Same as input tensor
+    stats: Modified stats
 """
 
 
 def weightObserver(value, stats):
+    if stats is None:
+        stats = torch.zeros(2)
     stats[0] = torch.min(value)
     stats[1] = torch.max(value)
-    return value
+    return stats
 
 
 r"""
@@ -40,17 +42,19 @@ Arguments:
 wrapper
 
 Output:
-    value: Same as input tensor
+    stats: Modified stats
 """
 
 
 def activationObserver(value, stats):
+    if stats is None:
+        stats = torch.zeros(2)
     averaging_constant = 0.001
     stats[0] = (1 - averaging_constant) * stats[0] + \
         averaging_constant * torch.min(value)
     stats[1] = (1 - averaging_constant) * stats[1] + \
         averaging_constant * torch.max(value)
-    return value
+    return stats
 
 
 r"""
@@ -91,7 +95,7 @@ def getAllQParamDict(allqparam_dict, quantObj):
 
 
 r"""
-This is an example QuantConfigTemplate which will be used to collect
+This is an example QuantTemplate which will be used to collect
 stats across batches by running torch script/trace module, from the
 observer nodes inserted in the graph. These stats are used to compute
 Quantization Parameters. These will be passed to quantizer to be used
@@ -99,14 +103,14 @@ as arguments for quant ops in quantization pass.
 """
 
 
-class QuantConfigTemplate:
-    def __init__(self, tensorType, observerImpl=None, calcQParamImpl=None):
+class QuantTemplate:
+    def __init__(self, qscheme, observerImpl=None, calcQParamImpl=None):
         self.value_stats = {}
         self.qparam_dict = {}
         self.averaging_constant = 0.001
         self.observerImpl = observerImpl
         self.calcQParamImpl = calcQParamImpl
-        self.tensor_type = tensorType
+        self.qscheme = qscheme
 
     def resetStats(self):
         self.value_stats = {}
@@ -117,10 +121,10 @@ class QuantConfigTemplate:
             return
         if name not in self.value_stats:
             self.value_stats[name] = []
-            stats = torch.zeros(2)
+            stats = None
         else:
             stats = self.value_stats[name]
-        self.observerImpl(value, stats)
+        stats = self.observerImpl(value, stats)
         self.value_stats.update({name: stats})
         return value
 
@@ -129,12 +133,10 @@ class QuantConfigTemplate:
         if self.calcQParamImpl is None:
             return
         for name in self.value_stats:
-            scaleT = 2.0 * (torch.max(self.value_stats[name][1],
-                            -self.value_stats[name][0]) / 255.0)
-            scale = scaleT.item()
-            zero_point = 0
+            # This can change depending on type of quantization which will
+            # be known to QuantTemplate object
             scale, zero_point = self.calcQParamImpl(name, self.value_stats)
-            self.qparam_dict.update({name: (self.tensor_type, scale, zero_point)})
+            self.qparam_dict.update({name: (self.qscheme, scale, zero_point)})
 
     def getQParam(self, name):
         if name in self.qparam_dict:
@@ -185,9 +187,9 @@ class QuantizerTestCase(TestCase):
         # Eager mode
 
         # Create QuantConfig object for eager mode
-        eagerQuantObj = QuantConfigTemplate(tensorType='activation',
-                                            observerImpl=activationObserver,
-                                            calcQParamImpl=calcQParamFunc)
+        eagerQuantObj = QuantTemplate(qscheme='per_tensor_quant',
+                                      observerImpl=activationObserver,
+                                      calcQParamImpl=calcQParamFunc)
         eagerM = TestM(quantObj=eagerQuantObj)
 
         # Run EagerMode Model and Collect stats
@@ -198,34 +200,24 @@ class QuantizerTestCase(TestCase):
         scriptM = TestScriptM()
 
         # Create QuantConfig object for script mode
-        activationQuantObj = QuantConfigTemplate(tensorType='activation',
-                                                 observerImpl=activationObserver,
-                                                 calcQParamImpl=calcQParamFunc)
-        weightQuantObj = QuantConfigTemplate(tensorType='param',
-                                             observerImpl=weightObserver,
-                                             calcQParamImpl=calcQParamFunc)
+        activationQuantObj = QuantTemplate(qscheme='per_tensor_quant',
+                                           observerImpl=activationObserver,
+                                           calcQParamImpl=calcQParamFunc)
 
         # This performs type analysis to identify tensors from other
         # types. This info needed for further quantizer passes
         torch._C._jit_pass_constant_propagation(scriptM.graph)
 
-        # Create sub-module quantconfigobject dict
-        qconfigobject_dict = {'__main__': {'activation': activationQuantObj,
-                                           'param': weightQuantObj}
-                              }
-
         # Insert observers
-        torch._C._jit_pass_insert_observers(scriptM, qconfigobject_dict)
+        torch._C._jit_pass_insert_observers(scriptM, activationQuantObj.observer)
 
         # Run ScriptM Model and Collect statistics
         scriptM.forward(data)
         activationQuantObj.calcQParam()
-        weightQuantObj.calcQParam()
 
         # Compare results for eager and graph mode
         eagerDict = eagerQuantObj.getQParamDict()
         activationDict = activationQuantObj.getQParamDict()
-        weightDict = weightQuantObj.getQParamDict()
 
         self.assertTrue('z' in eagerDict and 'z' in activationDict)
         self.assertAlmostEqual(eagerDict["z"][0], activationDict["z"][0], places=15)
