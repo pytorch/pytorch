@@ -3621,7 +3621,7 @@
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
-- func: adaptive_max_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+- func: adaptive_max_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
   dispatch:
     CPU: adaptive_max_pool2d_out_cpu

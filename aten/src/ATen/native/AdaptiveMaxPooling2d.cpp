@@ -105,13 +105,17 @@ void adaptive_max_pool2d_out_cpu_template(
 
   for (int64_t i = 0; i < input.ndimension(); i++) {
     AT_CHECK(input.size(i) > 0,
-      "adaptive_max_pool2d(): expected input to have non-empty spatial dimensions, "
+      "adaptive_max_pool2d: expected input to have non-empty spatial dimensions, "
       "but input has sizes ", input.sizes(), " with dimension ", i, " being "
       "empty");
   }
 
   AT_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
     "non-empty 3D or 4D (batch mode) tensor expected for input");
+
+  // the jit sometimes passes output_size.size() == 1
+  AT_CHECK(output_size.size() == 1 || output_size.size() == 2,
+    "adaptive_max_pool2d: internal error: output_size.size() must be 1 or 2");
 
   if (input.ndimension() == 4)
   {
@@ -125,12 +129,13 @@ void adaptive_max_pool2d_out_cpu_template(
   sizeD  = input.size(dimH-1);
   isizeH = input.size(dimH);
   isizeW = input.size(dimW);
-  auto osizeH = output_size[0];
-  auto osizeW = output_size[1];
   /* strides */
   istrideD = input.stride(dimH-1);
   istrideH = input.stride(dimH);
   istrideW = input.stride(dimW);
+
+  int64_t osizeH = output_size[0];
+  int64_t osizeW = output_size.size() == 1 ? output_size[0] : output_size[1];
 
   /* resize output */
   if (input.ndimension() == 3)

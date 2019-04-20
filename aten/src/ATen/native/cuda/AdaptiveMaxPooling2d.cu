@@ -212,6 +212,13 @@ void adaptive_max_pool2d_out_cuda_template(
   AT_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
+  // the jit sometimes passes output_size.size() == 1
+  AT_CHECK(output_size.size() == 1 || output_size.size() == 2,
+    "adaptive_max_pool2d: internal error: output_size.size() must be 1 or 2");
+
+  int64_t osizeH = output_size[0];
+  int64_t osizeW = output_size.size() == 1 ? output_size[0] : output_size[1];
+
   if (input.ndimension() == 3) {
     int64_t sizeD  = input.size(0);
     int64_t isizeH = input.size(1);
@@ -220,9 +227,6 @@ void adaptive_max_pool2d_out_cuda_template(
     int64_t istrideD = input.stride(0);
     int64_t istrideH = input.stride(1);
     int64_t istrideW = input.stride(2);
-
-    int64_t osizeH = output_size[0];
-    int64_t osizeW = output_size[1];
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
       "adaptive_max_pool2d_cuda",
@@ -260,9 +264,6 @@ void adaptive_max_pool2d_out_cuda_template(
     int64_t istrideD = input_.stride(1);
     int64_t istrideH = input_.stride(2);
     int64_t istrideW = input_.stride(3);
-
-    int64_t osizeH = output_size[0];
-    int64_t osizeW = output_size[1];
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_.scalar_type(),
       "adaptive_max_pool2d_cuda",
