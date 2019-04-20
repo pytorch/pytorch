@@ -20,7 +20,7 @@ Arguments:
 wrapper
 
 Output:
-    value: Same as input tensor
+    stats: Modified stats
 """
 
 
@@ -42,7 +42,7 @@ Arguments:
 wrapper
 
 Output:
-    value: Same as input tensor
+    stats: Modified stats
 """
 
 
