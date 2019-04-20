@@ -132,7 +132,6 @@ class QFCInt8 final : public c10::OperatorKernel {
       double /* weight_scale */,
       int64_t /* weight_zero_point */,
       const at::Tensor& /* bias */,
-      const at::Tensor& /* col_offsets */,
       double /* output_scale */,
       int64_t /* output_zero_point */) {
     // We make a strong guarantee that models using these operators will have

@@ -133,12 +133,12 @@ class TestQuantizedRelu(unittest.TestCase):
         np.testing.assert_equal(Y_tensor, Y_hat_tensor)
 
 
-# @unittest.skipIf(
-#     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-#     " Quantized FC requires FBGEMM. FBGEMM does not play"
-#     " well with UBSAN at the moment, so we skip the test if"
-#     " we are in a UBSAN environment.",
-# )
+@unittest.skipIf(
+    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+    " Quantized FC requires FBGEMM. FBGEMM does not play"
+    " well with UBSAN at the moment, so we skip the test if"
+    " we are in a UBSAN environment.",
+)
 class TestQuantizedFC(unittest.TestCase):
     """Tests the correctness of the quantized::fc op."""
 
