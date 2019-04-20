@@ -1238,21 +1238,21 @@ class CTCLoss(_Loss):
 
     **Inputs:**
         **log_probs**: Tensor of size :math:`(T, N, C)`
-            | :math:`T = input length`
-            | :math:`N = batch size`
-            | :math:`C = number of classes (including blank)`
+            | :math:`T = \text{input length}`
+            | :math:`N = \text{batch size}`
+            | :math:`C = \text{number of classes (including blank)}`
 
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
-        **targets**: Tensor of size :math:`(N, S)` or `(sum(target_lengths))`
-            | :math:`N = batch size`
-            | :math:`S = max target length, if shape is (N, S)`.
+        **targets**: Tensor of size :math:`(N, S)` or :math:`(\text{sum(target_lengths)})`
+            | :math:`N = \text{batch size}`
+            | :math:`S = \text{max target length, if shape is (N, S)}`.
 
             | Target sequences. Each element in the target sequence is a class index. Target index
               cannot be blank (default=0).
 
             | In the :math:`(N, S)` form, targets are padded to the length of the longest sequence, and stacked.
-            | In the :math:`(sum(target_lengths))` form, the targets are assumed to be un-padded and concatenated
+            | In the :math:`(\text{sum(target_lengths)})` form, the targets are assumed to be un-padded and concatenated
               within 1 dimension.
         **input_lengths**: Tuple or tensor of size :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`).
