@@ -52,7 +52,7 @@ struct ComplexCPUType : public at::CPUTypeDefault {
         allocator,
         /*resizable=*/true);
 
-    auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::ComplexCPUType());
+    auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::ComplexCPUTensorId());
     // Default TensorImpl has size [0]
     if (size.size() != 1 || size[0] != 0) {
       tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -67,14 +67,6 @@ struct ComplexHooks : public at::ComplexHooksInterface {
     context->registerType(Backend::ComplexCPU, new ComplexCPUType());
   }
 };
-
-ScalarType ComplexCPUType::scalarType() const {
-  return ScalarType::ComplexFloat;
-}
-
-caffe2::TypeMeta ComplexCPUType::typeMeta() const {
-  return scalarTypeToTypeMeta(ScalarType::ComplexFloat);
-}
 
 Backend ComplexCPUType::backend() const {
   return Backend::ComplexCPU;
