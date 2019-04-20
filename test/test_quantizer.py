@@ -104,13 +104,13 @@ as arguments for quant ops in quantization pass.
 
 
 class QuantTemplate:
-    def __init__(self, tensorType, observerImpl=None, calcQParamImpl=None):
+    def __init__(self, qscheme, observerImpl=None, calcQParamImpl=None):
         self.value_stats = {}
         self.qparam_dict = {}
         self.averaging_constant = 0.001
         self.observerImpl = observerImpl
         self.calcQParamImpl = calcQParamImpl
-        self.tensor_type = tensorType
+        self.qscheme = qscheme
 
     def resetStats(self):
         self.value_stats = {}
@@ -136,7 +136,7 @@ class QuantTemplate:
             # This can change depending on type of quantization which will
             # be known to QuantTemplate object
             scale, zero_point = self.calcQParamImpl(name, self.value_stats)
-            self.qparam_dict.update({name: (self.tensor_type, scale, zero_point)})
+            self.qparam_dict.update({name: (self.qscheme, scale, zero_point)})
 
     def getQParam(self, name):
         if name in self.qparam_dict:
@@ -187,7 +187,7 @@ class QuantizerTestCase(TestCase):
         # Eager mode
 
         # Create QuantConfig object for eager mode
-        eagerQuantObj = QuantTemplate(tensorType='activation',
+        eagerQuantObj = QuantTemplate(qscheme='per_tensor_quant',
                                       observerImpl=activationObserver,
                                       calcQParamImpl=calcQParamFunc)
         eagerM = TestM(quantObj=eagerQuantObj)
@@ -200,7 +200,7 @@ class QuantizerTestCase(TestCase):
         scriptM = TestScriptM()
 
         # Create QuantConfig object for script mode
-        activationQuantObj = QuantTemplate(tensorType='activation',
+        activationQuantObj = QuantTemplate(qscheme='per_tensor_quant',
                                            observerImpl=activationObserver,
                                            calcQParamImpl=calcQParamFunc)
 
