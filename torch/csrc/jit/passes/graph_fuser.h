@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/ir.h>
 
 namespace torch {

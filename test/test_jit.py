@@ -433,15 +433,6 @@ class JitTestCase(TestCase):
         torch._C._jit_pass_lint(graph)
         self.assertExpected(str(graph), *args, **kwargs)
 
-    def _fusion_enabled_for_this_device(self, f_args_variable, kwargs_variable):
-        cuda = any(isinstance(x, torch.Tensor) and x.is_cuda for x in f_args_variable) or\
-                any(isinstance(v, torch.Tensor) and v.is_cuda for k, v in kwargs_variable.items())
-
-        if cuda:
-            return torch._C._jit_can_fuse_on_gpu()
-        else:
-            return torch._C._jit_can_fuse_on_cpu()
-
     def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
         diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
         diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
