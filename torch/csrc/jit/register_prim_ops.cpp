@@ -1490,6 +1490,29 @@ int listSlice(Stack& stack) {
   return 0;
 }
 
+template <typename TList>
+int listSort(Stack& stack) {
+  TList list;
+
+  pop(stack, list);
+  std::sort(list->elements().begin(), list->elements().end());
+  return 0;
+}
+
+// Specialization for at::Tensor
+template <>
+int listSort<Shared<TensorList>>(Stack& stack) {
+  Shared<TensorList> list;
+  pop(stack, list);
+  std::sort(
+      list->elements().begin(),
+      list->elements().end(),
+      [](const at::Tensor& a, const at::Tensor& b) {
+        return a.lt(b).is_nonzero();
+      });
+  return 0;
+}
+
 template <typename TList, typename TElement>
 int listSetItem(Stack& stack) {
   TList list;
@@ -1796,6 +1819,14 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("Tensor", TensorList),
     CREATE_LIST_OPS("t", GenericList),
 #undef CREATE_LIST_OPS
+    Operator("aten::sort(int[](a!) self) -> ()", listSort<Shared<IntList>>),
+    Operator(
+        "aten::sort(float[](a!) self) -> ()",
+        listSort<Shared<DoubleList>>),
+    Operator(
+        "aten::sort(Tensor[](a!) self) -> ()",
+        listSort<Shared<TensorList>>),
+    Operator("aten::sort(bool[](a!) self) -> ()", listSort<Shared<BoolList>>),
 
     Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
     Operator(
