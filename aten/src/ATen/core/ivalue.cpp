@@ -118,4 +118,28 @@ void ivalue::Object::resizeObject(size_t slot) {
   slots_.resize(type()->numAttributes());
 }
 
+static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
+                          const std::pair<IValue, IValue>& bWrap) {
+  const auto a = aWrap.first;
+  const auto b = bWrap.first;
+  if (a.isString() && b.isString()) {
+    return a.toStringRef().compare(b.toStringRef()) < 0;
+  } else if (a.isInt() && b.isInt()) {
+    return a.toInt() < b.toInt();
+  } else if (a.isDouble() && b.isDouble()) {
+    return a.toDouble() < b.toDouble();
+  }
+  AT_ERROR("Illegal dict key");
+}
+
+const ivalue::GenericDict::IterationOrder ivalue::GenericDict::iterationOrder() const {
+    IterationOrder ordered;
+    ordered.reserve(elements().size());
+    for (auto pair : elements()) {
+        ordered.push_back(pair);
+    }
+    std::sort(ordered.begin(), ordered.end(), CompareIValue);
+    return ordered;
+}
+
 } // namespace c10
