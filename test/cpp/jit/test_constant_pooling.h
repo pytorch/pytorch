@@ -67,7 +67,8 @@ graph():
   %x : Tensor = aten::tensor(%3, %5, %7)
   %y : Tensor = aten::tensor(%3, %10, %7)
   %9 : int[] = prim::ListConstruct(%1, %2)
-  %z : Tensor = aten::tensor(%9, %10, %7)
+  %15: bool = prim::Constant[value=0]
+  %z : Tensor = aten::tensor(%9, %10, %7, %15)
   %14 : (Tensor, Tensor) = prim::TupleConstruct(%x, %y)
   return (%14)
   )IR",
