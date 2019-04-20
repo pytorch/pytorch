@@ -203,9 +203,6 @@ class TestQuantizedFC(unittest.TestCase):
             Y_zp,
         )
 
-        # print(Y_q_ref)
-        # print(Y_q)
-
         # Assert equal
         np.testing.assert_equal(Y_q_ref, Y_q.numpy())
 
