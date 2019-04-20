@@ -192,6 +192,13 @@ class DistributedDataParallel(Module):
                        bucket can potentially overlap with backward computation.
                        :attr:`bucket_cap_mb` controls the bucket size in MegaBytes (MB)
                        (default: 25)
+        find_unused_parameters (bool): Traverse the autograd graph of all tensors
+                                       contained in the return value of the wrapped
+                                       module's ``forward`` function.
+                                       Parameters that don't receive gradients as
+                                       part of this graph are preemptively marked
+                                       as being ready to be reduced.
+                                       (default: ``True``)
         check_reduction: when setting to ``True``, it enables DistributedDataParallel
                          to automatically check if the previous iteration's
                          backward reductions were successfully issued at the
@@ -213,6 +220,7 @@ class DistributedDataParallel(Module):
     def __init__(self, module, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
                  process_group=None, bucket_cap_mb=25,
+                 find_unused_parameters=True,
                  check_reduction=False):
 
         super(DistributedDataParallel, self).__init__()
@@ -255,6 +263,7 @@ class DistributedDataParallel(Module):
         self.dim = dim
         self.module = module
         self.broadcast_buffers = broadcast_buffers
+        self.find_unused_parameters = find_unused_parameters
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -375,7 +384,10 @@ class DistributedDataParallel(Module):
         # We need to find any tensors in this object, though, because we need to
         # figure out which parameters were used during this forward pass,
         # to ensure we short circuit reduction for any unused parameters.
-        self.reducer.prepare_for_backward(list(_find_tensors(output)))
+        if self.find_unused_parameters:
+            self.reducer.prepare_for_backward(list(_find_tensors(output)))
+        else:
+            self.reducer.prepare_for_backward([])
         return output
 
     def scatter(self, inputs, kwargs, device_ids):

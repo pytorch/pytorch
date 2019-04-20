@@ -46,6 +46,7 @@ Reducer::Reducer(
       process_group_(std::move(process_group)),
       expect_autograd_hooks_(false),
       has_queued_final_callback_(false),
+      has_marked_unused_parameters_(false),
       next_bucket_(0),
       backward_stats_base_(0) {
   AT_ASSERTM(replicas_.size() >= 1, "Expected at least one model replica.");
@@ -163,14 +164,30 @@ void Reducer::mark_variable_ready(
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& replica = bucket.replicas[replica_index];
-  AT_ASSERTM(
-      replica.pending >= 1,
-      "Received autograd hook for completed bucket replica ",
-      "(replica_index: ",
-      replica_index,
-      ", variable_index: ",
-      variable_index,
-      ").");
+
+  // Something is wrong if all variables contained in this bucket replica have
+  // already been marked as ready.
+  if (replica.pending == 0) {
+    // Receiving a call to `mark_variable_ready` twice for the same variable
+    // is only possible if the variable was initially deemed unused, and was
+    // marked ready from the `prepare_for_backward` function, only to become
+    // part of the autograd graph at a later point in time.
+    AT_ASSERT(has_marked_unused_parameters_);
+    AT_ERROR(
+        "Expected to mark a variable ready only once. ",
+        "",
+        "This error is caused by use of a module parameter outside the ",
+        "`forward` function. The return value of the `forward` function ",
+        "is inspected by the distributed data parallel wrapper to figure ",
+        "out if any of the module's parameters went unused. If this is the ",
+        "case, it knows they won't receive gradients in a backward pass. ",
+        "If any of those parameters are then used outside `forward`, this ",
+        "error condition is triggered. ",
+        "",
+        "You can disable unused parameter detection by passing the keyword "
+        "argument `find_unused_parameters=False` to ",
+        "`torch.nn.parallel.DistributedDataParallel`.");
+  }
 
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
   const auto offset = replica.offsets[bucket_index.intra_bucket_index];
@@ -361,6 +378,7 @@ void Reducer::prepare_for_backward(
 
   // Reset accounting.
   has_queued_final_callback_ = false;
+  has_marked_unused_parameters_ = true;
   expect_autograd_hooks_ = true;
   next_bucket_ = 0;
   backward_stats_base_ = current_time_in_nanos();
@@ -375,6 +393,7 @@ void Reducer::prepare_for_backward(
   // variables will be called, and we don't have to search the autograd graph
   // for presence of these hooks.
   if (outputs.empty()) {
+    has_marked_unused_parameters_ = false;
     return;
   }
 
@@ -423,9 +442,27 @@ void Reducer::finalize_backward() {
   expect_autograd_hooks_ = false;
 
   // Check that all buckets were completed and had their work kicked off.
-  AT_ASSERTM(
-      next_bucket_ == buckets_.size(),
-      "Expected all buckets to be ready at the end of the backward pass.");
+  if (next_bucket_ < buckets_.size()) {
+    // If the reducer marked unused parameters and we STILL didn't get
+    // gradients for all module parameters, something is seriously wrong.
+    AT_ASSERT(!has_marked_unused_parameters_);
+    AT_ERROR(
+        "Expected to have gradients for all module parameters upon returning ",
+        "from the call to `torch.autograd.backward`. ",
+        "",
+        "This error indicates that your module has parameters that were ",
+        "not used in producing its output (the return value of `forward`). ",
+        "",
+        "You can enable unused parameter detection by passing the keyword "
+        "argument `find_unused_parameters=True` to ",
+        "`torch.nn.parallel.DistributedDataParallel`. ",
+        "",
+        "If you already have this argument set, then the distributed data ",
+        "parallel module wasn't able to locate the output tensors in the ",
+        "return value of your module's `forward` function. ",
+        "Please include the structure of the return value of `forward` of ",
+        "your module when reporting this issue (e.g. list, dict, iterable).");
+  }
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
