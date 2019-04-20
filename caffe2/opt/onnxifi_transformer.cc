@@ -841,7 +841,8 @@ NetDef OnnxifiTransformer::TransformViaC2(
         return SubnetToOnnxifiOpViaC2(net, weights, shape_hints);
       };
 
-  return opt::OptimizeForBackend(*pred_net, c2_supports, c2_converter);
+  return opt::OptimizeForBackend(
+      *pred_net, c2_supports, c2_converter, opts_.debug);
 }
 
 NetDef OnnxifiTransformer::TransformViaOnnx(
