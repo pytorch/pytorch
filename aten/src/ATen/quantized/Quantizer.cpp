@@ -4,7 +4,10 @@
 #include <ATen/Type.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
+
+#ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
+#endif
 
 namespace at {
 
