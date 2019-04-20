@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/sugared_value.h>
+#include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 #include <torch/csrc/jit/constants.h>
@@ -318,14 +319,6 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
   Value* module_;
   std::vector<std::string> method_names_;
 };
-
-std::shared_ptr<Module> as_module(const py::object& obj) {
-  if (py::isinstance(
-          obj, py::module::import("torch.jit").attr("ScriptModule"))) {
-    return py::cast<std::shared_ptr<Module>>(obj.attr("_c"));
-  }
-  return nullptr;
-}
 
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
