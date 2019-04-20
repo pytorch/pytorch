@@ -2383,7 +2383,7 @@ class TestNN(NNTestCase):
             self.assertEqual(per_sample_weights.grad, per_sample_weights_reference.grad,
                              dtype2prec[dtype])
 
-    def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.double):
+    def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.double, test_backward=True):
         # check a known test example
         device = torch.device("cuda") if cuda else torch.device("cpu")
         es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse).to(device, dtype)
@@ -2472,7 +2472,7 @@ class TestNN(NNTestCase):
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
-        kwargs = dict(mode=mode, sparse=sparse, device=device, dtype=dtype)
+        kwargs = dict(mode=mode, sparse=sparse, device=device, dtype=dtype, test_backward=test_backward)
         self._test_EmbeddingBag_vs_Embedding(N, D, B, L, **kwargs)
         for max_norm in (None, 3):
             for p in itertools.product([1, 2], repeat=4):
@@ -2563,12 +2563,15 @@ class TestNN(NNTestCase):
         F.conv2d(x, torch.randn(1, 16, 1, 1, device="cuda"))
 
     def test_embedding_bag(self):
-        self._test_EmbeddingBag(False, 'sum', False)
-        self._test_EmbeddingBag(False, 'mean', False)
-        self._test_EmbeddingBag(False, 'max', False)
+        for dtype in [torch.double, torch.float]:
+            # TODO: figure out why backward on float breaks
+            test_backward = dtype is not torch.float
+            self._test_EmbeddingBag(False, 'sum', False, test_backward=test_backward, dtype=dtype)
+            self._test_EmbeddingBag(False, 'mean', False, test_backward=test_backward, dtype=dtype)
+            self._test_EmbeddingBag(False, 'max', False, test_backward=test_backward, dtype=dtype)
 
-        self._test_EmbeddingBag(False, 'sum', True)
-        self._test_EmbeddingBag(False, 'mean', True)
+            self._test_EmbeddingBag(False, 'sum', True, test_backward=test_backward, dtype=dtype)
+            self._test_EmbeddingBag(False, 'mean', True, test_backward=test_backward, dtype=dtype)
 
     @staticmethod
     def _embedding_bag_reference_impl(input, weight, offsets=None, mode='sum',
