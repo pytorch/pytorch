@@ -58,9 +58,18 @@ qint8 quantize_uint8(float scale, uint8_t zero_point, float value) {
   // cases away from zero, and can be consistent with SIMD implementations for
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
-  auto r = fbgemm::Quantize<uint8_t>(value, zero_point, scale,
+  int32_t qvalue;
+#ifdef USE_FBGEMM
+  qvalue = fbgemm::Quantize<uint8_t>(value, zero_point, scale,
                                      /*result_precision=*/8);
-  return static_cast<qint8>(r);
+#else
+  constexpr int32_t qmin = std::numeric_limits<uint8_t>::min();
+  constexpr int32_t qmax = std::numeric_limits<uint8_t>::max();
+  qvalue = zero_point + static_cast<int32_t>(std::nearbyint(value / scale));
+  qvalue = std::max(qvalue, qmin);
+  qvalue = std::min(qvalue, qmax);
+#endif
+  return static_cast<qint8>(qvalue);
 }
 
 QTensor PerTensorAffineQuantizer::quantize(RealTensor tensor) {
@@ -77,14 +86,20 @@ QTensor PerTensorAffineQuantizer::quantize(RealTensor tensor) {
 
   tensor = tensor.contiguous();
   const float* svd = tensor.data<float>();
-  auto qvd = reinterpret_cast<uint8_t*>(qv.data<qint8>());
 
+#ifdef USE_FBGEMM
+  auto qvd = reinterpret_cast<uint8_t*>(qv.data<qint8>());
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale_;
   qparams.zero_point = zero_point_;
   qparams.precision = 8;
   fbgemm::Quantize<uint8_t>(svd, qvd, tensor.numel(), qparams);
-
+#else
+  auto qvd = qv.data<qint8>();
+  for (int i = 0; i < tensor.numel(); ++i) {
+    qvd[i] = quantize_uint8(scale_, zero_point_, svd[i]);
+  }
+#endif
   return qv;
 }
 
@@ -93,15 +108,24 @@ RealTensor PerTensorAffineQuantizer::dequantize(QTensor tensor) {
   at::TensorOptions real_options = tensor.options().dtype(at::kFloat);
 
   RealTensor rv = at::empty(sizes, real_options);
-  tensor = tensor.contiguous();
-  const auto* qvd = reinterpret_cast<const uint8_t*>(tensor.data<qint8>());
   float* rvd = rv.data<float>();
+  tensor = tensor.contiguous();
 
+#ifdef USE_FBGEMM
+  const auto* qvd = reinterpret_cast<const uint8_t*>(tensor.data<qint8>());
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale_;
   qparams.zero_point = zero_point_;
   qparams.precision = 8;
   fbgemm::Dequantize<uint8_t>(qvd, rvd, tensor.numel(), qparams);
+#else
+  const auto* qvd = tensor.data<qint8>();
+  for (auto i = 0; i < tensor.numel(); ++i) {
+    // We need to convert the qint8 value to float to ensure the subtraction
+    // subexpression returns a float
+    rvd[i] = (static_cast<float>(qvd[i].val_) - zero_point_) * scale_;
+  }
+#endif
 
   return rv;
 }
