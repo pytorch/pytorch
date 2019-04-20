@@ -1246,7 +1246,7 @@ class CTCLoss(_Loss):
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
         **targets**: Tensor of size :math:`(N, S)` or :math:`(\text{sum(target_lengths)})`
             | :math:`N = \text{batch size}`
-            | :math:`S = \text{max target length, if shape is (N, S)}`.
+            | :math:`S = \text{max target length, if shape is} (N, S)`.
 
             | Target sequences. Each element in the target sequence is a class index. Target index
               cannot be blank (default=0).
