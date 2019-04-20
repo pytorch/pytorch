@@ -6,6 +6,7 @@ import ctypes
 import torch
 import gc
 import time
+import signal
 import unittest
 import itertools
 import warnings
@@ -24,6 +25,18 @@ except ImportError:
     HAS_PSUTIL = False
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
+    if IS_PYTORCH_CI:
+        raise ImportError(err_msg)
+    else:
+        warnings.warn(err_msg)
+
+try:
+    import faulthandler
+    HAS_FAULTHANDLER = True
+except ImportError:
+    HAS_FAULTHANDLER = False
+    err_msg = ("faulthandler not found. Some data loader tests uses it for error "
+               "reporting (e.g., TestDataLoader.test_proper_exit).")
     if IS_PYTORCH_CI:
         raise ImportError(err_msg)
     else:
@@ -202,6 +215,14 @@ class ErrorTrackingProcess(mp.Process):
         self.disable_stderr = disable_stderr
 
     def run(self):
+        if HAS_FAULTHANDLER:
+            faulthandler.enable()
+            if hasattr(signal, 'SIGUSR1'):
+                # use SIGUSR if possible...
+                faulthandler.register(signal.SIGUSR1, chain=True)
+            else:
+                # unless we are on some weird os like windows...
+                faulthandler.register(signal.SIGINT, chain=True)
         if self.disable_stderr:
             # Disable polluting stderr with errors that are supposed to happen.
             sys.stderr = open(os.devnull, "w")
@@ -211,6 +232,14 @@ class ErrorTrackingProcess(mp.Process):
         except Exception:
             self._cconn.send(ExceptionWrapper(sys.exc_info()))
             raise
+
+    def print_traces_of_all_threads(self):
+        if hasattr(signal, 'SIGUSR1'):
+            os.kill(self.pid, signal.SIGUSR1)
+        else:
+            os.kill(self.pid, signal.SIGINT)
+        # don't error too fast, give it some time to print
+        time.sleep(5)
 
     @property
     def exception(self):
@@ -789,6 +818,7 @@ class TestDataLoader(TestCase):
                 # workers.
                 loader_setup_event.wait(timeout=JOIN_TIMEOUT)
                 if not loader_setup_event.is_set():
+                    loader_p.print_traces_of_all_threads()
                     fail_msg = desc + ': loader process failed to setup within given time'
                     if loader_p.exception is not None:
                         self.fail(fail_msg + ', and had exception {}'.format(loader_p.exception))
@@ -804,6 +834,7 @@ class TestDataLoader(TestCase):
                 try:
                     loader_p.join(JOIN_TIMEOUT + MP_STATUS_CHECK_INTERVAL)
                     if loader_p.is_alive():
+                        loader_p.print_traces_of_all_threads()
                         fail_msg = desc + ': loader process did not terminate'
                         if loader_p.exception is not None:
                             self.fail(fail_msg + ', and had exception {}'.format(loader_p.exception))
