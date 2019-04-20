@@ -8,7 +8,7 @@ import argparse
 
 from caffe2.python import workspace
 
-from benchmarks.operator_benchmark import benchmark_core
+from operator_benchmark import benchmark_core
 
 """Performance microbenchmarks's main binary.
 
