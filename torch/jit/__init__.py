@@ -948,31 +948,29 @@ class ScriptMeta(type):
     # this has to inherit from pybind11's metaclass otherwise we get
     # issues because ScriptModule inherits from torch._C.ScriptModule,
     # a pybind11 type
-    def __init__(self, name, bases, attrs):
+    def __init__(cls, name, bases, attrs):
         # find all the script methods
-        self._original_methods = {}
+        cls._original_methods = {}
         methods = []
         for k, v in sorted(attrs.items()):
             if isinstance(v, ScriptMethodStub):
-                delattr(self, k)
+                delattr(cls, k)
                 methods.append(v)
-                self._original_methods[v.original_method.__name__] = v.original_method
+                cls._original_methods[v.original_method.__name__] = v.original_method
         # after the user's __init__ register all the script methods
         # with the module
-        original_init = getattr(self, '__init__', lambda self: None)
-        super_constants = getattr(super(self), '_constants_set', set())
-        self._constants_set = set(getattr(self, '__constants__', ())).union(super_constants)
-        self._overloads = dict(getattr(self, '__overloads__', {}))
-
-        cls = self
+        original_init = getattr(cls, '__init__', lambda self: None)
+        super_constants = getattr(super(cls), '_constants_set', set())
+        cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
+        cls._overloads = dict(getattr(cls, '__overloads__', {}))
 
         @functools.wraps(original_init)
         def init_then_register(self, *args, **kwargs):
             original_init(self, *args, **kwargs)
             _create_methods_from_stubs(self, methods)
 
-        self.__init__ = init_then_register
-        return super(ScriptMeta, self).__init__(name, bases, attrs)
+        cls.__init__ = init_then_register
+        return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
 if _enabled:
