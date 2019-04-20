@@ -656,7 +656,7 @@ def trace(func,
         return func
     executor_options = {'optimize': bool(optimize)}
     # Special case for common case of passing a single Tensor
-    if isinstance(example_inputs, torch.Tensor):
+    if isinstance(example_inputs, (torch.Tensor, dict)):
         example_inputs = (example_inputs,)
     # done primarily so that weird iterables fail here and not pybind11 code
     elif not isinstance(example_inputs, tuple):
@@ -727,15 +727,36 @@ def _is_new_style_class(cls):
         return ('__dict__' in dir(cls) or hasattr(cls, '__slots__'))
 
 
+def whichmodule(obj):
+    """Find the module an object belong to."""
+    module_name = getattr(obj, '__module__', None)
+    # Protect the iteration by using a list copy of sys.modules against dynamic
+    # modules that trigger imports of other modules upon calls to getattr.
+    for name, module in list(sys.modules.items()):
+        if name == '__main__' or module is None:
+            continue
+        try:
+            if _getattribute(module, name)[0] is obj:
+                return module_name
+        except AttributeError:
+            pass
+    return '__main__'
+
+
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
     name = obj.__name__
     module_name = obj.__module__
+
     # The Python docs are very clear that `__module__` can be None, but I can't
     # figure out when it actually would be.
     if module_name is None:
         raise RuntimeError("Could not get qualified name for class '{}': "
-                           "__module__ can't be None.")
+                           "__module__ can't be None.".format(name))
+
+    # if getattr(sys.modules[module_name], name) is not obj:
+    #     raise RuntimeError("Could not get qualified name for class '{}': "
+    #                        "the attr {} on module {} is not the the class".format(name, name, module_name))
 
     # __main__ is a builtin module, so rewrite it to "__torch__".
     if module_name == "__main__":
@@ -744,6 +765,11 @@ def _qualified_name(obj):
         # Everything else gets a "__torch__" prefix to avoid name collisions
         # with the names of user values.
         module_name = "__torch__." + module_name
+
+    if "." in name:
+        raise RuntimeError("Could not get qualified name for class '{}': "
+                           "'{}' is not a valid identifier".format(name, name))
+
     return module_name + "." + name
 
 

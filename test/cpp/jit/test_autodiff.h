@@ -60,9 +60,17 @@ variable_list get_grad_outputs(const variable_list& vars) {
 std::shared_ptr<Graph> trace(
     const ADTestSpec& test,
     const variable_list& vars_in) {
+  Stack input_vars = fmap<IValue>(vars_in);
+  std::vector<TypePtr> input_types;
+  input_types.reserve(input_vars.size());
+  for (auto i = 0; i < input_vars.size(); i++) {
+    input_types.push_back(TensorType::get());
+  }
+  auto input_typeptr = TupleType::create(std::move(input_types));
   std::shared_ptr<tracer::TracingState> state;
   Stack trace_stack_in;
-  std::tie(state, trace_stack_in) = tracer::enter(fmap<IValue>(vars_in));
+  std::tie(state, trace_stack_in) =
+      tracer::enter(tracer::TypedStack(input_vars, input_typeptr));
   variable_list trace_vars_in = fmap(
       trace_stack_in, [](const IValue& v) { return Variable(v.toTensor()); });
   auto trace_vars_out = test(trace_vars_in);

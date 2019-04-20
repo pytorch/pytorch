@@ -12,6 +12,7 @@ namespace c10 {
  * QScheme is an enum that specifies the type of quantization. This has a one
  * to one correspondence with Quantizer
  * Please refer to ATen/core/Quantizer.h to see the Quantizers classes.
+ * Keep this file in sync with torch/nn/_qscheme.py
  */
 enum class QScheme : uint8_t {
   PER_TENSOR_AFFINE = 0,

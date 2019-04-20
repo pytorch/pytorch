@@ -591,7 +591,7 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   // the same file (e.g. foo.bar.Baz and foo.bar.Qux)
 
   // Aggregate classes into files by their qualified names
-  std::unordered_map<std::string, std::string> fileToSrc;
+  std::unordered_map<std::string, std::ostringstream> fileToSrc;
   for (const auto& item : converted_classes_) {
     const auto& class_type = item.key();
     const auto& class_src = item.value();
@@ -601,7 +601,7 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
         ImportExportHelpers::qualifierToPath(class_type->qualifier());
     // End state: filename is "foo/bar.py", in which we will define a class
     // named Baz
-    fileToSrc[filename] += class_src;
+    fileToSrc[filename] << class_src;
   }
 
   // Write out the files. We still have to do this in converted_classes_ order,
@@ -610,18 +610,13 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
     const ClassTypePtr& class_type = item.key();
     const std::string filename =
         ImportExportHelpers::qualifierToPath(class_type->qualifier());
-    const std::string& src = fileToSrc.at(filename);
+    const std::string& src = fileToSrc.at(filename).str();
 
     std::ostringstream lib_stream;
     lib_stream << "op_version_set = " << op_version_set << "\n";
     lib_stream << src;
     std::string lib_str = lib_stream.str();
-
-    auto lib_def = model_def->add_libs();
     writer_.writeRecord(filename, lib_str.c_str(), lib_str.size());
-
-    torch::RecordRef* lib_record = lib_def->mutable_torchscript_arena();
-    lib_record->set_key(filename);
   }
 }
 
@@ -1031,14 +1026,15 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
     const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export,
-    ::torch::onnx::OperatorExportTypes operator_export_type) {
+    ::torch::onnx::OperatorExportTypes operator_export_type,
+    bool strip_doc_string) {
   auto graph_encoder = GraphEncoder(
       graph,
       onnx_opset_version,
       operator_export_type,
       initializers,
       defer_weight_export,
-      false);
+      strip_doc_string);
   return std::make_tuple(
       graph_encoder.get_model_proto().SerializeAsString(),
       graph_encoder.get_raw_data_export_map());

@@ -975,13 +975,19 @@ void initJitScriptBindings(PyObject* module) {
             // this was ensured in python before calling this function
             std::vector<Slot> parameters;
             gatherParametersAndBuffers(parameters, *self);
-            Stack inputs = toStack(input_tuple);
-            for (const Slot& param : parameters) {
-              inputs.emplace_back(param.value());
+            auto typed_inputs = toTypedStack(input_tuple);
+            if (parameters.size() > 0) {
+              auto inputs = typed_inputs.stack();
+              auto input_types = typed_inputs.types()->elements().vec();
+              for (const Slot& param : parameters) {
+                inputs.emplace_back(param.value());
+                input_types.push_back(incompleteInferTypeFrom(param.value()));
+              }
+              typed_inputs = TypedStack(inputs, TupleType::create(input_types));
             }
             auto graph = tracer::createGraphByTracing(
                 func,
-                inputs,
+                typed_inputs,
                 var_lookup_fn,
                 force_outplace,
                 input_tuple.size());
@@ -1145,7 +1151,13 @@ void initJitScriptBindings(PyObject* module) {
         }
         import_ir_module(module_lookup, in, optional_device, extra_files);
       });
-  m.def("_jit_import_methods", import_methods);
+  m.def(
+      "_jit_import_methods",
+      [](std::shared_ptr<Module> m,
+         const std::string& src,
+         const std::vector<at::Tensor>& tensor_table) {
+        import_methods(m, src, tensor_table, nullptr);
+      });
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
   m.def("_jit_clear_class_registry", ClassType::clearRegistry);
   m.def(

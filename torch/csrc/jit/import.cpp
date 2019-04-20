@@ -60,7 +60,7 @@ class ScriptModuleDeserializer final {
 
   void loadTensorTable(torch::ModelDef* model_def);
   void loadAttributeTable();
-  void loadLibs(torch::ModelDef* model_def);
+  void importCallback(const std::string& qualifier);
 
   caffe2::serialize::PyTorchStreamReader reader_;
   // this is a hack to make sure the script module created in C++ is the
@@ -71,6 +71,7 @@ class ScriptModuleDeserializer final {
 
   std::vector<at::Tensor> tensor_table_;
   std::vector<IValue> attribute_table_;
+  std::unordered_set<std::string> imported_libs_;
 };
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
@@ -103,11 +104,14 @@ void ScriptModuleDeserializer::deserialize(
       static_cast<char*>(data_ptr.get()),
       static_cast<char*>(data_ptr.get()) + data_size);
   std::string binary_string;
+  ::google::protobuf::util::JsonParseOptions opts;
+  opts.ignore_unknown_fields = true;
   auto convert_result = ::google::protobuf::util::JsonToBinaryString(
       resolver.get(),
       url_prefix + "/" + model_def.GetDescriptor()->full_name(),
       json_string,
-      &binary_string);
+      &binary_string,
+      opts);
   if (!convert_result.ok()) {
     std::stringstream ss;
     ss << convert_result;
@@ -134,7 +138,6 @@ void ScriptModuleDeserializer::deserialize(
   loadTensorTable(&model_def);
   if (model_def.proto_version() >= 2) {
     loadAttributeTable();
-    loadLibs(&model_def);
   }
 
   // TODO: this can be simplified when C++/Python interop lands,
@@ -156,26 +159,6 @@ void ScriptModuleDeserializer::loadAttributeTable() {
       reader_.getRecord("attributes.pkl");
   Unpickler unpickler(attributes_ptr.get(), attributes_size, &tensor_table_);
   attribute_table_ = unpickler.parse_ivalue_list();
-}
-
-void ScriptModuleDeserializer::loadLibs(torch::ModelDef* model_def) {
-  const auto lib_def = model_def->libs();
-  if (model_def->proto_version() <= 2) {
-    // Avoid tripping assert for old models. No models of this version actually
-    // use libs, so we don't need to actually load them in.
-    return;
-  }
-  for (const auto lib : lib_def) {
-    AT_ASSERT(lib.has_torchscript_arena());
-    at::DataPtr data;
-    size_t size;
-    std::tie(data, size) = reader_.getRecord(lib.torchscript_arena().key());
-    std::string data_str(static_cast<const char*>(data.get()), size);
-
-    const std::string class_qualifier =
-        ImportExportHelpers::pathToQualifier(lib.torchscript_arena().key());
-    script::import_libs(class_qualifier, data_str, tensor_table_);
-  }
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(
@@ -250,6 +233,21 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
   return result;
 }
 
+void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
+  if (imported_libs_.count(qualifier)) {
+    return;
+  }
+  imported_libs_.insert(qualifier);
+  std::function<void(const std::string&)> import_callback =
+      [this](const std::string& qualifier) { importCallback(qualifier); };
+  const std::string path = ImportExportHelpers::qualifierToPath(qualifier);
+  at::DataPtr data;
+  size_t size;
+  std::tie(data, size) = reader_.getRecord(path);
+  std::string src(static_cast<const char*>(data.get()), size);
+  script::import_libs(qualifier, src, tensor_table_, import_callback);
+}
+
 void ScriptModuleDeserializer::convertModule(
     const torch::ModuleDef& module_def) {
   std::shared_ptr<script::Module> module = moduleLookup_(moduleStack_);
@@ -288,7 +286,10 @@ void ScriptModuleDeserializer::convertModule(
     std::tie(data, size) =
         reader_.getRecord(module_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
-    script::import_methods(module, data_str, tensor_table_);
+
+    std::function<void(const std::string&)> import_callback =
+        [this](const std::string& qualifier) { importCallback(qualifier); };
+    script::import_methods(module, data_str, tensor_table_, import_callback);
   }
 }
 

@@ -342,31 +342,6 @@ static inline Self simpleSelf(const TypePtr& typ) {
     return std::make_shared<SimpleValue>(v);
   };
 }
-
-// Represents nested class namespaces, like `foo.bar.Baz`.
-// Right now these namespaces can only contain other namespaces or a class type.
-struct TORCH_API ClassNamespaceValue : public SugaredValue {
-  explicit ClassNamespaceValue(std::string name) : basename_(std::move(name)) {}
-
-  std::shared_ptr<SugaredValue> attr(
-      const SourceRange& loc,
-      Function& m,
-      const std::string& name) override {
-    const auto fullName = basename_ + "." + name;
-    if (auto classType = ClassType::get(fullName)) {
-      return std::make_shared<ClassValue>(classType);
-    }
-
-    return std::make_shared<ClassNamespaceValue>(fullName);
-  }
-  std::string kind() const override {
-    return "Class Namespace";
-  }
-
- private:
-  std::string basename_;
-};
-
 } // namespace script
 } // namespace jit
 } // namespace torch
