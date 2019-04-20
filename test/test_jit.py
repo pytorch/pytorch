@@ -1707,7 +1707,6 @@ graph(%x : Tensor,
         with self.assertRaisesRegex(RuntimeError, 'consistent'):
             self.checkTrace(test, (inputs,))
 
-
     # TODO: adapt to a GraphExecutor test
     @unittest.skip("Need to instrument GraphExecutors a bit more")
     def test_flags(self):
