@@ -539,5 +539,14 @@ inline py::object invokeOperatorFromPython(
 
   return createPyObjectForStack(std::move(stack));
 }
+
+inline std::shared_ptr<script::Module> as_module(const py::object& obj) {
+  if (py::isinstance(
+          obj, py::module::import("torch.jit").attr("ScriptModule"))) {
+    return py::cast<std::shared_ptr<script::Module>>(obj.attr("_c"));
+  }
+  return nullptr;
+}
+
 } // namespace jit
 } // namespace torch
