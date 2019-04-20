@@ -169,7 +169,7 @@ void import_methods(
     const std::shared_ptr<Module>& mod,
     const std::string& src,
     const std::vector<at::Tensor>& constant_table,
-    std::function<void(const std::string&)> import_callback) {
+    const std::function<void(const std::string&)>& import_callback) {
   Parser p(src);
   const size_t version = parseVersionNumber(p.lexer());
   const auto imports = parseImports(p.lexer());
@@ -200,7 +200,7 @@ void import_libs(
     const std::string& class_qualifier,
     const std::string& src,
     const std::vector<at::Tensor>& constant_table,
-    std::function<void(const std::string&)> import_callback) {
+    const std::function<void(const std::string&)>& import_callback) {
   Parser p(src);
   const size_t version = parseVersionNumber(p.lexer());
 
