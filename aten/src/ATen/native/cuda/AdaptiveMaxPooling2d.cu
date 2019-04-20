@@ -302,7 +302,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
 {
   TensorArg grad_input_arg{ gradInput, "gradInput", 1 };
   TensorArg grad_output_arg{ gradOutput_, "gradOutput_", 2 };
-  TensorArg input_arg{ input, "input", 2 };
+  TensorArg input_arg{ input, "input", 3 };
   TensorArg indices_arg{ indices, "indices", 4 };
 
   checkAllSameGPU("adaptive_max_pool2d_out_cuda",
