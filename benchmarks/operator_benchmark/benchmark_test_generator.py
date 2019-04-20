@@ -4,9 +4,9 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 
-from benchmarks.operator_benchmark.benchmark_caffe2 import Caffe2OperatorTestCase
-from benchmarks.operator_benchmark.benchmark_pytorch import PyTorchOperatorTestCase
-from benchmarks.operator_benchmark.benchmark_utils import * # noqa
+from operator_benchmark.benchmark_caffe2 import Caffe2OperatorTestCase
+from operator_benchmark.benchmark_pytorch import PyTorchOperatorTestCase
+from operator_benchmark.benchmark_utils import * # noqa
 
 
 def generate_test(configs, map_config, ops, OperatorTestCase):

@@ -3,8 +3,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from benchmarks.operator_benchmark import benchmark_core, benchmark_runner
-from benchmarks.operator_benchmark.benchmark_test_generator import *
+from operator_benchmark import benchmark_core, benchmark_runner
+from operator_benchmark.benchmark_test_generator import *
 
 import torch
 
