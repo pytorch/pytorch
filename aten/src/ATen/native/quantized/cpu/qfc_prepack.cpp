@@ -72,7 +72,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     return cpp_custom_type_hack::create(std::move(ret_ptr), weight.options());
   }
 #else // USE_FBGEMM
-  std::tuple<at::Tensor, at::Tensor> operator()(
+  at::Tensor operator()(
       const at::Tensor& /* weight */,
       int64_t /* weight_zero_point */
   ) {
