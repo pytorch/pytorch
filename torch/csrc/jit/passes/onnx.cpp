@@ -330,7 +330,7 @@ void BlockToONNX(
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
     py::object symbolic_fn =
-        onnx.attr("get_registered_op")(op->name(), domain, opset);
+        onnx_registry.attr("get_registered_op")(op->name(), domain, opset);
     py::object raw_output = onnx.attr("_run_symbolic_method")(
         op->name(), symbolic_fn, py_symbolic_args);
 
