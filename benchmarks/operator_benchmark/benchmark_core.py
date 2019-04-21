@@ -8,7 +8,7 @@ import numpy as np
 import timeit
 import json
 
-from benchmarks.operator_benchmark import benchmark_utils
+from operator_benchmark import benchmark_utils
 
 """Performance microbenchmarks.
 
