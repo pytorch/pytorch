@@ -43,7 +43,7 @@ Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
 }
 
 template <typename T>
-QTensor create(
+QTensor qcreate(
     std::unique_ptr<T> ptr,
     TensorOptions options,
     Scalar scale,
@@ -57,8 +57,11 @@ QTensor create(
 
   // size doesn't really matter, but we can align it to the actual size
   // returning variables because one likely want to use this hack from python
-  auto retval = _empty_affine_quantized(
-      {sizeof(T)}, options.device(kCPU).dtype(at::kQInt8), scale.toFloat(), zero_point.toInt());
+  auto retval = at::_empty_affine_quantized(
+      {sizeof(T)},
+      options.device(kCPU).dtype(at::kQInt8),
+      scale.toFloat(),
+      zero_point.toInt());
   retval.storage().set_data_ptr(std::move(at_ptr));
   return retval;
 }

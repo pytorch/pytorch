@@ -72,7 +72,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
 
     // TODO: we will need to replace this with torchscript classes at a later
     // point.
-    return cpp_custom_type_hack::create(
+    return cpp_custom_type_hack::qcreate(
         std::move(ret_ptr),
         weight.options(),
         weight.q_scale(),
