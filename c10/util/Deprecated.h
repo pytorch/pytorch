@@ -19,7 +19,7 @@
 // because we are C++11.  However, aspirationally, we would like
 // to use this version, because as of C++14 it is the correct and
 // portable way to declare something deprecated.
-#if defined(__cplusplus) && __cplusplus > 201402L
+#if defined(__cplusplus) && __cplusplus >= 201402L
 # define C10_DEPRECATED [[deprecated]]
 # define C10_DEPRECATED_MESSAGE(message) [[deprecated(message)]]
 #elif defined(__GNUC__)
@@ -41,7 +41,7 @@
 //    using BadType C10_DEPRECATED_USING = int;
 //
 
-#if defined(__cplusplus) && __cplusplus > 201402L
+#if defined(__cplusplus) && __cplusplus >= 201402L
 # define C10_DEPRECATED_USING [[deprecated]]
 #elif defined(_MSC_VER) && defined(__CUDACC__)
 // Apparently, [[deprecated]] doesn't work on nvcc on Windows;

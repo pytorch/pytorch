@@ -956,7 +956,7 @@
   indices: non_differentiable
   offsets: non_differentiable
   weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse, per_sample_weights)
-  per_sample_weights: _embedding_bag_per_sample_weights_backward(grad, weight, indices, result1, mode)
+  per_sample_weights: _embedding_bag_per_sample_weights_backward(grad, weight, indices, offsets, result1, mode)
 
 - name: _embedding_bag_dense_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, Tensor per_sample_weights)
   indices: non_differentiable
