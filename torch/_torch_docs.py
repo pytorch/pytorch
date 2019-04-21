@@ -2495,7 +2495,8 @@ add_docstr(torch.logspace,
 logspace(start, end, steps=100, base=10.0, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a one-dimensional tensor of :attr:`steps` points
-logarithmically spaced with base :attr:`base` between :math:`10^{{\text{{start}}}}` and :math:`10^{{\text{{end}}}}`.
+logarithmically spaced with base :attr:`base` between
+:math:`{{\text{{base}}}}^{{\text{{start}}}}` and :math:`{{\text{{base}}}}^{{\text{{end}}}}`.
 
 The output tensor is 1-D of size :attr:`steps`.
 
