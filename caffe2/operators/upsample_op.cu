@@ -33,13 +33,12 @@ __global__ void UpsampleBilinearKernel(
     float* __restrict__ Y) {
 
 
-  int indexTemp = threadIdx.x + blockIdx.x * blockDim.x;
-  if (indexTemp < output_height * output_width){
+  for (int index = threadIdx.x + blockIdx.x * blockDim.x; index < output_height * output_width; index += blockDim.x * gridDim.x){
+    int indexTemp = index;
     const int out_x = indexTemp % output_width;
     indexTemp /= output_width;
     const int out_y = indexTemp % output_height;
     indexTemp /= output_height;
-    //const int c = indexTemp % num_channels;
     indexTemp /= num_channels;
 
     const float rheight =
@@ -76,7 +75,6 @@ __global__ void UpsampleBilinearKernel(
     }
   }
 }
-
 // input is dY, output is dX
 __global__ void UpsampleBilinearGradientKernel(
     const int input_size,
