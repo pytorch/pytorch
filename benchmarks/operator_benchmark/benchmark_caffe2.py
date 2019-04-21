@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
-from benchmarks.operator_benchmark import benchmark_core, benchmark_utils
+from operator_benchmark import benchmark_core, benchmark_utils
 
 """Caffe2 performance microbenchmarks.
 
