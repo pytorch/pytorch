@@ -1,10 +1,11 @@
 #include <ATen/ATen.h>
+#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/quantized/Quantizer.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/fbgemm_utils.h>
 
 #include <algorithm>
-#include <tuple>
 
 namespace at {
 namespace native {
@@ -13,13 +14,9 @@ namespace {
 class QFCInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
-  std::tuple<at::Tensor, double, int64_t> operator()(
-      const at::Tensor& input,
-      double input_scale,
-      int64_t input_zero_point,
-      const at::Tensor& packed_weight,
-      double weight_scale,
-      int64_t weight_zero_point,
+  at::QTensor operator()(
+      const at::QTensor& input,
+      const at::QTensor& packed_weight,
       const at::Tensor& bias,
       double output_scale,
       int64_t output_zero_point) {
@@ -32,7 +29,8 @@ class QFCInt8 final : public c10::OperatorKernel {
         fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
     auto input_contig = input.contiguous();
-    const auto* input_ptr = input_contig.data<uint8_t>();
+    const auto* input_ptr =
+        reinterpret_cast<uint8_t*>(input_contig.data<c10::qint8>());
 
     AT_ASSERT(input.dim() >= 2);
     int64_t M = 1;
@@ -52,11 +50,15 @@ class QFCInt8 final : public c10::OperatorKernel {
     AT_ASSERT(bias.size(0) == N);
     AT_ASSERT(bias.dim() == 1);
 
-    float input_scale_float = static_cast<float>(input_scale);
-    int32_t input_zero_point_int32 = static_cast<int32_t>(input_zero_point);
+    float input_scale_float = static_cast<float>(input.q_scale().to<double>());
+    int32_t input_zero_point_int32 =
+        static_cast<int32_t>(input.q_zero_point().to<double>());
 
-    float weight_scale_float = static_cast<float>(weight_scale);
-    int32_t weight_zero_point_int32 = static_cast<int32_t>(weight_zero_point);
+    float weight_scale_float =
+        static_cast<float>(packed_weight.q_scale().to<double>());
+
+    int32_t weight_zero_point_int32 =
+        static_cast<int32_t>(packed_weight.q_zero_point().to<double>());
 
     float output_scale_float = static_cast<float>(output_scale) /
         input_scale_float / weight_scale_float;
@@ -106,7 +108,11 @@ class QFCInt8 final : public c10::OperatorKernel {
         /*nCol=*/N);
 
     // Allocate output Tensor and a buffer for fbgemmPacked to use
-    auto output = at::zeros({M, N}, input.options().dtype(at::kByte));
+    auto output = _empty_affine_quantized(
+        {M, N},
+        at::device(kCPU).dtype(kQInt8),
+        output_scale,
+        output_zero_point);
 
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
@@ -114,26 +120,22 @@ class QFCInt8 final : public c10::OperatorKernel {
     fbgemm::fbgemmPacked(
         /*packA=*/packA,
         /*packB=*/*packB,
-        /*C=*/output.data<uint8_t>(),
+        /*C=*/reinterpret_cast<uint8_t*>(output.data<c10::qint8>()),
         /*C_buffer=*/buffer.data<int32_t>(),
         /*ldc=*/N,
         /*outProcess=*/outputProcObj,
         /*thread_id=*/0,
         /*num_threads=*/1);
 
-    return std::make_tuple(output, output_scale, output_zero_point);
+    return output;
   }
 #else // USE_FBGEMM
-  std::tuple<at::Tensor, double, int64_t> operator()(
-      const at::Tensor& /* input */,
-      double /* input_scale */,
-      int64_t /* input_zero_point */,
-      const at::Tensor& /* packed_weight */,
-      double /* weight_scale */,
-      int64_t /* weight_zero_point */,
-      const at::Tensor& /* bias */,
-      double /* output_scale */,
-      int64_t /* output_zero_point */) {
+  at::QTensor operator()(
+      const at::QTensor& input,
+      const at::QTensor& packed_weight,
+      const at::Tensor& bias,
+      double output_scale,
+      int64_t output_zero_point) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -144,9 +146,9 @@ class QFCInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    "quantized::fc(Tensor X, float X_scale, int X_zero_point, Tensor W_prepack, float W_scale, int W_zero_point, Tensor b, float Y_scale_i, int Y_zero_point_i) -> (Tensor Y, float Y_scale_o, int Y_zero_point_o)",
+    "quantized::fc(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
     c10::kernel<QFCInt8>(),
-    c10::dispatchKey(CPUTensorId()));
+    c10::dispatchKey(QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at
