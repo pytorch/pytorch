@@ -30,10 +30,12 @@ def load_derivatives(path, declarations):
     return autograd_functions
 
 
-def create_differentiability_info(signature, output_differentiability,
+def create_differentiability_info(signature, non_differentiable_arg_names,
+                                  output_differentiability,
                                   autograd_fn):
     return {
         'signature': signature,
+        'non_differentiable_arg_names': non_differentiable_arg_names,
         'output_differentiability': output_differentiability,
         'autograd_fn': autograd_fn,
     }
@@ -41,7 +43,7 @@ def create_differentiability_info(signature, output_differentiability,
 
 # How do you feel about pasting declaration inside autograd function...
 def create_autograd_function(name, derivatives, args_with_derivatives,
-                             declaration, non_differentiable_arg_names):
+                             declaration):
     op = to_camel_case(name) + 'Backward'
     op = op.replace('ForwardBackward', 'Backward')
     return {
@@ -49,7 +51,6 @@ def create_autograd_function(name, derivatives, args_with_derivatives,
         'op': op,
         'declaration': declaration,
         'args_with_derivatives': args_with_derivatives,
-        'non_differentiable_arg_names': non_differentiable_arg_names,
         'derivatives': derivatives,
         'saved_inputs': all_saved_variables(derivatives, 'saved_inputs'),
         'saved_outputs': all_saved_variables(derivatives, 'saved_outputs'),
@@ -221,9 +222,10 @@ def process_definition(defn, declarations_by_signature):
     # only create an autograd function if we are actually going to calculate a derivative
     if len(args_with_derivatives) > 0:
         autograd_fn = create_autograd_function(defn_name, derivatives, args_with_derivatives,
-                                               canonical, non_differentiable_arg_names)
+                                               canonical)
 
-    return create_differentiability_info(signature, output_differentiability, autograd_fn)
+    return create_differentiability_info(signature, non_differentiable_arg_names,
+                                         output_differentiability, autograd_fn)
 
 
 def ensure_unique_names(autograd_functions):
@@ -381,4 +383,5 @@ def match_declarations_with_differentiability_info(declarations, differentiabili
     for declaration in declarations:
         info = find_info(declaration)
         declaration['derivative'] = info['autograd_fn'] if info else None
+        declaration['non_differentiable_arg_names'] = info['non_differentiable_arg_names'] if info else None
         declaration['output_differentiability'] = info['output_differentiability'] if info else None
