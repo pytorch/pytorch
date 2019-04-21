@@ -2949,14 +2949,12 @@
 - func: tril(Tensor self, int diagonal=0) -> Tensor
   variants: method, function
 
-- func: tril_indices(int row, int col, int offset=0, *, TensorOptions options=at::kLong) -> Tensor
-  matches_jit_signature: False
+- func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: tril_indices_cpu
     CUDA: tril_indices_cuda
 
-- func: triu_indices(int row, int col, int offset=0, *, TensorOptions options=at::kLong) -> Tensor
-  matches_jit_signature: False
+- func: triu_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: triu_indices_cpu
     CUDA: triu_indices_cuda
