@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 
 namespace torch {
 namespace jit {
@@ -328,6 +329,13 @@ void Module::clone_method(const Module& orig, const std::string& name) {
     }
   }
   return clone_method(orig, name, type_remap);
+}
+
+void Module::train(bool on) {
+ for (auto& submod : get_modules()) {
+   submod->train(on);
+ }
+ register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
 }
 
 } // namespace script
