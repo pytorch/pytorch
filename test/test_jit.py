@@ -1666,48 +1666,6 @@ graph(%x : Tensor,
         inputs = {'x': nested_input, 'force_unify': unified_nested}
         self.checkTrace(test, (inputs,), allow_unused=True)
 
-    def test_input_dict_of_lists(self):
-        def test(d):
-            return d['x'][0]
-
-        inputs = {'x': [torch.rand(3, 2)]}
-        self.checkTrace(test, (inputs,))
-
-    def test_input_list_toplevel_flatten(self):
-        def test(t1, t2):
-            return torch.add(t1, t2)
-
-        inputs = [torch.ones(2, 2), torch.rand(2, 2)]
-        self.checkTrace(test, inputs)
-
-    def test_input_list_toplevel_flatten_direct(self):
-        class Test(torch.nn.Module):
-            def forward(self, t1, t2):
-                return torch.add(t1, t2)
-        inputs = [torch.ones(2, 2), torch.rand(2, 2)]
-        torch.jit.trace(Test(), inputs)
-
-    def test_input_list_of_tuples(self):
-        def test(l):
-            return l[0][0]
-        inputs = [(torch.ones(2, 2),)]
-        self.checkTrace(test, (inputs,))
-
-    def test_input_dict_empty_list(self):
-        def test(d):
-            pass
-        inputs = {1: []}
-        with self.assertRaisesRegex(RuntimeError, 'List trace'):
-            self.checkTrace(test, (inputs,))
-
-    def test_input_list_mixed_type(self):
-        def test(d):
-            pass
-        inputs = [torch.rand(2, 3), (torch.ones(2), torch.ones(2))]
-        with self.assertRaisesRegex(RuntimeError, 'consistent'):
-            self.checkTrace(test, (inputs,))
-
-
     # TODO: adapt to a GraphExecutor test
     @unittest.skip("Need to instrument GraphExecutors a bit more")
     def test_flags(self):
