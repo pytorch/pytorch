@@ -285,7 +285,6 @@ def _generate_function_classes(scope_dict):
         'VolumetricMaxPooling',
         'VolumetricMaxUnpooling',
         'VolumetricAdaptiveAveragePooling',
-        'VolumetricAdaptiveMaxPooling',
         'VolumetricConvolution',
         'VolumetricFullConvolution',
         'VolumetricConvolutionMM',
