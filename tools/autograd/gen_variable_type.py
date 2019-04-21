@@ -491,6 +491,8 @@ def emit_body(declaration):
             # assert name.startswith('_th_'), \
             # "IndexTensor and BoolTensor are restricted to legacy _th_ functions only.
             return False
+        if arg['name'] in declaration.get('non_differentiable_arg_names', []):
+            return False
         return True
 
     def find_args_with_derivatives(differentiable_inputs):
