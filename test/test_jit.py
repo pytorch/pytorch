@@ -1288,7 +1288,7 @@ graph(%x : Tensor,
         trace = torch.jit.trace(testModule(), (torch.ones(1, 1, 1, 1)))
 
         qparam_dict = _helper_generate_qparam(trace, x1)
-        if qparam_dict is None:
+        if not len(qparam_dict):
             return
         torch._C._jit_pass_insert_quantdequant(trace.graph, qparam_dict)
 
