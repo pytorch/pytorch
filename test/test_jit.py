@@ -11022,6 +11022,13 @@ a")
         self.checkScript(fn, ("h"))
         self.checkScript(fn, ("y"))
 
+        def index_str_to_tensor(s):
+            # type: (str) -> int
+            return torch.tensor(ord(s))
+
+        s = u'\u00a3'.encode('utf8')[:1]
+        self.checkScript(index_str_to_tensor, (s,))
+
     def test_string_slicing(self):
         def fn1(x):
             # type: (str) -> str

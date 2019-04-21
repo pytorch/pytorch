@@ -1360,7 +1360,7 @@ void loadModule(const script::CompilationUnit& module) {
 void loadFunctions() {
   for (const std::string& str : functions) {
     script::CompilationUnit cu;
-    cu.define(str, script::nativeResolver, nullptr);
+    cu.define(str, script::nativeResolver(), nullptr);
     loadModule(cu);
   }
 }
