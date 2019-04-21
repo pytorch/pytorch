@@ -36,13 +36,13 @@ using namespace torch::autograd;
 // of a single type only. Adding this logic directly in the loop makes it a bit
 // ugly, so here's a helper for it.
 struct unique_type_checker {
-  void show(const at::Type& t) {
+  void show(const at::DeprecatedTypeProperties& t) {
     if (!unique) return;
     if (!type) type = &t;
     unique = (type == &t);
   }
 
-  const at::Type *type = nullptr;
+  const at::DeprecatedTypeProperties *type = nullptr;
   bool unique = true;
 };
 
