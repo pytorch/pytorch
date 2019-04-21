@@ -8771,7 +8771,7 @@ class _TestTorchMixin(object):
                     tensor = tensor.clone().resize_(shape)
                     dst1 = torch.nonzero(tensor)
                     dst2 = tensor.nonzero()
-                    dst3 = torch.LongTensor(device=device)
+                    dst3 = torch.LongTensor().to(device)
                     torch.nonzero(tensor, out=dst3)
                     if len(shape) == 1:
                         dst = []
