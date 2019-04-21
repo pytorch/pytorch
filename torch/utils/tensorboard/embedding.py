@@ -1,8 +1,8 @@
 import os
 import math
 import numpy as np
-from .x2num import make_np
-from .utils import make_grid
+from .convert_np import make_np
+from ._utils import make_grid
 from PIL import Image
 from posixpath import join
 

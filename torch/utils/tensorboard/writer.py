@@ -21,7 +21,7 @@ from .summary import (
     scalar, histogram, histogram_raw, image, audio, text,
     pr_curve, pr_curve_raw, video, custom_scalars, image_boxes
 )
-from .utils import figure_to_image
+from ._utils import figure_to_image
 
 
 class FileWriter(object):
@@ -186,7 +186,7 @@ class SummaryWriter(object):
         """This adds an entry to the self.scalar_dict datastructure with format
         {writer_id : [[timestamp, step, value], ...], ...}.
         """
-        from .x2num import make_np
+        from .convert_np import make_np
         if tag not in self.scalar_dict.keys():
             self.scalar_dict[tag] = []
         self.scalar_dict[tag].append(
@@ -566,7 +566,7 @@ class SummaryWriter(object):
             writer.add_embedding(torch.randn(100, 5), label_img=label_img)
             writer.add_embedding(torch.randn(100, 5), metadata=meta)
         """
-        from .x2num import make_np
+        from .convert_np import make_np
         mat = make_np(mat)
         if global_step is None:
             global_step = 0
@@ -607,7 +607,7 @@ class SummaryWriter(object):
             walltime (float): Optional override default walltime (time.time()) of event
 
         """
-        from .x2num import make_np
+        from .convert_np import make_np
         labels, predictions = make_np(labels), make_np(predictions)
         self.get_file_writer().add_summary(
             pr_curve(tag, labels, predictions, num_thresholds, weights),

@@ -6,15 +6,21 @@ from __future__ import unicode_literals
 import matplotlib.pyplot as plt
 import numpy as np
 import os
-import pytest
 import sys
 import unittest
 
 import torch
 from common_utils import run_tests
-from torch.utils.tensorboard import x2num, SummaryWriter
+from torch.utils.tensorboard import convert_np, SummaryWriter
 from torch.utils.tensorboard import summary
-from torch.utils.tensorboard.utils import _prepare_video, convert_to_HWC
+from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
+
+
+TEST_TENSORBOARD = True
+try:
+    import tensorboard.summary.writer.event_file_writer
+except ImportError:
+    TEST_TENSORBOARD = False
 
 
 class TestTensorBoardPyTorchNumpy(unittest.TestCase):
@@ -22,22 +28,22 @@ class TestTensorBoardPyTorchNumpy(unittest.TestCase):
         tensors = [torch.rand(3, 10, 10), torch.rand(1), torch.rand(1, 2, 3, 4, 5)]
         for tensor in tensors:
             # regular tensor
-            assert isinstance(x2num.make_np(tensor), np.ndarray)
+            self.assertIsInstance(convert_np.make_np(tensor), np.ndarray)
 
             # CUDA tensor
             if torch.cuda.device_count() > 0:
-                assert isinstance(x2num.make_np(tensor.cuda()), np.ndarray)
+                self.assertIsInstance(convert_np.make_np(tensor.cuda()), np.ndarray)
 
             # regular variable
-            assert isinstance(x2num.make_np(torch.autograd.Variable(tensor)), np.ndarray)
+            self.assertIsInstance(convert_np.make_np(torch.autograd.Variable(tensor)), np.ndarray)
 
             # CUDA variable
             if torch.cuda.device_count() > 0:
-                assert isinstance(x2num.make_np(torch.autograd.Variable(tensor).cuda()), np.ndarray)
+                self.assertIsInstance(convert_np.make_np(torch.autograd.Variable(tensor).cuda()), np.ndarray)
 
         # python primitive type
-        assert(isinstance(x2num.make_np(0), np.ndarray))
-        assert(isinstance(x2num.make_np(0.1), np.ndarray))
+        self.assertIsInstance(convert_np.make_np(0), np.ndarray)
+        self.assertIsInstance(convert_np.make_np(0.1), np.ndarray)
 
     def test_pytorch_write(self):
         with SummaryWriter() as w:
@@ -51,7 +57,7 @@ class TestTensorBoardPyTorchNumpy(unittest.TestCase):
     def test_pytorch_histogram_raw(self):
         with SummaryWriter() as w:
             num = 50
-            floats = x2num.make_np(torch.rand((num,)))
+            floats = convert_np.make_np(torch.rand((num,)))
             bins = [0.0, 0.25, 0.5, 0.75, 1.0]
             counts, limits = np.histogram(floats, bins)
             sum_sq = floats.dot(floats).item()
@@ -64,7 +70,7 @@ class TestTensorBoardPyTorchNumpy(unittest.TestCase):
                                 bucket_limits=limits.tolist(),
                                 bucket_counts=counts.tolist())
 
-            ints = x2num.make_np(torch.randint(0, 100, (num,)))
+            ints = convert_np.make_np(torch.randint(0, 100, (num,)))
             bins = [0, 25, 50, 75, 100]
             counts, limits = np.histogram(ints, bins)
             sum_sq = ints.dot(ints).item()
@@ -83,13 +89,13 @@ class TestTensorBoardUtils(unittest.TestCase):
         np.random.seed(1)
         test_image = np.random.randint(0, 256, size=(3, 32, 32), dtype=np.uint8)
         converted = convert_to_HWC(test_image, 'chw')
-        assert converted.shape == (32, 32, 3)
+        self.assertEqual(converted.shape, (32, 32, 3))
         test_image = np.random.randint(0, 256, size=(16, 3, 32, 32), dtype=np.uint8)
         converted = convert_to_HWC(test_image, 'nchw')
-        assert converted.shape == (64, 256, 3)
+        self.assertEqual(converted.shape, (64, 256, 3))
         test_image = np.random.randint(0, 256, size=(32, 32), dtype=np.uint8)
         converted = convert_to_HWC(test_image, 'hw')
-        assert converted.shape == (32, 32, 3)
+        self.assertEqual(converted.shape, (32, 32, 3))
 
     def test_prepare_video(self):
         # at each timestep the sum over all other dimensions of the video should stay the same
@@ -153,7 +159,7 @@ class TestTensorBoardSummaryWriter(unittest.TestCase):
         # after using a SummaryWriter as a ctx it should be closed
         with SummaryWriter(filename_suffix='.test') as writer:
             writer.add_scalar('test', 1)
-        assert writer.file_writer is None
+        self.assertIs(writer.file_writer, None)
 
     def test_summary_writer_close(self):
         # Opening and closing SummaryWriter a lot should not run into
@@ -165,7 +171,7 @@ class TestTensorBoardSummaryWriter(unittest.TestCase):
         except OSError:
             passed = False
 
-        assert passed
+        self.assertTrue(passed)
 
     def test_pathlib(self):
         import sys
@@ -228,7 +234,7 @@ class TestTensorBoardSummary(unittest.TestCase):
         '''
         test_image = np.random.randint(0, 256, size=(3, 32, 32), dtype=np.uint8)
         scale_factor = summary._calc_scale_factor(test_image)
-        assert scale_factor == 1, 'Values are already in [0, 255], scale factor should be 1'
+        self.assertEqual(scale_factor, 1, 'Values are already in [0, 255], scale factor should be 1')
 
     def test_float32_image(self):
         '''
@@ -237,68 +243,59 @@ class TestTensorBoardSummary(unittest.TestCase):
         '''
         test_image = np.random.rand(3, 32, 32).astype(np.float32)
         scale_factor = summary._calc_scale_factor(test_image)
-        assert scale_factor == 255, 'Values are in [0, 1], scale factor should be 255'
+        self.assertEqual(scale_factor, 255, 'Values are in [0, 1], scale factor should be 255')
 
     def test_list_input(self):
-        with pytest.raises(Exception) as e_info:
+        with self.assertRaises(Exception) as e_info:
             summary.histogram('dummy', [1, 3, 4, 5, 6], 'tensorflow')
 
     def test_empty_input(self):
         print('expect error here:')
-        with pytest.raises(Exception) as e_info:
+        with self.assertRaises(Exception) as e_info:
             summary.histogram('dummy', np.ndarray(0), 'tensorflow')
 
     def test_image_with_boxes(self):
-        compare_proto(summary.image_boxes('dummy',
+        self.assertTrue(compare_proto(summary.image_boxes('dummy',
                                           np.random.rand(3, 32, 32).astype(np.float32),
                                           np.array([[10, 10, 40, 40]])),
-                      self)
+                                          self))
 
     def test_image_with_one_channel(self):
-        np.random.seed(0)
-        compare_proto(summary.image('dummy', np.random.rand(1, 8, 8).astype(np.float32), dataformats='CHW'), self)
+        self.assertTrue(compare_proto(summary.image('dummy', np.random.rand(1, 8, 8).astype(np.float32), dataformats='CHW'), self))
 
     def test_image_with_one_channel_batched(self):
-        np.random.seed(0)
-        compare_proto(summary.image('dummy', np.random.rand(2, 1, 8, 8).astype(np.float32), dataformats='NCHW'), self)
+        self.assertTrue(compare_proto(summary.image('dummy', np.random.rand(2, 1, 8, 8).astype(np.float32), dataformats='NCHW'), self))
 
     def test_image_with_3_channel_batched(self):
-        np.random.seed(0)
-        compare_proto(summary.image('dummy', np.random.rand(2, 3, 8, 8).astype(np.float32), dataformats='NCHW'), self)
+        self.assertTrue(compare_proto(summary.image('dummy', np.random.rand(2, 3, 8, 8).astype(np.float32), dataformats='NCHW'), self))
 
     def test_image_without_channel(self):
-        np.random.seed(0)
-        compare_proto(summary.image('dummy', np.random.rand(8, 8).astype(np.float32), dataformats='HW'), self)
+        self.assertTrue(compare_proto(summary.image('dummy', np.random.rand(8, 8).astype(np.float32), dataformats='HW'), self))
 
     def test_video(self):
         try:
             import moviepy  # noqa F401
         except ImportError:
             return
-        np.random.seed(0)
-        compare_proto(summary.video('dummy', np.random.rand(4, 3, 1, 8, 8).astype(np.float32)), self)
+        self.assertTrue(compare_proto(summary.video('dummy', np.random.rand(4, 3, 1, 8, 8).astype(np.float32)), self))
         summary.video('dummy', np.random.rand(16, 48, 1, 28, 28).astype(np.float32))
         summary.video('dummy', np.random.rand(20, 7, 1, 8, 8).astype(np.float32))
 
     def test_audio(self):
-        np.random.seed(0)
-        compare_proto(summary.audio('dummy', np.random.rand(42)), self)
+        self.assertTrue(compare_proto(summary.audio('dummy', np.random.rand(42)), self))
 
     # TODO: add back after new PR in tensorboard landed
     # def test_text(self):
     #     compare_proto(summary.text('dummy', 'text 123'), self)
 
     def test_histogram_auto(self):
-        np.random.seed(0)
-        compare_proto(summary.histogram('dummy', np.random.rand(1024), bins='auto', max_bins=5), self)
+        self.assertTrue(compare_proto(summary.histogram('dummy', np.random.rand(1024), bins='auto', max_bins=5), self))
 
     def test_histogram_fd(self):
-        np.random.seed(0)
-        compare_proto(summary.histogram('dummy', np.random.rand(1024), bins='fd', max_bins=5), self)
+        self.assertTrue(compare_proto(summary.histogram('dummy', np.random.rand(1024), bins='fd', max_bins=5), self))
 
     def test_histogram_doane(self):
-        np.random.seed(0)
-        compare_proto(summary.histogram('dummy', np.random.rand(1024), bins='doane', max_bins=5), self)
+        self.assertTrue(compare_proto(summary.histogram('dummy', np.random.rand(1024), bins='doane', max_bins=5), self))
 
 
 def remove_whitespace(string):
@@ -307,7 +304,7 @@ def remove_whitespace(string):
 
 def compare_proto(str_to_compare, function_ptr):
     # TODO: enable test after tensorboard is ready.
-    return
+    return True
     if 'histogram' in function_ptr.id():
         return  # numpy.histogram has slight difference between versions
 
@@ -327,7 +324,7 @@ def compare_proto(str_to_compare, function_ptr):
     str_to_compare = str(str_to_compare)
     print(remove_whitespace(str_to_compare))
     print(remove_whitespace(expected))
-    assert remove_whitespace(str_to_compare) == remove_whitespace(expected)
+    return remove_whitespace(str_to_compare) == remove_whitespace(expected)
 
 
 def write_proto(str_to_compare, function_ptr):
@@ -379,10 +376,10 @@ class TestTensorBoardFigure(unittest.TestCase):
         plt.tight_layout()
 
         writer.add_figure("add_figure/figure", figure, 0, close=False)
-        assert plt.fignum_exists(figure.number) is True
+        self.assertTrue(plt.fignum_exists(figure.number))
 
         writer.add_figure("add_figure/figure", figure, 1)
-        assert plt.fignum_exists(figure.number) is False
+        self.assertFalse(plt.fignum_exists(figure.number))
 
         writer.close()
 
@@ -400,36 +397,36 @@ class TestTensorBoardFigure(unittest.TestCase):
             figures.append(figure)
 
         writer.add_figure("add_figure/figure_list", figures, 0, close=False)
-        assert all([plt.fignum_exists(figure.number) is True for figure in figures])  # noqa F812
+        self.assertTrue(all([plt.fignum_exists(figure.number) is True for figure in figures]))  # noqa F812
 
         writer.add_figure("add_figure/figure_list", figures, 1)
-        assert all([plt.fignum_exists(figure.number) is False for figure in figures])  # noqa F812
+        self.assertTrue(all([plt.fignum_exists(figure.number) is False for figure in figures]))  # noqa F812
 
         writer.close()
 
 
 class TestTensorBoardNumpy(unittest.TestCase):
     def test_scalar(self):
-        res = x2num.make_np(1.1)
-        assert isinstance(res, np.ndarray) and res.shape == (1,)
-        res = x2num.make_np(1 << 64 - 1)  # uint64_max
-        assert isinstance(res, np.ndarray) and res.shape == (1,)
-        res = x2num.make_np(np.float16(1.00000087))
-        assert isinstance(res, np.ndarray) and res.shape == (1,)
-        res = x2num.make_np(np.float128(1.00008 + 9))
-        assert isinstance(res, np.ndarray) and res.shape == (1,)
-        res = x2num.make_np(np.int64(100000000000))
-        assert isinstance(res, np.ndarray) and res.shape == (1,)
+        res = convert_np.make_np(1.1)
+        self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
+        res = convert_np.make_np(1 << 64 - 1)  # uint64_max
+        self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
+        res = convert_np.make_np(np.float16(1.00000087))
+        self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
+        res = convert_np.make_np(np.float128(1.00008 + 9))
+        self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
+        res = convert_np.make_np(np.int64(100000000000))
+        self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
 
     def test_numpy_vid(self):
         shapes = [(16, 3, 30, 28, 28), (19, 3, 30, 28, 28), (19, 3, 29, 23, 19)]
         for s in shapes:
             x = np.random.random_sample(s)
-            # assert x2num.make_np(x, 'VID').shape[3] == 3
+            # assert convert_np.make_np(x, 'VID').shape[3] == 3
 
     def test_numpy_vid_uint8(self):
         x = np.random.randint(0, 256, (16, 3, 30, 28, 28)).astype(np.uint8)
-        # x2num.make_np(x, 'VID').shape[3] == 3
+        # convert_np.make_np(x, 'VID').shape[3] == 3
 
 if __name__ == '__main__':
     run_tests()
