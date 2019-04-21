@@ -75,8 +75,8 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     return cpp_custom_type_hack::create(
         std::move(ret_ptr),
         weight.options(),
-        weight.q_scale().toDouble(),
-        weight.q_zero_point().toLong());
+        weight.q_scale(),
+        weight.q_zero_point());
   }
 #else // USE_FBGEMM
   at::QTensor operator()(const at::QTensor& /* weight */

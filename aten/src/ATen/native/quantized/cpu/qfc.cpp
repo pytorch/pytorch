@@ -131,11 +131,11 @@ class QFCInt8 final : public c10::OperatorKernel {
   }
 #else // USE_FBGEMM
   at::QTensor operator()(
-      const at::QTensor& input,
-      const at::QTensor& packed_weight,
-      const at::Tensor& bias,
-      double output_scale,
-      int64_t output_zero_point) {
+      const at::QTensor& /* input */,
+      const at::QTensor& /* packed_weight */,
+      const at::Tensor& /* bias */,
+      double /* output_scale */,
+      int64_t /* output_zero_point */) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
