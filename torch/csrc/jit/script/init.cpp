@@ -1042,6 +1042,19 @@ void initJitScriptBindings(PyObject* module) {
             return invokeScriptMethodFromPython(
                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
           })
+      .def(
+          "benchmark",
+          [](py::args args, py::kwargs kwargs) {
+            int64_t niter = py::cast<int64_t>(args[1]);
+            Method& method = py::cast<Method&>(args[0]);
+            auto stack = createStackForSchema(
+                method.getSchema(), tuple_slice(std::move(args), 2), std::move(kwargs));
+            {
+              AutoNoGIL no_gil_guard;
+              method.benchmark(stack, niter);
+            }
+          }
+      )
       .def_property_readonly("graph", &Method::graph)
       .def(
           "initial_ivalues",

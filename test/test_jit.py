@@ -13155,6 +13155,10 @@ def add_autograd_test(
                             check_against_reference(self, traced_fn,
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
+                            # Fuser not supported on windows
+                            if IS_WINDOWS:
+                                autodiff_nodes = autodiff_nodes + fusible_nodes
+                                fusible_nodes = []
                             self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
                         if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
@@ -13163,6 +13167,10 @@ def add_autograd_test(
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
 
+                            # Fuser not supported on windows
+                            if IS_WINDOWS:
+                                autodiff_nodes = autodiff_nodes + fusible_nodes
+                                fusible_nodes = []
                             self.assertAutodiffNode(script_fn.last_graph,
                                                     should_autodiff_node and test_name not in EXCLUDE_SCRIPT_AD_CHECK,
                                                     autodiff_nodes,
