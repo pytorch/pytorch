@@ -1,8 +1,9 @@
 #pragma once
 
-#include <unordered_set>
-#include <unordered_map>
 #include <memory>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -30,6 +31,8 @@ class MemoryDAG {
   // Make `from` point at `to`.
   void makePointerTo(Element* from, Element* to);
 
+  void addToContainedElements(Element* contained, Element* container);
+
   // Make a fresh element (i.e. an element that doesn't point to anything) and
   // return it.
   Element* makeFreshValue(const Value* v);
@@ -37,6 +40,10 @@ class MemoryDAG {
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Element* a, const Element* b) const;
   bool mayAlias(Element* a, Element* b) const;
+
+  // Does a hold reference to any memory that is stored in elem, or vice versa?
+  bool mayContainAlias(const Element* a, const Element* b) const;
+  bool mayContainAlias(Element* a, Element* b) const;
 
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`?
@@ -79,7 +86,9 @@ class MemoryDAG {
   }
 
  private:
-   bool mayAliasImpl(const Element* a, const Element* b) const;
+  bool mayAliasImpl(const Element* a, const Element* b) const;
+  bool mayContainAliasImpl(const Element* contained, const Element* container)
+      const;
   // Structure that owns all the element pointers. It's a map of
   //  raw pointer -> unique_ptr to facilitate easy queries
   std::unordered_map<Element*, std::unique_ptr<Element>> elements_;
@@ -104,6 +113,8 @@ struct Element {
   // Backreference for points-to.
   std::unordered_set<Element*> pointedFrom;
 
+  std::unordered_set<Element*> contained_elements;
+
   // Return the unique memory locations that `Element` might represent.
   std::unordered_set<const Element*> getMemoryLocations() const;
   // We do path compression to make repeated memory location queries faster.
@@ -116,6 +127,5 @@ struct Element {
   template <typename Fn>
   bool bfs(Fn fn, BfsDirection dir) const;
 };
-
 } // namespace jit
 } // namespace torch
