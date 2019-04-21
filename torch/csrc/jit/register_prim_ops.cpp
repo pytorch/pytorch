@@ -1041,25 +1041,6 @@ RegisterOperators logging_operators(
             return 0;                                                          \
           })
 
-// define implementations for python
-#define DEFINE_GENERI_PYTHON_OP(aten_op, int_op, float_op, int_result, float_result) \
-  Operator(                                                                    \
-      #aten_op "(int a) -> " #float_result,                                    \
-      [](Stack& stack) {                                                       \
-        int64_t a;                                                              \
-        pop(stack, a);                                                         \
-        push(stack, int_op);                                                   \
-        return 0;                                                              \
-      }),                                                                      \
-      Operator(                                                                \
-          #aten_op "(float a) -> " #float_result, [](Stack& stack) {           \
-            double a;                                                          \
-            pop(stack, a);                                                     \
-            push(stack, float_op);                                             \
-            return 0;                                                          \
-          })
-
-
 #define DEFINE_INT_FLOAT_OP(aten_op, op, result)                           \
   Operator(                                                                \
       #aten_op "(int a, float b) -> " #result,                             \
@@ -2175,100 +2156,12 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::expm1, std::expm1(a), float, float),
     DEFINE_UNARY_OP(aten::fabs, std::fabs(a), float, float),
     DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
-
-    Operator(
-        "aten::isnan(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::isnan(a));
-          return 0;
-        }),
-
-    Operator(
-        "aten::asinh(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::asinh(a));
-          return 0;
-        }),
-    Operator(
-        "aten::asinh(int a) -> float",
-        [](Stack& stack) {
-          int64_t a;
-          pop(stack, a);
-          push(stack, std::asinh(a));
-          return 0;
-        }),
-
-    Operator(
-        "aten::atanh(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::atanh(a));
-          return 0;
-        }),
-    Operator(
-        "aten::atanh(int a) -> float",
-        [](Stack& stack) {
-          int64_t a;
-          pop(stack, a);
-          push(stack, std::atanh(a));
-          return 0;
-        }),
-
-    Operator(
-        "aten::cosh(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::cosh(a));
-          return 0;
-        }),
-    Operator(
-        "aten::cosh(int a) -> float",
-        [](Stack& stack) {
-          int64_t a;
-          pop(stack, a);
-          push(stack, std::cosh(a));
-          return 0;
-        }),
-
-    Operator(
-        "aten::sinh(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::sinh(a));
-          return 0;
-        }),
-    Operator(
-        "aten::sinh(int a) -> float",
-        [](Stack& stack) {
-          int64_t a;
-          pop(stack, a);
-          push(stack, std::sinh(a));
-          return 0;
-        }),
-
-    Operator(
-        "aten::tanh(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::tanh(a));
-          return 0;
-        }),
-    Operator(
-        "aten::tanh(int a) -> float",
-        [](Stack& stack) {
-          int64_t a;
-          pop(stack, a);
-          push(stack, std::tanh(a));
-          return 0;
-        }),
+    DEFINE_UNARY_OP(aten::isnan, std::isnan(a), float, float),
+    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
+    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
+    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
+    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
+    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),
