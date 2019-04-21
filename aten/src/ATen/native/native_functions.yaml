@@ -435,7 +435,6 @@
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
@@ -688,7 +687,6 @@
     SparseCUDA: empty_sparse
 
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: empty_affine_quantized_cpu
 
