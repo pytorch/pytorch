@@ -1413,6 +1413,9 @@
   output_differentiability: [True, True, True, False, False]
   input, hx, cx, weight: "_cudnn_rnn_backward(input, weight, weight_stride0, result4, hx, cx, result0, grads[0], grads[1], grads[2], mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, retain_variables ? result3.clone() : result3, grad_input_mask)"
 
+- name: _cudnn_rnn_backward(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor cx, Tensor output, Tensor grad_output, Tensor grad_hy, Tensor grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, Tensor dropout_state, Tensor reserve, std::array<bool,4> output_mask)
+  dropout_state: non_differentiable
+
 # miopen
 
 - name: miopen_convolution_transpose(Tensor self, Tensor weight, Tensor bias, IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic)
