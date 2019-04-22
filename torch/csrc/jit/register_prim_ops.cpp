@@ -116,10 +116,10 @@ RegisterOperators reg(
     {Operator(
          "prim::profile(...) -> ()",
          [](const Node* node) {
-           return [node](Stack& stack) {
-             auto addr = node->i(attr::data);
-             std::function<void(Stack&)>& callback =
-                 *reinterpret_cast<std::function<void(Stack&)>*>(addr);
+           // TODO: figure out why cast isn't marked as const
+           auto n = const_cast<Node*>(node); // NOLINT
+           auto callback = n->cast<ProfileOp>()->getCallback();
+           return [callback](Stack& stack) {
              callback(stack);
              return 0;
            };
