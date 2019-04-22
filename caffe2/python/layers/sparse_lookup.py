@@ -54,6 +54,10 @@ class SparseLookup(ModelLayer):
         'WeightedMean', 'None'
     ]
 
+    _fp16_compatible_init_op_types = [
+        'Float16UniformFill'
+    ]
+
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
                  name='sparse_lookup', regularizer=None, **kwargs):
@@ -88,9 +92,23 @@ class SparseLookup(ModelLayer):
         self.input_dim = input_dim
         self.shape = [input_dim] + inner_shape
 
+        cur_scope = get_current_scope()
+        trainer_version = get_sparse_lookup_trainer_version(
+            **cur_scope.get(get_sparse_lookup_trainer_version.__name__,
+                            {'version': 'fp32'}))
+
+        self.trainer_version = trainer_version
+
         default_init_op = self._get_default_init_op()
 
         self.weight_init = weight_init or default_init_op
+
+        if self.trainer_version == "fp16":
+            assert self.weight_init[0] in self._fp16_compatible_init_op_types,\
+                "Fp16 training is enabled. Init op for weight parameter must be fp16"\
+                "compatibale. Got {}. Supported ops: {}".format(
+                    self.weight_init[0],
+                    self._fp16_compatible_init_op_types)
 
         if _is_id_list(self.input_record):
             sparse_key = self.input_record.items()
@@ -159,21 +177,14 @@ class SparseLookup(ModelLayer):
     def _get_default_init_op(self):
         scale = math.sqrt(1.0 / self.input_dim)
 
-        cur_scope = get_current_scope()
-        trainer_version = get_sparse_lookup_trainer_version(
-            **cur_scope.get(get_sparse_lookup_trainer_version.__name__,
-                            {'version': 'fp32'}))
-
-        if trainer_version == 'fp32':
+        if self.trainer_version == 'fp32':
             default_weight_init = ('UniformFill', {'min': -scale, 'max': scale})
-        elif trainer_version == 'fp16':
+        elif self.trainer_version == 'fp16':
             default_weight_init = ("Float16UniformFill", {'min': -scale, 'max': scale})
         else:
             raise NotImplementedError(
                 "Train version {} is not currently supported".format(trainer_version)
             )
-
-        self.trainer_version = trainer_version
 
         return default_weight_init
 

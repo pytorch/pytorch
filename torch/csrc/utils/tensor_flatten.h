@@ -31,9 +31,9 @@ struct TensorGroup {
   std::vector<at::Tensor> tensors;
   size_t size = 0;
 
-  at::Type& type() {
+  at::DeprecatedTypeProperties& type() {
     AT_ASSERT(!tensors.empty());
-    return tensors[0].dispatch_type();
+    return tensors[0].type();
   }
 };
 

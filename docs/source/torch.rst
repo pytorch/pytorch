@@ -227,6 +227,7 @@ Reduction Ops
 .. autofunction:: std_mean
 .. autofunction:: sum
 .. autofunction:: unique
+.. autofunction:: unique_consecutive
 .. autofunction:: var
 
 
@@ -282,6 +283,7 @@ Other Operations
 .. autofunction:: histc
 .. autofunction:: meshgrid
 .. autofunction:: renorm
+.. autofunction:: repeat_interleave
 .. autofunction:: roll
 .. autofunction:: tensordot
 .. autofunction:: trace
@@ -318,6 +320,7 @@ BLAS and LAPACK Operations
 .. autofunction:: logdet
 .. autofunction:: slogdet
 .. autofunction:: lu
+.. autofunction:: lu_solve
 .. autofunction:: lu_unpack
 .. autofunction:: matmul
 .. autofunction:: matrix_power

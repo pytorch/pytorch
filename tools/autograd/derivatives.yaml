@@ -8,12 +8,12 @@
 #     Note that a single gradient entry can specify the gradient
 #     formula for multiple input names, by specifying a key
 #     "input1, input2" (see atan2 for an example).
-#   - An argument can be flagged as 'not_differentiable'.
+#   - An argument can be flagged as 'non_differentiable'.
 #     In general there are 3 possibilities:
 #       1. An argument has an entry with a specified gradient
 #       2. An argument has an entry specified as not differentiable
 #       3. An argument has no entry
-#     Using the flag 'not_differentiable' resolves to the second case.
+#     Using the flag 'non_differentiable' resolves to the second case.
 #     The second case was introduced in support for arguments of
 #     type e.g. IndexTensor for 'embedding', that are not differentiable.
 #     TODO: Determine whether case 3 and case 2 can be replaced by one concept.
@@ -191,9 +191,6 @@
 - name: bmm(Tensor self, Tensor mat2)
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
-
-- name: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots)
-  self: not_implemented("btrisolve")
 
 - name: cat(TensorList tensors, int64_t dim)
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim)
@@ -466,6 +463,9 @@
 
 - name: _lu_with_info(Tensor self, bool pivot, bool check_errors)
   self: not_implemented("lu_with_info")
+
+- name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots)
+  self: not_implemented("lu_solve")
 
 - name: masked_fill_(Tensor self, Tensor mask, Scalar value)
   self: grad.clone().masked_fill_(mask, 0)
@@ -817,6 +817,9 @@
 - name: t(Tensor self)
   self: grad.t()
 
+- name: one_hot(Tensor self, int64_t num_classes)
+  self: non_differentiable
+
 - name: flip(Tensor self, IntArrayRef dims)
   self: grad.flip(dims)
 
@@ -848,7 +851,7 @@
   self: grad.transpose(dim0, dim1)
 
 - name: triangular_solve(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular)
-  self, A: triangular_solve_backward(grads[0], grads[1], self, A, result0, upper, transpose, unitriangular, grad_input_mask)
+  self, A: triangular_solve_backward(grads[0], grads[1], self, A, solution, upper, transpose, unitriangular, grad_input_mask)
 
 - name: tril(Tensor self, int64_t diagonal)
   self: grad.tril(diagonal)
@@ -861,6 +864,9 @@
 
 - name: to_dense(Tensor self)
   self: to_dense_backward(grad, self)
+
+- name: to_mkldnn(Tensor self)
+  self: to_mkldnn_backward(grad, self)
 
 - name: unfold(Tensor self, int64_t dimension, int64_t size, int64_t step)
   self: unfold_backward(grad, self.sizes(), dimension, size, step)
@@ -890,7 +896,7 @@
   self: grad.reshape(self.sizes())
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other)
-  condition: not_differentiable
+  condition: non_differentiable
   self: where(condition, grad, zeros_like(grad))
   other: where(condition, zeros_like(grad), grad)
 
@@ -942,19 +948,28 @@
   target: binary_cross_entropy_with_logits_target_backward(grad, self, target, weight, pos_weight, reduction)
 
 - name: embedding(Tensor weight, Tensor indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse)
-  indices: not_differentiable
+  indices: non_differentiable
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
 
 - name: embedding_dense_backward(Tensor grad_output, Tensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq)
   grad_output: embedding_dense_double_backward(grad, indices)
+  indices: non_differentiable
 
-- name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse)
-  indices: not_differentiable
-  offsets: not_differentiable
-  weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse)
+- name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse, Tensor per_sample_weights)
+  indices: non_differentiable
+  offsets: non_differentiable
+  weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse, per_sample_weights)
+  per_sample_weights: _embedding_bag_per_sample_weights_backward(grad, weight, indices, offsets, result1, mode)
+
+- name: _embedding_bag_dense_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, Tensor per_sample_weights)
+  indices: non_differentiable
+  offsets: non_differentiable
+  offset2bag: non_differentiable
+  bag_size: non_differentiable
+  maximum_indices: non_differentiable
 
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
-  indices: not_differentiable
+  indices: non_differentiable
   self: not_implemented("embedding_renorm")
 
 - name: kl_div(Tensor self, Tensor target, int64_t reduction)
@@ -1405,9 +1420,12 @@
 # Only frst three of _cudnn_rnn outputs can have gradients.
 # _cudnn_rnn outputs: (output, hy, cy, reserve, weight_buf)
 - name: _cudnn_rnn(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, Tensor dropout_state)
-  dropout_state: not_differentiable
+  dropout_state: non_differentiable
   output_differentiability: [True, True, True, False, False]
   input, hx, cx, weight: "_cudnn_rnn_backward(input, weight, weight_stride0, result4, hx, cx, result0, grads[0], grads[1], grads[2], mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, retain_variables ? result3.clone() : result3, grad_input_mask)"
+
+- name: _cudnn_rnn_backward(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor cx, Tensor output, Tensor grad_output, Tensor grad_hy, Tensor grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, Tensor dropout_state, Tensor reserve, std::array<bool,4> output_mask)
+  dropout_state: non_differentiable
 
 # miopen
 

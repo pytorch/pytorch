@@ -130,20 +130,20 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
 
 // We call the following methods via CUDA hooks because they are really only
 // valid when CUDA is available. See native/cuda/CuFFTPlanCache.h for more details.
-int64_t _cufft_get_plan_cache_max_size() {
-  return detail::getCUDAHooks().cuFFTGetPlanCacheMaxSize();
+int64_t _cufft_get_plan_cache_max_size(int64_t device_index) {
+  return detail::getCUDAHooks().cuFFTGetPlanCacheMaxSize(device_index);
 }
 
-void _cufft_set_plan_cache_max_size(int64_t max_size) {
-  detail::getCUDAHooks().cuFFTSetPlanCacheMaxSize(max_size);
+void _cufft_set_plan_cache_max_size(int64_t device_index, int64_t max_size) {
+  detail::getCUDAHooks().cuFFTSetPlanCacheMaxSize(device_index, max_size);
 }
 
-int64_t _cufft_get_plan_cache_size() {
-  return detail::getCUDAHooks().cuFFTGetPlanCacheSize();
+int64_t _cufft_get_plan_cache_size(int64_t device_index) {
+  return detail::getCUDAHooks().cuFFTGetPlanCacheSize(device_index);
 }
 
-void _cufft_clear_plan_cache() {
-  detail::getCUDAHooks().cuFFTClearPlanCache();
+void _cufft_clear_plan_cache(int64_t device_index) {
+  detail::getCUDAHooks().cuFFTClearPlanCache(device_index);
 }
 
 Tensor fft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {

@@ -575,9 +575,15 @@ RegisterQuantizationParamsWithHistogramNetObserver::
         qparams = qfactory->ChooseQuantizationParams(hist, is_weight);
       } else {
         qparams.scale = 0.1f;
-        qparams.zero_point =
-            (isinf(min) || isnan(min)) ? 0 : (-min / qparams.scale);
         qparams.precision = 8;
+        qparams.zero_point =
+            (isinf(min / qparams.scale) || isnan(min / qparams.scale))
+            ? 0
+            : std::max(
+                  0,
+                  std::min(
+                      int((-min) / qparams.scale),
+                      (1 << qparams.precision) - 1));
       }
 
       if (HasDNNLowPEngine_(*op)) {

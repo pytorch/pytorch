@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
 
@@ -113,11 +114,22 @@ static at::Tensor to_dispatch(
 
 RegisterOperators reg(
     {Operator(
+         "prim::profile(...) -> ()",
+         [](const Node* node) {
+           return [node](Stack& stack) {
+             auto addr = node->i(attr::data);
+             std::function<void(Stack&)>& callback =
+                 *reinterpret_cast<std::function<void(Stack&)>*>(addr);
+             callback(stack);
+             return 0;
+           };
+         }),
+     Operator(
          prim::FusionGroup,
          [](const Node* node) {
            const auto key = registerFusion(node);
            return [key](Stack& stack) {
-             autograd::profiler::RecordFunction record("FusionGroup");
+             RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
              runFusion(key, stack);
              return 0;
            };
@@ -258,7 +270,7 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Int(Scalar a) -> float",
+         "prim::Int(Scalar a) -> int",
          [](Stack& stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -660,7 +672,8 @@ RegisterOperators reg(
              return v->uses().size() > 0;
            });
            return [=](Stack& stack) {
-             autograd::profiler::RecordFunction record("chunk");
+             RECORD_FUNCTION("chunk", last(stack, 1));
+
              at::Tensor t;
              pop(stack, t);
              auto result = at::chunk(t, chunks, dim);
@@ -858,10 +871,9 @@ RegisterOperators reg(
          prim::CreateObject,
          [](const Node* node) {
            const auto type = node->output()->type()->expect<ClassType>();
-           const auto name = Symbol::user(type->name());
            const size_t numAttrs = type->numAttributes();
-           return [name, numAttrs](Stack& stack) {
-             auto userObj = c10::ivalue::Object::create(name, numAttrs);
+           return [type, numAttrs](Stack& stack) {
+             auto userObj = c10::ivalue::Object::create(type, numAttrs);
              push(stack, std::move(userObj));
              return 0;
            };
@@ -1528,15 +1540,33 @@ int dictKeys(Stack& stack) {
   return 0;
 }
 
-int dictValues(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
-  std::vector<IValue> values;
+template <typename Elem>
+std::vector<Elem> makeListForDictValues(const c10::ivalue::UnorderedMap& dict) {
+  std::vector<Elem> values;
   values.reserve(dict.size());
   for (auto item : dict) {
-    values.push_back(item.second);
+    values.push_back(item.second.to<Elem>());
   }
-  push(stack, IValue(values));
-  return 0;
+  return values;
+}
+
+Operation dictValues(const Node* n) {
+  auto outputType = n->output()->type()->expect<ListType>();
+  return [=](Stack& stack) -> int {
+    auto dict = pop(stack).toGenericDictRef();
+    if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
+      push(stack, makeListForDictValues<at::Tensor>(dict));
+    } else if (outputType->getElementType() == IntType::get()) {
+      push(stack, makeListForDictValues<int64_t>(dict));
+    } else if (outputType->getElementType() == FloatType::get()) {
+      push(stack, makeListForDictValues<double>(dict));
+    } else if (outputType->getElementType() == BoolType::get()) {
+      push(stack, makeListForDictValues<bool>(dict));
+    } else {
+      push(stack, makeListForDictValues<IValue>(dict));
+    }
+    return 0;
+  };
 }
 
 int dictIndex(Stack& stack) {
@@ -1600,7 +1630,13 @@ RegisterOperators reg2({
     DEFINE_STRING_OP(aten::ne, a != b, bool),
     DEFINE_STRING_OP(aten::add, a + b, str),
 #undef DEFINE_STRING_OP
-
+    Operator(
+        "aten::len(str s) -> int",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          push(stack, static_cast<int64_t>(string.size()));
+          return 0;
+        }),
     // tensor length op (size of 1st dimension)
     Operator(
         "aten::len(Tensor t) -> int",
@@ -1789,7 +1825,8 @@ RegisterOperators reg2({
               string.size() == 1,
               "String for ord() must be 1 character, found",
               string.size());
-          push(stack, int64_t(string.at(0)));
+          uint8_t ord = string.at(0);
+          push(stack, int64_t(ord));
           return 0;
         }),
 #define CREATE_COPY_OP(other_type, c_type)                                 \
@@ -1888,11 +1925,123 @@ RegisterOperators reg2({
         }),
 
     Operator(
-        "aten::floor(float a) -> int",
+        "aten::pow(float a, float b) -> float",
+        [](Stack& stack) {
+          double a, b;
+          pop(stack, a, b);
+          push(stack, std::pow(a, b));
+          return 0;
+        }),
+    Operator(
+        "aten::pow(float a, int b) -> float",
+        [](Stack& stack) {
+          double a;
+          int b;
+          pop(stack, a, b);
+          push(stack, std::pow(a, b));
+          return 0;
+        }),
+
+    Operator(
+        "aten::floor(float a) -> float",
         [](Stack& stack) {
           double a;
           pop(stack, a);
-          push(stack, static_cast<int64_t>(std::floor(a)));
+          push(stack, std::floor(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::ceil(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::ceil(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::log(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::log(a));
+          return 0;
+        }),
+    Operator(
+        "aten::log(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::log(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::log1p(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::log1p(a));
+          return 0;
+        }),
+    Operator(
+        "aten::log1p(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::log1p(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::log10(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::log10(a));
+          return 0;
+        }),
+    Operator(
+        "aten::log10(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::log10(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::exp(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::exp(a));
+          return 0;
+        }),
+    Operator(
+        "aten::exp(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::exp(a));
+          return 0;
+        }),
+
+    Operator(
+        "aten::sqrt(float a) -> float",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::sqrt(a));
+          return 0;
+        }),
+    Operator(
+        "aten::sqrt(int a) -> float",
+        [](Stack& stack) {
+          int64_t a;
+          pop(stack, a);
+          push(stack, std::sqrt(a));
           return 0;
         }),
 

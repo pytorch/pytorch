@@ -89,8 +89,13 @@ class ShapePropagator {
 
   bool resizesInput(Node* n) {
     static std::unordered_set<Symbol> resize_ops{
-        aten::resize_,
-        aten::resize_as_,
+        aten::resize_,    aten::resize_as_, aten::copy_,    aten::set_,
+        aten::add_,       aten::addbmm_,    aten::addcdiv_, aten::addcmul_,
+        aten::addmv_,     aten::addr_,      aten::baddbmm_, aten::ge_,
+        aten::gt_,        aten::le_,        aten::lerp_,    aten::lt_,
+        aten::mul_,       aten::ne_,        aten::sub_,     aten::unsqueeze_,
+        aten::t_, // could preserve DimensionedTensorType Here
+        aten::transpose_,
     };
 
     if (resize_ops.count(n->kind()))
@@ -152,10 +157,9 @@ class ShapePropagator {
       return *iv;
     }
     if (CompleteTensorTypePtr type = type_->cast<CompleteTensorType>()) {
-      auto backend =
-          type->device().is_cpu() ? at::Backend::CPU : at::Backend::CUDA;
+      auto attype = type->device().is_cpu() ?
+          at::CPU(type->scalarType()) : at::CUDA(type->scalarType());
       at::DeviceGuard device_guard(type->device());
-      auto& attype = at::getNonVariableType(backend, type->scalarType());
       auto t =
           at::empty_strided(type->sizes(), type->strides(), attype.options())
               .zero_();
@@ -767,6 +771,43 @@ class ShapePropagator {
             "aten::__ilshift__(Tensor self, Tensor other) -> Tensor",
             "aten::__irshift__(Tensor self, Tensor other) -> Tensor",
 
+            // Ops with Tensor-Tensor overloads only
+            "aten::atan2(Tensor self, Tensor other) -> Tensor",
+        },
+        [this](Node* node) -> type_vec_t {
+          if (auto maybe_tensor_types =
+                  gatherTensorTypes<DimensionedTensorType>(node)) {
+            AT_ASSERT(maybe_tensor_types->size() >= 2);
+            auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
+            auto second_scalar_type = (*maybe_tensor_types)[1]->scalarType();
+            size_t arg_for_type = 0;
+            if (c10::promoteTypes(first_scalar_type, second_scalar_type) !=
+                first_scalar_type) {
+              arg_for_type = 1;
+            }
+            return {broadcast(*maybe_tensor_types, arg_for_type)};
+          }
+          return {};
+        }};
+
+    static const register_formula_for fused_accum_binary_ops{
+        {
+            // Non-binary ops
+            "aten::addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value) -> Tensor",
+            "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value) -> Tensor",
+        },
+        [this](Node* node) -> type_vec_t {
+          if (auto maybe_tensor_types =
+                  gatherTensorTypes<DimensionedTensorType>(node)) {
+            return {broadcast(*maybe_tensor_types, 0)};
+          }
+          return {};
+        }};
+
+    // NB: we always take the scalar type of the Tensor
+    static const register_formula_for broadcasting_tensor_scalar_ops{
+        {
+
             // Tensor-Scalar operators
             "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
             "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
@@ -786,13 +827,6 @@ class ShapePropagator {
             "aten::__ixor__(Tensor self, Scalar other) -> Tensor",
             "aten::__ilshift__(Tensor self, Scalar other) -> Tensor",
             "aten::__irshift__(Tensor self, Scalar other) -> Tensor",
-
-            // Ops with Tensor-Tensor overloads only
-            "aten::atan2(Tensor self, Tensor other) -> Tensor",
-
-            // Non-binary ops
-            "aten::addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value) -> Tensor",
-            "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value) -> Tensor",
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
@@ -1146,7 +1180,7 @@ class ShapePropagator {
       if (!maybe_dtype_option)
         return {};
       auto dtype =
-          (maybe_dtype_option->isNone() ? at::kFloat
+          (maybe_dtype_option->isNone() ? at::kDouble
                                         : maybe_dtype_option->toScalarType());
 
       return {DimensionedTensorType::create(dtype, device, dim)};

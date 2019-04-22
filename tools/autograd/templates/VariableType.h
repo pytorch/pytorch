@@ -33,13 +33,9 @@ using c10::optional;
 
 struct TORCH_API VariableType final : public at::TypeDefault {
   VariableType(Context* context, at::TypeExtendedInterface* baseType);
-  at::ScalarType scalarType() const override;
-  caffe2::TypeMeta typeMeta() const override;
   at::Backend backend() const override;
   at::Allocator* allocator() const override;
   at::Device getDeviceFromPtr(void * data) const override;
-  Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
-  Storage storageWithAllocator(int64_t size, at::Allocator* allocator) const override;
   std::unique_ptr<at::Generator> generator() const override;
   const char * toString() const override;
   at::TypeID ID() const override;
