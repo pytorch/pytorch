@@ -339,21 +339,16 @@ struct ModuleValue : public SugaredValue {
       const SourceRange& loc,
       Function& m,
       const std::string& field) override {
-    // workaround to make self.training work
-    // it adds a buffer 'training' to the model if one doesn't exist
-    // and then loads that parameter, casting it to bool
+    // workaround to make self.training work, add it as a bool attribute
     if (field == "training") {
-      Slot* v = module_->find_buffer(field);
+      Slot* v = module_->find_attribute(field);
       if (!v) {
         py::object py_module = py::cast(module_);
         bool training = py::cast<bool>(py::getattr(py_module, "training"));
-        auto t =
-            autograd::make_variable(at::full({}, training ? 1 : 0, at::kLong));
-        module_->register_buffer("training", std::move(t));
-        v = module_->find_buffer(field);
+        module_->register_attribute("training", BoolType::get(), training);
+        v = module_->find_attribute(field);
       }
-      Value* the_tensor = m.graph()->insertGetAttr(self_, "training");
-      Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
+      Value* the_bool = m.graph()->insertGetAttr(self_, "training");
       return std::make_shared<SimpleValue>(the_bool);
     }
 

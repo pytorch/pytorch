@@ -338,7 +338,7 @@ struct TORCH_API Module {
     for (auto& submod : get_modules()) {
       submod->train(on);
     }
-    register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
+    register_attribute("training", BoolType::get(), on);
   }
   /// Calls train(false) to enable "eval" mode.
   /// Do not override this method, override `train()` instead.
@@ -347,8 +347,8 @@ struct TORCH_API Module {
   }
   /// True if the module is in training mode.
   bool is_training() {
-    if (auto p = find_buffer("training")) {
-      return p->value().toTensor().item<int64_t>() == 1;
+    if (auto p = find_attribute("training")) {
+      return p->value().toBool();
     }
     // We are in training mode by default
     return true;
