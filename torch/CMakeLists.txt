@@ -498,6 +498,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/TypeInfo.cpp
     ${TORCH_SRC_DIR}/csrc/Generator.cpp
     ${TORCH_SRC_DIR}/csrc/Layout.cpp
+    ${TORCH_SRC_DIR}/csrc/MemoryFormat.cpp
     ${TORCH_SRC_DIR}/csrc/Module.cpp
     ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
     ${TORCH_SRC_DIR}/csrc/Size.cpp

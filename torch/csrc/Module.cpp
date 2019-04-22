@@ -25,6 +25,7 @@
 #include <torch/csrc/DataLoader.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/autograd/generated/python_nn_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
@@ -581,6 +582,7 @@ PyObject* initModule() {
   THPDtype_init(module);
   THPDTypeInfo_init(module);
   THPLayout_init(module);
+  THPMemoryFormat_init(module);
   THPDevice_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
