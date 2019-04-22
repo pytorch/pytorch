@@ -39,7 +39,8 @@ inline QTensor new_qtensor_cpu(
   auto* allocator = at::getCPUAllocator();
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
-  AT_CHECK(isQIntType(typeMetaToScalarType(dtype)), "ScalarType not supported for QTensor in new_qtensor_cpu.");
+  AT_CHECK(isQIntType(typeMetaToScalarType(dtype)),
+           "ScalarType not supported for QTensor in new_qtensor_cpu.");
   auto storage = c10::make_intrusive<StorageImpl>(
       dtype,
       nelements,
@@ -96,7 +97,10 @@ QTensor PerTensorAffineQuantizer::quantize(RealTensor tensor) {
   qparams.scale = scale_;
   qparams.zero_point = zero_point_;
   qparams.precision = 8;
-  fbgemm::Quantize<uint8_t>(svd, qvd, tensor.numel(), qparams);
+  fbgemm::Quantize<uint8_t>(/*src=*/svd,
+                            /*dst=*/qvd,
+                            /*len=*/tensor.numel(),
+                            /*qparams=*/qparams);
 #else
   auto qvd = qv.data<qint8>();
   for (int i = 0; i < tensor.numel(); ++i) {
@@ -120,7 +124,10 @@ RealTensor PerTensorAffineQuantizer::dequantize(QTensor tensor) {
   qparams.scale = scale_;
   qparams.zero_point = zero_point_;
   qparams.precision = 8;
-  fbgemm::Dequantize<uint8_t>(qvd, rvd, tensor.numel(), qparams);
+  fbgemm::Dequantize<uint8_t>(/*src=*/qvd,
+                              /*dst=*/rvd,
+                              /*len=*/tensor.numel(),
+                              /*qparams=*/qparams);
 #else
   const auto* qvd = tensor.data<qint8>();
   for (auto i = 0; i < tensor.numel(); ++i) {
