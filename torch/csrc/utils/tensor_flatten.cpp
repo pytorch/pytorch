@@ -64,15 +64,15 @@ std::vector<TensorGroup> take_tensors(
 
 void reorder_tensors_like(std::vector<Tensor>& tensors, TensorList order) {
   AT_ASSERT(tensors.size() == order.size());
-  std::unordered_map<at::Type*, std::vector<size_t>> type_indices;
+  std::unordered_map<at::DeprecatedTypeProperties*, std::vector<size_t>> type_indices;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i)
-    type_indices[&tensors[i].dispatch_type()].push_back(i);
+    type_indices[&tensors[i].type()].push_back(i);
 
-  std::unordered_map<at::Type*, size_t> type_used;
+  std::unordered_map<at::DeprecatedTypeProperties*, size_t> type_used;
   std::vector<Tensor> ordered_tensors;
   ordered_tensors.reserve(tensors.size());
   for (auto & tmpl_tensor : order) {
-    auto * type = &tmpl_tensor.dispatch_type();
+    auto * type = &tmpl_tensor.type();
     auto & indices = type_indices[type];
     auto & used = type_used[type];
     ordered_tensors.push_back(tensors[indices[used++]]);
