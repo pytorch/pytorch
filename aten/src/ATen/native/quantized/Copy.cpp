@@ -9,9 +9,9 @@ Tensor& _s_copy__quantized(
     Tensor& self,
     const Tensor& src,
     bool non_blocking) {
-  AT_CHECK(self.scalar_type() == at::kQInt8, "Quantized copy only works with kQInt8 as source Tensor");
-  AT_CHECK(src.scalar_type() == at::kFloat, "Quantized copy only works with kFloat as target Tensor");
-  qint8* self_data = self.data<qint8>();//reinterpret_cast<uint8_t *>(self.data<qint8>());
+  AT_CHECK(self.scalar_type() == at::kQInt8, "Quantized copy only works with kQInt8 as target Tensor");
+  AT_CHECK(src.scalar_type() == at::kFloat, "Quantized copy only works with kFloat as source Tensor");
+  qint8* self_data = self.data<qint8>();
   float* src_data = src.data<float>();
   for (int i = 0; i < self.numel(); ++i) {
     self_data[i] = quantize_uint8(self.q_scale().to<float>(), self.q_zero_point().to<uint8_t>(), src_data[i]);
