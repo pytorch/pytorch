@@ -1,13 +1,16 @@
+#include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/passes/python_print.h>
-#include <torch/csrc/jit/qualified_name.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
+
+using c10::QualifiedNamePtr;
+using c10::QualifiedName;
 
 namespace torch {
 namespace jit {

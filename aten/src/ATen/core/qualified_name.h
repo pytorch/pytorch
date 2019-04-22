@@ -3,8 +3,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <string>
 
-namespace torch {
-namespace jit {
+namespace c10 {
 
 // Represents names of the form, e.g., self.a.b
 struct QualifiedName;
@@ -33,5 +32,4 @@ struct QualifiedName : c10::intrusive_ptr_target {
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace c10
