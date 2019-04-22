@@ -5,9 +5,9 @@
 #       - "Auto" detects local machine GPU compute arch at runtime.
 #       - "Common" and "All" cover common and entire subsets of architectures
 #      ARCH_AND_PTX : NAME | NUM.NUM | NUM.NUM(NUM.NUM) | NUM.NUM+PTX
-#      NAME: Fermi Kepler Maxwell Kepler+Tegra Kepler+Tesla Maxwell+Tegra Pascal
+#      NAME: Fermi Kepler Maxwell Kepler+Tegra Kepler+Tesla Maxwell+Tegra Pascal Volta Turing
 #      NUM: Any number. Only those pairs are currently accepted by NVCC though:
-#            2.0 2.1 3.0 3.2 3.5 3.7 5.0 5.2 5.3 6.0 6.2
+#            2.0 2.1 3.0 3.2 3.5 3.7 5.0 5.2 5.3 6.0 6.2 7.0 7.2 7.5
 #      Returns LIST of flags to be added to CUDA_NVCC_FLAGS in ${out_variable}
 #      Additionally, sets ${out_variable}_readable to the resulting numeric list
 #      Example:
@@ -17,35 +17,67 @@
 #      More info on CUDA architectures: https://en.wikipedia.org/wiki/CUDA
 #
 
+if(CMAKE_CUDA_COMPILER_LOADED) # CUDA as a language
+  if(CMAKE_CUDA_COMPILER_ID STREQUAL "NVIDIA"
+      AND CMAKE_CUDA_COMPILER_VERSION MATCHES "^([0-9]+\\.[0-9]+)")
+    set(CUDA_VERSION "${CMAKE_MATCH_1}")
+  endif()
+endif()
+
+# See: https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#gpu-feature-list
+
 # This list will be used for CUDA_ARCH_NAME = All option
 set(CUDA_KNOWN_GPU_ARCHITECTURES  "Fermi" "Kepler" "Maxwell")
 
 # This list will be used for CUDA_ARCH_NAME = Common option (enabled by default)
 set(CUDA_COMMON_GPU_ARCHITECTURES "3.0" "3.5" "5.0")
 
-if(CMAKE_CUDA_COMPILER_LOADED) # CUDA as a language
-  if(CMAKE_CUDA_COMPILER_ID STREQUAL "NVIDIA")
-    set(CUDA_VERSION "${CMAKE_CUDA_COMPILER_VERSION}")
+if(CUDA_VERSION VERSION_LESS "7.0")
+  set(CUDA_LIMIT_GPU_ARCHITECTURE "5.2")
+endif()
+
+# This list is used to filter CUDA archs when autodetecting
+set(CUDA_ALL_GPU_ARCHITECTURES "3.0" "3.2" "3.5" "5.0")
+
+if(CUDA_VERSION VERSION_GREATER "6.5")
+  list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Kepler+Tegra" "Kepler+Tesla" "Maxwell+Tegra")
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "5.2")
+
+  if(CUDA_VERSION VERSION_LESS "8.0")
+    list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "5.2+PTX")
+    set(CUDA_LIMIT_GPU_ARCHITECTURE "6.0")
   endif()
 endif()
 
-if (CUDA_VERSION VERSION_GREATER "6.5")
-  list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Kepler+Tegra" "Kepler+Tesla" "Maxwell+Tegra")
-  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "5.2")
-endif ()
-
-if (CUDA_VERSION VERSION_GREATER "7.5")
+if(CUDA_VERSION VERSION_GREATER "7.5")
   list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Pascal")
   list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "6.0" "6.1")
-else()
-  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "5.2+PTX")
+  list(APPEND CUDA_ALL_GPU_ARCHITECTURES "6.0" "6.1" "6.2")
+
+  if(CUDA_VERSION VERSION_LESS "9.0")
+    list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "6.1+PTX")
+    set(CUDA_LIMIT_GPU_ARCHITECTURE "7.0")
+  endif()
 endif ()
 
-if (CUDA_VERSION VERSION_GREATER "8.5")
+if(CUDA_VERSION VERSION_GREATER "8.5")
   list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Volta")
   list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.0" "7.0+PTX")
-else()
-  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "6.1+PTX")
+  list(APPEND CUDA_ALL_GPU_ARCHITECTURES "7.0" "7.0+PTX" "7.2" "7.2+PTX")
+
+  if(CUDA_VERSION VERSION_LESS "10.0")
+    set(CUDA_LIMIT_GPU_ARCHITECTURE "8.0")
+  endif()
+endif()
+
+if(CUDA_VERSION VERSION_GREATER "9.5")
+  list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Turing")
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.5" "7.5+PTX")
+  list(APPEND CUDA_ALL_GPU_ARCHITECTURES "7.5" "7.5+PTX")
+
+  if(CUDA_VERSION VERSION_LESS "11.0")
+    set(CUDA_LIMIT_GPU_ARCHITECTURE "9.0")
+  endif()
 endif()
 
 ################################################################################################
@@ -102,7 +134,20 @@ function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
     message(STATUS "Automatic GPU detection failed. Building for common architectures.")
     set(${OUT_VARIABLE} ${CUDA_COMMON_GPU_ARCHITECTURES} PARENT_SCOPE)
   else()
-    set(${OUT_VARIABLE} ${CUDA_GPU_DETECT_OUTPUT} PARENT_SCOPE)
+    # Filter based on CUDA version supported archs
+    set(CUDA_GPU_DETECT_OUTPUT_FILTERED "")
+    separate_arguments(CUDA_GPU_DETECT_OUTPUT)
+    foreach(ITEM IN ITEMS ${CUDA_GPU_DETECT_OUTPUT})
+        if(CUDA_LIMIT_GPU_ARCHITECTURE AND (ITEM VERSION_GREATER CUDA_LIMIT_GPU_ARCHITECTURE OR
+                                            ITEM VERSION_EQUAL CUDA_LIMIT_GPU_ARCHITECTURE))
+        list(GET CUDA_COMMON_GPU_ARCHITECTURES -1 NEWITEM)
+        string(APPEND CUDA_GPU_DETECT_OUTPUT_FILTERED " ${NEWITEM}")
+      else()
+        string(APPEND CUDA_GPU_DETECT_OUTPUT_FILTERED " ${ITEM}")
+      endif()
+    endforeach()
+
+    set(${OUT_VARIABLE} ${CUDA_GPU_DETECT_OUTPUT_FILTERED} PARENT_SCOPE)
   endif()
 endfunction()
 
@@ -167,6 +212,9 @@ function(CUDA_SELECT_NVCC_ARCH_FLAGS out_variable)
       elseif(${arch_name} STREQUAL "Volta")
         set(arch_bin 7.0 7.0)
         set(arch_ptx 7.0)
+      elseif(${arch_name} STREQUAL "Turing")
+        set(arch_bin 7.5)
+        set(arch_ptx 7.5)
       else()
         message(SEND_ERROR "Unknown CUDA Architecture Name ${arch_name} in CUDA_SELECT_NVCC_ARCH_FLAGS")
       endif()

@@ -27,13 +27,11 @@ namespace script {
 struct Def;
 struct SugaredValue;
 struct Function;
-using Kwargs = std::unordered_map<std::string, IValue>;
+struct Resolver;
 
-using Resolver = std::function<std::shared_ptr<SugaredValue>(
-    const std::string& name,
-    Function& f,
-    const SourceRange& loc)>;
+using ResolverPtr = std::shared_ptr<Resolver>;
 using Self = std::function<std::shared_ptr<SugaredValue>(Value*)>;
+using Kwargs = std::unordered_map<std::string, IValue>;
 
 // A Function is a pure Graph with no implicit `self` object bound.
 // It contains schema information, and the executor that manages the
@@ -64,10 +62,6 @@ struct TORCH_API Function {
     getSchema().checkAndNormalizeInputs(stack, kwargs);
     run(stack);
     return stack.front();
-  }
-
-  std::shared_ptr<Graph> graph_for(Stack inputs) {
-    return get_executor().graphFor(inputs);
   }
 
   std::shared_ptr<Graph> graph() const {
@@ -213,7 +207,7 @@ struct TORCH_API CompilationUnit {
   // for historic reasons, these are defined in compiler.cpp
   void define(
       const std::vector<Def>& definitions,
-      const std::vector<Resolver>& resolvers, /* determines how we handle free
+      const std::vector<ResolverPtr>& resolvers, /* determines how we handle free
                                                  variables in each definition*/
       // if non-null, the first argument to each def, is bound to this value
       const Self& self);
@@ -221,7 +215,7 @@ struct TORCH_API CompilationUnit {
   // same as above but parse the definitions from source
   void define(
       const std::string& source,
-      const Resolver& resolver,
+      const ResolverPtr& resolver,
       const Self& self);
 
   void clone_function(const Function& remote) {
