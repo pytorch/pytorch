@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/testing/file_check.h>
 
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/irparser.h>
@@ -374,18 +375,19 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<OverloadedFunctionValue>(
           self_, py::cast<std::vector<std::string>>(overloads));
     }
-
     if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
       if (py::isinstance<py::function>(attr) &&
-          py::hasattr(attr, "_is_parameter_list") &&
-          py::cast<bool>(py::getattr(attr, "_is_parameter_list"))) {
+          py::hasattr(attr, "_parameter_names_fn")) {
+        // Fetch the names of the parameters in the list so they're in the
+        // right order
+        auto fn_self = py::getattr(attr, "__self__");
+        auto param_names = py::getattr(attr, "_parameter_names_fn")(fn_self);
+
         Graph& g = *m.graph();
         // Add all module parameters as inputs to the graph
         std::vector<Value*> params;
-        const auto& param_list = module_->get_parameters();
-        for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
-          auto& param = *it;
-          params.emplace_back(g.insertGetAttr(self_, param.name()));
+        for (auto name : param_names) {
+          params.emplace_back(g.insertGetAttr(self_, py::str(name)));
         }
         auto list = g.insertNode(g.createTuple(params))->output();
         return std::make_shared<ConstantParameterList>(list);
@@ -639,16 +641,31 @@ static void gatherParametersAndBuffers(
 
 namespace {
 
-Resolver pythonResolver(const ResolutionCallback& rcb) {
-  return [rcb](const std::string& name, Function& m, const SourceRange& loc)
-             -> std::shared_ptr<SugaredValue> {
+// A resolver that will inspect the outer Python scope to find `name`.
+struct PythonResolver : public Resolver {
+  explicit PythonResolver(ResolutionCallback rcb) : rcb_(std::move(rcb)) {}
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) const override {
     AutoGIL ag;
-    py::object obj = rcb(name);
+    py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
     }
     return toSugaredValue(obj, m, loc);
-  };
+  }
+
+  TypePtr resolveType(const std::string& name) const override {
+    return ClassType::get(name);
+  }
+
+ private:
+  ResolutionCallback rcb_;
+};
+
+std::shared_ptr<PythonResolver> pythonResolver(ResolutionCallback rcb) {
+  return std::make_shared<PythonResolver>(rcb);
 }
 } // namespace
 
@@ -791,7 +808,6 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb,
              bool has_self) {
-            c10::optional<Self> self;
             if (has_self) {
               m->class_compilation_unit().define(
                   script, pythonResolver(rcb), moduleSelf(m));
@@ -806,7 +822,7 @@ void initJitScriptBindings(PyObject* module) {
              const std::vector<Def>& defs,
              const std::vector<ResolutionCallback>& rcbs,
              const std::vector<FunctionDefaults>& defaults) {
-            std::vector<Resolver> resolvers;
+            std::vector<ResolverPtr> resolvers;
             resolvers.reserve(rcbs.size());
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
@@ -937,36 +953,25 @@ void initJitScriptBindings(PyObject* module) {
             // this was ensured in python before calling this function
             std::vector<Slot> parameters;
             gatherParametersAndBuffers(parameters, *self);
-            Stack inputs = toStack(input_tuple);
-            for (const Slot& param : parameters) {
-              inputs.emplace_back(param.value());
+            auto typed_inputs = toTypedStack(input_tuple);
+            if (parameters.size() > 0) {
+              auto inputs = typed_inputs.stack();
+              auto input_types = typed_inputs.types()->elements().vec();
+              for (const Slot& param : parameters) {
+                inputs.emplace_back(param.value());
+                input_types.push_back(incompleteInferTypeFrom(param.value()));
+              }
+              typed_inputs = TypedStack(inputs, TupleType::create(input_types));
             }
             auto graph = tracer::createGraphByTracing(
                 func,
-                inputs,
+                typed_inputs,
                 var_lookup_fn,
                 force_outplace,
                 input_tuple.size());
             self->_define_lowered(
                 name, std::move(graph), std::move(parameters));
             didFinishEmitModule(self);
-          })
-      .def(
-          "graph_for",
-          [](py::args args, py::kwargs kwargs) {
-            // [pybind11 varargs] note: old version of pybind11 have a bug that
-            // leaks memory when py::args is mixed with positional arguments
-            // https://github.com/pybind/pybind11/pull/1216
-            // we work around this by not mixing positional arguments with
-            // varargs
-            Module& self = py::cast<Module&>(args[0]);
-            if (self.find_method("forward")) {
-              Method& m = self.get_method("forward");
-              return m.graph_for(createStackForSchema(
-                  m.getSchema(), tuple_slice(std::move(args), 1), kwargs));
-            }
-            throw std::runtime_error(
-                "Attempted to call graph_for on a Module without a compiled forward()");
           })
       .def(
           "get_debug_state",
@@ -1047,14 +1052,6 @@ void initJitScriptBindings(PyObject* module) {
             }
             return tensors;
           })
-      .def(
-          "graph_for",
-          [](py::args args, py::kwargs kwargs) {
-            // see: [pybind11 varargs]
-            Method& self = py::cast<Method&>(args[0]);
-            return self.graph_for(createStackForSchema(
-                self.getSchema(), tuple_slice(std::move(args), 1), kwargs));
-          })
       .def_property_readonly("schema", &Method::getSchema)
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
@@ -1088,7 +1085,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const ClassDef& classDef, ResolutionCallback rcb) {
         auto cu = std::make_shared<CompilationUnit>();
         auto classType = ClassType::create(classDef.name().name(), cu);
-        std::vector<Resolver> rcbs;
+        std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
           methodDefs.push_back(def);
@@ -1136,7 +1133,8 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
   m.def("_jit_clear_class_registry", ClassType::clearRegistry);
   m.def(
-      "_debug_set_autodiff_subgraph_inlining", debugSetAutodiffSubgraphInlining);
+      "_debug_set_autodiff_subgraph_inlining",
+      debugSetAutodiffSubgraphInlining);
   m.def("_propagate_shapes", _propagate_shapes);
   m.def(
       "_propagate_and_assign_input_and_output_shapes",
@@ -1154,6 +1152,10 @@ void initJitScriptBindings(PyObject* module) {
     }
     return std::make_pair(ss.str(), std::move(constants));
   });
+  m.def(
+      "_last_executed_optimized_graph",
+      []() { return lastExecutedOptimizedGraph(); },
+      "Retrieve the optimized graph that was run the last time the graph executor ran on this thread");
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
