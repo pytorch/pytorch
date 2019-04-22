@@ -741,14 +741,14 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
     size_t my_size = size.value_or(0);
     int flags = shared.value_or(false) ? TH_ALLOCATOR_MAPPED_SHARED : 0;
     auto dtype = options.dtype();
-    auto storage_impl = c10::make_intrusive<StorageImpl>(
+    auto storage_impl = c10::make_intrusive<at::StorageImpl>(
       dtype,
       my_size,
       THMapAllocator::makeDataPtr(
           filename.c_str(), flags, my_size * dtype.itemsize(), nullptr),
       /*allocator=*/nullptr,
       /*resizable=*/false);
-    auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
+    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::CPUTensorId());
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
     return tensor;
 }
