@@ -1604,7 +1604,8 @@ def create_derived(backend_type_env, declarations):
                     # e.g. x.sum(0) and x.sum() return the same type. We explicitly cast to the
                     # ScalarType before constructing the scalar_tensor to avoid overflow checking.
                     elif ret['type'] == 'accreal' or ret['type'] == 'real':
-                        return_scalar = 'return at::scalar_tensor(convert<${ScalarType}>(${call}), options());'
+                        return_scalar = ('return at::scalar_tensor(convert<${ScalarType}>(${call}), '
+                                         'options(ScalarType::${ScalarName}));')
                         case_body.append(CodeTemplate(return_scalar).substitute(case_env, call=call))
                     else:
                         # we using int64_t for long in the API, so correct it here...
