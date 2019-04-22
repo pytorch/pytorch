@@ -448,11 +448,11 @@ std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some, bool comput
   return at::legacy::th::_th_svd(self, some, compute_uv);
 }
 
-Tensor & potri_out(Tensor & result, const Tensor & self, bool upper) {
+Tensor & cholesky_inverse_out(Tensor & result, const Tensor & self, bool upper) {
   return at::legacy::th::_th_potri_out(result, self, upper);
 }
 
-Tensor potri(const Tensor & self, bool upper) {
+Tensor cholesky_inverse(const Tensor & self, bool upper) {
   return at::legacy::th::_th_potri(self, upper);
 }
 
