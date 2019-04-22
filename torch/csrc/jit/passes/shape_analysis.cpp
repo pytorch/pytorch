@@ -157,10 +157,9 @@ class ShapePropagator {
       return *iv;
     }
     if (CompleteTensorTypePtr type = type_->cast<CompleteTensorType>()) {
-      auto backend =
-          type->device().is_cpu() ? at::Backend::CPU : at::Backend::CUDA;
+      auto attype = type->device().is_cpu() ?
+          at::CPU(type->scalarType()) : at::CUDA(type->scalarType());
       at::DeviceGuard device_guard(type->device());
-      auto& attype = at::getNonVariableType(backend, type->scalarType());
       auto t =
           at::empty_strided(type->sizes(), type->strides(), attype.options())
               .zero_();

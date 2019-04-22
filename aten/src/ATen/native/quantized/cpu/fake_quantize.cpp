@@ -135,31 +135,12 @@ class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators()
-.op(c10::FunctionSchema(
-      "quantized::fake_quantize_per_tensor_affine_forward",
-      "",
-      {{"X", TensorType::get()},
-       {"scale", FloatType::get()},
-       {"zero_point", IntType::get()},
-       {"num_bits", IntType::get(), /*N=*/c10::nullopt, /*default_value=*/8},
-       {"quant_delay", IntType::get(), /*N=*/c10::nullopt, /*default_value=*/0},
-       {"iter", IntType::get(), /*N=*/c10::nullopt, /*default_value=*/0}},
-      {{"Y", TensorType::get()}}),
-  c10::kernel<FakeQuantizePerTensorAffineOp_forward>(),
-  c10::dispatchKey(CPUTensorId()))
-.op(c10::FunctionSchema(
-      "quantized::fake_quantize_per_tensor_affine_backward",
-      "",
-      {{"X", TensorType::get()},
-       {"dY", TensorType::get()},
-       {"scale", FloatType::get()},
-       {"zero_point", IntType::get()},
-       {"num_bits", IntType::get(), /*N=*/c10::nullopt, /*default_value=*/8},
-       {"quant_delay", IntType::get(), /*N=*/c10::nullopt, /*default_value=*/0},
-       {"iter", IntType::get(), /*N=*/c10::nullopt, /*default_value=*/0}},
-      {{"Y", TensorType::get()}}),
-  c10::kernel<FakeQuantizePerTensorAffineOp_backward>(),
-  c10::dispatchKey(CPUTensorId()));
+.op("quantized::fake_quantize_per_tensor_affine_forward(Tensor X, float scale, int zero_point, int num_bits = 8, int quant_delay = 0, int iter = 0) -> Tensor",
+    c10::kernel<FakeQuantizePerTensorAffineOp_forward>(),
+    c10::dispatchKey(CPUTensorId()))
+.op("quantized::fake_quantize_per_tensor_affine_backward(Tensor X, Tensor dY, float scale, int zero_point, int num_bits=8, int quant_delay=0, int iter = 0) -> Tensor",
+    c10::kernel<FakeQuantizePerTensorAffineOp_backward>(),
+    c10::dispatchKey(CPUTensorId()));
 
 }  // namespace
 }}  // namespace at::native

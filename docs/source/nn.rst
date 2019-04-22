@@ -529,6 +529,12 @@ Recurrent layers
 Linear layers
 ----------------------------------
 
+:hidden:`Identity`
+~~~~~~~~~~~~~~~~
+
+.. autoclass:: Identity
+    :members:
+
 :hidden:`Linear`
 ~~~~~~~~~~~~~~~~
 
