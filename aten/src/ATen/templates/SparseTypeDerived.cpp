@@ -13,6 +13,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/Dispatch.h>
 #include <c10/util/Half.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
