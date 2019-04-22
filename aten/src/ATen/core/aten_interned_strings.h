@@ -232,6 +232,7 @@ _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
 _(aten, cholesky) \
+_(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
 _(aten, chunk) \
 _(aten, clamp) \
@@ -519,7 +520,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
-_(aten, potri) \
 _(aten, pow) \
 _(aten, prelu) \
 _(aten, prelu_backward) \
