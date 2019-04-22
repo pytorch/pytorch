@@ -489,6 +489,8 @@ def emit_body(declaration):
             assert declaration['mode'] == 'TH' or declaration['mode'] == 'NN', \
                 "IndexTensor and BoolTensor are restricted to legacy TH/THNN functions only."
             return False
+        if arg['name'] in declaration.get('non_differentiable_arg_names', []):
+            return False
         return True
 
     def find_args_with_derivatives(differentiable_inputs):
@@ -505,7 +507,7 @@ def emit_body(declaration):
     inputs = [arg for arg in arguments if not arg.get('output', False)]
     differentiable_inputs = list(filter(is_differentiable, inputs))
     args_with_derivatives = find_args_with_derivatives(differentiable_inputs)
-    non_differentiable_arg_names = func['non_differentiable_arg_names'] if func else []
+    non_differentiable_arg_names = declaration.get('non_differentiable_arg_names', [])
     candidate_differentiable_outputs = list(filter(is_differentiable, returns))
 
     if declaration['output_differentiability'] is not None:
