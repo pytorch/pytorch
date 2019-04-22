@@ -153,17 +153,17 @@ class TestTensorBoardWriter(unittest.TestCase):
 
             writer.add_audio('myAudio', x, n_iter)
             writer.add_video('myVideo', np.random.rand(16, 48, 1, 28, 28).astype(np.float32), n_iter)
-            # writer.add_text('Text', 'text logged at step:' + str(n_iter), n_iter)
-            # writer.add_text('markdown Text', '''a|b\n-|-\nc|d''', n_iter)
+            writer.add_text('Text', 'text logged at step:' + str(n_iter), n_iter)
+            writer.add_text('markdown Text', '''a|b\n-|-\nc|d''', n_iter)
             writer.add_histogram('hist', np.random.rand(100, 100), n_iter)
-            # writer.add_pr_curve('xoxo', np.random.randint(2, size=100), np.random.rand(
-            #     100), n_iter)  # needs tensorboard 0.4RC or later
-            # writer.add_pr_curve_raw('prcurve with raw data', true_positive_counts,
-            #                         false_positive_counts,
-            #                         true_negative_counts,
-            #                         false_negative_counts,
-            #                         precision,
-            #                         recall, n_iter)
+            writer.add_pr_curve('xoxo', np.random.randint(2, size=100), np.random.rand(
+                100), n_iter)  # needs tensorboard 0.4RC or later
+            writer.add_pr_curve_raw('prcurve with raw data', true_positive_counts,
+                                    false_positive_counts,
+                                    true_negative_counts,
+                                    false_negative_counts,
+                                    precision,
+                                    recall, n_iter)
             # export scalar data to JSON for external processing
             writer.export_scalars_to_json("./all_scalars.json")
 
@@ -310,9 +310,8 @@ class TestTensorBoardSummary(unittest.TestCase):
     def test_audio(self):
         self.assertTrue(compare_proto(summary.audio('dummy', np.random.rand(42)), self))
 
-    # TODO: add back after new PR in tensorboard landed
-    # def test_text(self):
-    #     compare_proto(summary.text('dummy', 'text 123'), self)
+    def test_text(self):
+        self.assertTrue(compare_proto(summary.text('dummy', 'text 123'), self))
 
     def test_histogram_auto(self):
         self.assertTrue(compare_proto(summary.histogram('dummy', np.random.rand(1024), bins='auto', max_bins=5), self))
