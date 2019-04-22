@@ -595,7 +595,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.isNone(0)) {
-    return THPUtils_packString(torch::utils::type_to_string(self_.dispatch_type()));
+    return THPUtils_packString(torch::utils::type_to_string(self_.dispatch_type(), self_.scalar_type()));
   }
   auto obj = r.pyobject(0);
   std::string type_name;
@@ -618,9 +618,9 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   if (is_dtype) {
     scalar_type = r.scalartype(0);
   } else {
-    auto& type = torch::utils::type_from_string(type_name);
-    scalar_type = type.scalarType();
-    auto device_type = backendToDeviceType(type.backend());
+    Type* type;
+    std::tie(type, scalar_type) = torch::utils::type_from_string(type_name);
+    auto device_type = backendToDeviceType(type->backend());
     if (device_type != device.type()) {
       device = at::Device(device_type);
     }

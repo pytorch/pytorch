@@ -2700,7 +2700,7 @@ class _TestTorchMixin(object):
         zero_point = 10
         val = 100
         numel = 10
-        q = torch.empty_affine_quantized(numel, dtype=torch.qint8, scale=scale, zero_point=zero_point)
+        q = torch._empty_affine_quantized(numel, dtype=torch.qint8, scale=scale, zero_point=zero_point)
         # for i in range(numel):
         #     # wait for th_fill
         #     q[i] = val
@@ -6518,34 +6518,32 @@ class _TestTorchMixin(object):
     def test_cholesky_solve_batched_dims(self):
         self._test_cholesky_solve_batched_dims(self, lambda t: t)
 
-    @skipIfNoLapack
-    def test_potri(self):
-        a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
-                          (-6.05, -3.30, 5.36, -4.44, 1.08),
-                          (-0.45, 2.58, -2.70, 0.27, 9.04),
-                          (8.32, 2.71, 4.35, -7.17, 2.14),
-                          (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
-
-        # make sure 'a' is symmetric PSD
-        a = torch.mm(a, a.t())
+    @staticmethod
+    def _test_cholesky_inverse(self, cast):
+        from common_utils import random_symmetric_pd_matrix
+        a = cast(random_symmetric_pd_matrix(5))
 
         # compute inverse directly
         inv0 = torch.inverse(a)
 
         # default case
         chol = torch.cholesky(a)
-        inv1 = torch.potri(chol, False)
+        inv1 = torch.cholesky_inverse(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # upper Triangular Test
         chol = torch.cholesky(a, True)
-        inv1 = torch.potri(chol, True)
+        inv1 = torch.cholesky_inverse(chol, True)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # lower Triangular Test
         chol = torch.cholesky(a, False)
-        inv1 = torch.potri(chol, False)
+        inv1 = torch.cholesky_inverse(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
+
+    @skipIfNoLapack
+    def test_cholesky_inverse(self):
+        self._test_cholesky_inverse(self, lambda t: t)
 
     @skipIfNoLapack
     def test_pstrf(self):
@@ -10659,7 +10657,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             x_unique = x.unique(sorted=True)
             self.assertEqual(expected_unique, x_unique)
 
-            x_unique, _, x_counts = torch._unique2_temporary_will_remove_soon(x, sorted=True, return_counts=True)
+            x_unique, x_counts = torch.unique(x, sorted=True, return_counts=True)
             self.assertEqual(expected_counts, x_counts)
 
             x_unique, x_inverse = torch.unique(
@@ -10667,7 +10665,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique, x_unique)
             self.assertEqual(expected_inverse, x_inverse)
 
-            x_unique, x_inverse, x_counts = torch._unique2_temporary_will_remove_soon(
+            x_unique, x_inverse, x_counts = torch.unique(
                 x, sorted=True, return_inverse=True, return_counts=True)
             self.assertEqual(expected_unique, x_unique)
             self.assertEqual(expected_inverse, x_inverse)
@@ -10679,14 +10677,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique, y_unique)
             self.assertEqual(expected_inverse.view(y.size()), y_inverse)
 
-            y_unique, y_inverse, y_counts = torch._unique2_temporary_will_remove_soon(
+            y_unique, y_inverse, y_counts = torch.unique(
                 y, sorted=True, return_inverse=True, return_counts=True)
             self.assertEqual(expected_unique, y_unique)
             self.assertEqual(expected_inverse.view(y.size()), y_inverse)
             self.assertEqual(expected_counts, y_counts)
 
             # Tests unique on other types.
-            int_unique, int_inverse, int_counts = torch._unique2_temporary_will_remove_soon(
+            int_unique, int_inverse, int_counts = torch.unique(
                 torch.tensor([2, 1, 2], dtype=torch.int, device=device),
                 sorted=True,
                 return_inverse=True,
@@ -10696,7 +10694,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.tensor([1, 0, 1], dtype=torch.long, device=device), int_inverse)
             self.assertEqual(torch.tensor([1, 2], dtype=torch.long, device=device), int_counts)
 
-            double_unique, double_inverse, double_counts = torch._unique2_temporary_will_remove_soon(
+            double_unique, double_inverse, double_counts = torch.unique(
                 torch.tensor([2., 1.5, 2.1, 2.], dtype=torch.double, device=device),
                 sorted=True,
                 return_inverse=True,
@@ -10706,7 +10704,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.tensor([1, 0, 2, 1], dtype=torch.long, device=device), double_inverse)
             self.assertEqual(torch.tensor([1, 2, 1], dtype=torch.long, device=device), double_counts)
 
-            byte_unique, byte_inverse, byte_counts = torch._unique2_temporary_will_remove_soon(
+            byte_unique, byte_inverse, byte_counts = torch.unique(
                 torch.tensor([133, 7, 7, 7, 42, 128], dtype=torch.uint8, device=device),
                 sorted=True,
                 return_inverse=True,

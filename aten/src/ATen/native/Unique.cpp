@@ -43,17 +43,26 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
     int64_t* inverse_indices_data = inverse_indices.data<int64_t>();
     std::unordered_map<scalar_t, int64_t> inverse_map;
     inverse_map.reserve(output.numel());
-    for (int i = 0; i < output.numel(); ++i) {
+    for (int64_t i = 0; i < output.numel(); ++i) {
       inverse_map[output_data[i]] = i;
     }
-    for (int i = 0; i < numel; ++i) {
+    for(int64_t i = 0; i < numel; ++i) {
       inverse_indices_data[i] = inverse_map[input_data[i]];
     }
     if (return_counts) {
+      std::unordered_map<scalar_t, int64_t> counts_map;
+      counts_map.reserve(output.numel());
+      for (int64_t i = 0; i < output.numel(); ++i) {
+        counts_map[output_data[i]] = 0;
+      }
+      for(int64_t i = 0; i < numel; i++) {
+        counts_map[input_data[i]] += 1;
+      }
       counts.resize_(output.sizes());
       counts.fill_(0);
-      for (int i = 0; i < numel; ++i) {
-        counts[inverse_map[input_data[i]]] += 1;
+      int64_t *counts_data = counts.data<int64_t>();
+      for(int64_t i = 0; i < output.numel(); i++) {
+        counts_data[i] = counts_map[output_data[i]];
       }
     }
   }
@@ -175,7 +184,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   Tensor input_sorted;
   if (!consecutive) {
     input_sorted = at::empty(input_flat.sizes(), input_flat.options());
-    for (int i = 0; i < indices.size(); ++i) {
+    for (int64_t i = 0; i < indices.size(); ++i) {
       input_sorted[i] = input_flat[indices[i]];
     }
   } else {
