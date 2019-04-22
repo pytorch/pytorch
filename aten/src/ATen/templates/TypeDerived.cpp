@@ -15,6 +15,7 @@ $storage_tensor_headers
 #include <ATen/NativeFunctions.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/Dispatch.h>
 #include <c10/util/Half.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
