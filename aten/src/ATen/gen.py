@@ -13,6 +13,7 @@ import nn_parse
 import native_parse
 import preprocess_declarations
 import function_wrapper
+from function_wrapper import scalar_types
 
 from code_template import CodeTemplate
 
@@ -180,7 +181,7 @@ def backend_to_devicetype(backend):
         return 'CPU'
     return backend
 
-backends = ['CPU', 'CUDA', 'QuantizedCPU']
+backends = ['CPU', 'CUDA']
 densities = ['Dense', 'Sparse', 'Mkldnn']  # TODO: layout instead of densities?
 
 quantized_backends = ['QuantizedCPU']
@@ -191,18 +192,6 @@ extension_backends = ['MSNPU', 'XLA']
 quantized_scalar_types = [
     ('QInt8', 'qint8', 'QInt8AccrealNotDefined', 'Qint8IsFloatingTypeNotDefined'),
 ]
-
-scalar_types = [
-    ('Bool', 'bool', 'BoolAccrealNotDefined', False),
-    ('Byte', 'uint8_t', 'Long', False),
-    ('Char', 'int8_t', 'Long', False),
-    ('Double', 'double', 'Double', True),
-    ('Float', 'float', 'Double', True),
-    ('Int', 'int', 'Long', False),
-    ('Long', 'int64_t', 'Long', False),
-    ('Short', 'int16_t', 'Long', False),
-    ('Half', 'Half', 'Double', True),
-] + quantized_scalar_types
 
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
@@ -270,15 +259,12 @@ def format_yaml(data):
 
 
 def generate_storage_type_and_tensor(backend, density, scalar_type, declarations):
-    scalar_name, c_type, accreal, is_floating_type = scalar_type
+    scalar_name, c_type, _, _ = scalar_type
     env = {}
     density_tag = density if density != 'Dense' else ''
     env['Density'] = density
     env['ScalarName'] = scalar_name
     env['ScalarType'] = c_type
-    env['AccScalarName'] = accreal
-    env['isFloatingType'] = is_floating_type
-    env['isIntegralType'] = not is_floating_type
     env['Type'] = "{}{}{}Type".format(density_tag, backend, scalar_name)
     env['DeviceType'] = backend_to_devicetype(backend)
     env['Backend'] = density_tag + backend
@@ -317,10 +303,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDADevice.h>')
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDATypeDefault.h>')
         sname = '' if scalar_name == "Float" else scalar_name
-        env['THType'] = 'Cuda{}'.format(sname)
-        env['THStorage'] = 'THCuda{}Storage'.format(sname)
-        env['THTensor'] = 'THCuda{}Tensor'.format(sname)
-        env['THIndexTensor'] = 'THCudaLongTensor'
         env['state'] = ['globalContext().getTHCState()']
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
@@ -333,19 +315,12 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
             '#undef THNN_',
         ]
         env['extra_cuda_headers'] = []
-        env['THType'] = scalar_name
-        env['THStorage'] = "TH{}Storage".format(scalar_name)
-        env['THTensor'] = 'TH{}Tensor'.format(scalar_name)
-        env['THIndexTensor'] = 'THLongTensor'
         env['state'] = []
         env['isCUDA'] = 'false'
         env['storage_device'] = 'throw std::runtime_error("CPU storage has no device");'
         env['Generator'] = 'CPUGenerator'
-    env['AS_REAL'] = env['ScalarType']
     if scalar_name == "Half":
         env['SparseTensor'] = 'Tensor'
-        if backend == "CUDA":
-            env['AS_REAL'] = 'convert<at::Half,double>'
 
     declarations, definitions = function_wrapper.create_derived(
         env, declarations)
@@ -432,19 +407,17 @@ def generate_legacy_th_dispatcher(backend, density, scalar_type, declarations):
 def iterate_types():
     for backend in backends:
         for density in densities:
-            for scalar_type in scalar_types:
+            for scalar_type in (scalar_types + quantized_scalar_types):
                 if density == 'Mkldnn' and (backend != 'CPU' or scalar_type[0] != 'Float'):
                     continue
                 if density == 'Sparse' and scalar_type[0] == 'Half':
                     # THS does not do half type yet.
                     continue
-                if backend in quantized_backends:
-                    if density == 'Dense' and scalar_type in quantized_scalar_types:
-                        yield (backend, density, scalar_type)
-                    else:
-                        continue
                 else:
                     yield (backend, density, scalar_type)
+    for backend in quantized_backends:
+        for scalar_type in quantized_scalar_types:
+            yield (backend, 'Dense', scalar_type)
 
 
 ###################
