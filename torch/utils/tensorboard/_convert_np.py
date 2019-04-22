@@ -1,3 +1,6 @@
+"""
+This module converts objects into numpy array.
+"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -8,9 +11,6 @@ import six
 
 from caffe2.python import workspace
 
-"""
-This module converts objects into numpy array.
-"""
 
 def make_np(x):
     """
