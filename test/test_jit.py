@@ -5390,14 +5390,6 @@ a")
             # type: (float, int) -> float
             return math.pow(x, y)
 
-        def test_erf(x):
-            # type (float) -> float
-            return math.erf(x)
-
-        def test_copysign(x, y):
-            # type: (Union[float, int], Union[float, int]) -> float
-            return math.copysign(x, y)
-
         def test_gcd(x, y):
             # type (int, int) -> int
             return math.gcd(x, y)
@@ -5416,9 +5408,60 @@ a")
         self.checkScript(test_sqrt_float, (2.0,))
         self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
-        self.checkScript(test_erf, (1.5,))
-        for inputs in ((1, -1), (1.0, -1), (1, -1.0), (1.0, -1.0)):
-            self.checkScript(test_copysign, inputs)
+        self.checkScript(test_gcd, (2, 4))
+
+    def test_math_ops1(self):
+        funcs_template = dedent('''
+        def func():
+            return math.{func}({scalar1})
+        ''')
+        # map functions to the test values from their domains
+        default_inputs = [1, 10, 0, -1, -1.5, 5.0, 1.5]
+        func_inputs = {func: default_inputs for func in ['erf', 'erfc', 'expm1', 'fabs']}
+        func_inputs.update(
+            {
+              'gamma': [1, 10, -1.5, 1.0, 1.5],
+              'lgamma': [1, 10, -1.5, 1.0, 1.5]
+            }
+        )
+
+        def run_test(code):
+            scope = {}
+            execWrapper(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            self.assertEqual(cu.func(), scope['func']())
+
+        for func in func_inputs:
+            for scalar in func_inputs[func]:
+                code = funcs_template.format(func=func, scalar1=scalar)
+                run_test(code)
+
+    def test_math_copysign(self):
+
+        def func1(x, y):
+            # type: (int, int) -> float
+            return math.copysign(x, y)
+
+        def func2(x, y):
+            # type: (int, float) -> float
+            return math.copysign(x, y)
+
+        def func3(x, y):
+            # type: (float, int) -> float
+            return math.copysign(x, y)
+
+        def func4(x, y):
+            # type: (float, float) -> float
+            return math.copysign(x, y)
+
+        for inputs in [(3, 5), (3, -5), (-3, 5), (-3, -5), (3, 0), (0, 3)]:
+            self.checkScript(func1, inputs)
+        for inputs in [(3, 5.5), (3, -5.5), (-3, 5.5), (-3, -5.5), (3, 0.0), (0, 3.3)]:
+            self.checkScript(func2, inputs)
+        for inputs in [(3.3, 5), (3.3, -5), (-3.3, 5), (-3.3, -5), (3.3, 0), (0.0, 3)]:
+            self.checkScript(func3, inputs)
+        for inputs in [(3.3, 5.5), (3.3, -5.5), (-3.3, 5.5), (-3.3, -5.5), (3.3, 0.0), (0.0, 3.3)]:
+            self.checkScript(func4, inputs)
 
     def test_if_nest_while(self):
         def func(a, b):
