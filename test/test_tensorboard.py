@@ -275,16 +275,28 @@ class TestTensorBoardSummary(unittest.TestCase):
                                       self))
 
     def test_image_with_one_channel(self):
-        self.assertTrue(compare_proto(summary.image('dummy', np.random.rand(1, 8, 8).astype(np.float32), dataformats='CHW'), self))
+        self.assertTrue(compare_proto(summary.image('dummy',
+                                                    np.random.rand(1, 8, 8).astype(np.float32),
+                                                    dataformats='CHW'),
+                                                    self))  # noqa E127
 
     def test_image_with_one_channel_batched(self):
-        self.assertTrue(compare_proto(summary.image('dummy', np.random.rand(2, 1, 8, 8).astype(np.float32), dataformats='NCHW'), self))
+        self.assertTrue(compare_proto(summary.image('dummy',
+                                                    np.random.rand(2, 1, 8, 8).astype(np.float32),
+                                                    dataformats='NCHW'),
+                                                    self))  # noqa E127
 
     def test_image_with_3_channel_batched(self):
-        self.assertTrue(compare_proto(summary.image('dummy', np.random.rand(2, 3, 8, 8).astype(np.float32), dataformats='NCHW'), self))
+        self.assertTrue(compare_proto(summary.image('dummy',
+                                                    np.random.rand(2, 3, 8, 8).astype(np.float32),
+                                                    dataformats='NCHW'),
+                                                    self))  # noqa E127
 
     def test_image_without_channel(self):
-        self.assertTrue(compare_proto(summary.image('dummy', np.random.rand(8, 8).astype(np.float32), dataformats='HW'), self))
+        self.assertTrue(compare_proto(summary.image('dummy',
+                                                    np.random.rand(8, 8).astype(np.float32),
+                                                    dataformats='HW'),
+                                                    self))  # noqa E127
 
     def test_video(self):
         try:
