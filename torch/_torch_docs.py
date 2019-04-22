@@ -4701,7 +4701,7 @@ Example::
             [-1.9711, -0.7748, -1.3840,  0.5067]])
     >>> torch.std_mean(a, 1)
     (tensor([0.9110, 0.8197, 1.2552, 1.0608]), tensor([-0.6871,  0.6229,  0.2169, -0.9058]))
-""".format(**multi_dim_common))
+""")
 
 add_docstr(torch.sum,
            r"""
@@ -5556,9 +5556,9 @@ Example::
     tensor([ 1.7444,  1.1363,  0.7356,  0.5112])
 """.format(**multi_dim_common))
 
-add_docstr(torch.moments,
+add_docstr(torch.var_mean,
            r"""
-.. function:: moments(input, unbiased=True) -> (Tensor, Tensor)
+.. function:: var_mean(input, unbiased=True) -> (Tensor, Tensor)
 
 Returns the variance and mean of all elements in the :attr:`input` tensor.
 
@@ -5574,10 +5574,10 @@ Example::
     >>> a = torch.randn(1, 3)
     >>> a
     tensor([[0.0146, 0.4258, 0.2211]])
-    >>> torch.moments(a)
+    >>> torch.var_mean(a)
     (tensor(0.0423), tensor(0.2205))
 
-.. function:: moments(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
+.. function:: var_mean(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
 
 Returns the variance and mean of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
@@ -5601,9 +5601,9 @@ Example::
             [ 0.2325, -2.6145, -1.6428, -0.3537],
             [-0.2159, -1.1069,  1.2882, -1.3265],
             [-0.6706, -1.5893,  0.6827,  1.6727]])
-    >>> torch.moments(a, 1)
+    >>> torch.var_mean(a, 1)
     (tensor([2.3174, 1.6403, 1.4092, 2.0791]), tensor([-0.0512, -1.0946, -0.3403,  0.0239]))
-""".format(**multi_dim_common))
+""")
 
 add_docstr(torch.zeros,
            r"""

@@ -2422,23 +2422,23 @@ class _TestTorchMixin(object):
                 self.assertEqual(std1, std2)
                 self.assertEqual(mean1, mean2)
 
-    def test_moments(self):
+    def test_var_mean(self):
         for device in torch.testing.get_all_device_types():
             x = torch.rand(100, 300, 50, device=device)
             for dim in range(x.dim()):
                 for unbiased in [False, True]:
                     for keepdim in [False, True]:
-                        var1, mean1 = torch.moments(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        var1, mean1 = torch.var_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
                         var2 = x.var(dim=dim, unbiased=unbiased, keepdim=keepdim)
                         mean2 = x.mean(dim=dim, keepdim=keepdim)
                         self.assertEqual(var1, var2)
                         self.assertEqual(mean1, mean2)
 
-    def test_moments_all_dims(self):
+    def test_var_mean_all_dims(self):
         for device in torch.testing.get_all_device_types():
             x = torch.rand(100, 50, 20, device=device)
             for unbiased in [False, True]:
-                var1, mean1 = torch.moments(x, unbiased=unbiased)
+                var1, mean1 = torch.var_mean(x, unbiased=unbiased)
                 var2 = x.var(unbiased=unbiased)
                 mean2 = x.mean()
                 self.assertEqual(var1, var2)

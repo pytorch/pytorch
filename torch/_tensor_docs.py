@@ -2832,11 +2832,11 @@ var(dim=None, unbiased=True, keepdim=False) -> Tensor
 See :func:`torch.var`
 """)
 
-add_docstr_all('moments',
+add_docstr_all('var_mean',
                r"""
-moments(dim=None, unbiased=True, keepdim=False) -> (Tensor, Tensor)
+var_mean(dim=None, unbiased=True, keepdim=False) -> (Tensor, Tensor)
 
-See :func:`torch.moments`
+See :func:`torch.var_mean`
 """)
 
 add_docstr_all('view',

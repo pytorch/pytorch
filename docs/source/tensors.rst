@@ -324,7 +324,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: min
    .. automethod:: mm
    .. automethod:: mode
-   .. automethod:: moments
    .. automethod:: mul
    .. automethod:: mul_
    .. automethod:: multinomial
@@ -459,6 +458,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unsqueeze_
    .. automethod:: values
    .. automethod:: var
+   .. automethod:: var_mean
    .. automethod:: view
    .. automethod:: view_as
    .. automethod:: where

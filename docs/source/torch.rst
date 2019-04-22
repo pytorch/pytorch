@@ -220,7 +220,6 @@ Reduction Ops
 .. autofunction:: mean
 .. autofunction:: median
 .. autofunction:: mode
-.. autofunction:: moments
 .. autofunction:: norm
 .. autofunction:: prod
 .. autofunction:: std
@@ -229,6 +228,7 @@ Reduction Ops
 .. autofunction:: unique
 .. autofunction:: unique_consecutive
 .. autofunction:: var
+.. autofunction:: var_mean
 
 
 Comparison Ops
