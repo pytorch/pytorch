@@ -384,10 +384,13 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeWait(node);
     case prim::TupleConstruct:
       return analyzeTupleConstruct(node);
+    case prim::GradOf:
+      return analyzeGradOf(node);
     case prim::Constant:
     case prim::DictConstruct:
     case prim::ListConstruct:
     case prim::AutogradZero:
+    case prim::AutogradAdd:
     case prim::FusedConcat:
     case prim::MMTreeReduce:
     case prim::MMBatchSide:
@@ -594,6 +597,12 @@ void AliasDb::analyzeLoop(Node* node) {
   mapAliases(node->outputs(), blockOutputs);
 }
 
+void AliasDb::analyzeGradOf(Node* node) {
+  const auto grad_of_block = node->blocks().at(0);
+  analyze(grad_of_block);
+  mapAliases(node->outputs(), grad_of_block->outputs());
+}
+
 void AliasDb::analyzeSubgraph(Node* node) {
   const auto subgraph = node->g(attr::Subgraph).get();
 
@@ -704,6 +713,11 @@ void AliasDb::analyzeWait(Node* node) {
 }
 
 void AliasDb::analyzeTupleConstruct(Node* node) {
+  // Because we currently mark all Tuples as needing annotation
+  // (even those containing just prmitive types), an element needs to be created
+  // for TupleConstruct. When that changes we can create an element
+  // only if it contains elements which need annotation
+  getOrCreateElement(node->output());
   for (const auto& input : node->inputs()) {
     if (shouldAnnotate(input)) {
       addToContainedElements(input, node->output());
@@ -1241,6 +1255,7 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::TupleConstruct,
       prim::AutogradZero,
       prim::FusedConcat,
+      prim::GradOf,
       prim::MMTreeReduce,
       prim::MMBatchSide,
       prim::BroadcastSizes,
@@ -1256,6 +1271,7 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::BroadcastingChunk,
       prim::fork,
       prim::CreateObject,
+      prim::AutogradAdd,
       prim::GetAttr,
       prim::SetAttr,
       aten::wait,
