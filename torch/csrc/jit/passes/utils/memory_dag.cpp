@@ -1,6 +1,8 @@
 #include "memory_dag.h"
 
 #include <torch/csrc/utils/memory.h>
+#include <algorithm>
+#include <iostream>
 #include <queue>
 
 namespace torch {
@@ -31,10 +33,59 @@ bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
   return false;
 }
 
+bool MemoryDAG::mayContainAlias(const Element* a, const Element* b) const {
+  return mayContainAliasImpl(a, b);
+}
+
+bool MemoryDAG::mayContainAlias(Element* a, Element* b) const {
+  return mayContainAliasImpl(a, b);
+}
+
+void collectAllContainedMemoryLocations(
+    const Element* elem,
+    std::unordered_set<const Element*>& cont) {
+  // we have already recursed on this element
+  if (cont.count(elem)) {
+    return;
+  }
+
+  cont.insert(elem);
+
+  for (const auto& mem_loc : elem->getMemoryLocations()) {
+    collectAllContainedMemoryLocations(mem_loc, cont);
+  }
+
+  for (const auto& contained : elem->contained_elements) {
+    collectAllContainedMemoryLocations(contained, cont);
+  }
+}
+
+bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
+  std::unordered_set<const Element*> all_a_mlocs;
+  std::unordered_set<const Element*> all_b_mlocs;
+
+  collectAllContainedMemoryLocations(a, all_a_mlocs);
+  collectAllContainedMemoryLocations(b, all_b_mlocs);
+
+  for (const auto a_mem : all_a_mlocs) {
+    for (const auto b_mem : all_b_mlocs) {
+      if (a_mem == b_mem) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 // Make `v` point at `to`.
 void MemoryDAG::makePointerTo(Element* from, Element* to) {
   from->pointsTo.insert(to);
   to->pointedFrom.insert(from);
+}
+
+void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
+  container->contained_elements.insert(elem);
 }
 
 // Give `v` a fresh alias (i.e. it does not point to any value)

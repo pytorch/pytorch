@@ -17,7 +17,7 @@ from torch.autograd.profiler import profile
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
-                          load_tests)
+                          load_tests, random_symmetric_pd_matrix)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -2162,19 +2162,19 @@ class TestAutograd(TestCase):
 
     @skipIfNoLapack
     def test_cholesky(self):
-        def func(root):
+        def func(root, upper):
             x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
             return torch.cholesky(x, upper)
 
         def run_test(upper, dims):
-            root = torch.rand(*dims)
-            indices = torch.ones(dims[-1], dims[-1], dtype=torch.uint8).tril()
-            indices = indices.expand_as(root)
-            root[indices] = 0
-            root.requires_grad_()
+            root = torch.rand(*dims, requires_grad=True)
 
-            gradcheck(func, [root])
-            gradgradcheck(func, [root])
+            gradcheck(func, [root, upper])
+            gradgradcheck(func, [root, upper])
+
+            root = random_symmetric_pd_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            chol = root.cholesky().sum().backward()
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2))  # Check the gradient is symmetric
 
         for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)

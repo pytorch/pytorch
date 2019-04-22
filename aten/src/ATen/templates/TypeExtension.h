@@ -35,6 +35,8 @@ struct CAFFE2_API ${Type} : public TypeDefault {
   Allocator* allocator() const override;
   Device getDeviceFromPtr(void * data) const override;
   virtual Backend backend() const override;
+  virtual const char * toString() const override;
+  virtual TypeID ID() const override;
 
   ${type_method_declarations}
 };

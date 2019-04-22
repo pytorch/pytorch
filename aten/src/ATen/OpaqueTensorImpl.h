@@ -20,7 +20,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
   // public constructor for now...
   OpaqueTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::Device device,
                    OpaqueHandle opaque_handle, c10::IntArrayRef sizes)
-  :   TensorImpl(type_id, data_type, device, false),
+  :   TensorImpl(type_id, data_type, device),
       opaque_handle_(std::move(opaque_handle))
   {
     sizes_ = sizes.vec();
@@ -76,8 +76,12 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     AT_ERROR("opaque tensors do not have storage");
   }
 
-// NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
-// because it is unique for each Variable.
+// NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
+// 1. the AutogradMeta pointer, because it is unique for each Variable.
+// 2. the version counter, because although it lives in TensorImpl, the version counter is managed
+// by autograd, and the call sites of `shallow_copy_and_detach()` (from autograd) should decide what
+// the version counter should be for each new TensorImpl. See NOTE [ Version Counter Sharing ] for details.
+//
 // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
 // to this function that need to change the shallow copy's size or storage afterwards, and setting
 // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is

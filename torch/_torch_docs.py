@@ -63,6 +63,8 @@ factory_common_args = parse_kwargs("""
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
+    pin_memory (bool, optional): If set, returned tensor would be allocated in
+        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 factory_like_common_args = parse_kwargs("""
@@ -75,6 +77,8 @@ factory_like_common_args = parse_kwargs("""
         Default: if ``None``, defaults to the device of :attr:`input`.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
+    pin_memory (bool, optional): If set, returned tensor would be allocated in
+        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 factory_data_common_args = parse_kwargs("""
@@ -88,6 +92,8 @@ factory_data_common_args = parse_kwargs("""
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
+    pin_memory (bool, optional): If set, returned tensor would be allocated in
+        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 add_docstr(torch.abs,
@@ -1131,7 +1137,7 @@ Example::
 
 add_docstr(torch.cumprod,
            r"""
-cumprod(input, dim, dtype=None) -> Tensor
+cumprod(input, dim, out=None, dtype=None) -> Tensor
 
 Returns the cumulative product of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -1146,6 +1152,7 @@ Args:
     input (Tensor): the input tensor
     dim  (int): the dimension to do the operation over
     {dtype}
+    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -1180,6 +1187,7 @@ Args:
     input (Tensor): the input tensor
     dim  (int): the dimension to do the operation over
     {dtype}
+    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -2094,7 +2102,7 @@ add_docstr(torch.get_num_threads,
            r"""
 get_num_threads() -> int
 
-Gets the number of OpenMP threads used for parallelizing CPU operations
+Gets the number of threads used for parallelizing CPU operations
 """)
 
 add_docstr(torch.gt,
@@ -3990,7 +3998,7 @@ Example::
 
 add_docstr(torch.tensor,
            r"""
-tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
+tensor(data, dtype=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
 Constructs a tensor with :attr:`data`.
 
@@ -4014,6 +4022,7 @@ Args:
     {dtype}
     {device}
     {requires_grad}
+    {pin_memory}
 
 
 Example::
@@ -4282,7 +4291,10 @@ add_docstr(torch.set_num_threads,
            r"""
 set_num_threads(int)
 
-Sets the number of OpenMP threads used for parallelizing CPU operations
+Sets the number of threads used for parallelizing CPU operations.
+WARNING:
+To ensure that the correct number of threads is used, set_num_threads
+must be called before running eager, JIT or autograd code.
 """)
 
 add_docstr(torch.sigmoid,
@@ -5550,7 +5562,7 @@ Example::
 
 add_docstr(torch.empty,
            r"""
-empty(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+empty(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
 Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`sizes`.
@@ -5563,6 +5575,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {pin_memory}
 
 Example::
 
@@ -5841,14 +5854,8 @@ The inverse of this function is :func:`~torch.ifft`.
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
-    same configuration.
-
-    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
-    4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
-    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
-    use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
-    plans currently in cache, and
-    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+    configuration. See :ref:`cufft-plan-cache` for more details on how to
+    monitor and control the cache.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
@@ -5942,14 +5949,8 @@ The inverse of this function is :func:`~torch.fft`.
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
-    same configuration.
-
-    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
-    4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
-    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
-    use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
-    plans currently in cache, and
-    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+    configuration. See :ref:`cufft-plan-cache` for more details on how to
+    monitor and control the cache.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
@@ -6032,14 +6033,8 @@ The inverse of this function is :func:`~torch.irfft`.
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
-    same configuration.
-
-    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
-    4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
-    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
-    use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
-    plans currently in cache, and
-    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+    configuration. See :ref:`cufft-plan-cache` for more details on how to
+    monitor and control the cache.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
@@ -6114,14 +6109,8 @@ The inverse of this function is :func:`~torch.rfft`.
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
-    same configuration.
-
-    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
-    4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
-    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
-    use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
-    plans currently in cache, and
-    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+    configuration. See :ref:`cufft-plan-cache` for more details on how to
+    monitor and control the cache.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use
