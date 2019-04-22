@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cpu/CopyKernel.h>
 
@@ -36,6 +37,19 @@ bool copy_transpose_valid(const at::Tensor& self, const at::Tensor& src) {
 
 namespace at {
 namespace native {
+
+Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
+  Tensor b_src;
+  if (self.is_sparse() && src.is_sparse()) {
+    return at::copy_sparse_to_sparse_(self, src, non_blocking);
+  }
+  if (!self.is_sparse() && !src.is_sparse()) {
+    std::tie(b_src) = expand_inplace(self, src, "copy");
+    return s_copy_(self, b_src, non_blocking);
+  }
+  AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ",
+           self.type(), " and src type = ", src.type());
+}
 
 Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
   if (src.type_id() != CPUTensorId()) {

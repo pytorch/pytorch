@@ -464,12 +464,12 @@ struct TORCH_API Module {
   }
 
   // so that C++ users can easily add methods
-  void define(const std::string& src, const Resolver& resolver = nullptr);
+  void define(const std::string& src, const ResolverPtr& resolver = nullptr);
 
   void _define_lowered(
       const std::vector<Def>& definitions,
-      const std::vector<Resolver>& resolvers);
-  void _define_lowered(const std::string& src, const Resolver& resolver);
+      const std::vector<ResolverPtr>& resolvers);
+  void _define_lowered(const std::string& src, const ResolverPtr& resolver);
 
   Method& _define_lowered(
       std::string name,

@@ -2,7 +2,9 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/script/resolver.h>
 #include <torch/csrc/jit/script/tree_views.h>
+
 namespace torch {
 namespace jit {
 namespace script {
@@ -15,6 +17,9 @@ namespace script {
  */
 class TORCH_API ScriptTypeParser {
  public:
+  explicit ScriptTypeParser() {}
+  explicit ScriptTypeParser(ResolverPtr resolver)
+      : resolver_(std::move(resolver)) {}
   c10::optional<std::string> parseBaseTypeName(const Expr& expr) const;
 
   c10::TypePtr parseTypeFromExpr(const Expr& expr) const;
@@ -28,6 +33,7 @@ class TORCH_API ScriptTypeParser {
   at::TypePtr subscriptToType(
       const std::string& typeName,
       const Subscript& subscript) const;
+  ResolverPtr resolver_ = nullptr;
 };
 } // namespace script
 } // namespace jit
