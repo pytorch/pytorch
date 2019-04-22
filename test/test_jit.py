@@ -8354,6 +8354,17 @@ a")
         self.assertEqual(foo_trace(a), foo(a))
         self.assertNotEqual(foo_trace(a), foo_trace(b))
 
+    def test_torch_manual_seed(self):
+        with freeze_rng_state():
+            def test():
+                torch.manual_seed(2)
+                return torch.rand(1)
+
+            script = torch.jit.script(test)
+            self.assertEqual(test(), script())
+            graph = script.graph_for()
+            FileCheck().check("aten::manual_seed").run(graph)
+
     def test_tracing_indexing(self):
         @_trace(torch.zeros(10))
         def foo_trace(x):
