@@ -43,10 +43,8 @@ namespace detail {
   //           If the IValue contains an IntList, return it as ArrayRef<int>.
   // TODO Should we move the IValue so we can avoid bumping the Tensor refcount?
   template<class T, class Enable = void> struct ivalue_to_arg_type {
-    static T call(const IValue& v) {
-      // This base case is hit whenever a type does not have a specialisation below.
-      static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
-    }
+    // This base case is hit whenever a type does not have a specialisation below.
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
   };
   template<class T>
   struct ivalue_to_arg_type<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
@@ -77,40 +75,28 @@ namespace detail {
   // in some common error scenarios.
   template<class T>
   struct ivalue_to_arg_type<std::vector<T>> {
-    static std::vector<T> call(const IValue& v) {
-      // We don't support std::vector because that would prevent us from doing
-      // internal optimization to how we represent lists (e.g. SmallVector).
-      // Users should use ArrayRef instead.
-      static_assert(guts::false_t<std::vector<T>>::value, "You tried to register a kernel with an unsupported argument type: std::vector<T>. Please use c10::ArrayRef<T> instead.");
-    }
+    // We don't support std::vector because that would prevent us from doing
+    // internal optimization to how we represent lists (e.g. SmallVector).
+    // Users should use ArrayRef instead.
+    static_assert(guts::false_t<std::vector<T>>::value, "You tried to register a kernel with an unsupported argument type: std::vector<T>. Please use c10::ArrayRef<T> instead.");
   };
   template<class T>
   struct ivalue_to_arg_type<T, guts::enable_if_t<std::is_same<float, T>::value>> {
-    static T call(const IValue& v) {
-      // There is no reason to support float when we have double. Keep the API lean.
-      static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type: float. Please use double instead.");
-    }
+    // There is no reason to support float when we have double. Keep the API lean.
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type: float. Please use double instead.");
   };
   template<class T>
   struct ivalue_to_arg_type<T, guts::enable_if_t<std::is_same<const char*, T>::value>> {
-    static T call(const IValue& v) {
-      // There is no reason to support float when we have double. Keep the API lean.
-      static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type: const char*. Please use std::string instead.");
-    }
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type: const char*. Please use std::string instead.");
   };
   template<class T>
   struct ivalue_to_arg_type<T, guts::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    static T call(const IValue& v) {
-      // There is no reason to support float when we have double. Keep the API lean.
-      static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral argument type. Please use int64_t instead.");
-    }
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral argument type. Please use int64_t instead.");
   };
 
   template<class T, class Enable = void>
   struct return_type_to_ivalue_ {
-    static IValue call(T&& v) {
-      static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type.");
-    }
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type.");
   };
   template<class T>
   struct return_type_to_ivalue_<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
@@ -141,27 +127,19 @@ namespace detail {
   // in some common error scenarios.
   template<class T>
   struct return_type_to_ivalue_<c10::ArrayRef<T>> {
-    static IValue call(c10::ArrayRef<T>&& v) {
-      static_assert(guts::false_t<c10::ArrayRef<T>>::value, "You tried to register a kernel with an unsupported return type: c10::ArrayRef<T>. Please use std::vector<T> instead.");
-    }
+    static_assert(guts::false_t<c10::ArrayRef<T>>::value, "You tried to register a kernel with an unsupported return type: c10::ArrayRef<T>. Please use std::vector<T> instead.");
   };
   template<class T>
   struct return_type_to_ivalue_<T, guts::enable_if_t<std::is_same<float, T>::value>> {
-    static IValue call(T&& v) {
-      static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type: float. Please use double instead.");
-    }
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type: float. Please use double instead.");
   };
   template<class T>
   struct return_type_to_ivalue_<T, guts::enable_if_t<std::is_same<const char*, T>::value>> {
-    static IValue call(T&& v) {
-      static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type: const char*. Please use std::string instead.");
-    }
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type: const char*. Please use std::string instead.");
   };
   template<class T>
   struct return_type_to_ivalue_<T, guts::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    static IValue call(T&& v) {
-      static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral return argument type. Please use int64_t instead.");
-    }
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral return argument type. Please use int64_t instead.");
   };
 
   template<class T>
