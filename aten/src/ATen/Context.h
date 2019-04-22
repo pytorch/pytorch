@@ -176,6 +176,11 @@ CAFFE2_API TypeExtendedInterface& getType(const Tensor&);
 
 CAFFE2_API Allocator* getCPUAllocator();
 
+static inline DeprecatedTypeProperties& getNonVariableDeprecatedTypeProperties(Backend p, ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      p, s, /*is_variable*/false);
+}
+
 static inline DeprecatedTypeProperties& CPU(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
       Backend::CPU, s, /*is_variable*/false);
