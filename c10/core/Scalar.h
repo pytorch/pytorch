@@ -91,6 +91,17 @@ class C10_API Scalar {
 
   Scalar operator-() const;
 
+  bool operator==(const Scalar& rhs) const {
+    if (tag != rhs.tag) {
+      return false;
+    }
+    switch(tag) {
+      case Tag::HAS_d: return v.d == rhs.v.d;
+      case Tag::HAS_i: return v.i == rhs.v.i;
+      case Tag::HAS_z: return v.z[0] == rhs.v.z[0] && v.z[1] == rhs.v.z[1];
+    }
+  }
+
  private:
   enum class Tag { HAS_d, HAS_i, HAS_z };
   Tag tag;

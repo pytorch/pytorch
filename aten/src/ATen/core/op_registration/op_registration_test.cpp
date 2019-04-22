@@ -280,6 +280,20 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     1, [] (const int64_t& v) {EXPECT_EQ(1, v);},
     2, [] (const IValue& v) {EXPECT_EQ(2, v.toInt());},
     "(int a) -> int");
+  ArgTypeTestKernel<c10::Scalar>::test(
+    1, [] (const c10::Scalar& v) {EXPECT_EQ(1, v.toInt());},
+    2, [] (const IValue& v) {EXPECT_EQ(2, v.toInt());});
+  ArgTypeTestKernel<c10::Scalar>::test(
+    1, [] (const c10::Scalar& v) {EXPECT_EQ(1, v.toInt());},
+    2, [] (const IValue& v) {EXPECT_EQ(2, v.toInt());},
+    "(Scalar a) -> Scalar");
+  ArgTypeTestKernel<c10::Scalar>::test(
+    1.5, [] (const c10::Scalar& v) {EXPECT_EQ(1.5, v.toDouble());},
+    2.5, [] (const IValue& v) {EXPECT_EQ(2.5, v.toDouble());});
+  ArgTypeTestKernel<c10::Scalar>::test(
+    1.5, [] (const c10::Scalar& v) {EXPECT_EQ(1.5, v.toDouble());},
+    2.5, [] (const IValue& v) {EXPECT_EQ(2.5, v.toDouble());},
+    "(Scalar a) -> Scalar");
   ArgTypeTestKernel<bool>::test(
     true, [] (const bool& v) {EXPECT_EQ(true, v);},
     false, [] (const IValue& v) {EXPECT_EQ(false, v.toBool());});
@@ -325,6 +339,20 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     c10::optional<int64_t>(1), [] (const c10::optional<int64_t>& v) {EXPECT_EQ(1, v.value());},
     c10::optional<int64_t>(2), [] (const IValue& v) {EXPECT_EQ(2, v.toInt());},
     "(int? a) -> int?");
+  ArgTypeTestKernel<c10::optional<c10::Scalar>>::test(
+    c10::optional<c10::Scalar>(1), [] (const c10::optional<c10::Scalar>& v) {EXPECT_EQ(1, v.value().toInt());},
+    c10::optional<c10::Scalar>(2), [] (const IValue& v) {EXPECT_EQ(2, v.toInt());});
+  ArgTypeTestKernel<c10::optional<c10::Scalar>>::test(
+    c10::optional<c10::Scalar>(1), [] (const c10::optional<c10::Scalar>& v) {EXPECT_EQ(1, v.value().toInt());},
+    c10::optional<c10::Scalar>(2), [] (const IValue& v) {EXPECT_EQ(2, v.toInt());},
+    "(Scalar? a) -> Scalar?");
+  ArgTypeTestKernel<c10::optional<c10::Scalar>>::test(
+    c10::optional<c10::Scalar>(1.5), [] (const c10::optional<c10::Scalar>& v) {EXPECT_EQ(1.5, v.value().toDouble());},
+    c10::optional<c10::Scalar>(2.5), [] (const IValue& v) {EXPECT_EQ(2.5, v.toDouble());});
+  ArgTypeTestKernel<c10::optional<c10::Scalar>>::test(
+    c10::optional<c10::Scalar>(1.5), [] (const c10::optional<c10::Scalar>& v) {EXPECT_EQ(1.5, v.value().toDouble());},
+    c10::optional<c10::Scalar>(2.5), [] (const IValue& v) {EXPECT_EQ(2.5, v.toDouble());},
+    "(Scalar? a) -> Scalar?");
   ArgTypeTestKernel<c10::optional<bool>>::test(
     c10::optional<bool>(true), [] (const c10::optional<bool>& v) {EXPECT_EQ(true, v.value());},
     c10::optional<bool>(false), [] (const IValue& v) {EXPECT_EQ(false, v.toBool());});
@@ -370,6 +398,13 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     c10::optional<int64_t>(), [] (const c10::optional<int64_t>& v) {EXPECT_FALSE(v.has_value());},
     c10::optional<int64_t>(), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(int? a) -> int?");
+  ArgTypeTestKernel<c10::optional<c10::Scalar>>::test(
+    c10::optional<c10::Scalar>(), [] (const c10::optional<c10::Scalar>& v) {EXPECT_FALSE(v.has_value());},
+    c10::optional<c10::Scalar>(), [] (const IValue& v) {EXPECT_TRUE(v.isNone());});
+  ArgTypeTestKernel<c10::optional<c10::Scalar>>::test(
+    c10::optional<c10::Scalar>(), [] (const c10::optional<c10::Scalar>& v) {EXPECT_FALSE(v.has_value());},
+    c10::optional<c10::Scalar>(), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    "(Scalar? a) -> Scalar?");
   ArgTypeTestKernel<c10::optional<bool>>::test(
     c10::optional<bool>(), [] (const c10::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
     c10::optional<bool>(), [] (const IValue& v) {EXPECT_TRUE(v.isNone());});
@@ -415,6 +450,13 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     c10::ArrayRef<int64_t>(), [] (c10::ArrayRef<int64_t> v) {EXPECT_EQ(0, v.size());},
     std::vector<int64_t>(), [] (const IValue& v) {EXPECT_EQ(0, v.toIntListRef().size());},
     "(int[] a) -> int[]");
+  ArgTypeTestKernel<c10::ArrayRef<c10::Scalar>, std::vector<c10::Scalar>>::test(
+    c10::ArrayRef<c10::Scalar>(), [] (c10::ArrayRef<c10::Scalar> v) {EXPECT_EQ(0, v.size());},
+    std::vector<c10::Scalar>(), [] (const IValue& v) {EXPECT_EQ(0, v.toScalarListRef().size());});
+  ArgTypeTestKernel<c10::ArrayRef<c10::Scalar>, std::vector<c10::Scalar>>::test(
+    c10::ArrayRef<c10::Scalar>(), [] (c10::ArrayRef<c10::Scalar> v) {EXPECT_EQ(0, v.size());},
+    std::vector<c10::Scalar>(), [] (const IValue& v) {EXPECT_EQ(0, v.toScalarListRef().size());},
+    "(Scalar[] a) -> Scalar[]");
   // TODO Converting std::vector<bool> to ArrayRef<bool> doesn't work, so we
   //      need to find an alternative
   // ArgTypeTestKernel<c10::ArrayRef<bool>, std::vector<bool>>::test(
@@ -456,6 +498,13 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     c10::ArrayRef<int64_t>({1, 2}), [] (c10::ArrayRef<int64_t> v) {EXPECT_EQ(c10::ArrayRef<int64_t>({1, 2}), v);},
     std::vector<int64_t>({3, 4}), [] (const IValue& v) {EXPECT_EQ(std::vector<int64_t>({3, 4}), v.toIntListRef());},
     "(int[] a) -> int[]");
+  ArgTypeTestKernel<c10::ArrayRef<c10::Scalar>, std::vector<c10::Scalar>>::test(
+    c10::ArrayRef<c10::Scalar>({1, 2.5}), [] (c10::ArrayRef<c10::Scalar> v) {EXPECT_EQ(c10::ArrayRef<c10::Scalar>({1, 2.5}), v);},
+    std::vector<c10::Scalar>({3, 4.5}), [] (const IValue& v) {EXPECT_EQ(std::vector<c10::Scalar>({3, 4.5}), v.toScalarListRef());});
+  ArgTypeTestKernel<c10::ArrayRef<c10::Scalar>, std::vector<c10::Scalar>>::test(
+    c10::ArrayRef<c10::Scalar>({1, 2.5}), [] (c10::ArrayRef<c10::Scalar> v) {EXPECT_EQ(c10::ArrayRef<c10::Scalar>({1, 2.5}), v);},
+    std::vector<c10::Scalar>({3, 4.5}), [] (const IValue& v) {EXPECT_EQ(std::vector<c10::Scalar>({3, 4.5}), v.toScalarListRef());},
+    "(Scalar[] a) -> Scalar[]");
   // TODO When fixing bool[] and str[] (see above), also add them here
   ArgTypeTestKernel<c10::ArrayRef<Tensor>, std::vector<Tensor>>::test(
     c10::ArrayRef<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}), [] (c10::ArrayRef<Tensor> v) {

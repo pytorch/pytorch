@@ -95,6 +95,7 @@ using TensorList = List<at::Tensor>;
 using DoubleList = List<double>;
 using BoolList = List<bool>;
 using GenericList = List<IValue>;
+using ScalarList = List<c10::Scalar>;
 
 struct Object;
 }
@@ -114,6 +115,7 @@ struct Object;
   _(Bool) \
   _(Tuple) \
   _(IntList) \
+  _(ScalarList) \
   _(DoubleList) \
   _(BoolList) \
   _(String) \
@@ -313,7 +315,23 @@ struct CAFFE2_API IValue final {
     return toIntrusivePtr<ivalue::IntList>();
   }
 
+  // IScalarList
+  IValue(c10::intrusive_ptr<ivalue::ScalarList> v);
+  IValue(std::vector<c10::Scalar> v);
+  IValue(at::ArrayRef<c10::Scalar> v)
+  : IValue(v.vec()) {}
+  bool isScalarList() const { return Tag::ScalarList == tag; }
+  c10::intrusive_ptr<ivalue::ScalarList> toScalarList() && {
+    AT_ASSERT(isScalarList());
+    return moveToIntrusivePtr<ivalue::ScalarList>();
+  }
+  c10::intrusive_ptr<ivalue::ScalarList> toScalarList() const & {
+    AT_ASSERT(isScalarList());
+    return toIntrusivePtr<ivalue::ScalarList>();
+  }
+
   const std::vector<int64_t>& toIntListRef() const;
+  const std::vector<c10::Scalar>& toScalarListRef() const;
   const std::vector<double>& toDoubleListRef() const;
   const std::vector<bool>& toBoolListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
@@ -420,7 +438,7 @@ struct CAFFE2_API IValue final {
     return "None";
   }
   // Scalar, which gets encoded as either an Int or a Double
-  IValue(at::Scalar s)
+  IValue(c10::Scalar s)
   : IValue() {
     if(s.isFloatingPoint()) {
       *this = s.toDouble();
@@ -431,7 +449,7 @@ struct CAFFE2_API IValue final {
   bool isScalar() const {
     return isDouble() || isInt();
   }
-  at::Scalar toScalar() const {
+  c10::Scalar toScalar() const {
     if(isDouble())
       return toDouble();
     else if(isInt())
@@ -452,8 +470,8 @@ struct CAFFE2_API IValue final {
   }
 
   // ScalarType
-  at::ScalarType toScalarType() const {
-    return static_cast<at::ScalarType>(toInt());
+  c10::ScalarType toScalarType() const {
+    return static_cast<c10::ScalarType>(toInt());
   }
 
   // Layout
@@ -790,14 +808,16 @@ DEFINE_TO(bool, toBool)
 DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob);
 DEFINE_TO(c10::intrusive_ptr<ivalue::DoubleList>, toDoubleList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::IntList>, toIntList)
+DEFINE_TO(c10::intrusive_ptr<ivalue::ScalarList>, toScalarList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::BoolList>, toBoolList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::TensorList>, toTensorList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::GenericList>, toGenericList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::GenericDict>, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
-DEFINE_TO(at::Scalar, toScalar)
+DEFINE_TO(c10::Scalar, toScalar)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
+DEFINE_TO(std::vector<c10::Scalar>, toScalarListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
 DEFINE_TO(std::vector<bool>, toBoolListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
@@ -806,7 +826,7 @@ DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
-DEFINE_TO(at::ScalarType, toScalarType)
+DEFINE_TO(c10::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 
 template <typename T>
@@ -857,6 +877,13 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::IntList> v)
 }
 inline IValue::IValue(std::vector<int64_t> v)
 : IValue(ivalue::IntList::create(std::move(v))) {}
+
+inline IValue::IValue(c10::intrusive_ptr<ivalue::ScalarList> v)
+: tag(Tag::ScalarList), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(std::vector<c10::Scalar> v)
+: IValue(ivalue::ScalarList::create(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
 : tag(Tag::String), is_intrusive_ptr(true) {
@@ -911,6 +938,10 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
 
 inline const std::vector<int64_t>& IValue::toIntListRef() const {
   return toIntList()->elements();
+}
+
+inline const std::vector<c10::Scalar>& IValue::toScalarListRef() const {
+  return toScalarList()->elements();
 }
 
 inline const std::vector<double>& IValue::toDoubleListRef() const {
