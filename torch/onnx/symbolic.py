@@ -674,7 +674,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
             return _unimplemented(name, "input size not accesible")
         if set(tuple_fn(dilation)) != {1}:
             return _unimplemented(name, "dilation")
-        if stride is None:
+        if not stride:
             stride = kernel_size
         padding = tuple(tuple_fn(padding))
         if ceil_mode:
