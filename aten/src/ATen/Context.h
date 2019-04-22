@@ -47,8 +47,8 @@ class CAFFE2_API Context {
   }
   // The passed in Type must be delete'able
   // TODO: Just make it take a unique_ptr
-  void registerType(Backend b, ScalarType s, Type* t) {
-    globalLegacyTypeDispatch().registerType(b, s,
+  void registerType(Backend b, Type* t) {
+    globalLegacyTypeDispatch().registerType(b,
       LegacyTypeDispatch::TypeUniquePtr{t, LegacyTypeDeleter([](Type* p) { delete p; }) });
   }
 
