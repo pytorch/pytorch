@@ -93,9 +93,9 @@ TEST(CPUGenerator, TestMultithreadingGetSetCurrentSeed) {
   // See Note [Thread-safety and Generators]
   auto gen1 = at::detail::getDefaultCPUGenerator();
   auto initial_seed = gen1->current_seed();
-  std::thread t0{thread_func_get_set_current_seed, gen1.get()};
-  std::thread t1{thread_func_get_set_current_seed, gen1.get()};
-  std::thread t2{thread_func_get_set_current_seed, gen1.get()};
+  std::thread t0{thread_func_get_set_current_seed, gen1};
+  std::thread t1{thread_func_get_set_current_seed, gen1};
+  std::thread t2{thread_func_get_set_current_seed, gen1};
   t0.join();
   t1.join();
   t2.join();
