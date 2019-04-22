@@ -1,10 +1,10 @@
 #include <torch/extension.h>
 
-#include <ATen/CPUFloatType.h>
 #include <ATen/Type.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <ATen/detail/ComplexHooksInterface.h>
 
+#include <ATen/CPUTypeDefault.h>
 #include <c10/core/Allocator.h>
 #include <ATen/CPUGenerator.h>
 #include <ATen/DeviceGuard.h>
@@ -28,7 +28,7 @@ namespace at {
 struct CPUComplexFloatType : public at::CPUTypeDefault {
   CPUComplexFloatType()
       : CPUTypeDefault(
-            CPUTensorId(),
+            ComplexCPUTensorId(),
             /*is_variable=*/false,
             /*is_undefined=*/false) {}
 
@@ -39,9 +39,27 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
   TypeID ID() const override;
 
   Tensor empty(IntArrayRef size, const TensorOptions & options) const override {
-    // Delegate to the appropriate cpu tensor factory
-    const DeviceGuard device_guard(options.device());
-    return at::native::empty_cpu(/* actuals */ size, options);
+    AT_ASSERT(options.device().is_cpu());
+
+    for (auto x: size) {
+      AT_CHECK(x >= 0, "Trying to create tensor using size with negative dimension: ", size);
+    }
+    auto* allocator = at::getCPUAllocator();
+    int64_t nelements = at::prod_intlist(size);
+    auto dtype = options.dtype();
+    auto storage_impl = c10::make_intrusive<StorageImpl>(
+        dtype,
+        nelements,
+        allocator->allocate(nelements * dtype.itemsize()),
+        allocator,
+        /*resizable=*/true);
+
+    auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::ComplexCPUTensorId());
+    // Default TensorImpl has size [0]
+    if (size.size() != 1 || size[0] != 0) {
+      tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
+    }
+    return tensor;
   }
 };
 
@@ -49,7 +67,7 @@ struct ComplexHooks : public at::ComplexHooksInterface {
   ComplexHooks(ComplexHooksArgs) {}
   void registerComplexTypes(Context* context) const override {
     context->registerType(
-        Backend::CPU, ScalarType::ComplexFloat, new CPUComplexFloatType());
+        Backend::ComplexCPU, ScalarType::ComplexFloat, new CPUComplexFloatType());
   }
 };
 
@@ -62,7 +80,7 @@ caffe2::TypeMeta CPUComplexFloatType::typeMeta() const {
 }
 
 Backend CPUComplexFloatType::backend() const {
-  return Backend::CPU;
+  return Backend::ComplexCPU;
 }
 
 const char* CPUComplexFloatType::toString() const {
