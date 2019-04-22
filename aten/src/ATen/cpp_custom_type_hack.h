@@ -25,7 +25,7 @@ T& cast(const Tensor& packed) {
 }
 
 template<typename T>
-Tensor create(std::unique_ptr<T> ptr) {
+Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
   // We store this instance away in a Tensor and register a deleter function
   // so that we do not leak memory. On the other side, we pull out the storage's
   // data_ptr and get the right typed pointer.
@@ -38,9 +38,7 @@ Tensor create(std::unique_ptr<T> ptr) {
 
   // size doesn't really matter, but we can align it to the actual size
   // returning variables because one likely want to use this hack from python
-  auto retval = at::empty(
-      {sizeof(T)},
-      at::device(kCPU).dtype(at::kByte).is_variable(true).requires_grad(false));
+  auto retval = at::empty({sizeof(T)}, options.device(kCPU).dtype(at::kByte));
   retval.storage().set_data_ptr(std::move(at_ptr));
   return retval;
 }
