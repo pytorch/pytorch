@@ -1146,6 +1146,23 @@ class TestJit(JitTestCase):
 
         self.assertExportImport(trace, (x, y))
 
+    def test_cse_not_introduce_aliasing(self):
+        @torch.jit.script
+        def tensor_alias_outputs(x):
+            return x + x, x + x
+
+        self.run_pass('cse', tensor_alias_outputs.graph)
+        FileCheck().check_count("aten::add", 2).run(tensor_alias_outputs.graph)
+
+        @torch.jit.script
+        def ints_alias_outputs(x):
+            # type: (int) -> Tuple[int, int]
+            return x + x, x + x
+
+        # non-aliasing types can be CSEd
+        self.run_pass('cse', ints_alias_outputs.graph)
+        FileCheck().check_count("aten::add", 1).run(ints_alias_outputs.graph)
+
     def test_recursive_cse(self):
         input_str = """
 graph(%x : Tensor,
@@ -12702,28 +12719,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         # We should not have combined the two multiplications into
         # the same group; they should each be a separate DiffGraph
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
-
-    def test_mutation_subgraph_inlining(self):
-        # cannot move a node which has writers into a differentiable subgraph,
-        # bc CSE might lose context that it has writers
-
-        def fn(x):
-            a = x.t()
-            a = a + 1
-            c = x.t()
-            c = c + 1
-            e = a + c
-            b = a.add_(x)
-            d = c.add_(x)
-            return e, b, d
-
-        fn_script = torch.jit.script(fn)
-        outs1 = fn_script(torch.tensor(0.5, requires_grad=True))
-        outs2 = fn(torch.tensor(0.5, requires_grad=True))
-        for i in range(len(outs1)):
-            self.assertEqual(outs1[i], outs2[i])
-        graph = fn_script.graph_for(torch.tensor(0.5, requires_grad=True))
-        FileCheck().check_not("DifferentiableGraph").run(graph)
 
 
 class TestCustomOperators(JitTestCase):

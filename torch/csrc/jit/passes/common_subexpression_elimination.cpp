@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 namespace {
+
 // The function implements common subexpression elimination.
 // Since the nodes are visited in topological order, one pass is enough.
 void EliminateCommonSubexpression(
@@ -21,6 +22,13 @@ void EliminateCommonSubexpression(
     if (node->hasSideEffects() || node->isNondeterministic() ||
         aliasDb.hasWriters(node)) {
       // Do NOT have enough information to do CSE on these nodes.
+      continue;
+    }
+
+    // since the graph outputs may be mutated after they are returned,
+    // don't introduce new aliasing
+    if (aliasDb.mayContainAlias(
+            node->outputs(), node->owningGraph()->outputs())) {
       continue;
     }
 

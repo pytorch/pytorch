@@ -49,6 +49,27 @@ class AliasDb {
   // hold in memory any element that exists in the other
   bool mayContainAlias(const Value* a, const Value* b) const;
 
+  // Do any values in group `a` share a memory location or hold in memory
+  // any element that exists in group `b`
+  template <
+      typename... Other1,
+      template <typename, typename...> class T,
+      typename... Other2,
+      template <typename, typename...> class U>
+  bool mayContainAlias(
+      const T<Value*, Other1...>& a,
+      const U<Value*, Other2...>& b) const {
+    if (a.empty() || b.empty()) {
+      return false;
+    }
+
+    return std::any_of(a.begin(), a.end(), [&](Value* v1) {
+      return std::any_of(b.begin(), b.end(), [&](Value* v2) {
+        return mayContainAlias(v1, v2);
+      });
+    });
+  }
+
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
