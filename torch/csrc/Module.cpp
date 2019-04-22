@@ -35,6 +35,7 @@
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_layouts.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/init.h>
@@ -98,6 +99,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
     return nullptr;
   }
   torch::utils::initializeLayouts();
+  torch::utils::initializeMemoryFormats();
   torch::utils::initializeDtypes();
   torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
