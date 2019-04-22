@@ -704,7 +704,8 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
                                         kernel_shape_i=[1 for _ in range(ndims)],
                                         strides_i=[1 for _ in range(ndims)])
             # convert indices to have non-flattened indices values
-            s = _slice_op(g, flattened_indices, axes=[2 + i for i in range(ndims)], starts=[0 for _ in range(ndims)], ends=[1 for _ in range(ndims)])
+            s = _slice_op(g, flattened_indices, axes=[2 + i for i in range(ndims)],
+                          starts=[0 for _ in range(ndims)], ends=[1 for _ in range(ndims)])
             indices = sub(g, indices, s)
             return r, indices
         else:
