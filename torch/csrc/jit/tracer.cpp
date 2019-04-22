@@ -343,7 +343,7 @@ void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
 void addInputs(Node* n, const char* name, bool value) {
   detail::genericAddInput(n, value);
 }
-void addInputs(Node* n, const char* name /* unused */, c10::optional<bool>& value) {
+void addInputs(Node* n, const char* name /* unused */, const c10::optional<bool>& value) {
   if (value) {
     detail::genericAddInput(n, *value);
   } else {
