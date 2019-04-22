@@ -42,17 +42,17 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
   options = CUDA(kInt).options();
   REQUIRE_OPTIONS(kCUDA, -1, kInt, kStrided);
 
-  options = getNonVariableType(Backend::SparseCUDA, kFloat).options();
+  options = getNonVariableDeprecatedTypeProperties(Backend::SparseCUDA, kFloat).options();
   REQUIRE_OPTIONS(kCUDA, -1, kFloat, kSparse);
 
-  options = getNonVariableType(Backend::SparseCUDA, kByte).options();
+  options = getNonVariableDeprecatedTypeProperties(Backend::SparseCUDA, kByte).options();
   REQUIRE_OPTIONS(kCUDA, -1, kByte, kSparse);
 
   options = CUDA(kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kStrided);
 
   options =
-      getNonVariableType(Backend::SparseCUDA, kFloat).options(/*device=*/5);
+      getNonVariableDeprecatedTypeProperties(Backend::SparseCUDA, kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kSparse);
 }
 
@@ -60,7 +60,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
   auto options = empty(5, device(kCUDA).dtype(kDouble)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 
-  options = empty(5, getNonVariableType(Backend::SparseCUDA, kByte)).options();
+  options = empty(5, getNonVariableDeprecatedTypeProperties(Backend::SparseCUDA, kByte)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kByte, kSparse);
 
   if (torch::cuda::device_count() > 1) {

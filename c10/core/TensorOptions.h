@@ -357,8 +357,14 @@ struct C10_API TensorOptions {
       case Layout::Strided:
         switch (device().type()) {
           case DeviceType::CPU:
+            if (isComplexType(typeMetaToScalarType(dtype()))) {
+              return ComplexCPUTensorId();
+            }
             return CPUTensorId();
           case DeviceType::CUDA:
+            if (isComplexType(typeMetaToScalarType(dtype()))) {
+              return ComplexCUDATensorId();
+            }
             return CUDATensorId();
           case DeviceType::MKLDNN:
             return MKLDNNTensorId();

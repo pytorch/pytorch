@@ -67,6 +67,7 @@ bool isSimpleMap(Node* node) {
       "aten::neg(Tensor self) -> Tensor",
       "aten::pow(Tensor self, Tensor exponent) -> Tensor",
       "aten::pow(Tensor self, Scalar exponent) -> Tensor",
+      "aten::pow(Scalar self, Tensor exponent) -> Tensor",
       "aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
@@ -284,7 +285,7 @@ struct GraphFuser {
            const char* source,
            const std::string& method_name) {
           script::CompilationUnit cu;
-          cu.define(source, script::nativeResolver, nullptr);
+          cu.define(source, script::nativeResolver(), nullptr);
           *graph_ptr = cu.get_function(method_name).graph();
         },
         &nm_graph,

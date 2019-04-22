@@ -60,6 +60,11 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_top_k.*'  # opset 10 is not supported yet
                      '|test_resize.*'  # opset 10 is not supported yet
                      '|test_slice.*'  # opset 10 is not supported yet
+                     '|test_.*qlinear.*'  # Skip quantized op test
+                     '|test_.*quantize.*'  # Skip quantized op test
+                     '|test_.*matmulinteger.*'  # Skip quantized op test
+                     '|test_.*convinteger.*'  # Skip quantized op test
+                     '|test_isinf.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
