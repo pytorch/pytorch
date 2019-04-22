@@ -8,8 +8,18 @@ import six
 
 from caffe2.python import workspace
 
+"""
+This module converts objects into numpy array.
+"""
 
 def make_np(x):
+    """
+    Args:
+      x: An instance of torch tensor or caffe blob name
+
+    Returns:
+        numpy.array: Numpy array
+    """
     if isinstance(x, np.ndarray):
         return x
     if isinstance(x, six.string_types):  # Caffe2 will pass name of blob(s) to fetch

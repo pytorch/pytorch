@@ -20,7 +20,7 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 # from tensorboard.compat.proto.plugin_text_pb2 import TextPluginData
 # from tensorboard.compat.proto import layout_pb2
 
-from .convert_np import make_np
+from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
 

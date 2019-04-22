@@ -11,14 +11,14 @@ import unittest
 
 import torch
 from common_utils import run_tests
-from torch.utils.tensorboard import convert_np, SummaryWriter
-from torch.utils.tensorboard import summary
+from torch.utils.tensorboard import summary, SummaryWriter
 from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
+from torch.utils.tensorboard._convert_np import make_np
 
 
 TEST_TENSORBOARD = True
 try:
-    import tensorboard.summary.writer.event_file_writer
+    import tensorboard.summary.writer.event_file_writer  # noqa F401
 except ImportError:
     TEST_TENSORBOARD = False
 
@@ -28,22 +28,22 @@ class TestTensorBoardPyTorchNumpy(unittest.TestCase):
         tensors = [torch.rand(3, 10, 10), torch.rand(1), torch.rand(1, 2, 3, 4, 5)]
         for tensor in tensors:
             # regular tensor
-            self.assertIsInstance(convert_np.make_np(tensor), np.ndarray)
+            self.assertIsInstance(make_np(tensor), np.ndarray)
 
             # CUDA tensor
             if torch.cuda.device_count() > 0:
-                self.assertIsInstance(convert_np.make_np(tensor.cuda()), np.ndarray)
+                self.assertIsInstance(make_np(tensor.cuda()), np.ndarray)
 
             # regular variable
-            self.assertIsInstance(convert_np.make_np(torch.autograd.Variable(tensor)), np.ndarray)
+            self.assertIsInstance(make_np(torch.autograd.Variable(tensor)), np.ndarray)
 
             # CUDA variable
             if torch.cuda.device_count() > 0:
-                self.assertIsInstance(convert_np.make_np(torch.autograd.Variable(tensor).cuda()), np.ndarray)
+                self.assertIsInstance(make_np(torch.autograd.Variable(tensor).cuda()), np.ndarray)
 
         # python primitive type
-        self.assertIsInstance(convert_np.make_np(0), np.ndarray)
-        self.assertIsInstance(convert_np.make_np(0.1), np.ndarray)
+        self.assertIsInstance(make_np(0), np.ndarray)
+        self.assertIsInstance(make_np(0.1), np.ndarray)
 
     def test_pytorch_write(self):
         with SummaryWriter() as w:
@@ -57,7 +57,7 @@ class TestTensorBoardPyTorchNumpy(unittest.TestCase):
     def test_pytorch_histogram_raw(self):
         with SummaryWriter() as w:
             num = 50
-            floats = convert_np.make_np(torch.rand((num,)))
+            floats = make_np(torch.rand((num,)))
             bins = [0.0, 0.25, 0.5, 0.75, 1.0]
             counts, limits = np.histogram(floats, bins)
             sum_sq = floats.dot(floats).item()
@@ -70,9 +70,23 @@ class TestTensorBoardPyTorchNumpy(unittest.TestCase):
                                 bucket_limits=limits.tolist(),
                                 bucket_counts=counts.tolist())
 
-            ints = convert_np.make_np(torch.randint(0, 100, (num,)))
+            ints = make_np(torch.randint(0, 100, (num,)))
             bins = [0, 25, 50, 75, 100]
             counts, limits = np.histogram(ints, bins)
+            sum_sq = ints.dot(ints).item()
+            w.add_histogram_raw('int histogram raw',
+                                min=ints.min().item(),
+                                max=ints.max().item(),
+                                num=num,
+                                sum=ints.sum().item(),
+                                sum_squares=sum_sq,
+                                bucket_limits=limits.tolist(),
+                                bucket_counts=counts.tolist())
+
+            ints = torch.tensor(range(0, 100)).float()
+            nbins = 100
+            counts = torch.histc(ints, bins=nbins, min=0, max=99)
+            limits = torch.tensor(range(nbins))
             sum_sq = ints.dot(ints).item()
             w.add_histogram_raw('int histogram raw',
                                 min=ints.min().item(),
@@ -256,9 +270,9 @@ class TestTensorBoardSummary(unittest.TestCase):
 
     def test_image_with_boxes(self):
         self.assertTrue(compare_proto(summary.image_boxes('dummy',
-                                          np.random.rand(3, 32, 32).astype(np.float32),
-                                          np.array([[10, 10, 40, 40]])),
-                                          self))
+                                      np.random.rand(3, 32, 32).astype(np.float32),
+                                      np.array([[10, 10, 40, 40]])),
+                                      self))
 
     def test_image_with_one_channel(self):
         self.assertTrue(compare_proto(summary.image('dummy', np.random.rand(1, 8, 8).astype(np.float32), dataformats='CHW'), self))
@@ -407,26 +421,26 @@ class TestTensorBoardFigure(unittest.TestCase):
 
 class TestTensorBoardNumpy(unittest.TestCase):
     def test_scalar(self):
-        res = convert_np.make_np(1.1)
+        res = make_np(1.1)
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
-        res = convert_np.make_np(1 << 64 - 1)  # uint64_max
+        res = make_np(1 << 64 - 1)  # uint64_max
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
-        res = convert_np.make_np(np.float16(1.00000087))
+        res = make_np(np.float16(1.00000087))
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
-        res = convert_np.make_np(np.float128(1.00008 + 9))
+        res = make_np(np.float128(1.00008 + 9))
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
-        res = convert_np.make_np(np.int64(100000000000))
+        res = make_np(np.int64(100000000000))
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
 
     def test_numpy_vid(self):
         shapes = [(16, 3, 30, 28, 28), (19, 3, 30, 28, 28), (19, 3, 29, 23, 19)]
         for s in shapes:
             x = np.random.random_sample(s)
-            # assert convert_np.make_np(x, 'VID').shape[3] == 3
+            # assert make_np(x, 'VID').shape[3] == 3
 
     def test_numpy_vid_uint8(self):
         x = np.random.randint(0, 256, (16, 3, 30, 28, 28)).astype(np.uint8)
-        # convert_np.make_np(x, 'VID').shape[3] == 3
+        # make_np(x, 'VID').shape[3] == 3
 
 if __name__ == '__main__':
     run_tests()

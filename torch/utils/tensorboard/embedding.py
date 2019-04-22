@@ -1,7 +1,7 @@
 import os
 import math
 import numpy as np
-from .convert_np import make_np
+from ._convert_np import make_np
 from ._utils import make_grid
 from PIL import Image
 from posixpath import join
