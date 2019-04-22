@@ -59,7 +59,7 @@ TEST(TestScalar, TestScalar) {
   Scalar h2 = h;
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " "
        << bar.toDouble() << " " << what.isIntegral() << "\n";
-  auto& gen = at::detail::getDefaultCPUGenerator();
+  auto gen = at::detail::getDefaultCPUGenerator();
   {
     // See Note [Thread-safety and Generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);

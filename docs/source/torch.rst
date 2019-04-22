@@ -87,7 +87,7 @@ Random sampling
 .. autofunction:: initial_seed
 .. autofunction:: get_rng_state
 .. autofunction:: set_rng_state
-.. autoattribute:: default_generator
+.. autoattribute:: torch._C.default_generator
 .. autofunction:: bernoulli
 .. autofunction:: multinomial
 .. autofunction:: normal

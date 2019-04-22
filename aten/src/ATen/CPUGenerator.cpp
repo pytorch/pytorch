@@ -12,7 +12,7 @@ namespace detail {
 static std::once_flag cpu_device_flag;
 
 // Default, global CPU generator.
-static std::unique_ptr<CPUGenerator> default_gen_cpu;
+static CPUGenerator default_gen_cpu;
 
 /**
  * PyTorch maintains a collection of default generators that get
@@ -22,11 +22,11 @@ static std::unique_ptr<CPUGenerator> default_gen_cpu;
  * getDefaultCPUGenerator gets the default generator for a particular
  * device.
  */
-std::unique_ptr<CPUGenerator>& getDefaultCPUGenerator() {
+CPUGenerator* getDefaultCPUGenerator() {
   std::call_once(cpu_device_flag, [&] {
-    default_gen_cpu = c10::guts::make_unique<CPUGenerator>(getNonDeterministicRandom());
+    default_gen_cpu = CPUGenerator(getNonDeterministicRandom());
   });
-  return default_gen_cpu;
+  return &default_gen_cpu;
 }
 
 /**
@@ -72,19 +72,22 @@ uint64_t getNonDeterministicRandom() {
 CPUGenerator::CPUGenerator(uint64_t seed_in)
   : CloneableGenerator(Device(DeviceType::CPU)),
     engine_(seed_in),
-    is_normal_cache_available_(false) { }
+    next_double_normal_sample_(c10::optional<double>()),
+    next_float_normal_sample_(c10::optional<float>()) { }
 
 CPUGenerator::CPUGenerator(mt19937 engine_in)
   : CloneableGenerator(Device(DeviceType::CPU)),
     engine_(engine_in),
-    is_normal_cache_available_(false) { }
+    next_double_normal_sample_(c10::optional<double>()),
+    next_float_normal_sample_(c10::optional<float>()) { }
 
 /**
  * Manually seeds the engine with the seed input
  * See Note [Thread-safety and Generators]
  */
 void CPUGenerator::set_current_seed(uint64_t seed) {
-  is_normal_cache_available_ = false;
+  next_float_normal_sample_.reset();
+  next_double_normal_sample_.reset();
   engine_ = mt19937(seed);
 }
 
@@ -124,33 +127,17 @@ uint64_t CPUGenerator::random64() {
 }
 
 /**
- * Gets the current cache index of normal randoms in normal
- * distribution.
- * 
- * See Note [Thread-safety and Generators]
- */
-bool CPUGenerator::is_normal_cache_available() {
-  return is_normal_cache_available_;
-}
-
-/**
  * Get the cached normal random in float
- * 
- * See Note [Thread-safety and Generators]
  */
-float CPUGenerator::normal_cache_float() {
-  is_normal_cache_available_ = false;
-  return normal_cache_float_;
+c10::optional<float> CPUGenerator::next_float_normal_sample() {
+  return next_float_normal_sample_;
 }
 
 /**
  * Get the cached normal random in double
- * 
- * See Note [Thread-safety and Generators]
  */
-double CPUGenerator::normal_cache_double() {
-  is_normal_cache_available_ = false;
-  return normal_cache_double_;
+c10::optional<double> CPUGenerator::next_double_normal_sample() {
+  return next_double_normal_sample_;
 }
 
 /**
@@ -158,9 +145,8 @@ double CPUGenerator::normal_cache_double() {
  * 
  * See Note [Thread-safety and Generators]
  */
-void CPUGenerator::set_normal_cache_float(float randn) {
-  normal_cache_float_ = randn;
-  is_normal_cache_available_ = true;
+void CPUGenerator::set_next_float_normal_sample(c10::optional<float> randn) {
+  next_float_normal_sample_ = randn;
 }
 
 /**
@@ -168,9 +154,8 @@ void CPUGenerator::set_normal_cache_float(float randn) {
  * 
  * See Note [Thread-safety and Generators]
  */
-void CPUGenerator::set_normal_cache_double(double randn) {
-  normal_cache_double_ = randn;
-  is_normal_cache_available_ = true;
+void CPUGenerator::set_next_double_normal_sample(c10::optional<double> randn) {
+  next_double_normal_sample_ = randn;
 }
 
 /**

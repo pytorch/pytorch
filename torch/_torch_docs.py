@@ -6439,25 +6439,23 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 
 add_docstr(torch._C.Generator,
            r"""
-Generator(device='cpu', default=False) -> Generator
+Generator(device='cpu') -> Generator
 
 Creates and returns a generator object which manages the state of the algorithm that
-produces pseudo random numbers. Used as a keyword argument in many random tensors in
-:ref:`inplace-random-sampling`. Currently only creation of CPU Generator is supported through
+produces pseudo random numbers. Used as a keyword argument in many :ref:`inplace-random-sampling`
+functions. Currently only creation of CPU Generator is supported through
 this API.
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the generator.
-    default (bool, optional): set this to True to construct the default generator,
-    which will coincide with any other constructions of the default generator.
 
 Returns:
-    Generator: An ATen Generator object.
+    Generator: An torch.Generator object.
 
 Example::
 
     >>> g_cpu = torch.Generator()
-    >>> g_cpu_default = torch.Generator(default=True);
+    >>> g_cpu_default = torch.default_generator;
 """)
 
 
@@ -6473,7 +6471,7 @@ Arguments:
 Example::
 
     >>> g_cpu = torch.Generator()
-    >>> g_cpu_default = torch.Generator(default=True)
+    >>> g_cpu_default = torch.default_generator
     >>> g_cpu.set_state(g_cpu_default.get_state())
 """)
 
@@ -6491,8 +6489,7 @@ Returns:
 Example::
 
     >>> g_cpu = torch.Generator()
-    >>> g_cpu_default = torch.Generator(default=True)
-    >>> g_cpu.set_state(g_cpu_default.get_state())
+    >>> g_cpu.get_state()
 """)
 
 
@@ -6500,7 +6497,7 @@ add_docstr(torch._C.Generator.manual_seed,
            r"""
 Generator.manual_seed(seed) -> Generator
 
-Sets the seed for generating random numbers. Returns a `torch._C.Generator` object.
+Sets the seed for generating random numbers. Returns a `torch.Generator` object.
 It is recommended to set a large seed, i.e. a number that has a good balance of 0
 and 1 bits. Avoid having many 0 bits in the seed.
 
@@ -6508,11 +6505,11 @@ Arguments:
     seed (int): The desired seed.
 
 Returns:
-    Generator: An ATen Generator object.
+    Generator: An torch.Generator object.
 
 Example::
 
-    >>> g_cpu_default = torch.Generator(default=True)
+    >>> g_cpu_default = torch.default_generator
     >>> g_cpu_default.manual_seed(2147483647)
 """)
 
@@ -6555,6 +6552,20 @@ Gets the current device of the generator.
 Example::
 
     >>> g_cpu = torch.Generator()
+    >>> g_cpu.device
+    device(type='cpu')
+""")
+
+
+add_docstr(torch._C.default_generator,
+           r"""
+default_generator -> Generator
+
+Gets the default cpu generator.
+
+Example::
+
+    >>> g_cpu = torch.default_generator
     >>> g_cpu.device
     device(type='cpu')
 """)

@@ -20,7 +20,7 @@ def get_rng_state():
 
 def manual_seed(seed):
     r"""Sets the seed for generating random numbers. Returns a
-    `torch._C.Generator` object.
+    `torch.Generator` object.
 
     Args:
         seed (int): The desired seed.

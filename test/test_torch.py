@@ -8988,7 +8988,7 @@ class _TestTorchMixin(object):
 
     def test_generator_cpu(self):
         # test default generators are equal
-        self.assertEqual(torch.Generator(default=True), torch.Generator(default=True))
+        self.assertEqual(torch.default_generator, torch.default_generator)
 
         # tests Generator API
         # manual_seed, seed, initial_seed, get_state, set_state
@@ -9002,14 +9002,14 @@ class _TestTorchMixin(object):
         g2.seed()
         self.assertNotEqual(g1.initial_seed(), g2.initial_seed())
 
-        g1 = torch.Generator(default=True)
+        g1 = torch.Generator()
         g2_state = g2.get_state()
         g2_randn = torch.randn(1, generator=g2)
         g1.set_state(g2_state)
-        g1_randn = torch.randn(1)
+        g1_randn = torch.randn(1, generator=g1)
         self.assertEqual(g1_randn, g2_randn)
 
-        default_state = torch.Generator(default=True).get_state()
+        default_state = torch.default_generator.get_state()
         q = torch.Tensor(100)
         g1_normal = q.normal_()
         g2 = torch.Generator()

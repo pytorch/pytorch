@@ -21,21 +21,22 @@ TEST(CPUGenerator, TestDefaultGenerator) {
   // Test Description: 
   // Check if default generator is created only once
   // address of generator should be same in all calls
-  auto& foo = at::detail::getDefaultCPUGenerator();
-  auto& bar = at::detail::getDefaultCPUGenerator();
+  auto foo = at::detail::getDefaultCPUGenerator();
+  auto bar = at::detail::getDefaultCPUGenerator();
   ASSERT_EQ(foo, bar);
 }
 
 TEST(CPUGenerator, TestCloning) {
   // Test Description: 
-  // Check copy assignment
-  // See Note [Thread-safety and Generators]
-  auto new_gen = at::detail::createCPUGenerator();
-  new_gen->random(); // advance new gen_state
-  new_gen->random();
-  auto& default_gen = at::detail::getDefaultCPUGenerator();
-  default_gen = new_gen->clone();
-  ASSERT_EQ(new_gen->random(), default_gen->random());
+  // Check cloning of new generators.
+  // Note that we don't allow cloning of other
+  // generator states into default generators.
+  auto gen1 = at::detail::createCPUGenerator();
+  gen1->random(); // advance gen1 state
+  gen1->random();
+  auto gen2 = at::detail::createCPUGenerator();
+  gen2 = gen1->clone();
+  ASSERT_EQ(gen1->random(), gen2->random());
 }
 
 void thread_func_get_engine_op(CPUGenerator* generator) {
@@ -49,11 +50,12 @@ TEST(CPUGenerator, TestMultithreadingGetEngineOperator) {
   // is not corrupted when multiple threads request for 
   // random samples.
   // See Note [Thread-safety and Generators]
-  auto& gen1 = at::detail::getDefaultCPUGenerator();
+  auto gen1 = at::detail::createCPUGenerator();
   auto gen2 = at::detail::createCPUGenerator();
-  gen1->mutex_.lock();
-  gen2 = gen1->clone(); // capture the current state of default generator
-  gen1->mutex_.unlock();
+  {
+    std::lock_guard<std::mutex> lock(gen1->mutex_);
+    gen2 = gen1->clone(); // capture the current state of default generator
+  }
   std::thread t0{thread_func_get_engine_op, gen1.get()};
   std::thread t1{thread_func_get_engine_op, gen1.get()};
   std::thread t2{thread_func_get_engine_op, gen1.get()};
@@ -71,7 +73,7 @@ TEST(CPUGenerator, TestGetSetCurrentSeed) {
   // Test Description: 
   // Test current seed getter and setter
   // See Note [Thread-safety and Generators]
-  auto& foo = at::detail::getDefaultCPUGenerator();
+  auto foo = at::detail::getDefaultCPUGenerator();
   std::lock_guard<std::mutex> lock(foo->mutex_);
   foo->set_current_seed(123);
   auto current_seed = foo->current_seed();
@@ -89,17 +91,14 @@ TEST(CPUGenerator, TestMultithreadingGetSetCurrentSeed) {
   // Test Description: 
   // Test current seed getter and setter are thread safe
   // See Note [Thread-safety and Generators]
-  auto& gen1 = at::detail::getDefaultCPUGenerator();
-  gen1->mutex_.lock();
+  auto gen1 = at::detail::getDefaultCPUGenerator();
   auto initial_seed = gen1->current_seed();
-  gen1->mutex_.unlock();
   std::thread t0{thread_func_get_set_current_seed, gen1.get()};
   std::thread t1{thread_func_get_set_current_seed, gen1.get()};
   std::thread t2{thread_func_get_set_current_seed, gen1.get()};
   t0.join();
   t1.join();
   t2.join();
-  std::lock_guard<std::mutex> lock(gen1->mutex_);
   ASSERT_EQ(gen1->current_seed(), initial_seed+3);
 }
 
@@ -108,12 +107,12 @@ TEST(CPUGenerator, TestRNGForking) {
   // Test that state of a generator can be frozen and
   // restored
   // See Note [Thread-safety and Generators]
-  auto& default_gen = at::detail::getDefaultCPUGenerator();
+  auto default_gen = at::detail::getDefaultCPUGenerator();
   auto current_gen = at::detail::createCPUGenerator();
-  default_gen->mutex_.lock();
-  current_gen = default_gen->clone();
-  default_gen->mutex_.unlock();
-
+  {
+    std::lock_guard<std::mutex> lock(default_gen->mutex_);
+    current_gen = default_gen->clone(); // capture the current state of default generator
+  }
   auto target_value = at::randn({1000});
   // Dramatically alter the internal state of the main generator
   auto x = at::randn({100000});

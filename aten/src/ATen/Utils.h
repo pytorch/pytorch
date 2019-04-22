@@ -138,9 +138,9 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
  * See Note [Thread-safety and Generators]
  */
 template <typename T>
-static inline T * check_generator_with_default(Generator * expr, std::unique_ptr<T>& defaultValue) {
+static inline T * check_generator_with_default(Generator * expr, Generator * defaultValue) {
   if (!expr) {
-    expr = defaultValue.get();
+    expr = defaultValue;
   }
   if (T::device_type() == expr->device().type()) {
     return static_cast<T*>(expr);
