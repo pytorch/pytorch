@@ -22,7 +22,7 @@ namespace script {
 
 enum NoneStatus { ALWAYS, MAYBE, NEVER };
 
-struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
+struct TORCH_API SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // what is this node? for error reporting (e.g. Module, python function)
   virtual std::string kind() const = 0;
 
