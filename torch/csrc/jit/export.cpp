@@ -129,13 +129,17 @@ class EncoderBase {
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
       const std::map<std::string, at::Tensor>& initializers =
-          std::map<std::string, at::Tensor>());
+        std::map<std::string, at::Tensor>(),
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes = 
+        std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>());
 
   void EncodeBlock(
       onnx::GraphProto* graph_proto,
       const Block* block,
       const std::map<std::string, at::Tensor>& initializers =
-          std::map<std::string, at::Tensor>());
+        std::map<std::string, at::Tensor>(),
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes = 
+        std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>());
 
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
@@ -149,7 +153,9 @@ class EncoderBase {
   virtual void EncodeValueInfo(
       onnx::GraphProto* graph_proto,
       onnx::ValueInfoProto* v,
-      const Value* n);
+      const Value* n,
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes = 
+        std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>());
 
   void AddAttribute(
       onnx::NodeProto* node_proto,
@@ -206,8 +212,10 @@ EncoderBase::EncoderBase(
 void EncoderBase::EncodeValueInfo(
     onnx::GraphProto* graph_proto,
     onnx::ValueInfoProto* v,
-    const Value* n) {
-  v->set_name(n->uniqueName());
+    const Value* n,
+    const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
+  std::string name = n->uniqueName();
+  v->set_name(name);
   if (CompleteTensorTypePtr node_type = n->type()->cast<CompleteTensorType>()) {
     onnx::TypeProto* t = v->mutable_type();
     onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
@@ -215,7 +223,13 @@ void EncoderBase::EncodeValueInfo(
     const std::vector<std::int64_t>& sizes = node_type->sizes();
     for (size_t i = 0; i < sizes.size(); i++) {
       shape->add_dim();
-      shape->mutable_dim(i)->set_dim_value(sizes[i]);
+      if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
+          (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())){
+        shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
+      }
+      else{
+        shape->mutable_dim(i)->set_dim_value(sizes[i]);
+      }
     }
     tensor_type->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
   } else if (BoolTypePtr node_type = n->type()->cast<BoolType>()) {
@@ -228,14 +242,16 @@ void EncoderBase::EncodeValueInfo(
 void EncoderBase::EncodeGraph(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
-    const std::map<std::string, at::Tensor>& initializers) {
-  EncodeBlock(graph_proto, graph->block(), initializers);
+    const std::map<std::string, at::Tensor>& initializers,
+    const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
+  EncodeBlock(graph_proto, graph->block(), initializers, dynamic_axes);
 }
 
 void EncoderBase::EncodeBlock(
     onnx::GraphProto* graph_proto,
     const Block* block,
-    const std::map<std::string, at::Tensor>& initializers) {
+    const std::map<std::string, at::Tensor>& initializers,
+    const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   AT_ASSERT(graph_proto != nullptr);
   std::string block_name = "torch-jit-export";
   if (num_blocks_) {
@@ -246,11 +262,11 @@ void EncoderBase::EncodeBlock(
 
   for (auto input : block->inputs()) {
     onnx::ValueInfoProto* v = graph_proto->add_input();
-    EncodeValueInfo(graph_proto, v, input);
+    EncodeValueInfo(graph_proto, v, input, dynamic_axes);
   }
   for (auto output : block->outputs()) {
     onnx::ValueInfoProto* v = graph_proto->add_output();
-    EncodeValueInfo(graph_proto, v, output);
+    EncodeValueInfo(graph_proto, v, output, dynamic_axes);
   }
   for (auto node : block->nodes()) {
     bool is_raw_export =
@@ -404,6 +420,7 @@ class GraphEncoder : public EncoderBase {
       int64_t onnx_opset_version,
       onnx_torch::OperatorExportTypes operator_export_type,
       const std::map<std::string, at::Tensor>& initializers,
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
       bool defer_weight_export,
       bool strip_doc);
 
@@ -426,6 +443,7 @@ GraphEncoder::GraphEncoder(
     int64_t onnx_opset_version,
     onnx_torch::OperatorExportTypes operator_export_type,
     const std::map<std::string, at::Tensor>& initializers,
+    const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
     bool defer_weight_export,
     bool strip_doc)
     : EncoderBase(operator_export_type, strip_doc),
@@ -438,7 +456,7 @@ GraphEncoder::GraphEncoder(
   // This is the version of ONNX operator set we are targeting
   imp->set_version(onnx_opset_version);
 
-  EncodeGraph(model_proto_.mutable_graph(), graph, initializers);
+  EncodeGraph(model_proto_.mutable_graph(), graph, initializers, dynamic_axes);
 
   for (const std::string& domain : domains_) {
     auto* opset = model_proto_.add_opset_import();
@@ -1112,6 +1130,7 @@ std::string pretty_print_onnx(
       onnx_opset_version,
       operator_export_type,
       initializers,
+      std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>{},
       defer_weight_export,
       true);
   if (google_printer) {
@@ -1129,6 +1148,7 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
+    const std::unordered_map<std::string, std::unordered_map<std::int64_t, std::string>>& dynamic_axes,
     bool defer_weight_export,
     ::torch::onnx::OperatorExportTypes operator_export_type,
     bool strip_doc_string) {
@@ -1137,6 +1157,7 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       onnx_opset_version,
       operator_export_type,
       initializers,
+      dynamic_axes,
       defer_weight_export,
       strip_doc_string);
   return std::make_tuple(
