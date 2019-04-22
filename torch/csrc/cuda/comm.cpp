@@ -36,45 +36,43 @@ using namespace torch::autograd;
 // of a single type only. Adding this logic directly in the loop makes it a bit
 // ugly, so here's a helper for it.
 struct unique_type_checker {
-  void show(const at::Type& t) {
+  void show(const at::DeprecatedTypeProperties& t) {
     if (!unique) return;
     if (!type) type = &t;
     unique = (type == &t);
   }
 
-  const at::Type *type = nullptr;
+  const at::DeprecatedTypeProperties *type = nullptr;
   bool unique = true;
 };
 
 std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
-  auto & type = tensor.dispatch_type();
-  if (type.is_cuda() && tensor.get_device() != devices[0])
+  if (tensor.is_cuda() && tensor.get_device() != devices[0])
     throw std::runtime_error("device of broadcasted tensor must appear as the "
                              "first on devices list");
   std::vector<Tensor> tensors;
   tensors.reserve(devices.size());
-  at::cuda::OptionalCUDAGuard _device_guard;
 #ifdef USE_NCCL
   if (nccl::is_available({tensor})) {
     tensors.push_back(tensor);
     for (auto device : devices.slice(1)) {
-      _device_guard.set_index(device);
-      tensors.push_back(at::empty(tensor.sizes(), type.options(tensor.scalar_type())));
+      tensors.push_back(
+          at::empty(tensor.sizes(),
+          tensor.options().device(at::Device(kCUDA, device))));
     }
     nccl::broadcast(tensors);
   } else {
 #else
   {
 #endif
-    if (type.is_cuda()) {
+    if (tensor.is_cuda()) {
       tensors.push_back(tensor);
     }
-    IntArrayRef loop_devices = type.is_cuda() ? devices.slice(1) : devices;
+    IntArrayRef loop_devices = tensor.is_cuda() ? devices.slice(1) : devices;
     for (auto device : loop_devices) {
-      _device_guard.set_index(device);
       tensors.push_back(tensor.to(
-          kCUDA,
-          type.scalarType(),
+          at::Device(kCUDA, device),
+          tensor.scalar_type(),
           /*non_blocking*/true,
           /*copy*/true));
     }

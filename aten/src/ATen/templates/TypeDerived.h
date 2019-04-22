@@ -18,8 +18,6 @@ namespace at {
 
 struct ${Type} final : public ${DeviceType}TypeDefault {
   explicit ${Type}();
-  virtual ScalarType scalarType() const override;
-  virtual caffe2::TypeMeta typeMeta() const override;
   virtual Backend backend() const override;
   virtual const char * toString() const override;
   virtual TypeID ID() const override;
