@@ -59,10 +59,6 @@ class AliasDb {
   bool mayContainAlias(
       const T<Value*, Other1...>& a,
       const U<Value*, Other2...>& b) const {
-    if (a.empty() || b.empty()) {
-      return false;
-    }
-
     return std::any_of(a.begin(), a.end(), [&](Value* v1) {
       return std::any_of(b.begin(), b.end(), [&](Value* v2) {
         return mayContainAlias(v1, v2);
