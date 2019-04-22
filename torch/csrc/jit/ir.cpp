@@ -833,6 +833,7 @@ bool Node::hasSideEffects() const {
     case prim::RaiseException:
     case prim::SetAttr:
     case aten::warn:
+    case aten::manual_seed:
     case prim::AddStatValue:
     case prim::TimePoint:
       return true;

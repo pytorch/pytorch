@@ -228,7 +228,8 @@ void initPythonIRBindings(PyObject* module_) {
              const std::map<std::string, at::Tensor>& initializers,
              int64_t onnx_opset_version,
              bool defer_weight_export,
-             ::torch::onnx::OperatorExportTypes operator_export_type) {
+             ::torch::onnx::OperatorExportTypes operator_export_type,
+             bool strip_doc_string) {
             std::string graph;
             RawDataExportMap export_map;
             std::tie(graph, export_map) = export_onnx(
@@ -236,7 +237,8 @@ void initPythonIRBindings(PyObject* module_) {
                 initializers,
                 onnx_opset_version,
                 defer_weight_export,
-                operator_export_type);
+                operator_export_type,
+                strip_doc_string);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -255,7 +257,8 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("onnx_opset_version") = 0,
           py::arg("defer_weight_export") = false,
           py::arg("operator_export_type") =
-              ::torch::onnx::OperatorExportTypes::ONNX)
+              ::torch::onnx::OperatorExportTypes::ONNX,
+          py::arg("strip_doc_string") = true)
       .def(
           "_pretty_print_onnx",
           [](const std::shared_ptr<Graph> g,

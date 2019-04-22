@@ -645,7 +645,7 @@ Python-defined Constants
                    super(Foo, self).__init__(False)
                    self.a = 1 + 4
 
-              @torch.jit.ScriptModule
+              @torch.jit.script_method
               def forward(self, input):
                   return self.a + input
 
