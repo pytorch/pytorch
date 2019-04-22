@@ -102,6 +102,13 @@ Value* getValueTrace(const IValue& var) {
     }
 
     // Didn't find it. Bake in a constant
+    if (ten.is_variable() && ten.requires_grad()) {
+      std::ostringstream oss;
+      oss << "Cannot insert a Tensor that requires grad as a constant. "
+          << "Consider making it a parameter or input, or detaching the gradient\n";
+      throw std::runtime_error(oss.str());
+    }
+
     Value* constant = state->graph->insertConstant(ten);
     recordSourceLocation(constant->node());
     constant->inferTypeFrom(ten);
@@ -194,7 +201,7 @@ Value* getNestedOutputTrace(
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
-std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
+std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs) {
   if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
   }
@@ -227,16 +234,34 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
         elems[i] = add_input(elems[i], elem_types[i], elem_values[i]);
       }
       return Tuple::create(std::move(elems));
+    } else if (auto dict_type = type->cast<DictType>()) {
+      auto elem_pairs = input.toGenericDict()->elements();
+      auto unpack_to_list = state->graph->insert(aten::values, {value});
+      auto list_unpack = state->graph->createListUnpack(unpack_to_list, elem_pairs.size());
+      auto unpack_node = state->graph->insertNode(list_unpack);
+      auto elem_values = unpack_node->outputs();
+
+      AT_ASSERT(elem_pairs.size() == elem_values.size());
+
+      size_t i = 0;
+      for (const auto &pair : elem_pairs) {
+        elem_pairs[pair.first] = add_input(pair.second, dict_type->getValueType(), elem_values[i++]);
+      }
+
+      return c10::ivalue::GenericDict::create(std::move(elem_pairs));
     } else {
       AT_ERROR(
-          "Only tensors or tuples of tensors can be inputs to traced functions");
+          "Only tensors or (possibly nested) dict or tuples of tensors can be "
+          "inputs to traced functions. Got ", type);
     }
   };
-  for (IValue& input : inputs) {
+  size_t i = 0;
+  auto input_types = inputs.types()->elements();
+  for (IValue& input : inputs.stack()) {
     input = add_input(
-        input, incompleteInferTypeFrom(input), state->graph->addInput());
+        input, input_types[i++], state->graph->addInput());
   }
-  return std::make_pair(state, inputs);
+  return std::make_pair(state, inputs.stack());
 }
 
 // Exit a trace, treating 'outputs' as the outputs of the trace.  These
@@ -400,6 +425,7 @@ void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
   addInputs(n, name, at::typeMetaToScalarType(options.dtype()));
   addInputs(n, name, options.layout());
   addInputs(n, name, options.device());
+  addInputs(n, name, options.pinned_memory());
 }
 
 void addInputs(Node* n, const char* name, at::IntArrayRef value) {
@@ -429,10 +455,8 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
 void addInputs(Node* n, const char* name, const ArrayRef<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
-void addInputs(
-    Node* n,
-    const char* name,
-    const std::vector<double>& value) {
+
+void addInputs(Node* n, const char* name, const std::vector<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 
@@ -505,7 +529,7 @@ void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
        << " live references to the data region being modified when tracing in-place operator "
        << name
        << ". This might cause the trace to be incorrect, because all other views "
-       << "that also reference this data will not not reflect this change in the trace! "
+       << "that also reference this data will not reflect this change in the trace! "
        << "On the other hand, if all other views use the same memory chunk, but are disjoint (e.g. "
        << "are outputs of torch.split), this might still be safe.";
     warn(ss.str().c_str());

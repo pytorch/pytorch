@@ -456,7 +456,7 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
         args.wdesc.desc(), args.weight.data_ptr(),
         args.cdesc.desc(),
         args.odesc.desc(), args.output.data_ptr(),
-        1,	// just return the fastest
+        1,        // just return the fastest
         &perf_count,
         &perf_results,
         ws.data,

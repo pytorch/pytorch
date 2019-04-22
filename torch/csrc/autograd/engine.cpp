@@ -9,6 +9,7 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/Parallel.h>
 #include <c10/util/Exception.h>
 
 #include <atomic>
@@ -204,7 +205,7 @@ Engine::Engine() = default;
 Engine::~Engine() = default;
 
 auto Engine::thread_init(int device) -> void {
-  THInferNumThreads();
+  at::init_num_threads();
   // Note [Allocating GPUs to autograd threads]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // What's our strategy here?  Originally, the autograd engine was written
@@ -333,7 +334,7 @@ static variable_list call_post_hooks(Function& fn, variable_list outputs, const 
   return outputs;
 }
 
-static bool is_compatible_type(const at::Type& expected, const at::Type& actual) {
+static bool is_compatible_type(const at::DeprecatedTypeProperties& expected, const at::DeprecatedTypeProperties& actual) {
   // Types are compatible if they exactly match or if the gradient is a sparse
   // version of the expected type.
   return expected == actual || (actual.is_sparse() &&

@@ -1,11 +1,7 @@
 from __future__ import print_function
-import multiprocessing
-import sys
 import os
-import inspect
 import collections
 import yaml
-import types
 import re
 import argparse
 
@@ -76,6 +72,7 @@ blacklist = [
     'tensordot',
     'norm',
     'split',
+    'unique_consecutive',
     # These are handled specially by python_arg_parser.cpp
     'add',
     'add_',
@@ -243,7 +240,11 @@ def generate_type_hints(fname, decls, is_tensor=False):
                 if a.get('kwarg_only', False) and render_kw_only_separator:
                     python_args.append('*')
                     render_kw_only_separator = False
-                python_args.append(arg_to_type_hint(a))
+                try:
+                    python_args.append(arg_to_type_hint(a))
+                except Exception:
+                    print("Error while processing function {}".format(fname))
+                    raise
 
         if is_tensor:
             if 'self: Tensor' in python_args:
@@ -424,7 +425,6 @@ def gen_pyi(declarations_path, out):
         'numpy': ['def numpy(self) -> Any: ...'],
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
         'map_': ['def map_(tensor: Tensor, callable: Callable) -> Tensor: ...'],
-        'copy_': ['def copy_(self, src: Tensor, non_blocking: bool=False) -> Tensor: ...'],
         'storage': ['def storage(self) -> Storage: ...'],
         'type': ['def type(self, dtype: Union[None, str, _dtype]=None, non_blocking: bool=False)'
                  ' -> Union[str, Tensor]: ...'],

@@ -41,7 +41,7 @@ struct TypeAndSize {
 
 private:
   std::vector<int64_t> sizes;
-  Type* type;
+  at::DeprecatedTypeProperties* type;
 };
 
 ${autograd_function_declarations}

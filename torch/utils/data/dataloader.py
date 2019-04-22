@@ -569,7 +569,12 @@ class _DataLoaderIter(object):
         self.rcvd_idx += 1
         self._put_indices()
         if isinstance(batch, _utils.ExceptionWrapper):
-            raise batch.exc_type(batch.exc_msg)
+            # make multiline KeyError msg readable by working around
+            # a python bug https://bugs.python.org/issue2651
+            if batch.exc_type == KeyError and "\n" in batch.exc_msg:
+                raise Exception("KeyError:" + batch.exc_msg)
+            else:
+                raise batch.exc_type(batch.exc_msg)
         return batch
 
     def __getstate__(self):

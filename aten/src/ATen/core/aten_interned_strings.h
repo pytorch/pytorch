@@ -88,6 +88,7 @@ _(aten, _log10) \
 _(aten, _log1p) \
 _(aten, _log2) \
 _(aten, _logspace) \
+_(aten, _lu_with_info) \
 _(aten, _masked_scale) \
 _(aten, _mm) \
 _(aten, _mv) \
@@ -224,9 +225,6 @@ _(aten, bincount) \
 _(aten, blackman_window) \
 _(aten, bmm) \
 _(aten, broadcast_tensors) \
-_(aten, btrifact) \
-_(aten, btrifact_with_info) \
-_(aten, btrisolve) \
 _(aten, cartesian_prod) \
 _(aten, cat) \
 _(aten, cauchy) \
@@ -234,6 +232,7 @@ _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
 _(aten, cholesky) \
+_(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
 _(aten, chunk) \
 _(aten, clamp) \
@@ -417,6 +416,7 @@ _(aten, logsumexp) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lt) \
+_(aten, lu_solve) \
 _(aten, margin_ranking_loss) \
 _(aten, masked_fill) \
 _(aten, masked_scatter) \
@@ -520,7 +520,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
-_(aten, potri) \
 _(aten, pow) \
 _(aten, prelu) \
 _(aten, prelu_backward) \

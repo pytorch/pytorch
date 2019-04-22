@@ -138,5 +138,12 @@ class TestDataRandomFiller : public DataRandomFiller {
   void fillInputToWorkspace(Workspace* workspace) const;
 };
 
+// Convenient helpers to fill data to workspace.
+CAFFE2_API void fillRandomNetworkInputs(
+    const NetDef& net,
+    const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
+    const std::vector<std::vector<std::string>>& inputTypes,
+    Workspace* workspace);
+
 } // namespace emulator
 } // namespace caffe2

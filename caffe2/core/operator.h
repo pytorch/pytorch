@@ -19,6 +19,7 @@
 #include "caffe2/core/operator_gradient.h"
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/tensor_int8.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
@@ -1335,6 +1336,9 @@ CAFFE2_API void SetEnginePref(
 CAFFE2_API void SetOpEnginePref(
     const std::string& op_type,
     const CaffeMap<DeviceType, EnginePrefType>& op_pref);
+
+CAFFE2_API void
+LoadInt8TensorInfoOfBlob(float* scale, float* offset, const Blob* b);
 
 CAFFE2_API TensorShape GetTensorShapeOfBlob(const Blob* b);
 

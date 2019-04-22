@@ -45,14 +45,17 @@ libtorch_sources = [
     "torch/csrc/autograd/grad_mode.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
     "torch/csrc/autograd/profiler.cpp",
+    "torch/csrc/autograd/record_function.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/attributes.cpp",
+    "torch/csrc/jit/argument_spec.cpp",
     "torch/csrc/jit/constants.cpp",
     "torch/csrc/jit/node_hashing.cpp",
     "torch/csrc/jit/export.cpp",
+    "torch/csrc/jit/pass_manager.cpp",
     "torch/csrc/jit/pickler.cpp",
     "torch/csrc/jit/graph_executor.cpp",
     "torch/csrc/jit/import.cpp",
@@ -61,7 +64,9 @@ libtorch_sources = [
     "torch/csrc/jit/irparser.cpp",
     "torch/csrc/jit/netdef_converter.cpp",
     "torch/csrc/jit/register_c10_ops.cpp",
+    "torch/csrc/jit/subgraph_matcher.cpp",
     "torch/csrc/jit/symbolic_script.cpp",
+    "torch/csrc/jit/profiling_record.cpp",
     "torch/csrc/jit/operator.cpp",
     "torch/csrc/jit/passes/alias_analysis.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
@@ -93,9 +98,10 @@ libtorch_sources = [
     "torch/csrc/jit/register_quantized_ops.cpp",
     "torch/csrc/jit/scope.cpp",
     "torch/csrc/jit/script/compiler.cpp",
+    "torch/csrc/api/src/jit.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",
+    "torch/csrc/jit/script/logging.cpp",
     "torch/csrc/jit/script/final_returns.cpp",
-    "torch/csrc/jit/script/schema_type_parser.cpp",
     "torch/csrc/jit/script/script_type_parser.cpp",
     "torch/csrc/jit/script/sugared_value.cpp",
     "torch/csrc/jit/script/schema_matching.cpp",
@@ -105,7 +111,6 @@ libtorch_sources = [
     "torch/csrc/jit/import_source.cpp",
     "torch/csrc/jit/hooks_for_testing.cpp",
     "torch/csrc/jit/script/builtin_functions.cpp",
-    "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/module.cpp",
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
@@ -145,11 +150,20 @@ def add_torch_libs():
             "torch/csrc/distributed/**/*.cpp",
             # top-level hook of extension registration lives in a separate file
             "torch/csrc/stub.cpp",
+            # to avoid redefinitions of symbols defined in
+            # dynamic_library_unix.cpp
+            "torch/csrc/jit/fuser/cpu/dynamic_library_win.cpp",
+            # exclude files that are already included in ATen/core
+            "torch/csrc/jit/script/function_schema_parser.cpp",
+            "torch/csrc/jit/script/schema_type_parser.cpp",
+            "torch/csrc/jit/script/lexer.cpp",
+            "torch/csrc/jit/script/strtod.cpp",
         ],
     ) + [
         "torch/csrc/distributed/Module.cpp",
         "torch/csrc/distributed/c10d/init.cpp",
         "torch/csrc/distributed/c10d/ddp.cpp",
+        "torch/csrc/distributed/c10d/reducer.cpp",
     ] + [":generate-code=" + x for x in GENERATED_CPP])
     libtorch_python_sources = sets.to_list(sets.difference(
         sets.make(globbed_sources),
@@ -246,6 +260,7 @@ def add_torch_libs():
     cpp_library(
         name="_C_impl",
         srcs=libtorch_python_sources,
+        link_whole=True,
         deps=[
             ":libtorch_cuda",
             ":thnn",

@@ -27,8 +27,8 @@ you can specify optimizer-specific options such as the learning rate, weight dec
 
 Example::
 
-    optimizer = optim.SGD(model.parameters(), lr = 0.01, momentum=0.9)
-    optimizer = optim.Adam([var1, var2], lr = 0.0001)
+    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+    optimizer = optim.Adam([var1, var2], lr=0.0001)
 
 Per-parameter options
 ^^^^^^^^^^^^^^^^^^^^^
@@ -144,4 +144,6 @@ allows dynamic learning rate reducing based on some validation measurements.
 .. autoclass:: torch.optim.lr_scheduler.CosineAnnealingLR
     :members:
 .. autoclass:: torch.optim.lr_scheduler.ReduceLROnPlateau
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.CyclicLR
     :members:

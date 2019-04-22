@@ -1,7 +1,3 @@
-import os
-import itertools
-import importlib
-
 try:
     # when compiling a cffi extension, this works. When compiling
     # torch itself, it doesn't work because the parent module can't

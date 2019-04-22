@@ -57,12 +57,6 @@ signature.
   `Tensor!` - shorthand for Tensor(fresh\_identifier!)
   `Tensor(a! -> a|b)` - Tensor is in set `a`, written to, and after the write is in set `a` AND `b`.
   For more details on when and why this needs to happen, please see the section on annotations.
-- Tensors of specific types.  At the moment, valid type names are:
-    - `IntegerTensor` (a.k.a. `LongTensor`)
-    - `BoolTensor` (a.k.a. `ByteTensor`)
-    - `IndexTensor` (a.k.a. `IntTensor`)
-  These type names were inherited from TH, and may be renamed soon, so
-  don't commit them to memory.
 - `Tensor[]`.  A `Tensor[]` argument translates into a C++ argument of type `ArrayRef<Tensor>`
   (a.k.a. `TensorList`)
 - `int[]`.  `int[]` accepts an optional length specifier, e.g., `int[2]`, which
@@ -282,15 +276,16 @@ matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 ### `matches_jit_signature`
 
 ```
-matches_jit_signature: True
+matches_jit_signature: False
 ```
 
-This will verify that the func syntax follows the JIT signature schema. This
-is a temporary attribute and doesn't need to be set by developers outside the
-core team. Remove it if you trigger asserts and add @cpuhrsch to your PR. It
-serves as a means of tracking an ongoing schema unification with the goal of
-aligning func syntax with other components of PyTorch in order to reduce
-overall complexity and assert coverage of all functions by each component.
+This will indicate that the func syntax does not follow the JIT signature schema.
+If you are a triggering an assert related to JIT signature compliance
+try adding this field and setting it to False. In general, this serves as a means
+of tracking an ongoing schema unification with the goal of aligning func syntax
+with other components of PyTorch in order to reduce overall complexity.
+If you find yourself having to set this field to False add @gchanan to your PR's
+set of reviewers.
 
 ## Writing an implementation in C++
 

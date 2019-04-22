@@ -295,3 +295,27 @@ SHOULD_NOT_DO_GRADIENT(BoxWithNMSLimit);
 
 } // namespace
 } // namespace caffe2
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    BoxWithNMSLimit,
+    "_caffe2::BoxWithNMSLimit("
+      "Tensor scores, "
+      "Tensor boxes, "
+      "Tensor batch_splits, "
+      "float score_thresh, "
+      "float nms, "
+      "int detections_per_im, "
+      "bool soft_nms_enabled, "
+      "str soft_nms_method, "
+      "float soft_nms_sigma, "
+      "float soft_nms_min_score_thres, "
+      "bool rotated"
+    ") -> ("
+      "Tensor scores, "
+      "Tensor boxes, "
+      "Tensor classes, "
+      "Tensor batch_splits"
+      //"Tensor keeps, "
+      //"Tensor keeps_size, "
+    ")",
+    caffe2::BoxWithNMSLimitOp<caffe2::CPUContext>);

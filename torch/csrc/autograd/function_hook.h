@@ -16,7 +16,9 @@ struct FunctionPreHook {
 
 struct FunctionPostHook {
   virtual ~FunctionPostHook() = default;
-  virtual variable_list operator()(const variable_list& grad_input, const variable_list& grad_output) = 0;
+  virtual variable_list operator()(
+    const variable_list& outputs /* grad_inputs */,
+    const variable_list& inputs /* grad_outputs */) = 0;
 };
 
 }} // namespace torch::autograd

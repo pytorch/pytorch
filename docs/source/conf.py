@@ -25,7 +25,7 @@ import os
 
 import torch
 try:
-    import torchvision
+    import torchvision  # noqa: F401
 except ImportError:
     import warnings
     warnings.warn('unable to load "torchvision" package')
