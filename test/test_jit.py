@@ -5769,17 +5769,17 @@ a")
             return torch.tensor(li)
         ''')
 
-        li = ["[1]", "[False]", "[2.5]", "0.5", "1", "False", "[[1]]"]
-        e = ["Long(*)", ("Byte(*)"), "Double(*)", "Double()", "Long()", "Byte()", "Long(*, *)"]
+        list_input = ["[1]", "[False]", "[2.5]", "0.5", "1", "False", "[[1]]"]
+        expected_shape = ["Long(*)", ("Byte(*)"), "Double(*)", "Double()", "Long()", "Byte()", "Long(*, *)"]
 
-        for l, e in zip(li, e):
-            code = template.format(list_create=l)
+        for list_i, expect in zip(list_input, expected_shape):
+            code = template.format(list_create=list_i)
             scope = {}
             exec(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
             g = cu.func
             torch._C._jit_pass_complete_shape_analysis(g.graph, (), False)
-            FileCheck().check(e).check("aten::tensor").run(g.graph)
+            FileCheck().check(expect).check("aten::tensor").run(g.graph)
 
         @torch.jit.script
         def test_dtype(inp_dtype):

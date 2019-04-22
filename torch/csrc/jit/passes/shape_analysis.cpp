@@ -446,7 +446,7 @@ class ShapePropagator {
       auto inp = toIValue(node->inputs().at(*device_index));
       if (inp == c10::nullopt) {
         return;
-      } else if (inp->isDevice()) {
+      } else if (!inp->isNone()) {
         default_device = inp->toDevice();
       }
     }
