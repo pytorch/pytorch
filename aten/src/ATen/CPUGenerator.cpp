@@ -12,7 +12,7 @@ namespace detail {
 static std::once_flag cpu_device_flag;
 
 // Default, global CPU generator.
-static CPUGenerator default_gen_cpu;
+static std::unique_ptr<CPUGenerator> default_gen_cpu;
 
 /**
  * PyTorch maintains a collection of default generators that get
@@ -24,9 +24,9 @@ static CPUGenerator default_gen_cpu;
  */
 CPUGenerator* getDefaultCPUGenerator() {
   std::call_once(cpu_device_flag, [&] {
-    default_gen_cpu = CPUGenerator(getNonDeterministicRandom());
+    default_gen_cpu = c10::guts::make_unique<CPUGenerator>(getNonDeterministicRandom());
   });
-  return &default_gen_cpu;
+  return default_gen_cpu.get();
 }
 
 /**
@@ -72,14 +72,14 @@ uint64_t getNonDeterministicRandom() {
 CPUGenerator::CPUGenerator(uint64_t seed_in)
   : CloneableGenerator(Device(DeviceType::CPU)),
     engine_(seed_in),
-    next_double_normal_sample_(c10::optional<double>()),
-    next_float_normal_sample_(c10::optional<float>()) { }
+    next_float_normal_sample_(c10::optional<float>()),
+    next_double_normal_sample_(c10::optional<double>()) { }
 
 CPUGenerator::CPUGenerator(mt19937 engine_in)
   : CloneableGenerator(Device(DeviceType::CPU)),
     engine_(engine_in),
-    next_double_normal_sample_(c10::optional<double>()),
-    next_float_normal_sample_(c10::optional<float>()) { }
+    next_float_normal_sample_(c10::optional<float>()),
+    next_double_normal_sample_(c10::optional<double>()) { }
 
 /**
  * Manually seeds the engine with the seed input

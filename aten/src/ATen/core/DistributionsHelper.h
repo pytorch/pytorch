@@ -133,7 +133,7 @@ struct normal_distribution {
         return ret;
       }
     }
-    // otherwise generator new normal values
+    // otherwise generate new normal values
     uniform_real_distribution<T> uniform(0.0, 1.0);
     const dist_acctype<T> u1 = uniform(generator);
     const dist_acctype<T> u2 = uniform(generator);
