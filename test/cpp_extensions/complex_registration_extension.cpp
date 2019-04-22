@@ -25,15 +25,13 @@
 
 namespace at {
 
-struct CPUComplexFloatType : public at::CPUTypeDefault {
-  CPUComplexFloatType()
+struct ComplexCPUType : public at::CPUTypeDefault {
+  ComplexCPUType()
       : CPUTypeDefault(
             ComplexCPUTensorId(),
             /*is_variable=*/false,
             /*is_undefined=*/false) {}
 
-  ScalarType scalarType() const override;
-  caffe2::TypeMeta typeMeta() const override;
   Backend backend() const override;
   const char* toString() const override;
   TypeID ID() const override;
@@ -66,28 +64,19 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
 struct ComplexHooks : public at::ComplexHooksInterface {
   ComplexHooks(ComplexHooksArgs) {}
   void registerComplexTypes(Context* context) const override {
-    context->registerType(
-        Backend::ComplexCPU, ScalarType::ComplexFloat, new CPUComplexFloatType());
+    context->registerType(Backend::ComplexCPU, new ComplexCPUType());
   }
 };
 
-ScalarType CPUComplexFloatType::scalarType() const {
-  return ScalarType::ComplexFloat;
-}
-
-caffe2::TypeMeta CPUComplexFloatType::typeMeta() const {
-  return scalarTypeToTypeMeta(ScalarType::ComplexFloat);
-}
-
-Backend CPUComplexFloatType::backend() const {
+Backend ComplexCPUType::backend() const {
   return Backend::ComplexCPU;
 }
 
-const char* CPUComplexFloatType::toString() const {
-  return "CPUComplexFloatType";
+const char* ComplexCPUType::toString() const {
+  return "ComplexCPUType";
 }
 
-TypeID CPUComplexFloatType::ID() const {
+TypeID ComplexCPUType::ID() const {
   return TypeID::CPUComplexFloat;
 }
 

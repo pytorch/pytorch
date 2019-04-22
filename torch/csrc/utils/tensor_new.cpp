@@ -83,9 +83,12 @@ Tensor new_with_storage(const Type& type, const ScalarType scalar_type, Storage 
   return tensor;
 }
 
-Tensor new_with_tensor(const Type& type, const Tensor& other) {
+Tensor new_with_tensor(const Type& type, const ScalarType scalar_type, const Tensor& other) {
   if (other.dispatch_type() != type) {
     throw TypeError("expected %s (got %s)", type.toString(), other.type().toString().c_str());
+  }
+  if (other.scalar_type() != scalar_type) {
+    throw TypeError("expected %s (got %s)", toString(scalar_type), toString(other.scalar_type()));
   }
   return other.slice();
 }
@@ -115,7 +118,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
   if (PyFloat_Check(obj)) {
     // this is always guaranteed to be a floating-point type, and makes it more
     // convenient to write e.g. torch.tensor(0.) than torch.tensor(0., dtype=torch.Tensor.dtype).
-    return torch::tensors::get_default_tensor_type().scalarType();
+    return torch::tensors::get_default_scalar_type();
   }
   if (THPUtils_checkLong(obj)) {
     return ScalarType::Long;
@@ -144,7 +147,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     auto length = PySequence_Length(obj);
     if (length < 0) throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
-    if (length == 0) return torch::tensors::get_default_tensor_type().scalarType();
+    if (length == 0) return torch::tensors::get_default_scalar_type();
     for (int i = 0; i < length; ++i) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       if (!handle) throw python_error();
@@ -391,7 +394,7 @@ Tensor legacy_tensor_ctor(const Type& type, ScalarType scalar_type, PyObject* ar
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
-    return new_with_tensor(type, r.tensor(0));
+    return new_with_tensor(type, scalar_type, r.tensor(0));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
@@ -437,7 +440,7 @@ Tensor legacy_tensor_new(const Type& type, ScalarType scalar_type, PyObject* arg
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
-    return new_with_tensor(type, r.tensor(0));
+    return new_with_tensor(type, scalar_type, r.tensor(0));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
