@@ -708,7 +708,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return slots_.at(slot);
   }
 
-  const std::string& name() const;
+  std::string name() const;
 
   const std::vector<IValue>& slots() const {
     return slots_;
