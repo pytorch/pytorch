@@ -4775,6 +4775,7 @@ class _TestTorchMixin(object):
 
         # Check non-default base=2
         self.assertEqual(torch.logspace(1, 1, 1, 2), torch.ones(1) * 2)
+        self.assertEqual(torch.logspace(0, 2, 3, 2), torch.Tensor((1, 2, 4)))
 
         # Check logspace_ for generating with start > end.
         self.assertEqual(torch.logspace(1, 0, 2), torch.Tensor((10, 1)), 0)
