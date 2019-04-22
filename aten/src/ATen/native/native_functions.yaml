@@ -3123,9 +3123,9 @@
     CPU: _solve_helper_cpu
     CUDA: _solve_helper_cuda
 
-- func: potri(Tensor self, bool upper=True, *, Tensor(a!) out) -> Tensor(a!)
+- func: cholesky_inverse(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: potri(Tensor self, bool upper=True) -> Tensor
+- func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   variants: method, function
 
 - func: pstrf(Tensor self, bool upper=True, Scalar tol=-1, *, Tensor(a!) u, Tensor(b!) pivot) -> (Tensor(a!) u, Tensor(b!) pivot)

@@ -6518,34 +6518,32 @@ class _TestTorchMixin(object):
     def test_cholesky_solve_batched_dims(self):
         self._test_cholesky_solve_batched_dims(self, lambda t: t)
 
-    @skipIfNoLapack
-    def test_potri(self):
-        a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
-                          (-6.05, -3.30, 5.36, -4.44, 1.08),
-                          (-0.45, 2.58, -2.70, 0.27, 9.04),
-                          (8.32, 2.71, 4.35, -7.17, 2.14),
-                          (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
-
-        # make sure 'a' is symmetric PSD
-        a = torch.mm(a, a.t())
+    @staticmethod
+    def _test_cholesky_inverse(self, cast):
+        from common_utils import random_symmetric_pd_matrix
+        a = cast(random_symmetric_pd_matrix(5))
 
         # compute inverse directly
         inv0 = torch.inverse(a)
 
         # default case
         chol = torch.cholesky(a)
-        inv1 = torch.potri(chol, False)
+        inv1 = torch.cholesky_inverse(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # upper Triangular Test
         chol = torch.cholesky(a, True)
-        inv1 = torch.potri(chol, True)
+        inv1 = torch.cholesky_inverse(chol, True)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # lower Triangular Test
         chol = torch.cholesky(a, False)
-        inv1 = torch.potri(chol, False)
+        inv1 = torch.cholesky_inverse(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
+
+    @skipIfNoLapack
+    def test_cholesky_inverse(self):
+        self._test_cholesky_inverse(self, lambda t: t)
 
     @skipIfNoLapack
     def test_pstrf(self):

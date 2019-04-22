@@ -859,14 +859,14 @@ cholesky(A, upper=False, out=None) -> Tensor
 Computes the Cholesky decomposition of a symmetric positive-definite
 matrix :math:`A` or for batches of symmetric positive-definite matrices.
 
-If :attr:`upper` is ``True``, the returned matrix `U` is upper-triangular, and
+If :attr:`upper` is ``True``, the returned matrix ``U`` is upper-triangular, and
 the decomposition has the form:
 
 .. math::
 
   A = U^TU
 
-If :attr:`upper` is ``False``, the returned matrix `L` is lower-triangular, and
+If :attr:`upper` is ``False``, the returned matrix ``L`` is lower-triangular, and
 the decomposition has the form:
 
 .. math::
@@ -970,6 +970,50 @@ Example::
     tensor([[ -8.1626,  19.6097],
             [ -5.8398,  14.2387],
             [ -4.3771,  10.4173]])
+""")
+
+add_docstr(torch.cholesky_inverse, r"""
+cholesky_inverse(u, upper=False, out=None) -> Tensor
+
+Computes the inverse of a symmetric positive-definite matrix :math:`A` using its
+Cholesky factor :attr:`u`: returns matrix ``inv``. The inverse is computed using
+LAPACK routines ``dpotri`` and ``spotri`` (and the corresponding MAGMA routines).
+
+If :attr:`upper` is ``False``, :attr:`u` is lower triangular
+such that the returned tensor is
+
+.. math::
+    inv = (uu^{T})^{-1}
+
+If :attr:`upper` is ``True`` or not provided, :attr:`u` is upper
+triangular such that the returned tensor is
+
+.. math::
+    inv = (u^T u)^{-1}
+
+Args:
+    u (Tensor): the input 2-D tensor, a upper or lower triangular
+           Cholesky factor
+    upper (bool, optional): whether to return a lower (default) or upper triangular matrix
+    out (Tensor, optional): the output tensor for `inv`
+
+Example::
+
+    >>> a = torch.randn(3, 3)
+    >>> a = torch.mm(a, a.t()) + 1e-05 * torch.eye(3) # make symmetric positive definite
+    >>> u = torch.cholesky(a)
+    >>> a
+    tensor([[  0.9935,  -0.6353,   1.5806],
+            [ -0.6353,   0.8769,  -1.7183],
+            [  1.5806,  -1.7183,  10.6618]])
+    >>> torch.cholesky_inverse(u)
+    tensor([[ 1.9314,  1.2251, -0.0889],
+            [ 1.2251,  2.4439,  0.2122],
+            [-0.0889,  0.2122,  0.1412]])
+    >>> a.inverse()
+    tensor([[ 1.9314,  1.2251, -0.0889],
+            [ 1.2251,  2.4439,  0.2122],
+            [-0.0889,  0.2122,  0.1412]])
 """)
 
 add_docstr(torch.clamp,
@@ -3615,49 +3659,6 @@ Args:
 .. _LAPACK documentation for ormqr:
     https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
 
-""")
-
-add_docstr(torch.potri, r"""
-potri(u, upper=True, out=None) -> Tensor
-
-Computes the inverse of a positive semidefinite matrix given its
-Cholesky factor :attr:`u`: returns matrix `inv`
-
-If :attr:`upper` is ``True`` or not provided, :attr:`u` is upper
-triangular such that the returned tensor is
-
-.. math::
-    inv = (u^T u)^{-1}
-
-If :attr:`upper` is ``False``, :attr:`u` is lower triangular
-such that the returned tensor is
-
-.. math::
-    inv = (uu^{T})^{-1}
-
-Args:
-    u (Tensor): the input 2-D tensor, a upper or lower triangular
-           Cholesky factor
-    upper (bool, optional): whether to return a upper (default) or lower triangular matrix
-    out (Tensor, optional): the output tensor for `inv`
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.cholesky(a)
-    >>> a
-    tensor([[  0.9935,  -0.6353,   1.5806],
-            [ -0.6353,   0.8769,  -1.7183],
-            [  1.5806,  -1.7183,  10.6618]])
-    >>> torch.potri(u)
-    tensor([[ 1.9314,  1.2251, -0.0889],
-            [ 1.2251,  2.4439,  0.2122],
-            [-0.0889,  0.2122,  0.1412]])
-    >>> a.inverse()
-    tensor([[ 1.9314,  1.2251, -0.0889],
-            [ 1.2251,  2.4439,  0.2122],
-            [-0.0889,  0.2122,  0.1412]])
 """)
 
 add_docstr(torch.pow,
