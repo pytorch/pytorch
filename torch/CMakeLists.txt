@@ -510,6 +510,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/TypeInfo.cpp
     ${TORCH_SRC_DIR}/csrc/Generator.cpp
     ${TORCH_SRC_DIR}/csrc/Layout.cpp
+    ${TORCH_SRC_DIR}/csrc/MemoryFormat.cpp
     ${TORCH_SRC_DIR}/csrc/Module.cpp
     ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
     ${TORCH_SRC_DIR}/csrc/Size.cpp
@@ -558,6 +559,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_layouts.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_list.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_memoryformats.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp

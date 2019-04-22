@@ -409,7 +409,10 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   int64_t numel() const override;
   at::IntArrayRef sizes() const override;
   at::IntArrayRef strides() const override;
-  bool is_contiguous() const override;
+  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const override;
+  void set_memory_format_tag(at::MemoryFormat memory_format) override;
+  void reset_memory_format_tag() override;
+  bool maybe_as_channels_last() override;
   int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
   void resize_dim(int64_t ndim) override;

@@ -40,6 +40,7 @@ TYPE_MAP = {
     'std::array<bool,4>': 'bool[4]',
     'std::string': 'str',
     'Scalar': 'Scalar',
+    'MemoryFormat': 'MemoryFormat',
     'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
     'Tensor?': 'Tensor?',
@@ -96,6 +97,7 @@ FROM_IVALUE = {
     'IntArrayRef': '{}.toIntList()->elements()',
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
+    'MemoryFormat': '{}.toMemoryFormat()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.toScalarType()',
@@ -483,6 +485,7 @@ def signature(decl, should_match_schema=True):
                 .replace('true', 'True') \
                 .replace('false', 'False') \
                 .replace('Reduction::Mean', 'Mean') \
+                .replace('MemoryFormat::Contiguous', 'contiguous_format') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
                 .replace('{', '[') \
                 .replace('}', ']')

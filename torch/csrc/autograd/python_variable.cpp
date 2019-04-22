@@ -67,6 +67,7 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
 
 PyObject * THPVariable_Wrap(Variable var)
 {
+
   if (!var.defined()) {
     Py_RETURN_NONE;
   }

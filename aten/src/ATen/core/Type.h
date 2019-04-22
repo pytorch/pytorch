@@ -5,6 +5,7 @@
 #include <c10/util/Deprecated.h>
 #include <ATen/core/Generator.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include <ATen/core/SparseTensorRef.h>
@@ -182,7 +183,7 @@ struct CAFFE2_API Type {
   virtual Tensor & clamp_max_(Tensor & self, Scalar max) const = 0;
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;
   virtual Tensor & clamp_min_(Tensor & self, Scalar min) const = 0;
-  virtual Tensor contiguous(const Tensor & self) const = 0;
+  virtual Tensor contiguous(const Tensor & self, MemoryFormat memory_format) const = 0;
   virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
   virtual Tensor cos(const Tensor & self) const = 0;
   virtual Tensor & cos_(Tensor & self) const = 0;
@@ -399,6 +400,7 @@ struct CAFFE2_API Type {
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking, bool copy) const = 0;
+  virtual Tensor to(const Tensor & self, MemoryFormat memory_format) const = 0;
   virtual Scalar item(const Tensor & self) const = 0;
   virtual void* data_ptr(const Tensor & self) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source) const = 0;

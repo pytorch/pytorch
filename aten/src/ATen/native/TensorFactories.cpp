@@ -166,6 +166,15 @@ Tensor empty_like(const Tensor& self, const TensorOptions& options) {
   return at::empty(self.sizes(), options);
 }
 
+Tensor empty_like(const Tensor& self, const TensorOptions& options, MemoryFormat memory_format) {
+  if (memory_format == MemoryFormat::ChannelsLast)
+  {
+    return at::empty_like(self, options).to(MemoryFormat::ChannelsLast);
+  }
+  return at::empty_like(self, options);
+}
+
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor eye(int64_t n, const TensorOptions& options) {

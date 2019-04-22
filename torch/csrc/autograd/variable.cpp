@@ -54,9 +54,23 @@ IntArrayRef Variable::Impl::strides() const {
   return data_.strides();
 }
 
-bool Variable::Impl::is_contiguous() const {
-  return data_.is_contiguous();
+void Variable::Impl::set_memory_format_tag(MemoryFormat memory_format) {
+  data_.set_memory_format_tag(memory_format);
 }
+
+void Variable::Impl::reset_memory_format_tag() {
+  data_.reset_memory_format_tag();
+}
+
+bool Variable::Impl::is_contiguous(MemoryFormat memory_format) const {
+  return data_.is_contiguous(memory_format);
+}
+
+
+bool Variable::Impl::maybe_as_channels_last() {
+  return data_.maybe_as_channels_last();
+}
+
 
 int64_t Variable::Impl::dim() const {
   return data_.dim();

@@ -32,6 +32,8 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
     impl->storage_offset_ = storage_offset_;
     impl->is_wrapped_number_ = is_wrapped_number_;
     impl->reserved_ = reserved_;
+    impl->memory_format_tag_ = memory_format_tag_;
+
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;

@@ -113,6 +113,48 @@ bool TensorImpl::has_storage() const {
   return storage_;
 }
 
+void TensorImpl::set_memory_format_tag(MemoryFormat memory_format) {
+  AT_ASSERT(
+      !is_variable()); // TODO: remove this when Variable and Tensor are merged
+  memory_format_tag_ = memory_format;
+}
+
+bool TensorImpl::maybe_as_channels_last() {
+  AT_ASSERT(
+      !is_variable()); // TODO: remove this when Variable and Tensor are merged
+  if (dim() == 4 && is_contiguous_) {
+    strides_[1] = 1;
+    strides_[3] = sizes_[1]; // size(1);
+    strides_[2] = strides_[3] * sizes_[3];
+    strides_[0] = strides_[2] * sizes_[2];
+    set_memory_format_tag(at::MemoryFormat::ChannelsLast);
+    is_contiguous_ = false;
+    return true;
+  } else if (dim() == 4) {
+    auto strides_1 = 1;
+    auto strides_3 = sizes_[1]; // size(1);
+    auto strides_2 = strides_3 * sizes_[3];
+    auto strides_0 = strides_2 * sizes_[2];
+    if (strides_0 == strides_[0] && strides_1 == strides_[1] &&
+        strides_2 == strides_[2] && strides_3 == strides_[3]) {
+      set_memory_format_tag(at::MemoryFormat::ChannelsLast);
+      return true;
+    }
+  }
+  return false;
+}
+
+// VITALYF Move back to .h file
+bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
+#ifdef DEBUG
+  AT_ASSERT(compute_contiguous() == is_contiguous_);
+#endif
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    return memory_format_tag_ == MemoryFormat::ChannelsLast;
+  }
+  return is_contiguous_;
+}
+
 const Storage& TensorImpl::storage() const {
   return storage_;
 }

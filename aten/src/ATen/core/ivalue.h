@@ -462,6 +462,12 @@ struct CAFFE2_API IValue final {
     return static_cast<at::Layout>(toInt());
   }
 
+  // MemoryFormat
+  at::MemoryFormat toMemoryFormat() const {
+    return static_cast<at::MemoryFormat>(toInt());
+  }
+
+
   // for debugging
   std::string tagKind() const {
     switch(tag) {
@@ -812,6 +818,7 @@ DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
+DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 
 template <typename T>
 struct _fake_type {};

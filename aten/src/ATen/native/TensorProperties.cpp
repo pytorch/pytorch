@@ -52,11 +52,16 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
-Tensor contiguous(const Tensor & self) {
-  if (self.is_contiguous()) {
+Tensor contiguous(const Tensor & self, MemoryFormat memory_format) {
+  if (self.is_contiguous(memory_format)) {
     return self;
   }
-  return self.clone();
+  auto result = at::empty_like(self);
+  if (memory_format == MemoryFormat::ChannelsLast) {
+    AT_CHECK(self.dim() == 4, " required rank 4 tensor to use channels_last format");
+    result.maybe_as_channels_last();
+  }
+  return result.copy_(self);
 }
 
 }

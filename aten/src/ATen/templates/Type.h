@@ -5,6 +5,7 @@
 #include <c10/util/Deprecated.h>
 #include <ATen/core/Generator.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include <ATen/core/SparseTensorRef.h>

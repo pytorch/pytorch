@@ -11333,12 +11333,77 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 weight), torch.tensor(bias), 1, epsilon, True)
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
+    def _test_memory_format_operators(self, device):
+        operators_str = """
+        x + x
+        x + y
+        y + x
+        x * 2
+        x * y
+        y * x
+        x.sin()
+        x.sqrt()
+        abs(x)
+        x.abs()
+        x
+        x.clone()
+        """
+        # In progress
+        # x.clone()
+        operators = operators_str.strip().split("\n")
+        for operator in operators:
+            ctx = {
+                'x' : torch.randn(10, 32, 32, 3).to(device=device).contiguous(memory_format=torch.channels_last),
+                'y' : (abs(torch.randn(10, 32, 32, 3)) + 1).to(device=device),
+                's' : 3}
+            code = "result = {}".format(operator.strip())
+            exec(code, {}, ctx)
+            result = ctx["result"]
+            self.assertTrue(
+                result.is_contiguous(memory_format=torch.channels_last),
+                "result of the '{}' is not in channels_last format".format(operator.strip()))
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_memory_format_operators_cuda(self):
+        self._test_memory_format_operators('cuda')
+
+    def test_memory_format_operators_cpu(self):
+        self._test_memory_format_operators('cpu')
+
+    def test_memory_format(self):
+        x = torch.randn(10, 3, 32, 32)
+        nhwc = x.to(memory_format=torch.channels_last)
+        self.assertFalse(nhwc.is_contiguous())
+        self.assertTrue(nhwc.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(nhwc, x)
+
+        def fake_nhwc(N, C, H, W):
+            alloc = torch.randn(N, H, W, C)
+            return alloc.permute(0, 3, 1, 2)
+
+        fake = fake_nhwc(10, 3, 32, 32)
+        self.assertFalse(
+            fake.is_contiguous(memory_format=torch.channels_last),
+            " must be tagged to be identified as channels_last")
+
+    def test_memory_format_permute(self):
+        x = torch.randn(10, 3, 32, 32)
+        nhwc = x.to(memory_format=torch.channels_last)
+        y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
+        self.assertFalse(y.is_contiguous(memory_format=torch.channels_last))
+
+    def test_memory_format_permute_cuda(self):
+        x = torch.randn(10, 3, 32, 32)
+        nhwc = x.to(memory_format=torch.channels_last).cuda()
+        y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
+        self.assertFalse(y.is_contiguous(memory_format=torch.channels_last))
+
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
 FUNCTIONAL = 4
 DIM_ARG = None
-
 
 def make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim=0):
     def neg_dim_test(self):

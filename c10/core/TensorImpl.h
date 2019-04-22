@@ -5,6 +5,7 @@
 #include <numeric>
 
 #include <c10/core/Backend.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeId.h>
@@ -382,12 +383,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * compute_contiguous() for the exact definition of whether or not
    * a tensor is contiguous or not.
    */
-  virtual bool is_contiguous() const {
-#ifdef DEBUG
-    AT_ASSERT(compute_contiguous() == is_contiguous_);
-#endif
-    return is_contiguous_;
-  }
+  virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const;
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
@@ -740,6 +736,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     strides_.resize(ndim, 0);
     refresh_numel();
     refresh_contiguous();
+    reset_memory_format_tag();
   }
 
   /**
@@ -755,6 +752,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
+    reset_memory_format_tag();
   }
 
   /**
@@ -768,6 +766,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
+    reset_memory_format_tag();
   }
 
   /**
@@ -856,6 +855,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
     refresh_numel();
     refresh_contiguous();
+    reset_memory_format_tag();
   }
 
   /**
@@ -925,6 +925,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     impl->storage_offset_ = storage_offset_;
     impl->is_wrapped_number_ = is_wrapped_number_;
     impl->reserved_ = reserved_;
+    impl->memory_format_tag_ = memory_format_tag_;
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;
@@ -1341,6 +1342,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     device_opt_ = storage_.device();
   }
 
+  virtual void set_memory_format_tag(MemoryFormat memory_format);
+  virtual void reset_memory_format_tag() {
+    memory_format_tag_ = MemoryFormat::Any;
+  }
+
+
+  virtual bool maybe_as_channels_last();
 private:
 
   // The Caffe2 Resize() method supports being called both as Resize({2,2}) as
@@ -1511,6 +1519,8 @@ protected:
   // The logic is that if Extend() or ReserveSpace() were ever called,
   // then subsequent Resize()s will not free up Storage.
   bool reserved_ = false;
+
+  MemoryFormat memory_format_tag_ = MemoryFormat::Any;
 
 };
 

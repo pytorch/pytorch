@@ -19,8 +19,12 @@ static inline Device ensure_has_index(Device device) {
   return impl->getDevice();
 }
 
-static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking) {
+static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking, MemoryFormat memory_format=MemoryFormat::Contiguous) {
   auto r = at::empty(self.sizes(), options);
+  // VITALYF: Optimize if already channels first
+  if (memory_format == MemoryFormat::ChannelsLast) {
+    r.maybe_as_channels_last();
+  }
   r.copy_(self, non_blocking);
   return r;
 }
@@ -53,6 +57,13 @@ Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, b
     specified_options = specified_options.dtype(dtype_opt.value());
   }
   return to_impl(self, specified_options, non_blocking);
+}
+
+Tensor to(const Tensor& self, MemoryFormat memory_format) {
+  if (memory_format == MemoryFormat::Any || memory_format == MemoryFormat::Preserve) {
+    return self;
+  }
+  return to_impl(self, self.options(), false, memory_format);
 }
 
 Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy) {

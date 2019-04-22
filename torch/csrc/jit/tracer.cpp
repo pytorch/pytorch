@@ -449,6 +449,9 @@ void addInputs(Node* n, const char* name, at::Layout value) {
 void addInputs(Node* n, const char* name, at::ScalarType value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
+void addInputs(Node* n, const char* name, at::MemoryFormat value) {
+  detail::genericAddInput(n, static_cast<int64_t>(value));
+}
 void addInputs(
     Node* n,
     const char* name,
