@@ -77,12 +77,6 @@ struct TORCH_API Method {
   void run(Stack&& stack) {
     run(stack);
   }
-  void benchmark(Stack stack_, int64_t niter) {
-    for (int64_t i = 0; i < niter; ++i) {
-      auto stack = stack_;
-      run(stack);
-    }
-  }
 
   IValue operator()(
       std::vector<IValue> stack,
