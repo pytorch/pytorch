@@ -816,6 +816,9 @@ void testMemoryDAG() {
       AT_ASSERT(!t.mayContainAlias(f, elem));
       AT_ASSERT(!t.mayContainAlias(e, elem));
     }
+
+    AT_ASSERT(!t.mayContainAlias({a, b, c, d}, {f, e}));
+    AT_ASSERT(t.mayContainAlias({a, c, d}, {f, e, b}));
   }
 }
 } // namespace jit

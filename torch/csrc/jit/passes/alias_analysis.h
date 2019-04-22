@@ -59,11 +59,26 @@ class AliasDb {
   bool mayContainAlias(
       const T<Value*, Other1...>& a,
       const U<Value*, Other2...>& b) const {
-    return std::any_of(a.begin(), a.end(), [&](Value* v1) {
-      return std::any_of(b.begin(), b.end(), [&](Value* v2) {
-        return mayContainAlias(v1, v2);
-      });
-    });
+    std::vector<Element*> a_elements;
+    for (const auto& val : a) {
+      if (cannotCheckAliasContainment(val)) {
+        return true;
+      }
+      if (shouldAnnotate(val)) {
+        a_elements.push_back(elementMap_.at(val));
+      }
+    }
+
+    std::vector<Element*> b_elements;
+    for (const auto& val : b) {
+      if (cannotCheckAliasContainment(val)) {
+        return true;
+      }
+      if (shouldAnnotate(val)) {
+        b_elements.push_back(elementMap_.at(val));
+      }
+    }
+    return memoryDAG_->mayContainAlias(a_elements, b_elements);
   }
 
   // Do `a` and `b` potentially share a memory location?
