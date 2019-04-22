@@ -30,7 +30,6 @@ TESTS = [
     'expecttest',
     'indexing',
     'indexing_cuda',
-    'jit',
     'mkldnn',
     'multiprocessing',
     'multiprocessing_spawn',
@@ -46,8 +45,15 @@ TESTS = [
     'type_hints',
     'utils',
     'namedtuple_return_api',
-    'jit_fuser',
 ]
+
+JIT_TESTS = [
+    'jit',
+    'jit_fuser',
+    'jit_script',
+]
+
+TESTS = TESTS + JIT_TESTS
 
 WINDOWS_BLACKLIST = [
     'distributed',
@@ -265,6 +271,11 @@ def parse_args():
         action='store_true',
         help='print verbose information and test-by-test results')
     parser.add_argument(
+        '--jit',
+        '--jit',
+        action='store_true',
+        help='run all jit tests')
+    parser.add_argument(
         '-pt', '--pytest', action='store_true',
         help='If true, use `pytest` to execute the tests. E.g., this runs '
              'TestTorch with pytest in verbose and coverage mode: '
@@ -409,6 +420,9 @@ def main():
 
     if options.coverage:
         shell(['coverage', 'erase'])
+
+    if options.jit:
+        selected_tests = JIT_TESTS
 
     for test in selected_tests:
         test_name = 'test_{}'.format(test)
