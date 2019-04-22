@@ -6555,17 +6555,3 @@ Example::
     >>> g_cpu.device
     device(type='cpu')
 """)
-
-
-add_docstr(torch._C.default_generator,
-           r"""
-default_generator -> Generator
-
-Gets the default cpu generator.
-
-Example::
-
-    >>> g_cpu = torch.default_generator
-    >>> g_cpu.device
-    device(type='cpu')
-""")

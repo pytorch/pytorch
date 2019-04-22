@@ -87,7 +87,8 @@ Random sampling
 .. autofunction:: initial_seed
 .. autofunction:: get_rng_state
 .. autofunction:: set_rng_state
-.. autoattribute:: torch._C.default_generator
+.. autoattribute:: torch.default_generator
+   :annotation:  Returns the default CPU torch.Generator
 .. autofunction:: bernoulli
 .. autofunction:: multinomial
 .. autofunction:: normal
