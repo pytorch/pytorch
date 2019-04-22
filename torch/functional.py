@@ -20,8 +20,9 @@ __all__ = [
     'lu_unpack',
     'norm',
     'meshgrid',
-    'potrf',
     'pstrf',
+    'potrf',
+    'potri',
     'potrs',
     'split',
     'stft',
@@ -741,23 +742,6 @@ def chain_matmul(*matrices):
     return torch._C._VariableFunctions.chain_matmul(matrices)
 
 
-def potrf(a, upper=True, out=None):
-    r"""Computes the Cholesky decomposition of a symmetric positive-definite
-    matrix :math:`A`.
-
-    For more information regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
-
-    .. warning::
-        :func:`torch.potrf` is deprecated in favour of :func:`torch.cholesky` and will be removed
-        in the next release. Please use :func:`torch.cholesky` instead and note that the :attr:`upper`
-        argument in :func:`torch.cholesky` defaults to ``False``.
-    """
-    warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
-                  "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
-                  " torch.cholesky defaults to ``False``.", stacklevel=2)
-    return torch.cholesky(a, upper=upper, out=out)
-
-
 def pstrf(a, upper=True, out=None):
     r"""Computes the pivoted Cholesky decomposition of a symmetric positive-definite
     matrix :attr:`a`. returns a namedtuple (u, pivot) of matrice.
@@ -801,6 +785,40 @@ def pstrf(a, upper=True, out=None):
     warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
                   "in the next release.", stacklevel=2)
     return torch._C._VariableFunctions.pstrf(a, upper=upper, out=out)
+
+
+def potrf(a, upper=True, out=None):
+    r"""Computes the Cholesky decomposition of a symmetric positive-definite
+    matrix :math:`A`.
+
+    For more information regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
+
+    .. warning::
+        :func:`torch.potrf` is deprecated in favour of :func:`torch.cholesky` and will be removed
+        in the next release. Please use :func:`torch.cholesky` instead and note that the :attr:`upper`
+        argument in :func:`torch.cholesky` defaults to ``False``.
+    """
+    warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
+                  "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
+                  " torch.cholesky defaults to ``False``.", stacklevel=2)
+    return torch.cholesky(a, upper=upper, out=out)
+
+
+def potri(a, upper=True, out=None):
+    r"""Computes the inverse of a symmetric positive-definite matrix :math:`A` using its
+    Cholesky factor.
+
+    For more information regarding :func:`torch.potri`, please check :func:`torch.cholesky_inverse`.
+
+    .. warning::
+        :func:`torch.potri` is deprecated in favour of :func:`torch.cholesky_inverse` and will be removed
+        in the next release. Please use :func:`torch.cholesky_inverse` instead and note that the :attr:`upper`
+        argument in :func:`torch.cholesky_inverse` defaults to ``False``.
+    """
+    warnings.warn("torch.potri is deprecated in favour of torch.cholesky_inverse and will be removed in "
+                  "the next release. Please use torch.cholesky_inverse instead and note that the :attr:`upper` "
+                  "argument in torch.cholesky_inverse defaults to ``False``.", stacklevel=2)
+    return torch.cholesky_inverse(a, upper=upper, out=out)
 
 
 def potrs(b, u, upper=True, out=None):

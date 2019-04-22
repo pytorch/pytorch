@@ -133,11 +133,7 @@ static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
 }
 
 const ivalue::GenericDict::IterationOrder ivalue::GenericDict::iterationOrder() const {
-    IterationOrder ordered;
-    ordered.reserve(elements().size());
-    for (auto pair : elements()) {
-        ordered.push_back(pair);
-    }
+    IterationOrder ordered(elements().begin(), elements().end());
     std::sort(ordered.begin(), ordered.end(), CompareIValue);
     return ordered;
 }

@@ -403,6 +403,14 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         // TODO return generator object when torchscript supports RNG
+         // first-class
+         "aten::manual_seed(int seed) -> ()",
+         [](Stack& stack) {
+           at::manual_seed(pop(stack).toInt());
+           return 0;
+         }),
+     Operator(
          "aten::cuda(Tensor(a) self) -> Tensor(a|b)",
          [](Stack& stack) {
            at::Tensor a;
