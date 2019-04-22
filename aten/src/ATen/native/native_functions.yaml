@@ -1916,14 +1916,6 @@
     CPU: unique_dim_cpu
     CUDA: unique_dim_cuda
 
-# _unique_dim is deprecated and will be removed in the future. Please use unique_dim
-
-- func: _unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU: _unique_dim_cpu
-    CUDA: _unique_dim_cuda
-
 - func: unique_consecutive(Tensor self, bool return_inverse=False, bool return_counts=False, int? dim=None) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
