@@ -6455,7 +6455,6 @@ Returns:
 Example::
 
     >>> g_cpu = torch.Generator()
-    >>> g_cpu_default = torch.default_generator;
 """)
 
 
@@ -6471,8 +6470,8 @@ Arguments:
 Example::
 
     >>> g_cpu = torch.Generator()
-    >>> g_cpu_default = torch.default_generator
-    >>> g_cpu.set_state(g_cpu_default.get_state())
+    >>> g_cpu_other = torch.Generator()
+    >>> g_cpu.set_state(g_cpu_other.get_state())
 """)
 
 
@@ -6509,8 +6508,8 @@ Returns:
 
 Example::
 
-    >>> g_cpu_default = torch.default_generator
-    >>> g_cpu_default.manual_seed(2147483647)
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.manual_seed(2147483647)
 """)
 
 
