@@ -10,6 +10,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/VectorizedCopy.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <algorithm>
@@ -396,14 +397,28 @@ Tensor permute(const Tensor& self, IntArrayRef dims) {
   return self.as_strided(newSizes, newStrides);
 }
 
+#define VEC_REPEAT_CHECK(T, name, _)              \
+  if (self.scalar_type() == ScalarType::name) {   \
+    type_and_size_match += 1;                     \
+  }
+
 Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   AT_CHECK(repeats.size() >= (size_t)self.dim(),
            "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
 
+  uint64_t type_and_size_match = 0;
+  AT_FORALL_SCALAR_TYPES_EXCEPT_QINT(VEC_REPEAT_CHECK)
   // Add new leading dimensions to the tensor if the
   // number of target dimensions is larger than the
   // number of source dimensions.
   int64_t num_new_dimensions = repeats.size() - self.dim();
+
+  // Invoke vectorized repeat if 1) type is scalar except qint
+  // and 2) input tensor is contiguous.
+  if (type_and_size_match == 1 && self.is_contiguous()) {
+    return vectorized_contig_tensor_repeat(self, repeats);
+  }
+
   std::vector<int64_t> padded_size(num_new_dimensions, 1);
   padded_size.insert(padded_size.end(), self.sizes().begin(), self.sizes().end());
   std::vector<int64_t> target_size(repeats.size());
@@ -412,9 +427,9 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   }
 
   Tensor xtensor = self.expand(padded_size);
-
   Tensor result = at::empty(target_size, self.options());
   Tensor urtensor = at::alias(result);
+
   for (int64_t i = 0; i < xtensor.dim(); ++i) {
     // can't unfold with step 0, so make sure step is at least 1
     // (it doesn't matter what it is in that case, because the size is 0).

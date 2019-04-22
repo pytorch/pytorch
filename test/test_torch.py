@@ -8223,6 +8223,24 @@ class _TestTorchMixin(object):
         self.assertEqual(result.size(), target, 'Error in repeat using result and LongStorage')
         self.assertEqual(result.mean(0).view(8, 4), tensor, 'Error in repeat (not equal)')
 
+    def test_repeat_fast_path(self):
+        # Test fast path.
+        input_shape = (4, 1, 4, 1)
+
+        repeat_shapes = (
+                        (1, 1, 1, 16),  # Test single element broadcast path
+                        (1, 2, 1, 16),  # Test single element broadcast + subtensor broadcast
+                        (1, 8, 1, 1),  # Test subtensor broadcast
+                        (2, 8, 1, 1),  # Test two subtensor broadcast
+                        )
+
+        np_input_tensor = np.random.random(input_shape)
+        for repeat in repeat_shapes:
+            torch_input_tensor = torch.from_numpy(np_input_tensor)
+            self.assertEqual(torch_input_tensor.repeat(*repeat).numpy(),
+                             np.tile(np_input_tensor, repeat))
+
+
     def test_repeat_interleave(self):
         x = torch.tensor([0, 1, 2, 3])
         expected = torch.tensor([1, 2, 2, 3, 3, 3])

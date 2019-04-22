@@ -81,7 +81,7 @@ def main():
     workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
     workspace.ClearGlobalNetObserver()
 
-    benchmark_core.BenchmarkRunner(args).run()
+    return benchmark_core.BenchmarkRunner(args).run()
 
 
 if __name__ == "__main__":

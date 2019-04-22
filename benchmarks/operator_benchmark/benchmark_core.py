@@ -185,3 +185,4 @@ class BenchmarkRunner(object):
 
             reported_run_time = (1e6 * run_time / iters)
             self._print_perf_result(full_test_id, input_shapes, args, reported_run_time)
+            return reported_run_time
