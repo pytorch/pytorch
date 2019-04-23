@@ -7,7 +7,9 @@
 //
 // Template argument <T> has to be registered with CAFFE_KNOWN_TYPE mechanism.
 
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
+#include <ATen/core/Type.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/quantized/Quantizer.h>
 
 namespace at {
