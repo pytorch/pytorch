@@ -455,8 +455,10 @@ def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
 def _max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tensor  # noqa
-    return max_pool1d_with_indices(
-        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+    if stride is None:
+        stride = torch.jit.annotate(List[int], [])
+    return torch.max_pool1d(
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 max_pool1d = torch._jit_internal.boolean_dispatch(
     arg_name='return_indices',
@@ -486,8 +488,10 @@ def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation
 def _max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tensor  # noqa
-    return max_pool2d_with_indices(
-        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+    if stride is None:
+        stride = torch.jit.annotate(List[int], [])
+    return torch.max_pool2d(
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 max_pool2d = torch._jit_internal.boolean_dispatch(
     arg_name='return_indices',
@@ -518,8 +522,10 @@ def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
 def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tensor  # noqa
-    return max_pool3d_with_indices(
-        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+    if stride is None:
+        stride = torch.jit.annotate(List[int], [])
+    return torch.max_pool3d(
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 max_pool3d = torch._jit_internal.boolean_dispatch(
     arg_name='return_indices',
