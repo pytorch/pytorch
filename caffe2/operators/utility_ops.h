@@ -765,7 +765,6 @@ class ScatterOp : public Operator<Context> {
     size_t item_bytesize = dataType.itemsize();
 
     // ONNX allows negative axis to index from the back, valid range: [-r, r].
-    //const int axis = this->template GetSingleArgument<int>("axis", 1);
     if (axis_ < 0) {
       axis_ = data.dim() + axis_;
     }
@@ -773,7 +772,6 @@ class ScatterOp : public Operator<Context> {
     CAFFE_ENFORCE_GE(data.dim(), axis_ + 1, "DATA should be at least [axis+1]-D");
     CAFFE_ENFORCE_GE(axis_, 0, "Axis should be non-negative");
     CAFFE_ENFORCE_LT(axis_, data.dim(), "Axis out of range");
-    // enforce indices and values have same shape
 
     Tensor* output = Output(0, data.sizes().vec(), at::dtype(dataType));
     output->CopyFrom(data);
@@ -810,7 +808,7 @@ class ScatterOp : public Operator<Context> {
 
         auto src = src_base + batch * src_batch_bytesize + idx * block_bytesize;
         auto dst = out + batch * dst_batch_size + (i - i_max + N) * block_bytesize;
-        context_.template CopyItemsSameDevice(dataType, block_size, src, dst);
+        context_.CopyItemsSameDevice(dataType, block_size, src, dst);
       }
     }
     return true;
