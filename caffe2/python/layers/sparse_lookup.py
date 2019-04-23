@@ -103,12 +103,17 @@ class SparseLookup(ModelLayer):
 
         self.weight_init = weight_init or default_init_op
 
+        # If fp16 is used, make sure fp16 init op is used
         if self.trainer_version == "fp16":
-            assert self.weight_init[0] in self._fp16_compatible_init_op_types,\
-                "Fp16 training is enabled. Init op for weight parameter must be fp16"\
+            # if init op is UniformFill, we replace it directly
+            if self.weight_init[0] == "UniformFill":
+                self.weight_init = ("Float16UniformFill", self.weight_init[1])
+            assert self.weight_init[0] in self._fp16_compatible_init_op_types, (
+                "Fp16 training is enabled. Init op for weight parameter must be fp16 "
                 "compatibale. Got {}. Supported ops: {}".format(
                     self.weight_init[0],
                     self._fp16_compatible_init_op_types)
+            )
 
         if _is_id_list(self.input_record):
             sparse_key = self.input_record.items()
