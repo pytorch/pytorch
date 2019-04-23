@@ -183,6 +183,11 @@ struct CAFFE2_API TensorIterator {
     return operands_[arg].tensor;
   }
 
+  Tensor input(int arg=0) const {
+    AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
+    return operands_[num_outputs_ + arg].tensor;
+  }
+
   /// Removes an operand from this iterator
   void remove_operand(int arg);
   /// Removes a dimension from this iterator
