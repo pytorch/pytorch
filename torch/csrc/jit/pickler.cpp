@@ -28,7 +28,7 @@ const std::string& getClassName(PicklerClass cls) {
 }
 
 const std::string& getModuleName() {
-  static const std::string module_name("__main__\n");
+  static const std::string module_name("torch.jit._pickle\n");
   return module_name;
 }
 
