@@ -69,10 +69,6 @@ except ImportError:
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-# Note: creating FusionGroups is currently device-independent.
-# FusionGroup creation with CPU is disabled.
-FUSION_ENABLED = torch._C._jit_can_fuse_on_cpu() or torch._C._jit_can_fuse_on_gpu()
-
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_HALF = RUN_CUDA
 if torch.cuda.is_available():
@@ -438,9 +434,6 @@ class JitTestCase(TestCase):
         self.assertExpected(str(graph), *args, **kwargs)
 
     def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
-        if not FUSION_ENABLED:
-            nonfusible_nodes = nonfusible_nodes + fusible_nodes
-            fusible_nodes = []
         diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
         diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
 
@@ -13138,6 +13131,10 @@ def add_autograd_test(
         # we want to close over in some way
         def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
                     check_ad=check_ad, output_process_fn=output_process_fn):
+            # We enable the CPU fuser during these checks for more consistent
+            # behavior. Otherwise, we are going to have to analyze the graph to
+            # see if producer values are Dimension
+            @enable_cpu_fuser
             def check(name):
                 set_rng_seed(2)
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
@@ -13169,6 +13166,10 @@ def add_autograd_test(
                             check_against_reference(self, traced_fn,
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
+                            # Fuser not supported on windows
+                            if IS_WINDOWS:
+                                autodiff_nodes = autodiff_nodes + fusible_nodes
+                                fusible_nodes = []
                             self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
                         if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
@@ -13177,6 +13178,10 @@ def add_autograd_test(
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
 
+                            # Fuser not supported on windows
+                            if IS_WINDOWS:
+                                autodiff_nodes = autodiff_nodes + fusible_nodes
+                                fusible_nodes = []
                             self.assertAutodiffNode(script_fn.last_graph,
                                                     should_autodiff_node and test_name not in EXCLUDE_SCRIPT_AD_CHECK,
                                                     autodiff_nodes,
