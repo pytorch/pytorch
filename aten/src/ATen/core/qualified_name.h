@@ -73,8 +73,11 @@ struct QualifiedName {
     // No empty atomic names allowed (e.g. "foo..bar")
     AT_ASSERT(qualifiedName_.find("..") == std::string::npos);
   }
+  // The fully qualified name, like "foo.bar.baz"
   std::string qualifiedName_;
+  // The leading qualifier, like "foo.bar"
   std::string prefix_;
+  // The base name, like "baz"
   std::string name_;
 };
 } // namespace c10
