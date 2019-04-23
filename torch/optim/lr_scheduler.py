@@ -16,14 +16,14 @@ class _LRScheduler(object):
         if last_epoch == -1:
             for group in optimizer.param_groups:
                 group.setdefault('initial_lr', group['lr'])
+            last_epoch = 0
         else:
             for i, group in enumerate(optimizer.param_groups):
                 if 'initial_lr' not in group:
                     raise KeyError("param 'initial_lr' is not specified "
                                    "in param_groups[{}] when resuming an optimizer".format(i))
         self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
-        self.step(last_epoch + 1)
-        self.last_epoch = last_epoch
+        self.step(last_epoch)
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -70,9 +70,9 @@ class LambdaLR(_LRScheduler):
         >>> lambda2 = lambda epoch: 0.95 ** epoch
         >>> scheduler = LambdaLR(optimizer, lr_lambda=[lambda1, lambda2])
         >>> for epoch in range(100):
-        >>>     scheduler.step()
         >>>     train(...)
         >>>     validate(...)
+        >>>     scheduler.step()
     """
 
     def __init__(self, optimizer, lr_lambda, last_epoch=-1):
@@ -144,9 +144,9 @@ class StepLR(_LRScheduler):
         >>> # ...
         >>> scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
         >>> for epoch in range(100):
-        >>>     scheduler.step()
         >>>     train(...)
         >>>     validate(...)
+        >>>     scheduler.step()
     """
 
     def __init__(self, optimizer, step_size, gamma=0.1, last_epoch=-1):
@@ -181,9 +181,9 @@ class MultiStepLR(_LRScheduler):
         >>> # lr = 0.0005   if epoch >= 80
         >>> scheduler = MultiStepLR(optimizer, milestones=[30,80], gamma=0.1)
         >>> for epoch in range(100):
-        >>>     scheduler.step()
         >>>     train(...)
         >>>     validate(...)
+        >>>     scheduler.step()
     """
 
     def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
@@ -226,7 +226,11 @@ class CosineAnnealingLR(_LRScheduler):
 
     .. math::
         \eta_{t+1} = \eta_{min} + (\eta_t - \eta_{min})\frac{1 +
-        \cos(\frac{T_{cur+1}}{T_{max}}\pi)}{1 + \cos(\frac{T_{cur}}{T_{max}}\pi)}
+        \cos(\frac{T_{cur+1}}{T_{max}}\pi)}{1 + \cos(\frac{T_{cur}}{T_{max}}\pi)},
+        T_{cur} \neq (2k+1)T_{max};\\
+        \eta_{t+1} = \eta_{t} + (\eta_{max} - \eta_{min})\frac{1 -
+        \cos(\frac{1}{T_{max}}\pi)}{2},
+        T_{cur} = (2k+1)T_{max}.\\
 
     When last_epoch=-1, sets initial lr as lr. Notice that because the schedule
     is defined recursively, the learning rate can be simultaneously modified
@@ -259,6 +263,11 @@ class CosineAnnealingLR(_LRScheduler):
     def get_lr(self):
         if self.last_epoch == 0:
             return self.base_lrs
+        elif (self.last_epoch - 1 - self.T_max) % (2 * self.T_max) == 0:
+            return [group['lr'] + (base_lr - self.eta_min) *
+                    (1 - math.cos(math.pi / self.T_max)) / 2
+                    for base_lr, group in
+                    zip(self.base_lrs, self.optimizer.param_groups)]
         return [(1 + math.cos(math.pi * self.last_epoch / self.T_max)) /
                 (1 + math.cos(math.pi * (self.last_epoch - 1) / self.T_max)) *
                 (group['lr'] - self.eta_min) + self.eta_min
