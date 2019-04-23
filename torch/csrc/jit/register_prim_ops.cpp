@@ -1041,6 +1041,28 @@ RegisterOperators logging_operators(
             return 0;                                                          \
           })
 
+<<<<<<< HEAD
+=======
+// define implementations for python
+#define DEFINE_GENERIC_PYTHON_OP(aten_op, int_op, float_op, float_result) \
+  Operator(                                                                    \
+      #aten_op "(int a) -> " #float_result,                                    \
+      [](Stack& stack) {                                                       \
+        int64_t a;                                                              \
+        pop(stack, a);                                                         \
+        push(stack, int_op);                                                   \
+        return 0;                                                              \
+      }),                                                                      \
+      Operator(                                                                \
+          #aten_op "(float a) -> " #float_result, [](Stack& stack) {           \
+            double a;                                                          \
+            pop(stack, a);                                                     \
+            push(stack, float_op);                                             \
+            return 0;                                                          \
+          })
+
+
+>>>>>>> Fixed typo in name
 #define DEFINE_INT_FLOAT_OP(aten_op, op, result)                           \
   Operator(                                                                \
       #aten_op "(int a, float b) -> " #result,                             \
