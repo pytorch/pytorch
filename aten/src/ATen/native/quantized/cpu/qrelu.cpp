@@ -12,7 +12,7 @@ namespace {
 
 class QReluInt8 final : public c10::OperatorKernel {
  public:
-  QTensor operator()(const at::QTensor& qx) {
+  QTensor operator()(at::QTensor qx) {
     QTensor qy = at::_empty_affine_quantized(qx.sizes(),
                                              at::device(kCPU).dtype(kQInt8),
                                              qx.q_scale().toDouble(),
