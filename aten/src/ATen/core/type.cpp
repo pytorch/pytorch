@@ -470,6 +470,27 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
 }
 
 namespace {
+// Equality on the full qualified string
+struct QualNameEq {
+  bool operator()(const QualifiedNamePtr& lhs, const QualifiedNamePtr& rhs)
+      const {
+    if (!lhs) {
+      return !rhs;
+    }
+    return lhs->equals(rhs);
+  }
+};
+
+// Hash on the base name
+struct QualNameHash {
+  size_t operator()(const QualifiedNamePtr& k) const {
+    if (k) {
+      return std::hash<std::string>()(k->name_);
+    }
+    return 0;
+  }
+};
+
 class ClassTypeRegistry {
  public:
   void registerType(QualifiedNamePtr name, ClassTypePtr type) {
@@ -493,7 +514,12 @@ class ClassTypeRegistry {
 
  private:
   std::mutex mutex_;
-  std::unordered_map<QualifiedNamePtr, ClassTypePtr> reg_;
+  std::unordered_map<
+      QualifiedNamePtr,
+      ClassTypePtr,
+      QualNameHash,
+      QualNameEq>
+      reg_;
 };
 
 ClassTypeRegistry& getRegistry() {

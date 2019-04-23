@@ -44,11 +44,11 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
       Function& m,
       const std::string& name) override {
     auto fullName = c10::QualifiedName::create(basename_, name);
-    if (auto classType = ClassType::get(std::move(fullName))) {
+    if (auto classType = ClassType::get(fullName)) {
       return std::make_shared<ClassValue>(classType);
     }
 
-    return std::make_shared<ClassNamespaceValue>(fullName);
+    return std::make_shared<ClassNamespaceValue>(std::move(fullName));
   }
   std::string kind() const override {
     return "Class Namespace";

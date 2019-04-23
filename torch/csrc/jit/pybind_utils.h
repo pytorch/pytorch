@@ -49,8 +49,9 @@ struct TypedIValue : public std::pair<IValue, TypePtr> {
 
 inline TypedIValue toDictKeyIValue(py::handle key) {
   if (py::isinstance<py::str>(key)) {
-    return TypedIValue(ConstantString::create(py::cast<std::string>(key)),
-                       StringType::create());
+    return TypedIValue(
+        ConstantString::create(py::cast<std::string>(key)),
+        StringType::create());
   } else if (PyLong_Check(key.ptr())) {
     return TypedIValue(py::cast<int64_t>(key), IntType::create());
   } else if (PyFloat_Check(key.ptr())) {
@@ -102,15 +103,17 @@ inline TypedIValue toTypedIValue(py::handle input) {
         auto unifiedKey = unifyTypes(keyType, keyInfo.second);
         auto unifiedValue = unifyTypes(valueType, valInfo.second);
         if (!unifiedKey || !unifiedValue) {
-          AT_ERROR("Dictionary inputs to traced functions must have consistent type");
+          AT_ERROR(
+              "Dictionary inputs to traced functions must have consistent type");
         }
         keyType = *unifiedKey;
         valueType = *unifiedValue;
       }
       elems.insert(std::make_pair(keyInfo.first, valInfo.first));
     }
-    return TypedIValue(at::ivalue::GenericDict::create(std::move(elems)),
-                       DictType::create(keyType, valueType));
+    return TypedIValue(
+        at::ivalue::GenericDict::create(std::move(elems)),
+        DictType::create(keyType, valueType));
   } else {
     throw std::runtime_error(c10::str(
         "Only tensors and (possibly nested) tuples of tensors or dicts are supported ",
@@ -124,7 +127,7 @@ inline TypedIValue toTypedIValue(py::handle input) {
 }
 
 inline IValue toIValue(py::handle input) {
-    return toTypedIValue(input).ivalue();
+  return toTypedIValue(input).ivalue();
 }
 
 inline Stack toStack(const py::tuple& inputs) {
@@ -133,7 +136,8 @@ inline Stack toStack(const py::tuple& inputs) {
 
 inline TypedStack toTypedStack(const py::tuple& inputs) {
   auto info = toTypedIValue(inputs);
-  return TypedStack(info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
+  return TypedStack(
+      info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
 }
 
 inline IValue toIValue(
@@ -375,7 +379,8 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = ivalue.toObject();
-    const auto classType = ClassType::get(obj->name());
+    const auto classType =
+        ClassType::get(c10::QualifiedName::createFromDotted(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
         py::module::import("torch.jit").attr("_get_script_class")(obj->name());
