@@ -582,8 +582,9 @@ class TestLRScheduler(TestCase):
     def test_legacy_cos_anneal_lr(self):
         eta_min = 1e-10
         epochs = 20
-        scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
-        legacy_scheduler = LegacyCosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
+        T_max = 5
+        scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
+        legacy_scheduler = LegacyCosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
         self._test_against_legacy(scheduler, legacy_scheduler, epochs)
 
     def test_reduce_lr_on_plateau1(self):

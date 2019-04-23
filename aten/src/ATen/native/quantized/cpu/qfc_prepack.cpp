@@ -41,12 +41,13 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     }
   }
 
-  at::QTensor operator()(const at::QTensor& weight) {
+  at::QTensor operator()(at::QTensor weight) {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
     int32_t weight_zero_point_int32 = weight.q_zero_point().toInt();
 
+    // TODO: contiguous is called for further jit optimizations.
     auto weight_contig = weight.contiguous();
     auto weight_ptr_int8 = reinterpret_cast<int8_t*>(weight.data<c10::qint8>());
 
@@ -78,7 +79,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
         weight.q_zero_point());
   }
 #else // USE_FBGEMM
-  at::QTensor operator()(const at::QTensor& /* weight */
+  at::QTensor operator()(at::QTensor /* weight */
   ) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
