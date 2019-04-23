@@ -627,7 +627,13 @@ class _DataLoaderIter(object):
                 for w in self.workers:
                     w.join()
             finally:
-                # Removes pids from the C side data structure finally
+                # Even though all this function does is putting into queues that
+                # we have called `cancel_join_thread` on, weird things can
+                # happen when a worker is killed by a signal, e.g., hanging in
+                # `Event.set()`. So we need to guard this with SIGCHLD handler,
+                # and remove pids from the C side data structure only at the
+                # end.
+                #
                 # FIXME: Unfortunately, for Windows, we are missing a worker
                 #        error detection mechanism here in this function, as it
                 #        doesn't provide a SIGCHLD handler.
