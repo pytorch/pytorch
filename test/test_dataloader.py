@@ -217,12 +217,9 @@ class ErrorTrackingProcess(mp.Process):
     def run(self):
         if HAS_FAULTHANDLER:
             faulthandler.enable()
-            if hasattr(signal, 'SIGUSR1'):
-                # use SIGUSR if possible...
+            if not IS_WINDOWS:
+                # windows does not have faulthandler.register
                 faulthandler.register(signal.SIGUSR1, chain=True)
-            else:
-                # unless we are on some weird OS like Windows...
-                faulthandler.register(signal.SIGINT, chain=True)
         if self.disable_stderr:
             # Disable polluting stderr with errors that are supposed to happen.
             sys.stderr = open(os.devnull, "w")
@@ -234,11 +231,18 @@ class ErrorTrackingProcess(mp.Process):
             raise
 
     def print_traces_of_all_threads(self):
-        if HAS_FAULTHANDLER and hasattr(signal, 'SIGUSR1'):
-            # use the custom signal if it is registered by faulthandler
-            os.kill(self.pid, signal.SIGUSR1)
+        assert self.is_alive(), "can only use print_traces_of_all_threads if the process is alive"
+        if HAS_FAULTHANDLER:
+            if not IS_WINDOWS:
+                # use the custom signal if available
+                os.kill(self.pid, signal.SIGUSR1)
+            else:
+                # otherwise we can still use the handler given by faulthandler.enable()
+                # at the cost of killing the process, so let's poll the exception first
+                _ = self.exception
+                os.kill(self.pid, signal.SIGSEGV)
         else:
-            # use SIGINT otherwise and hope for the best
+            # if there is no faulthandler, use SIGINT otherwise and hope for the best
             os.kill(self.pid, signal.SIGINT)
         # don't error too fast, give it some time to print
         time.sleep(5)
