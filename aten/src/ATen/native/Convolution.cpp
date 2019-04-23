@@ -148,7 +148,7 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #if AT_MKLDNN_ENABLED()
-  return (input.type_id() == MkldnnCPUTensorId()) || // input is mkldnn Tensor
+  return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.type().backend() == at::Backend::CPU &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
      !is_dilated() && // doesn't support dilation
@@ -374,7 +374,7 @@ at::Tensor _convolution(
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled) {
 
-  const bool input_is_mkldnn = (input_r.type_id() == MkldnnCPUTensorId());
+  const bool input_is_mkldnn = input_r.is_mkldnn();
   auto input = input_r;
   if (!input_is_mkldnn) {
     input = input.contiguous();
@@ -411,10 +411,6 @@ at::Tensor _convolution(
   }
 
   Tensor output;
-  if (!input_is_mkldnn) {
-    output = at::empty({0}, input.options());
-  }
-
   if (params.is_depthwise(input, weight)) {
       /* output.resize_(output_size(input, weight)); */
 
