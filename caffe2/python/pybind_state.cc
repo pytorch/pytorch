@@ -246,7 +246,7 @@ bool feedBlob(
     return true;
   }
 #ifdef FBCODE_CAFFE2
-  if (auto module = torch::jit::as_module(arg)) {
+  if (auto module = torch::jit::script::as_module(arg)) {
     *blob->GetMutable<std::shared_ptr<torch::jit::script::Module>>() =
         module;
     return true;
