@@ -17,16 +17,16 @@ def to_mkldnn(module):
                 if param._grad is not None:
                     param._grad.data = t_fn(param._grad.data)
 
-        for key, buf in module._buffers.items():
+        for key, buf in m._buffers.items():
             if buf is not None:
-                module._buffers[key] = t_fn(buf)
+                m._buffers[key] = t_fn(buf)
 
-        if isinstance(module, torch.nn.Conv2d):
-            module.weight.data = torch._C._nn.mkldnn_reorder_conv2d_weight(
-                module.weight.data,
-                module.padding,
-                module.stride,
-                module.dilation,
-                module.groups)
+        if isinstance(m, torch.nn.Conv2d):
+            m.weight.data = torch._C._nn.mkldnn_reorder_conv2d_weight(
+                m.weight.data,
+                m.padding,
+                m.stride,
+                m.dilation,
+                m.groups)
 
     return module.apply(m_fn)
