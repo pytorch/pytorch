@@ -30,7 +30,15 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 
-class TestTensorBoardPyTorchNumpy(TestCase):
+class BaseTestCase(TestCase):
+    """ Base class used for all TensorBoard tests """
+    def tearDown(self):
+        super(BaseTestCase, self).tearDown()
+        # Remove runs directory created by SummaryWriter
+        shutil.rmtree('runs')
+
+
+class TestTensorBoardPyTorchNumpy(BaseTestCase):
     def test_pytorch_np(self):
         tensors = [torch.rand(3, 10, 10), torch.rand(1), torch.rand(1, 2, 3, 4, 5)]
         for tensor in tensors:
@@ -105,7 +113,7 @@ class TestTensorBoardPyTorchNumpy(TestCase):
                                 bucket_counts=counts.tolist())
 
 
-class TestTensorBoardUtils(TestCase):
+class TestTensorBoardUtils(BaseTestCase):
     def test_to_HWC(self):
         test_image = np.random.randint(0, 256, size=(3, 32, 32), dtype=np.uint8)
         converted = convert_to_HWC(test_image, 'chw')
@@ -137,7 +145,7 @@ precision = [0.3333333, 0.3786982, 0.5384616, 1.0, 0.0]
 recall = [1.0, 0.8533334, 0.28, 0.0666667, 0.0]
 
 
-class TestTensorBoardWriter(TestCase):
+class TestTensorBoardWriter(BaseTestCase):
     def test_writer(self):
         with SummaryWriter() as writer:
             sample_rate = 44100
@@ -174,7 +182,7 @@ class TestTensorBoardWriter(TestCase):
             shutil.rmtree(d)
 
 
-class TestTensorBoardSummaryWriter(TestCase):
+class TestTensorBoardSummaryWriter(BaseTestCase):
     def test_summary_writer_ctx(self):
         # after using a SummaryWriter as a ctx it should be closed
         with SummaryWriter(filename_suffix='.test') as writer:
@@ -206,7 +214,7 @@ class TestTensorBoardSummaryWriter(TestCase):
         shutil.rmtree(str(p))
 
 
-class TestTensorBoardEmbedding(TestCase):
+class TestTensorBoardEmbedding(BaseTestCase):
     def test_embedding(self):
         w = SummaryWriter()
         all_features = torch.Tensor([[1, 2, 3], [5, 4, 1], [3, 7, 7]])
@@ -247,7 +255,7 @@ class TestTensorBoardEmbedding(TestCase):
                         global_step=2)
 
 
-class TestTensorBoardSummary(TestCase):
+class TestTensorBoardSummary(BaseTestCase):
     def test_uint8_image(self):
         '''
         Tests that uint8 image (pixel values in [0, 255]) is not changed
@@ -370,7 +378,7 @@ def write_proto(str_to_compare, function_ptr):
         f.write(str(str_to_compare))
 
 
-class TestTensorBoardPytorchGraph(TestCase):
+class TestTensorBoardPytorchGraph(BaseTestCase):
     def test_pytorch_graph(self):
         dummy_input = (torch.zeros(1, 3),)
 
@@ -394,7 +402,7 @@ class TestTensorBoardPytorchGraph(TestCase):
                 w.add_graph(model, dummy_input)  # error
 
 
-class TestTensorBoardFigure(TestCase):
+class TestTensorBoardFigure(BaseTestCase):
 
     @skipIfNoMatplotlib
     def test_figure(self):
@@ -439,7 +447,7 @@ class TestTensorBoardFigure(TestCase):
         writer.close()
 
 
-class TestTensorBoardNumpy(TestCase):
+class TestTensorBoardNumpy(BaseTestCase):
     def test_scalar(self):
         res = make_np(1.1)
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
