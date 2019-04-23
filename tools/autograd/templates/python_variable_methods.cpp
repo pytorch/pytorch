@@ -294,7 +294,6 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     "cuda(Device? device=None, bool non_blocking=False)",
-    "cuda(Device? device=None, bool async=False)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<2> parsed_args;
@@ -589,7 +588,6 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
     "type(PyObject* dtype=None, bool non_blocking=False)",
-    "type(PyObject* dtype=None, bool async=False)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<2> parsed_args;
