@@ -14,7 +14,6 @@
 namespace at {
 
 struct QTensorImpl;
-
 struct Quantizer;
 using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
 

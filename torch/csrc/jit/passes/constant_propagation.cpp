@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -36,6 +37,9 @@ std::vector<IValue> runNode(Node* n) {
     if (v.isTensor()) {
       auto t = std::move(v).toTensor();
       if (t.defined()) {
+        if (t.requires_grad()) {
+          throw c10::Error("Can't insert requires grad as constant", "");
+        }
         return IValue(autograd::as_variable_ref(t).data());
       } else {
         return t;
