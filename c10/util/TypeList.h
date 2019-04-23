@@ -132,6 +132,23 @@ struct count_if final {
 };
 
 
+/**
+ * Checks if a typelist contains a certain type.
+ * Examples:
+ *  contains<typelist<int, string>, string> == true_type
+ *  contains<typelist<int, string>, double> == false_type
+ */
+namespace detail {
+template<class TypeList, class Type, class Enable = void> struct contains {};
+template<class Type> struct contains<typelist<>, Type, void> : std::false_type {};
+template<class Type, class Head, class... Tail>
+struct contains<typelist<Head, Tail...>, Type, guts::enable_if_t<std::is_same<Head, Type>::value>> : std::true_type {};
+template<class Type, class Head, class... Tail>
+struct contains<typelist<Head, Tail...>, Type, guts::enable_if_t<!std::is_same<Head, Type>::value>> : contains<typelist<Tail...>, Type> {};
+}
+template<class TypeList, class Type>
+using contains = typename detail::contains<TypeList, Type>::type;
+
 
 /**
  * Returns true iff the type trait is true for all types in the type list

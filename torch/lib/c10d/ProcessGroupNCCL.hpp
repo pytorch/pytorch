@@ -169,8 +169,6 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
-  std::unordered_map<int, int> getGroupRank() override;
-
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(ncclUniqueId* ncclID);

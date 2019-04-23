@@ -20,14 +20,16 @@ __all__ = [
     'lu_unpack',
     'norm',
     'meshgrid',
-    'potrf',
     'pstrf',
+    'potrf',
+    'potri',
     'potrs',
     'split',
     'stft',
     'tensordot',
     'trtrs',
     'unique',
+    'unique_consecutive',
 ]
 
 
@@ -386,8 +388,11 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
-def unique(input, sorted=True, return_inverse=False, dim=None):
-    r"""Returns the unique scalar elements of the input tensor as a 1-D tensor.
+del torch.unique_dim
+
+
+def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
+    r"""Returns the unique elements of the input tensor.
 
     Arguments:
         input (Tensor): the input tensor
@@ -395,18 +400,26 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
             before returning as output.
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
+        return_counts (bool): Whether to also return the counts for each unique
+            element.
         dim (int): the dimension to apply unique. If ``None``, the unique of the
             flattened input is returned. default: ``None``
 
     Returns:
-        (Tensor, Tensor (optional)): A tensor or a tuple of tensors containing
+        (Tensor, Tensor (optional) Tensor (optional))::
+        A tensor or a tuple of tensors containing
 
             - **output** (*Tensor*): the output list of unique scalar elements.
             - **inverse_indices** (*Tensor*): (optional) if
-              :attr:`return_inverse` is True, there will be a
-              2nd returned tensor (same shape as input) representing the indices
+              :attr:`return_inverse` is True, there will be an additional
+              returned tensor (same shape as input) representing the indices
               for where elements in the original input map to in the output;
               otherwise, this function will only return a single tensor.
+            - **counts** (*Tensor*): (optional) if
+              :attr:`return_counts` is True, there will be an additional
+              returned tensor (same shape as output or output.size(dim),
+              if dim was specified) representing the number of occurrences
+              for each unique value or tensor.
 
     Example::
 
@@ -431,22 +444,89 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
 
     """
     if dim is not None:
-        output, inverse_indices = torch._unique_dim(
+        output, inverse_indices, counts = torch._C._VariableFunctions.unique_dim(
             input,
             dim,
             sorted=sorted,
-            return_inverse=return_inverse
+            return_inverse=return_inverse,
+            return_counts=return_counts,
         )
     else:
-        output, inverse_indices = torch._unique(
+        output, inverse_indices, counts = torch._unique2(
             input,
             sorted=sorted,
             return_inverse=return_inverse,
+            return_counts=return_counts,
         )
-    if return_inverse:
+    if return_inverse and return_counts:
+        return output, inverse_indices, counts
+    elif return_inverse:
         return output, inverse_indices
+    elif return_counts:
+        return output, counts
     else:
         return output
+
+
+def unique_consecutive(input, return_inverse=False, return_counts=False, dim=None):
+    r"""Eliminates all but the first element from every consecutive group of equivalent elements.
+
+    .. note:: This function is different from :func:`torch.unique` in the sense that this function
+        only eliminates consecutive duplicate values. This semantics is similar to `std::unique`
+        in C++.
+
+    Arguments:
+        input (Tensor): the input tensor
+        return_inverse (bool): Whether to also return the indices for where
+            elements in the original input ended up in the returned unique list.
+        return_counts (bool): Whether to also return the counts for each unique
+            element.
+        dim (int): the dimension to apply unique. If ``None``, the unique of the
+            flattened input is returned. default: ``None``
+
+    Returns:
+        (Tensor, Tensor (optional), Tensor (optional)): A tensor or a tuple of tensors containing
+
+            - **output** (*Tensor*): the output list of unique scalar elements.
+            - **inverse_indices** (*Tensor*): (optional) if
+              :attr:`return_inverse` is True, there will be an additional
+              returned tensor (same shape as input) representing the indices
+              for where elements in the original input map to in the output;
+              otherwise, this function will only return a single tensor.
+            - **counts** (*Tensor*): (optional) if
+              :attr:`return_counts` is True, there will be an additional
+              returned tensor (same shape as output or output.size(dim),
+              if dim was specified) representing the number of occurrences
+              for each unique value or tensor.
+
+    Example::
+
+        >>> x = torch.tensor([1, 1, 2, 2, 3, 1, 1, 2])
+        >>> output = torch.unique_consecutive(x)
+        >>> output
+        tensor([1, 2, 3, 1, 2])
+
+        >>> output, inverse_indices = torch.unique_consecutive(x, return_inverse=True)
+        >>> output
+        tensor([1, 2, 3, 1, 2])
+        >>> inverse_indices
+        tensor([0, 0, 1, 1, 2, 3, 3, 4])
+
+        >>> output, counts = torch.unique_consecutive(x, return_counts=True)
+        >>> output
+        tensor([1, 2, 3, 1, 2])
+        >>> counts
+        tensor([2, 2, 1, 2, 1])
+    """
+    output, inverse_indices, counts = torch._C._VariableFunctions.unique_consecutive(
+        input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
+    if return_inverse and return_counts:
+        return output, inverse_indices, counts
+    if return_inverse:
+        return output, inverse_indices
+    if return_counts:
+        return output, counts
+    return output
 
 
 def tensordot(a, b, dims=2):
@@ -662,23 +742,6 @@ def chain_matmul(*matrices):
     return torch._C._VariableFunctions.chain_matmul(matrices)
 
 
-def potrf(a, upper=True, out=None):
-    r"""Computes the Cholesky decomposition of a symmetric positive-definite
-    matrix :math:`A`.
-
-    For more information regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
-
-    .. warning::
-        :func:`torch.potrf` is deprecated in favour of :func:`torch.cholesky` and will be removed
-        in the next release. Please use :func:`torch.cholesky` instead and note that the :attr:`upper`
-        argument in :func:`torch.cholesky` defaults to ``False``.
-    """
-    warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
-                  "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
-                  " torch.cholesky defaults to ``False``.", stacklevel=2)
-    return torch.cholesky(a, upper=upper, out=out)
-
-
 def pstrf(a, upper=True, out=None):
     r"""Computes the pivoted Cholesky decomposition of a symmetric positive-definite
     matrix :attr:`a`. returns a namedtuple (u, pivot) of matrice.
@@ -722,6 +785,40 @@ def pstrf(a, upper=True, out=None):
     warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
                   "in the next release.", stacklevel=2)
     return torch._C._VariableFunctions.pstrf(a, upper=upper, out=out)
+
+
+def potrf(a, upper=True, out=None):
+    r"""Computes the Cholesky decomposition of a symmetric positive-definite
+    matrix :math:`A`.
+
+    For more information regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
+
+    .. warning::
+        :func:`torch.potrf` is deprecated in favour of :func:`torch.cholesky` and will be removed
+        in the next release. Please use :func:`torch.cholesky` instead and note that the :attr:`upper`
+        argument in :func:`torch.cholesky` defaults to ``False``.
+    """
+    warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
+                  "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
+                  " torch.cholesky defaults to ``False``.", stacklevel=2)
+    return torch.cholesky(a, upper=upper, out=out)
+
+
+def potri(a, upper=True, out=None):
+    r"""Computes the inverse of a symmetric positive-definite matrix :math:`A` using its
+    Cholesky factor.
+
+    For more information regarding :func:`torch.potri`, please check :func:`torch.cholesky_inverse`.
+
+    .. warning::
+        :func:`torch.potri` is deprecated in favour of :func:`torch.cholesky_inverse` and will be removed
+        in the next release. Please use :func:`torch.cholesky_inverse` instead and note that the :attr:`upper`
+        argument in :func:`torch.cholesky_inverse` defaults to ``False``.
+    """
+    warnings.warn("torch.potri is deprecated in favour of torch.cholesky_inverse and will be removed in "
+                  "the next release. Please use torch.cholesky_inverse instead and note that the :attr:`upper` "
+                  "argument in torch.cholesky_inverse defaults to ``False``.", stacklevel=2)
+    return torch.cholesky_inverse(a, upper=upper, out=out)
 
 
 def potrs(b, u, upper=True, out=None):

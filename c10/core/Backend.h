@@ -26,7 +26,7 @@ namespace c10 {
  * or "SparseCUDA"; backend in torch.backends is something like "MKL" or
  * "CUDNN".
  */
-enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, Undefined, MkldnnCPU, NumOptions };
+enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, QuantizedCPU, ComplexCPU, ComplexCUDA, Undefined, MkldnnCPU, NumOptions };
 
 static inline Backend toSparse(Backend b) {
   switch (b) {
@@ -65,6 +65,12 @@ static inline Backend toDense(Backend b) {
       return Backend::CUDA;
     case Backend::SparseHIP:
       return Backend::HIP;
+    case Backend::QuantizedCPU:
+      return Backend::QuantizedCPU;
+    case Backend::ComplexCPU:
+      return Backend::ComplexCPU;
+    case Backend::ComplexCUDA:
+      return Backend::ComplexCUDA;
     default:
       throw std::runtime_error("Unknown backend");
   }
@@ -89,6 +95,12 @@ static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
     return Backend::SparseHIP;
   } else if (t == MkldnnCPUTensorId()) {
     return Backend::MkldnnCPU;
+  } else if (t == QuantizedCPUTensorId()) {
+    return Backend::QuantizedCPU;
+  } else if (t == ComplexCPUTensorId()) {
+    return Backend::ComplexCPU;
+  } else if (t == ComplexCUDATensorId()) {
+    return Backend::ComplexCUDA;
   } else if (t == UndefinedTensorId()) {
     return Backend::Undefined;
   } else {
@@ -116,6 +128,12 @@ static inline TensorTypeId backendToTensorTypeId(Backend b) {
       return SparseHIPTensorId();
     case Backend::MkldnnCPU:
       return MkldnnCPUTensorId();
+    case Backend::QuantizedCPU:
+      return QuantizedCPUTensorId();
+    case Backend::ComplexCPU:
+      return ComplexCPUTensorId();
+    case Backend::ComplexCUDA:
+      return ComplexCUDATensorId();
     case Backend::Undefined:
       return UndefinedTensorId();
     default:
@@ -142,7 +160,11 @@ static inline DeviceType backendToDeviceType(Backend b) {
     case Backend::SparseHIP:
       return DeviceType::HIP;
     case Backend::MkldnnCPU:
+    case Backend::QuantizedCPU:
+    case Backend::ComplexCPU:
       return DeviceType::CPU;
+    case Backend::ComplexCUDA:
+      return DeviceType::CUDA;
     case Backend::Undefined:
       AT_ERROR("Undefined backend is not a valid device type");
     default:
@@ -169,6 +191,11 @@ static inline Backend backendToCPU(Backend b) {
       return Backend::CPU;
     case Backend::MkldnnCPU:
       return Backend::MkldnnCPU;
+    case Backend::QuantizedCPU:
+      return Backend::QuantizedCPU;
+    case Backend::ComplexCPU:
+    case Backend::ComplexCUDA:
+      return Backend::ComplexCPU;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
@@ -188,6 +215,9 @@ static inline Backend backendToCUDA(Backend b) {
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
       return Backend::SparseCUDA;
+    case Backend::ComplexCPU:
+    case Backend::ComplexCUDA:
+      return Backend::ComplexCUDA;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
@@ -214,12 +244,6 @@ static inline Backend backendToHIP(Backend b) {
   }
 }
 
-constexpr DeviceType kCPU = DeviceType::CPU;
-constexpr DeviceType kCUDA = DeviceType::CUDA;
-constexpr DeviceType kHIP = DeviceType::HIP;
-constexpr DeviceType kMSNPU = DeviceType::MSNPU;
-constexpr DeviceType kXLA = DeviceType::XLA;
-
 static inline const char* toString(Backend b) {
   switch (b) {
     case Backend::CPU:
@@ -240,6 +264,12 @@ static inline const char* toString(Backend b) {
       return "SparseHIP";
     case Backend::MkldnnCPU:
       return "MkldnnCPU";
+    case Backend::QuantizedCPU:
+      return "QuantizedCPU";
+    case Backend::ComplexCPU:
+      return "ComplexCPU";
+    case Backend::ComplexCUDA:
+      return "ComplexCUDA";
     default:
       return "UNKNOWN_BACKEND";
   }

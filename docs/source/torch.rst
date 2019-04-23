@@ -225,6 +225,7 @@ Reduction Ops
 .. autofunction:: std
 .. autofunction:: sum
 .. autofunction:: unique
+.. autofunction:: unique_consecutive
 .. autofunction:: var
 
 
@@ -305,6 +306,7 @@ BLAS and LAPACK Operations
 .. autofunction:: btriunpack
 .. autofunction:: chain_matmul
 .. autofunction:: cholesky
+.. autofunction:: cholesky_inverse
 .. autofunction:: cholesky_solve
 .. autofunction:: dot
 .. autofunction:: eig

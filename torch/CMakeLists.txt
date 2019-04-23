@@ -125,6 +125,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
   ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/pass_manager.cpp
   ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp
@@ -140,7 +141,9 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_c10_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/subgraph_matcher.cpp
   ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/profiling_record.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
@@ -175,17 +178,16 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/register_quantized_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
   ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/script/schema_type_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/class_type.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
@@ -236,7 +238,6 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/random.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
@@ -522,13 +523,12 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/peephole.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/constant_fold.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_arg_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/init.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
     ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
     ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp

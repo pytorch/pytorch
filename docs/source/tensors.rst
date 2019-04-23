@@ -188,6 +188,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ceil_
    .. automethod:: char
    .. automethod:: cholesky
+   .. automethod:: cholesky_inverse
    .. automethod:: cholesky_solve
    .. automethod:: chunk
    .. automethod:: clamp
@@ -277,6 +278,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_select
    .. automethod:: indices
    .. automethod:: int
+   .. automethod:: int_repr
    .. automethod:: inverse
    .. automethod:: irfft
    .. automethod:: is_contiguous
@@ -451,6 +453,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unfold
    .. automethod:: uniform_
    .. automethod:: unique
+   .. automethod:: unique_consecutive
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
    .. automethod:: values
