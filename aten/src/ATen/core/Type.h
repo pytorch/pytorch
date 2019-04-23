@@ -53,10 +53,6 @@ enum class TypeID {
   QuantizedCPU,
   MSNPU,
   XLA,
-  CPUComplexFloat,
-  CPUComplexDouble,
-  CUDAComplexFloat,
-  CUDAComplexDouble,
   Undefined,
   NumOptions
 };
