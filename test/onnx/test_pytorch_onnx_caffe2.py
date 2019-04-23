@@ -1047,9 +1047,8 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_unsqueeze(self):
         shape = (3, 4, 5)
-        for dim in range(2 * len(shape) + 2):
-            # test negative dim as well.
-            dim = dim - len(shape) - 1
+        # test negative dim as well.
+        for dim in range(-len(shape) - 1, len(shape) + 1):
 
             class MyModel(torch.nn.Module):
                 def __init__(self):
@@ -1062,9 +1061,8 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_squeeze(self):
         shape = (1, 1, 1)
-        for dim in range(2 * len(shape)):
-            # test negative dim as well
-            dim = dim - len(shape)
+        # test negative dim as well
+        for dim in range(-len(shape), len(shape)):
 
             class MyModel(torch.nn.Module):
                 def __init__(self):
