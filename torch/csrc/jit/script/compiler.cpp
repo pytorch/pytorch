@@ -1438,8 +1438,7 @@ struct to_ir {
         {},
         /*required=*/true);
 
-    auto outermost_dim_index =
-        graph->insertConstant(0, nullptr, range);
+    auto outermost_dim_index = graph->insertConstant(0, IntType::get(), range);
     auto max_trip_count_val = emitBuiltinCall(
         range,
         *graph,

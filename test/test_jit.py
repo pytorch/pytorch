@@ -3029,6 +3029,17 @@ class TestScript(JitTestCase):
         self.checkScript(test_sizes, (torch.rand(777),))
         self.checkScript(test_sizes, (torch.rand(0),))
 
+    def test_for_in_tensors_rank0(self):
+        with self.assertRaisesRegex(Exception, "iteration over a 0-d tensor"):
+            @torch.jit.script
+            def test_sizes(x):
+                sumz = 0
+                for s in x:
+                    sumz += 1
+                return sumz
+
+            test_sizes(torch.tensor(1))
+
     def test_for_in_tensors_fail_scalar(self):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             @torch.jit.script
