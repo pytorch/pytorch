@@ -112,6 +112,15 @@ inline bool is_sparse(Tensor self) {
   return self.is_sparse();
 }
 
+inline bool Tensor::is_mkldnn() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_mkldnn();
+}
+
+inline bool is_mkldnn(Tensor self) {
+  return self.is_mkldnn();
+}
+
 inline bool Tensor::is_quantized() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_quantized();

@@ -1677,6 +1677,7 @@ void addGlobalMethods(py::module& m) {
          const std::vector<int>& black_list,
          int max_batch_size,
          int max_seq_size,
+         bool adjust_batch,
          bool debug_builder,
          bool use_onnx) -> py::bytes {
         caffe2::NetDef pred_net;
@@ -1692,6 +1693,7 @@ void addGlobalMethods(py::module& m) {
         OnnxifiTransformerOptions opts;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
         opts.bound_shape_spec.max_seq_size = max_seq_size;
+        opts.adjust_batch = adjust_batch;
         opts.debug = debug_builder;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);

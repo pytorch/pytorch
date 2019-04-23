@@ -3459,7 +3459,8 @@ nonzero(input, out=None) -> LongTensor
 
 Returns a tensor containing the indices of all non-zero elements of
 :attr:`input`.  Each row in the result contains the indices of a non-zero
-element in :attr:`input`.
+element in :attr:`input`. The result is sorted lexicographically, with
+the last index changing the fastest (C-style).
 
 If :attr:`input` has `n` dimensions, then the resulting indices tensor
 :attr:`out` is of size :math:`(z \times n)`, where :math:`z` is the total number of
