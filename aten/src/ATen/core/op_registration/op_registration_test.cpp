@@ -265,6 +265,8 @@ private:
 };
 
 TEST(OperatorRegistrationTest, testAvailableArgTypes) {
+  // TODO Test Scalar
+
   // primitive types
   ArgTypeTestKernel<double>::test(
     1.5, [] (const double& v) {EXPECT_EQ(1.5, v);},
@@ -481,8 +483,9 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     },
     "(Tensor[] a) -> Tensor[]");
 
+  // TODO We support optional of list. Add test cases for it.
 
-  // TODO Do we want to support list of optional / optional of list ?
+  // TODO Do we want to support list of optional ?
 
   // TODO Add tests for dict types
 }
