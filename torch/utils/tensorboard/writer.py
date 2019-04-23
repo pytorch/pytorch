@@ -90,10 +90,10 @@ class FileWriter(object):
         self.add_event(event, global_step, walltime)
 
     def add_graph(self, graph_profile, walltime=None):
-        graph = graph_profile[0]
-        stepstats = graph_profile[1]
         """Adds a `Graph` protocol buffer to the event file.
         """
+        graph = graph_profile[0]
+        stepstats = graph_profile[1]
         event = event_pb2.Event(graph_def=graph.SerializeToString())
         self.add_event(event, None, walltime)
 

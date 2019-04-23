@@ -171,7 +171,7 @@ def make_histogram(values, bins, max_bins=None):
     end = int(end) + 1
     del cum_counts
 
-    # Tensorboard only includes the right bin limits. To still have the leftmost limit
+    # TensorBoard only includes the right bin limits. To still have the leftmost limit
     # included, we include an empty bin left.
     # If start == 0, we need to add an empty one left, otherwise we can just include the bin left to the
     # first nonzero-count bin:
