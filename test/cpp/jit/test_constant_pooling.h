@@ -89,6 +89,8 @@ graph():
 graph(%cond : Tensor):
   %a : Tensor = prim::Constant()
   %b : Tensor = prim::Constant()
+  %c : Tensor = prim::Constant()
+  %1 = prim::Print(%c)
   return (%a, %b)
   )IR",
         &*graph);
