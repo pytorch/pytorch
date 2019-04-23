@@ -46,6 +46,7 @@ static inline void noop_deleter(void*) {}
 
 enum class TypeID {
   ${type_ids}
+  ComplexCPU,
   Undefined,
   NumOptions
 };

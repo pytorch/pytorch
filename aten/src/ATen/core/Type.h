@@ -53,6 +53,7 @@ enum class TypeID {
   QuantizedCPU,
   MSNPU,
   XLA,
+  ComplexCPU,
   Undefined,
   NumOptions
 };
