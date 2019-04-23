@@ -454,7 +454,6 @@
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
@@ -707,7 +706,6 @@
     SparseCUDA: empty_sparse
 
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: empty_affine_quantized_cpu
 
@@ -1019,11 +1017,11 @@
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
-- func: linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+- func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+
+- func: mkldnn_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
-    CPU: linear
-    CUDA: linear
     MkldnnCPU: mkldnn_linear
 
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
@@ -1160,9 +1158,9 @@
 
 - func: max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
 
-- func: max_pool2d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
+- func: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
 
-- func: max_pool3d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
+- func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: mean(Tensor self, *, ScalarType dtype) -> Tensor
@@ -1519,6 +1517,10 @@
 - func: reshape(Tensor self, int[] shape) -> Tensor
   variants: function, method
   device_guard: False
+  dispatch:
+    CPU: reshape
+    CUDA: reshape
+    MkldnnCPU: mkldnn_reshape
 
 - func: reshape_as(Tensor self, Tensor other) -> Tensor
   variants: method
@@ -1951,14 +1953,6 @@
     CPU: unique_dim_cpu
     CUDA: unique_dim_cuda
 
-# _unique_dim is deprecated and will be removed in the future. Please use unique_dim
-
-- func: _unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU: _unique_dim_cpu
-    CUDA: _unique_dim_cuda
-
 - func: unique_consecutive(Tensor self, bool return_inverse=False, bool return_counts=False, int? dim=None) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
@@ -2130,6 +2124,7 @@
     CUDA: clone
     SparseCPU: clone_sparse
     SparseCUDA: clone_sparse
+    MkldnnCPU: mkldnn_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   cpu_bool: True
@@ -3659,32 +3654,56 @@
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
-- func: adaptive_max_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+- func: adaptive_max_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: adaptive_max_pool2d_out_cpu
+    CUDA: adaptive_max_pool2d_out_cuda
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d(Tensor self, int[2] output_size) -> (Tensor, Tensor)
   python_module: nn
+  dispatch:
+    CPU: adaptive_max_pool2d_cpu
+    CUDA: adaptive_max_pool2d_cuda
 
 - func: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: adaptive_max_pool2d_backward_out_cpu
+    CUDA: adaptive_max_pool2d_backward_out_cuda
 
 - func: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: adaptive_max_pool2d_backward_cpu
+    CUDA: adaptive_max_pool2d_backward_cuda
 
 # Return: (Tensor output, Tensor indices)
-- func: adaptive_max_pool3d(Tensor self, int[3] output_size, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+- func: adaptive_max_pool3d(Tensor self, int[3] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: adaptive_max_pool3d_out_cpu
+    CUDA: adaptive_max_pool3d_out_cuda
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d(Tensor self, int[3] output_size) -> (Tensor, Tensor)
   python_module: nn
+  dispatch:
+    CPU: adaptive_max_pool3d_cpu
+    CUDA: adaptive_max_pool3d_cuda
 
 - func: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: adaptive_max_pool3d_backward_out_cpu
+    CUDA: adaptive_max_pool3d_backward_out_cuda
 
 - func: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: adaptive_max_pool3d_backward_cpu
+    CUDA: adaptive_max_pool3d_backward_cuda
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

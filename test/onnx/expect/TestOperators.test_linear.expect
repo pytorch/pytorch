@@ -9,6 +9,16 @@ graph {
     output: "3"
     op_type: "Gemm"
     attribute {
+      name: "alpha"
+      f: 1
+      type: FLOAT
+    }
+    attribute {
+      name: "beta"
+      f: 1
+      type: FLOAT
+    }
+    attribute {
       name: "transB"
       i: 1
       type: INT

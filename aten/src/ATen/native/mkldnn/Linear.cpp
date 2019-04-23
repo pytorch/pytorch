@@ -8,7 +8,7 @@ namespace at {
 namespace native {
 
 Tensor mkldnn_linear(
-    const Tensor& input,
+    const Tensor& self,
     const Tensor& weight,
     const Tensor& bias) {
   AT_ERROR("mkldnn_linear: ATen not compiled with MKLDNN support");
@@ -25,10 +25,10 @@ namespace at {
 namespace native {
 
 Tensor mkldnn_linear(
-    const Tensor& input,
+    const Tensor& self,
     const Tensor& weight,
     const Tensor& bias) {
-  ideep::tensor& x = itensor_from_mkldnn(input);
+  ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor& w = itensor_from_mkldnn(weight);
 
   ideep::tensor y;
@@ -39,7 +39,7 @@ Tensor mkldnn_linear(
     ideep::inner_product_forward::compute(x, w, y);
   }
 
-  return new_with_itensor_mkldnn(std::move(y), input.options());
+  return new_with_itensor_mkldnn(std::move(y), self.options());
 }
 
 } // namespace native

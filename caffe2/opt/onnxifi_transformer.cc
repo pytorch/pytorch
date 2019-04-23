@@ -218,6 +218,9 @@ OnnxifiTransformer::generateBatchPaddingHints(
     const NetDef& onnxifi_net,
     const ShapeInfoMap& shape_hints) {
   std::unordered_map<int, std::string> batch_pos_map;
+  if (!opts_.adjust_batch) {
+    return batch_pos_map;
+  }
   const auto external_inputs = toHashSet(onnxifi_net.external_input());
   const auto external_outputs = toHashSet(onnxifi_net.external_output());
   for (const auto& op : onnxifi_net.op()) {
@@ -252,7 +255,7 @@ OnnxifiTransformer::generateBatchPaddingHints(
               getBlob1stDimSize(shape_info_it->second, output_blob);
           CAFFE_ENFORCE(
               batch_pos_map.count(max_batch_size),
-              "Cannot find input with max batch size",
+              "Cannot find input with max batch size: ",
               max_batch_size);
         } else if (shape_info_it->second.dim_type == ShapeInfo::DimType::SEQ) {
           LOG(WARNING) << "It's unusual that output tensor " << output_blob
@@ -334,16 +337,21 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
   AddArgument(kNetPos, c10::to_string(onnxifi_op_id_++), &op);
 
   // Add output resizing hints
-  auto* resize_arg = op.add_arg();
-  resize_arg->set_name("output_resize_hints");
-  for (const auto kv : batch_pos_map) {
-    const auto it = input_pos_map.find(kv.second);
-    CAFFE_ENFORCE(
-        it != input_pos_map.end(),
-        "Cannot find input in OnnxifiOp: ",
-        kv.second);
-    resize_arg->add_ints(kv.first);
-    resize_arg->add_ints(it->second);
+  if (opts_.adjust_batch) {
+    AddArgument("adjust_output_batch", 1, &op);
+    auto* resize_arg = op.add_arg();
+    resize_arg->set_name("output_resize_hints");
+    for (const auto kv : batch_pos_map) {
+      const auto it = input_pos_map.find(kv.second);
+      CAFFE_ENFORCE(
+          it != input_pos_map.end(),
+          "Cannot find input in OnnxifiOp: ",
+          kv.second);
+      resize_arg->add_ints(kv.first);
+      resize_arg->add_ints(it->second);
+    }
+  } else {
+    AddArgument("adjust_output_batch", 0, &op);
   }
 
   return op;

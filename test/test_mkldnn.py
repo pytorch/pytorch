@@ -90,6 +90,11 @@ class TestMkldnn(TestCase):
         self.assertTrue("layout=torch._mkldnn" in str(torch.randn((1, 2, 3, 4),
                         dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
 
+    def test_is_mkldnn(self):
+        x = torch.randn(4, 5, dtype=torch.float32)
+        self.assertFalse(x.is_mkldnn)
+        self.assertTrue(x.to_mkldnn().is_mkldnn)
+
     def test_conv2d(self):
         for groups in [1, 4]:
             N = torch.randint(3, 10, (1,)).item()
@@ -183,12 +188,25 @@ class TestMkldnn(TestCase):
         self.assertEqual(x, mx.to_dense())
 
     def test_view(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
+        self.assertRaisesRegex(RuntimeError,
+                               "Change to use reshape",
+                               lambda: x.view(x.size(0), -1))
+
+    def test_reshape(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
         size = (x.size(0), -1)
 
         self.assertEqual(
-            x.view(size),
-            x.to_mkldnn().view(size).to_dense(),
+            x.reshape(size),
+            x.to_mkldnn().reshape(size).to_dense(),
+        )
+
+    def test_clone(self):
+        x = torch.randn(4, 5, dtype=torch.float32) * 10
+        self.assertEqual(
+            x.clone(),
+            x.to_mkldnn().clone().to_dense(),
         )
 
     def test_linear(self):
