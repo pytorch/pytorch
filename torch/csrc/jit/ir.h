@@ -1165,9 +1165,6 @@ struct Graph {
 
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 
-  TORCH_API std::ostream& prettyPrint(std::ostream& out);
-  TORCH_API void dumpPretty();
-
   TORCH_API std::shared_ptr<Graph> copy();
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
