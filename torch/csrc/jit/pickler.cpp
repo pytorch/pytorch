@@ -368,6 +368,12 @@ OpCode Unpickler::readInstruction() {
       // Mark location of the container ivalue in the stack
       marks_.push_back(stack_.size());
     } break;
+    case OpCode::NEWTRUE: {
+      stack_.emplace_back(true);
+    } break;
+    case OpCode::NEWFALSE: {
+      stack_.emplace_back(false);
+    } break;
     case OpCode::BININT1: {
       int8_t value = read<int8_t>();
       stack_.emplace_back(int64_t(value));
@@ -449,7 +455,7 @@ OpCode Unpickler::readInstruction() {
       }
     } break;
     default:
-      AT_ERROR("Unknown opcode for unpickling");
+      AT_ERROR("Unknown opcode for unpickling: ", static_cast<uint8_t>(opcode));
   }
   return opcode;
 }

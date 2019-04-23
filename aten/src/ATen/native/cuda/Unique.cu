@@ -235,15 +235,6 @@ _unique2_cuda(const Tensor& self, const bool sorted, const bool return_inverse, 
   });
 }
 
-std::tuple<Tensor, Tensor>
-_unique_dim_cuda(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse) {
-  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim", [&] {
-    Tensor output, inverse;
-    std::tie(output, std::ignore, inverse, std::ignore) = unique_dim_cuda_template<scalar_t>(self, dim, /*consecutive=*/false, /*return_index=*/false, return_inverse, /*return_counts=*/false);
-    return std::make_tuple(output, inverse);
-  });
-}
-
 std::tuple<Tensor, Tensor, Tensor>
 unique_dim_cuda(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse, const bool return_counts) {
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim", [&] {

@@ -23,6 +23,7 @@ def onnxifi_caffe2_net(
         max_seq_size=1,
         debug=False,
         use_onnx=True,
+        adjust_batch=True,
         black_list=None):
     """
     Transform the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
@@ -35,6 +36,7 @@ def onnxifi_caffe2_net(
                              black_list if black_list else [],
                              max_batch_size,
                              max_seq_size,
+                             adjust_batch,
                              debug,
                              use_onnx)
     pred_net_cut = caffe2_pb2.NetDef()
