@@ -116,10 +116,10 @@ RegisterOperators reg(
     {Operator(
          "prim::profile(...) -> ()",
          [](const Node* node) {
-           return [node](Stack& stack) {
-             auto addr = node->i(attr::data);
-             std::function<void(Stack&)>& callback =
-                 *reinterpret_cast<std::function<void(Stack&)>*>(addr);
+           // TODO: figure out why cast isn't marked as const
+           auto n = const_cast<Node*>(node); // NOLINT
+           auto callback = n->cast<ProfileOp>()->getCallback();
+           return [callback](Stack& stack) {
              callback(stack);
              return 0;
            };
@@ -400,6 +400,14 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.cpu());
+           return 0;
+         }),
+     Operator(
+         // TODO return generator object when torchscript supports RNG
+         // first-class
+         "aten::manual_seed(int seed) -> ()",
+         [](Stack& stack) {
+           at::manual_seed(pop(stack).toInt());
            return 0;
          }),
      Operator(
@@ -1540,15 +1548,33 @@ int dictKeys(Stack& stack) {
   return 0;
 }
 
-int dictValues(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
-  std::vector<IValue> values;
+template <typename Elem>
+std::vector<Elem> makeListForDictValues(const c10::ivalue::UnorderedMap& dict) {
+  std::vector<Elem> values;
   values.reserve(dict.size());
   for (auto item : dict) {
-    values.push_back(item.second);
+    values.push_back(item.second.to<Elem>());
   }
-  push(stack, IValue(values));
-  return 0;
+  return values;
+}
+
+Operation dictValues(const Node* n) {
+  auto outputType = n->output()->type()->expect<ListType>();
+  return [=](Stack& stack) -> int {
+    auto dict = pop(stack).toGenericDictRef();
+    if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
+      push(stack, makeListForDictValues<at::Tensor>(dict));
+    } else if (outputType->getElementType() == IntType::get()) {
+      push(stack, makeListForDictValues<int64_t>(dict));
+    } else if (outputType->getElementType() == FloatType::get()) {
+      push(stack, makeListForDictValues<double>(dict));
+    } else if (outputType->getElementType() == BoolType::get()) {
+      push(stack, makeListForDictValues<bool>(dict));
+    } else {
+      push(stack, makeListForDictValues<IValue>(dict));
+    }
+    return 0;
+  };
 }
 
 int dictIndex(Stack& stack) {
@@ -1807,7 +1833,8 @@ RegisterOperators reg2({
               string.size() == 1,
               "String for ord() must be 1 character, found",
               string.size());
-          push(stack, int64_t(string.at(0)));
+          uint8_t ord = string.at(0);
+          push(stack, int64_t(ord));
           return 0;
         }),
 #define CREATE_COPY_OP(other_type, c_type)                                 \

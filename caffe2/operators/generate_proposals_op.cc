@@ -408,23 +408,19 @@ SHOULD_NOT_DO_GRADIENT(GenerateProposalsCPP);
 
 C10_REGISTER_CAFFE2_OPERATOR_CPU(
     GenerateProposals,
-    (std::vector<c10::Argument>{
-        c10::Argument("scores"),
-        c10::Argument("bbox_deltas"),
-        c10::Argument("im_info"),
-        c10::Argument("anchors"),
-        c10::Argument("spatial_scale", FloatType::get()),
-        c10::Argument("pre_nms_topN", IntType::get()),
-        c10::Argument("post_nms_topN", IntType::get()),
-        c10::Argument("nms_thresh", FloatType::get()),
-        c10::Argument("min_size", FloatType::get()),
-        c10::Argument("angle_bound_on", BoolType::get()),
-        c10::Argument("angle_bound_lo", IntType::get()),
-        c10::Argument("angle_bound_hi", IntType::get()),
-        c10::Argument("clip_angle_thresh", FloatType::get()),
-    }),
-    (std::vector<c10::Argument>{
-        c10::Argument("output_0"),
-        c10::Argument("output_1"),
-    }),
+    "_caffe2::GenerateProposals("
+      "Tensor scores, "
+      "Tensor bbox_deltas, "
+      "Tensor im_info, "
+      "Tensor anchors, "
+      "float spatial_scale, "
+      "int pre_nms_topN, "
+      "int post_nms_topN, "
+      "float nms_thresh, "
+      "float min_size, "
+      "bool angle_bound_on, "
+      "int angle_bound_lo, "
+      "int angle_bound_hi, "
+      "float clip_angle_thresh"
+    ") -> (Tensor output_0, Tensor output_1)",
     caffe2::GenerateProposalsOp<caffe2::CPUContext>);

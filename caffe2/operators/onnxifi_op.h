@@ -66,6 +66,8 @@ class OnnxifiOp final : public Operator<Context> {
     }
 
     // Get output resizing hints
+    adjust_output_batch_ =
+        this->template GetSingleArgument<int>("adjust_output_batch", 0);
     auto output_resize_hints =
         this->template GetRepeatedArgument<int>("output_resize_hints");
     CAFFE_ENFORCE_EQ(
@@ -266,6 +268,9 @@ class OnnxifiOp final : public Operator<Context> {
 
   // output shape hints
   std::unordered_map<int, TensorInfo> output_shape_hints_;
+
+  // Whether we need to resize outputs or not
+  bool adjust_output_batch_{false};
 
   // Output resizing hint map
   // key: max batch size

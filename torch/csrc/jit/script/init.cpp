@@ -375,18 +375,19 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<OverloadedFunctionValue>(
           self_, py::cast<std::vector<std::string>>(overloads));
     }
-
     if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
       if (py::isinstance<py::function>(attr) &&
-          py::hasattr(attr, "_is_parameter_list") &&
-          py::cast<bool>(py::getattr(attr, "_is_parameter_list"))) {
+          py::hasattr(attr, "_parameter_names_fn")) {
+        // Fetch the names of the parameters in the list so they're in the
+        // right order
+        auto fn_self = py::getattr(attr, "__self__");
+        auto param_names = py::getattr(attr, "_parameter_names_fn")(fn_self);
+
         Graph& g = *m.graph();
         // Add all module parameters as inputs to the graph
         std::vector<Value*> params;
-        const auto& param_list = module_->get_parameters();
-        for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
-          auto& param = *it;
-          params.emplace_back(g.insertGetAttr(self_, param.name()));
+        for (auto name : param_names) {
+          params.emplace_back(g.insertGetAttr(self_, py::str(name)));
         }
         auto list = g.insertNode(g.createTuple(params))->output();
         return std::make_shared<ConstantParameterList>(list);
@@ -640,16 +641,31 @@ static void gatherParametersAndBuffers(
 
 namespace {
 
-Resolver pythonResolver(const ResolutionCallback& rcb) {
-  return [rcb](const std::string& name, Function& m, const SourceRange& loc)
-             -> std::shared_ptr<SugaredValue> {
+// A resolver that will inspect the outer Python scope to find `name`.
+struct PythonResolver : public Resolver {
+  explicit PythonResolver(ResolutionCallback rcb) : rcb_(std::move(rcb)) {}
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) const override {
     AutoGIL ag;
-    py::object obj = rcb(name);
+    py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
     }
     return toSugaredValue(obj, m, loc);
-  };
+  }
+
+  TypePtr resolveType(const std::string& name) const override {
+    return ClassType::get(name);
+  }
+
+ private:
+  ResolutionCallback rcb_;
+};
+
+std::shared_ptr<PythonResolver> pythonResolver(ResolutionCallback rcb) {
+  return std::make_shared<PythonResolver>(rcb);
 }
 } // namespace
 
@@ -792,7 +808,6 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb,
              bool has_self) {
-            c10::optional<Self> self;
             if (has_self) {
               m->class_compilation_unit().define(
                   script, pythonResolver(rcb), moduleSelf(m));
@@ -807,7 +822,7 @@ void initJitScriptBindings(PyObject* module) {
              const std::vector<Def>& defs,
              const std::vector<ResolutionCallback>& rcbs,
              const std::vector<FunctionDefaults>& defaults) {
-            std::vector<Resolver> resolvers;
+            std::vector<ResolverPtr> resolvers;
             resolvers.reserve(rcbs.size());
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
@@ -938,13 +953,19 @@ void initJitScriptBindings(PyObject* module) {
             // this was ensured in python before calling this function
             std::vector<Slot> parameters;
             gatherParametersAndBuffers(parameters, *self);
-            Stack inputs = toStack(input_tuple);
-            for (const Slot& param : parameters) {
-              inputs.emplace_back(param.value());
+            auto typed_inputs = toTypedStack(input_tuple);
+            if (parameters.size() > 0) {
+              auto inputs = typed_inputs.stack();
+              auto input_types = typed_inputs.types()->elements().vec();
+              for (const Slot& param : parameters) {
+                inputs.emplace_back(param.value());
+                input_types.push_back(incompleteInferTypeFrom(param.value()));
+              }
+              typed_inputs = TypedStack(inputs, TupleType::create(input_types));
             }
             auto graph = tracer::createGraphByTracing(
                 func,
-                inputs,
+                typed_inputs,
                 var_lookup_fn,
                 force_outplace,
                 input_tuple.size());
@@ -1064,7 +1085,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const ClassDef& classDef, ResolutionCallback rcb) {
         auto cu = std::make_shared<CompilationUnit>();
         auto classType = ClassType::create(classDef.name().name(), cu);
-        std::vector<Resolver> rcbs;
+        std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
           methodDefs.push_back(def);
