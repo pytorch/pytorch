@@ -34,8 +34,9 @@ class BaseTestCase(TestCase):
     """ Base class used for all TensorBoard tests """
     def tearDown(self):
         super(BaseTestCase, self).tearDown()
-        # Remove runs directory created by SummaryWriter
-        shutil.rmtree('runs')
+        if os.path.exists('runs'):
+            # Remove directory created by SummaryWriter
+            shutil.rmtree('runs')
 
 
 class TestTensorBoardPyTorchNumpy(BaseTestCase):
