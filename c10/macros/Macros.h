@@ -69,6 +69,7 @@ namespace c10 { namespace hip {} }
 // c10 namespace where possible.
 namespace caffe2 { using namespace c10; }
 namespace at { using namespace c10; }
+namespace torch { using namespace c10; }
 namespace at { namespace cuda { using namespace c10::cuda; }}
 
 // WARNING!!! THIS IS A GIANT HACK!!!
