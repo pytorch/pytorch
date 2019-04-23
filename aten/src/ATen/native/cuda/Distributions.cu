@@ -217,7 +217,7 @@ Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
 
 Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen) {
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "dirichlet", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(ret.type(), "dirichlet", [&] {
     Tensor gamma = at::empty(alpha.sizes(), alpha.options());
     gamma_cuda_kernel<scalar_t>(gamma, alpha, next_philox_seed(gen, 10));
     dirichlet_scalar_cuda_kernel<scalar_t>(ret, gamma);
