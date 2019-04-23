@@ -43,7 +43,7 @@ Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
 }
 
 template <typename T>
-QTensor qcreate(
+QTensor create(
     std::unique_ptr<T> ptr,
     TensorOptions options,
     Scalar scale,
