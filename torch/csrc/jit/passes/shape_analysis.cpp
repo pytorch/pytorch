@@ -418,41 +418,6 @@ class ShapePropagator {
     setUnshapedType(cat_node);
   }
 
-  void propagateTorchTensorShape(Node* node) {
-    auto input_type = node->inputs().at(0)->type();
-
-    size_t dims = 0;
-    auto input_base_type = input_type;
-    auto list_type = input_type->cast<ListType>();
-    while (list_type) {
-      dims++;
-      input_base_type = list_type->getElementType();
-      list_type = input_base_type->cast<ListType>();
-    }
-
-    at::ScalarType default_type = scalarTypeFromJitType(input_base_type);
-    if (auto grad_index = node->schema().argumentIndexWithName("dtype")) {
-      auto inp = toIValue(node->inputs().at(*grad_index));
-      if (inp == c10::nullopt) {
-        return;
-      } else if (!inp->isNone()) {
-        default_type = inp->toScalarType();
-      }
-    }
-
-    at::Device default_device = at::kCPU;
-    if (auto device_index = node->schema().argumentIndexWithName("device")) {
-      auto inp = toIValue(node->inputs().at(*device_index));
-      if (inp == c10::nullopt) {
-        return;
-      } else if (!inp->isNone()) {
-        default_device = inp->toDevice();
-      }
-    }
-    node->output()->setType(
-        DimensionedTensorType::create(default_type, default_device, dims));
-  }
-
   bool mayAliasResizedSet(at::ArrayRef<Value*> vs) {
     bool in_resize = false;
     for (auto v : vs) {
@@ -527,9 +492,6 @@ class ShapePropagator {
               DimensionedTensorType::create(at::kDouble, at::kCPU, 0));
         }
         return;
-      }
-      case aten::tensor: {
-        return propagateTorchTensorShape(node);
       }
       case prim::TupleConstruct: {
         // We refresh the tuple type, because the input types could have been
