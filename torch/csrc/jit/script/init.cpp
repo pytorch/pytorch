@@ -608,8 +608,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
-    if (auto classType = ClassType::get(
-            c10::QualifiedName::createFromDotted(qualifiedName))) {
+    if (auto classType = ClassType::get(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
     }
   }
@@ -681,7 +680,7 @@ struct PythonResolver : public Resolver {
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
 
-    return ClassType::get(c10::QualifiedName::createFromDotted(qualifiedName));
+    return ClassType::get(c10::QualifiedName(qualifiedName));
   }
 
  private:
@@ -1108,8 +1107,8 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_class_compile",
       [](const ClassDef& classDef, ResolutionCallback rcb) {
         auto cu = std::make_shared<CompilationUnit>();
-        auto classType = ClassType::create(
-            c10::QualifiedName::createFromDotted(classDef.name().name()), cu);
+        auto classType =
+            ClassType::create(c10::QualifiedName(classDef.name().name()), cu);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {

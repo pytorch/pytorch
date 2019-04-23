@@ -36,14 +36,14 @@ struct ConstantValue : public SugaredValue {
 // Represents nested class namespaces, like `foo.bar.Baz`.
 // Right now these namespaces can only contain other namespaces or a class type.
 struct TORCH_API ClassNamespaceValue : public SugaredValue {
-  explicit ClassNamespaceValue(c10::QualifiedNamePtr name)
+  explicit ClassNamespaceValue(c10::QualifiedName name)
       : basename_(std::move(name)) {}
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
       Function& m,
       const std::string& name) override {
-    auto fullName = c10::QualifiedName::create(basename_, name);
+    auto fullName = c10::QualifiedName(basename_, name);
     if (auto classType = ClassType::get(fullName)) {
       return std::make_shared<ClassValue>(classType);
     }
@@ -55,7 +55,7 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
   }
 
  private:
-  c10::QualifiedNamePtr basename_;
+  c10::QualifiedName basename_;
 };
 
 // This value maps attributes CONSTANTS.c0 CONSTANTS.c1 to entries
@@ -122,14 +122,13 @@ struct SourceResolver : public Resolver {
     }
 
     if (name == "__torch__") {
-      return std::make_shared<ClassNamespaceValue>(
-          c10::QualifiedName::create(name));
+      return std::make_shared<ClassNamespaceValue>(c10::QualifiedName(name));
     }
     return nullptr;
   }
 
   TypePtr resolveType(const std::string& name) const override {
-    return ClassType::get(c10::QualifiedName::createFromDotted(name));
+    return ClassType::get(c10::QualifiedName(name));
   }
 
  private:
@@ -227,8 +226,8 @@ void import_libs(
     auto cu = std::make_shared<CompilationUnit>();
     const auto qualified_classname =
         class_qualifier + "." + class_def.name().name();
-    auto class_type = ClassType::create(
-        c10::QualifiedName::createFromDotted(qualified_classname), cu);
+    auto class_type =
+        ClassType::create(c10::QualifiedName(qualified_classname), cu);
     auto self = [&](Value* v) {
       v->setType(class_type);
       return std::make_shared<SimpleValue>(v);

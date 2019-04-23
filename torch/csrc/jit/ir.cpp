@@ -1459,5 +1459,16 @@ std::vector<Value*> inlineCallTo(
   return outputs;
 }
 
+void ProfileOp::cloneFrom(Node* other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<ProfileOp>();
+  this->callback_ = other->getCallback();
+}
+Node* ProfileOp::allocNewInstance(Graph* g) {
+  return new ProfileOp(g, {nullptr});
+}
+
+constexpr Symbol ProfileOp::Kind;
+
 } // namespace jit
 } // namespace torch

@@ -380,7 +380,7 @@ inline py::object toPyObject(IValue&& ivalue) {
   } else if (ivalue.isObject()) {
     const auto obj = ivalue.toObject();
     const auto classType =
-        ClassType::get(c10::QualifiedName::createFromDotted(obj->name()));
+        ClassType::get(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
         py::module::import("torch.jit").attr("_get_script_class")(obj->name());
