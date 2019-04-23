@@ -87,8 +87,6 @@ def uniform_(tensor, a=0., b=1.):
         >>> nn.init.uniform_(w)
     """
     # type: (Tensor, float, float) -> Tensor
-    # with torch.no_grad():
-    #     return tensor.uniform_(a, b)
     return _no_grad_uniform_(tensor, a, b)
 
 
@@ -107,8 +105,6 @@ def normal_(tensor, mean=0., std=1.):
         >>> nn.init.normal_(w)
     """
     # type: (Tensor, float, float) -> Tensor
-    # with torch.no_grad():
-    #     return tensor.normal_(mean, std)
     return _no_grad_normal_(tensor, mean, std)
 
 
@@ -125,8 +121,6 @@ def constant_(tensor, val):
         >>> nn.init.constant_(w, 0.3)
     """
     # type: (Tensor, float) -> Tensor
-    # with torch.no_grad():
-    #     return tensor.fill_(val)
     return _no_grad_fill_(tensor, val)
 
 
@@ -142,8 +136,6 @@ def ones_(tensor):
         >>> nn.init.ones_(w)
     """
     # type: (Tensor) -> Tensor
-    # with torch.no_grad():
-    #     return tensor.fill_(1)
     # return _no_grad_fill_(tensor, 1.)
 
 
@@ -160,8 +152,6 @@ def zeros_(tensor):
     """
     # type: (Tensor) -> Tensor
     return _no_grad_zero_(tensor)
-    # with torch.no_grad():
-    #     return tensor.zero_()
 
 
 def eye_(tensor):
@@ -262,8 +252,6 @@ def xavier_uniform_(tensor, gain=1.):
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
     a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
 
-    # with torch.no_grad():
-    #     return tensor.uniform_(-a, a)
     return _no_grad_uniform_(tensor, -a, a)
 
 
@@ -292,8 +280,6 @@ def xavier_normal_(tensor, gain=1.):
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
 
-    # with torch.no_grad():
-    #     return tensor.normal_(0, std)
     return _no_grad_normal_(tensor, 0., std)
 
 
