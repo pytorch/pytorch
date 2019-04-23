@@ -45,8 +45,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
-    int32_t weight_zero_point_int32 =
-        static_cast<int32_t>(weight.q_zero_point().to<double>());
+    int32_t weight_zero_point_int32 = weight.q_zero_point().toInt();
 
     auto weight_contig = weight.contiguous();
     auto weight_ptr_int8 = reinterpret_cast<int8_t*>(weight.data<c10::qint8>());

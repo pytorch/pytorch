@@ -527,6 +527,13 @@ cholesky_solve(input2, upper=False) -> Tensor
 See :func:`torch.cholesky_solve`
 """)
 
+add_docstr_all('cholesky_inverse',
+               r"""
+cholesky_inverse(upper=False) -> Tensor
+
+See :func:`torch.cholesky_inverse`
+""")
+
 add_docstr_all('clamp',
                r"""
 clamp(min, max) -> Tensor
@@ -1719,13 +1726,6 @@ Example:
     torch.Size([2, 3, 5])
     >>> x.permute(2, 0, 1).size()
     torch.Size([5, 2, 3])
-""")
-
-add_docstr_all('potri',
-               r"""
-potri(upper=True) -> Tensor
-
-See :func:`torch.potri`
 """)
 
 add_docstr_all('pow',

@@ -50,18 +50,15 @@ class QFCInt8 final : public c10::OperatorKernel {
     AT_ASSERT(bias.size(0) == N);
     AT_ASSERT(bias.dim() == 1);
 
-    float input_scale_float = static_cast<float>(input.q_scale().to<double>());
-    int32_t input_zero_point_int32 =
-        static_cast<int32_t>(input.q_zero_point().to<double>());
+    float input_scale_float = input.q_scale().toFloat();
+    int32_t input_zero_point_int32 = input.q_zero_point().toInt();
 
-    float weight_scale_float =
-        static_cast<float>(packed_weight.q_scale().to<double>());
+    float weight_scale_float = packed_weight.q_scale().toFloat();
 
-    int32_t weight_zero_point_int32 =
-        static_cast<int32_t>(packed_weight.q_zero_point().to<double>());
+    int32_t weight_zero_point_int32 = packed_weight.q_zero_point().toInt();
 
     float output_scale_float = static_cast<float>(output_scale) /
-        input_scale_float / weight_scale_float;
+        (input_scale_float * weight_scale_float);
     int32_t output_zero_point_int32 = static_cast<int32_t>(output_zero_point);
 
     // This operation does the following:
