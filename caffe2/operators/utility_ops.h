@@ -742,116 +742,101 @@ template <class Context>
 class ScatterOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  virtual ~ScatterOp() {}
 
   template <class... Args>
   explicit ScatterOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
-        runners_({{{TensorProto_DataType_INT32, TensorProto_DataType_FLOAT},
-                   &ScatterOp::DoRun<int32_t, float>},
-                  {{TensorProto_DataType_INT32, TensorProto_DataType_FLOAT16},
-                   &ScatterOp::DoRun<int32_t, at::Half>},
-                  {{TensorProto_DataType_INT32, TensorProto_DataType_UINT8},
-                   &ScatterOp::DoRun<int32_t, uint8_t>},
-                  {{TensorProto_DataType_INT32, TensorProto_DataType_INT32},
-                   &ScatterOp::DoRun<int32_t, int32_t>},
-                  {{TensorProto_DataType_INT32, TensorProto_DataType_INT64},
-                   &ScatterOp::DoRun<int32_t, int64_t>},
-                  {{TensorProto_DataType_INT64, TensorProto_DataType_FLOAT},
-                   &ScatterOp::DoRun<int64_t, float>},
-                  {{TensorProto_DataType_INT64, TensorProto_DataType_FLOAT16},
-                   &ScatterOp::DoRun<int64_t, at::Half>},
-                  {{TensorProto_DataType_INT64, TensorProto_DataType_UINT8},
-                   &ScatterOp::DoRun<int64_t, uint8_t>},
-                  {{TensorProto_DataType_INT64, TensorProto_DataType_INT32},
-                   &ScatterOp::DoRun<int64_t, int32_t>},
-                  {{TensorProto_DataType_INT64, TensorProto_DataType_INT64},
-                   &ScatterOp::DoRun<int64_t, int64_t>}}) {}
+        OP_SINGLE_ARG(int, "axis", axis_, 1) {
+  }
+
+  virtual ~ScatterOp() noexcept {}
 
   bool RunOnDevice() override {
-    const auto& data = Input(DATA);
-    const auto& slices = Input(SLICES);
-    auto& indices = Input(INDICES);
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+        this, this->template Input<Tensor>(INDICES, CPU));
+  }
 
-    const auto dataType = TypeMetaToDataType(data.dtype());
-    const auto slicesType = TypeMetaToDataType(slices.dtype());
-    const auto indicesType = TypeMetaToDataType(indices.dtype());
-    auto* output = Output(0);
+  template <typename Index>
+  bool DoRunWithType() {
+    const Tensor& data = Input(DATA);
+    const Tensor& indices = Input(INDICES);
+    const Tensor& updates = Input(UPDATES);
+    const TypeMeta dataType = data.dtype();
+    size_t item_bytesize = dataType.itemsize();
 
-    auto runner = GetRunner(dataType, slicesType, indicesType);
-    (this->*runner)();
+    // ONNX allows negative axis to index from the back, valid range: [-r, r].
+    //const int axis = this->template GetSingleArgument<int>("axis", 1);
+    if (axis_ < 0) {
+      axis_ = data.dim() + axis_;
+    }
+    
+    CAFFE_ENFORCE_GE(data.dim(), axis_ + 1, "DATA should be at least [axis+1]-D");
+    CAFFE_ENFORCE_GE(axis_, 0, "Axis should be non-negative");
+    CAFFE_ENFORCE_LT(axis_, data.dim(), "Axis out of range");
+    // enforce indices and values have same shape
+
+    Tensor* output = Output(0, data.sizes().vec(), at::dtype(dataType));
+    output->CopyFrom(data);
+    auto out = static_cast<char*>(output->raw_mutable_data(dataType));
+
+    // Succeed if size of output is zero, which can happen for empty batch which
+    // would have data dimension size of 0.
+    // This *must* be done AFTER output->raw_mutable_data() above as that has
+    // important allocation side effect that we must see.
+    if (output->numel() == 0) {
+      return true;
+    }
+
+    const Index* idxs = indices.template data<Index>();
+    auto src_base = static_cast<const char*>(updates.raw_data());
+
+    const int64_t outer_dims_product = updates.size_to_dim(axis_);
+    const int64_t block_size = updates.size_from_dim(axis_ + 1);
+    const int64_t block_bytesize = block_size * item_bytesize;
+
+    const int64_t src_indexing_axis_dim = updates.size(axis_);
+    const int64_t src_batch_bytesize = updates.size_from_dim(axis_) * item_bytesize;
+    const int64_t dst_batch_size = data.size_from_dim(axis_) * item_bytesize;
+    
+    const int64_t N = indices.size(axis_);
+
+    check_indexarray_range<Index>(idxs, N, src_indexing_axis_dim);
+
+    int64_t i = 0;
+    for (int64_t batch = 0; batch < outer_dims_product; ++batch) {
+      int64_t i_max = i + N;
+      for (i; i < i_max && i < indices.numel(); ++i) {
+        auto idx = idxs[i];
+
+        auto src = src_base + batch * src_batch_bytesize + idx * block_bytesize;
+        auto dst = out + batch * dst_batch_size + (i - i_max + N) * block_bytesize;
+        context_.template CopyItemsSameDevice(dataType, block_size, src, dst);
+      }
+    }
     return true;
   }
 
- private:
-  typedef void (ScatterOp::*RunnerType)();
-  typedef std::
-      map<std::pair<TensorProto_DataType, TensorProto_DataType>, RunnerType>
-          RunnerMap;
+  INPUT_TAGS(DATA, INDICES, UPDATES);
 
-  RunnerMap runners_;
-
-  RunnerType GetRunner(
-      const TensorProto_DataType dataType,
-      const TensorProto_DataType slicesType,
-      const TensorProto_DataType indicesType) {
-    CAFFE_ENFORCE_EQ(dataType, slicesType, "Data and slice types must match");
-    auto it = runners_.find({indicesType, dataType});
-    CAFFE_ENFORCE(
-        it != runners_.end(),
-        "Could not find the runner corresponding to indicesType, dataType = ",
-        indicesType,
-        " ",
-        dataType);
-    return it->second;
-  }
-
-  template <typename Index, typename T>
-  void DoRun() {
-    auto& input = Input(DATA);
-    auto& indices = Input(INDICES);
-    auto& slices = Input(SLICES);
-    auto* output = Output(0);
-
-    output->ResizeLike(input);
-    output->CopyFrom(input);
-
-    CAFFE_ENFORCE_GT(input.dim(), 0, "X0 has to be at least the vector");
-    int64_t M = input.numel();
-    int64_t N = input.size(0);
-    int64_t K = indices.numel();
-    int64_t block_size = M / N;
-    //CAFFE_ENFORCE_EQ(slices.numel(), block_size * K);
-    // TODO(dzhulgakov): it can be made to work with arbitrary data type by
-    // using raw_mutable_data
-    T* input_data = input.template mutable_data<T>();
-    const Index* idxs = indices.template data<Index>();
-    const T* slicesData = slices.template data<T>();
-    T* output_data = output->template mutable_data<T>(); 
-
-    DoScatter(input_data, idxs, slicesData, output_data, N, K, block_size);
-  }
-
-  template <typename Index, typename T>
-  void DoScatter(
-      T* input_data,
-      const Index* idxs,
-      const T* slicesData,
-      T* output_data,
-      int64_t N,
-      int64_t K,
-      int64_t block_size) {
-    for (int i = 0; i < K; ++i) {
-      Index idx = idxs[i];
-      // double-checking the indices, but it's fine as it's DCHECK only
-      DCHECK(0 <= idx && idx < N)
-          << "Index out of bounds: " << idx << ", range 0 to " << N;
-      context_.template CopySameDevice<T>(
-          block_size, slicesData + block_size * i, output_data + block_size * idx);
+  // Check that indices fall within dimension array size with CAFFE_ENFORCE.
+  template <typename IndexType>
+  static void check_indexarray_range(
+      const IndexType* indices,
+      int64_t n,
+      IndexType indexing_axis_dim) {
+    for (auto i = 0; i < n; ++i) {
+      auto idx = indices[i];
+      CAFFE_ENFORCE(
+          0 <= idx && idx < indexing_axis_dim,
+          "INDICES element is out of DATA bounds, id=",
+          idx,
+          " axis_dim=",
+          indexing_axis_dim);
     }
   }
 
-  INPUT_TAGS(DATA, INDICES, SLICES);
+ protected:
+  int axis_;
 };
 
 template <class Context>
