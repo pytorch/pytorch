@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/InferSize.h>
+#include <ATen/NativeFunctions.h>
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -9,7 +9,11 @@ namespace at {
 namespace native {
 
 Tensor mkldnn_view(const Tensor& self, IntArrayRef size) {
-  AT_ERROR("mkldnn_view: ATen not compiled with MKLDNN support");
+  AT_ERROR("mkldnn_reshape: ATen not compiled with MKLDNN support");
+}
+
+Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
+  AT_ERROR("mkldnn_reshape: ATen not compiled with MKLDNN support");
 }
 
 } // namespace native
@@ -23,6 +27,11 @@ namespace at {
 namespace native {
 
 Tensor mkldnn_view(const Tensor& self, IntArrayRef size) {
+  AT_ERROR(
+      "Currently Mkldnn tensor does not support view. Change to use reshape instead");
+}
+
+Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
   auto inferred_size = at::infer_size(size, self.numel());
   const ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y;
