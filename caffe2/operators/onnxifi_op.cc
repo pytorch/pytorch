@@ -289,6 +289,18 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
     ext_supported = true;
     output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
     output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
+    if (enable_tracing_) {
+      traces_.reset();
+      traces_ = std::shared_ptr<onnxTraceEventList>(
+          new onnxTraceEventList(), [this](onnxTraceEventList* p) {
+            if (p && onnxReleaseTraceEventsPointer_) {
+              CAFFE_ENFORCE_EQ(
+                  (*onnxReleaseTraceEventsPointer_)(p), ONNXIFI_STATUS_SUCCESS);
+            }
+            delete p;
+          });
+      traces_->numEvents = 0;
+    }
     CAFFE_ENFORCE_EQ(
         (*onnxSetIOAndRunGraphPointer_)(
             graph_,
@@ -297,7 +309,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
             output_desc_.size(),
             output_desc_.data(),
             &output_fence,
-            /* traceEvents */ nullptr),
+            traces_.get()),
         ONNXIFI_STATUS_SUCCESS);
     output_batch_sizes = extractOutputBatchSizes();
     CAFFE_ENFORCE_EQ(
@@ -345,6 +357,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   if (adjust_output_batch_) {
     maybeAdjustOutputBatchSizes(output_batch_sizes);
   }
+  enable_tracing_ = false;
   return true;
 }
 
