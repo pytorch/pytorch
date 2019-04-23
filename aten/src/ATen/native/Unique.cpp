@@ -171,7 +171,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
       Tensor output = self;
       Tensor inverse_indices =
           at::empty(self.sizes(), self.options().dtype(kLong));
-        Tensor counts = at::zeros(self.sizes(), self.options().dtype(kLong));
+        Tensor counts = at::empty({0}, self.options().dtype(kLong));
 
       return std::make_tuple(output, inverse_indices,counts);
     }

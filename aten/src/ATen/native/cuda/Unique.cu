@@ -153,11 +153,12 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
       Tensor output = self;
       Tensor inverse_indices =
           at::empty(self.sizes(), self.options().dtype(kLong));
-      Tensor counts = at::zeros(self.sizes(), self.options().dtype(kLong));
+      Tensor counts = at::empty({0}, self.options().dtype(kLong));
           
       THCudaCheck(cudaGetLastError());
       return std::make_tuple(output, inverse_indices,counts);
     }
+  }
     Tensor input_flat = self.transpose(dim, 0);
     auto orig_sizes = input_flat.sizes().vec();
     input_flat = input_flat.contiguous().view({input_flat.size(0), -1});

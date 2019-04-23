@@ -10787,6 +10787,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             expected_counts_dim2 = torch.tensor([1, 1])
             expected_inverse_empty = torch.zeros(5,0,dtype=dtype,device=device)
             expected_unique_empty = torch.tensor([],dtype=dtype,device=device)
+            expected_counts_empty = torch.tensor([],dtype=dtype,device=device)
             # dim0
             x_unique = torch.unique(x, dim=0)
             self.assertEqual(expected_unique_dim0, x_unique)
@@ -10872,12 +10873,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_counts_dim2, x_counts)
 
             # test empty tensor
-            x_unique,x_inverse = torch.unique(
+            x_unique, x_inverse, x_counts = torch.unique(
                 x_empty,
                 return_inverse=True,
+                return_counts=True,
                 dim=1)
             self.assertEqual(expected_unique_empty,x_unique )
             self.assertEqual(expected_inverse_empty,x_inverse)
+            self.assertEqual(expected_counts_empty,x_counts)
 
             # test consecutive version
             y = torch.tensor(
