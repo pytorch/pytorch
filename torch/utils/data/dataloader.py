@@ -628,6 +628,9 @@ class _DataLoaderIter(object):
                     w.join()
             finally:
                 # Removes pids from the C side data structure finally
+                # FIXME: Unfortunately, for Windows, we are missing a worker
+                #        error detection mechanism here in this function, as it
+                #        doesn't provide a SIGCHLD handler.
                 if self.worker_pids_set:
                     _utils.signal_handling._remove_worker_pids(id(self))
                     self.worker_pids_set = False
