@@ -17,6 +17,21 @@ namespace native{
 
 namespace {
 
+template <typename scalar_t, typename policy_t>
+std::tuple<Tensor, Tensor> unique_consecutive_1d_cuda_(
+  Tensor &self, const bool return_inverse,
+  const bool return_counts, policy_t policy
+) {
+  return unique_consecutive_1d_(
+    output, return_inverse, return_counts,
+    std::bind(thrust::adjacent_difference, policy, _1, _2, _3, thrust::not_equal<scalar_t>()),
+    std::bind(thrust::inclusive_scan, policy, _1, _2, _3),
+    std::bind(thrust::unique, policy, _1, _2),
+    std::bind(thrust::unique_by_key, policy, _1, _2, _3),
+    std::bind(thrust::adjacent_difference, policy, _1, _2, _3)
+  );
+}
+
 template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> unique_consecutive_template(
   const Tensor& self,
@@ -29,13 +44,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_template(
 
   Tensor output = self.clone().reshape(-1);
   Tensor inverse_indices, counts;
-  std::tie(inverse_indices, counts) = unique_consecutive_1d_(
-    output, return_inverse, return_counts,
-    std::bind(thrust::adjacent_difference, policy, _1, _2, _3, thrust::not_equal<scalar_t>()),
-    std::bind(thrust::inclusive_scan, policy, _1, _2, _3),
-    std::bind(thrust::unique, policy, _1, _2),
-    std::bind(thrust::unique_by_key, policy, _1, _2, _3),
-    std::bind(thrust::adjacent_difference, policy, _1, _2, _3)
+  std::tie(inverse_indices, counts) = unique_consecutive_1d_cuda_(
+    output, return_inverse, return_counts, policy
   );
   if (return_inverse) {
       inverse_indices.resize_(self.sizes());
@@ -65,13 +75,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   }
 
   Tensor inverse_indices, counts;
-  std::tie(inverse_indices, counts) = unique_consecutive_1d_(
-    output, return_inverse, return_counts,
-    std::bind(thrust::adjacent_difference, policy, _1, _2, _3, thrust::not_equal<scalar_t>()),
-    std::bind(thrust::inclusive_scan, policy, _1, _2, _3),
-    std::bind(thrust::unique, policy, _1, _2),
-    std::bind(thrust::unique_by_key, policy, _1, _2, _3),
-    std::bind(thrust::adjacent_difference, policy, _1, _2, _3)
+  std::tie(inverse_indices, counts) = unique_consecutive_1d_cuda_(
+    output, return_inverse, return_counts, policy
   );
 
   if (return_inverse) {
