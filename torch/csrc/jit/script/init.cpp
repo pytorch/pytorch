@@ -1101,10 +1101,10 @@ void initJitScriptBindings(PyObject* module) {
        py::tuple input_tuple,
        py::function var_lookup_fn,
        bool force_outplace) {
-      Stack inputs = toStack(input_tuple);
+      auto typed_inputs = toTypedStack(input_tuple);
       auto graph = tracer::createGraphByTracing(
           func,
-          inputs,
+          typed_inputs,
           var_lookup_fn,
           force_outplace,
           input_tuple.size());
