@@ -213,7 +213,7 @@ unique_cuda(const Tensor& self, const bool sorted, const bool return_inverse, co
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
     // The current CUDA implementation of unique always sort due to the
     // lack of hashtable implementation in thrust
-    return unique_cuda_template<scalar_t>(self, return_inverse, return_counts);
+    return unique_cuda_template<scalar_t>(self, false, return_inverse, return_counts);
   });
 }
 
