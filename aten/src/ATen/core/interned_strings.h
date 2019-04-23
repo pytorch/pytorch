@@ -115,6 +115,7 @@ namespace c10 {
   _(aten, transpose_)              \
   _(aten, unsqueeze_)              \
   _(aten, _set_item)               \
+  _(aten, manual_seed)             \
   _(aten, set_)                    \
   _(aten, index_put_)              \
   _(aten, device)                  \

@@ -1037,6 +1037,13 @@ def _unique(g, input, sorted, return_inverse):
                 return_inverse_i=return_inverse, outputs=2)
 
 
+@parse_args('v', 'i', 'i', 'i')
+def _unique2(g, input, sorted, return_inverse, return_counts):
+    return g.op("ATen", input, operator_s="_unique2", sorted_i=sorted,
+                return_inverse_i=return_inverse, return_counts_i=return_counts,
+                outputs=3)
+
+
 for k, v in sym_help.cast_pytorch_to_onnx.items():
     name = '_cast_{}'.format(k)
     globals()[name] = parse_args('v', 'i')(partial(sym_help._cast_func_template, v))

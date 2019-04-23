@@ -190,7 +190,7 @@ static bool meaningfulName(const std::string& name) {
 struct Environment {
   Environment(
       Function& method,
-      Resolver resolver,
+      ResolverPtr resolver,
       Block* b,
       std::shared_ptr<Environment> next = nullptr)
       : method(method),
@@ -199,7 +199,7 @@ struct Environment {
         next(std::move(next)) {}
 
   Function& method;
-  Resolver resolver;
+  ResolverPtr resolver;
   std::vector<std::string> captured_inputs;
   std::unordered_map<std::string, std::string> error_messages;
   Block* b;
@@ -419,7 +419,7 @@ struct Environment {
     }
 
     if (!retval) {
-      retval = resolver(ident, method, range);
+      retval = resolver->resolveValue(ident, method, range);
     }
 
     if (!retval && required) {
@@ -516,12 +516,13 @@ struct DefContext {
 struct to_ir {
   to_ir(
       const Def& def,
-      Resolver resolver_,
+      ResolverPtr resolver_,
       const Self& self,
       Function& method) // method being constructed
       : method(method),
         graph(method.graph()),
         resolver(std::move(resolver_)),
+        typeParser_(resolver),
         environment_stack(nullptr) {
     AT_ASSERT(resolver);
     pushFrame(graph->block(), /*starts_def=*/true);
@@ -542,7 +543,7 @@ struct to_ir {
  private:
   Function& method;
   std::shared_ptr<Graph> graph;
-  Resolver resolver;
+  ResolverPtr resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
   ScriptTypeParser typeParser_;
@@ -1301,44 +1302,26 @@ struct to_ir {
 
   void emitLoopCommon(
       SourceRange range,
-      c10::optional<Expr> max_trip_count,
-      c10::optional<Expr> cond,
       const List<Stmt>& body,
-      c10::optional<Ident> itr_ident,
-      bool in_list = false) {
+      const std::function<void(Value*, std::shared_ptr<Environment>)>&
+          current_element_assigner,
+      c10::optional<Expr> cond,
+      Value* max_trip_count_val = nullptr) {
+    Value* cond_val = nullptr;
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
-    Value *max_trip_count_val, *cond_val;
-    {
-      WithInsertPoint guard(n);
-      if (max_trip_count) {
-        if (in_list) {
-          auto listArg = emitExpr(max_trip_count.value());
+    WithInsertPoint guard(n);
 
-          max_trip_count_val = emitBuiltinCall(
-              max_trip_count->range(),
-              *graph,
-              aten::len,
-              c10::nullopt,
-              {listArg},
-              {},
-              /*required=*/true);
-        } else {
-          max_trip_count_val = ensureInt(
-              max_trip_count->range(), emitExpr(max_trip_count.value()));
-        }
-      } else {
-        max_trip_count_val = materializeConstant(
-            std::numeric_limits<int64_t>::max(),
-            *graph,
-            range,
-            integral_constants);
-      }
-      if (cond) {
-        cond_val = emitCond(cond.value());
-      } else {
-        cond_val = graph->insertConstant(true, nullptr, range);
-      }
+    if (!max_trip_count_val)
+    {
+      max_trip_count_val = materializeConstant(
+          std::numeric_limits<int64_t>::max(),
+          *graph,
+          range,
+          integral_constants);
     }
+
+    cond_val = (cond) ? emitCond(cond.value())
+                      : graph->insertConstant(true, nullptr, range);
     n->addInput(max_trip_count_val);
     n->addInput(cond_val);
     auto* body_block = n->addBlock();
@@ -1348,33 +1331,20 @@ struct to_ir {
     {
       pushFrame(body_block);
       WithInsertPoint guard(body_block);
-      if (itr_ident) {
-        if (in_list) {
-          // set user's iterator variable to the current element
-          auto listArg = emitExpr(max_trip_count.value());
-          trip_count = emitBuiltinCall(
-              max_trip_count->range(),
-              *graph,
-              aten::select,
-              c10::nullopt,
-              {listArg, trip_count},
-              {},
-              /*required=*/true);
-        }
-        environment_stack->setVar(
-            itr_ident->range(), itr_ident->name(), trip_count);
+
+      // current_element_assigner uses an induction variable
+      // to set a current element
+      if (current_element_assigner)
+      {
+        current_element_assigner(trip_count, environment_stack);
       }
+
       emitStatements(body);
 
       // Also emit the conditional
-      if (cond) {
-        Value* body_cond_value = emitCond(cond.value());
-        body_block->registerOutput(body_cond_value);
-      } else {
-        Value* cond_value_dummy = graph->insertConstant(true, nullptr, range);
-        body_block->registerOutput(cond_value_dummy);
-      }
-
+      cond_val = (cond) ? emitCond(cond.value())
+                        : graph->insertConstant(true, nullptr, range);
+      body_block->registerOutput(cond_val);
       auto body_frame = popFrame();
       auto outer_frame = environment_stack;
 
@@ -1411,7 +1381,46 @@ struct to_ir {
       throw ErrorReport(range)
           << "range() expects 1 argument but got " << args.size();
     }
-    emitLoopCommon(range, {args[0]}, {}, body, target);
+    auto max_trip_count_val = ensureInt(range, emitExpr(args[0]));
+    const auto& ident_name = target.name();
+    auto assigner = [ident_name, range](Value* index, std::shared_ptr<Environment> env) {
+      env->setVar(range, ident_name, index);
+    };
+    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
+  }
+
+  void emitForInListLoop(
+      const For& stmt,
+      const std::shared_ptr<torch::jit::script::SimpleValue>& siv) {
+    auto targets = stmt.targets();
+    auto itrs = stmt.itrs();
+    auto body = stmt.body();
+    auto& range = stmt.range();
+    auto target = Var(targets[0]).name();
+
+    auto listArg = siv->asValue(range, method);
+    auto max_trip_count_val = emitBuiltinCall(
+        range,
+        *graph,
+        aten::len,
+        c10::nullopt,
+        {listArg},
+        {},
+        /*required=*/true);
+    const auto& ident_name = target.name();
+    auto assigner = [ident_name, range, listArg, this](
+                        Value* index, std::shared_ptr<Environment> env) {
+      auto cur_elm = emitBuiltinCall(
+          range,
+          *this->graph,
+          aten::select,
+          c10::nullopt,
+          {listArg, index},
+          {},
+          /*required=*/true);
+      env->setVar(range, ident_name, cur_elm);
+    };
+    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
   void emitFor(const For& stmt) {
@@ -1454,8 +1463,8 @@ struct to_ir {
     // check if a value is simple and list-like
     if (auto siv = std::dynamic_pointer_cast<SimpleValue>(sv)) {
       if (siv->getValue()->type()->kind() == TypeKind::ListType) {
-        return emitLoopCommon(
-            stmt.range(), {itrs[0]}, {}, body, {target}, true);
+        emitForInListLoop(stmt, siv);
+        return;
       }
     }
     auto instances = sv->asTuple(stmt.range(), method);
@@ -1477,7 +1486,7 @@ struct to_ir {
 
   void emitWhile(const While& stmt) {
     auto cond = stmt.cond();
-    emitLoopCommon(stmt.range(), {}, {cond}, stmt.body(), {});
+    emitLoopCommon(stmt.range(), stmt.body(), nullptr, cond, nullptr);
   }
 
   // Currently we do not support assigning exceptions to variables,
@@ -2776,9 +2785,35 @@ struct to_ir {
   }
 };
 
+struct MethodResolver : public Resolver {
+  explicit MethodResolver(
+      const Resolver* otherResolver,
+      const std::unordered_map<std::string, Function*>& functionTable)
+      : otherResolver_(otherResolver), functionTable_(functionTable) {}
+
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) const override {
+    auto it = functionTable_.find(name);
+    if (it != functionTable_.end()) {
+      return std::make_shared<MethodValue>(c10::nullopt, *it->second);
+    }
+    return otherResolver_->resolveValue(name, m, loc);
+  }
+
+  TypePtr resolveType(const std::string& name) const override {
+    return otherResolver_->resolveType(name);
+  }
+
+ private:
+  const Resolver* otherResolver_;
+  const std::unordered_map<std::string, Function*>& functionTable_;
+};
+
 void CompilationUnit::define(
     const std::vector<Def>& definitions,
-    const std::vector<Resolver>& resolvers,
+    const std::vector<ResolverPtr>& resolvers,
     const Self& self) {
   AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
@@ -2786,22 +2821,14 @@ void CompilationUnit::define(
   std::unordered_map<std::string, Function*> function_table;
   for (const Def& def : definitions) {
     const std::string& name = def.name().name();
-    auto resolver = *resolver_it++;
+    ResolverPtr resolver = *resolver_it++;
     AT_ASSERT(resolver);
     if (!self) {
       // if self is defined, then these are methods and do not go into the
       // global namespace otherwise, they get defined together so we add them to
       // the function table so the methods can see each other
-      resolver = [resolver, &function_table](
-                     const std::string& name,
-                     Function& m,
-                     const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
-        auto it = function_table.find(name);
-        if (it != function_table.end()) {
-          return std::make_shared<MethodValue>(c10::nullopt, *it->second);
-        }
-        return resolver(name, m, loc);
-      };
+      resolver =
+          std::make_shared<MethodResolver>(resolver.get(), function_table);
     }
     auto creator = [def, resolver, self](Function& method) {
       AT_ASSERT(resolver);
@@ -2820,11 +2847,11 @@ void CompilationUnit::define(
 
 void CompilationUnit::define(
     const std::string& source,
-    const Resolver& resolver,
+    const ResolverPtr& resolver,
     const Self& self) {
   Parser p(source);
   std::vector<Def> definitions;
-  std::vector<Resolver> resolvers;
+  std::vector<ResolverPtr> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
     definitions.push_back(def);

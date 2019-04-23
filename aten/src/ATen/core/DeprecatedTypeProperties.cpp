@@ -9,6 +9,10 @@ Tensor DeprecatedTypeProperties::unsafeTensorFromTH(void * th_pointer, bool reta
   return getDispatchType().unsafeTensorFromTH(th_pointer, retain);
 }
 
+Storage DeprecatedTypeProperties::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+  return getDispatchType().unsafeStorageFromTH(th_pointer, retain);
+}
+
 Tensor DeprecatedTypeProperties::copy(const Tensor & src, bool non_blocking, c10::optional<Device> to_device) const {
   if (to_device) {
     return src.to(src.options().dtype(scalarType()).device(to_device), non_blocking, /*copy*/true);
