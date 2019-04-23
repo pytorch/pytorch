@@ -1061,7 +1061,7 @@ struct CAFFE2_API StringType : public Type {
     return rhs.kind() == kind();
   }
   std::string str() const override {
-    return "str";
+    return "string";
   }
   std::string python_str() const override {
     return "str";

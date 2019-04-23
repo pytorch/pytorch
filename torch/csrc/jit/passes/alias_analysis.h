@@ -47,18 +47,18 @@ class AliasDb {
 
   // Does `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
-  bool mayContainAlias(const Value* a, const Value* b) const;
+  bool mayContainAlias(Value* a, Value* b) const {
+    const std::vector<Value*> a_vec = {a};
+    const std::vector<Value*> b_vec = {b};
+
+    return mayContainAlias(a_vec, b_vec);
+  }
 
   // Do any values in group `a` share a memory location or hold in memory
   // any element that exists in group `b`
-  template <
-      typename... Other1,
-      template <typename, typename...> class T,
-      typename... Other2,
-      template <typename, typename...> class U>
   bool mayContainAlias(
-      const T<Value*, Other1...>& a,
-      const U<Value*, Other2...>& b) const {
+      const at::ArrayRef<Value*>& a,
+      const at::ArrayRef<Value*>& b) const {
     std::vector<Element*> a_elements;
     for (const auto& val : a) {
       if (cannotCheckAliasContainment(val)) {

@@ -1166,19 +1166,20 @@ class TestJit(JitTestCase):
     def test_recursive_cse(self):
         input_str = """
 graph(%x : Tensor,
-      %y : Tensor):
+      %y : Tensor,
+      %20 : int):
   %2 : int = prim::Constant[value=1]()
   %3 : Tensor = aten::add(%x, %y, %2)
-  %4 : Tensor = aten::gt(%3, %x)
+  %4 : int = aten::add(%2, %20)
   %5 : bool = prim::Bool(%4)
-  %z : Tensor = prim::If(%5)
+  %z : int = prim::If(%5)
     # CHECK: block
     block0():
       # CHECK-NOT: aten::add
-      %z.1 : Tensor = aten::add(%x, %y, %2)
+      %z.1 : int = aten::add(%2, %20)
       -> (%z.1)
     block1():
-      -> (%x)
+      -> (%2)
   return (%z)
 """
         graph = parse_ir(input_str)

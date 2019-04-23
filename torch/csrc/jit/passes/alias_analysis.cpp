@@ -845,18 +845,6 @@ bool AliasDb::cannotCheckAliasContainment(const Value* elem) const {
   return false;
 }
 
-bool AliasDb::mayContainAlias(const Value* a, const Value* b) const {
-  if (!shouldAnnotate(a) || !shouldAnnotate(b)) {
-    return false;
-  }
-
-  if (cannotCheckAliasContainment(a) || cannotCheckAliasContainment(b)) {
-    return true;
-  }
-
-  return memoryDAG_->mayContainAlias(elementMap_.at(a), elementMap_.at(b));
-}
-
 // Make each value in the `from` list point to its partner in the `to` list
 void AliasDb::mapAliases(at::ArrayRef<Value*> from, at::ArrayRef<Value*> to) {
   AT_ASSERT(to.size() == from.size());
