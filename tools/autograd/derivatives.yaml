@@ -208,6 +208,9 @@
   self: not_implemented("cholesky_solve")
   input2: not_implemented("cholesky_solve")
 
+- name: cholesky_inverse(Tensor self, bool upper)
+  self: not_implemented("cholesky_inverse")
+
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
 - name: clamp(Tensor self, Scalar? min, Scalar? max)
@@ -637,9 +640,6 @@
 - name: poisson(Tensor self, Generator generator)
   self: zeros_like(self)
 
-- name: potri(Tensor self, bool upper)
-  self: not_implemented("potri")
-
 - name: pow(Tensor self, Scalar exponent)
   self: pow_backward(grad, self, exponent)
 
@@ -817,6 +817,9 @@
 - name: t(Tensor self)
   self: grad.t()
 
+- name: one_hot(Tensor self, int64_t num_classes)
+  self: non_differentiable
+
 - name: flip(Tensor self, IntArrayRef dims)
   self: grad.flip(dims)
 
@@ -950,12 +953,20 @@
 
 - name: embedding_dense_backward(Tensor grad_output, Tensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq)
   grad_output: embedding_dense_double_backward(grad, indices)
+  indices: non_differentiable
 
 - name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse, Tensor per_sample_weights)
   indices: non_differentiable
   offsets: non_differentiable
   weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse, per_sample_weights)
   per_sample_weights: _embedding_bag_per_sample_weights_backward(grad, weight, indices, offsets, result1, mode)
+
+- name: _embedding_bag_dense_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, Tensor per_sample_weights)
+  indices: non_differentiable
+  offsets: non_differentiable
+  offset2bag: non_differentiable
+  bag_size: non_differentiable
+  maximum_indices: non_differentiable
 
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   indices: non_differentiable
@@ -1412,6 +1423,9 @@
   dropout_state: non_differentiable
   output_differentiability: [True, True, True, False, False]
   input, hx, cx, weight: "_cudnn_rnn_backward(input, weight, weight_stride0, result4, hx, cx, result0, grads[0], grads[1], grads[2], mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, retain_variables ? result3.clone() : result3, grad_input_mask)"
+
+- name: _cudnn_rnn_backward(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor cx, Tensor output, Tensor grad_output, Tensor grad_hy, Tensor grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, Tensor dropout_state, Tensor reserve, std::array<bool,4> output_mask)
+  dropout_state: non_differentiable
 
 # miopen
 

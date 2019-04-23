@@ -69,10 +69,6 @@ except ImportError:
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-# Note: creating FusionGroups is currently device-independent.
-# FusionGroup creation with CPU is disabled.
-FUSION_ENABLED = torch._C._jit_can_fuse_on_cpu() or torch._C._jit_can_fuse_on_gpu()
-
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_HALF = RUN_CUDA
 if torch.cuda.is_available():
@@ -438,9 +434,6 @@ class JitTestCase(TestCase):
         self.assertExpected(str(graph), *args, **kwargs)
 
     def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
-        if not FUSION_ENABLED:
-            nonfusible_nodes = nonfusible_nodes + fusible_nodes
-            fusible_nodes = []
         diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
         diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
 
@@ -5841,6 +5834,66 @@ a")
 
         self.checkScript(func, ())
 
+    def test_tensor_shape_prop(self):
+        template = dedent('''
+        def func():
+            li = {list_create}
+            return torch.tensor(li)
+        ''')
+
+        list_input = ["[1]", "[False]", "[2.5]", "0.5", "1", "False", "[[1]]"]
+        expected_shape = ["Long(*)", ("Byte(*)"), "Double(*)", "Double()", "Long()", "Byte()", "Long(*, *)"]
+
+        for list_i, expect in zip(list_input, expected_shape):
+            code = template.format(list_create=list_i)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            g = cu.func
+            torch._C._jit_pass_complete_shape_analysis(g.graph, (), False)
+            FileCheck().check(expect).check("aten::tensor").run(g.graph)
+
+        @torch.jit.script
+        def test_dtype(inp_dtype):
+            # type: (int) -> Tuple[Tensor, Tensor]
+            a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
+            return a, torch.tensor(1.0, dtype=inp_dtype)
+
+        test_dtype(5)
+        g = test_dtype.graph_for(5)
+        # first should have type set second should not
+        FileCheck().check("Float() = aten::tensor").check("Tensor = aten::tensor").run(g)
+
+    def test_tensor_requires_grad(self):
+        @torch.jit.script
+        def test(b):
+            # type: (bool) -> Tuple[Tensor, Tensor, Tensor]
+            a = torch.tensor(1., requires_grad=b)
+            b = torch.tensor(1., requires_grad=True)
+            c = torch.tensor(1., requires_grad=False)
+            return a, b, c
+
+        g = test.graph_for(True)
+        out = next(g.outputs())
+        out_inp = list(out.node().inputs())
+
+        self.assertTrue(out_inp[0].requires_grad())
+        self.assertTrue(out_inp[1].requires_grad())
+        self.assertFalse(out_inp[2].requires_grad())
+
+    def test_grad_from_script(self):
+        def test():
+            a = torch.tensor(2.5, requires_grad=True)
+            b = a * 2
+            return a, b
+
+        a, b = test()
+        b.backward()
+
+        a_script, b_script = torch.jit.script(test)()
+        b_script.backward()
+        self.assertEqual(a.grad, a_script.grad)
+
     def test_torch_tensor(self):
         template = dedent('''
         def func():
@@ -8348,6 +8401,17 @@ a")
         self.assertEqual(foo_trace(a), foo_script(a))
         self.assertEqual(foo_trace(a), foo(a))
         self.assertNotEqual(foo_trace(a), foo_trace(b))
+
+    def test_torch_manual_seed(self):
+        with freeze_rng_state():
+            def test():
+                torch.manual_seed(2)
+                return torch.rand(1)
+
+            script = torch.jit.script(test)
+            self.assertEqual(test(), script())
+            graph = script.graph_for()
+            FileCheck().check("aten::manual_seed").run(graph)
 
     def test_tracing_indexing(self):
         @_trace(torch.zeros(10))
@@ -13123,6 +13187,10 @@ def add_autograd_test(
         # we want to close over in some way
         def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
                     check_ad=check_ad, output_process_fn=output_process_fn):
+            # We enable the CPU fuser during these checks for more consistent
+            # behavior. Otherwise, we are going to have to analyze the graph to
+            # see if producer values are Dimension
+            @enable_cpu_fuser
             def check(name):
                 set_rng_seed(2)
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
@@ -13154,6 +13222,10 @@ def add_autograd_test(
                             check_against_reference(self, traced_fn,
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
+                            # Fuser not supported on windows
+                            if IS_WINDOWS:
+                                autodiff_nodes = autodiff_nodes + fusible_nodes
+                                fusible_nodes = []
                             self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
                         if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
@@ -13162,6 +13234,10 @@ def add_autograd_test(
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
 
+                            # Fuser not supported on windows
+                            if IS_WINDOWS:
+                                autodiff_nodes = autodiff_nodes + fusible_nodes
+                                fusible_nodes = []
                             self.assertAutodiffNode(script_fn.last_graph,
                                                     should_autodiff_node and test_name not in EXCLUDE_SCRIPT_AD_CHECK,
                                                     autodiff_nodes,
