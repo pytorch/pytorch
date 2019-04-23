@@ -2,23 +2,37 @@
 
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
-#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/MemoryFormat.h>
 
 #include <ATen/MemoryFormat.h>
 
-namespace torch { namespace utils {
+namespace torch {
+namespace utils {
+
+#define _ADD_MEMORY_FORMAT(format, name)                                       \
+  {                                                                            \
+    std::string module_name = "torch.";                                        \
+    PyObject* memory_format = THPMemoryFormat_New(format, module_name + name); \
+    Py_INCREF(memory_format);                                                  \
+    if (PyModule_AddObject(torch_module, name, memory_format) != 0) {          \
+      throw python_error();                                                    \
+    }                                                                          \
+  }
 
 void initializeMemoryFormats() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!torch_module) throw python_error();
-
-  PyObject *cf_memory_format = THPMemoryFormat_New(at::MemoryFormat::ChannelsFirst, "torch.channels_first");
-  Py_INCREF(cf_memory_format);
-  if (PyModule_AddObject(torch_module, "channels_first", cf_memory_format) != 0) {
+  if (!torch_module) {
     throw python_error();
   }
+
+  _ADD_MEMORY_FORMAT(at::MemoryFormat::Any, "any_format");
+  _ADD_MEMORY_FORMAT(at::MemoryFormat::Preserve, "preserve_format");
+  _ADD_MEMORY_FORMAT(at::MemoryFormat::Contiguous, "contiguous_format");
+  _ADD_MEMORY_FORMAT(at::MemoryFormat::ChannelsFirst, "channels_first");
+
 }
 
-}} // namespace torch::utils
+} // namespace utils
+} // namespace torch
