@@ -39,12 +39,13 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     }
   }
 
-  at::Tensor operator()(const at::Tensor& weight, int64_t weight_zero_point) {
+  at::Tensor operator()(at::Tensor weight, int64_t weight_zero_point) {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
     int32_t weight_zero_point_int32 = static_cast<int32_t>(weight_zero_point);
 
+    // TODO: contiguous is called for further jit optimizations.
     auto weight_contig = weight.contiguous();
     auto weight_ptr_int8 = weight_contig.data<int8_t>();
 
@@ -73,7 +74,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
   }
 #else // USE_FBGEMM
   at::Tensor operator()(
-      const at::Tensor& /* weight */,
+      at::Tensor /* weight */,
       int64_t /* weight_zero_point */
   ) {
     // We make a strong guarantee that models using these operators will have

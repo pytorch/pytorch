@@ -23,7 +23,7 @@ def _dequantize(qx, scale, zero_point):
     return x
 
 
-# Make sure we won't have overflows from vpmaddubsw instruction used in fbgemm)
+# Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM
 def avoid_vpmaddubsw_overflow_fc(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
@@ -65,7 +65,7 @@ def qfc_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
     )
 
     Y_q_ref = (
-        (np.round((Prod_XqWq_ref + b_q) * (Y_scale / X_scale / W_scale)) + Y_zp)
+        (np.round((Prod_XqWq_ref + b_q) * (X_scale * W_scale / Y_scale)) + Y_zp)
         .clip(0, 255)
         .astype(np.uint8)
     )
@@ -171,7 +171,7 @@ class TestQuantizedFC(unittest.TestCase):
 
         b_q = np.round(np.random.randn(output_channels) * 10 - 10).astype(np.int32)
 
-        Y_scale = 0.1234
+        Y_scale = 7.1234
         Y_zp = 5
 
         avoid_vpmaddubsw_overflow_fc(

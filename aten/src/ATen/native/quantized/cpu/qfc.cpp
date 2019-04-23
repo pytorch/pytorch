@@ -14,13 +14,13 @@ class QFCInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
   std::tuple<at::Tensor, double, int64_t> operator()(
-      const at::Tensor& input,
+      at::Tensor input,
       double input_scale,
       int64_t input_zero_point,
-      const at::Tensor& packed_weight,
+      at::Tensor packed_weight,
       double weight_scale,
       int64_t weight_zero_point,
-      const at::Tensor& bias,
+      at::Tensor bias,
       double output_scale,
       int64_t output_zero_point) {
     // uint8 * int8 -> uint8 (no quantization/dequantization)
@@ -31,16 +31,21 @@ class QFCInt8 final : public c10::OperatorKernel {
     AT_ASSERTM(
         fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
+    // TODO: contiguous is called for further jit optimizations.
     auto input_contig = input.contiguous();
     const auto* input_ptr = input_contig.data<uint8_t>();
 
     AT_ASSERT(input.dim() >= 2);
+    // M refers to M in the standard GEMM notation for C(output) = A(input) x
+    // B(weight), where C, A, B are MxN, MxK, KxN matrices, respectively.
+    // M is not the number of output channels for some operators implemented in
+    // popular deep learning frameworks.
     int64_t M = 1;
     for (size_t i = 0; i < input.dim() - 1; ++i) {
       M *= input.size(i);
     }
 
-    // Pull out the PackBMatrix and col_offsets instance from the owning tensor
+    // Pull out the PackBMatrix and col_offsets instance from the owning tensor.
     auto& pack_ptr = cpp_custom_type_hack::cast<PackedFCWeight>(packed_weight);
     auto packB = pack_ptr.w.get();
     // packB->printPackedMatrix("packedB inside qfc: ");
@@ -58,15 +63,16 @@ class QFCInt8 final : public c10::OperatorKernel {
     float weight_scale_float = static_cast<float>(weight_scale);
     int32_t weight_zero_point_int32 = static_cast<int32_t>(weight_zero_point);
 
-    float output_scale_float = static_cast<float>(output_scale) /
-        input_scale_float / weight_scale_float;
+    float output_multiplier_float = (input_scale_float * weight_scale_float) /
+        static_cast<float>(output_scale);
     int32_t output_zero_point_int32 = static_cast<int32_t>(output_zero_point);
 
     // This operation does the following:
-    // 1) Quantizes the input matrix given the statistics we've calculated above
-    // 2) Creates a "row buffer" vector with offset values that must be added
-    //    to the integer matrix multiplication operation to ensure correctness
-    // 3) Packs the resulting quantized matrix into vector-register and cache
+    // 1) Creates a "row buffer" vector with offset values that must be added
+    //    to the integer matrix multiplication operation to ensure correctness.
+    //    This "row buffer" is also called the row offset, and it is needed when
+    //    we use affine quantization for weights.
+    // 2) Packs the resulting quantized matrix into vector-register and cache
     //    friendly tiles.
     //
     //  Note this is not executed eagerly, but rather within the fbgemmPacked
@@ -77,26 +83,29 @@ class QFCInt8 final : public c10::OperatorKernel {
         /*nCol=*/K,
         /*smat=*/input_ptr,
         /*ld=*/K,
-        /*pmat=*/nullptr); // packA manages ownership of `pmat`
+        /*pmat=*/nullptr); // Currently, packA manages ownership of `pmat`.
+                           // TODO: Consider a way to pre-allocate and reuse
+                           // pmat buffer.
 
     // ReQuantizeOutput requires pointers to the zero point values,
     // since in the case of rowwise quantization these will be arrays rather
     // than scalars. But in this case, we're doing whole-tensor quantization so
     // we just pass a pointer to the scale values (and internally
-    // ReQuantizeOutput won't index past 0
+    // ReQuantizeOutput won't index past 0.
 
-    // This is the end of the pipeline, pass the resulting matrix through
+    // This is the end of the pipeline, pass the resulting matrix through.
     fbgemm::DoNothing<> doNothingObj{};
 
+    // TODO: contiguous is called for further jit optimizations.
     auto bias_contig = bias.contiguous();
 
     // After the uint8 * int8 matrix multiplication is performed, this operation
     // does:
-    //  1) Add in row and column offsets to the rows and columns, respectively
-    //  2) Add in the bias term
+    //  1) Add in row and column offsets to the rows and columns, respectively.
+    //  2) Add in the bias term.
     fbgemm::ReQuantizeOutput<false /* FUSE_RELU*/> outputProcObj(
         /*nextop=*/doNothingObj,
-        /*C_multiplier=*/&output_scale_float,
+        /*C_multiplier=*/&output_multiplier_float,
         /*C_zero_point=*/output_zero_point_int32,
         /*Aq_zero_point=*/input_zero_point_int32,
         /*Bq_zero_point=*/&weight_zero_point_int32,
@@ -125,13 +134,13 @@ class QFCInt8 final : public c10::OperatorKernel {
   }
 #else // USE_FBGEMM
   std::tuple<at::Tensor, double, int64_t> operator()(
-      const at::Tensor& /* input */,
+      at::Tensor /* input */,
       double /* input_scale */,
       int64_t /* input_zero_point */,
-      const at::Tensor& /* packed_weight */,
+      at::Tensor /* packed_weight */,
       double /* weight_scale */,
       int64_t /* weight_zero_point */,
-      const at::Tensor& /* bias */,
+      at::Tensor /* bias */,
       double /* output_scale */,
       int64_t /* output_zero_point */) {
     // We make a strong guarantee that models using these operators will have
