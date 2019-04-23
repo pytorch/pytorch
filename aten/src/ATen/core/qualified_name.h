@@ -19,8 +19,8 @@ struct QualifiedName : c10::intrusive_ptr_target {
         "'");
   }
 
-  QualifiedNamePtr prefix_;
-  std::string name_;
+  const QualifiedNamePtr prefix_;
+  const std::string name_;
 
   static QualifiedNamePtr create(QualifiedNamePtr prefix, std::string name) {
     return c10::make_intrusive<QualifiedName>(
@@ -57,6 +57,16 @@ struct QualifiedName : c10::intrusive_ptr_target {
     return QualifiedName::create(qualifiedName, std::move(finalAtom));
   }
 
+  // Flatten this qualified name and convert the whole thing to a string, like
+  // "foo.bar.baz".
+  std::string toString() const {
+    std::ostringstream ss;
+    toString(ss);
+    return ss.str();
+  }
+
+  // Compares `this` with `other` for equality, starting from the furthest
+  // prefix.
   bool equals(const QualifiedNamePtr& other) const {
     if (!other) {
       return false;
@@ -67,14 +77,6 @@ struct QualifiedName : c10::intrusive_ptr_target {
       return !other->prefix_ && namesEqual;
     }
     return prefix_->equals(other->prefix_) && namesEqual;
-  }
-
-  // Flatten this qualified name and convert the whole thing to a string, like
-  // "foo.bar.baz".
-  std::string toString() const {
-    std::ostringstream ss;
-    toString(ss);
-    return ss.str();
   }
 
  private:
