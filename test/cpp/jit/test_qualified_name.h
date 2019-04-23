@@ -19,6 +19,10 @@ void testQualifiedName() {
     ASSERT_EQ(baz->toString(), "foo.bar.baz");
     ASSERT_EQ(baz->prefix_->toString(), "foo.bar");
     ASSERT_EQ(baz->name_, "baz");
+    auto empty = QualifiedName::create("");
+    ASSERT_EQ(empty->toString(), "");
+    ASSERT_EQ(empty->prefix_->toString(), "");
+    ASSERT_EQ(empty->name_, "");
   }
   {
     // Test createFromDotted API

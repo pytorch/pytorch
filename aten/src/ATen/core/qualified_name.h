@@ -37,10 +37,6 @@ struct QualifiedName : c10::intrusive_ptr_target {
     size_t startSearchFrom = 0;
     size_t pos = name.find('.', startSearchFrom);
 
-    if (pos == std::string::npos) {
-      return QualifiedName::create(name);
-    }
-
     auto qualifiedName = QualifiedNamePtr();
     while (pos != std::string::npos) {
       auto atom = name.substr(startSearchFrom, pos - startSearchFrom);
@@ -72,11 +68,14 @@ struct QualifiedName : c10::intrusive_ptr_target {
       return false;
     }
 
-    bool namesEqual = name_ == other->name_;
-    if (!prefix_) {
-      return !other->prefix_ && namesEqual;
+    if (name_ != other->name_) {
+      return false;
     }
-    return prefix_->equals(other->prefix_) && namesEqual;
+
+    if (!prefix_) {
+      return !other->prefix_;
+    }
+    return prefix_->equals(other->prefix_);
   }
 
  private:
