@@ -845,6 +845,38 @@ bool AliasDb::cannotCheckAliasContainment(const Value* elem) const {
   return false;
 }
 
+bool AliasDb::mayContainAlias(Value* a, Value* b) const {
+  const std::vector<Value*> a_vec = {a};
+  const std::vector<Value*> b_vec = {b};
+
+  return mayContainAlias(a_vec, b_vec);
+}
+
+bool AliasDb::mayContainAlias(
+    const at::ArrayRef<Value*>& a,
+    const at::ArrayRef<Value*>& b) const {
+  std::vector<Element*> a_elements;
+  for (const auto& val : a) {
+    if (cannotCheckAliasContainment(val)) {
+      return true;
+    }
+    if (shouldAnnotate(val)) {
+      a_elements.push_back(elementMap_.at(val));
+    }
+  }
+
+  std::vector<Element*> b_elements;
+  for (const auto& val : b) {
+    if (cannotCheckAliasContainment(val)) {
+      return true;
+    }
+    if (shouldAnnotate(val)) {
+      b_elements.push_back(elementMap_.at(val));
+    }
+  }
+  return memoryDAG_->mayContainAlias(a_elements, b_elements);
+}
+
 // Make each value in the `from` list point to its partner in the `to` list
 void AliasDb::mapAliases(at::ArrayRef<Value*> from, at::ArrayRef<Value*> to) {
   AT_ASSERT(to.size() == from.size());

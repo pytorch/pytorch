@@ -1161,7 +1161,7 @@ class TestJit(JitTestCase):
 
         # non-aliasing types can be CSEd
         self.run_pass('cse', ints_alias_outputs.graph)
-        FileCheck().check_count("aten::add", 1).run(ints_alias_outputs.graph)
+        FileCheck().check_count("aten::add", 1, exactly=True).run(ints_alias_outputs.graph)
 
     def test_recursive_cse(self):
         input_str = """
