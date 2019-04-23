@@ -291,13 +291,16 @@ void unary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
     std::is_same<typename traits::result_type, typename traits::arg1_t>::value,
     "all types must match");
 
-  iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
-    if (is_unary_contiguous<traits>(strides)) {
-      vectorized_unary_loop(data, n, op, vop);
-    } else {
-      unary_loop(data, strides, 0, n, op);
-    }
-  });
+  iter.for_each(
+      [&](int ntensor, char** data, const int64_t* strides, int64_t n) {
+        if (is_unary_contiguous<traits>(strides)) {
+          vectorized_unary_loop(data, n, op, vop);
+        } else if (is_unary_contiguous_s1<traits>(strides)) {
+          unary_loop(data, strides, 0, n, op);
+        } else {
+          unary_loop(data, strides, 0, n, op);
+        }
+      });
 }
 
 template <typename func_t>
