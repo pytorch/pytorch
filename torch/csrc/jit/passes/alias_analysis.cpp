@@ -865,6 +865,10 @@ bool AliasDb::mayContainAlias(
     }
   }
 
+  if (a_elements.size() == 0) {
+    return false;
+  }
+
   std::vector<Element*> b_elements;
   for (const auto& val : b) {
     if (cannotCheckAliasContainment(val)) {
