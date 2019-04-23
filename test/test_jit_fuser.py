@@ -269,7 +269,7 @@ class TestFuser(JitTestCase):
 
         a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
         b = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        nan = torch.tensor(float('nan'))
+        nan = torch.tensor(float('nan'), dtype=torch.float, device='cuda')
 
         funcs = (func2, funcInf, funcOptMin, funcOptMax)
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
