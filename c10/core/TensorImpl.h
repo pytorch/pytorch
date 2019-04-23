@@ -1583,4 +1583,5 @@ static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 
+static_assert(sizeof(bool) == 1, "Bool is not 8-bit");
 } // namespace c10
