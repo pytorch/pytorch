@@ -1201,9 +1201,10 @@ TORCH_API void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
-  PythonPrintPass pp(out, tensor_table, class_table, enforce_importable);
+  PythonPrintPass pp(tensor_table, class_table, enforce_importable);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   pp.printFunction(const_cast<script::Function&>(callee), /*is_class=*/false);
+  pp.print(out);
 }
 
 TORCH_API void PythonPrint(
