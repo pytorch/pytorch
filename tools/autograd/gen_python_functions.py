@@ -30,7 +30,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cholesky.*', '_triangular_solve.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'linear', 'to',
-    'copy_sparse_to_sparse_',
+    'copy_sparse_to_sparse_', 'copy_',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
