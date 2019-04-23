@@ -16,14 +16,14 @@ class _LRScheduler(object):
         if last_epoch == -1:
             for group in optimizer.param_groups:
                 group.setdefault('initial_lr', group['lr'])
+            last_epoch = 0
         else:
             for i, group in enumerate(optimizer.param_groups):
                 if 'initial_lr' not in group:
                     raise KeyError("param 'initial_lr' is not specified "
                                    "in param_groups[{}] when resuming an optimizer".format(i))
         self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
-        self.step(last_epoch + 1)
-        self.last_epoch = last_epoch
+        self.step(last_epoch)
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -70,9 +70,9 @@ class LambdaLR(_LRScheduler):
         >>> lambda2 = lambda epoch: 0.95 ** epoch
         >>> scheduler = LambdaLR(optimizer, lr_lambda=[lambda1, lambda2])
         >>> for epoch in range(100):
-        >>>     scheduler.step()
         >>>     train(...)
         >>>     validate(...)
+        >>>     scheduler.step()
     """
 
     def __init__(self, optimizer, lr_lambda, last_epoch=-1):
@@ -144,9 +144,9 @@ class StepLR(_LRScheduler):
         >>> # ...
         >>> scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
         >>> for epoch in range(100):
-        >>>     scheduler.step()
         >>>     train(...)
         >>>     validate(...)
+        >>>     scheduler.step()
     """
 
     def __init__(self, optimizer, step_size, gamma=0.1, last_epoch=-1):
@@ -181,9 +181,9 @@ class MultiStepLR(_LRScheduler):
         >>> # lr = 0.0005   if epoch >= 80
         >>> scheduler = MultiStepLR(optimizer, milestones=[30,80], gamma=0.1)
         >>> for epoch in range(100):
-        >>>     scheduler.step()
         >>>     train(...)
         >>>     validate(...)
+        >>>     scheduler.step()
     """
 
     def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
