@@ -604,8 +604,6 @@ bool MIOPENConvGradientOp::DoRunWithType() {
         bwdWeightWsSize_));
   });
 
-  // Synchronize the work across groups.
-  hipDeviceSynchronize();
 
   ////////////////////////////////////// BIAS ///////////////////////////
   if (!no_bias_) {
