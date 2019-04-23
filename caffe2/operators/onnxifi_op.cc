@@ -168,6 +168,10 @@ OnnxifiOp<CPUContext>::buildInitializationList(
 
 template <>
 std::vector<int> OnnxifiOp<CPUContext>::extractOutputBatchSizes() const {
+  if (!adjust_output_batch_) {
+    return std::vector<int>();
+  }
+
   CAFFE_ENFORCE_EQ(
       input_shapes_.size(),
       InputSize(),
@@ -338,7 +342,9 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
   }
 
-  maybeAdjustOutputBatchSizes(output_batch_sizes);
+  if (adjust_output_batch_) {
+    maybeAdjustOutputBatchSizes(output_batch_sizes);
+  }
   return true;
 }
 
