@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
 
-using c10::QualifiedNamePtr;
 using c10::QualifiedName;
 
 namespace torch {
@@ -88,19 +87,19 @@ static bool isValidIdentifier(const std::string& name) {
   return true;
 }
 
-static void emitQualifiedName(std::ostream& out, QualifiedNamePtr name) {
-  const auto& name_ = name->name_;
-  const auto& prefix_ = name->prefix_;
+static void emitQualifiedName(std::ostream& out, const QualifiedName& name) {
+  const auto& name_ = name.name();
+  const auto& prefix_ = name.prefix();
   if (isValidIdentifier(name_)) {
-    if (prefix_) {
-      emitQualifiedName(out, prefix_);
+    if (!prefix_.empty()) {
+      emitQualifiedName(out, QualifiedName(prefix_));
       out << ".";
     }
     out << name_;
   } else {
-    AT_ASSERT(prefix_);
+    AT_ASSERT(!prefix_.empty());
     out << "getattr(";
-    emitQualifiedName(out, prefix_);
+    emitQualifiedName(out, QualifiedName(prefix_));
     out << ", ";
     printQuotedString(out, name_);
     out << ")";
@@ -110,25 +109,25 @@ static void emitQualifiedName(std::ostream& out, QualifiedNamePtr name) {
 // Get a stringified version of the qualified name.
 // if a field is not a valid Python identifier, then it will print as, e.g.
 // getattr(self, "0").b
-static std::string getValidQualifiedName(QualifiedNamePtr name) {
+static std::string getValidQualifiedName(const QualifiedName& name) {
   std::stringstream ss;
-  emitQualifiedName(ss, std::move(name));
+  emitQualifiedName(ss, name);
   return ss.str();
 }
 
 void createTensorToParameterNameMap(
     const script::Module& module,
-    const QualifiedNamePtr& prefix,
-    std::unordered_map<script::Slot, QualifiedNamePtr>& result) {
+    const QualifiedName& prefix,
+    std::unordered_map<script::Slot, QualifiedName>& result) {
   for (const auto& param : module.get_parameters()) {
-    result[param] = QualifiedName::create(prefix, param.name());
+    result[param] = QualifiedName(prefix, param.name());
   }
   for (const auto& param : module.get_attributes()) {
-    result[param] = QualifiedName::create(prefix, param.name());
+    result[param] = QualifiedName(prefix, param.name());
   }
   for (const auto& elem : module.get_modules()) {
     createTensorToParameterNameMap(
-        *elem, QualifiedName::create(prefix, elem->name()), result);
+        *elem, QualifiedName(prefix, elem->name()), result);
   }
 }
 
@@ -1120,15 +1119,15 @@ struct PythonPrintPass {
     }
   }
   void printMethod(script::Method& method) {
-    std::unordered_map<script::Slot, QualifiedNamePtr> extra_ivalue_names;
+    std::unordered_map<script::Slot, QualifiedName> extra_ivalue_names;
     createTensorToParameterNameMap(
-        method.owner(), QualifiedName::create("self"), extra_ivalue_names);
+        method.owner(), QualifiedName("self"), extra_ivalue_names);
     printMethod(method, /*is_class=*/false, extra_ivalue_names);
   }
   void printMethod(
       script::Method& method,
       bool is_class,
-      const std::unordered_map<script::Slot, QualifiedNamePtr>&
+      const std::unordered_map<script::Slot, QualifiedName>&
           extra_ivalue_names) {
     std::vector<std::string> ivalue_names =
         fmap(method.initial_ivalues(), [&](const script::Slot& slot) {
@@ -1150,9 +1149,9 @@ struct PythonPrintPass {
     printFunction(graph, name, is_class, defaults, {});
   }
   void printModule(script::Module& module) {
-    std::unordered_map<script::Slot, QualifiedNamePtr> extra_ivalue_names;
+    std::unordered_map<script::Slot, QualifiedName> extra_ivalue_names;
     createTensorToParameterNameMap(
-        module, QualifiedName::create("self"), extra_ivalue_names);
+        module, QualifiedName("self"), extra_ivalue_names);
     for (auto& method : module.get_methods()) {
       const std::string& name = method->name();
       // we skip __forked_functions because they actually get inlined into their

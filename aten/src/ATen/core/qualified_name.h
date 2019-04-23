@@ -1,92 +1,80 @@
 #pragma once
 
+#include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
 #include <string>
 
 namespace c10 {
 
-// Represents names of the form, e.g., self.a.b
-struct QualifiedName;
-using QualifiedNamePtr = c10::intrusive_ptr<QualifiedName>;
-struct QualifiedName : c10::intrusive_ptr_target {
-  QualifiedName(QualifiedNamePtr prefix, std::string name)
-      : prefix_(std::move(prefix)), name_(std::move(name)) {
-    const auto pos = name_.find('.');
-    AT_ASSERTM(
-        pos == std::string::npos,
-        "Invalid name for qualified name: '",
-        name_,
-        "'");
-  }
+// Represents a name of the form "foo.bar.baz"
+struct QualifiedName {
+  QualifiedName() = default;
 
-  const QualifiedNamePtr prefix_;
-  const std::string name_;
-
-  static QualifiedNamePtr create(QualifiedNamePtr prefix, std::string name) {
-    return c10::make_intrusive<QualifiedName>(
-        std::move(prefix), std::move(name));
-  }
-  static QualifiedNamePtr create(std::string name) {
-    return c10::make_intrusive<QualifiedName>(
-        QualifiedNamePtr(), std::move(name));
-  }
-
-  // Create a qualified name from a dotted string, splitting it as necessary.
-  // Example input: "foo.bar.baz"
-  static QualifiedNamePtr createFromDotted(const std::string& name) {
-    size_t startSearchFrom = 0;
-    size_t pos = name.find('.', startSearchFrom);
-
+  explicit QualifiedName(std::string name) : qualifiedName_(std::move(name)) {
+    // Compute the base name based on the qualified name
+    const auto pos = qualifiedName_.rfind('.');
     if (pos == std::string::npos) {
-      return QualifiedName::create(name);
-    }
-
-    auto qualifiedName = QualifiedNamePtr();
-    while (pos != std::string::npos) {
-      auto atom = name.substr(startSearchFrom, pos - startSearchFrom);
+      // If there are no delimiters, the qualname and name are the same
+      name_ = qualifiedName_;
+    } else {
+      // Otherwise take the name that trails the last '.'
+      name_ = qualifiedName_.substr(pos + 1);
+      prefix_ = qualifiedName_.substr(0, pos);
       AT_ASSERTM(
-          atom.size() > 0, "Invalid name for qualified name: '", name, "'");
-      qualifiedName = QualifiedName::create(qualifiedName, std::move(atom));
-      startSearchFrom = pos + 1;
-      pos = name.find('.', startSearchFrom);
+          !name_.empty(),
+          "'.' can't be the last character in qualified name: ",
+          qualifiedName_);
+      AT_ASSERTM(
+          !prefix_.empty() && prefix_[0] != '.',
+          "'.' can't be the first character in qualified name: ",
+          qualifiedName_);
     }
-
-    auto finalAtom = name.substr(startSearchFrom, pos - startSearchFrom);
-    AT_ASSERTM(
-        finalAtom.size() > 0, "Invalid name for qualified name: '", name, "'");
-    return QualifiedName::create(qualifiedName, std::move(finalAtom));
+    checkInvariants();
   }
 
-  // Flatten this qualified name and convert the whole thing to a string, like
-  // "foo.bar.baz".
-  std::string toString() const {
-    std::ostringstream ss;
-    toString(ss);
-    return ss.str();
+  explicit QualifiedName(const QualifiedName& prefix, std::string name)
+      : qualifiedName_(str(prefix.qualifiedName(), '.', name)),
+        prefix_(prefix.qualifiedName()),
+        name_(std::move(name)) {
+    checkInvariants();
   }
 
-  // Compares `this` with `other` for equality, starting from the furthest
-  // prefix.
-  bool equals(const QualifiedNamePtr& other) const {
-    if (!other) {
-      return false;
-    }
+  const std::string& qualifiedName() const {
+    return qualifiedName_;
+  }
 
-    bool namesEqual = name_ == other->name_;
-    if (!prefix_) {
-      return !other->prefix_ && namesEqual;
-    }
-    return prefix_->equals(other->prefix_) && namesEqual;
+  const std::string& prefix() const {
+    return prefix_;
+  }
+
+  const std::string& name() const {
+    return name_;
+  }
+
+  bool operator==(const QualifiedName& other) const {
+    return this->qualifiedName_ == other.qualifiedName_;
+  }
+
+  bool operator!=(const QualifiedName& other) const {
+    return !(*this == other);
   }
 
  private:
-  std::ostream& toString(std::ostream& ss) const {
-    if (!prefix_) {
-      ss << name_;
-      return ss;
+  void checkInvariants() {
+    if (prefix_.empty()) {
+      AT_ASSERT(qualifiedName_ == name_);
+    } else {
+      AT_ASSERT(qualifiedName_ == str(prefix_, ".", name_));
     }
-    prefix_->toString(ss) << "." << name_;
-    return ss;
+
+    // No separators allowed in the base name
+    AT_ASSERT(name_.find(".") == std::string::npos);
+
+    // No empty atomic names allowed (e.g. "foo..bar")
+    AT_ASSERT(qualifiedName_.find("..") == std::string::npos);
   }
+  std::string qualifiedName_;
+  std::string prefix_;
+  std::string name_;
 };
 } // namespace c10
