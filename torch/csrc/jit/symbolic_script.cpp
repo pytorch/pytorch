@@ -6,7 +6,6 @@ namespace {
 std::mutex lock;
 const std::vector<std::string> functions = {
     R"(
-
         ####     HELPER FUNCTIONS           ###
         ####     PREFIX: AD_                ###
         ####     SCHEMA NOT SAVED IN CACHE  ###
@@ -386,7 +385,7 @@ const std::vector<std::string> functions = {
                     tensor1,
                     tensor2,
                     *,
-                    value: float = 1.0):
+                    value: number = 1.0):
             def backward(grad_output):
                 grad = grad_output * value
                 grad_tensor1 = (grad * tensor2)._grad_sum_to_size(tensor1.size())
@@ -449,10 +448,10 @@ const std::vector<std::string> functions = {
 
         def lerp_0(self,
                    end,
-                   weight: float):
+                   weight: number):
             def backward(grad_output):
-                grad_self = (grad_output * (1 - weight))._grad_sum_to_size(self.size())
-                grad_end = (grad_output * weight)._grad_sum_to_size(end.size())
+                grad_self = (grad_output * (1 - float(weight)))._grad_sum_to_size(self.size())
+                grad_end = (grad_output * float(weight))._grad_sum_to_size(end.size())
                 return grad_self, grad_end, None
             return torch.lerp(self, end, weight), backward
 
@@ -475,6 +474,91 @@ const std::vector<std::string> functions = {
 
             return self * other, backward
 
+        def reshape(self,
+                    shape: List[int]):
+            self_size = self.size()
+            def backward(grad_output):
+                grad_self = grad_output.reshape(self_size)
+                return grad_self, None
+
+            return torch.reshape(self, shape), backward
+
+        def split(self,
+                  split_size: int,
+                  dim: int):
+            def backward(grad_outputs: List[Tensor]):
+                grad_self = torch.cat(grad_outputs, dim)
+                return grad_self, None, None
+
+            return torch.split(self, split_size, dim), backward
+
+        def split_with_sizes(self,
+                             split_sizes: List[int],
+                             dim: int=0):
+            def backward(grad_outputs: List[Tensor]):
+                size = len(grad_outputs)
+                grad_self = torch.cat(grad_outputs, dim)
+                return grad_self, None, None
+
+            return torch.split_with_sizes(self, split_sizes, dim), backward
+
+        def stack(tensors: List[Tensor],
+                  dim: int=0):
+            def backward(grad_output):
+                grad_tensors = torch.unbind(grad_output, dim)
+                return grad_tensors, None
+
+            return torch.stack(tensors, dim), backward
+
+        def unbind(self,
+                   dim: int=0):
+            def backward(grad_outputs: List[Tensor]):
+                grad_self = torch.stack(grad_outputs, dim)
+                return grad_self, None
+
+            return torch.unbind(self, dim), backward
+
+        def cat(tensors: List[Tensor],
+                dim: int=0):
+            size = len(tensors)
+            split_sizes = [0] * size
+            for i in range(size):
+                if tensors[i].numel() > 0:
+                    split_sizes[i] = tensors[i].size()[dim]
+
+            def backward(grad_output):
+                grad_tensors = torch.split_with_sizes(grad_output, split_sizes, dim)
+                return grad_tensors, None
+
+            return torch.cat(tensors, dim), backward
+
+        def index(self,
+                  indices: List[Tensor]):
+            def backward(grad_output):
+                grad_self = torch.zeros_like(self).index_put_(indices, grad_output, True)
+                return grad_self, None
+
+            return torch.index(self, indices), backward
+
+        def meshgrid(tensors: List[Tensor]):
+            size = len(tensors)
+            sizes = [0] * size
+            for i in range(size):
+                if tensors[i].dim() != 0:
+                    sizes[i] = tensors[i].size()[0]
+            def backward(grad_outputs: List[Tensor]):
+                grads_tensors = []
+                for i in range(size):
+                    view_shape = [1] * size
+                    if sizes[i] == 0:
+                        view_shape[i] = 1
+                        grads_tensors.append((grad_outputs[i]._grad_sum_to_size(view_shape)).reshape(()))
+                    else:
+                        view_shape[i] = sizes[i]
+                        grads_tensors.append((grad_outputs[i]._grad_sum_to_size(view_shape)).reshape([sizes[i]]))
+                return grads_tensors
+            return torch.meshgrid(tensors), backward
+
         def mv(self, vec):
             def backward(grad_output):
                 return grad_output.ger(vec), self.t().mv(grad_output)
@@ -494,9 +578,12 @@ const std::vector<std::string> functions = {
             return torch.ones_like(self), backward
 
         def pow_0(self,
-                  exponent: float):
+                  exponent: number):
             def backward(grad_output):
-                grad_self = torch.where(torch.tensor(exponent == 0.0), torch.zeros_like(self), grad_output * exponent * torch.pow(self, exponent - 1))
+                if float(exponent) == 0.0:
+                    grad_self = torch.zeros_like(self)
+                else:
+                    grad_self = grad_output * exponent * torch.pow(self, float(exponent) - 1)
                 return grad_self, None
 
             return torch.pow(self, exponent), backward
@@ -510,16 +597,16 @@ const std::vector<std::string> functions = {
 
             return torch.pow(self, exponent), backward
 
-        def pow_2(self: float,
+        def pow_2(self: number,
                   exponent):
             def backward(grad_output):
-                grad_exponent = grad_output * torch.pow(self, exponent) * torch.log(torch.tensor(self))
+                grad_exponent = grad_output * torch.pow(self, exponent) * torch.log(float(self))
                 return None, grad_exponent
 
             return torch.pow(self, exponent), backward
 
         def rsub_0(self, other,
-                   alpha: float = 1.0):
+                   alpha: number = 1.0):
             self_size = self.size()
             other_size = other.size()
             def backward(grad_output):
@@ -530,8 +617,8 @@ const std::vector<std::string> functions = {
             return torch.rsub(self, other, alpha), backward
 
         def rsub_1(self,
-                   other: float,
-                   alpha: float = 1.0):
+                   other: number,
+                   alpha: number = 1.0):
             self_size = self.size()
             def backward(grad_output):
                 grad_self = (- grad_output * alpha)._grad_sum_to_size(self_size)
@@ -1219,8 +1306,8 @@ bool isHelperFunction(const std::string& method_name) {
   return method_name.compare(0, helper_prefix.length(), helper_prefix) == 0;
 }
 
-void loadModule(const std::shared_ptr<script::Module>& module) {
-  for (const auto& method : module->get_methods()) {
+void loadModule(const script::CompilationUnit& module) {
+  for (const auto& method : module.get_functions()) {
     if (isHelperFunction(method->name()))
       continue;
 
@@ -1272,9 +1359,8 @@ void loadModule(const std::shared_ptr<script::Module>& module) {
 
 void loadFunctions() {
   for (const std::string& str : functions) {
-    auto cu = std::make_shared<script::Module>();
-    script::defineMethodsInModule(
-        cu, str, script::nativeResolver, c10::nullopt);
+    script::CompilationUnit cu;
+    cu.define(str, script::nativeResolver(), nullptr);
     loadModule(cu);
   }
 }
@@ -1290,14 +1376,6 @@ c10::optional<GradientPair> gradientInfoForSchema(
     return cache_it->second;
   } else {
     auto schema_str = canonicalSchemaString(schema);
-    // Specialize Scalar to float for the arg type of the node schema
-    // this is used to:
-    // 1. define scalar type as float in TorchScript autodiff formula
-    // 2. to make sure the input of any graph node does not contain scalar type
-    //    in its argument, all scalar arg should already be passed with float
-    //    value since scalar/int aren't differentiable either way.
-    //
-    c10::ReplaceAll(schema_str, "Scalar", "float");
     // For debugging AD change:
     // std::cout << "Looking for " << schema_str << std::endl;
 

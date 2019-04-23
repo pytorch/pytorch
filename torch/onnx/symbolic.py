@@ -69,19 +69,32 @@ def _parse_arg(value, desc):
         return value
     if desc == 'v' or not _is_value(value):
         return value
-    if value.node().kind() != 'onnx::Constant':
-        raise RuntimeError("ONNX symbolic expected a constant value in the trace")
-    tval = value.node()['value']
-    if desc == 'i':
-        return int(tval)
-    elif desc == 'f':
-        return float(tval)
-    elif desc == 't':
-        return tval
-    elif desc == 'is':
-        return [int(v) for v in tval]
-    else:
-        raise RuntimeError("Casting constants to `{}` is not implemented".format(desc))
+    if value.node().kind() == 'onnx::Constant':
+        tval = value.node()['value']
+        if desc == 'i':
+            return int(tval)
+        elif desc == 'f':
+            return float(tval)
+        elif desc == 'b':
+            return bool(tval)
+        elif desc == 't':
+            return tval
+        elif desc == 'is':
+            return [int(v) for v in tval]
+        else:
+            raise RuntimeError("ONNX symbolic doesn't know to interpret Constant node")
+    elif value.node().kind() == 'prim::ListConstruct':
+        if desc == 'is':
+            for v in value.node().inputs():
+                if v.node().kind() != 'onnx::Constant':
+                    raise RuntimeError("Failed to export an ONNX attribute, "
+                                       "since it's not constant, please try to make "
+                                       "things (e.g., kernel size) static if possible")
+            return [int(v.node()['value']) for v in value.node().inputs()]
+        else:
+            raise RuntimeError("ONNX symbolic doesn't know to interpret ListConstruct node")
+
+    raise RuntimeError("Unexpected node type: {}".format(value.node().kind()))
 
 
 def _maybe_get_const(value, desc):
@@ -204,7 +217,7 @@ _export_onnx_opset_version = _default_onnx_opset_version
 
 def _set_opset_version(opset_version):
     global _export_onnx_opset_version
-    if opset_version == _default_onnx_opset_version:
+    if opset_version == _export_onnx_opset_version:
         return
     if opset_version in _onnx_stable_opsets + [_onnx_master_opset]:
         _export_onnx_opset_version = opset_version
@@ -382,6 +395,13 @@ def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
 
+def _slice_op(g, input, axes, starts, ends):
+    assert len(starts) == len(ends)
+    if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807:
+        return input
+    return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
+
+
 def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
         if dim is None:
@@ -522,7 +542,8 @@ def select(g, self, dim, index):
         # of Gather in caffe2. We need to change this as soon as possible.
         # TODO: this breaks if index == -1
         index_val = _parse_arg(index, 'i')
-        slice_node = g.op("Slice", self, axes_i=[dim], starts_i=[index_val], ends_i=[index_val + 1])
+        slice_node = _slice_op(g, self, axes=[dim],
+                               starts=[index_val], ends=[index_val + 1])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
         return g.op("Gather", self, index, axis_i=dim)
@@ -646,104 +667,63 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     return padding_ceil
 
 
-@parse_args('v', 'is', 'is', 'is', 'is', 'i')
-def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode and input.type().kind() != "CompleteTensorType":
-        return _unimplemented("max_pool1d_with_indices", "input size not accesible")
-    if set(_single(dilation)) != {1}:
-        return _unimplemented("max_pool1d_with_indices", "dilation")
-    if stride is None:
-        stride = kernel_size
-    padding = tuple(_single(padding))
-    if ceil_mode:
-        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-        padding = padding + tuple(numpy.add(padding_ceil, padding))
-    else:
-        padding = padding * 2
-    r, indices = g.op("MaxPool", input, outputs=2,
-                      kernel_shape_i=_single(kernel_size),
-                      pads_i=padding,
-                      strides_i=_single(stride))
-    # easy but hacky way to get flattened indices values
-    # to be used to convert the indices values to non-flattened.
-    # In ONNX the indices are computed as a flatten 1-D tensor,
-    # so the values in indices are in [0, N x C x D1 x ... x Dn).
-    # To convert the indices to the same format used by Pytorch,
-    # we first execute a maxpool with a kernel and stride of 1 on the same input.
-    # This will result in a tensor of indices in which each index will have it's own value.
-    # Using this tensor as a reference, we extract the first index of each axis and substract
-    # it from each index of this axis in the indices to convert.
-    # This step will result in a tensor were each dimension has values of indices within
-    # the dimension it is in.
-    # For more information :
-    # https://github.com/pytorch/pytorch/pull/16455#issuecomment-460776407
-    _, flattened_indices = g.op("MaxPool", input, outputs=2,
-                                kernel_shape_i=[1],
-                                strides_i=[1])
-    # convert indices to have non-flattened indices values
-    s = g.op("Slice", flattened_indices, axes_i=[2], starts_i=[0], ends_i=[1])
-    indices = sub(g, indices, s)
-    return r, indices
+def _max_pool(name, tuple_fn, ndims, return_indices):
+    @parse_args('v', 'is', 'is', 'is', 'is', 'i')
+    def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+        if ceil_mode and input.type().kind() != "CompleteTensorType":
+            return _unimplemented(name, "input size not accesible")
+        if set(tuple_fn(dilation)) != {1}:
+            return _unimplemented(name, "dilation")
+        if not stride:
+            stride = kernel_size
+        padding = tuple(tuple_fn(padding))
+        if ceil_mode:
+            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+            padding = padding + tuple(numpy.add(padding_ceil, padding))
+        else:
+            padding = padding * 2
+        # easy but hacky way to get flattened indices values
+        # to be used to convert the indices values to non-flattened.
+        # In ONNX the indices are computed as a flatten 1-D tensor,
+        # so the values in indices are in [0, N x C x D1 x ... x Dn).
+        # To convert the indices to the same format used by Pytorch,
+        # we first execute a maxpool with a kernel and stride of 1 on the same input.
+        # This will result in a tensor of indices in which each index will have it's own value.
+        # Using this tensor as a reference, we extract the first index of each axis and substract
+        # it from each index of this axis in the indices to convert.
+        # This step will result in a tensor were each dimension has values of indices within
+        # the dimension it is in.
+        # For more information :
+        # https://github.com/pytorch/pytorch/pull/16455#issuecomment-460776407
+        if return_indices:
+            r, indices = g.op("MaxPool", input, outputs=2,
+                              kernel_shape_i=tuple_fn(kernel_size),
+                              pads_i=padding,
+                              strides_i=tuple_fn(stride))
+            _, flattened_indices = g.op("MaxPool", input, outputs=2,
+                                        kernel_shape_i=[1 for _ in range(ndims)],
+                                        strides_i=[1 for _ in range(ndims)])
+            # convert indices to have non-flattened indices values
+            s = _slice_op(g, flattened_indices, axes=[2 + i for i in range(ndims)],
+                          starts=tuple_fn(0), ends=tuple_fn(1))
+            indices = sub(g, indices, s)
+            return r, indices
+        else:
+            r = g.op("MaxPool", input, outputs=1,
+                     kernel_shape_i=tuple_fn(kernel_size),
+                     pads_i=padding,
+                     strides_i=tuple_fn(stride))
+            return r
+
+    return symbolic_fn
 
 
-@parse_args('v', 'is', 'is', 'is', 'is', 'i')
-def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode and input.type().kind() != "CompleteTensorType":
-        return _unimplemented("max_pool2d_with_indices", "input size not accesible")
-    if set(_pair(dilation)) != {1}:
-        return _unimplemented("max_pool2d_with_indices", "dilation")
-    if not stride:
-        stride = kernel_size
-    padding = tuple(_pair(padding))
-    if ceil_mode:
-        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-        padding = padding + tuple(numpy.add(padding_ceil, padding))
-    else:
-        padding = padding * 2
-    r, indices = g.op("MaxPool", input, outputs=2,
-                      kernel_shape_i=_pair(kernel_size),
-                      pads_i=padding,
-                      strides_i=_pair(stride))
-    # easy but hacky way to get flattened indices values
-    # to be used to convert the indices values to non-flattened
-    # See comment in max_pool1d_with_indices for details.
-    _, flattened_indices = g.op("MaxPool", input, outputs=2,
-                                kernel_shape_i=[1, 1],
-                                strides_i=[1, 1])
-    # convert indices to have non-flattened indices values
-    s = g.op("Slice", flattened_indices, axes_i=[2, 3], starts_i=[0, 0], ends_i=[1, 1])
-    indices = sub(g, indices, s)
-    return r, indices
-
-
-@parse_args('v', 'is', 'is', 'is', 'is', 'i')
-def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode and input.type().kind() != "CompleteTensorType":
-        return _unimplemented("max_pool3d_with_indices", "input size not accesible")
-    if set(_triple(dilation)) != {1}:
-        return _unimplemented("max_pool3d_with_indices", "dilation")
-    if not stride:
-        stride = kernel_size
-    padding = tuple(_triple(padding))
-    if ceil_mode:
-        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-        padding = padding + tuple(numpy.add(padding_ceil, padding))
-    else:
-        padding = padding * 2
-    r, indices = g.op("MaxPool", input, outputs=2,
-                      kernel_shape_i=_triple(kernel_size),
-                      pads_i=padding,
-                      strides_i=_triple(stride))
-    # easy but hacky way to get flattened indices values
-    # to be used to convert the indices values to non-flattened
-    # See comment in max_pool1d_with_indices for details.
-    _, flattened_indices = g.op("MaxPool", input, outputs=2,
-                                kernel_shape_i=[1, 1, 1],
-                                strides_i=[1, 1, 1])
-    # convert indices to have non-flattened indices values
-    s = g.op("Slice", flattened_indices, axes_i=[2, 3, 4], starts_i=[0, 0, 0], ends_i=[1, 1, 1])
-    indices = sub(g, indices, s)
-    return r, indices
+max_pool1d = _max_pool("max_pool1d", _single, 1, return_indices=False)
+max_pool2d = _max_pool("max_pool2d", _pair, 2, return_indices=False)
+max_pool3d = _max_pool("max_pool3d", _triple, 3, return_indices=False)
+max_pool1d_with_indices = _max_pool("max_pool1d_with_indices", _single, 1, return_indices=True)
+max_pool2d_with_indices = _max_pool("max_pool2d_with_indices", _pair, 2, return_indices=True)
+max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, return_indices=True)
 
 
 def _avg_pool(name, tuple_fn):
@@ -1226,6 +1206,13 @@ def _unique(g, input, sorted, return_inverse):
                 return_inverse_i=return_inverse, outputs=2)
 
 
+@parse_args('v', 'i', 'i', 'i')
+def _unique2(g, input, sorted, return_inverse, return_counts):
+    return g.op("ATen", input, operator_s="_unique2", sorted_i=sorted,
+                return_inverse_i=return_inverse, return_counts_i=return_counts,
+                outputs=3)
+
+
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an
 # ONNX cast node with `to` attribute 'UINT8'
@@ -1291,34 +1278,44 @@ scalar_type_to_onnx = [
 ]
 
 
-@parse_args('v', 'i', 'v', 'v')
-def zeros(g, sizes, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def zeros(g, sizes, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def zeros_like(g, input, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def zeros_like(g, input, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def ones(g, sizes, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def ones(g, sizes, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def ones_like(g, input, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def ones_like(g, input, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-def full(g, sizes, value, dtype, layout, device):
+def full(g, sizes, value, dtype, layout, device, pin_memory=False):
+    if pin_memory and _parse_arg(pin_memory, 'b'):
+        raise RuntimeError("onnx pin_memory support is not implemented")
     const_value = _maybe_get_const(value, 't')
     if _is_value(const_value):
         tmp = zeros(sizes, dtype, layout, device)
@@ -1329,8 +1326,10 @@ def full(g, sizes, value, dtype, layout, device):
                     value_t=torch.tensor([const_value], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v')
-def full_like(g, input, fill_value, dtype, layout, device):
+@parse_args('v', 'f', 'i', 'v', 'v', 'b')
+def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([fill_value], dtype=scalar_type_to_pytorch_type[dtype]))
@@ -1350,7 +1349,7 @@ def slice(g, self, dim, start, end, step):
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
         dim = _parse_arg(dim, 'i')
-        return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+        return _slice_op(g, self, axes=[dim], starts=[start], ends=[end])
 
 
 @parse_args('v', 'f', 'f')
@@ -1393,6 +1392,11 @@ def to(g, self, *args):
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
     elif len(args) == 5:
         # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
+        dtype = _get_const(args[0], 'i', 'dtype')
+        # Layout and device are ignored
+        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+    elif len(args) == 6:
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool) -> Tensor
         dtype = _get_const(args[0], 'i', 'dtype')
         # Layout and device are ignored
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
@@ -1701,7 +1705,7 @@ def isnan(g, input):
 
 @parse_args('v', 'i', 'i', 'i')
 def narrow(g, input, dim, start, length):
-    return g.op("Slice", input, axes_i=[dim], starts_i=[start], ends_i=[start + length])
+    return _slice_op(g, input, axes=[dim], starts=[start], ends=[start + length])
 
 
 def argmax(g, input, dim, keepdim):

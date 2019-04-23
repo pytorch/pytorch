@@ -5,7 +5,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function_hook.h>
-#include <torch/csrc/autograd/variable_version.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -257,10 +256,10 @@ struct TORCH_API Variable : public at::Tensor {
 
   /// Increments the version count of this `Variable`.
   void bump_version() noexcept;
-  void set_version_counter(const VariableVersion& version_counter) noexcept;
+  void set_version_counter(const c10::VariableVersion& version_counter) noexcept;
 
   /// Retrieves this `Variable`s version counter.
-  const VariableVersion& version_counter() const noexcept;
+  const c10::VariableVersion& version_counter() const noexcept;
 
   /// Retrieves the current value of the `Variable`'s version counter.
   /// Equivalent to calling `version_counter().current_version()`.
@@ -335,7 +334,6 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   std::shared_ptr<Function> grad_fn_;
   std::weak_ptr<Function> grad_accumulator_;
 
-  VariableVersion version_counter_;
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
 
   // Only meaningful on leaf variables (must be false otherwise)
@@ -692,20 +690,20 @@ inline bool Variable::is_leaf() const noexcept {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::set_version_counter(
-    const VariableVersion& version_counter) noexcept {
-  get_autograd_meta()->version_counter_ = version_counter;
+    const c10::VariableVersion& version_counter) noexcept {
+  data().unsafeGetTensorImpl()->set_version_counter(version_counter);
 }
 
 inline void Variable::bump_version() noexcept {
-  get_autograd_meta()->version_counter_.bump();
+  data().unsafeGetTensorImpl()->bump_version();
 }
 
 inline uint32_t Variable::current_version() const noexcept {
-  return get_autograd_meta()->version_counter_.current_version();
+  return data().unsafeGetTensorImpl()->version_counter().current_version();
 }
 
-inline const VariableVersion& Variable::version_counter() const noexcept {
-  return get_autograd_meta()->version_counter_;
+inline const c10::VariableVersion& Variable::version_counter() const noexcept {
+  return data().unsafeGetTensorImpl()->version_counter();
 }
 
 // Hooks
