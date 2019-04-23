@@ -288,19 +288,6 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
   return out;
 }
 
-std::ostream& Graph::prettyPrint(std::ostream& out) {
-  std::vector<at::Tensor> tensor_table;
-  std::vector<ClassTypePtr> class_table;
-  PythonPrint(out, *this, tensor_table, class_table);
-  return out;
-}
-
-void Graph::dumpPretty() {
-  std::vector<at::Tensor> tensor_table;
-  std::vector<ClassTypePtr> class_table;
-  PythonPrint(std::cout, *this, tensor_table, class_table);
-}
-
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
   c10::optional<at::Device> device = c10::nullopt;
