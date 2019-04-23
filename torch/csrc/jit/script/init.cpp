@@ -1036,6 +1036,7 @@ void initJitScriptBindings(PyObject* module) {
         didFinishEmitFunction(defined);
         return defined;
       });
+
   m.def(
       "_create_function_from_trace",
       [](std::string name,
@@ -1043,9 +1044,9 @@ void initJitScriptBindings(PyObject* module) {
          py::tuple input_tuple,
          py::function var_lookup_fn,
          bool force_outplace) {
-        Stack inputs = toStack(input_tuple);
+        auto typed_inputs = toTypedStack(input_tuple);
         auto graph = tracer::createGraphByTracing(
-            func, inputs, var_lookup_fn, force_outplace);
+            func, typed_inputs, var_lookup_fn, force_outplace);
         CompilationUnit cu;
         auto result = cu.create_function(std::move(name), std::move(graph));
         didFinishEmitFunction(result);
