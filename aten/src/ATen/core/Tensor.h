@@ -706,7 +706,7 @@ class CAFFE2_API Tensor {
   Tensor cholesky(bool upper=false) const;
   Tensor cholesky_solve(const Tensor & input2, bool upper=false) const;
   std::tuple<Tensor,Tensor> solve(const Tensor & A) const;
-  Tensor potri(bool upper=true) const;
+  Tensor cholesky_inverse(bool upper=false) const;
   std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
   std::tuple<Tensor,Tensor> qr() const;
   std::tuple<Tensor,Tensor> geqrf() const;

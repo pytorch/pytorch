@@ -35,24 +35,85 @@ namespace jit {
 // that is confusing to display to the end user since it always reports
 // locations in libtorch code rather than user code.
 
-inline IValue toIValue(py::handle input) {
+using tracer::TypedStack;
+struct TypedIValue : public std::pair<IValue, TypePtr> {
+  using pair::pair;
+
+  IValue& ivalue() {
+    return this->first;
+  }
+  TypePtr& type() {
+    return this->second;
+  }
+};
+
+inline TypedIValue toDictKeyIValue(py::handle key) {
+  if (py::isinstance<py::str>(key)) {
+    return TypedIValue(ConstantString::create(py::cast<std::string>(key)),
+                       StringType::create());
+  } else if (PyLong_Check(key.ptr())) {
+    return TypedIValue(py::cast<int64_t>(key), IntType::create());
+  } else if (PyFloat_Check(key.ptr())) {
+    return TypedIValue(py::cast<double>(key), FloatType::create());
+  } else {
+    AT_ERROR("Dictionary inputs may only have string, int, or float keys");
+  }
+}
+
+inline TypedIValue toTypedIValue(py::handle input) {
   if (THPVariable_Check(input.ptr())) {
     auto ten = py::cast<at::Tensor>(input);
     if (ten.is_sparse()) {
       AT_ERROR("sparse tensors not supported");
     }
-    return ten;
+    return TypedIValue(ten, CompleteTensorType::create(ten));
   } else if (six::isTuple(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
     Stack s;
+    std::vector<TypePtr> t;
     s.reserve(input_tuple.size());
+    t.reserve(input_tuple.size());
     for (py::handle elem : input_tuple) {
-      s.push_back(toIValue(elem));
+      auto info = toTypedIValue(elem);
+      s.push_back(info.first);
+      t.push_back(info.second);
     }
-    return Tuple::create(s);
+    return TypedIValue(Tuple::create(s), TupleType::create(t));
+  } else if (PyDict_Check(input.ptr())) {
+    // Check to make sure we can generate useful input/output types
+    auto dict = py::cast<py::dict>(input);
+    at::ivalue::UnorderedMap elems;
+
+    size_t len = py::len(dict);
+    if (!len) {
+      AT_ERROR("Dictionary inputs must have entries.");
+    }
+    elems.reserve(len);
+
+    TypePtr keyType = nullptr;
+    TypePtr valueType = nullptr;
+    for (auto entry : dict) {
+      auto keyInfo = toDictKeyIValue(entry.first);
+      auto valInfo = toTypedIValue(entry.second);
+      if (!keyType) {
+        keyType = keyInfo.second;
+        valueType = valInfo.second;
+      } else {
+        auto unifiedKey = unifyTypes(keyType, keyInfo.second);
+        auto unifiedValue = unifyTypes(valueType, valInfo.second);
+        if (!unifiedKey || !unifiedValue) {
+          AT_ERROR("Dictionary inputs to traced functions must have consistent type");
+        }
+        keyType = *unifiedKey;
+        valueType = *unifiedValue;
+      }
+      elems.insert(std::make_pair(keyInfo.first, valInfo.first));
+    }
+    return TypedIValue(at::ivalue::GenericDict::create(std::move(elems)),
+                       DictType::create(keyType, valueType));
   } else {
     throw std::runtime_error(c10::str(
-        "Only tensors and (possibly nested) tuples of tensors are supported ",
+        "Only tensors and (possibly nested) tuples of tensors or dicts are supported ",
         "as inputs or outputs of traced functions",
         ", but instead got value of type ",
         py::str(input.get_type().attr("__name__")),
@@ -62,8 +123,17 @@ inline IValue toIValue(py::handle input) {
   }
 }
 
+inline IValue toIValue(py::handle input) {
+    return toTypedIValue(input).ivalue();
+}
+
 inline Stack toStack(const py::tuple& inputs) {
   return toIValue(inputs).toTuple()->elements();
+}
+
+inline TypedStack toTypedStack(const py::tuple& inputs) {
+  auto info = toTypedIValue(inputs);
+  return TypedStack(info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
 }
 
 inline IValue toIValue(
