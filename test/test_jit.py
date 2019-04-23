@@ -2127,37 +2127,6 @@ graph(%x : Tensor,
         fn(x)
         fn(y)
 
-    def test_decompose_addmm(self):
-        def does_decompose():
-            @torch.jit.script
-            def addmm(mat, mat1, mat2, alpha, beta):
-                a = mat.addmm(mat1, mat2, alpha=4.20, beta=2.0)
-                b = mat.addmm(mat1, mat2, alpha=int(alpha), beta=int(beta))
-
-                return a + b
-
-            mat = torch.randn(2, 2)
-            mat1 = torch.randn(2, 4)
-            mat2 = torch.randn(4, 2)
-            alpha = torch.FloatTensor([123.0])
-            beta = torch.FloatTensor([321.0])
-
-            out_ref = addmm(mat, mat1, mat2, alpha, beta)
-            self.run_pass('canonicalize_ops', addmm.graph)
-            out_test = addmm(mat, mat1, mat2, alpha, beta)
-            self.assertEqual(out_ref, out_test)
-            FileCheck().check_not("addmm").run(str(addmm.graph))
-
-        def doesnt_decompose():
-            @torch.jit.script
-            def addmm(mat, mat1, mat2, alpha, beta):
-                a = mat.addmm(mat1, mat2)
-                b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
-
-            orig = str(addm.graph)
-            self.run_pass('canonicalize_ops', addmm.graph)
-            self.assertTrue(orig == str(addmm.graph))
-
     def test_index_put(self):
         ten = torch.zeros(3, 3)
         mask = torch.Tensor([[True, True, True],
