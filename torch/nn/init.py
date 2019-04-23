@@ -1,7 +1,33 @@
+from __future__ import division
+
 import math
 import warnings
 
 import torch
+from .._jit_internal import weak_script
+
+# These no_grad_* functions are necessary as wrappers around the parts of these
+# functions that use `with torch.no_grad()`. The JIT doesn't support context
+# managers, so these need to be implemented as builtins. Using these wrappers
+# lets us keep those builtins small and re-usable.
+def _no_grad_uniform_(tensor, a, b):
+    with torch.no_grad():
+        return tensor.uniform_(a, b)
+
+
+def _no_grad_normal_(tensor, mean, std):
+    with torch.no_grad():
+        return tensor.normal_(mean, std)
+
+
+def _no_grad_fill_(tensor, val):
+    with torch.no_grad():
+        return tensor.fill_(val)
+
+
+def _no_grad_zero_(tensor):
+    with torch.no_grad():
+        return tensor.zero_()
 
 
 def calculate_gain(nonlinearity, param=None):
@@ -46,7 +72,8 @@ def calculate_gain(nonlinearity, param=None):
         raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
 
-def uniform_(tensor, a=0, b=1):
+@weak_script
+def uniform_(tensor, a=0., b=1.):
     r"""Fills the input Tensor with values drawn from the uniform
     distribution :math:`\mathcal{U}(a, b)`.
 
@@ -59,11 +86,14 @@ def uniform_(tensor, a=0, b=1):
         >>> w = torch.empty(3, 5)
         >>> nn.init.uniform_(w)
     """
-    with torch.no_grad():
-        return tensor.uniform_(a, b)
+    # type: (Tensor, float, float) -> Tensor
+    # with torch.no_grad():
+    #     return tensor.uniform_(a, b)
+    return _no_grad_uniform_(tensor, a, b)
 
 
-def normal_(tensor, mean=0, std=1):
+@weak_script
+def normal_(tensor, mean=0., std=1.):
     r"""Fills the input Tensor with values drawn from the normal
     distribution :math:`\mathcal{N}(\text{mean}, \text{std})`.
 
@@ -76,10 +106,13 @@ def normal_(tensor, mean=0, std=1):
         >>> w = torch.empty(3, 5)
         >>> nn.init.normal_(w)
     """
-    with torch.no_grad():
-        return tensor.normal_(mean, std)
+    # type: (Tensor, float, float) -> Tensor
+    # with torch.no_grad():
+    #     return tensor.normal_(mean, std)
+    return _no_grad_normal_(tensor, mean, std)
 
 
+@weak_script
 def constant_(tensor, val):
     r"""Fills the input Tensor with the value :math:`\text{val}`.
 
@@ -91,10 +124,13 @@ def constant_(tensor, val):
         >>> w = torch.empty(3, 5)
         >>> nn.init.constant_(w, 0.3)
     """
-    with torch.no_grad():
-        return tensor.fill_(val)
+    # type: (Tensor, float) -> Tensor
+    # with torch.no_grad():
+    #     return tensor.fill_(val)
+    return _no_grad_fill_(tensor, val)
 
 
+@weak_script
 def ones_(tensor):
     r"""Fills the input Tensor with ones`.
 
@@ -105,10 +141,13 @@ def ones_(tensor):
         >>> w = torch.empty(3, 5)
         >>> nn.init.ones_(w)
     """
-    with torch.no_grad():
-        return tensor.fill_(1)
+    # type: (Tensor) -> Tensor
+    # with torch.no_grad():
+    #     return tensor.fill_(1)
+    # return _no_grad_fill_(tensor, 1.)
 
 
+@weak_script
 def zeros_(tensor):
     r"""Fills the input Tensor with zeros`.
 
@@ -119,8 +158,10 @@ def zeros_(tensor):
         >>> w = torch.empty(3, 5)
         >>> nn.init.zeros_(w)
     """
-    with torch.no_grad():
-        return tensor.zero_()
+    # type: (Tensor) -> Tensor
+    return _no_grad_zero_(tensor)
+    # with torch.no_grad():
+    #     return tensor.zero_()
 
 
 def eye_(tensor):
@@ -174,8 +215,9 @@ def dirac_(tensor):
     return tensor
 
 
+@weak_script
 def _calculate_fan_in_and_fan_out(tensor):
-    dimensions = tensor.ndimension()
+    dimensions = tensor.dim()
     if dimensions < 2:
         raise ValueError("Fan in and fan out can not be computed for tensor with fewer than 2 dimensions")
 
@@ -194,7 +236,8 @@ def _calculate_fan_in_and_fan_out(tensor):
     return fan_in, fan_out
 
 
-def xavier_uniform_(tensor, gain=1):
+@weak_script
+def xavier_uniform_(tensor, gain=1.):
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
     neural networks` - Glorot, X. & Bengio, Y. (2010), using a uniform
@@ -214,14 +257,18 @@ def xavier_uniform_(tensor, gain=1):
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain('relu'))
     """
+    # type: (Tensor, float) -> Tensor
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
-    std = gain * math.sqrt(2.0 / (fan_in + fan_out))
+    std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
     a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
-    with torch.no_grad():
-        return tensor.uniform_(-a, a)
+
+    # with torch.no_grad():
+    #     return tensor.uniform_(-a, a)
+    return _no_grad_uniform_(tensor, -a, a)
 
 
-def xavier_normal_(tensor, gain=1):
+@weak_script
+def xavier_normal_(tensor, gain=1.):
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
     neural networks` - Glorot, X. & Bengio, Y. (2010), using a normal
@@ -241,10 +288,13 @@ def xavier_normal_(tensor, gain=1):
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_normal_(w)
     """
+    # type: (Tensor, float) -> Tensor
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
-    std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-    with torch.no_grad():
-        return tensor.normal_(0, std)
+    std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
+
+    # with torch.no_grad():
+    #     return tensor.normal_(0, std)
+    return _no_grad_normal_(tensor, 0., std)
 
 
 def _calculate_correct_fan(tensor, mode):
