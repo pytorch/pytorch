@@ -17,12 +17,11 @@ namespace native{
 
 namespace {
 
-template <typename scalar_t, typename unique_consecutive_1d_t>
+template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> unique_consecutive_template(
   const Tensor& self,
   const bool return_inverse,
-  const bool return_counts,
-  unique_consecutive_1d_t unique_consecutive_1d_
+  const bool return_counts
 ) {
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
