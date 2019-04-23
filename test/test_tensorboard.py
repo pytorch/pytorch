@@ -3,27 +3,31 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import matplotlib.pyplot as plt
 import numpy as np
 import os
 import sys
 import unittest
 
 import torch
-from common_utils import run_tests
+from common_utils import TestCase, run_tests
 from torch.utils.tensorboard import summary, SummaryWriter
 from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
 from torch.utils.tensorboard._convert_np import make_np
 
-
-TEST_TENSORBOARD = True
 try:
-    import tensorboard.summary.writer.event_file_writer  # noqa F401
+    import tensorboard.summary.writer.event_file_writer
 except ImportError:
-    TEST_TENSORBOARD = False
+    return  # Short circuit all TensorBoard tests
+
+TEST_MATPLOTLIB = True
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    TEST_MATPLOTLIB = False
+skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 
-class TestTensorBoardPyTorchNumpy(unittest.TestCase):
+class TestTensorBoardPyTorchNumpy(TestCase):
     def test_pytorch_np(self):
         tensors = [torch.rand(3, 10, 10), torch.rand(1), torch.rand(1, 2, 3, 4, 5)]
         for tensor in tensors:
@@ -98,9 +102,8 @@ class TestTensorBoardPyTorchNumpy(unittest.TestCase):
                                 bucket_counts=counts.tolist())
 
 
-class TestTensorBoardUtils(unittest.TestCase):
+class TestTensorBoardUtils(TestCase):
     def test_to_HWC(self):
-        np.random.seed(1)
         test_image = np.random.randint(0, 256, size=(3, 32, 32), dtype=np.uint8)
         converted = convert_to_HWC(test_image, 'chw')
         self.assertEqual(converted.shape, (32, 32, 3))
@@ -113,7 +116,6 @@ class TestTensorBoardUtils(unittest.TestCase):
 
     def test_prepare_video(self):
         # at each timestep the sum over all other dimensions of the video should stay the same
-        np.random.seed(1)
         V_before = np.random.random((4, 10, 3, 20, 20))
         V_after = _prepare_video(np.copy(V_before))
         V_before = np.swapaxes(V_before, 0, 1)
@@ -132,7 +134,7 @@ precision = [0.3333333, 0.3786982, 0.5384616, 1.0, 0.0]
 recall = [1.0, 0.8533334, 0.28, 0.0666667, 0.0]
 
 
-class TestTensorBoardWriter(unittest.TestCase):
+class TestTensorBoardWriter(TestCase):
     def test_writer(self):
         with SummaryWriter() as writer:
             sample_rate = 44100
@@ -168,7 +170,7 @@ class TestTensorBoardWriter(unittest.TestCase):
             writer.export_scalars_to_json("./all_scalars.json")
 
 
-class TestTensorBoardSummaryWriter(unittest.TestCase):
+class TestTensorBoardSummaryWriter(TestCase):
     def test_summary_writer_ctx(self):
         # after using a SummaryWriter as a ctx it should be closed
         with SummaryWriter(filename_suffix='.test') as writer:
@@ -200,7 +202,7 @@ class TestTensorBoardSummaryWriter(unittest.TestCase):
         shutil.rmtree(str(p))
 
 
-class TestTensorBoardEmbedding(unittest.TestCase):
+class TestTensorBoardEmbedding(TestCase):
     def test_embedding(self):
         w = SummaryWriter()
         all_features = torch.Tensor([[1, 2, 3], [5, 4, 1], [3, 7, 7]])
@@ -241,7 +243,7 @@ class TestTensorBoardEmbedding(unittest.TestCase):
                         global_step=2)
 
 
-class TestTensorBoardSummary(unittest.TestCase):
+class TestTensorBoardSummary(TestCase):
     def test_uint8_image(self):
         '''
         Tests that uint8 image (pixel values in [0, 255]) is not changed
@@ -364,7 +366,7 @@ def write_proto(str_to_compare, function_ptr):
         f.write(str(str_to_compare))
 
 
-class TestTensorBoardPytorchGraph(unittest.TestCase):
+class TestTensorBoardPytorchGraph(TestCase):
     def test_pytorch_graph(self):
         dummy_input = (torch.zeros(1, 3),)
 
@@ -388,7 +390,9 @@ class TestTensorBoardPytorchGraph(unittest.TestCase):
                 w.add_graph(model, dummy_input)  # error
 
 
-class TestTensorBoardFigure(unittest.TestCase):
+class TestTensorBoardFigure(TestCase):
+
+    @skipIfNoMatplotlib
     def test_figure(self):
         writer = SummaryWriter()
 
@@ -408,6 +412,7 @@ class TestTensorBoardFigure(unittest.TestCase):
 
         writer.close()
 
+    @skipIfNoMatplotlib
     def test_figure_list(self):
         writer = SummaryWriter()
 
@@ -430,7 +435,7 @@ class TestTensorBoardFigure(unittest.TestCase):
         writer.close()
 
 
-class TestTensorBoardNumpy(unittest.TestCase):
+class TestTensorBoardNumpy(TestCase):
     def test_scalar(self):
         res = make_np(1.1)
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
