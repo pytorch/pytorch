@@ -375,16 +375,16 @@ OPERATOR_SCHEMA(Scatter)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
-Update slices of the tensor in-place by overriding current value.
+Update values of the tensor by overriding current value specified by indices.
 
-Note: The op pretty much ignores the exact shapes of the input arguments and
-cares only about sizes. It's done for performance consideration to avoid
-unnecessary reshapes. Only first dimension of X_0 is important, let's call it
-N. If M is the total size of X_0 and K is the size of INDICES then X_i is
-assumed to be of shape K x (M / N) regardless of the real shape.
+Writes all values from the tensor UPDATES into DATA at the indices specified in the INDICES tensor.
+For each value in DATA, its output index is specified by its index in UPDATES and by the corresponding value in INDICES for the specified axis.
 
-Note: Each update in INDICES is applied independently which means that if
-duplicated elements are present in INDICES arbitrary one will win.
+For a 3-D tensor, DATA is updated as:
+
+DATA[INDICES[i][j][k]][j][k] = UPDATES[i][j][k]  # if axis == 0
+DATA[i][INDICES[i][j][k]][k] = UPDATES[i][j][k]  # if axis == 1
+DATA[i][j][INDICES[i][j][k]] = UPDATES[i][j][k]  # if axis == 2
 
 Currently only works on CPU because of access to INDICES.
 )DOC")
@@ -398,7 +398,10 @@ Currently only works on CPU because of access to INDICES.
         2,
         "UPDATES",
         "Update slices, with shape len(INDICES) + shape(X_0)[1:]")
-    .Output(0, "OUTPUT", "The updated output.");
+    .Output(0, "OUTPUT", "The updated output.")
+    .Arg(
+        "axis",
+        "*(type: int; default: 1)* Which dimension to scatter on.");
 
 OPERATOR_SCHEMA(HasElements)
     .NumInputs(1)
