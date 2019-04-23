@@ -40,7 +40,7 @@ inline Tensor new_qtensor_cpu(
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
   AT_CHECK(isQIntType(typeMetaToScalarType(dtype)),
-           "ScalarType not supported for in new_qtensor_cpu.");
+           "ScalarType is not supported in new_qtensor_cpu.");
   auto storage = c10::make_intrusive<StorageImpl>(
       dtype,
       nelements,
