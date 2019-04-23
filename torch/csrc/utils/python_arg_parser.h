@@ -332,7 +332,7 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   if (!args[i]) {
     auto scalartype = signature.params[i].default_scalartype;
     return (scalartype == at::ScalarType::Undefined) ?
-            torch::tensors::get_default_tensor_type().scalarType() : scalartype;
+            torch::tensors::get_default_scalar_type() : scalartype;
   }
   return reinterpret_cast<THPDtype*>(args[i])->scalar_type;
 }

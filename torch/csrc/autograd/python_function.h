@@ -25,6 +25,7 @@ struct VariableInfo {
 
   at::Type* type;
   at::Device device = at::kCPU;
+  at::ScalarType scalar_type = at::kFloat;
   std::vector<int64_t> size;
   bool requires_grad;
 };
