@@ -124,6 +124,7 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/cpu/dynamic_library_unix.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "test/cpp/jit/test.cpp",
+    "test/cpp/jit/test_utils.cpp",
 ]
 
 libtorch_cuda_sources = [

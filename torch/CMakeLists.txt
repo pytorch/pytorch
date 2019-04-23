@@ -200,6 +200,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
   ${TORCH_ROOT}/test/cpp/jit/test.cpp
+  ${TORCH_ROOT}/test/cpp/jit/test_utils.cpp
   )
 
 if (WIN32)
@@ -332,6 +333,9 @@ if(OPENMP_FOUND)
   target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
   target_link_libraries(torch ${OpenMP_CXX_LIBRARIES})
 endif()
+
+# For test_utils.cpp
+target_include_directories(torch PRIVATE ${TORCH_SRC_DIR}/../test/cpp/jit)
 
 if (NOT NO_API)
   target_include_directories(torch PUBLIC
