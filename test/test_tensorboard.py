@@ -5,7 +5,9 @@ from __future__ import unicode_literals
 
 import numpy as np
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 import torch
@@ -167,8 +169,9 @@ class TestTensorBoardWriter(TestCase):
                                     false_negative_counts,
                                     precision,
                                     recall, n_iter)
-            # export scalar data to JSON for external processing
-            writer.export_scalars_to_json("./all_scalars.json")
+            d = tempfile.mkdtemp()
+            writer.export_scalars_to_json(os.path.join(d, "all_scalars.json"))
+            shutil.rmtree(d)
 
 
 class TestTensorBoardSummaryWriter(TestCase):
