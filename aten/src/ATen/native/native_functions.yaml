@@ -144,7 +144,6 @@
     MkldnnCPU: mkldnn_add_
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: add_out
     CUDA: add_out
