@@ -13,7 +13,8 @@ from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
     ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler, \
     CyclicLR
-from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
+from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
+    skipIfRocm
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -237,7 +238,15 @@ class TestOptim(TestCase):
     def _build_params_dict_single(self, weight, bias, **kwargs):
         return [dict(params=bias, **kwargs)]
 
+    @skipIfRocm
     def test_sgd(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.SGD([bias], lr=1e-3)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.SGD([weight, bias], lr=1e-3)
         )
@@ -282,7 +291,15 @@ class TestOptim(TestCase):
             [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
         )
 
+    @skipIfRocm
     def test_adam(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Adam([bias], lr=1e-3)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adam([weight, bias], lr=1e-3)
         )
@@ -332,6 +349,13 @@ class TestOptim(TestCase):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
     def test_adadelta(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Adadelta([bias], rho=0.95)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adadelta([weight, bias])
         )
@@ -349,6 +373,13 @@ class TestOptim(TestCase):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
     def test_adagrad(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Adagrad([bias], lr=1e-1)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
         )
@@ -377,6 +408,29 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
             optim.Adagrad(None, lr=1e-2, lr_decay=-0.5)
 
+    def test_adagrad_share_memory_flag(self):
+        "Adagrad has a unique share_memory method"
+        linear = torch.nn.Linear(1, 1)
+        optimizer = optim.Adagrad([linear.weight], lr=1e-2)
+
+        optimizer.share_memory()
+        optimizer.add_param_group({'params': [linear.bias]})
+        dummy_loss = linear.weight.sum() + linear.bias.sum()
+        dummy_loss.backward()
+        optimizer.step()
+        for pg in optimizer.param_groups:
+            for p in pg['params']:
+                self.assertTrue(optimizer.state[p]['sum'].is_shared())
+
+    def test_adagrad_share_memory_flag_default(self):
+        "Test if Adagrad can load the state without flag"
+        linear = torch.nn.Linear(1, 1)
+        optimizer = optim.Adagrad([linear.weight], lr=1e-2)
+
+        another_optimizer = optim.SGD([linear.weight], lr=0.01)
+        optimizer.load_state_dict(another_optimizer.state_dict())
+        self.assertFalse(optimizer._is_share_memory)
+
     def test_adagrad_sparse(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.Adagrad(params, lr=1e-1)
@@ -387,7 +441,15 @@ class TestOptim(TestCase):
              lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
         )
 
+    @skipIfRocm
     def test_adamax(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Adamax([bias], lr=1e-1)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
         )
@@ -399,7 +461,15 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
             optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
 
+    @skipIfRocm
     def test_rmsprop(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.RMSprop([bias], lr=1e-2)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2)
         )
@@ -411,7 +481,15 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
             optim.RMSprop(None, lr=1e-2, momentum=-1.0)
 
+    @skipIfRocm
     def test_asgd(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.ASGD([bias], lr=1e-3, t0=100)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100)
         )
@@ -423,7 +501,15 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
             optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
 
+    @skipIfRocm
     def test_rprop(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Rprop([bias], lr=1e-3)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Rprop([weight, bias], lr=1e-3)
         )
@@ -435,7 +521,15 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
             optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
 
+    @skipIfRocm
     def test_lbfgs(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.ASGD([bias])
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.LBFGS([weight, bias]),
             ignore_multidevice=True
@@ -577,8 +671,9 @@ class TestLRScheduler(TestCase):
     def test_legacy_cos_anneal_lr(self):
         eta_min = 1e-10
         epochs = 20
-        scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
-        legacy_scheduler = LegacyCosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
+        T_max = 5
+        scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
+        legacy_scheduler = LegacyCosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
         self._test_against_legacy(scheduler, legacy_scheduler, epochs)
 
     def test_reduce_lr_on_plateau1(self):
