@@ -1325,6 +1325,26 @@ graph(%x : Tensor,
                    .check_next("Constant").check_next("quantize_linear") \
                    .check("dequantize").run(str(trace.graph))
 
+    def test_pattern_based_fusion(self):
+        class testModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y, z):
+                t = x * y
+                p = t * z
+                u = p * x
+                o = u * y
+                return o
+        m = testModule()
+        print(m.graph)
+        torch._C._jit_pass_custom_pattern_based_fusion("""
+graph(%a, %b, %c):
+  %q = aten::mul(%a, %b)
+  %r = aten::mul(%q, %c)
+  return (%r)""", "aten::fused_mulmul", ["a", "b", "c"], ["r"], m)
+        FileCheck().check_not("aten::mul").check("aten::fused_mulmul")    \
+                   .check_next("aten::fused_mulmul").check_next("return") \
+                   .run(str(m.graph))
+
     def test_expand_quantlint(self):
         pass
 
