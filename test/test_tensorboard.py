@@ -15,7 +15,7 @@ from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
 from torch.utils.tensorboard._convert_np import make_np
 
 try:
-    import tensorboard.summary.writer.event_file_writer
+    import tensorboard.summary.writer.event_file_writer  # noqa F401
 except ImportError:
     # Short circuit all TensorBoard tests
     raise unittest.SkipTest("no tensorboard installed")
