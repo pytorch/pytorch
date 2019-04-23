@@ -65,14 +65,39 @@ namespace at { namespace native {
 			this->algo = algo;
 		}
 
-		void set(miopenRNNMode_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, miopenDataType_t datatype) {
-			this->rnn_mode = mode;
+		/*fn_mode is set in torch.backends.cudnn (get_cudnn_mode() method) 
+	  	  Need to modify the interface to the frontend to make this function useful.
+		*/
+    	void set_mode(int64_t fn_mode) {
+      		switch (fn_mode) {
+        		case 0:
+          			rnn_mode = miopenRNNRELU;
+          			break;
+        		case 1:
+          			rnn_mode = miopenRNNTANH;
+          			break;
+        		case 2:
+          			rnn_mode = miopenLSTM;
+          			break;
+        		case 3:
+          			rnn_mode = miopenGRU;
+          			break;
+        		default:
+        		{
+          			std::ostringstream oss;
+          			oss << "unrecognized miopen RNN mode " << fn_mode;
+          			AT_ERROR(oss.str());
+        		}
+      	}
+    }
+
+	void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, miopenDataType_t datatype) {
+			this->set_mode(mode);
 			this->hidden_size = hidden_size;
 			this->num_layers = num_layers;
 			this->direction = this->set_bidirectional(bidirectional);
 			this->datatype = datatype;
 		}
-
 	}
 
   	Tensor miopen_rnn_flatten_weight(
@@ -89,11 +114,14 @@ namespace at { namespace native {
 
   	  /*TODO: 
 
-  	  	1. Need to create RNNDescriptorParam and set RNN Descriptor.
-  	  	2. Create RNNDescriptors in Descriptors.h
-		2. Create a handle.
-		3. Flatten the weights.		
+  	  	[Done]1. Need to create RNNDescriptorParam and set RNN Descriptor.
+  	  	[Done]2. Create RNNDescriptors in Descriptors.h
+		3. set the RNNDescriptor in RNNDescriptors.
+		4. Flatten the weights.		
   	  */
+
+  	  RNNDescriptorParam rnn;
+  	  rnn.set(fn_mode, hidden_size, num_layers, bidirectional, datatype);
 
     }
 
