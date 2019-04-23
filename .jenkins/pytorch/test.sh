@@ -42,6 +42,9 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # TODO: move this to Docker
   pip install -q hypothesis --user
 
+  # TODO: move this to Docker
+  pip install -q tb-nightly --user
+
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
   pip install mypy --user || true
