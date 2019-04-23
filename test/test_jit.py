@@ -6071,7 +6071,7 @@ a")
         self.checkScript(test_pow_int, (2.0, 2))
 
         num_list = [-1000000, -1000, -2, 0, 1, 3, 1000, 10000000]
-        for i in list:
+        for i in num_list:
             self.checkScript(test_isnan, (i,))
 
         self.checkScript(test_asinh_int, (2,))
