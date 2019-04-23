@@ -726,6 +726,20 @@ class TestJit(JitTestCase):
 
         self.checkTrace(f, (x, y))
 
+    def test_trace_aliased_parameter(self):
+        class M(nn.Module):
+            def __init__(self, x):
+                super(M, self).__init__()
+                self.x = nn.Parameter(x)
+
+            def forward(self, y):
+                return self.x + y
+
+        m = M(torch.rand(3, 4))
+        r = torch.jit.trace(m, m.x)
+        t2 = torch.rand(3, 4)
+        self.assertEqual(r(t2), m.x + t2)
+
     def test_restore_device(self):
         # main purpose is checking map_location works
         m = torch.jit.ScriptModule()
