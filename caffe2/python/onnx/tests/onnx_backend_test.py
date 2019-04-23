@@ -65,6 +65,8 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_.*matmulinteger.*'  # Skip quantized op test
                      '|test_.*convinteger.*'  # Skip quantized op test
                      '|test_isinf.*'  # Needs implementation
+                     '|test_mod.*'  # Needs implementation
+                     '|test_nonmaxsuppression.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
