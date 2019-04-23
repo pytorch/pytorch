@@ -2691,8 +2691,6 @@ class _TestTorchMixin(object):
         zero_point = 2
         qr = r.quantize_linear(scale, zero_point)
         rqr = qr.dequantize()
-        print(r.numpy())
-        print(rqr.numpy())
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
     def test_qtensor_creation(self):
@@ -2701,12 +2699,7 @@ class _TestTorchMixin(object):
         val = 100
         numel = 10
         q = torch._empty_affine_quantized(numel, dtype=torch.qint8, scale=scale, zero_point=zero_point)
-        # for i in range(numel):
-        #     # wait for th_fill
-        #     q[i] = val
-        # r = q.dequantize()
-        # for i in range(numel):
-        #     self.assertEqual(r[i], (val - zero_point) * scale)
+        # TODO: check dequantized values?
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
