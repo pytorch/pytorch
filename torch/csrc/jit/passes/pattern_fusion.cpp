@@ -20,7 +20,7 @@ graph(%x, %w, %b):
 
 void PatternFuser::RegisterFusionPattern(
     const std::string& pattern,
-    const std::string fused_node_name,
+    const std::string& fused_node_name,
     std::vector<std::string> inputs,
     std::vector<std::string> outputs) {
   FusionPatternDescr d = {pattern, fused_node_name, inputs, outputs};

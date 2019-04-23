@@ -150,7 +150,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_custom_pattern_based_fusion",
           [](const std::string& pattern,
-             const std::string fused_node_name,
+             const std::string& fused_node_name,
              std::vector<std::string> inputs,
              std::vector<std::string> outputs,
              std::shared_ptr<script::Module> m) {

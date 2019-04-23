@@ -65,7 +65,7 @@ class PatternFuser {
    */
   void RegisterFusionPattern(
       const std::string& pattern,
-      const std::string fused_node_name,
+      const std::string& fused_node_name,
       std::vector<std::string> inputs,
       std::vector<std::string> outputs);
 
