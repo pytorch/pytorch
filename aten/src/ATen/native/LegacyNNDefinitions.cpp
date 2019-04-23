@@ -348,22 +348,6 @@ Tensor adaptive_avg_pool3d_backward(const Tensor & grad_output, const Tensor & s
   return at::legacy::th::_thnn_adaptive_avg_pool3d_backward(grad_output, self);
 }
 
-std::tuple<Tensor &,Tensor &> adaptive_max_pool2d_out(Tensor & output, Tensor & indices, const Tensor & self, IntArrayRef output_size) {
-  return at::legacy::th::_thnn_adaptive_max_pool2d_forward_out(output, indices, self, output_size);
-}
-
-std::tuple<Tensor,Tensor> adaptive_max_pool2d(const Tensor & self, IntArrayRef output_size) {
-  return at::legacy::th::_thnn_adaptive_max_pool2d_forward(self, output_size);
-}
-
-Tensor & adaptive_max_pool2d_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & indices) {
-  return at::legacy::th::_thnn_adaptive_max_pool2d_backward_out(grad_input, grad_output, self, indices);
-}
-
-Tensor adaptive_max_pool2d_backward(const Tensor & grad_output, const Tensor & self, const Tensor & indices) {
-  return at::legacy::th::_thnn_adaptive_max_pool2d_backward(grad_output, self, indices);
-}
-
 std::tuple<Tensor &,Tensor &> adaptive_max_pool3d_out(Tensor & output, Tensor & indices, const Tensor & self, IntArrayRef output_size) {
   return at::legacy::th::_thnn_adaptive_max_pool3d_forward_out(output, indices, self, output_size);
 }
