@@ -35,7 +35,7 @@ try:
     HAS_FAULTHANDLER = True
 except ImportError:
     HAS_FAULTHANDLER = False
-    err_msg = ("faulthandler not found. Some data loader tests uses it for error "
+    err_msg = ("faulthandler not found. Some data loader tests use it for error "
                "reporting (e.g., TestDataLoader.test_proper_exit).")
     if IS_PYTORCH_CI:
         raise ImportError(err_msg)
@@ -232,6 +232,7 @@ class ErrorTrackingProcess(mp.Process):
 
     def print_traces_of_all_threads(self):
         assert self.is_alive(), "can only use print_traces_of_all_threads if the process is alive"
+        assert not self.disable_stderr, "do not disable stderr if you use print_traces_of_all_threads"
         if HAS_FAULTHANDLER:
             if not IS_WINDOWS:
                 # use the custom signal if available
@@ -244,7 +245,7 @@ class ErrorTrackingProcess(mp.Process):
         else:
             # if there is no faulthandler, use SIGINT otherwise and hope for the best
             os.kill(self.pid, signal.SIGINT)
-        # don't error too fast, give it some time to print
+        # wait in parent process to give subprocess some time to print
         time.sleep(5)
 
     @property
