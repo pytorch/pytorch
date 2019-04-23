@@ -268,21 +268,18 @@ def _str(self):
         tensor_str = indices_prefix + indices_str + '),\n' + ' ' * indent + values_prefix + values_str + ')'
     elif self.is_quantized:
         suffixes.append('size=' + str(tuple(self.shape)))
-        if not has_default_dtype:
-            suffixes.append('dtype=' + str(self.dtype))
+        suffixes.append('dtype=' + str(self.dtype))
         is_quantized_prefix = 'is_quantized=True'
         qscheme_prefix = 'qscheme=per_tensor_affine'
         values_prefix = 'float_values=tensor('
         values = self.dequantize()
         values_str = _tensor_str(values, indent + len(values_prefix))
-        if values.numel() == 0:
-            values_str += ', size=' + str(tuple(values.shape))
         int_repr_prefix = 'int_repr=tensor('
         int_repr = self.int_repr()
         int_repr_str = _tensor_str(int_repr, indent + len(int_repr_prefix))
-        if int_repr.numel() == 0:
-            int_repr_str += ', size=' + str(tuple(int_repr.shape))
-        tensor_str = is_quantized_prefix + ', ' + qscheme_prefix + ',\n' + ' ' * indent + values_prefix + values_str + '),\n' + ' ' * indent + int_repr_prefix + int_repr_str + ')'
+        tensor_str = is_quantized_prefix + ', ' + qscheme_prefix + ',\n' + ' ' * \
+            indent + values_prefix + values_str + '),\n' + ' ' * indent + \
+            int_repr_prefix + int_repr_str + ')'
     else:
         if self.numel() == 0 and not self.is_sparse:
             # Explicitly print the shape if it is not (0,), to match NumPy behavior
@@ -302,7 +299,7 @@ def _str(self):
             else:
                 tensor_str = _tensor_str(self, indent)
 
-    if not self.is_quantized and self.layout != torch.strided:
+    if self.layout != torch.strided:
         suffixes.append('layout=' + str(self.layout))
 
     if self.grad_fn is not None:
