@@ -52,7 +52,8 @@ static PyMethodDef THPDtype_methods[] = {
 
 PyObject *THPDtype_repr(THPDtype *self)
 {
-  return THPUtils_packString(self->name);
+  std::string name = self->name;
+  return THPUtils_packString("torch." + name);
 }
 
 PyTypeObject THPDtypeType = {
