@@ -10,7 +10,7 @@
 namespace at {
 namespace native {
 
-std::tuple<Tensor, Tensor> mkldnn_max_pool2d_with_indices(
+Tensor mkldnn_max_pool2d(
     const Tensor& self,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -18,20 +18,7 @@ std::tuple<Tensor, Tensor> mkldnn_max_pool2d_with_indices(
     IntArrayRef dilation,
     bool ceil_mode) {
   AT_ERROR(
-      "mkldnn_max_pool2d_with_indices: ATen not compiled with MKLDNN support");
-}
-
-std::tuple<Tensor&, Tensor&> mkldnn_max_pool2d_with_indices_out(
-    Tensor& output,
-    Tensor& indices,
-    const Tensor& self,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef dilation,
-    bool ceil_mode) {
-  AT_ERROR(
-      "mkldnn_max_pool2d_with_indices_out: ATen not compiled with MKLDNN support");
+      "mkldnn_max_pool2d: ATen not compiled with MKLDNN support");
 }
 
 Tensor mkldnn_avg_pool2d(
@@ -102,14 +89,14 @@ static Tensor _mkldnn_pool2d(
   return new_with_itensor_mkldnn(std::move(y), input.options());
 }
 
-std::tuple<Tensor, Tensor> mkldnn_max_pool2d_with_indices(
+Tensor mkldnn_max_pool2d(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  Tensor output = _mkldnn_pool2d(
+  return _mkldnn_pool2d(
       input,
       kernel_size,
       stride,
@@ -117,34 +104,6 @@ std::tuple<Tensor, Tensor> mkldnn_max_pool2d_with_indices(
       dilation,
       ceil_mode,
       ideep::algorithm::pooling_max);
-  return std::make_tuple(
-      output,
-      // TODO: ideep currently doesn't expose the max indices,
-      // so return garbage values here
-      at::empty({0}, at::kInt));
-}
-
-std::tuple<Tensor&, Tensor&> mkldnn_max_pool2d_with_indices_out(
-    Tensor& output,
-    Tensor& indices,
-    const Tensor& input,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef dilation,
-    bool ceil_mode) {
-  output = _mkldnn_pool2d(
-      input,
-      kernel_size,
-      stride,
-      padding,
-      dilation,
-      ceil_mode,
-      ideep::algorithm::pooling_max);
-  // TODO: ideep currently doesn't expose the max indices,
-  // so return garbage values here
-  indices = at::empty({0}, at::kInt);
-  return std::tuple<Tensor&, Tensor&>(output, indices);
 }
 
 Tensor mkldnn_avg_pool2d(
