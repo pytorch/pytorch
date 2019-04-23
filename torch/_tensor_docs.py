@@ -527,6 +527,13 @@ cholesky_solve(input2, upper=False) -> Tensor
 See :func:`torch.cholesky_solve`
 """)
 
+add_docstr_all('cholesky_inverse',
+               r"""
+cholesky_inverse(upper=False) -> Tensor
+
+See :func:`torch.cholesky_inverse`
+""")
+
 add_docstr_all('clamp',
                r"""
 clamp(min, max) -> Tensor
@@ -1721,13 +1728,6 @@ Example:
     torch.Size([5, 2, 3])
 """)
 
-add_docstr_all('potri',
-               r"""
-potri(upper=True) -> Tensor
-
-See :func:`torch.potri`
-""")
-
 add_docstr_all('pow',
                r"""
 pow(exponent) -> Tensor
@@ -2532,6 +2532,16 @@ int() -> Tensor
 
 ``self.int()`` is equivalent to ``self.to(torch.int32)``. See :func:`to`.
 """)
+
+add_docstr_all('int_repr',
+               r"""
+int_repr() -> Tensor
+
+Given a quantized Tensor,
+``self.int_repr()`` returns a CPU Tensor with uint8_t as data type that stores the
+underlying uint8_t values of the given Tensor.
+""")
+
 
 add_docstr_all('long',
                r"""
