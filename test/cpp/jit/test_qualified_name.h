@@ -28,8 +28,22 @@ void testQualifiedName() {
     ASSERT_EQ(bar->toString(), "bar");
   }
   {
-    // Can't create directly from a dotted string to avoid ambiguity.
+    // throw some bad inputs at it
     ASSERT_ANY_THROW(QualifiedName::create("foo.bar"));
+    ASSERT_ANY_THROW(QualifiedName::createFromDotted("foo..bar"));
+    ASSERT_ANY_THROW(QualifiedName::createFromDotted(".foo.bar"));
+    ASSERT_ANY_THROW(QualifiedName::createFromDotted("foo.bar."));
+  }
+  {
+    // test equality api
+    auto foo1 = QualifiedName::createFromDotted("foo.bar.baz");
+    auto foo2 = QualifiedName::createFromDotted("foo.bar.baz");
+    auto foo3 = QualifiedName::createFromDotted("bar.bar.baz");
+    ASSERT_TRUE(foo1->equals(foo2));
+    ASSERT_FALSE(foo3->equals(foo1));
+    auto bar1 = QualifiedName::create("sup");
+    auto bar2 = QualifiedName::create("sup");
+    ASSERT_TRUE(foo1->equals(foo2));
   }
 }
 } // namespace test
