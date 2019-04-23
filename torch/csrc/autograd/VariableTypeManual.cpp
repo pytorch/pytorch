@@ -344,4 +344,66 @@ Tensor & VariableType::detach_(Tensor & self) const {
   return self;
 }
 
+Tensor VariableType::_sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, const TensorOptions & options) const {
+  RECORD_FUNCTION("_sparse_coo_tensor_with_dims_and_tensors", std::vector<c10::IValue>({indices, values}), Function::peek_at_next_sequence_nr());
+  auto indices_ = as_variable_ref(indices).data();
+  auto values_ = as_variable_ref(values).data();
+  auto options_ = TensorOptions(options).is_variable(false);
+  check_no_requires_grad(indices, "indices");
+  std::shared_ptr<SparseCooTensorWithDimsAndTensorsBackward> grad_fn;
+  if (compute_requires_grad( values )) {
+    grad_fn = std::shared_ptr<SparseCooTensorWithDimsAndTensorsBackward>(new SparseCooTensorWithDimsAndTensorsBackward(), deleteFunction);
+    grad_fn->set_next_edges(collect_next_edges( values ));
+    grad_fn->indices_ = SavedVariable(indices, false);
+    grad_fn->values_sizes = values.sizes().vec();
+  }
+  torch::jit::Node* node = nullptr;
+  std::shared_ptr<jit::tracer::TracingState> tracer_state;
+  if (jit::tracer::isTracing()) {
+    tracer_state = jit::tracer::getTracingState();
+    at::Symbol op_name;
+    op_name = jit::Symbol::fromQualString("aten::_sparse_coo_tensor_with_dims_and_tensors");
+    node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "sparse_dim", sparse_dim);
+    jit::tracer::addInputs(node, "dense_dim", dense_dim);
+    jit::tracer::addInputs(node, "size", size);
+    jit::tracer::addInputs(node, "indices", indices);
+    jit::tracer::addInputs(node, "values", values);
+    jit::tracer::addInputs(node, "options", options);
+    tracer_state->graph->insertNode(node);
+
+    jit::tracer::setTracingState(nullptr);
+  }
+  #ifndef NDEBUG
+  c10::optional<Storage> indices__storage_saved =
+    indices_.has_storage() ? c10::optional<Storage>(indices_.storage()) : c10::nullopt;
+  c10::intrusive_ptr<TensorImpl> indices__impl_saved;
+  if (indices_.defined()) indices__impl_saved = indices_.getIntrusivePtr();
+  c10::optional<Storage> values__storage_saved =
+    values_.has_storage() ? c10::optional<Storage>(values_.storage()) : c10::nullopt;
+  c10::intrusive_ptr<TensorImpl> values__impl_saved;
+  if (values_.defined()) values__impl_saved = values_.getIntrusivePtr();
+  #endif
+  auto tmp = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return baseType->_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices_, values_, options_);
+  })();
+  auto result = as_variable(tmp);
+  #ifndef NDEBUG
+  if (indices__storage_saved.has_value())
+    AT_ASSERT(indices__storage_saved.value().is_alias_of(indices_.storage()));
+  if (indices__impl_saved) AT_ASSERT(indices__impl_saved == indices_.getIntrusivePtr());
+  if (values__storage_saved.has_value())
+    AT_ASSERT(values__storage_saved.value().is_alias_of(values_.storage()));
+  if (values__impl_saved) AT_ASSERT(values__impl_saved == values_.getIntrusivePtr());
+  #endif
+  set_history(flatten_tensor_args( result ), grad_fn);
+  if (tracer_state) {
+    jit::tracer::setTracingState(std::move(tracer_state));
+    jit::tracer::addOutput(node, result);
+  }
+  return result;
+}
+
 }} // namespace torch::autograd

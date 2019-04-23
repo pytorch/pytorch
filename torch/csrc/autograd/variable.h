@@ -170,7 +170,7 @@ struct TORCH_API Variable : public at::Tensor {
   //
   // NOTE: `var.data()` performs shallow-copying of `var`'s TensorImpl, which incurs
   // runtime overhead.
-  at::Tensor data() noexcept;
+  at::Tensor data() const noexcept;
 
   // Gradient Function and Edges
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -586,7 +586,7 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
   return static_cast<const Variable&>(tensor);
 }
 
-inline at::Tensor Variable::data() noexcept {
+inline at::Tensor Variable::data() const noexcept {
   return make_variable(*this, /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
 }
 
