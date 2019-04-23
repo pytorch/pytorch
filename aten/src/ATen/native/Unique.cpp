@@ -70,22 +70,29 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
 }
 
 template <typename scalar_t>
-std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
+std::tuple<Tensor, Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     const Tensor& self,
+    const bool return_index,
     const bool return_inverse,
     const bool return_counts) {
   const Tensor& input = self.contiguous();
   const scalar_t* input_data = input.data<scalar_t>();
   int64_t numel = input.numel();
   Tensor output = at::empty({numel}, input.options());
+  Tensor unique_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor counts = at::empty({0}, self.options().dtype(kLong));
 
   scalar_t *output_data = output.data<scalar_t>();
+  int64_t *unique_indices_data = nullptr;
   int64_t *inverse_data = nullptr;
   int64_t *counts_data = nullptr;
   if (numel > 0) {
     *output_data = *input_data;
+  }
+  if (return_index) {
+    unique_indices.resize_(input.sizes());
+    unique_indices_data = unique_indices.data<int64_t>();
   }
   if (return_inverse) {
     inverse_indices.resize_(input.sizes());
@@ -96,13 +103,17 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     counts_data = counts.data<int64_t>();
   }
   scalar_t *p = output_data;
-  int64_t *q = counts_data;
+  int64_t *q = unique_indices_data;
+  int64_t *r = counts_data;
   int64_t last = 0;
   for (int64_t i = 0; i < numel; i++) {
     if (input_data[i] != *p) {
       *(++p) = input_data[i];
+      if (return_index) {
+          *(++q) = i;
+      }
       if (return_counts) {
-        *(q++) = i - last;
+        *(r++) = i - last;
         last = i;
       }
     }
@@ -112,12 +123,15 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
   }
   int64_t output_size = p - output_data + 1;
   if (return_counts && numel > 0) {
-    *q = numel - last;
+    *r = numel - last;
     counts.resize_({output_size});
   }
   output.resize_({output_size});
+  if (return_index) {
+    unique_indices.resize_({output_size});
+  }
 
-  return std::make_tuple(output, inverse_indices, counts);
+  return std::make_tuple(output, unique_indices, inverse_indices, counts);
 }
 
 template<class ForwardIt>
@@ -225,6 +239,16 @@ std::tuple<Tensor, Tensor, Tensor>
 _unique2_cpu(const Tensor& self, const bool sorted, const bool return_inverse, const bool return_counts) {
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
     return unique_cpu_template<scalar_t>(self, sorted, return_inverse, return_counts);
+  });
+}
+
+std::tuple<Tensor, Tensor>
+_unique_dim_cpu(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse) {
+  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim", [&] {
+    // The current implementation using `dim` always sorts due to unhashable tensors
+    Tensor output, inverse;
+    std::tie(output, inverse, std::ignore) = _unique_dim_cpu_template<scalar_t>(self, dim, false, return_inverse, false);
+    return std::make_tuple(output, inverse);
   });
 }
 

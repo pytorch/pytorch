@@ -468,7 +468,7 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
         return output
 
 
-def unique_consecutive(input, return_inverse=False, return_counts=False, dim=None):
+def unique_consecutive(input, return_index=False, return_inverse=False, return_counts=False, dim=None):
     r"""Eliminates all but the first element from every consecutive group of equivalent elements.
 
     .. note:: This function is different from :func:`torch.unique` in the sense that this function
@@ -477,6 +477,8 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
 
     Arguments:
         input (Tensor): the input tensor
+        return_index(bool): Whether to also return the indices for where each
+        unique element first occurs in in the original input
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
         return_counts (bool): Whether to also return the counts for each unique
@@ -485,8 +487,11 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
             flattened input is returned. default: ``None``
 
     Returns:
-        (Tensor, Tensor (optional), Tensor (optional)): A tensor or a tuple of tensors containing
-
+        (Tensor, Tensor (optional), Tensor (optional), Tensor (optional)): A tensor or a tuple of tensors containing
+            - **unique_indices** (*Tensor*): (optional) if
+              :attr:`return_index` is True, there will be an additional
+              returned tensor (same shape as output) representing the 
+              indices of the first occurrences of the unique values.
             - **output** (*Tensor*): the output list of unique scalar elements.
             - **inverse_indices** (*Tensor*): (optional) if
               :attr:`return_inverse` is True, there will be an additional
@@ -506,9 +511,12 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
         >>> output
         tensor([1, 2, 3, 1, 2])
 
-        >>> output, inverse_indices = torch.unique_consecutive(x, return_inverse=True)
+        >>> output, unique_indices, inverse_indices = torch.unique_consecutive(
+              x, return_index=True, return_inverse=True)
         >>> output
         tensor([1, 2, 3, 1, 2])
+        >>> unique_indices
+        tensor([0, 2, 4, 5, 7])
         >>> inverse_indices
         tensor([0, 0, 1, 1, 2, 3, 3, 4])
 
@@ -518,15 +526,16 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
         >>> counts
         tensor([2, 2, 1, 2, 1])
     """
-    output, inverse_indices, counts = torch._C._VariableFunctions.unique_consecutive(
-        input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
-    if return_inverse and return_counts:
-        return output, inverse_indices, counts
+    output, unique_indices, inverse_indices, counts = torch._C._VariableFunctions.unique_consecutive(
+        input, return_indexs=return_indexs, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
+    out = [output]
+    if return_index:
+        out.append(unique_indices)
     if return_inverse:
-        return output, inverse_indices
+        out.append(inverse_indices)
     if return_counts:
-        return output, counts
-    return output
+        out.append(counts)
+    return out
 
 
 def tensordot(a, b, dims=2):

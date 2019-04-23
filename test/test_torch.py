@@ -10717,6 +10717,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # test consecutive version
             z = torch.tensor([1, 2, 2, 2, 5, 5, 2, 2, 3], device=device)
             expected_z_unique = torch.tensor([1, 2, 5, 2, 3], device=device)
+            expected_z_unique_indices = torch.tensor([0, 1, 4, 6, 8], device=device)
             expected_z_inverse = torch.tensor([0, 1, 1, 1, 2, 2, 3, 3, 4], device=device)
             expected_z_counts = torch.tensor([1, 3, 2, 2, 1], device=device)
 
@@ -10733,6 +10734,22 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
             z_unique, z_inverse, z_counts = torch.unique_consecutive(z, return_inverse=True, return_counts=True)
             self.assertEqual(z_unique, expected_z_unique)
+            self.assertEqual(z_inverse, expected_z_inverse)
+            self.assertEqual(z_counts, expected_z_counts)
+
+            z_unique, z_unique_indices, z_inverse = torch.unique_consecutive(z, return_index=True, return_inverse=True)
+            self.assertEqual(z_unique, expected_z_unique)
+            self.assertEqual(z_unique_indices, expected_z_unique_indices)
+            self.assertEqual(z_inverse, expected_z_inverse)
+
+            z_unique, z_inverse, z_counts = torch.unique_consecutive(z, return_index=True, return_counts=True)
+            self.assertEqual(z_unique, expected_z_unique)
+            self.assertEqual(z_unique_indices, expected_z_unique_indices)
+            self.assertEqual(z_counts, expected_z_counts)
+
+            z_unique, z_inverse, z_counts = torch.unique_consecutive(z, return_index=True, return_inverse=True, return_counts=True)
+            self.assertEqual(z_unique, expected_z_unique)
+            self.assertEqual(z_unique_indices, expected_z_unique_indices)
             self.assertEqual(z_inverse, expected_z_inverse)
             self.assertEqual(z_counts, expected_z_counts)
 
