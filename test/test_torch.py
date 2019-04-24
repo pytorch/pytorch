@@ -2684,10 +2684,16 @@ class _TestTorchMixin(object):
         # qr[0] = 8 # float asignment
         # self.assertEqual(qr.item(), 8)
         # we can also print a qtensor
-        self.assertEqual(str(qr), "tensor(is_quantized=True, qscheme=per_tensor_affine,\n" + " " * 7 + "float_values=tensor([1.]),\n" + " " * 7 + "int_repr=tensor([3]), size=(1,), dtype=torch.qint8)")
+        self.assertEqual(str(qr),
+                         "tensor(is_quantized=True, qscheme=per_tensor_affine,\n" +
+                         " " * 7 + "float_values=tensor([1.]),\n" + " " * 7 +
+                         "int_repr=tensor([3]), size=(1,), dtype=torch.qint8)")
         empty_r = torch.ones((0, 1), dtype=torch.float)
         empty_qr = empty_r.quantize_linear(scale, zero_point)
-        self.assertEqual(str(empty_qr), "tensor(is_quantized=True, qscheme=per_tensor_affine,\n" + " " * 7 + "float_values=tensor([]),\n" + " " * 7 + "int_repr=tensor([]), size=(0, 1), dtype=torch.qint8)")
+        self.assertEqual(str(empty_qr),
+                         "tensor(is_quantized=True, qscheme=per_tensor_affine,\n" +
+                         " " * 7 + "float_values=tensor([]),\n" + " " * 7 +
+                         "int_repr=tensor([]), size=(0, 1), dtype=torch.qint8)")
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
