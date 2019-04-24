@@ -2083,6 +2083,15 @@ RegisterOperators reg2({
           push(stack, std::sqrt(a));
           return 0;
         }),
+    Operator(
+        "aten::frexp(float a, int* b) -> float",
+        [](Stack& stack) {
+          float a;
+          int64_t b;
+          pop(stack, a, b);
+          push(stack, std::frexp(a, &b));
+          return 0;
+        }),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),

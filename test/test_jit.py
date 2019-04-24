@@ -5361,6 +5361,10 @@ a")
             # type: (float, int) -> float
             return math.pow(x, y)
 
+        def test_frexp_float(x, y)
+            # type: (float, int) -> float
+            return math.frexp(x, y)
+
         self.checkScript(test_floor, (1.5,))
         self.checkScript(test_ceil, (1.5,))
         self.checkScript(test_log_int, (2,))
@@ -5375,6 +5379,7 @@ a")
         self.checkScript(test_sqrt_float, (2.0,))
         self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
+        self.checkScript(test_frexp_float, (2.0, 2))
 
     def test_if_nest_while(self):
         def func(a, b):
