@@ -108,6 +108,118 @@ struct RNNDescriptorParams {
     }
 };
 
+//TensorDescriptor list.
+std::vector<TensorDescriptor> rnn_descriptor_sequence(const Tensor& tensor, IntArrayRef batch_sizes) {
+	std::vector<TensorDescriptor> descriptors(batch_sizes.size());
+	size_t i =0;
+
+	auto batch_tensor_size = tensor.sizes().vec();
+	for (auto batch_size : batch_sizes) {
+		batch_tensor_size[0] = batch_size;
+
+		descriptors[i].set(getMiopenDataType(tensor), batch_tensor_size, tensor.strides(), 3);
+		i++;
+	}
+
+	return descriptors;
+}
+
+std::vector<TensorDescriptor> rnn_descriptor(const Tensor& tensor, int64_t N) {
+	std::vector<TensorDescriptor> descriptors(N);
+	for (int64_t i = 0; i < N ; i++) {
+		descriptors[i].set(tensor, 5);
+	}
+
+	return descriptors;
+}
+
+struct TensorDescriptorListParams {
+	IntArrayRef batch_sizes;
+	int64_t batch_sizes;
+	int64_t seq_length;
+	int64_t mini_batch;
+
+	int64_t input_size;
+	int64_t batch_sizes_sum;
+
+	bool is_input_packed() const {
+		return batch_sizes.size() != 0;
+	}
+
+	void set(IntArrayRef input_sizes, IntArrayRef batch_sizes_, bool batch_first) {
+		batch_sizes = batch_sizes_;
+		if (is_input_packed()) {
+			seq_length = batch_sizes.size();
+			mini_batch = batch_sizes[0];
+			batch_sizes_sum = input_sizes[0];
+			input_size = input_sizes[1];
+		} else {
+			if (batch_first) {
+				seq_length = input_sizes[1];
+				mini_batch = input_sizes[0];
+			} else {
+				seq_length = input_sizes[0];
+				mini_batch = input_sizes[1];
+			}
+			input_size = input_sizes[2];
+			batch_sizes_sum = -1;
+		}
+	}
+
+	std::vector<TensorDescriptor> descriptors(Tensor x) const {
+		auto is_input_packed = batch_sizes.size() != 0;
+		if (is_input_packed) {
+			return rnn_descriptor_sequence(x, batch_sizes);
+		} else {
+			return rnn_descriptor(x[0], seq_length);
+		}
+	}
+};
+
+struct RNNParams {
+	RNNDescriptorParams rnn;
+	TensorDescriptorListParams tensors;
+};
+
+struct RNNDescriptors {
+	RNNDescriptor rnn_desc;
+	std::vector<TensorDescriptor> x_descs;
+	std::vector<TensorDescriptor> y_descs;
+	TensorDescriptor hx_desc;
+	TensorDescriptor hy_desc;
+	TensorDescriptor cx_desc;
+	TensorDescriptor cy_desc;
+
+	RNNDescriptors(const RNNParams& fn, miopenHandle_t handle, Tensor x, Tensor y, Tensor hx, Tensor cx) {
+		rnn_desc = fn.rnn.descriptor();
+		x_descs = fn.tensors.descriptors(x);
+		y_descs = fn.tensors.descriptors(y);
+		hx_desc.set(hx, 5);
+		hy_desc.set(hy, 5);
+		if (cx.defined()) {
+			cx_desc.set(cx, 5);
+			cy_desc.set(cy, 5);
+		}
+	}
+
+	std::vector<miopenTensorDescriptor_t> get_descs(const std::vector<TensorDescriptor>& descs) {
+		std::vector<miopenTensorDescriptor_t> r;
+		r.reserve(descs.size());
+		for (auto& desc : descs) {
+			r.emplace_back(desc.desc());
+		}
+		return r;
+	}
+
+	std::vector<miopenTensorDescriptor_t> get_x_descs() {
+		return get_descs(x_descs);
+	}
+
+	std::vector<miopenTensorDescriptor_t> get_y_descs() {
+		return get_descs(y_descs);
+	}
+};
+
 void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to, bool copy) {
     AT_ASSERTM(params_from.size(0) == params_to.size(0), "number of layers mismatch");
     for (size_t i = 0; i < params_from.size(0); i++) {
@@ -208,6 +320,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         IntArrayRef fn_batch_sizes, const Tensor& fn_dropout_state
         ) {
     AT_ERROR("miopen_rnn : not implemented yet.");
+
+    check_device(input_r, weight, {hx, cx});
+    auto input = input_r;
+    auto weight_buf = weight_buf_r;
+    
+
+    if (fn_dropout_state.defined()) {
+    	AT_ERROR("miopen_rnn : Dropout is not supported in MIOpen. ");
+    }
+
+    RNNParams fn;
+
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
