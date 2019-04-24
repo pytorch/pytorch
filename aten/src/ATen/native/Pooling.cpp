@@ -4,8 +4,6 @@
 #include <ATen/TensorUtils.h>
 #include <c10/util/Exception.h>
 
-#include <ATen/native/mkldnn/Pooling.h>
-
 #include <tuple>
 
 namespace at { namespace native {
@@ -117,7 +115,7 @@ Tensor max_pool2d(
     IntArrayRef dilation,
     bool ceil_mode) {
   if (self.is_mkldnn()) {
-    return at::native::mkldnn_max_pool2d(
+    return at::mkldnn_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
   auto output_and_indices = at::max_pool2d_with_indices(
