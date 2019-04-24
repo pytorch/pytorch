@@ -1153,7 +1153,7 @@ struct GraphFuser {
   }
 
   bool canFuseWithConcat(Value* producer, Node* before_check) {
-    if (!isFusable(producer->node())) {
+    if (!isFusableDevice(producer) || !isFusable(producer->node())) {
       return false;
     }
     // NB: it is important that this check happens after isFusable, which checks

@@ -299,11 +299,11 @@ class JitTestCase(TestCase):
         def copy_structure_and_params(m):
             c = torch.jit.ScriptModule()
             for name, v in m._get_parameters():
-                c._register_parameter(name, v, False)
+                c._c._register_parameter(name, v, False)
             for name, the_type, v in m._get_attributes():
-                c._register_attribute(name, the_type, v)
+                c._c._register_attribute(name, the_type, v)
             for name, s in m._get_modules():
-                c._register_module(name, copy_structure_and_params(s))
+                c._c._register_module(name, copy_structure_and_params(s)._c)
             return c
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
@@ -368,12 +368,12 @@ class JitTestCase(TestCase):
 
     def getExportImportCopyWithPacking(self, m, also_test_file=True, map_location=None):
         buffer = io.BytesIO()
-        m.apply(lambda s: s._pack() if s._has_method('_pack') else None)
+        m.apply(lambda s: s._pack() if s._c._has_method('_pack') else None)
         torch.jit.save(m, buffer)
-        m.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+        m.apply(lambda s: s._unpack() if s._c._has_method('_unpack') else None)
         buffer.seek(0)
         imported = torch.jit.load(buffer, map_location=map_location)
-        imported.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+        imported.apply(lambda s: s._unpack() if s._c._has_method('_unpack') else None)
 
         if not also_test_file:
             return imported
@@ -389,7 +389,7 @@ class JitTestCase(TestCase):
         finally:
             os.unlink(f.name)
 
-        result.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+        result.apply(lambda s: s._unpack() if s._c._has_method('_unpack') else None)
         return result
 
     def assertGraphContains(self, graph, kind):
@@ -616,7 +616,7 @@ class JitTestCase(TestCase):
     def createScriptModuleFromGraph(self, trace):
         graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
         m = torch.jit.ScriptModule()
-        m._create_method_from_graph("forward", graph)
+        m._c._create_method_from_graph("forward", graph)
         return m
 
     def assertExportImport(self, trace, inputs):
@@ -1139,22 +1139,40 @@ class TestJit(JitTestCase):
 
         self.assertExportImport(trace, (x, y))
 
+    def test_cse_not_introduce_aliasing(self):
+        @torch.jit.script
+        def tensor_alias_outputs(x):
+            return x + x, x + x
+
+        self.run_pass('cse', tensor_alias_outputs.graph)
+        FileCheck().check_count("aten::add", 2).run(tensor_alias_outputs.graph)
+
+        @torch.jit.script
+        def ints_alias_outputs(x):
+            # type: (int) -> Tuple[int, int]
+            return x + x, x + x
+
+        # non-aliasing types can be CSEd
+        self.run_pass('cse', ints_alias_outputs.graph)
+        FileCheck().check_count("aten::add", 1, exactly=True).run(ints_alias_outputs.graph)
+
     def test_recursive_cse(self):
         input_str = """
 graph(%x : Tensor,
-      %y : Tensor):
+      %y : Tensor,
+      %20 : int):
   %2 : int = prim::Constant[value=1]()
   %3 : Tensor = aten::add(%x, %y, %2)
-  %4 : Tensor = aten::gt(%3, %x)
+  %4 : int = aten::add(%2, %20)
   %5 : bool = prim::Bool(%4)
-  %z : Tensor = prim::If(%5)
+  %z : int = prim::If(%5)
     # CHECK: block
     block0():
       # CHECK-NOT: aten::add
-      %z.1 : Tensor = aten::add(%x, %y, %2)
+      %z.1 : int = aten::add(%2, %20)
       -> (%z.1)
     block1():
-      -> (%x)
+      -> (%2)
   return (%z)
 """
         graph = parse_ir(input_str)
@@ -2766,7 +2784,7 @@ graph(%a, %b, %c, %d):
 
         r, _ = _jit_python_print(foo)
         mod = torch.jit.ScriptModule()
-        torch._C._jit_import_methods(mod, "op_version_set = 0\n{}".format(r), [])
+        torch._C._jit_import_methods(mod._c, "op_version_set = 0\n{}".format(r), [])
         self.assertExpected(mod.graph.pretty_print())
 
     def test_function_default_values(self):
@@ -3076,7 +3094,7 @@ class TestScript(JitTestCase):
             pp, table = _jit_python_print(foo)
             ppv = "op_version_set = 0\n{}".format(pp)
             sm = torch.jit.ScriptModule()
-            torch._C._jit_import_methods(sm, ppv, table)
+            torch._C._jit_import_methods(sm._c, ppv, table)
             r = foo()
             r2 = sm()
             # use precise assert, we are checking floating point details
@@ -4169,6 +4187,43 @@ a")
             (),
             RuntimeError,
             "bool value of Tensor")
+
+    def test_list_sort(self):
+        template = dedent('''
+        def func():
+            li = {list_create}
+            li.sort()
+            return li
+        ''')
+
+        lists = ["[]", "[1, 3, 2]", "[True, False, True]", "[1.2, .2, 3.2]",
+                 "[torch.tensor(1.0), torch.tensor(0.2), torch.tensor(0.5)]",
+                 "[torch.tensor(5), torch.tensor(-2), torch.tensor(4)]"]
+        for li in lists:
+            code = template.format(list_create=li)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            t1 = cu.func()
+            t2 = scope['func']()
+            self.assertEqual(t1, t2)
+
+        def test_fail(x):
+            # type: (List[Tensor]) -> List[Tensor]
+            x.sort()
+            return x
+
+        self.checkScriptRaisesRegex(test_fail, (([torch.zeros([2]), torch.zeros([2])],)), Exception,
+                                    "bool value of Tensor with more than one value")
+
+        @torch.jit.script
+        def test_mutation():
+            a = [1, 2, 3]
+            a.sort()
+            return a
+
+        test_mutation()
+        FileCheck().check("aten::sort").run(test_mutation.graph_for())
 
     def test_list_slice(self):
         def test_regular_slice():
@@ -5887,21 +5942,33 @@ a")
         self.checkScript(func, ())
 
     def test_tensor_shape_prop(self):
-        template = dedent('''
-        def func():
-            li = {list_create}
-            return torch.tensor(li)
-        ''')
+        def func1():
+            return torch.tensor([1])
 
-        list_input = ["[1]", "[False]", "[2.5]", "0.5", "1", "False", "[[1]]"]
+        def func2():
+            return torch.tensor([False])
+
+        def func3():
+            return torch.tensor([2.5])
+
+        def func4():
+            return torch.tensor(0.5)
+
+        def func5():
+            return torch.tensor(1)
+
+        def func6():
+            return torch.tensor(False)
+
+        def func7():
+            return torch.tensor([[1]])
+
+        list_input = [func1, func2, func3, func4, func5, func6, func7]
         expected_shape = ["Long(*)", ("Byte(*)"), "Double(*)", "Double()", "Long()", "Byte()", "Long(*, *)"]
 
-        for list_i, expect in zip(list_input, expected_shape):
-            code = template.format(list_create=list_i)
-            scope = {}
-            exec(code, globals(), scope)
-            cu = torch.jit.CompilationUnit(code)
-            g = cu.func
+        for fn, expect in zip(list_input, expected_shape):
+            self.checkScript(fn, ())
+            g = torch.jit.script(fn)
             torch._C._jit_pass_complete_shape_analysis(g.graph, (), False)
             FileCheck().check(expect).check("aten::tensor").run(g.graph)
 
@@ -6793,6 +6860,7 @@ a")
         # Specialized error for Tensors
         class S(torch.jit.ScriptModule):
             def __init__(self):
+                super(S, self).__init__()
                 self.tensor_constant = torch.ones(2)
 
             @torch.jit.script_method
@@ -7536,7 +7604,7 @@ a")
 
         self.run_pass('constant_propagation', list_tensors.graph)
         m = torch.jit.ScriptModule()
-        m._create_method_from_graph("forward", list_tensors.graph)
+        m._c._create_method_from_graph("forward", list_tensors.graph)
         # testing that tensor type of lists is unified
         self.getExportImportCopy(m)
 
@@ -7772,8 +7840,6 @@ a")
 
     def test_script_define_order(self):
         class M(torch.jit.ScriptModule):
-            def __init__(self):
-                pass
 
             @torch.jit.script_method
             def call_foo(self, input):
@@ -7787,8 +7853,6 @@ a")
 
     def test_script_define_order_recursive_fail(self):
         class M(torch.jit.ScriptModule):
-            def __init__(self):
-                pass
 
             @torch.jit.script_method
             def call_foo(self, input):
@@ -7803,8 +7867,6 @@ a")
 
     def test_script_kwargs_fn_call(self):
         class M(torch.jit.ScriptModule):
-            def __init__(self):
-                pass
 
             @torch.jit.script_method
             def call_foo(self, input):
@@ -8784,6 +8846,7 @@ a")
             __constants__ = ['d']
 
             def __init__(self):
+                super(M, self).__init__()
                 self.d = torch.device('cpu')
 
             @torch.jit.script_method
@@ -9399,18 +9462,18 @@ a")
         # for each of these checks, check that *BOTH* the underlying
         # _C.ScriptModule object has the expected method/param, as well as the
         # Python object that wraps it.
-        self.assertTrue(traced.ssm._has_method('foo'))
+        self.assertTrue(traced.ssm._c._has_method('foo'))
         self.assertTrue(hasattr(traced.ssm, 'foo'))
 
         imported = self.getExportImportCopy(traced)
 
-        self.assertTrue(imported.ssm._has_method('foo'))
+        self.assertTrue(imported.ssm._c._has_method('foo'))
         self.assertTrue(hasattr(imported.ssm, 'foo'))
 
-        self.assertTrue(imported.ssm.asm._has_method('bar'))
+        self.assertTrue(imported.ssm.asm._c._has_method('bar'))
         self.assertTrue(hasattr(imported.ssm.asm, 'bar'))
 
-        self.assertTrue(imported.ssm.asm._has_parameter('param'))
+        self.assertTrue(imported.ssm.asm._c._has_parameter('param'))
         self.assertTrue(hasattr(imported.ssm.asm, 'param'))
 
     def test_trace_parameter(self):
@@ -11372,10 +11435,10 @@ a")
         self.assertEqual(m.some_state, torch.zeros(1) + 100)
 
         # Export and ensure ignored code not present
-        pp, constants = _jit_python_print(m._get_method('forward'))
+        pp, constants = _jit_python_print(m.forward)
         printed = torch.jit.ScriptModule()
         ppv = "op_version_set = 0\n{}".format(pp)
-        torch._C._jit_import_methods(printed, ppv, constants)
+        torch._C._jit_import_methods(printed._c, ppv, constants)
         self.assertIn('IgnoredPythonOp', ppv)
         self.assertNotIn('ignored_code', ppv)
 
@@ -11548,7 +11611,7 @@ a")
 
         self.run_pass('constant_propagation', foo.graph)
         m = torch.jit.ScriptModule()
-        m._create_method_from_graph("forward", foo.graph)
+        m._c._create_method_from_graph("forward", foo.graph)
         self.getExportImportCopy(m)
 
     def test_attribute_serialization(self):
@@ -12807,28 +12870,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         # We should not have combined the two multiplications into
         # the same group; they should each be a separate DiffGraph
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
-
-    def test_mutation_subgraph_inlining(self):
-        # cannot move a node which has writers into a differentiable subgraph,
-        # bc CSE might lose context that it has writers
-
-        def fn(x):
-            a = x.t()
-            a = a + 1
-            c = x.t()
-            c = c + 1
-            e = a + c
-            b = a.add_(x)
-            d = c.add_(x)
-            return e, b, d
-
-        fn_script = torch.jit.script(fn)
-        outs1 = fn_script(torch.tensor(0.5, requires_grad=True))
-        outs2 = fn(torch.tensor(0.5, requires_grad=True))
-        for i in range(len(outs1)):
-            self.assertEqual(outs1[i], outs2[i])
-        graph = fn_script.graph_for(torch.tensor(0.5, requires_grad=True))
-        FileCheck().check_not("DifferentiableGraph").run(graph)
 
 
 class TestCustomOperators(JitTestCase):
