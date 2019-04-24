@@ -214,8 +214,10 @@ std::pair<std::shared_ptr<Function>, std::vector<Slot>> Module::
     lower_first_class_method(Function* fn) {
   fn->ensure_defined();
   auto lowered = lower_graph(module_object(), *fn->graph());
+  CompilationUnit cu;
+  cu.set_optimized(fn->is_optimized());
   std::shared_ptr<Function> new_func =
-      CompilationUnit().create_function(fn->name(), lowered.first);
+      cu.create_function(fn->name(), lowered.first);
 
   // generate the new schema
   // slice away the self argument
