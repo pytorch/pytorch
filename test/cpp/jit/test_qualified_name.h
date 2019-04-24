@@ -18,10 +18,10 @@ void testQualifiedName() {
     ASSERT_EQ(baz.qualifiedName(), "foo.bar.baz");
     ASSERT_EQ(baz.prefix(), "foo.bar");
     ASSERT_EQ(baz.name(), "baz");
-    auto empty = QualifiedName("");
-    ASSERT_EQ(empty.qualifiedName(), "");
-    ASSERT_EQ(empty.prefix(), "");
-    ASSERT_EQ(empty.name(), "");
+    auto nullstate = QualifiedName();
+    ASSERT_EQ(nullstate.qualifiedName(), "");
+    ASSERT_EQ(nullstate.prefix(), "");
+    ASSERT_EQ(nullstate.name(), "");
   }
   {
     // Test dotted construction
@@ -40,6 +40,7 @@ void testQualifiedName() {
     ASSERT_ANY_THROW(QualifiedName("foo..bar"));
     ASSERT_ANY_THROW(QualifiedName(".foo.bar"));
     ASSERT_ANY_THROW(QualifiedName("foo.bar."));
+    ASSERT_ANY_THROW(QualifiedName(""));
   }
   {
     // test equality api
