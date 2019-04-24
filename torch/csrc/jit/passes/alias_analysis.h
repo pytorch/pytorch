@@ -47,7 +47,13 @@ class AliasDb {
 
   // Does `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
-  bool mayContainAlias(const Value* a, const Value* b) const;
+  bool mayContainAlias(Value* a, Value* b) const;
+
+  // Do any values in group `a` share a memory location or hold in memory
+  // any element that exists in group `b`
+  bool mayContainAlias(
+      const at::ArrayRef<Value*>& a,
+      const at::ArrayRef<Value*>& b) const;
 
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Value* a, const Value* b) const;
@@ -189,6 +195,7 @@ class AliasDb {
   void analyzeBroadcastingChunk(Node* node);
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
+  void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeTupleConstruct(Node* node);
   void analyzeCustomOp(Node* node);
