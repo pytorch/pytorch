@@ -120,6 +120,20 @@ void Module::to_impl(
         non_blocking);
     variable.set_data(new_data);
   }
+  // Then convert every tensor attributes (buffers).
+  for (auto& parameter : get_attributes()) {
+    if (parameter.type()->isSubtypeOf(TensorType::get())) {
+      // Need to access the `at::Tensor` as a `Variable` here.
+      autograd::Variable variable = parameter.value().toTensor();
+      at::Tensor data = variable.data();
+      // Use the data's original device or dtype if not supplied here.
+      auto new_data = data.to(
+          device.value_or(data.device()),
+          dtype.value_or(data.scalar_type()),
+          non_blocking);
+      variable.set_data(new_data);
+    }
+  }
 }
 
 // lower_first_class_method and lift_lowered_method are transitionary functions
