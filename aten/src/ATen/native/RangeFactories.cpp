@@ -41,7 +41,7 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   return result;
 }
 
-Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
+Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps, double base) {
   AT_CHECK(steps >= 0, "number of steps must be non-negative");
 
   if (result.numel() != steps) {
@@ -52,10 +52,10 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   if (steps == 0) {
     // skip
   } else if (steps == 1) {
-    r.fill_(std::pow(10.0, start.to<double>()));
+    r.fill_(std::pow(base, start.to<double>()));
   } else {
     AT_DISPATCH_FLOATING_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
-      scalar_t base10 = 10;
+      scalar_t scalar_base = static_cast<scalar_t>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t *data_ptr = r.data<scalar_t>();
@@ -63,7 +63,7 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
       at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
         scalar_t is = static_cast<scalar_t>(p_begin);
         for (int64_t i = p_begin; i < p_end; ++i, ++is) {
-          data_ptr[i]= std::pow(base10, scalar_start + step*is);
+          data_ptr[i]= std::pow(scalar_base, scalar_start + step*is);
         }
       });
     });

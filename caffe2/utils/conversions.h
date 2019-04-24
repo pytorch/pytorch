@@ -19,6 +19,11 @@
 #define CONVERSIONS_DECL inline
 #endif
 
+#ifdef _MSC_VER
+#undef IN
+#undef OUT
+#endif
+
 namespace caffe2 {
 
 namespace convert {

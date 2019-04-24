@@ -4118,6 +4118,43 @@ a")
             RuntimeError,
             "bool value of Tensor")
 
+    def test_list_sort(self):
+        template = dedent('''
+        def func():
+            li = {list_create}
+            li.sort()
+            return li
+        ''')
+
+        lists = ["[]", "[1, 3, 2]", "[True, False, True]", "[1.2, .2, 3.2]",
+                 "[torch.tensor(1.0), torch.tensor(0.2), torch.tensor(0.5)]",
+                 "[torch.tensor(5), torch.tensor(-2), torch.tensor(4)]"]
+        for li in lists:
+            code = template.format(list_create=li)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            t1 = cu.func()
+            t2 = scope['func']()
+            self.assertEqual(t1, t2)
+
+        def test_fail(x):
+            # type: (List[Tensor]) -> List[Tensor]
+            x.sort()
+            return x
+
+        self.checkScriptRaisesRegex(test_fail, (([torch.zeros([2]), torch.zeros([2])],)), Exception,
+                                    "bool value of Tensor with more than one value")
+
+        @torch.jit.script
+        def test_mutation():
+            a = [1, 2, 3]
+            a.sort()
+            return a
+
+        test_mutation()
+        FileCheck().check("aten::sort").run(test_mutation.graph_for())
+
     def test_list_slice(self):
         def test_regular_slice():
             a = [0, 1, 2, 3, 4]
