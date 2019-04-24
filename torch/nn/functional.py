@@ -2955,6 +2955,8 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
+    print("margin ", margin)
+    print("p ", p)
     return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps,
                                      swap, reduction_enum)
 

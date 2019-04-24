@@ -6364,6 +6364,7 @@ class TestNN(NNTestCase):
 
     def test_triplet_margin_loss_swap_no_reduce(self):
         input1 = torch.randn(5, 10, requires_grad=True)
+        print(input1.dtype)
         input2 = torch.randn(5, 10, requires_grad=True)
         input3 = torch.randn(5, 10, requires_grad=True)
         self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(

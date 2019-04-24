@@ -45,14 +45,22 @@ Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double mar
 
 Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const Tensor& negative, double margin,
                            double p, double eps, bool swap, int64_t reduction) {
+  std::cout << "triplet_margin_loss 1" << std::endl;
+  std::cout << "positive " << positive.dtype() << std::endl;
+  std::cout << "negative " << negative.dtype() << std::endl;
   auto dist_pos = at::pairwise_distance(anchor, positive, p, eps);
   auto dist_neg = at::pairwise_distance(anchor, negative, p, eps);
   if (swap) {
+    std::cout << "triplet_margin_loss 2" << std::endl;
     auto dist_swap = at::pairwise_distance(positive, negative, p, eps);
     dist_neg = at::min(dist_neg, dist_swap);
   }
+  std::cout << "triplet_margin_loss 3" << std::endl;
   auto output = at::clamp_min(margin + dist_pos - dist_neg, 0);
-  return apply_loss_reduction(output, reduction);
+  std::cout << "triplet_margin_loss 4" << std::endl;
+  auto res = apply_loss_reduction(output, reduction);
+  std::cout << "res " << res.dtype() << std::endl;
+  return res;
 }
 
 Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {

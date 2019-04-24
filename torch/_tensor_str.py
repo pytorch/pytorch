@@ -84,8 +84,19 @@ class _Formatter(object):
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
+<<<<<<< HEAD
             nonzero_finite_vals = torch.masked_select(tensor_view, (torch.isfinite(tensor_view) & tensor_view.ne(0)).to(torch.bool))
 
+=======
+            #print("\n\n here:")
+            #a = torch.isfinite(tensor_view)
+            #print("a: ", a)
+            #b = tensor_view.ne(0).byte()
+            #print(b)
+            #nonzero_finite_vals = torch.masked_select(tensor_view, a & b)
+            print("yolo")
+            nonzero_finite_vals = torch.masked_select(tensor_view, torch.isfinite(tensor_view) & tensor_view.ne(0).byte())
+>>>>>>> debug
             if nonzero_finite_vals.numel() == 0:
                 # no valid number, do nothing
                 return

@@ -564,19 +564,20 @@ auto Engine::execute(const edge_list& roots,
                      bool keep_graph,
                      bool create_graph,
                      const edge_list& outputs) -> variable_list {
+  std::cout << "exec" << std::endl;
   std::call_once(start_threads_flag, &Engine::start_threads, this);
-
+  std::cout << "1" << std::endl;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
-
+  std::cout << "2" << std::endl;
   // Callbacks are only valid for the duration of this run and should always be cleared
   ClearCallbacks _cb_guard(final_callbacks, post_callbacks_lock);
 
   GraphTask graph_task(keep_graph, create_graph);
   std::unique_lock<std::mutex> lock(graph_task.mutex);
-
+  std::cout << "3" << std::endl;
   // Now compute the dependencies for all executable functions and queue the root
   auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
   compute_dependencies(graph_root.get(), graph_task);
@@ -584,7 +585,7 @@ auto Engine::execute(const edge_list& roots,
     graph_task.init_to_execute(*graph_root, outputs);
   }
   ready_queue(at::kCPU).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
-
+  std::cout << "4" << std::endl;
   // Not a worker
   if (worker_device == NO_DEVICE) {
     // Wait for all tasks to complete
@@ -599,7 +600,7 @@ auto Engine::execute(const edge_list& roots,
     lock.unlock();
     thread_main(&graph_task);
   }
-
+  std::cout << "5" << std::endl;
   // Check for an exception while running backwards
   if (graph_task.has_error.load()) {
     std::rethrow_exception(graph_task.exception);
@@ -608,7 +609,7 @@ auto Engine::execute(const edge_list& roots,
   if (!graph_task.not_ready.empty()) {
     throw std::runtime_error("could not compute gradients for some functions");
   }
-
+  std::cout << "6" << std::endl;
   // Unlocking is necessary, because the callback can register
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
@@ -621,7 +622,7 @@ auto Engine::execute(const edge_list& roots,
     final_callbacks[i]();
     cb_lock.lock();
   }
-
+  std::cout << "exec2" << std::endl;
   return graph_task.captured_vars;
 }
 

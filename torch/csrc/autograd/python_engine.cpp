@@ -89,6 +89,7 @@ static void _maybe_reinitialize_engine_after_fork() {
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
+  std::cout << "1" << std::endl;
   _maybe_reinitialize_engine_after_fork();
   PyObject *tensors = nullptr;
   PyObject *grad_tensors = nullptr;
@@ -103,7 +104,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OObb|Ob", (char**)accepted_kwargs,
         &tensors, &grad_tensors, &keep_graph, &create_graph, &inputs, &allow_unreachable))
     return nullptr;
-
+std::cout << "2" << std::endl;
   THPUtils_assert(PyTuple_Check(tensors), "tensors argument is expected to "
       "be a tuple, but got %s", THPUtils_typename(tensors));
   THPUtils_assert(PyTuple_Check(grad_tensors), "grad_tensors argument is "
@@ -127,7 +128,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(gradient_edge.function,
         "element %d of tensors does not require grad and does not have a grad_fn", i);
     roots.push_back(std::move(gradient_edge));
-
+std::cout << "3" << std::endl;
     PyObject *grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
       grads.push_back(((THPVariable*)grad)->cdata);
@@ -138,7 +139,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
           "element %d of gradients tuple is None, but the corresponding Tensor requires grad");
     }
   }
-
+std::cout << "4" << std::endl;
   std::vector<Edge> output_edges;
   if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
@@ -162,28 +163,37 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       }
     }
   }
-
+std::cout << "5" << std::endl;
   variable_list outputs;
   {
     AutoNoGIL no_gil;
+
+    std::cout << "6" << std::endl;
     outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges);
+    std::cout << "7" << std::endl;
   }
 
+  std::cout << "8" << std::endl;
   if (inputs != nullptr) {
+    std::cout << "9" << std::endl;
     int num_inputs = PyTuple_GET_SIZE(inputs);
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
     if (!py_outputs) return nullptr;
+    std::cout << "10" << std::endl;
     for (int i = 0; i < num_inputs; i++) {
+      std::cout << "11" << std::endl;
       THPUtils_assert(allow_unreachable || outputs[i].defined(), "One of the "
                       "differentiated Tensors appears to not have been used "
                       "in the graph. Set allow_unused=True if this is the "
                       "desired behavior.");
       PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));
     }
+    std::cout << "12" << std::endl;
     return py_outputs.release();
   } else {
     Py_RETURN_NONE;
   }
+  std::cout << "666" << std::endl;
   END_HANDLE_TH_ERRORS
 }
 
