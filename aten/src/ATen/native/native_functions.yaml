@@ -445,6 +445,7 @@
   dispatch:
     CPU: _s_copy__cpu
     CUDA: _s_copy__cuda
+    QuantizedCPU: _s_copy__quantized
 
 - func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   cpu_half: True
@@ -688,7 +689,7 @@
 
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0) -> Tensor
   dispatch:
-    CPU: empty_affine_quantized_cpu
+    QuantizedCPU: empty_affine_quantized_cpu
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   variants: method
