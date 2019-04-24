@@ -136,7 +136,7 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
     }
     
     if (full) {
-        auto mask = target > 1;
+        auto mask = (target > 1).toType(torch::kLong));
         loss.index_select(0, mask) += (target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target)).index_select(0, mask);
     }
 
