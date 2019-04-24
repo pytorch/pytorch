@@ -1928,7 +1928,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
         ret = input
         raise ValueError(reduction + " is not valid")
         
-    ret = torch.poissson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
+    ret = torch.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
     return ret
 
 
