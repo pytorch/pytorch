@@ -63,17 +63,16 @@ void propagateNode(Node* n) {
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
-    try {
+    if (canInsertConstant(outputs[i])) {
       auto new_output = graph->insertConstant(outputs[i]);
       if (outputs[i].isNone()) {
         new_output->setType(n->outputs()[i]->type());
       }
       n->outputs()[i]->replaceAllUsesWith(new_output);
-    } catch (constant_not_supported_error& err) {
-      // we cannot actually represent the IValue as a constant node,
-      // so we give up replacing it
+    } else {
+      // If we cannot insert the IValue as a
+      // constant, give up replacing it and let DCE remove it.
     }
-    // let dce elimination remove n
   }
 }
 

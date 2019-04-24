@@ -7,6 +7,12 @@
 namespace torch {
 namespace jit {
 
+bool canInsertConstant(const IValue& val) {
+  return val.isTensor() || val.isInt() || val.isDouble() || val.isBool() ||
+      val.isBoolList() || val.isIntList() || val.isTensorList() ||
+      val.isString() || val.isDevice() || val.isNone();
+}
+
 // IValue -> Constant node
 Value* insertConstant(
     Graph& g,

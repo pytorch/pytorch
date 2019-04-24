@@ -32,6 +32,11 @@ TORCH_API Value* insertConstant(
     c10::optional<SourceRange> loc = c10::nullopt,
     c10::optional<ScopePtr> scope = c10::nullopt);
 
+
+// Test if this IValue can be inserted into a graph as a constant
+TORCH_API bool canInsertConstant(const IValue& val);
+
+
 //////////////////////////////////////////////////////////////////////////////////
 // Helper for retrieving constants
 //////////////////////////////////////////////////////////////////////////////////
