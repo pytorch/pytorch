@@ -569,7 +569,7 @@ scalar_t THTensor_(minall)(THTensor *tensor)
   scalar_t theMin;
   scalar_t value;
 
-  if (THTensor_nDimensionLegacyAll(tensor) == 0){
+  if (THTensor_(nElement)(tensor) == 0){
     return std::numeric_limits<scalar_t>::max();
   }
 
@@ -590,7 +590,7 @@ scalar_t THTensor_(maxall)(THTensor *tensor)
   scalar_t theMax;
   scalar_t value;
 
-  if (THTensor_nDimensionLegacyAll(tensor) == 0){
+  if (THTensor_(nElement)(tensor) == 0){
     return std::numeric_limits<scalar_t>::lowest();
   }
 

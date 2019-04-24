@@ -904,6 +904,29 @@ class _TestTorchMixin(object):
     def test_max_with_inf(self):
         self._test_max_with_inf(self)
 
+    def test_max_empty(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            x = torch.ones(0, device=device)
+
+            self.assertTrue(x.byte().max().item() == 0)
+            self.assertTrue(x.short().max().item() == -2**15)
+            self.assertTrue(x.int().max().item() == -2**31)
+            self.assertTrue(x.long().max().item() == -2**63)
+
+            self.assertTrue(x.byte().min().item() == 2**8 - 1)
+            self.assertTrue(x.short().min().item() == 2**15 - 1)
+            self.assertTrue(x.int().min().item() == 2**31 - 1)
+            self.assertTrue(x.long().min().item() == 2**63 - 1)
+
+            # Checking underflow
+            self.assertTrue(x.float().max() == x.float().max() - 1)
+            self.assertTrue(x.double().max() == x.double().max() - 1)
+
+            # Checking overflow
+            self.assertTrue(x.float().min() == x.float().min() + 1)
+            self.assertTrue(x.double().min() == x.double().min() + 1)
+
     def test_min(self):
         self._testSelection(torch.min, min)
 
@@ -916,6 +939,11 @@ class _TestTorchMixin(object):
 
     def test_min_with_inf(self):
         self._test_min_with_inf(self)
+
+    def test_empty_max(self):
+        # To be done
+        g = torch.rand(0,4)
+        torch.max(g)
 
     @staticmethod
     def _test_norm(self, device):
