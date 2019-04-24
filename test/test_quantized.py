@@ -143,8 +143,8 @@ class TestQuantizedFC(unittest.TestCase):
     """Tests the correctness of the quantized::fc op."""
 
     def test_qfc(self):
-        qfc_prepack = torch.ops.quantized.fc_prepack
-        qfc = torch.ops.quantized.fc
+        qfc_packed = torch.ops.quantized.fbgemm_fc_packed
+        qfc = torch.ops.quantized.fbgemm_fc
 
         batch_size = 4
         input_channels = 16
@@ -190,7 +190,7 @@ class TestQuantizedFC(unittest.TestCase):
         Y_q_ref = qfc_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp)
 
         # Weight prepacking operator for quantized FC
-        W_prepack = qfc_prepack(torch.from_numpy(W_q), W_zp)
+        W_prepack = qfc_packed(torch.from_numpy(W_q), W_zp)
         [Y_q, Y_scale, Y_zp] = qfc(
             torch.from_numpy(X_q),
             X_scale,
