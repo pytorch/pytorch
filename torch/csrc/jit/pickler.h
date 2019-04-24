@@ -183,6 +183,10 @@ class Unpickler {
   const uint8_t* end_ptr_;
   const std::vector<at::Tensor>* tensor_table_;
   OpCode last_opcode_;
+
+  // When a GLOBAL opcode is hit, the corresponding PicklerClass is pushed. It
+  // is popped when a REDUCE opcode is found
+  std::vector<PicklerClass> globals_;
 };
 
 } // namespace jit
