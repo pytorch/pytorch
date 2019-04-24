@@ -85,6 +85,7 @@ accreal THTensor_(sumall)(THTensor *tensor)
     TH_TENSOR_APPLY(scalar_t, tensor, sum += *tensor_data;);
   }
   return sum;
+}
 
 void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
 {
