@@ -161,7 +161,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
   }
     Tensor input_flat_ = self.transpose(dim, 0);
     auto orig_sizes = input_flat_.sizes().vec();
-    input_flat_ = input_flat_.contiguous().view({input_flat.size(0), -1});
+    input_flat_ = input_flat_.contiguous().view({input_flat_.size(0), -1});
 
   int64_t num_inp = self.size(dim);
   auto options = self.options().dtype(kLong);
