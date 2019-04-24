@@ -345,6 +345,15 @@ void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
 void addInputs(Node* n, const char* name, bool value) {
   detail::genericAddInput(n, value);
 }
+void addInputs(Node* n, const char* name /* unused */, const c10::optional<bool>& value) {
+  if (value) {
+    detail::genericAddInput(n, *value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone(BoolType::get()))->output();
+    n->addInput(none);
+  }
+}
 void addInputs(Node* n, const char* name, double value) {
   detail::genericAddInput(n, value);
 }
