@@ -19,6 +19,12 @@ namespace serialize {
 InputArchive::InputArchive()
     : module_(std::make_shared<jit::script::Module>()) {}
 
+bool InputArchive::has_key(const std::string& key) {
+  auto param = module_->find_parameter(key);
+  auto buffer = module_->find_buffer(key);
+  return param != nullptr || buffer != nullptr;
+}
+
 void InputArchive::read(
     const std::string& key,
     Tensor& tensor,

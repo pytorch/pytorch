@@ -40,6 +40,32 @@ void save(const Value& value, SaveToArgs&&... args) {
   archive.save_to(std::forward<SaveToArgs>(args)...);
 }
 
+/// Serializes the given `tensor_vec` of type `std::vector<torch::Tensor>`.
+///
+/// To perform the serialization, a `serialize::OutputArchive` is constructed,
+/// and all arguments after the `tensor_vec` are forwarded to its `save_to`
+/// method. For example, you can pass a filename, or an `ostream`.
+///
+/// \rst
+/// .. code-block:: cpp
+///
+///   std::vector<torch::Tensor> tensor_vec = { torch::randn({1, 2}), torch::randn({3, 4}) };
+///   torch::save(tensor_vec, "my_tensor_vec.pt");
+///
+///   std::vector<torch::Tensor> tensor_vec = { torch::randn({5, 6}), torch::randn({7, 8}) };
+///   std::ostringstream stream;
+///   torch::save(tensor_vec, stream);
+/// \endrst
+template <typename... SaveToArgs>
+void save(const std::vector<torch::Tensor>& tensor_vec, SaveToArgs&&... args) {
+  serialize::OutputArchive archive;
+  for (size_t i = 0; i < tensor_vec.size(); i++) {
+    auto& value = tensor_vec[i];
+    archive.write(std::to_string(i), value);
+  }
+  archive.save_to(std::forward<SaveToArgs>(args)...);
+}
+
 /// Deserializes the given `value`.
 /// There must be an overload of `operator>>` between `serialize::InputArchive`
 /// and `Value` for this method to be well-formed. Currently, such an overload
@@ -71,5 +97,39 @@ void load(Value& value, LoadFromArgs&&... args) {
   serialize::InputArchive archive;
   archive.load_from(std::forward<LoadFromArgs>(args)...);
   archive >> value;
+}
+
+/// Deserializes the given `tensor_vec` of type `std::vector<torch::Tensor>`.
+///
+/// To perform the serialization, a `serialize::InputArchive` is constructed,
+/// and all arguments after the `value` are forwarded to its `load_from` method.
+/// For example, you can pass a filename, or an `istream`.
+///
+/// \rst
+/// .. code-block:: cpp
+///
+///   std::vector<torch::Tensor> tensor_vec;
+///   torch::load(tensor_vec, "my_tensor_vec.pt");
+///
+///   std::vector<torch::Tensor> tensor_vec;
+///   std::istringstream stream("...");
+///   torch::load(tensor_vec, stream);
+/// \endrst
+template <typename... LoadFromArgs>
+void load(std::vector<torch::Tensor>& tensor_vec, LoadFromArgs&&... args) {
+  serialize::InputArchive archive;
+  archive.load_from(std::forward<LoadFromArgs>(args)...);
+
+  // NOTE: The number of elements in the serialized `std::vector<torch::Tensor>`
+  // is not known ahead of time, so we need a while-loop to increment the index,
+  // and use `archive.has_key(...)` to check whether we have reached the end of
+  // the serialized `std::vector<torch::Tensor>`.
+  size_t index = 0;
+  while (archive.has_key(std::to_string(index))) {
+    torch::Tensor value;
+    archive.read(std::to_string(index), value);
+    tensor_vec.push_back(value);
+    index++;
+  }
 }
 } // namespace torch
