@@ -36,7 +36,6 @@ void badArgType(const T& v) {
 }
 
 thread_local std::shared_ptr<TracingState> tracing_state;
-
 } // namespace detail
 
 TORCH_API std::function<void()> pauseTracing() {
@@ -103,9 +102,12 @@ Value* getValueTrace(const IValue& var) {
 
     // Didn't find it. Bake in a constant
     if (ten.is_variable() && ten.requires_grad()) {
+      pauseTracing();
       std::ostringstream oss;
       oss << "Cannot insert a Tensor that requires grad as a constant. "
-          << "Consider making it a parameter or input, or detaching the gradient\n";
+          << "Consider making it a parameter or input, or detaching the gradient\n"
+          << "Tensor:\n"
+          << ten;
       throw std::runtime_error(oss.str());
     }
 
@@ -237,29 +239,31 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs) {
     } else if (auto dict_type = type->cast<DictType>()) {
       auto elem_pairs = input.toGenericDict()->elements();
       auto unpack_to_list = state->graph->insert(aten::values, {value});
-      auto list_unpack = state->graph->createListUnpack(unpack_to_list, elem_pairs.size());
+      auto list_unpack =
+          state->graph->createListUnpack(unpack_to_list, elem_pairs.size());
       auto unpack_node = state->graph->insertNode(list_unpack);
       auto elem_values = unpack_node->outputs();
 
       AT_ASSERT(elem_pairs.size() == elem_values.size());
 
       size_t i = 0;
-      for (const auto &pair : elem_pairs) {
-        elem_pairs[pair.first] = add_input(pair.second, dict_type->getValueType(), elem_values[i++]);
+      for (const auto& pair : elem_pairs) {
+        elem_pairs[pair.first] =
+            add_input(pair.second, dict_type->getValueType(), elem_values[i++]);
       }
 
       return c10::ivalue::GenericDict::create(std::move(elem_pairs));
     } else {
       AT_ERROR(
           "Only tensors or (possibly nested) dict or tuples of tensors can be "
-          "inputs to traced functions. Got ", type);
+          "inputs to traced functions. Got ",
+          type);
     }
   };
   size_t i = 0;
   auto input_types = inputs.types()->elements();
   for (IValue& input : inputs.stack()) {
-    input = add_input(
-        input, input_types[i++], state->graph->addInput());
+    input = add_input(input, input_types[i++], state->graph->addInput());
   }
   return std::make_pair(state, inputs.stack());
 }
@@ -629,7 +633,6 @@ void _do_warn(const char* _reason, const char* _kind) {
 void setWarn(warn_fn_type fn) {
   warn_callback.store(fn);
 }
-
 } // namespace tracer
 } // namespace jit
 } // namespace torch
