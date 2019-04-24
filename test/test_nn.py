@@ -2089,6 +2089,42 @@ class TestNN(NNTestCase):
         self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3, 8, 1, 3]]))
         self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(6, 3))
 
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_embedding_sparse_half_backward(self):
+        # same as test_embedding_sparse_backward above but testing half types in
+        # cuda. cpu sum not supported.
+        embedding = nn.Embedding(10, 3, sparse=True).half()
+        longTensor = torch.LongTensor([[7, 1, 3]])
+        ones = torch.tensor(1.).expand(3, 3).half()
+        longTwice = torch.LongTensor([[7, 1, 3, 7, 1, 3]])
+        onesTwice = torch.tensor(1.).expand(6, 3)
+
+        embedding = embedding.cuda()
+        longTensor = longTensor.cuda()
+        ones = ones.cuda()
+        longTwice = longTwice.cuda()
+        onesTwice = onesTwice.cuda()
+
+        embedding.zero_grad()
+        embedding(longTensor).sum().backward()
+        self.assertEqual(embedding.weight.grad._indices(), longTensor)
+        self.assertEqual(embedding.weight.grad._values(), ones)
+
+        embedding.zero_grad()
+        embedding(longTensor).sum().backward()
+        embedding(longTensor).sum().backward()
+        self.assertEqual(embedding.weight.grad._indices(), longTwice)
+        self.assertEqual(embedding.weight.grad._values(), onesTwice)
+
+        embedding.zero_grad()
+        embedding(longTensor[0]).sum().backward()
+        longTensor[0, 0] = 8
+        embedding(longTensor).sum().backward()
+        longTwice[0, 3] = 8
+        self.assertEqual(embedding.weight.grad._indices(), longTwice)
+        self.assertEqual(embedding.weight.grad._values(), onesTwice)
+
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx=0)
         input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
@@ -2374,7 +2410,11 @@ class TestNN(NNTestCase):
 
         # We have more floating point error here because we are dealing with larger numbers
         if backward_prec is None:
-            needed_prec = dtype2prec[dtype] * 2
+            # torch.half is particularly imprecise
+            if dtype == torch.half:
+                needed_prec = dtype2prec[dtype] * 3
+            else:
+                needed_prec = dtype2prec[dtype] * 2
         else:
             needed_prec = backward_prec
         self.assertEqual(es_weight_grad, e.weight.grad, needed_prec)
@@ -2730,10 +2770,9 @@ class TestNN(NNTestCase):
         self._test_EmbeddingBag(True, 'sum', False, dtype)
         self._test_EmbeddingBag(True, 'mean', False, dtype)
         self._test_EmbeddingBag(True, 'max', False, dtype)
-        if dtype != torch.half:
-            # torch.cuda.sparse.HalfTensor is not enabled.
-            self._test_EmbeddingBag(True, 'sum', True, dtype)
-            self._test_EmbeddingBag(True, 'mean', True, dtype)
+
+        self._test_EmbeddingBag(True, 'sum', True, dtype)
+        self._test_EmbeddingBag(True, 'mean', True, dtype)
 
     def test_fractional_max_pool2d(self):
         x = torch.randn(1, 2, 7, 7, requires_grad=True)
