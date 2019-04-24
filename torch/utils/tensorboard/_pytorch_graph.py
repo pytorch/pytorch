@@ -37,14 +37,14 @@ class NodeBase(object):
 
 
 class NodePy(NodeBase):
-    def __init__(self, NodeCpp, valid_methods):
-        super(NodePy, self).__init__(NodeCpp)
+    def __init__(self, node_cpp, valid_methods):
+        super(NodePy, self).__init__(node_cpp)
         self.valid_methods = valid_methods[:]
         self.inputs = []
 
         for m in self.valid_methods:
             if m == 'inputs' or m == 'outputs':
-                list_of_node = list(getattr(NodeCpp, m)())
+                list_of_node = list(getattr(node_cpp, m)())
                 io_unique_names = []
                 io_tensor_sizes = []
                 for n in list_of_node:
@@ -58,14 +58,14 @@ class NodePy(NodeBase):
                 setattr(self, m + 'tensor_size', io_tensor_sizes)
 
             else:
-                setattr(self, m, getattr(NodeCpp, m)())
+                setattr(self, m, getattr(node_cpp, m)())
 
 
 class NodePyIO(NodePy):
-    def __init__(self, NodeCpp, input_or_output=None):
-        super(NodePyIO, self).__init__(NodeCpp, methods_IO)
+    def __init__(self, node_cpp, input_or_output=None):
+        super(NodePyIO, self).__init__(node_cpp, methods_IO)
         try:
-            tensor_size = NodeCpp.type().sizes()
+            tensor_size = node_cpp.type().sizes()
         except RuntimeError:
             tensor_size = [1, ]  # fail when constant model is used.
         self.tensor_size = tensor_size
@@ -76,18 +76,18 @@ class NodePyIO(NodePy):
 
 
 class NodePyOP(NodePy):
-    def __init__(self, NodeCpp):
-        super(NodePyOP, self).__init__(NodeCpp, methods_OP)
-        self.attributes = str({k: NodeCpp[k] for k in NodeCpp.attributeNames()}).replace("'", ' ')
-        self.kind = NodeCpp.kind()
+    def __init__(self, node_cpp):
+        super(NodePyOP, self).__init__(node_cpp, methods_OP)
+        self.attributes = str({k: node_cpp[k] for k in node_cpp.attributeNames()}).replace("'", ' ')
+        self.kind = node_cpp.kind()
 
 
 class GraphPy(object):
     def __init__(self):
         self.nodes_op = []
         self.nodes_io = OrderedDict()
-        self.uniqueNameToScopedName = {}
-        self.shallowestScopeName = 'default'
+        self.unique_name_to_scoped_name = {}
+        self.shallowest_scope_name = 'default'
         self.scope_name_appeared = []
 
     def append(self, x):
@@ -114,27 +114,27 @@ class GraphPy(object):
     def find_common_root(self):
         for fullscope in self.scope_name_appeared:
             if fullscope:
-                self.shallowestScopeName = fullscope.split('/')[0]
+                self.shallowest_scope_name = fullscope.split('/')[0]
 
     def populate_namespace_from_OP_to_IO(self):
         for node in self.nodes_op:
             for input_node_id in node.inputs:
-                self.uniqueNameToScopedName[input_node_id] = node.scopeName + '/' + input_node_id
+                self.unique_name_to_scoped_name[input_node_id] = node.scopeName + '/' + input_node_id
 
         for key, node in self.nodes_io.items():
             if type(node) == NodeBase:
-                self.uniqueNameToScopedName[key] = node.scope + '/' + node.uniqueName
+                self.unique_name_to_scoped_name[key] = node.scope + '/' + node.uniqueName
             if hasattr(node, 'input_or_output'):
-                self.uniqueNameToScopedName[key] = node.input_or_output + '/' + node.uniqueName
+                self.unique_name_to_scoped_name[key] = node.input_or_output + '/' + node.uniqueName
             if hasattr(node, 'scope'):
-                if node.scope == '' and self.shallowestScopeName:
-                    self.uniqueNameToScopedName[node.uniqueName] = self.shallowestScopeName + '/' + node.uniqueName
+                if node.scope == '' and self.shallowest_scope_name:
+                    self.unique_name_to_scoped_name[node.uniqueName] = self.shallowest_scope_name + '/' + node.uniqueName
 
         # replace name
         for key, node in self.nodes_io.items():
-            self.nodes_io[key].inputs = [self.uniqueNameToScopedName[node_input_id] for node_input_id in node.inputs]
-            if node.uniqueName in self.uniqueNameToScopedName:
-                self.nodes_io[key].uniqueName = self.uniqueNameToScopedName[node.uniqueName]
+            self.nodes_io[key].inputs = [self.unique_name_to_scoped_name[node_input_id] for node_input_id in node.inputs]
+            if node.uniqueName in self.unique_name_to_scoped_name:
+                self.nodes_io[key].uniqueName = self.unique_name_to_scoped_name[node.uniqueName]
 
     def to_proto(self):
         nodes = []
