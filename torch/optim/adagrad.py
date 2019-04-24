@@ -32,18 +32,30 @@ class Adagrad(Optimizer):
         defaults = dict(lr=lr, lr_decay=lr_decay, weight_decay=weight_decay,
                         initial_accumulator_value=initial_accumulator_value)
         super(Adagrad, self).__init__(params, defaults)
-
-        for group in self.param_groups:
-            for p in group['params']:
-                state = self.state[p]
-                state['step'] = 0
-                state['sum'] = torch.full_like(p.data, initial_accumulator_value)
+        self._is_share_memory = False
 
     def share_memory(self):
+        self._is_share_memory = True
+        # ensure the existing state is shared memory
         for group in self.param_groups:
             for p in group['params']:
                 state = self.state[p]
-                state['sum'].share_memory_()
+                if len(state) != 0:
+                    state['sum'].share_memory_()
+
+    def __getstate__(self):
+        base_dict = super(Adagrad, self).__getstate__()
+        base_dict['_is_share_memory'] = self._is_share_memory
+        return base_dict
+
+    def state_dict(self):
+        base_state_dict = super(Adagrad, self).state_dict()
+        base_state_dict['_is_share_memory'] = self._is_share_memory
+        return base_state_dict
+
+    def load_state_dict(self, state_dict):
+        super(Adagrad, self).load_state_dict(state_dict)
+        self._is_share_memory = state_dict.get('_is_share_memory', False)
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -63,6 +75,13 @@ class Adagrad(Optimizer):
 
                 grad = p.grad.data
                 state = self.state[p]
+
+                # state initialization
+                if len(state) == 0:
+                    state['step'] = 0
+                    state['sum'] = torch.full_like(p.data, group['initial_accumulator_value'])
+                    if self._is_share_memory:
+                        state['sum'].share_memory_()
 
                 state['step'] += 1
 

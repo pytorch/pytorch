@@ -4118,6 +4118,43 @@ a")
             RuntimeError,
             "bool value of Tensor")
 
+    def test_list_sort(self):
+        template = dedent('''
+        def func():
+            li = {list_create}
+            li.sort()
+            return li
+        ''')
+
+        lists = ["[]", "[1, 3, 2]", "[True, False, True]", "[1.2, .2, 3.2]",
+                 "[torch.tensor(1.0), torch.tensor(0.2), torch.tensor(0.5)]",
+                 "[torch.tensor(5), torch.tensor(-2), torch.tensor(4)]"]
+        for li in lists:
+            code = template.format(list_create=li)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            t1 = cu.func()
+            t2 = scope['func']()
+            self.assertEqual(t1, t2)
+
+        def test_fail(x):
+            # type: (List[Tensor]) -> List[Tensor]
+            x.sort()
+            return x
+
+        self.checkScriptRaisesRegex(test_fail, (([torch.zeros([2]), torch.zeros([2])],)), Exception,
+                                    "bool value of Tensor with more than one value")
+
+        @torch.jit.script
+        def test_mutation():
+            a = [1, 2, 3]
+            a.sort()
+            return a
+
+        test_mutation()
+        FileCheck().check("aten::sort").run(test_mutation.graph_for())
+
     def test_list_slice(self):
         def test_regular_slice():
             a = [0, 1, 2, 3, 4]
@@ -5833,6 +5870,66 @@ a")
             return torch.tensor([[[li]]])
 
         self.checkScript(func, ())
+
+    def test_tensor_shape_prop(self):
+        template = dedent('''
+        def func():
+            li = {list_create}
+            return torch.tensor(li)
+        ''')
+
+        list_input = ["[1]", "[False]", "[2.5]", "0.5", "1", "False", "[[1]]"]
+        expected_shape = ["Long(*)", ("Byte(*)"), "Double(*)", "Double()", "Long()", "Byte()", "Long(*, *)"]
+
+        for list_i, expect in zip(list_input, expected_shape):
+            code = template.format(list_create=list_i)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            g = cu.func
+            torch._C._jit_pass_complete_shape_analysis(g.graph, (), False)
+            FileCheck().check(expect).check("aten::tensor").run(g.graph)
+
+        @torch.jit.script
+        def test_dtype(inp_dtype):
+            # type: (int) -> Tuple[Tensor, Tensor]
+            a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
+            return a, torch.tensor(1.0, dtype=inp_dtype)
+
+        test_dtype(5)
+        g = test_dtype.graph_for(5)
+        # first should have type set second should not
+        FileCheck().check("Float() = aten::tensor").check("Tensor = aten::tensor").run(g)
+
+    def test_tensor_requires_grad(self):
+        @torch.jit.script
+        def test(b):
+            # type: (bool) -> Tuple[Tensor, Tensor, Tensor]
+            a = torch.tensor(1., requires_grad=b)
+            b = torch.tensor(1., requires_grad=True)
+            c = torch.tensor(1., requires_grad=False)
+            return a, b, c
+
+        g = test.graph_for(True)
+        out = next(g.outputs())
+        out_inp = list(out.node().inputs())
+
+        self.assertTrue(out_inp[0].requires_grad())
+        self.assertTrue(out_inp[1].requires_grad())
+        self.assertFalse(out_inp[2].requires_grad())
+
+    def test_grad_from_script(self):
+        def test():
+            a = torch.tensor(2.5, requires_grad=True)
+            b = a * 2
+            return a, b
+
+        a, b = test()
+        b.backward()
+
+        a_script, b_script = torch.jit.script(test)()
+        b_script.backward()
+        self.assertEqual(a.grad, a_script.grad)
 
     def test_torch_tensor(self):
         template = dedent('''
