@@ -787,7 +787,7 @@ def create_generic(top_env, declarations):
         # dispatch to self if it's a parameter
         def is_any_tensor_type(formal):
             return (formal['dynamic_type'] == 'Tensor' or formal['dynamic_type'] == 'ByteTensor'
-                    or formal['dynamic_type'] == 'IndexTensor')
+                    or formal['dynamic_type'] == 'IndexTensor' or formal['dynamic_type'] == 'BoolTensor')
 
         for formal in formals:
             if formal['name'] == 'self' and is_any_tensor_type(formal) and not formal.get('is_nullable', False):
