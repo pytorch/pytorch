@@ -14,15 +14,15 @@ from tensorboard.compat.proto.event_pb2 import Event
 from tensorboard.compat.proto import event_pb2
 from tensorboard.summary.writer.event_file_writer import EventFileWriter
 
-from .embedding import make_mat, make_sprite, make_tsv, append_pbtxt
-from .onnx_graph import load_onnx_graph
-from .pytorch_graph import graph
+from ._convert_np import make_np
+from ._embedding import make_mat, make_sprite, make_tsv, append_pbtxt
+from ._onnx_graph import load_onnx_graph
+from ._pytorch_graph import graph
+from ._utils import figure_to_image
 from .summary import (
     scalar, histogram, histogram_raw, image, audio, text,
     pr_curve, pr_curve_raw, video, custom_scalars, image_boxes
 )
-from ._utils import figure_to_image
-from ._convert_np import make_np
 
 
 class FileWriter(object):
@@ -343,7 +343,7 @@ class SummaryWriter(object):
             walltime (float): Optional override default walltime (time.time()) of event
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. You can use ``torchvision.utils.make_grid()`` to
-            convert a batch of tensor into 3xHxW format or call ``add_images`` and let tensorboardX do the job.
+            convert a batch of tensor into 3xHxW format or call ``add_images`` and let us do the job.
             Tensor with :math:`(1, H, W)`, :math:`(H, W)`, :math:`(H, W, 3)` is also suitible as long as
             corresponding ``dataformats`` argument is passed. e.g. CHW, HWC, HW.
         """
@@ -502,7 +502,7 @@ class SummaryWriter(object):
                 return
             from caffe2.proto import caffe2_pb2
             from caffe2.python import core
-            from .caffe2_graph import (
+            from ._caffe2_graph import (
                 model_to_graph_def, nets_to_graph_def, protos_to_graph_def
             )
             # notimporterror should be already handled when checking self.caffe2_enabled

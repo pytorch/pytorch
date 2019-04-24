@@ -43,12 +43,12 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   pip install -q hypothesis --user
 
   # TODO: move this to Docker
-  python_version=`python -c 'import platform; print(platform.python_version())'|cut -c1`
-  echo $python_version
-  if [[ $python_version == "2" ]]; then
-    pip install -q http://m100.nthu.edu.tw/~s100062805/tensorboard/tensorboard-1.14.0a0-py2-none-any.whl --user
+  PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
+  echo $PYTHON_VERSION
+  if [[ $PYTHON_VERSION == "2" ]]; then
+    pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl --user
   else
-    pip install -q http://m100.nthu.edu.tw/~s100062805/tensorboard/tensorboard-1.14.0a0-py3-none-any.whl --user
+    pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl --user
   fi
 
   # mypy will fail to install on Python <3.4.  In that case,

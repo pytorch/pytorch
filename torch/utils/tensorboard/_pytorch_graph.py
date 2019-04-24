@@ -3,14 +3,13 @@ import time
 import torch
 
 from collections import OrderedDict
-from distutils.version import LooseVersion
 
 from tensorboard.compat.proto.config_pb2 import RunMetadata
 from tensorboard.compat.proto.graph_pb2 import GraphDef
 from tensorboard.compat.proto.step_stats_pb2 import StepStats, DeviceStepStats, NodeExecStats, AllocatorMemoryUsed
 from tensorboard.compat.proto.versions_pb2 import VersionDef
 
-from .proto_graph import Node_proto
+from ._proto_graph import Node_proto
 
 
 methods_OP = ['attributeNames', 'hasMultipleOutputs', 'hasUses', 'inputs',
@@ -18,11 +17,11 @@ methods_OP = ['attributeNames', 'hasMultipleOutputs', 'hasUses', 'inputs',
 methods_IO = ['node', 'offset', 'uniqueName']  # 'unique' <int> , 'type' <Tensor<class 'torch._C.Type'>>
 
 
-class Node_base(object):
-    def __init__(self, uniqueName=None, inputs=None, scope=None, tensorSize=None, op_type='UnSpecified', attributes=''):
+class NodeBase(object):
+    def __init__(self, uniqueName=None, inputs=None, scope=None, tensor_size=None, op_type='UnSpecified', attributes=''):
         self.uniqueName = uniqueName
         self.inputs = inputs
-        self.tensorSize = tensorSize
+        self.tensor_size = tensor_size
         self.kind = op_type
         self.attributes = attributes
         if scope is not None:
@@ -37,68 +36,68 @@ class Node_base(object):
         return '\n'.join(repr) + '\n\n'
 
 
-class Node_py(Node_base):
-    def __init__(self, Node_cpp, valid_mothods):
-        super(Node_py, self).__init__(Node_cpp)
-        self.valid_mothods = valid_mothods[:]
+class NodePy(NodeBase):
+    def __init__(self, NodeCpp, valid_methods):
+        super(NodePy, self).__init__(NodeCpp)
+        self.valid_methods = valid_methods[:]
         self.inputs = []
 
-        for m in self.valid_mothods:
+        for m in self.valid_methods:
             if m == 'inputs' or m == 'outputs':
-                list_of_node = list(getattr(Node_cpp, m)())
-                io_uniqueName_list = []
-                io_tensorSize_list = []
+                list_of_node = list(getattr(NodeCpp, m)())
+                io_unique_names = []
+                io_tensor_sizes = []
                 for n in list_of_node:
-                    io_uniqueName_list.append(n.uniqueName())
+                    io_unique_names.append(n.uniqueName())
                     if n.type().kind() == 'CompleteTensorType':
-                        io_tensorSize_list.append(n.type().sizes())
+                        io_tensor_sizes.append(n.type().sizes())
                     else:
-                        io_tensorSize_list.append(None)
+                        io_tensor_sizes.append(None)
 
-                setattr(self, m, io_uniqueName_list)
-                setattr(self, m + 'TensorSize', io_tensorSize_list)
+                setattr(self, m, io_unique_names)
+                setattr(self, m + 'tensor_size', io_tensor_sizes)
 
             else:
-                setattr(self, m, getattr(Node_cpp, m)())
+                setattr(self, m, getattr(NodeCpp, m)())
 
 
-class Node_py_IO(Node_py):
-    def __init__(self, Node_cpp, input_or_output=None):
-        super(Node_py_IO, self).__init__(Node_cpp, methods_IO)
+class NodePyIO(NodePy):
+    def __init__(self, NodeCpp, input_or_output=None):
+        super(NodePyIO, self).__init__(NodeCpp, methods_IO)
         try:
-            tensorsize = Node_cpp.type().sizes()
+            tensor_size = NodeCpp.type().sizes()
         except RuntimeError:
-            tensorsize = [1, ]  # fail when constant model is used.
-        self.tensorSize = tensorsize
+            tensor_size = [1, ]  # fail when constant model is used.
+        self.tensor_size = tensor_size
         self.kind = 'Parameter'
         if input_or_output:
             self.input_or_output = input_or_output
             self.kind = 'IO Node'
 
 
-class Node_py_OP(Node_py):
-    def __init__(self, Node_cpp):
-        super(Node_py_OP, self).__init__(Node_cpp, methods_OP)
-        self.attributes = str({k: Node_cpp[k] for k in Node_cpp.attributeNames()}).replace("'", ' ')
-        self.kind = Node_cpp.kind()
+class NodePyOP(NodePy):
+    def __init__(self, NodeCpp):
+        super(NodePyOP, self).__init__(NodeCpp, methods_OP)
+        self.attributes = str({k: NodeCpp[k] for k in NodeCpp.attributeNames()}).replace("'", ' ')
+        self.kind = NodeCpp.kind()
 
 
-class Graph_py(object):
+class GraphPy(object):
     def __init__(self):
-        self.nodes_OP = []
-        self.nodes_IO = OrderedDict()
+        self.nodes_op = []
+        self.nodes_io = OrderedDict()
         self.uniqueNameToScopedName = {}
         self.shallowestScopeName = 'default'
         self.scope_name_appeared = []
 
     def append(self, x):
-        if type(x) == Node_py_IO:
-            self.nodes_IO[x.uniqueName] = x
-        if type(x) == Node_py_OP:
-            self.nodes_OP.append(x)
-            for node_output, outputSize in zip(x.outputs, x.outputsTensorSize):
+        if type(x) == NodePyIO:
+            self.nodes_io[x.uniqueName] = x
+        if type(x) == NodePyOP:
+            self.nodes_op.append(x)
+            for node_output, outputSize in zip(x.outputs, x.outputstensor_size):
                 self.scope_name_appeared.append(x.scopeName)
-                self.nodes_IO[node_output] = Node_base(node_output,
+                self.nodes_io[node_output] = NodeBase(node_output,
                                                        x.inputs,
                                                        x.scopeName,
                                                        outputSize,
@@ -107,23 +106,23 @@ class Graph_py(object):
 
     def printall(self):
         print('all nodes')
-        for node in self.nodes_OP:
+        for node in self.nodes_op:
             print(node)
-        for key in self.nodes_IO:
-            print(self.nodes_IO[key])
+        for key in self.nodes_io:
+            print(self.nodes_io[key])
 
-    def findCommonRoot(self):
+    def find_common_root(self):
         for fullscope in self.scope_name_appeared:
             if fullscope:
                 self.shallowestScopeName = fullscope.split('/')[0]
 
     def populate_namespace_from_OP_to_IO(self):
-        for node in self.nodes_OP:
+        for node in self.nodes_op:
             for input_node_id in node.inputs:
                 self.uniqueNameToScopedName[input_node_id] = node.scopeName + '/' + input_node_id
 
-        for key, node in self.nodes_IO.items():
-            if type(node) == Node_base:
+        for key, node in self.nodes_io.items():
+            if type(node) == NodeBase:
                 self.uniqueNameToScopedName[key] = node.scope + '/' + node.uniqueName
             if hasattr(node, 'input_or_output'):
                 self.uniqueNameToScopedName[key] = node.input_or_output + '/' + node.uniqueName
@@ -132,28 +131,28 @@ class Graph_py(object):
                     self.uniqueNameToScopedName[node.uniqueName] = self.shallowestScopeName + '/' + node.uniqueName
 
         # replace name
-        for key, node in self.nodes_IO.items():
-            self.nodes_IO[key].inputs = [self.uniqueNameToScopedName[node_input_id] for node_input_id in node.inputs]
+        for key, node in self.nodes_io.items():
+            self.nodes_io[key].inputs = [self.uniqueNameToScopedName[node_input_id] for node_input_id in node.inputs]
             if node.uniqueName in self.uniqueNameToScopedName:
-                self.nodes_IO[key].uniqueName = self.uniqueNameToScopedName[node.uniqueName]
+                self.nodes_io[key].uniqueName = self.uniqueNameToScopedName[node.uniqueName]
 
     def to_proto(self):
         nodes = []
         node_stats = []
-        for v in self.nodes_IO.values():
+        for v in self.nodes_io.values():
             nodes.append(Node_proto(v.uniqueName,
                                     input=v.inputs,
-                                    outputsize=v.tensorSize,
+                                    outputsize=v.tensor_size,
                                     op=v.kind,
                                     attributes=v.attributes))
 
-            if v.tensorSize and len(v.tensorSize) > 0:  # assume data is float32, only parameter is counted
+            if v.tensor_size and len(v.tensor_size) > 0:  # assume data is float32, only parameter is counted
                 node_stats.append(
                     NodeExecStats(node_name=v.uniqueName,
                                   all_start_micros=int(time.time() * 1e7),
                                   all_end_rel_micros=42,
                                   memory=[AllocatorMemoryUsed(allocator_name="cpu",
-                                                              total_bytes=int(np.prod(v.tensorSize)) * 4)]))
+                                                              total_bytes=int(np.prod(v.tensor_size)) * 4)]))
 
         return nodes, node_stats
 
@@ -169,23 +168,23 @@ def parse(graph, args=None, omit_useless_nodes=True):
     n_inputs = len(args)  # not sure...
 
     scope = {}
-    nodes_py = Graph_py()
+    nodes_py = GraphPy()
     for i, node in enumerate(graph.inputs()):
         if omit_useless_nodes:
             if len(node.uses()) == 0:  # number of user of the node (= number of outputs/ fanout)
                 continue
 
         if i < n_inputs:
-            nodes_py.append(Node_py_IO(node, 'input'))
+            nodes_py.append(NodePyIO(node, 'input'))
         else:
-            nodes_py.append(Node_py_IO(node))  # parameter
+            nodes_py.append(NodePyIO(node))  # parameter
 
     for node in graph.nodes():
-        nodes_py.append(Node_py_OP(node))
+        nodes_py.append(NodePyOP(node))
 
     for node in graph.outputs():  # must place last.
-        Node_py_IO(node, 'output')
-    nodes_py.findCommonRoot()
+        NodePyIO(node, 'output')
+    nodes_py.find_common_root()
     nodes_py.populate_namespace_from_OP_to_IO()
     return nodes_py.to_proto()
 
@@ -235,9 +234,6 @@ def graph(model, args, verbose=False, **kwargs):
         torch._C._jit_pass_lint(graph)
         return graph
 
-    assert LooseVersion(torch.__version__) >= LooseVersion("1.0.0"),\
-        'This version of tensorboardX requires pytorch>=1.0.0.'
-
     with torch.onnx.set_training(model, False):
         try:
             trace, _ = torch.jit.get_trace_graph(model, args)
@@ -264,6 +260,9 @@ def graph(model, args, verbose=False, **kwargs):
     try:
         _optimize_trace(trace, operator_export_type)
     except RuntimeError as e:
+        # Optimize trace might fail (due to bad scopes in some cases we've seen)
+        # and we don't want graph visualization to fail in this case. In this
+        # case we'll log the warning and display the non-optimized graph.
         logging.warn(ImportError(e))
     graph = trace.graph()
     if verbose:
