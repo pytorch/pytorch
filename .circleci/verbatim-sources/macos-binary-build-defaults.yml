@@ -8,11 +8,11 @@ binary_mac_build: &binary_mac_build
     xcode: "9.0"
   steps:
   - run:
+      <<: *binary_checkout
+  - run:
       <<: *binary_populate_env
   - run:
       <<: *macos_brew_update
-  - run:
-      <<: *binary_checkout
   - run:
       <<: *binary_install_miniconda
 
@@ -21,59 +21,18 @@ binary_mac_build: &binary_mac_build
       no_output_timeout: "1h"
       command: |
         set -ex
-        source "/Users/distiller/project/env"
-        mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
-
-        # For some reason `unbuffer` breaks if we change the PATH here, so we
-        # write a script with the PATH change in it and unbuffer the whole
-        # thing
-        build_script="$workdir/build_script.sh"
-        touch "$build_script"
-        chmod +x "$build_script"
-
-        # Build
-        cat >"$build_script" <<EOL
-        export PATH="$workdir/miniconda/bin:$PATH"
-        if [[ "$PACKAGE_TYPE" == conda ]]; then
-          "$workdir/builder/conda/build_pytorch.sh"
-        else
-          export TORCH_PACKAGE_NAME="$(echo $TORCH_PACKAGE_NAME | tr '-' '_')"
-          "$workdir/builder/wheel/build_wheel.sh"
-        fi
-        EOL
-        unbuffer "$build_script" | ts
+        script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_build.sh"
+        cat "$script"
+        source "$script"
 
   - run:
       name: Test
       no_output_timeout: "1h"
       command: |
         set -ex
-        source "/Users/distiller/project/env"
-        export "PATH=$workdir/miniconda/bin:$PATH"
-        pkg="$workdir/final_pkgs/$(ls $workdir/final_pkgs)"
-
-        # Don't test libtorch TODO
-        if [[ "$PACKAGE_TYPE" == libtorch ]]; then
-          exit 0
-        fi
-
-        # Create a new test env TODO cut all this out into a separate test
-        # job and have an entirely different miniconda
-        source deactivate || true
-        conda create -qyn test python="$DESIRED_PYTHON"
-        source activate test >/dev/null
-
-        # Install the package
-        if [[ "$PACKAGE_TYPE" == conda ]]; then
-          conda install -y "$pkg" --offline
-        else
-          pip install "$pkg" --no-index --no-dependencies -v
-        fi
-
-        # Test
-        pushd "$workdir/pytorch"
-        $workdir/builder/run_tests.sh "$PACKAGE_TYPE" "$DESIRED_PYTHON" "$DESIRED_CUDA"
-        popd
+        script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_test.sh"
+        cat "$script"
+        source "$script"
 
   - persist_to_workspace:
       root: /Users/distiller/project
@@ -83,6 +42,8 @@ binary_mac_upload: &binary_mac_upload
   macos:
     xcode: "9.0"
   steps:
+  - run:
+      <<: *binary_checkout
   - run:
       <<: *binary_populate_env
   - run:
@@ -95,35 +56,6 @@ binary_mac_upload: &binary_mac_upload
       name: Upload
       no_output_timeout: "10m"
       command: |
-        export AWS_ACCESS_KEY_ID="${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
-        export AWS_SECRET_ACCESS_KEY="${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
-        cat >/Users/distiller/project/login_to_anaconda.sh <<EOL
-        set +x
-        echo "Trying to login to Anaconda"
-        yes | anaconda login \
-            --username "$PYTORCH_BINARY_PJH5_CONDA_USERNAME" \
-            --password "$PYTORCH_BINARY_PJH5_CONDA_PASSWORD"
-        set -x
-        EOL
-        chmod +x /Users/distiller/project/login_to_anaconda.sh
-        set -ex
-        source "/Users/distiller/project/env"
-        export "PATH=$workdir/miniconda/bin:$PATH"
-
-        pushd "$workdir/final_pkgs"
-        if [[ "$PACKAGE_TYPE" == conda ]]; then
-          retry conda install -yq anaconda-client
-          retry /Users/distiller/project/login_to_anaconda.sh
-          retry anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
-        elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
-          retry pip install -q awscli
-          s3_dir="s3://pytorch/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
-          for pkg in $(ls); do
-            retry aws s3 cp "$pkg" "$s3_dir" --acl public-read
-          done
-        else
-          retry pip install -q awscli
-          s3_dir="s3://pytorch/whl/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
-          retry aws s3 cp "$(ls)" "$s3_dir" --acl public-read
-        fi
-
+        script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_test.sh"
+        cat "$script"
+        source "$script"

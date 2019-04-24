@@ -116,10 +116,10 @@ RegisterOperators reg(
     {Operator(
          "prim::profile(...) -> ()",
          [](const Node* node) {
-           return [node](Stack& stack) {
-             auto addr = node->i(attr::data);
-             std::function<void(Stack&)>& callback =
-                 *reinterpret_cast<std::function<void(Stack&)>*>(addr);
+           // TODO: figure out why cast isn't marked as const
+           auto n = const_cast<Node*>(node); // NOLINT
+           auto callback = n->cast<ProfileOp>()->getCallback();
+           return [callback](Stack& stack) {
              callback(stack);
              return 0;
            };
@@ -400,6 +400,14 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.cpu());
+           return 0;
+         }),
+     Operator(
+         // TODO return generator object when torchscript supports RNG
+         // first-class
+         "aten::manual_seed(int seed) -> ()",
+         [](Stack& stack) {
+           at::manual_seed(pop(stack).toInt());
            return 0;
          }),
      Operator(
@@ -1482,6 +1490,29 @@ int listSlice(Stack& stack) {
   return 0;
 }
 
+template <typename TList>
+int listSort(Stack& stack) {
+  TList list;
+
+  pop(stack, list);
+  std::sort(list->elements().begin(), list->elements().end());
+  return 0;
+}
+
+// Specialization for at::Tensor
+template <>
+int listSort<Shared<TensorList>>(Stack& stack) {
+  Shared<TensorList> list;
+  pop(stack, list);
+  std::sort(
+      list->elements().begin(),
+      list->elements().end(),
+      [](const at::Tensor& a, const at::Tensor& b) {
+        return a.lt(b).is_nonzero();
+      });
+  return 0;
+}
+
 template <typename TList, typename TElement>
 int listSetItem(Stack& stack) {
   TList list;
@@ -1541,10 +1572,11 @@ int dictKeys(Stack& stack) {
 }
 
 template <typename Elem>
-std::vector<Elem> makeListForDictValues(const c10::ivalue::UnorderedMap& dict) {
+std::vector<Elem> makeListForDictValues(
+    const c10::ivalue::GenericDict::IterationOrder& order) {
   std::vector<Elem> values;
-  values.reserve(dict.size());
-  for (auto item : dict) {
+  values.reserve(order.size());
+  for (auto item : order) {
     values.push_back(item.second.to<Elem>());
   }
   return values;
@@ -1553,17 +1585,17 @@ std::vector<Elem> makeListForDictValues(const c10::ivalue::UnorderedMap& dict) {
 Operation dictValues(const Node* n) {
   auto outputType = n->output()->type()->expect<ListType>();
   return [=](Stack& stack) -> int {
-    auto dict = pop(stack).toGenericDictRef();
+    const auto& order = pop(stack).toGenericDict()->iterationOrder();
     if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
-      push(stack, makeListForDictValues<at::Tensor>(dict));
+      push(stack, makeListForDictValues<at::Tensor>(order));
     } else if (outputType->getElementType() == IntType::get()) {
-      push(stack, makeListForDictValues<int64_t>(dict));
+      push(stack, makeListForDictValues<int64_t>(order));
     } else if (outputType->getElementType() == FloatType::get()) {
-      push(stack, makeListForDictValues<double>(dict));
+      push(stack, makeListForDictValues<double>(order));
     } else if (outputType->getElementType() == BoolType::get()) {
-      push(stack, makeListForDictValues<bool>(dict));
+      push(stack, makeListForDictValues<bool>(order));
     } else {
-      push(stack, makeListForDictValues<IValue>(dict));
+      push(stack, makeListForDictValues<IValue>(order));
     }
     return 0;
   };
@@ -1788,6 +1820,14 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("Tensor", TensorList),
     CREATE_LIST_OPS("t", GenericList),
 #undef CREATE_LIST_OPS
+    Operator("aten::sort(int[](a!) self) -> ()", listSort<Shared<IntList>>),
+    Operator(
+        "aten::sort(float[](a!) self) -> ()",
+        listSort<Shared<DoubleList>>),
+    Operator(
+        "aten::sort(Tensor[](a!) self) -> ()",
+        listSort<Shared<TensorList>>),
+    Operator("aten::sort(bool[](a!) self) -> ()", listSort<Shared<BoolList>>),
 
     Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
     Operator(

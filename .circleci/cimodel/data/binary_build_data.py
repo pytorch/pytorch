@@ -23,6 +23,7 @@ LINKING_DIMENSIONS = [
     "static",
 ]
 
+
 DEPS_INCLUSION_DIMENSIONS = [
     "with-deps",
     "without-deps",
@@ -33,20 +34,22 @@ def get_processor_arch_name(cuda_version):
     return "cpu" if not cuda_version else "cu" + cuda_version
 
 
+LINUX_PACKAGE_VARIANTS = OrderedDict(
+    manywheel=[
+        "2.7m",
+        "2.7mu",
+        "3.5m",
+        "3.6m",
+        "3.7m",
+    ],
+    conda=dimensions.STANDARD_PYTHON_VERSIONS,
+    libtorch=[
+        "2.7m",
+    ],
+)
+
 CONFIG_TREE_DATA = OrderedDict(
-    linux=(dimensions.CUDA_VERSIONS, OrderedDict(
-        manywheel=[
-            "2.7m",
-            "2.7mu",
-            "3.5m",
-            "3.6m",
-            "3.7m",
-        ],
-        conda=dimensions.STANDARD_PYTHON_VERSIONS,
-        libtorch=[
-            "2.7m",
-        ]
-    )),
+    linux=(dimensions.CUDA_VERSIONS, LINUX_PACKAGE_VARIANTS),
     macos=([None], OrderedDict(
         wheel=dimensions.STANDARD_PYTHON_VERSIONS,
         conda=dimensions.STANDARD_PYTHON_VERSIONS,
@@ -55,6 +58,9 @@ CONFIG_TREE_DATA = OrderedDict(
         ],
     )),
 )
+
+
+DEVTOOLSET_VERSIONS = [3, 7]
 
 
 class TopLevelNode(ConfigNode):
@@ -86,6 +92,19 @@ class PackageFormatConfigNode(ConfigNode):
 
         self.props["python_versions"] = python_versions
         self.props["package_format"] = package_format
+
+    def get_children(self):
+        if self.find_prop("os_name") == "linux" and self.find_prop("package_format") != "conda":
+            return [LinuxGccConfigNode(self, v) for v in DEVTOOLSET_VERSIONS]
+        else:
+            return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]
+
+
+class LinuxGccConfigNode(ConfigNode):
+    def __init__(self, parent, devtoolset_version):
+        super(LinuxGccConfigNode, self).__init__(parent, "DEVTOOLSET=" + str(devtoolset_version))
+
+        self.props["devtoolset_version"] = devtoolset_version
 
     def get_children(self):
         return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]
