@@ -489,6 +489,5 @@ std::string Unpickler::readString() {
 OpCode Unpickler::readOpCode() {
   return static_cast<OpCode>(read<uint8_t>());
 }
-
 } // namespace jit
 } // namespace torch
