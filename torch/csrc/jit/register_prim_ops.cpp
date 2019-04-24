@@ -1572,10 +1572,11 @@ int dictKeys(Stack& stack) {
 }
 
 template <typename Elem>
-std::vector<Elem> makeListForDictValues(const c10::ivalue::UnorderedMap& dict) {
+std::vector<Elem> makeListForDictValues(
+    const c10::ivalue::GenericDict::IterationOrder &order) {
   std::vector<Elem> values;
-  values.reserve(dict.size());
-  for (auto item : dict) {
+  values.reserve(order.size());
+  for (auto item : order) {
     values.push_back(item.second.to<Elem>());
   }
   return values;
@@ -1584,17 +1585,17 @@ std::vector<Elem> makeListForDictValues(const c10::ivalue::UnorderedMap& dict) {
 Operation dictValues(const Node* n) {
   auto outputType = n->output()->type()->expect<ListType>();
   return [=](Stack& stack) -> int {
-    auto dict = pop(stack).toGenericDictRef();
+    const auto &order = pop(stack).toGenericDict()->iterationOrder();
     if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
-      push(stack, makeListForDictValues<at::Tensor>(dict));
+      push(stack, makeListForDictValues<at::Tensor>(order));
     } else if (outputType->getElementType() == IntType::get()) {
-      push(stack, makeListForDictValues<int64_t>(dict));
+      push(stack, makeListForDictValues<int64_t>(order));
     } else if (outputType->getElementType() == FloatType::get()) {
-      push(stack, makeListForDictValues<double>(dict));
+      push(stack, makeListForDictValues<double>(order));
     } else if (outputType->getElementType() == BoolType::get()) {
-      push(stack, makeListForDictValues<bool>(dict));
+      push(stack, makeListForDictValues<bool>(order));
     } else {
-      push(stack, makeListForDictValues<IValue>(dict));
+      push(stack, makeListForDictValues<IValue>(order));
     }
     return 0;
   };
