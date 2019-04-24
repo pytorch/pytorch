@@ -1985,6 +1985,9 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
         In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
     """
+    if torch.max(input) > 0:
+        raise ValueError("The input must be a log form of probability. The max of input = ({}) "
+                                    .format(torch.max(input)))
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
