@@ -345,6 +345,18 @@ OpCode Unpickler::readInstruction() {
       }
       memo_table_.push_back(stack_.back());
     } break;
+    case OpCode::LONG_BINPUT: {
+      AT_CHECK(
+          std::numeric_limits<size_t>::max() >=
+              std::numeric_limits<uint32_t>::max(),
+          "Found a LONG_BINPUT opcode, but size_t on this system is "
+          "not big enough to decode it");
+      size_t memo_id = read<uint32_t>();
+      if (memo_table_.size() <= memo_id) {
+        memo_table_.reserve(1 + 2 * memo_id);
+      }
+      memo_table_.push_back(stack_.back());
+    } break;
     case OpCode::MARK: {
       // Mark location of the container ivalue in the stack
       marks_.push_back(stack_.size());
