@@ -1,7 +1,5 @@
 import numpy as np
 import time
-import torch
-
 from collections import OrderedDict
 
 from tensorboard.compat.proto.config_pb2 import RunMetadata
@@ -9,7 +7,9 @@ from tensorboard.compat.proto.graph_pb2 import GraphDef
 from tensorboard.compat.proto.step_stats_pb2 import StepStats, DeviceStepStats, NodeExecStats, AllocatorMemoryUsed
 from tensorboard.compat.proto.versions_pb2 import VersionDef
 
-from ._proto_graph import Node_proto
+import torch
+from ._proto_graph import node_proto
+from torch.onnx.utils import OperatorExportTypes
 
 
 methods_OP = ['attributeNames', 'hasMultipleOutputs', 'hasUses', 'inputs',
@@ -140,7 +140,7 @@ class GraphPy(object):
         nodes = []
         node_stats = []
         for v in self.nodes_io.values():
-            nodes.append(Node_proto(v.uniqueName,
+            nodes.append(node_proto(v.uniqueName,
                                     input=v.inputs,
                                     outputsize=v.tensor_size,
                                     op=v.kind,
@@ -189,7 +189,9 @@ def parse(graph, args=None, omit_useless_nodes=True):
     return nodes_py.to_proto()
 
 
-def graph(model, args, verbose=False, **kwargs):
+def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_nodes=True):
+    operator_export_type = getattr(OperatorExportTypes, operator_export_type)
+
     def _optimize_trace(trace, operator_export_type):
         trace.set_graph(_optimize_graph(trace.graph(), operator_export_type))
 
@@ -221,7 +223,7 @@ def graph(model, args, verbose=False, **kwargs):
         torch._C._jit_pass_peephole(graph, True)
         torch._C._jit_pass_lint(graph)
 
-        if operator_export_type != torch.onnx.utils.OperatorExportTypes.RAW:
+        if operator_export_type != OperatorExportTypes.RAW:
             graph = torch._C._jit_pass_onnx(graph, operator_export_type)
             torch._C._jit_pass_lint(graph)
             # torch._C._jit_pass_onnx_peephole(graph)
@@ -248,14 +250,6 @@ def graph(model, args, verbose=False, **kwargs):
             except RuntimeError:
                 print("Your model fails onnx too, please report to onnx team")
             return GraphDef(versions=VersionDef(producer=22))
-
-    if 'operator_export_type' not in kwargs:
-        operator_export_type = torch.onnx.utils.OperatorExportTypes.ONNX
-    else:
-        operator_export_type = getattr(torch.onnx.utils.OperatorExportTypes, kwargs['operator_export_type'])
-
-    if 'omit_useless_nodes' not in kwargs:
-        omit_useless_nodes = True
 
     try:
         _optimize_trace(trace, operator_export_type)

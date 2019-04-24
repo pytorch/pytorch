@@ -3,23 +3,23 @@ from tensorboard.compat.proto.attr_value_pb2 import AttrValue
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 
 
-def AttrValue_proto(dtype, shape, s):
+def attr_value_proto(dtype, shape, s):
     attr = {}
 
     if s is not None:
         attr['attr'] = AttrValue(s=s.encode(encoding='utf_8'))
 
     if shape is not None:
-        shapeproto = TensorShape_proto(shape)
+        shapeproto = tensor_shape_proto(shape)
         attr['_output_shapes'] = AttrValue(list=AttrValue.ListValue(shape=[shapeproto]))
     return attr
 
 
-def TensorShape_proto(outputsize):
+def tensor_shape_proto(outputsize):
     return TensorShapeProto(dim=[TensorShapeProto.Dim(size=d) for d in outputsize])
 
 
-def Node_proto(name,
+def node_proto(name,
                op='UnSpecified',
                input=None,
                dtype=None,
@@ -35,5 +35,5 @@ def Node_proto(name,
         name=name.encode(encoding='utf_8'),
         op=op,
         input=input,
-        attr=AttrValue_proto(dtype, outputsize, attributes)
+        attr=attr_value_proto(dtype, outputsize, attributes)
     )
