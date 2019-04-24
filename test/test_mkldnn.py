@@ -175,6 +175,7 @@ class TestMkldnn(TestCase):
         mx = x.to_mkldnn()
         my = y.to_mkldnn()
 
+        # add
         self.assertEqual(
             x + y,
             (mx + my).to_dense())
@@ -183,9 +184,17 @@ class TestMkldnn(TestCase):
             torch.add(x, y, alpha=alpha),
             torch.add(mx, my, alpha=alpha).to_dense())
 
+        # add_
         x += y
         mx += my
         self.assertEqual(x, mx.to_dense())
+
+        # add_out
+        out = x.clone()
+        mkldnn_out = out.to_mkldnn()
+        torch.add(x, y, alpha=alpha, out=out)
+        torch.add(mx, my, alpha=alpha, out=mkldnn_out)
+        self.assertEqual(out, mkldnn_out.to_dense())
 
 
 if __name__ == '__main__':
