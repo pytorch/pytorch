@@ -2691,8 +2691,6 @@ class _TestTorchMixin(object):
         zero_point = 2
         qr = r.quantize_linear(scale, zero_point)
         rqr = qr.dequantize()
-        print(r.numpy())
-        print(rqr.numpy())
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
     def test_qtensor_creation(self):
@@ -2700,13 +2698,8 @@ class _TestTorchMixin(object):
         zero_point = 10
         val = 100
         numel = 10
-        q = torch.empty_affine_quantized(numel, dtype=torch.qint8, scale=scale, zero_point=zero_point)
-        # for i in range(numel):
-        #     # wait for th_fill
-        #     q[i] = val
-        # r = q.dequantize()
-        # for i in range(numel):
-        #     self.assertEqual(r[i], (val - zero_point) * scale)
+        q = torch._empty_affine_quantized(numel, dtype=torch.qint8, scale=scale, zero_point=zero_point)
+        # TODO: check dequantized values?
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
@@ -4773,6 +4766,10 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, -1))
         self.assertEqual(torch.logspace(0, 1, 1), torch.ones(1), 0)
 
+        # Check non-default base=2
+        self.assertEqual(torch.logspace(1, 1, 1, 2), torch.ones(1) * 2)
+        self.assertEqual(torch.logspace(0, 2, 3, 2), torch.Tensor((1, 2, 4)))
+
         # Check logspace_ for generating with start > end.
         self.assertEqual(torch.logspace(1, 0, 2), torch.Tensor((10, 1)), 0)
 
@@ -6518,34 +6515,32 @@ class _TestTorchMixin(object):
     def test_cholesky_solve_batched_dims(self):
         self._test_cholesky_solve_batched_dims(self, lambda t: t)
 
-    @skipIfNoLapack
-    def test_potri(self):
-        a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
-                          (-6.05, -3.30, 5.36, -4.44, 1.08),
-                          (-0.45, 2.58, -2.70, 0.27, 9.04),
-                          (8.32, 2.71, 4.35, -7.17, 2.14),
-                          (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
-
-        # make sure 'a' is symmetric PSD
-        a = torch.mm(a, a.t())
+    @staticmethod
+    def _test_cholesky_inverse(self, cast):
+        from common_utils import random_symmetric_pd_matrix
+        a = cast(random_symmetric_pd_matrix(5))
 
         # compute inverse directly
         inv0 = torch.inverse(a)
 
         # default case
         chol = torch.cholesky(a)
-        inv1 = torch.potri(chol, False)
+        inv1 = torch.cholesky_inverse(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # upper Triangular Test
         chol = torch.cholesky(a, True)
-        inv1 = torch.potri(chol, True)
+        inv1 = torch.cholesky_inverse(chol, True)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # lower Triangular Test
         chol = torch.cholesky(a, False)
-        inv1 = torch.potri(chol, False)
+        inv1 = torch.cholesky_inverse(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
+
+    @skipIfNoLapack
+    def test_cholesky_inverse(self):
+        self._test_cholesky_inverse(self, lambda t: t)
 
     @skipIfNoLapack
     def test_pstrf(self):
@@ -8720,7 +8715,10 @@ class _TestTorchMixin(object):
         self.assertEqual(v.storage()[14], v.data[2][4])
 
     def test_nonzero(self):
-        num_src = 12
+        devices = torch.testing.get_all_device_types()
+        num_srcs = [
+            12, 12, 12, 12, 12, 125,
+        ]
 
         types = [
             'torch.ByteTensor',
@@ -8738,38 +8736,59 @@ class _TestTorchMixin(object):
             torch.Size((1, 12)),
             torch.Size((6, 2)),
             torch.Size((3, 2, 2)),
+            torch.Size((5, 5, 5)),
         ]
 
-        for t in types:
-            while True:
-                tensor = torch.rand(num_src).mul(2).floor().type(t)
-                if tensor.sum() > 0:
-                    break
-            for shape in shapes:
-                tensor = tensor.clone().resize_(shape)
-                dst1 = torch.nonzero(tensor)
-                dst2 = tensor.nonzero()
-                dst3 = torch.LongTensor()
-                torch.nonzero(tensor, out=dst3)
-                if len(shape) == 1:
-                    dst = []
-                    for i in range(num_src):
-                        if tensor[i] != 0:
-                            dst += [i]
+        def is_lexicographically_sorted(inds):
+            """Check sorted ascending with
+            i -> j -> k changing slowest to fastest"""
+            assert inds.size(1) == 3
+            if inds.size(0) > 1:
+                i0, j0, k0 = inds[:-1].t()
+                i1, j1, k1 = inds[+1:].t()
+                i_ok = (i1 >= i0)
+                j_ok = (j1 >= j0) | (i1 > i0)
+                k_ok = (k1 >= k0) | (j1 > j0) | (i1 > i0)
+                lex = torch.stack((i_ok, j_ok, k_ok), dim=1)
+                return lex
+            return torch.full_like(inds, 1)
 
-                    self.assertEqual(dst1.select(1, 0), torch.LongTensor(dst), 0)
-                    self.assertEqual(dst2.select(1, 0), torch.LongTensor(dst), 0)
-                    self.assertEqual(dst3.select(1, 0), torch.LongTensor(dst), 0)
-                elif len(shape) == 2:
-                    # This test will allow through some False positives. It only checks
-                    # that the elements flagged positive are indeed non-zero.
-                    for i in range(dst1.size(0)):
-                        self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1]].item(), 0)
-                elif len(shape) == 3:
-                    # This test will allow through some False positives. It only checks
-                    # that the elements flagged positive are indeed non-zero.
-                    for i in range(dst1.size(0)):
-                        self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]].item(), 0)
+        def gen_nontrivial_input(num_src, dtype, device):
+            while True:
+                tensor = torch.rand(num_src).mul(2).floor().type(dtype).to(device)
+                if tensor.sum() > 0:
+                    return tensor
+
+        for device in devices:
+            for dtype in types:
+                for shape, num_src in zip(shapes, num_srcs):
+                    tensor = gen_nontrivial_input(num_src, dtype, device)
+                    tensor = tensor.clone().resize_(shape)
+                    dst1 = torch.nonzero(tensor)
+                    dst2 = tensor.nonzero()
+                    dst3 = torch.LongTensor().to(device)
+                    torch.nonzero(tensor, out=dst3)
+                    if len(shape) == 1:
+                        dst = []
+                        for i in range(num_src):
+                            if tensor[i] != 0:
+                                dst += [i]
+                        dst = torch.LongTensor(dst).to(device)
+                        self.assertEqual(dst1.select(1, 0), dst, 0)
+                        self.assertEqual(dst2.select(1, 0), dst, 0)
+                        self.assertEqual(dst3.select(1, 0), dst, 0)
+                    elif len(shape) == 2:
+                        # This test will allow through some False positives. It only checks
+                        # that the elements flagged positive are indeed non-zero.
+                        for i in range(dst1.size(0)):
+                            self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1]].item(), 0)
+                    elif len(shape) == 3:
+                        # This test will allow through some False positives. It only checks
+                        # that the elements flagged positive are indeed non-zero.
+                        for i in range(dst1.size(0)):
+                            self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]].item(), 0)
+                        lex = is_lexicographically_sorted(dst1)
+                        self.assertEqual(torch.ones_like(lex), lex)
 
     def test_nonzero_empty(self):
         for device in torch.testing.get_all_device_types():
@@ -8858,6 +8877,13 @@ class _TestTorchMixin(object):
         self.assertTrue(isinstance(b, torch.nn.Parameter))
         self.assertEqual(a.requires_grad, b.requires_grad)
         self.assertEqual(a, b)
+
+    def test_pickle_dtype(self):
+        t = torch.float32
+        serialized = pickle.dumps(t)
+        b = pickle.loads(serialized)
+        self.assertTrue(isinstance(b, torch.dtype))
+        self.assertEqual(id(b), id(t))
 
     def test_norm_fastpaths(self):
         x = torch.randn(3, 5)
@@ -9709,6 +9735,28 @@ class _TestTorchMixin(object):
 
             # check mapping
             s2 = torch.FloatStorage.from_file(f.name, True, size)
+            t2 = torch.FloatTensor(s2)
+            self.assertEqual(t1, t2, 0)
+
+            # check changes to t1 from t2
+            rnum = random.uniform(-1, 1)
+            t1.fill_(rnum)
+            self.assertEqual(t1, t2, 0)
+
+            # check changes to t2 from t1
+            rnum = random.uniform(-1, 1)
+            t2.fill_(rnum)
+            self.assertEqual(t1, t2, 0)
+
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
+    def test_torch_from_file(self):
+        size = 10000
+        with tempfile.NamedTemporaryFile() as f:
+            s1 = torch.from_file(f.name, True, size, dtype=torch.float)
+            t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
+
+            # check mapping
+            s2 = torch.from_file(f.name, True, size, dtype=torch.float)
             t2 = torch.FloatTensor(s2)
             self.assertEqual(t1, t2, 0)
 
@@ -10652,7 +10700,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             x_unique = x.unique(sorted=True)
             self.assertEqual(expected_unique, x_unique)
 
-            x_unique, _, x_counts = torch._unique2_temporary_will_remove_soon(x, sorted=True, return_counts=True)
+            x_unique, x_counts = torch.unique(x, sorted=True, return_counts=True)
             self.assertEqual(expected_counts, x_counts)
 
             x_unique, x_inverse = torch.unique(
@@ -10660,7 +10708,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique, x_unique)
             self.assertEqual(expected_inverse, x_inverse)
 
-            x_unique, x_inverse, x_counts = torch._unique2_temporary_will_remove_soon(
+            x_unique, x_inverse, x_counts = torch.unique(
                 x, sorted=True, return_inverse=True, return_counts=True)
             self.assertEqual(expected_unique, x_unique)
             self.assertEqual(expected_inverse, x_inverse)
@@ -10672,14 +10720,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique, y_unique)
             self.assertEqual(expected_inverse.view(y.size()), y_inverse)
 
-            y_unique, y_inverse, y_counts = torch._unique2_temporary_will_remove_soon(
+            y_unique, y_inverse, y_counts = torch.unique(
                 y, sorted=True, return_inverse=True, return_counts=True)
             self.assertEqual(expected_unique, y_unique)
             self.assertEqual(expected_inverse.view(y.size()), y_inverse)
             self.assertEqual(expected_counts, y_counts)
 
             # Tests unique on other types.
-            int_unique, int_inverse, int_counts = torch._unique2_temporary_will_remove_soon(
+            int_unique, int_inverse, int_counts = torch.unique(
                 torch.tensor([2, 1, 2], dtype=torch.int, device=device),
                 sorted=True,
                 return_inverse=True,
@@ -10689,7 +10737,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.tensor([1, 0, 1], dtype=torch.long, device=device), int_inverse)
             self.assertEqual(torch.tensor([1, 2], dtype=torch.long, device=device), int_counts)
 
-            double_unique, double_inverse, double_counts = torch._unique2_temporary_will_remove_soon(
+            double_unique, double_inverse, double_counts = torch.unique(
                 torch.tensor([2., 1.5, 2.1, 2.], dtype=torch.double, device=device),
                 sorted=True,
                 return_inverse=True,
@@ -10699,7 +10747,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.tensor([1, 0, 2, 1], dtype=torch.long, device=device), double_inverse)
             self.assertEqual(torch.tensor([1, 2, 1], dtype=torch.long, device=device), double_counts)
 
-            byte_unique, byte_inverse, byte_counts = torch._unique2_temporary_will_remove_soon(
+            byte_unique, byte_inverse, byte_counts = torch.unique(
                 torch.tensor([133, 7, 7, 7, 42, 128], dtype=torch.uint8, device=device),
                 sorted=True,
                 return_inverse=True,

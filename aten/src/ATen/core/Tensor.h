@@ -14,6 +14,9 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 
+namespace caffe2 {
+class Tensor;
+}
 namespace c10{
 struct TensorOptions;
 }
@@ -703,7 +706,7 @@ class CAFFE2_API Tensor {
   Tensor cholesky(bool upper=false) const;
   Tensor cholesky_solve(const Tensor & input2, bool upper=false) const;
   std::tuple<Tensor,Tensor> solve(const Tensor & A) const;
-  Tensor potri(bool upper=true) const;
+  Tensor cholesky_inverse(bool upper=false) const;
   std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
   std::tuple<Tensor,Tensor> qr() const;
   std::tuple<Tensor,Tensor> geqrf() const;
@@ -761,6 +764,8 @@ class CAFFE2_API Tensor {
   friend struct WeakTensor;
 
 protected:
+  friend class ::caffe2::Tensor;
+
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };

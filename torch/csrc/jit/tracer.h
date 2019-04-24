@@ -65,7 +65,30 @@ TORCH_API Value* getNestedOutputTrace(
     const std::shared_ptr<TracingState>& state,
     const IValue& iv);
 
-TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs);
+struct TypedStack : public std::pair<Stack, TupleTypePtr>
+{
+  using pair::pair;
+
+  // NB: The inherited default constructor gives nullptr for |type|,
+  //     so we provide a saner one.
+  TypedStack()
+    : pair({}, TupleType::create({}))
+  {}
+
+  Stack& stack() {
+    return this->first;
+  }
+  TupleTypePtr& types() {
+    return this->second;
+  }
+  size_t size() {
+    auto s = stack().size();
+    AT_ASSERT(s == types()->elements().size());
+    return s;
+  }
+};
+
+TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs);
 
 TORCH_API void exit(const Stack& outputs);
 
@@ -79,6 +102,10 @@ TORCH_API void addInputs(
     const char* name,
     c10::optional<int64_t> value);
 TORCH_API void addInputs(Node* n, const char* name, bool value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<bool>& value);
 TORCH_API void addInputs(Node* n, const char* name, double value);
 TORCH_API void addInputs(Node* n, const char* name, const at::Scalar& value);
 TORCH_API void addInputs(
