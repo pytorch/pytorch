@@ -34,16 +34,16 @@ graph():
     script::parseIR(
         R"IR(
 graph(%cond : Tensor):
-  %a : string = prim::Constant[value="bcd"]()
+  %a : str = prim::Constant[value="bcd"]()
   %3 : bool = prim::Bool(%cond)
-  %b : string = prim::If(%3)
+  %b : str = prim::If(%3)
     block0():
-      %b.1 : string = prim::Constant[value="abc"]()
+      %b.1 : str = prim::Constant[value="abc"]()
       -> (%b.1)
     block1():
-      %b.2 : string = prim::Constant[value="abc"]()
+      %b.2 : str = prim::Constant[value="abc"]()
       -> (%b.2)
-  %7 : (string, string) = prim::TupleConstruct(%a, %b)
+  %7 : (str, str) = prim::TupleConstruct(%a, %b)
   return (%7)
   )IR",
         &*graph);
@@ -69,8 +69,8 @@ graph():
   %y : Tensor = aten::tensor(%3, %10, %7, %15)
   %9 : int[] = prim::ListConstruct(%1, %2)
   %z : Tensor = aten::tensor(%9, %10, %7, %15)
-  %14 : (Tensor, Tensor) = prim::TupleConstruct(%x, %y)
-  return (%14)
+  %f = prim::Print(%x, %y, %z)
+  return (%1)
   )IR",
         &*graph);
     // three tensors created - two different devices among the three
@@ -82,7 +82,24 @@ graph():
         ->check_count("Long(2) = prim::Constant", 1, /*exactly*/ true)
         ->run(*graph);
   }
+  // don't create aliasing of graph outputs in constant pooling
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+graph(%cond : Tensor):
+  %a : Tensor = prim::Constant()
+  %b : Tensor = prim::Constant()
+  %c : Tensor = prim::Constant()
+  %1 = prim::Print(%c)
+  return (%a, %b)
+  )IR",
+        &*graph);
+    ConstantPooling(graph);
+    testing::FileCheck()
+        .check_count("prim::Constant", 2, /*exactly*/ true)
+        ->run(*graph);
+  }
 }
-
 } // namespace jit
 } // namespace torch
