@@ -360,9 +360,6 @@ struct C10_API TensorOptions {
             if (isComplexType(typeMetaToScalarType(dtype()))) {
               return ComplexCPUTensorId();
             }
-            if (isQIntType(typeMetaToScalarType(dtype()))) {
-              return QuantizedCPUTensorId();
-            }
             return CPUTensorId();
           case DeviceType::CUDA:
             if (isComplexType(typeMetaToScalarType(dtype()))) {
