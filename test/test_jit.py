@@ -1789,6 +1789,7 @@ graph(%x : Tensor,
         trace = torch.jit.trace(max_pool2d, (x))
         graph = trace.graph_for(x)
         FileCheck().check("aten::max_pool2d(").run(graph)
+        self.assertEqual(max_pool2d(x), trace(x))
 
     def test_repeated_input(self):
         def fn(a, b):
