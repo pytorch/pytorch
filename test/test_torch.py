@@ -2683,6 +2683,10 @@ class _TestTorchMixin(object):
         self.assertTrue(qr[0].is_quantized)
         qr[0] = 11.3  # float asignment
         self.assertEqual(qr.item(), 11)
+        x = torch.ones(1, dtype=torch.float) * 15.3
+        # Copying from a float Tensor
+        qr[:] = x
+        self.assertEqual(qr.item(), 15)
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
