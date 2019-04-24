@@ -199,7 +199,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
-  ${TORCH_ROOT}/test/cpp/jit/test.cpp
   )
 
 if (WIN32)
@@ -550,6 +549,10 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tuple_parser.cpp
+    # test.cpp included here to enable running cpp tests from python runner.
+    # Ideally we'd create a separate python extension for it, but it's too much
+    # hassle
+    ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 
   set(TORCH_PYTHON_INCLUDE_DIRECTORIES

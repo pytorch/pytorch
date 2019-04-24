@@ -123,7 +123,6 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/fuser/cpu/dynamic_library_unix.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
-    "test/cpp/jit/test.cpp",
 ]
 
 libtorch_cuda_sources = [
@@ -240,6 +239,10 @@ def add_torch_libs():
         "torch/csrc/utils/tensor_numpy.cpp",
         "torch/csrc/utils/tensor_types.cpp",
         "torch/csrc/utils/tuple_parser.cpp",
+        # test.cpp included here to enable running cpp tests from python runner.
+        # Ideally we'd create a separate python extension for it, but it's too
+        # much hassle
+        "test/cpp/jit/test.cpp",
     ]
 
     common_flags = {
