@@ -3063,6 +3063,7 @@ class _TestTorchMixin(object):
             self.assertEqual(a > False, torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
             self.assertEqual(a == torch.tensor(True, dtype=torch.bool), torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
             self.assertEqual(a == torch.tensor(0, dtype=torch.bool), torch.tensor([0, 1, 0, 1, 0, 1], dtype=torch.uint8))
+            self.assertFalse(a.equal(b))
 
     def test_bool_tensor_value_change(self):
         for device in torch.testing.get_all_device_types():
