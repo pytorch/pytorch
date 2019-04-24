@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <vector>
 
+#include <ATen/native/mkldnn/TensorShape.h>
+
 namespace at {
 namespace native {
 
@@ -431,6 +433,11 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
   auto shape = infer_size(proposed_shape, self.numel());
+
+  if (self.is_mkldnn()) {
+    return mkldnn_reshape(self, shape);
+  }
+
   if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
     return self.as_strided(shape, *stride);
   }

@@ -1158,10 +1158,7 @@
 - func: max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
 
 - func: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
-  dispatch:
-    CPU: max_pool2d
-    CUDA: max_pool2d
-    MkldnnCPU: mkldnn_max_pool2d
+  requires_tensor: True
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
@@ -1520,10 +1517,7 @@
 - func: reshape(Tensor self, int[] shape) -> Tensor
   variants: function, method
   device_guard: False
-  dispatch:
-    CPU: reshape
-    CUDA: reshape
-    MkldnnCPU: mkldnn_reshape
+  requires_tensor: True
 
 - func: reshape_as(Tensor self, Tensor other) -> Tensor
   variants: method
@@ -2718,10 +2712,6 @@
   cuda_bool: True
   variants: method
   device_guard: False
-  dispatch:
-    CPU: view
-    CUDA: view
-    MkldnnCPU: mkldnn_view
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
