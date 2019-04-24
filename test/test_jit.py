@@ -11209,10 +11209,10 @@ a")
             arg_str = ', '.join([chr(i + ord('a')) for i in range(len(args_fn()))])
 
             code = dedent('''
-                def test({}):
-                    # type: ({})
-                    return torch.nn.init.{}({})
-            ''').format(arg_str, type_str, name, arg_str)
+                def test({arg_str}):
+                    # type: ({type_str})
+                    return torch.nn.init.{name}({arg_str})
+            ''').format(arg_str=arg_str, type_str=type_str, name=name)
             cu = torch.jit.CompilationUnit(code)
 
             # Compare functions
@@ -11220,6 +11220,8 @@ a")
             script_out = self.runAndSaveRNG(cu.test, args_fn())
             eager_out = self.runAndSaveRNG(init_fn, args_fn())
             self.assertEqual(script_out, eager_out)
+
+            FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
 
     def test_overloading(self):
         @torch._jit_internal.weak_module

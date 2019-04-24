@@ -396,7 +396,7 @@ RegisterOperators reg(
          "aten::_pack_sequence(Tensor output, Tensor batch_sizes, Tensor? sorted_indices, "
          "Tensor? unsorted_indices) -> (Tensor, Tensor, Tensor?, Tensor?)",
          [](Stack& stack) { return 0; }),
-     Operator("aten::_no_grad_uniform_(Tensor(a) tensor, float a, float b) -> Tensor(a)", [](Stack& stack) {
+     Operator("aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)", [](Stack& stack) {
        // TODO: remove when script supports setting grad mode
        torch::NoGradGuard no_grad;
 
@@ -407,7 +407,7 @@ RegisterOperators reg(
        push(stack, at::_th_uniform_(tensor, a, b));
        return 0;
      }),
-     Operator("aten::_no_grad_normal_(Tensor(a) tensor, float mean, float std) -> Tensor(a)", [](Stack& stack) {
+     Operator("aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std) -> Tensor(a!)", [](Stack& stack) {
        // TODO: remove when script supports setting grad mode
        torch::NoGradGuard no_grad;
 
@@ -418,7 +418,7 @@ RegisterOperators reg(
        push(stack, at::_th_normal_(tensor, mean, std));
        return 0;
      }),
-     Operator("aten::_no_grad_fill_(Tensor(a) tensor, float val) -> Tensor(a)", [](Stack& stack) {
+     Operator("aten::_no_grad_fill_(Tensor(a!) tensor, float val) -> Tensor(a!)", [](Stack& stack) {
        // TODO: remove when script supports setting grad mode
        torch::NoGradGuard no_grad;
 
@@ -428,7 +428,7 @@ RegisterOperators reg(
        push(stack, at::fill_(tensor, val));
        return 0;
      }),
-     Operator("aten::_no_grad_zero_(Tensor(a) tensor) -> Tensor(a)", [](Stack& stack) {
+     Operator("aten::_no_grad_zero_(Tensor(a!) tensor) -> Tensor(a!)", [](Stack& stack) {
        // TODO: remove when script supports setting grad mode
        torch::NoGradGuard no_grad;
 

@@ -74,6 +74,7 @@ def calculate_gain(nonlinearity, param=None):
 
 @weak_script
 def uniform_(tensor, a=0., b=1.):
+    # type: (Tensor, float, float) -> Tensor
     r"""Fills the input Tensor with values drawn from the uniform
     distribution :math:`\mathcal{U}(a, b)`.
 
@@ -86,12 +87,12 @@ def uniform_(tensor, a=0., b=1.):
         >>> w = torch.empty(3, 5)
         >>> nn.init.uniform_(w)
     """
-    # type: (Tensor, float, float) -> Tensor
     return _no_grad_uniform_(tensor, a, b)
 
 
 @weak_script
 def normal_(tensor, mean=0., std=1.):
+    # type: (Tensor, float, float) -> Tensor
     r"""Fills the input Tensor with values drawn from the normal
     distribution :math:`\mathcal{N}(\text{mean}, \text{std})`.
 
@@ -104,12 +105,12 @@ def normal_(tensor, mean=0., std=1.):
         >>> w = torch.empty(3, 5)
         >>> nn.init.normal_(w)
     """
-    # type: (Tensor, float, float) -> Tensor
     return _no_grad_normal_(tensor, mean, std)
 
 
 @weak_script
 def constant_(tensor, val):
+    # type: (Tensor, float) -> Tensor
     r"""Fills the input Tensor with the value :math:`\text{val}`.
 
     Args:
@@ -120,12 +121,12 @@ def constant_(tensor, val):
         >>> w = torch.empty(3, 5)
         >>> nn.init.constant_(w, 0.3)
     """
-    # type: (Tensor, float) -> Tensor
     return _no_grad_fill_(tensor, val)
 
 
 @weak_script
 def ones_(tensor):
+    # type: (Tensor) -> Tensor
     r"""Fills the input Tensor with ones`.
 
     Args:
@@ -135,12 +136,12 @@ def ones_(tensor):
         >>> w = torch.empty(3, 5)
         >>> nn.init.ones_(w)
     """
-    # type: (Tensor) -> Tensor
-    # return _no_grad_fill_(tensor, 1.)
+    return _no_grad_fill_(tensor, 1.)
 
 
 @weak_script
 def zeros_(tensor):
+    # type: (Tensor) -> Tensor
     r"""Fills the input Tensor with zeros`.
 
     Args:
@@ -150,7 +151,6 @@ def zeros_(tensor):
         >>> w = torch.empty(3, 5)
         >>> nn.init.zeros_(w)
     """
-    # type: (Tensor) -> Tensor
     return _no_grad_zero_(tensor)
 
 
@@ -228,6 +228,7 @@ def _calculate_fan_in_and_fan_out(tensor):
 
 @weak_script
 def xavier_uniform_(tensor, gain=1.):
+    # type: (Tensor, float) -> Tensor
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
     neural networks` - Glorot, X. & Bengio, Y. (2010), using a uniform
@@ -247,7 +248,6 @@ def xavier_uniform_(tensor, gain=1.):
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain('relu'))
     """
-    # type: (Tensor, float) -> Tensor
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
     a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
@@ -257,6 +257,7 @@ def xavier_uniform_(tensor, gain=1.):
 
 @weak_script
 def xavier_normal_(tensor, gain=1.):
+    # type: (Tensor, float) -> Tensor
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
     neural networks` - Glorot, X. & Bengio, Y. (2010), using a normal
@@ -276,7 +277,6 @@ def xavier_normal_(tensor, gain=1.):
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_normal_(w)
     """
-    # type: (Tensor, float) -> Tensor
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
 
