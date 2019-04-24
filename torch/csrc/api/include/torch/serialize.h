@@ -28,6 +28,8 @@ namespace torch {
 ///
 ///   torch::optim::SGD sgd(/*lr=*/0.9);
 ///   std::ostringstream stream;
+///   // Note that the same stream cannot be used in multiple torch::save(...)
+///   // invocations, otherwise the header will be corrupted.
 ///   torch::save(sgd, stream);
 ///
 ///   auto tensor = torch::ones({3, 4});
@@ -54,6 +56,8 @@ void save(const Value& value, SaveToArgs&&... args) {
 ///
 ///   std::vector<torch::Tensor> tensor_vec = { torch::randn({5, 6}), torch::randn({7, 8}) };
 ///   std::ostringstream stream;
+///   // Note that the same stream cannot be used in multiple torch::save(...)
+///   // invocations, otherwise the header will be corrupted.
 ///   torch::save(tensor_vec, stream);
 /// \endrst
 template <typename... SaveToArgs>
