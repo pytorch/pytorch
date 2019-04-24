@@ -904,7 +904,20 @@ class _TestTorchMixin(object):
     def test_max_with_inf(self):
         self._test_max_with_inf(self)
 
-    def test_max_empty(self):
+    def test_min(self):
+        self._testSelection(torch.min, min)
+
+    @staticmethod
+    def _test_min_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):
+        for dtype in dtypes:
+            a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
+            self.assertTrue(torch.all(torch.min(a, dim=1)[0] == (-inf)).item())
+            self.assertTrue(torch.min(a).item() == -inf)
+
+    def test_min_with_inf(self):
+        self._test_min_with_inf(self)
+
+    def test_max_min_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
             x = torch.ones(0, device=device)
@@ -926,24 +939,6 @@ class _TestTorchMixin(object):
             # Checking overflow
             self.assertTrue(x.float().min() == x.float().min() + 1)
             self.assertTrue(x.double().min() == x.double().min() + 1)
-
-    def test_min(self):
-        self._testSelection(torch.min, min)
-
-    @staticmethod
-    def _test_min_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):
-        for dtype in dtypes:
-            a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
-            self.assertTrue(torch.all(torch.min(a, dim=1)[0] == (-inf)).item())
-            self.assertTrue(torch.min(a).item() == -inf)
-
-    def test_min_with_inf(self):
-        self._test_min_with_inf(self)
-
-    def test_empty_max(self):
-        # To be done
-        g = torch.rand(0,4)
-        torch.max(g)
 
     @staticmethod
     def _test_norm(self, device):
