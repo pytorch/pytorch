@@ -11267,6 +11267,36 @@ a")
                         return 4
                 return 5
 
+    def test_nn_init(self):
+        tests = (
+            ('constant_', (lambda: (torch.ones(2, 2), 2.5)), "Tensor, float"),
+            ('ones_', (lambda: (torch.ones(2, 2),)), "Tensor"),
+            ('zeros_', (lambda: (torch.ones(2, 2),)), "Tensor"),
+            ('uniform_', (lambda: (torch.ones(2, 2),)), "Tensor"),
+            ('normal_', (lambda: (torch.ones(2, 2),)), "Tensor"),
+            ('xavier_normal_', (lambda: (torch.ones(2, 2),)), "Tensor"),
+            ('xavier_uniform_', (lambda: (torch.ones(2, 2),)), "Tensor"),
+        )
+
+        for name, args_fn, type_str in tests:
+            # Build test code
+            arg_str = ', '.join([chr(i + ord('a')) for i in range(len(args_fn()))])
+
+            code = dedent('''
+                def test({arg_str}):
+                    # type: ({type_str})
+                    return torch.nn.init.{name}({arg_str})
+            ''').format(arg_str=arg_str, type_str=type_str, name=name)
+            cu = torch.jit.CompilationUnit(code)
+
+            # Compare functions
+            init_fn = getattr(torch.nn.init, name)
+            script_out = self.runAndSaveRNG(cu.test, args_fn())
+            eager_out = self.runAndSaveRNG(init_fn, args_fn())
+            self.assertEqual(script_out, eager_out)
+
+            FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
+
     def test_overloading(self):
         @torch._jit_internal.weak_module
         class W(torch.nn.Module):
