@@ -93,19 +93,24 @@ constexpr uint32_t LMASK = 0x7fffffff;
 
 class mt19937_engine {
 public:
-  /**
-   * Note: This constructor is only used for testing this
-   * implementation against std::mt19937. If you use this
-   * constructor, chances are you'll encounter the same seeding
-   * surprises as mentioned in this article:
-   * http://www.pcg-random.org/posts/cpp-seeding-surprises.html
-   */
+
   inline explicit mt19937_engine(uint64_t seed = 5489) : seed_(seed) {
     init_with_uint32(seed);
   }
 
+  inline mt19937_engine(uint64_t seed, int left, bool seeded, uint32_t next, 
+                        std::array<uint32_t, MERSENNE_STATE_N> state)
+         : seed_(seed), left_(left), seeded_(seeded), next_(next), state_(state) { }
+
   inline uint64_t seed() const {
     return seed_;
+  }
+
+  inline bool is_valid() {
+    if ((seeded_ == true) && (left_ > 0 && left_ <= MERSENNE_STATE_N) && (next_ <= MERSENNE_STATE_N)) {
+      return true;
+    }
+    return false;
   }
 
   inline uint32_t operator()() {
@@ -114,7 +119,7 @@ public:
     if (--(left_) == 0) {
         next_state();
     }
-    y = *(state_ + next_++);
+    y = *(state_.data() + next_++);
     y ^= (y >> 11);
     y ^= (y << 7) & 0x9d2c5680;
     y ^= (y << 15) & 0xefc60000;
@@ -126,16 +131,19 @@ public:
 private:
   uint64_t seed_;
   int left_;
+  bool seeded_;
   uint32_t next_;
-  uint32_t state_[MERSENNE_STATE_N];
+  std::array<uint32_t, MERSENNE_STATE_N> state_;
 
   inline void init_with_uint32(uint64_t seed) {
+    seeded_ = true;
     state_[0] = seed & 0xffffffff;
     for(int j = 1; j < MERSENNE_STATE_N; j++) {
       state_[j] = (1812433253 * (state_[j-1] ^ (state_[j-1] >> 30)) + j);
       state_[j] &= 0xffffffff;
     }
     left_ = 1;
+    next_ = 0;
   }
 
   inline uint32_t mix_bits(uint32_t u, uint32_t v) {
@@ -147,7 +155,7 @@ private:
   }
 
   inline void next_state() {
-    uint32_t* p = state_;
+    uint32_t* p = state_.data();
     left_ = MERSENNE_STATE_N;
     next_ = 0;
 

@@ -9,7 +9,11 @@
 #endif
 
 #include <cpuinfo.h>
+#include <array>
+#include <iterator>
+#include <algorithm>
 #include <ATen/Utils.h>
+#include <TH/THGenerator.hpp>
 
 void THTensor_(random)(THTensor *self, at::Generator *_generator)
 {
@@ -477,32 +481,81 @@ void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
 {
   // See Note [Thread-safety and Generators]
   std::lock_guard<std::mutex> lock(_generator->mutex_);
-  static const size_t size = sizeof(at::CPUGenerator);
-  at::CPUGenerator* rng_state;
+  static const size_t size = sizeof(THGeneratorStateNew);
   THTensor_(resize1d)(self, size);
   THArgCheck(THTensor_(nElement)(self) == size, 1, "RNG state is wrong size");
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
-  rng_state = (at::CPUGenerator*)self->data<scalar_t>();
+
+  // cast byte tensor to POD type
+  THGeneratorStateNew* rng_state = (THGeneratorStateNew*)self->data<scalar_t>();
+
+  // accumulate generator data to be copied into byte tensor
+  auto state = c10::guts::make_unique<THGeneratorStateNew>();
   auto cast_generator = static_cast<at::CPUGenerator*>(_generator);
-  memcpy(rng_state, cast_generator, size);
+  state->engine = cast_generator->engine();
+  state->next_float_normal_sample = cast_generator->next_float_normal_sample();
+  state->next_double_normal_sample = cast_generator->next_double_normal_sample();
+
+  memcpy(rng_state, state.get(), size);
 }
 
 void THTensor_(setRNGState)(at::Generator *_generator, THTensor *self)
 {
   // See Note [Thread-safety and Generators]
   std::lock_guard<std::mutex> lock(_generator->mutex_);
-  static const size_t size = sizeof(at::CPUGenerator);
-  at::CPUGenerator* rng_state;
-  THArgCheck(THTensor_(nElement)(self) == size, 1, "RNG state is wrong size");
-  THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
-  rng_state = (at::CPUGenerator*)self->data<scalar_t>();
-  int64_t is_valid = 0;
-  if (_generator->device().type() == rng_state->device().type()) {
-    is_valid = 1;
-  }
-  THArgCheck(is_valid, 1, "Invalid RNG state");
   auto cast_generator = static_cast<at::CPUGenerator*>(_generator);
-  memcpy(cast_generator, rng_state, size);
+  THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
+  static const size_t size_legacy = sizeof(THGeneratorState);
+  static const size_t size_current = sizeof(THGeneratorStateNew);
+  at::mt19937 engine;
+  auto float_normal_sample = c10::optional<float>();
+  auto double_normal_sample = c10::optional<double>();
+
+  // Construct the state of at::CPUGenerator based on input byte tensor size.
+  if (THTensor_(nElement)(self) == size_legacy) {
+    THGeneratorState* legacy_state = (THGeneratorState*)self->data<scalar_t>();
+    // Note that in legacy THGeneratorState, we didn't have float version
+    // of normal sample and hence we leave the c10::optional<float> as is
+    
+    // Update next_double_normal_sample.
+    // Note that legacy THGeneratorState stores two uniform values (normal_x, normal_y)
+    // and a rho value (normal_rho). These three values were redundant and in the new
+    // DistributionsHelper.h, we store the actual extra normal sample, rather than three
+    // intermediate values.
+    if (legacy_state->normal_is_valid) {
+      auto r = legacy_state->normal_rho;
+      auto theta = 2.0 * M_PI * legacy_state->normal_x;
+      // we return the sin version of the normal sample when in caching mode
+      double_normal_sample = c10::optional<double>(r * ::sin(theta));
+    }
+
+    // construct engine_
+    // Note that legacy THGeneratorState stored a state array of 64 bit uints, whereas in our
+    // redefined mt19937, we have changed to a state array of 32 bit uints. Hence, we are
+    // doing a std::copy.
+    std::array<uint32_t, at::MERSENNE_STATE_N> state_array_32_bit;
+    std::copy(std::begin(legacy_state->state), std::end(legacy_state->state), state_array_32_bit.begin());
+    engine = at::mt19937(legacy_state->the_initial_seed,
+                         legacy_state->left,
+                         legacy_state->seeded,
+                         static_cast<uint32_t>(legacy_state->next),
+                         state_array_32_bit);
+  } else if (THTensor_(nElement)(self) == size_current) {
+    auto rng_state = (THGeneratorStateNew*)self->data<scalar_t>();
+    // construct engine_
+    engine = rng_state->engine;
+    // update next_float_normal_sample
+    float_normal_sample = rng_state->next_float_normal_sample;
+    // update next_double_normal_sample
+    double_normal_sample = rng_state->next_double_normal_sample;
+  } else {
+    AT_ERROR("RNG state is wrong size");
+  }
+
+  THArgCheck(engine.is_valid(), 1, "Invalid RNG state");
+  cast_generator->set_engine(engine);
+  cast_generator->set_next_float_normal_sample(float_normal_sample);
+  cast_generator->set_next_double_normal_sample(double_normal_sample);
 }
 #endif
 #endif

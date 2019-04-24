@@ -75,12 +75,6 @@ CPUGenerator::CPUGenerator(uint64_t seed_in)
     next_float_normal_sample_(c10::optional<float>()),
     next_double_normal_sample_(c10::optional<double>()) { }
 
-CPUGenerator::CPUGenerator(mt19937 engine_in)
-  : CloneableGenerator(Device(DeviceType::CPU)),
-    engine_(engine_in),
-    next_float_normal_sample_(c10::optional<float>()),
-    next_double_normal_sample_(c10::optional<double>()) { }
-
 /**
  * Manually seeds the engine with the seed input
  * See Note [Thread-safety and Generators]
@@ -159,12 +153,32 @@ void CPUGenerator::set_next_double_normal_sample(c10::optional<double> randn) {
 }
 
 /**
+ * Get the engine of the CPUGenerator
+ */
+at::mt19937 CPUGenerator::engine() {
+  return engine_;
+}
+
+/**
+ * Set the engine of the CPUGenerator
+ * 
+ * See Note [Thread-safety and Generators]
+ */
+void CPUGenerator::set_engine(at::mt19937 engine) {
+  engine_ = engine;
+}
+
+/**
  * Private clone method implementation
  * 
  * See Note [Thread-safety and Generators]
  */
 CloneableGenerator<CPUGenerator, Generator>* CPUGenerator::clone_impl() const {
-  return new CPUGenerator(engine_);
+  auto gen = new CPUGenerator();
+  gen->set_engine(engine_);
+  gen->set_next_float_normal_sample(next_float_normal_sample_);
+  gen->set_next_double_normal_sample(next_double_normal_sample_);
+  return gen;
 }
 
 } // namespace at

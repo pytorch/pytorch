@@ -120,14 +120,14 @@ struct normal_distribution {
     // return cached values if available
     if (std::is_same<T, double>::value) {
       if (generator->next_double_normal_sample()) {
-        ret = *(generator->next_double_normal_sample());
+        ret = *(generator->next_double_normal_sample()) * stdv + mean;
         // reset c10::optional to null
         generator->set_next_double_normal_sample(c10::optional<double>());
         return ret;
       }
     } else {
       if (generator->next_float_normal_sample()) {
-        ret = *(generator->next_float_normal_sample());
+        ret = *(generator->next_float_normal_sample()) * stdv + mean;
         // reset c10::optional to null
         generator->set_next_float_normal_sample(c10::optional<float>());
         return ret;
@@ -140,10 +140,10 @@ struct normal_distribution {
     const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
     const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
     if (std::is_same<T, double>::value) {
-      dist_acctype<double> cache = r * ::sin(theta) * stdv + mean;
+      dist_acctype<double> cache = r * ::sin(theta);
       generator->set_next_double_normal_sample(c10::optional<double>(cache));
     } else {
-      dist_acctype<float> cache = r * ::sin(theta) * stdv + mean;
+      dist_acctype<float> cache = r * ::sin(theta);
       generator->set_next_float_normal_sample(c10::optional<float>(cache));
     }
     ret = r * ::cos(theta) * stdv + mean;
