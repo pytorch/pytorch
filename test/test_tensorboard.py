@@ -370,7 +370,6 @@ if TEST_TENSORBOARD:
         with open(expected_file, 'w') as f:
             f.write(str(str_to_compare))
 
-
     class TestTensorBoardPytorchGraph(BaseTestCase):
         def test_pytorch_graph(self):
             dummy_input = (torch.zeros(1, 3),)
