@@ -10,17 +10,17 @@ import sys
 import tempfile
 import unittest
 
-import torch
-from common_utils import TestCase, run_tests
-from torch.utils.tensorboard import summary, SummaryWriter
-from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
-from torch.utils.tensorboard._convert_np import make_np
-
 try:
     import tensorboard.summary.writer.event_file_writer  # noqa F401
 except ImportError:
     # Short circuit all TensorBoard tests
     raise unittest.SkipTest("no tensorboard installed")
+
+import torch
+from common_utils import TestCase, run_tests
+from torch.utils.tensorboard import summary, SummaryWriter
+from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
+from torch.utils.tensorboard._convert_np import make_np
 
 TEST_MATPLOTLIB = True
 try:
