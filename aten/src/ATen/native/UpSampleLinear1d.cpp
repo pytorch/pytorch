@@ -40,7 +40,7 @@ static void upsample_linear1d_out_frame(
 
   for (int64_t w2 = 0; w2 < output_width; ++w2) {
     const scalar_t w1r = linear_upsample_compute_source_index<scalar_t>(
-        rwidth, w2, align_corners);
+        rwidth, w2, align_corners, /*cubic=*/false);
 
     const int64_t w1 = w1r;
     const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
@@ -89,7 +89,7 @@ static void upsample_linear1d_backward_out_frame(
 
   for (int64_t w2 = 0; w2 < output_width; ++w2) {
     const scalar_t w1r = linear_upsample_compute_source_index<scalar_t>(
-        rwidth, w2, align_corners);
+        rwidth, w2, align_corners, /*cubic=*/false);
 
     const int64_t w1 = w1r;
     const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;

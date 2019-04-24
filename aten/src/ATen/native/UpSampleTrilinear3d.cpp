@@ -59,7 +59,7 @@ static void upsample_trilinear3d_out_frame(
       input_width, output_width, align_corners);
   for (int64_t t2 = 0; t2 < output_depth; ++t2) {
     const scalar_t t1r = linear_upsample_compute_source_index<scalar_t>(
-        rdepth, t2, align_corners);
+        rdepth, t2, align_corners, /*cubic=*/false);
 
     const int64_t t1 = t1r;
     const int64_t t1p = (t1 < input_depth - 1) ? 1 : 0;
@@ -68,7 +68,7 @@ static void upsample_trilinear3d_out_frame(
 
     for (int64_t h2 = 0; h2 < output_height; ++h2) {
       const scalar_t h1r = linear_upsample_compute_source_index<scalar_t>(
-          rheight, h2, align_corners);
+          rheight, h2, align_corners, /*cubic=*/false);
 
       const int64_t h1 = h1r;
       const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
@@ -77,7 +77,7 @@ static void upsample_trilinear3d_out_frame(
 
       for (int64_t w2 = 0; w2 < output_width; ++w2) {
         const scalar_t w1r = linear_upsample_compute_source_index<scalar_t>(
-            rwidth, w2, align_corners);
+            rwidth, w2, align_corners, /*cubic=*/false);
 
         const int64_t w1 = w1r;
         const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
@@ -169,7 +169,7 @@ static void upsample_trilinear3d_backward_out_frame(
 
   for (int64_t t2 = 0; t2 < output_depth; ++t2) {
     const scalar_t t1r = linear_upsample_compute_source_index<scalar_t>(
-        rdepth, t2, align_corners);
+        rdepth, t2, align_corners, /*cubic=*/false);
     const int64_t t1 = t1r;
     const int64_t t1p = (t1 < input_depth - 1) ? 1 : 0;
     const scalar_t t1lambda = t1r - t1;
@@ -177,7 +177,7 @@ static void upsample_trilinear3d_backward_out_frame(
 
     for (int64_t h2 = 0; h2 < output_height; ++h2) {
       const scalar_t h1r = linear_upsample_compute_source_index<scalar_t>(
-          rheight, h2, align_corners);
+          rheight, h2, align_corners, /*cubic=*/false);
       const int64_t h1 = h1r;
       const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
       const scalar_t h1lambda = h1r - h1;
@@ -185,7 +185,7 @@ static void upsample_trilinear3d_backward_out_frame(
 
       for (int64_t w2 = 0; w2 < output_width; ++w2) {
         const scalar_t w1r = linear_upsample_compute_source_index<scalar_t>(
-            rwidth, w2, align_corners);
+            rwidth, w2, align_corners, /*cubic=*/false);
         const int64_t w1 = w1r;
         const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
         const scalar_t w1lambda = w1r - w1;

@@ -49,7 +49,7 @@ static void upsample_bilinear2d_out_frame(
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {
     const scalar_t h1r = linear_upsample_compute_source_index<scalar_t>(
-        rheight, h2, align_corners);
+        rheight, h2, align_corners, /*cubic=*/false);
 
     const int64_t h1 = h1r;
     const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
@@ -59,7 +59,7 @@ static void upsample_bilinear2d_out_frame(
 
     for (int64_t w2 = 0; w2 < output_width; ++w2) {
       const scalar_t w1r = linear_upsample_compute_source_index<scalar_t>(
-          rwidth, w2, align_corners);
+          rwidth, w2, align_corners, /*cubic=*/false);
 
       const int64_t w1 = w1r;
       const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
@@ -120,7 +120,7 @@ static void upsample_bilinear2d_backward_out_frame(
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {
     const scalar_t h1r = linear_upsample_compute_source_index<scalar_t>(
-        rheight, h2, align_corners);
+        rheight, h2, align_corners, /*cubic=*/false);
 
     const int64_t h1 = h1r;
     const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
@@ -130,7 +130,7 @@ static void upsample_bilinear2d_backward_out_frame(
 
     for (int64_t w2 = 0; w2 < output_width; ++w2) {
       const scalar_t w1r = linear_upsample_compute_source_index<scalar_t>(
-          rwidth, w2, align_corners);
+          rwidth, w2, align_corners, /*cubic=*/false);
 
       const int64_t w1 = w1r;
       const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;

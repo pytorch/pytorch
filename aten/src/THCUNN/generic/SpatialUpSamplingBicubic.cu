@@ -72,7 +72,7 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
     max_threads,
     0,
     stream
-  >>>(num_output_elements, rheight, rwidth, idata, odata);
+  >>>(num_output_elements, rheight, rwidth, align_corners, idata, odata);
   THCudaCheck(cudaGetLastError());
 }
 

@@ -162,12 +162,17 @@ template <typename scalar_t>
 static inline scalar_t linear_upsample_compute_source_index(
     scalar_t scale,
     int64_t dst_index,
-    bool align_corners) {
+    bool align_corners,
+    bool cubic) {
   if (align_corners) {
     return scale * dst_index;
   } else {
     scalar_t src_idx = scale * (dst_index + 0.5) - 0.5;
-    return src_idx < 0 ? scalar_t(0) : src_idx;
+    // [Note] Follow Opencv resize logic:
+    // When doing cubic interpolation, we allow negative src_idx
+    //   to compute dx = src_idx - floorf(src_idx) later.
+    // For other modes, it's bounded by 0.
+    return (!cubic && src_idx < 0) ? scalar_t(0) : src_idx;
   }
 }
 

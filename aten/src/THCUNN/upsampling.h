@@ -25,12 +25,13 @@ static Acctype linear_upsampling_compute_scale(
 template<typename Acctype>
 __device__ __forceinline__
 static Acctype linear_upsampling_compute_source_index(
-                          Acctype scale, int dst_index, bool align_corners) {
+                          Acctype scale, int dst_index, bool align_corners, bool cubic) {
   if (align_corners) {
     return scale * dst_index;
   } else {
     Acctype src_idx = scale * (dst_index + Acctype(0.5)) - Acctype(0.5);
-    return src_idx < Acctype(0) ? Acctype(0) : src_idx;
+    // See Note[Follow Opencv resize logic]
+    return (!cubic && src_idx) < Acctype(0) ? Acctype(0) : src_idx;
   }
 }
 
