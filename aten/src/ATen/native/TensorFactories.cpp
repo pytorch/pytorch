@@ -243,9 +243,10 @@ Tensor logspace(
     Scalar start,
     Scalar end,
     int64_t steps,
+    double base,
     const TensorOptions& options) {
   Tensor result = at::empty({steps}, options);
-  return at::logspace_out(result, start, end, steps);
+  return at::logspace_out(result, start, end, steps, base);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

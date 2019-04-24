@@ -124,7 +124,7 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             if not hasattr(curr, name):
                 setattr(curr, name, ScriptModule())
             curr = getattr(curr, name)
-        return curr
+        return curr._c
     if isinstance(f, string_classes):
         if not os.path.exists(f):
             raise ValueError("The provided filename {} does not exist".format(f))
@@ -666,8 +666,8 @@ def trace(func,
     else:
         module = TopLevelTracedModule(func, **executor_options)
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
-    module._create_method_from_trace('forward', func, example_inputs,
-                                     var_lookup_fn, _force_outplace)
+    module._c._create_method_from_trace('forward', func, example_inputs,
+                                        var_lookup_fn, _force_outplace)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
@@ -690,7 +690,7 @@ class CompilationUnit(object):
     def define(self, lang, rcb=None, _frames_up=0):
         if not rcb:
             rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-        self.module._define(lang, rcb, False)
+        self.module._define(None, lang, rcb, False)
 
     def __getattr__(self, attr):
         return self.module._get_method(attr)
@@ -742,7 +742,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
     else:
         mod = ScriptModule()
         ast = get_jit_def(obj)
-        _jit_script_compile(mod, ast, _rcb, get_default_args(obj))
+        _jit_script_compile(mod._c, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         mod.__doc__ = obj.__doc__
         return mod
@@ -812,14 +812,7 @@ def _is_weak_type(cls):
 
 class OrderedDictWrapper(object):
     def __init__(self, module):
-        self.module_ref = weakref.ref(module)
-
-    @property
-    def module(self):
-        r = self.module_ref()
-        if r is None:
-            raise RuntimeError("_parameters or _modules alive after module is dead")
-        return r
+        self.module = module
 
     def keys(self):
         return [k for k, v in self.items()]
@@ -865,7 +858,7 @@ class OrderedModuleDict(OrderedDictWrapper):
         if k in self._python_modules:
             raise RuntimeError("cannot re-assign modules in a ScriptModule")
         if isinstance(v, ScriptModule):
-            self.module._register_module(k, v)
+            self.module._register_module(k, v._c)
 
         self._python_modules[k] = v
 
@@ -937,7 +930,7 @@ def _create_methods_from_stubs(self, stubs):
     defs = [m.def_ for m in stubs]
     rcbs = [m.resolution_callback for m in stubs]
     defaults = [get_default_args(m.original_method) for m in stubs]
-    self._create_methods(defs, rcbs, defaults)
+    self._c._create_methods(self, defs, rcbs, defaults)
 
 # For each user-defined class that subclasses ScriptModule this meta-class,
 # (1) finds all the methods annotated with @script_method
@@ -949,44 +942,49 @@ def _create_methods_from_stubs(self, stubs):
 # resolve references to `self.param` or `self.module`.
 
 
-class ScriptMeta(type(torch._C.ScriptModule)):
+class ScriptMeta(type):
     # this has to inherit from pybind11's metaclass otherwise we get
     # issues because ScriptModule inherits from torch._C.ScriptModule,
     # a pybind11 type
-    def __init__(self, name, bases, attrs):
+    def __init__(cls, name, bases, attrs):
         # find all the script methods
-        self._original_methods = {}
+        cls._original_methods = {}
         methods = []
         for k, v in sorted(attrs.items()):
             if isinstance(v, ScriptMethodStub):
-                delattr(self, k)
+                delattr(cls, k)
                 methods.append(v)
-                self._original_methods[v.original_method.__name__] = v.original_method
+                cls._original_methods[v.original_method.__name__] = v.original_method
         # after the user's __init__ register all the script methods
         # with the module
-        original_init = getattr(self, '__init__', lambda self: None)
-        super_constants = getattr(super(self), '_constants_set', set())
-        self._constants_set = set(getattr(self, '__constants__', ())).union(super_constants)
-        self._overloads = dict(getattr(self, '__overloads__', {}))
-
-        cls = self
+        original_init = getattr(cls, '__init__', lambda self: None)
+        super_constants = getattr(super(cls), '_constants_set', set())
+        cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
+        cls._overloads = dict(getattr(cls, '__overloads__', {}))
 
         @functools.wraps(original_init)
         def init_then_register(self, *args, **kwargs):
-            # ensure even if the user forgets to call super that
-            # the pybind object is initialized so it will not segfault
-            # run this once, before the most-derived __init__ is called
-            if cls is type(self):
-                torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
             _create_methods_from_stubs(self, methods)
 
-        self.__init__ = init_then_register
-        return super(ScriptMeta, self).__init__(name, bases, attrs)
+        cls.__init__ = init_then_register
+        return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
 if _enabled:
-    class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
+
+    # this is a Python 'non-data descriptor' that causes the first access
+    # to ScriptModule's forward to lookup the forward method and stash
+    # it in the objects dict. Due to the standard rules for attribute lookup
+    # subsequent lookups will just directly return the previously looked up method.
+    # This is necessary because nn.Module defines forward as a method. If we
+    # did nothing __getattr__ would not be called. Instead we'd get nn.Module.forward
+    # which always throws an exception.
+    class _CachedForward(object):
+        def __get__(self, obj, cls):
+            return self.__getattr__('forward')
+
+    class ScriptModule(with_metaclass(ScriptMeta, Module)):
         r"""
         The core data structure in TorchScript is the ``ScriptModule``. It is an
         analogue of torch's nn.Module and represents an entire model as a tree of
@@ -1111,25 +1109,49 @@ if _enabled:
         """
 
         def __init__(self, optimize=True):
-            # must be before Module.init since the field is used in __getattr__
+            self.__dict__['_c'] = torch._C.ScriptModule()
             Module.__init__(self)
-            self._set_optimized(optimize)
-            self._parameters = OrderedParameterDict(self)
-            self._buffers = OrderedBufferDict(self)
-            self._modules = OrderedModuleDict(self)
+            self._c._set_optimized(optimize)
+            self._parameters = OrderedParameterDict(self._c)
+            self._buffers = OrderedBufferDict(self._c)
+            self._modules = OrderedModuleDict(self._c)
+
+        @property
+        def graph(self):
+            return self.forward.graph
+
+        @property
+        def code(self):
+            return self.forward.code
+
+        def save(self, *args, **kwargs):
+            return self._c.save(*args, **kwargs)
+
+        def save_to_buffer(self, *args, **kwargs):
+            return self._c.save_to_buffer(*args, **kwargs)
+
+        def get_debug_state(self, *args, **kwargs):
+            return self._c.get_debug_state()
+
+        forward = _CachedForward()
 
         def __getattr__(self, attr):
-            if self._has_method(attr):
+            if '_c' not in self.__dict__:
+                raise RuntimeError("ScriptModule has not been initialized, did you forget to call super's init?")
+            if self._c._has_method(attr):
                 if attr in self.__class__._original_methods:
                     original_method = self.__class__._original_methods[attr]
-                    script_method = self._get_method(attr)
-                    return functools.wraps(original_method)(script_method)
+                    script_method = self._c._get_method(attr)
+                    script_method = functools.wraps(original_method)(script_method)
                 else:
-                    return self._get_method(attr)
-            if attr == 'graph' and self._has_method('forward'):
-                return self.__getattr__('forward').graph
-            if self._has_attribute(attr):
-                return self._get_attribute(attr)
+                    script_method = self._c._get_method(attr)
+                # cache method so future calls do not go through __getattr__
+                # to improve invocation performance
+                self.__dict__[attr] = script_method
+                return script_method
+
+            if self._c._has_attribute(attr):
+                return self._c._get_attribute(attr)
             return Module.__getattr__(self, attr)
 
         def __setattr__(self, attr, value):
@@ -1138,14 +1160,14 @@ if _enabled:
                     # Compile weak script module
                     value = _make_strong(value)
                 if attr == 'training':
-                    if self._has_buffer('training'):
+                    if self._c._has_buffer('training'):
                         self.__dict__['training'] = value
-                        self._get_buffer('training').fill_(int(value))
+                        self._c._get_buffer('training').fill_(int(value))
                         return
                 if isinstance(value, Attribute):
                     the_type = torch.jit.annotations.ann_to_type(value.type)
                     try:
-                        self._register_attribute(attr, the_type, value.value)
+                        self._c._register_attribute(attr, the_type, value.value)
                     except RuntimeError:
                         raise RuntimeError("Could not register attribute '{}' of type '{}' for a value of type '{}'"
                                            .format(attr, value.type, type(value.value)))
@@ -1187,7 +1209,7 @@ if _enabled:
             # createResolutionCallback internally adds 1 to get us to our frame, then
             # we add 1 to get to the proper surrounding scope.
             rcb = _jit_internal.createResolutionCallback(frames_up=1)
-            self._define(lang, rcb, True)
+            self._c._define(self, lang, rcb, True)
 
         def copy(self):
             m = ScriptModule()
@@ -1198,8 +1220,8 @@ if _enabled:
                     if not hasattr(curr, name):
                         setattr(curr, name, ScriptModule())
                     curr = getattr(curr, name)
-                return curr
-            self._copy_into(module_lookup, {}, [])
+                return curr._c
+            self._c._copy_into(module_lookup, {}, [])
             return m
 
         def __getstate__(self):
@@ -1209,7 +1231,7 @@ if _enabled:
                 "For purely script modules use my_script_module.save(<filename>) instead.")
 
         def graph_for(self, *args, **kwargs):
-            return self._get_method('forward').graph_for(*args, **kwargs)
+            return self.forward.graph_for(*args, **kwargs)
 
     class WeakScriptModuleProxy(ScriptModule):
         def __init__(self, original, stubs):
@@ -1403,8 +1425,7 @@ class TracedModule(ScriptModule):
 
 
 class TopLevelTracedModule(TracedModule):
-    def forward(self, *args, **kwargs):
-        return self._get_method('forward')(*args, **kwargs)
+    forward = _CachedForward()
 
 
 class _ConstModuleList(ScriptModule):
