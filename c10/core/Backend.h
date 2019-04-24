@@ -26,7 +26,7 @@ namespace c10 {
  * or "SparseCUDA"; backend in torch.backends is something like "MKL" or
  * "CUDNN".
  */
-enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, QuantizedCPU, Undefined, MkldnnCPU, NumOptions };
+enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, QuantizedCPU, ComplexCPU, ComplexCUDA, Undefined, MkldnnCPU, NumOptions };
 
 static inline Backend toSparse(Backend b) {
   switch (b) {
@@ -67,6 +67,10 @@ static inline Backend toDense(Backend b) {
       return Backend::HIP;
     case Backend::QuantizedCPU:
       return Backend::QuantizedCPU;
+    case Backend::ComplexCPU:
+      return Backend::ComplexCPU;
+    case Backend::ComplexCUDA:
+      return Backend::ComplexCUDA;
     default:
       throw std::runtime_error("Unknown backend");
   }
@@ -93,6 +97,10 @@ static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
     return Backend::MkldnnCPU;
   } else if (t == QuantizedCPUTensorId()) {
     return Backend::QuantizedCPU;
+  } else if (t == ComplexCPUTensorId()) {
+    return Backend::ComplexCPU;
+  } else if (t == ComplexCUDATensorId()) {
+    return Backend::ComplexCUDA;
   } else if (t == UndefinedTensorId()) {
     return Backend::Undefined;
   } else {
@@ -122,6 +130,10 @@ static inline TensorTypeId backendToTensorTypeId(Backend b) {
       return MkldnnCPUTensorId();
     case Backend::QuantizedCPU:
       return QuantizedCPUTensorId();
+    case Backend::ComplexCPU:
+      return ComplexCPUTensorId();
+    case Backend::ComplexCUDA:
+      return ComplexCUDATensorId();
     case Backend::Undefined:
       return UndefinedTensorId();
     default:
@@ -149,7 +161,10 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::HIP;
     case Backend::MkldnnCPU:
     case Backend::QuantizedCPU:
+    case Backend::ComplexCPU:
       return DeviceType::CPU;
+    case Backend::ComplexCUDA:
+      return DeviceType::CUDA;
     case Backend::Undefined:
       AT_ERROR("Undefined backend is not a valid device type");
     default:
@@ -178,6 +193,9 @@ static inline Backend backendToCPU(Backend b) {
       return Backend::MkldnnCPU;
     case Backend::QuantizedCPU:
       return Backend::QuantizedCPU;
+    case Backend::ComplexCPU:
+    case Backend::ComplexCUDA:
+      return Backend::ComplexCPU;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
@@ -197,6 +215,9 @@ static inline Backend backendToCUDA(Backend b) {
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
       return Backend::SparseCUDA;
+    case Backend::ComplexCPU:
+    case Backend::ComplexCUDA:
+      return Backend::ComplexCUDA;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
@@ -245,6 +266,10 @@ static inline const char* toString(Backend b) {
       return "MkldnnCPU";
     case Backend::QuantizedCPU:
       return "QuantizedCPU";
+    case Backend::ComplexCPU:
+      return "ComplexCPU";
+    case Backend::ComplexCUDA:
+      return "ComplexCUDA";
     default:
       return "UNKNOWN_BACKEND";
   }

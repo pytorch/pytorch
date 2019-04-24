@@ -747,6 +747,9 @@ struct C10_EXPORT ivalue::GenericDict : c10::intrusive_ptr_target {
   operator UnorderedMap&() {
     return elements();
   }
+
+  using IterationOrder = std::vector<std::pair<IValue, IValue>>;
+  const IterationOrder iterationOrder() const;
 };
 
 #undef TORCH_FORALL_TAGS
