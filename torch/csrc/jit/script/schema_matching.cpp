@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/interfaces.h>
 
 namespace torch {
 namespace jit {
@@ -353,7 +354,7 @@ Value* packOutputs(
 
 // Given a successful match between operator schema and symbol, emit a node
 // with the appropriate inputs and outputs.
-static Value* emitBuiltinNode(
+Value* emitBuiltinNode(
     const MatchedSchema& matched_schema,
     const SourceRange& loc,
     Graph& graph,
@@ -432,6 +433,19 @@ Value* emitBuiltinCall(
               allow_conversions)) {
         return result;
       }
+    }
+    const auto matched_interface = tryMatchInterfaceOps(
+        graph,
+        loc,
+        self,
+        inputs,
+        attributes,
+        name,
+        failure_messages,
+        allow_conversions);
+
+    if (matched_interface != nullptr) {
+      return matched_interface;
     }
   }
 

@@ -46,6 +46,12 @@ TORCH_API c10::optional<size_t> findInputWithName(
     const std::string& name,
     at::ArrayRef<NamedValue> kwargs);
 
+TORCH_API Value* emitBuiltinNode(
+    const MatchedSchema& matched_schema,
+    const SourceRange& loc,
+    Graph& graph,
+    Symbol name);
+
 // applies implict conversion from value trying to turn it into type
 // concrete_type it succeeds if the return_value->isSubclassOf(concrete_type)
 TORCH_API Value* tryConvertToType(

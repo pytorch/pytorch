@@ -384,6 +384,8 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeWait(node);
     case prim::TupleConstruct:
       return analyzeTupleConstruct(node);
+    case prim::sort:
+      return analyzeSort(node);
     case prim::Constant:
     case prim::DictConstruct:
     case prim::ListConstruct:
@@ -716,6 +718,14 @@ void AliasDb::analyzeSetAttr(Node* node) {
   const auto self = node->inputs().at(0);
   AT_ASSERT(self->type()->kind() == TypeKind::ClassType);
   registerWrite(self, node);
+}
+
+void AliasDb::analyzeSort(Node* node) {
+  const auto custom_list = node->inputs().at(0);
+  custom_list->type()->expect<ListType>();
+  registerWrite(custom_list, node);
+  // TODO need to register whatever happens in the function __lt__
+  // to the op as well. For now, mark the list as being mutated
 }
 
 // Custom ops may write to any input and produce wildcards
@@ -1255,6 +1265,7 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::ConstantChunk,
       prim::BroadcastingChunk,
       prim::fork,
+      prim::sort,
       prim::CreateObject,
       prim::GetAttr,
       prim::SetAttr,

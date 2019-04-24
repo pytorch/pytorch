@@ -244,14 +244,15 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
 
 void PeepholeOptimize(Block* block, bool addmm_fusion_enabled) {
   PeepholeOptimizeImpl(block, addmm_fusion_enabled);
-  // Eliminate dead code created by any peephole passes we've just done
-  EliminateDeadCode(block);
 }
 
 void PeepholeOptimize(
     const std::shared_ptr<Graph>& graph,
     bool addmm_fusion_enabled) {
   PeepholeOptimize(graph->block(), addmm_fusion_enabled);
+  // Eliminate dead code created by any peephole passes we've just done,
+  // unsafe to only run on block
+  EliminateDeadCode(graph);
 }
 } // namespace jit
 } // namespace torch

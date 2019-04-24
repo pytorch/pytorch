@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
 
@@ -896,6 +897,29 @@ RegisterOperators reg(
              auto userObj = pop(stack).toObject();
              auto value = userObj->getSlot(slot);
              push(stack, std::move(value));
+             return 0;
+           };
+         }),
+     Operator(
+         prim::sort,
+         [](const Node* node) {
+           const auto list_type =
+               node->inputs().at(0)->type()->expect<ListType>();
+           const auto elem = list_type->getElementType()->expect<ClassType>();
+           script::Function* func = elem->getMethod("__lt__");
+           return [func](Stack& stack) {
+             bool reverse = pop(stack).toBool();
+             auto g_list = pop(stack).toGenericList();
+             std::sort(
+                 g_list->elements().begin(),
+                 g_list->elements().end(),
+                 [func, reverse](const IValue& a, const IValue& b) {
+                   Stack inp = {a, b};
+                   func->run(inp);
+                   auto out = pop(inp).toBool();
+                   out = reverse ? !out : out;
+                   return out;
+                 });
              return 0;
            };
          }),

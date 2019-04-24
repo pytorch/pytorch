@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/passes/python_print.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
-#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
@@ -867,6 +867,10 @@ struct PythonPrintPass {
         stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::index)
              << "]";
       } break;
+      case prim::sort: {
+        stmt << useOf(node->inputs().at(0))
+             << ".sort(reverse=" << useOf(node->inputs().at(1)) << ")";
+      } break;
       case prim::TupleSlice: {
         stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::beg) << ":"
              << node->i(attr::end) << "]";
@@ -1242,6 +1246,7 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::CreateObject,
       prim::GetAttr,
       prim::SetAttr,
+      prim::sort,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
