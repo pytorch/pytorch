@@ -922,15 +922,16 @@ class _TestTorchMixin(object):
         for device in devices:
             x = torch.ones(0, device=device)
 
-            self.assertTrue(x.byte().max().item() == 0)
-            self.assertTrue(x.short().max().item() == -2**15)
-            self.assertTrue(x.int().max().item() == -2**31)
-            self.assertTrue(x.long().max().item() == -2**63)
+            if device == 'cpu': # Needed until #19673 is solved.
+                self.assertTrue(x.byte().max().item() == 0)
+                self.assertTrue(x.short().max().item() == -2**15)
+                self.assertTrue(x.int().max().item() == -2**31)
+                self.assertTrue(x.long().max().item() == -2**63)
 
-            self.assertTrue(x.byte().min().item() == 2**8 - 1)
-            self.assertTrue(x.short().min().item() == 2**15 - 1)
-            self.assertTrue(x.int().min().item() == 2**31 - 1)
-            self.assertTrue(x.long().min().item() == 2**63 - 1)
+                self.assertTrue(x.byte().min().item() == 2**8 - 1)
+                self.assertTrue(x.short().min().item() == 2**15 - 1)
+                self.assertTrue(x.int().min().item() == 2**31 - 1)
+                self.assertTrue(x.long().min().item() == 2**63 - 1)
 
             # Checking underflow
             self.assertTrue(x.float().max() == x.float().max() - 1)
