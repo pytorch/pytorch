@@ -306,7 +306,8 @@ class FullyConnectedGradientOp : public Operator<Context> {
         &context_,
         math_type);
     if (!bias_multiplier_.has_value()) {
-      bias_multiplier_ = caffe2::empty({M}, at::dtype<T_B>().device(Context::GetDeviceType()));
+      bias_multiplier_ =
+          caffe2::empty({M}, at::dtype<T_B>().device(Context::GetDeviceType()));
       math::Set<T_B, Context>(
           M,
           convert::To<float, T_B>(1),
@@ -372,5 +373,8 @@ class FullyConnectedGradientOp : public Operator<Context> {
 };
 
 } // namespace caffe2
+
+C10_DECLARE_CAFFE2_OPERATOR(FC);
+C10_DECLARE_CAFFE2_OPERATOR(FCTransposed);
 
 #endif // CAFFE2_OPERATORS_FULLY_CONNECTED_OP_H_

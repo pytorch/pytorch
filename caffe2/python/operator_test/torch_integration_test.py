@@ -42,8 +42,10 @@ def generate_rois_rotated(roi_counts, im_dims):
     # [batch_id, ctr_x, ctr_y, w, h, angle]
     rotated_rois = np.empty((rois.shape[0], 6)).astype(np.float32)
     rotated_rois[:, 0] = rois[:, 0]  # batch_id
-    rotated_rois[:, 1] = (rois[:, 1] + rois[:, 3]) / 2.0  # ctr_x = (x1 + x2) / 2
-    rotated_rois[:, 2] = (rois[:, 2] + rois[:, 4]) / 2.0  # ctr_y = (y1 + y2) / 2
+    rotated_rois[:, 1] = (rois[:, 1] + rois[:, 3]) / \
+        2.0  # ctr_x = (x1 + x2) / 2
+    rotated_rois[:, 2] = (rois[:, 2] + rois[:, 4]) / \
+        2.0  # ctr_y = (y1 + y2) / 2
     rotated_rois[:, 3] = rois[:, 3] - rois[:, 1] + 1.0  # w = x2 - x1 + 1
     rotated_rois[:, 4] = rois[:, 4] - rois[:, 2] + 1.0  # h = y2 - y1 + 1
     rotated_rois[:, 5] = np.random.uniform(-90.0, 90.0)  # angle in degrees
@@ -60,7 +62,8 @@ def create_bbox_transform_inputs(roi_counts, num_classes, rotated):
         else generate_rois(roi_counts, im_dims)
     )
     box_dim = 5 if rotated else 4
-    deltas = np.random.randn(total_rois, box_dim * num_classes).astype(np.float32)
+    deltas = np.random.randn(total_rois, box_dim *
+                             num_classes).astype(np.float32)
     im_info = np.zeros((batch_size, 3)).astype(np.float32)
     im_info[:, 0] = im_dims
     im_info[:, 1] = im_dims
@@ -163,14 +166,16 @@ class TorchIntegration(hu.HypothesisTestCase):
                 clip_angle_thresh,
             )
         ]
-        class_prob = np.random.randn(sum(roi_counts), num_classes).astype(np.float32)
+        class_prob = np.random.randn(
+            sum(roi_counts), num_classes).astype(np.float32)
         score_thresh = 0.5
         nms_thresh = 0.5
         topk_per_image = sum(roi_counts) / 2
 
         def box_with_nms_limit_ref():
             input_blobs = ["class_prob", "pred_bbox", "batch_splits"]
-            output_blobs = ["score_nms", "bbox_nms", "class_nms", "batch_splits_nms"]
+            output_blobs = ["score_nms", "bbox_nms",
+                            "class_nms", "batch_splits_nms"]
             ref_op = core.CreateOperator(
                 "BoxWithNMSLimit",
                 input_blobs,
@@ -281,12 +286,15 @@ class TorchIntegration(hu.HypothesisTestCase):
         batch_first,
     ):
         num_directions = 2 if is_bidirectional else 1
-        hx = np.zeros((num_layers * num_directions, bsz, hidden_size), dtype=np.float32)
+        hx = np.zeros((num_layers * num_directions, bsz,
+                       hidden_size), dtype=np.float32)
 
         if batch_first:
-            inputs = np.random.randn(bsz, seq_lens, emb_lens).astype(np.float32)
+            inputs = np.random.randn(
+                bsz, seq_lens, emb_lens).astype(np.float32)
         else:
-            inputs = np.random.randn(seq_lens, bsz, emb_lens).astype(np.float32)
+            inputs = np.random.randn(
+                seq_lens, bsz, emb_lens).astype(np.float32)
 
         torch_lstm = torch.nn.LSTM(
             emb_lens,
@@ -304,7 +312,8 @@ class TorchIntegration(hu.HypothesisTestCase):
             workspace.FeedBlob("hidden_1", hx)
             for i, param in enumerate(torch_lstm._flat_weights):
                 input_names.append("param_{}".format(i))
-                workspace.FeedBlob("param_{}".format(i), param.detach().numpy())
+                workspace.FeedBlob("param_{}".format(i),
+                                   param.detach().numpy())
 
             ref_op = core.CreateOperator(
                 "InferenceLSTM",
@@ -454,7 +463,8 @@ class TorchIntegration(hu.HypothesisTestCase):
         def _gelu_ref(_X):
             return (_X * norm.cdf(_X).astype(np.float32), )
         expected_output, = _gelu_ref(X)
-        actual_output = torch.ops._caffe2.Gelu(torch.tensor(X), fast_gelu)
+        actual_output = torch.ops._caffe2.Gelu(
+            torch.tensor(X).to(device), fast_gelu)
 
         rtol = 1e-3 if fast_gelu else 1e-4
         atol = 1e-5
@@ -464,9 +474,74 @@ class TorchIntegration(hu.HypothesisTestCase):
     def test_gelu_op(self):
         self._test_gelu_op(device="cpu")
 
-    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
-    def test_gelu_op_cuda(self):
-        self._test_gelu_op(device="cuda")
+    @given(M=st.integers(1, 10),
+           N=st.integers(1, 10),
+           K=st.integers(1, 10),
+           transposed=st.booleans())
+    def _test_fc_op(self, M, N, K, transposed, device):
+        def fc_ref(X, W, b):
+            if transposed:
+                Y = np.dot(X, W) + b
+            else:
+                Y = np.dot(X, W.T) + b
+            return (Y, )
+
+        X = np.random.randn(M, K).astype(np.float32)
+        W = np.random.randn(N, K).astype(np.float32)
+        b = np.random.randn(N).astype(np.float32)
+        if transposed:
+            W = W.T
+
+        expected_output, = fc_ref(X, W, b)
+        if transposed:
+            actual_output = torch.ops._caffe2.FCTransposed(
+                [torch.tensor(X).to(device),
+                 torch.tensor(W).to(device),
+                 torch.tensor(b).to(device)])
+        else:
+            actual_output = torch.ops._caffe2.FC(
+                [torch.tensor(X).to(device),
+                 torch.tensor(W).to(device),
+                 torch.tensor(b).to(device)])
+
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_fc_op_cpu(self):
+        self._test_fc_op(device="cpu")
+
+    @given(batch_size=st.integers(1, 10),
+           M=st.integers(1, 10),
+           N=st.integers(1, 10),
+           K=st.integers(1, 10),
+           trans_a=st.booleans(),
+           trans_b=st.booleans())
+    def _test_batch_matmul_op(self, batch_size, M, N, K, trans_a, trans_b, device):
+        def batch_matmul_ref(A, B):
+            if trans_a:
+                A = np.transpose(A, [0, 2, 1])
+            if trans_b:
+                B = np.transpose(B, [0, 2, 1])
+            return (np.matmul(A, B), )
+
+        A = np.random.randn(batch_size, M, K).astype(np.float32)
+        if trans_a:
+            A = np.transpose(A, [0, 2, 1])
+        B = np.random.randn(batch_size, K, N).astype(np.float32)
+        if trans_b:
+            B = np.transpose(B, [0, 2, 1])
+
+        expected_output, = batch_matmul_ref(A, B)
+        actual_output = torch.ops._caffe2.BatchMatMul(
+            torch.Tensor(A).contiguous().to(device),
+            torch.Tensor(B).contiguous().to(device),
+            trans_a,
+            trans_b,
+        )
+
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_batch_matmul_op_cpu(self):
+        self._test_batch_matmul_op(device="cpu")
 
 
 if __name__ == '__main__':

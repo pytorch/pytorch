@@ -252,3 +252,14 @@ class GetBatchMatMulGradient : public GradientMakerBase {
 REGISTER_GRADIENT(BatchMatMul, GetBatchMatMulGradient);
 
 } // namespace caffe2
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    BatchMatMul,
+    "_caffe2::BatchMatMul("
+    "    Tensor A,"
+    "    Tensor B,"
+    "    bool trans_a = False,"
+    "    bool trans_b = False,"
+    "    bool broadcast = False"
+    ") -> (Tensor output)",
+    caffe2::BatchMatMulOp<caffe2::CPUContext>);

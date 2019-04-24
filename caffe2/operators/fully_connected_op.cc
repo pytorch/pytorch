@@ -6,6 +6,12 @@
 
 namespace caffe2 {
 
+template <class Context>
+using FCOp = FullyConnectedOp<Context>;
+
+template <class Context>
+using FCTransposedOp = FullyConnectedOp<Context, DefaultEngine, false>;
+
 REGISTER_CPU_OPERATOR(FC, FullyConnectedOp<CPUContext>);
 REGISTER_CPU_GRADIENT_OPERATOR(
     FCGradient,
@@ -237,3 +243,23 @@ REGISTER_GRADIENT(FCTransposed, GetFCGradient);
 } // namespace
 
 } // namespace caffe2
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    FC,
+    "_caffe2::FC("
+    "    Tensor[] inputs_list,"
+    "    int axis = 1,"
+    "    int axis_w = 1,"
+    "    bool float16_compute = False"
+    ") -> (Tensor output)",
+    caffe2::FCOp<caffe2::CPUContext>);
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    FCTransposed,
+    "_caffe2::FCTransposed("
+    "    Tensor[] inputs_list,"
+    "    int axis = 1,"
+    "    int axis_w = 1,"
+    "    bool float16_compute = False"
+    ") -> (Tensor output)",
+    caffe2::FCTransposedOp<caffe2::CPUContext>);

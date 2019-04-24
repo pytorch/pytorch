@@ -294,4 +294,6 @@ class BatchMatMulOp final : public Operator<Context> {
 
 } // namespace caffe2
 
+C10_DECLARE_CAFFE2_OPERATOR(BatchMatMul);
+
 #endif // CAFFE2_OPERATORS_BATCH_MATMUL_OP_H_
