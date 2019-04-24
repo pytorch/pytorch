@@ -250,6 +250,17 @@ def enable_cpu_fuser(fn):
     return wrapper
 
 
+def enable_cpu_fuser_if(cond):
+    if cond:
+        return enable_cpu_fuser
+    else:
+        def noop_fuser(fn):
+            def wrapper(*args, **kwargs):
+                return fn(*args, **kwargs)
+            return wrapper
+        return noop_fuser
+
+
 # note: not re-entrant, use unnested only
 @contextmanager
 def disable_autodiff_subgraph_inlining(enabled=True):
@@ -13235,7 +13246,7 @@ def add_autograd_test(
             # We enable the CPU fuser during these checks for more consistent
             # behavior. Otherwise, we are going to have to analyze the graph to
             # see if producer values are Dimension
-            @enable_cpu_fuser
+            @enable_cpu_fuser_if(not (IS_SANDCASTLE or IS_WINDOWS))
             def check(name):
                 set_rng_seed(2)
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
@@ -13268,7 +13279,7 @@ def add_autograd_test(
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
                             # Fuser not supported on windows
-                            if IS_WINDOWS:
+                            if IS_SANDCASTLE or IS_WINDOWS:
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
                                 fusible_nodes = []
                             self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
@@ -13280,7 +13291,7 @@ def add_autograd_test(
                                                     check_types=check_types)
 
                             # Fuser not supported on windows
-                            if IS_WINDOWS:
+                            if IS_SANDCASTLE or IS_WINDOWS:
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
                                 fusible_nodes = []
                             self.assertAutodiffNode(script_fn.last_graph,
