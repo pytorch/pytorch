@@ -1078,9 +1078,9 @@
 - func: logdet(Tensor self) -> Tensor
   variants: function, method
 
-- func: logspace(Scalar start, Scalar end, int steps=100, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: logspace(Scalar start, Scalar end, int steps=100, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: logspace(Scalar start, Scalar end, int steps=100, *, Tensor(a!) out) -> Tensor(a!)
+- func: logspace(Scalar start, Scalar end, int steps=100, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out

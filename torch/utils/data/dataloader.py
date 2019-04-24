@@ -596,41 +596,50 @@ class _DataLoaderIter(object):
         # See (1) and the second half of the note.
         if not self.shutdown:
             self.shutdown = True
-            # Removes pids from the C side data structure first so worker
-            # termination afterwards won't trigger false positive error report.
-            if self.worker_pids_set:
-                _utils.signal_handling._remove_worker_pids(id(self))
-                self.worker_pids_set = False
+            try:
+                self.done_event.set()
 
-            self.done_event.set()
+                # Exit `pin_memory_thread` first because exiting workers may leave
+                # corrupted data in `worker_result_queue` which `pin_memory_thread`
+                # reads from.
+                if hasattr(self, 'pin_memory_thread'):
+                    # Use hasattr in case error happens before we set the attribute.
+                    # First time do `worker_result_queue.put` in this process.
 
-            # Exit `pin_memory_thread` first because exiting workers may leave
-            # corrupted data in `worker_result_queue` which `pin_memory_thread`
-            # reads from.
-            if hasattr(self, 'pin_memory_thread'):
-                # Use hasattr in case error happens before we set the attribute.
-                # First time do `worker_result_queue.put` in this process.
+                    # `cancel_join_thread` in case that `pin_memory_thread` exited.
+                    self.worker_result_queue.cancel_join_thread()
+                    self.worker_result_queue.put(None)
+                    self.pin_memory_thread.join()
+                    # Indicate that no more data will be put on this queue by the
+                    # current process. This **must** be called after
+                    # `pin_memory_thread` is joined because that thread shares the
+                    # same pipe handles with this loader thread. If the handle is
+                    # closed, Py3 will error in this case, but Py2 will just time
+                    # out even if there is data in the queue.
+                    self.worker_result_queue.close()
 
-                # `cancel_join_thread` in case that `pin_memory_thread` exited.
-                self.worker_result_queue.cancel_join_thread()
-                self.worker_result_queue.put(None)
-                self.pin_memory_thread.join()
-                # Indicate that no more data will be put on this queue by the
-                # current process. This **must** be called after
-                # `pin_memory_thread` is joined because that thread shares the
-                # same pipe handles with this loader thread. If the handle is
-                # closed, Py3 will error in this case, but Py2 will just time
-                # out even if there is data in the queue.
-                self.worker_result_queue.close()
-
-            # Exit workers now.
-            for q in self.index_queues:
-                q.put(None)
-                # Indicate that no more data will be put on this queue by the
-                # current process.
-                q.close()
-            for w in self.workers:
-                w.join()
+                # Exit workers now.
+                for q in self.index_queues:
+                    q.put(None)
+                    # Indicate that no more data will be put on this queue by the
+                    # current process.
+                    q.close()
+                for w in self.workers:
+                    w.join()
+            finally:
+                # Even though all this function does is putting into queues that
+                # we have called `cancel_join_thread` on, weird things can
+                # happen when a worker is killed by a signal, e.g., hanging in
+                # `Event.set()`. So we need to guard this with SIGCHLD handler,
+                # and remove pids from the C side data structure only at the
+                # end.
+                #
+                # FIXME: Unfortunately, for Windows, we are missing a worker
+                #        error detection mechanism here in this function, as it
+                #        doesn't provide a SIGCHLD handler.
+                if self.worker_pids_set:
+                    _utils.signal_handling._remove_worker_pids(id(self))
+                    self.worker_pids_set = False
 
     def __del__(self):
         if self.num_workers > 0:
