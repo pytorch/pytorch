@@ -1,3 +1,5 @@
+#pragma once
+
 #include <string>
 #include <vector>
 
@@ -119,7 +121,7 @@ class Pickler {
   // the left of a '::', its type cannot be deduced by the compiler so one must
   // explicitly instantiate the template, i.e. push<int>(int) works, push(int)
   // does not)
-  template<typename T>
+  template <typename T>
   void push(typename std::common_type<T>::type value) {
     const char* begin = reinterpret_cast<const char*>(&value);
     stack_.insert(stack_.end(), begin, begin + sizeof(T));
@@ -140,6 +142,35 @@ class Pickler {
   uint32_t memo_id = 0;
 };
 
+// An item in the unpickler stack. There needs to be a way to differentiate
+// between a GLOBAL item (PicklerClass) and a normal value item (IValue)
+struct StackItem {
+  StackItem(IValue ivalue)
+      : pickler_class_(c10::nullopt), ivalue_(std::move(ivalue)){};
+  StackItem(PicklerClass pickler_class)
+      : pickler_class_(pickler_class), ivalue_(c10::nullopt){};
+
+  IValue ivalue() {
+    return *ivalue_;
+  }
+
+  PicklerClass pickler_class() {
+    return *pickler_class_;
+  }
+
+  c10::optional<IValue> ivalue_opt() {
+    return ivalue_;
+  }
+
+  c10::optional<PicklerClass> pickler_class_opt() {
+    return pickler_class_;
+  }
+
+ private:
+  c10::optional<PicklerClass> pickler_class_;
+  c10::optional<IValue> ivalue_;
+};
+
 class Unpickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
 
@@ -150,8 +181,7 @@ class Unpickler {
       const std::vector<at::Tensor>* tensor_table)
       : bytes_(static_cast<const uint8_t*>(data)),
         end_ptr_(bytes_ + size),
-        tensor_table_(tensor_table),
-        last_opcode_(OpCode::STOP) {}
+        tensor_table_(tensor_table) {}
 
   std::vector<IValue> parse_ivalue_list();
 
@@ -176,13 +206,12 @@ class Unpickler {
   OpCode readOpCode();
   void readList();
 
-  std::vector<IValue> stack_;
-  std::vector<IValue> memo_table_;
+  std::vector<StackItem> stack_;
+  std::vector<StackItem> memo_table_;
   std::vector<size_t> marks_;
   const uint8_t* bytes_;
   const uint8_t* end_ptr_;
   const std::vector<at::Tensor>* tensor_table_;
-  OpCode last_opcode_;
 };
 
 } // namespace jit
