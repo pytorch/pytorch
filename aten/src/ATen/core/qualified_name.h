@@ -1,52 +1,60 @@
 #pragma once
 
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <c10/util/intrusive_ptr.h>
 #include <string>
 
 namespace c10 {
 
 // Represents a name of the form "foo.bar.baz"
 struct QualifiedName {
-  QualifiedName() = default;
+  QualifiedName() {}
 
-  explicit QualifiedName(std::string name) : qualifiedName_(std::move(name)) {
-    // Compute the base name based on the qualified name
-    const auto pos = qualifiedName_.rfind('.');
-    if (pos == std::string::npos) {
-      // If there are no delimiters, the qualname and name are the same
-      name_ = qualifiedName_;
-    } else {
-      // Otherwise take the name that trails the last '.'
-      name_ = qualifiedName_.substr(pos + 1);
-      prefix_ = qualifiedName_.substr(0, pos);
+  // `name` can be a dotted string, like "foo.bar.baz", or just a bare name.
+  explicit QualifiedName(std::string name) {
+    AT_ASSERT(!name.empty());
+    // split the string into its atoms.
+    size_t startSearchFrom = 0;
+    size_t pos = name.find('.', startSearchFrom);
+
+    while (pos != std::string::npos) {
+      auto atom = name.substr(startSearchFrom, pos - startSearchFrom);
       AT_ASSERTM(
-          !name_.empty(),
-          "'.' can't be the last character in qualified name: ",
-          qualifiedName_);
-      AT_ASSERTM(
-          !prefix_.empty() && prefix_[0] != '.',
-          "'.' can't be the first character in qualified name: ",
-          qualifiedName_);
+          atom.size() > 0, "Invalid name for qualified name: '", name, "'");
+      atoms_.push_back(std::move(atom));
+      startSearchFrom = pos + 1;
+      pos = name.find('.', startSearchFrom);
     }
-    checkInvariants();
+
+    auto finalAtom = name.substr(startSearchFrom, pos - startSearchFrom);
+    AT_ASSERTM(
+        finalAtom.size() > 0, "Invalid name for qualified name: '", name, "'");
+    atoms_.push_back(std::move(finalAtom));
+
+    cacheAccessors();
   }
 
-  explicit QualifiedName(const QualifiedName& prefix, std::string name)
-      : qualifiedName_(str(prefix.qualifiedName(), '.', name)),
-        prefix_(prefix.qualifiedName()),
-        name_(std::move(name)) {
-    checkInvariants();
+  // `name` must be a bare name (no dots!)
+  explicit QualifiedName(const QualifiedName& prefix, std::string name) {
+    AT_ASSERT(!name.empty());
+    atoms_.insert(atoms_.begin(), prefix.atoms_.begin(), prefix.atoms_.end());
+    atoms_.push_back(std::move(name));
+
+    cacheAccessors();
   }
 
+  // The fully qualified name, like "foo.bar.baz"
   const std::string& qualifiedName() const {
     return qualifiedName_;
   }
 
+  // The leading qualifier, like "foo.bar"
   const std::string& prefix() const {
     return prefix_;
   }
 
+  // The base name, like "baz"
   const std::string& name() const {
     return name_;
   }
@@ -60,6 +68,19 @@ struct QualifiedName {
   }
 
  private:
+  void cacheAccessors() {
+    qualifiedName_ = Join(".", atoms_);
+    if (atoms_.size() > 1) {
+      ArrayRef<std::string> view(atoms_);
+      const auto prefixView = view.slice(0, view.size() - 1);
+      prefix_ = Join(".", prefixView);
+    }
+
+    if (atoms_.size() >= 1) {
+      name_ = atoms_.back();
+    }
+    checkInvariants();
+  }
   void checkInvariants() {
     if (prefix_.empty()) {
       AT_ASSERT(qualifiedName_ == name_);
@@ -72,12 +93,22 @@ struct QualifiedName {
 
     // No empty atomic names allowed (e.g. "foo..bar")
     AT_ASSERT(qualifiedName_.find("..") == std::string::npos);
+
+    // Check individual atoms
+    for (const auto& atom : atoms_) {
+      AT_ASSERT(!atom.empty());
+      AT_ASSERT(atom.find(".") == std::string::npos);
+    }
   }
-  // The fully qualified name, like "foo.bar.baz"
+
+  // The actual list of names, like "{foo, bar, baz}"
+  std::vector<std::string> atoms_;
+
+  /*
+   * Cached accessors, derived from `atoms_`.
+   */
   std::string qualifiedName_;
-  // The leading qualifier, like "foo.bar"
   std::string prefix_;
-  // The base name, like "baz"
   std::string name_;
 };
 } // namespace c10
