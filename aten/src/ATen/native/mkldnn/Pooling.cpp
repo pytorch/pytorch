@@ -1,3 +1,5 @@
+#include <ATen/native/mkldnn/Pooling.h>
+
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
