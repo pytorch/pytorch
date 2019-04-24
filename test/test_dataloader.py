@@ -6,6 +6,7 @@ import ctypes
 import torch
 import gc
 import time
+import signal
 import unittest
 import itertools
 import warnings
@@ -13,7 +14,7 @@ from torch import multiprocessing as mp
 from torch.utils.data import _utils, Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
-from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC,
+from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                           IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
                           load_tests)
 
@@ -24,6 +25,18 @@ except ImportError:
     HAS_PSUTIL = False
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
+    if IS_PYTORCH_CI:
+        raise ImportError(err_msg)
+    else:
+        warnings.warn(err_msg)
+
+try:
+    import faulthandler
+    HAS_FAULTHANDLER = True
+except ImportError:
+    HAS_FAULTHANDLER = False
+    err_msg = ("faulthandler not found. Some data loader tests use it for error "
+               "reporting (e.g., TestDataLoader.test_proper_exit).")
     if IS_PYTORCH_CI:
         raise ImportError(err_msg)
     else:
@@ -46,7 +59,15 @@ if not NO_MULTIPROCESSING_SPAWN:
     mp = mp.get_context(method='spawn')
 
 
-JOIN_TIMEOUT = 17.0 if (IS_WINDOWS or IS_PPC) else 13.0
+# 60s of timeout?
+# Yes, in environments where physical CPU resources are shared, e.g., CI, the
+# time for a inter-process communication can be highly varying.  With 15~17s of
+# timeout, we have observed flakiness in some CI builds (see
+# pytorch/pytorch#14501, pytoch/pytorch#16608).  We follow the CPython
+# multiprocessing setup and set the timeout to 60s here:
+#
+# https://github.com/python/cpython/blob/e8113f51a8bdf33188ee30a1c038a298329e7bfa/Lib/test/_test_multiprocessing.py#L73
+JOIN_TIMEOUT = 60.0  # seconds
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -194,6 +215,11 @@ class ErrorTrackingProcess(mp.Process):
         self.disable_stderr = disable_stderr
 
     def run(self):
+        if HAS_FAULTHANDLER:
+            faulthandler.enable()
+            if not IS_WINDOWS:
+                # windows does not have faulthandler.register
+                faulthandler.register(signal.SIGUSR1, chain=True)
         if self.disable_stderr:
             # Disable polluting stderr with errors that are supposed to happen.
             sys.stderr = open(os.devnull, "w")
@@ -203,6 +229,24 @@ class ErrorTrackingProcess(mp.Process):
         except Exception:
             self._cconn.send(ExceptionWrapper(sys.exc_info()))
             raise
+
+    def print_traces_of_all_threads(self):
+        assert self.is_alive(), "can only use print_traces_of_all_threads if the process is alive"
+        assert not self.disable_stderr, "do not disable stderr if you use print_traces_of_all_threads"
+        if HAS_FAULTHANDLER:
+            if not IS_WINDOWS:
+                # use the custom signal if available
+                os.kill(self.pid, signal.SIGUSR1)
+            else:
+                # otherwise we can still use the handler given by faulthandler.enable()
+                # at the cost of killing the process, so let's poll the exception first
+                _ = self.exception
+                os.kill(self.pid, signal.SIGSEGV)
+        else:
+            # if there is no faulthandler, use SIGINT otherwise and hope for the best
+            os.kill(self.pid, signal.SIGINT)
+        # wait in parent process to give subprocess some time to print
+        time.sleep(5)
 
     @property
     def exception(self):
@@ -721,7 +765,6 @@ class TestDataLoader(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
-    @unittest.skip("this test is flaky, see https://github.com/pytorch/pytorch/issues/14501")
     def test_proper_exit(self):
         (r'''There might be ConnectionResetError or leaked semaphore warning '''
          r'''(due to dirty process exit), but they are all safe to ignore''')
@@ -737,8 +780,9 @@ class TestDataLoader(TestCase):
             # not be called before process end. It is important to see that the
             # processes still exit in both cases.
 
-            if pin_memory and (not TEST_CUDA or NO_MULTIPROCESSING_SPAWN):
+            if pin_memory and (not TEST_CUDA or NO_MULTIPROCESSING_SPAWN or IS_WINDOWS):
                 # Can't use CUDA without spawn
+                # For windows, pin_memory sometimes causes CUDA oom.
                 continue
 
             # `exit_method` controls the way the loader process ends.
@@ -781,6 +825,7 @@ class TestDataLoader(TestCase):
                 # workers.
                 loader_setup_event.wait(timeout=JOIN_TIMEOUT)
                 if not loader_setup_event.is_set():
+                    loader_p.print_traces_of_all_threads()
                     fail_msg = desc + ': loader process failed to setup within given time'
                     if loader_p.exception is not None:
                         self.fail(fail_msg + ', and had exception {}'.format(loader_p.exception))
@@ -796,6 +841,7 @@ class TestDataLoader(TestCase):
                 try:
                     loader_p.join(JOIN_TIMEOUT + MP_STATUS_CHECK_INTERVAL)
                     if loader_p.is_alive():
+                        loader_p.print_traces_of_all_threads()
                         fail_msg = desc + ': loader process did not terminate'
                         if loader_p.exception is not None:
                             self.fail(fail_msg + ', and had exception {}'.format(loader_p.exception))
@@ -813,8 +859,19 @@ class TestDataLoader(TestCase):
                             self.assertIsInstance(loader_p.exception, RuntimeError, desc)
                             self.assertIn('Loader error', str(loader_p.exception), desc)
                         elif exit_method == 'worker_kill':
-                            self.assertIsInstance(loader_p.exception, RuntimeError, desc)
-                            self.assertIn('DataLoader worker (pid', str(loader_p.exception), desc)
+                            if isinstance(loader_p.exception, RuntimeError):
+                                self.assertIn('DataLoader worker (pid', str(loader_p.exception), desc)
+                            elif isinstance(loader_p.exception, ConnectionRefusedError):
+                                # Sometimes, when the worker is being killed and is freeing its
+                                # resources, the unpickling in loader process will be met an
+                                # a `ConnectionRefusedError` as it can not open a socket to receive
+                                # resource. In such cases, the worker may not have fully exited,
+                                # and the loader can't know this via `is_alive` check or `SIGCHLD`
+                                # handler. So we permit this as an allowed error as well.
+                                # After all, we are happy as long as it terminates.
+                                pass
+                            else:
+                                self.fail(desc)
                         elif exit_method == 'worker_error':
                             self.assertIsInstance(loader_p.exception, RuntimeError, desc)
                             self.assertIn('Worker error', str(loader_p.exception), desc)
