@@ -2681,7 +2681,7 @@ class _TestTorchMixin(object):
         self.assertEqual(qr[0].item(), 1)
         # assignment
         self.assertTrue(qr[0].is_quantized)
-        qr[0] = 11.3 # float asignment
+        qr[0] = 11.3  # float asignment
         self.assertEqual(qr.item(), 11)
 
     def test_qtensor_quant_dequant(self):
