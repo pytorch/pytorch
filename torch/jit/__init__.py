@@ -667,11 +667,11 @@ def trace(func,
             _module_class = TopLevelTracedModule
         traced = _module_class(func, **executor_options)
         traced._c._create_method_from_trace('forward', func, example_inputs,
-                                           var_lookup_fn, _force_outplace)
+                                            var_lookup_fn, _force_outplace)
     else:
         name = getattr(func, '__name__', 'forward')
         if name == '<lambda>':
-            name = '_lambda' # make name a valid identifier
+            name = '_lambda'  # make name a valid identifier
         traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                       var_lookup_fn,
                                                       _force_outplace)

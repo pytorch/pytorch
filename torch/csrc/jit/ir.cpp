@@ -628,7 +628,7 @@ void Block::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
       if (node->kindOf(name) == AttributeKind::g) {
         node->g(name)->remapTypes(type_map);
       } else if (node->kindOf(name) == AttributeKind::gs) {
-          for(auto g : node->gs(name)) {
+          for(const auto& g : node->gs(name)) {
             g->remapTypes(type_map);
           }
       }
