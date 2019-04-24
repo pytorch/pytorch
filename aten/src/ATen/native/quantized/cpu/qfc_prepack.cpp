@@ -1,7 +1,9 @@
 #include <ATen/ATen.h>
+#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/fbgemm_utils.h>
+#include <ATen/quantized/Quantizer.h>
 
 #include <algorithm>
 #include <vector>
@@ -39,15 +41,15 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     }
   }
 
-  at::Tensor operator()(at::Tensor weight, int64_t weight_zero_point) {
+  at::QTensor operator()(at::QTensor weight) {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
-    int32_t weight_zero_point_int32 = static_cast<int32_t>(weight_zero_point);
+    int32_t weight_zero_point_int32 = weight.q_zero_point().toInt();
 
     // TODO: contiguous is called for further jit optimizations.
     auto weight_contig = weight.contiguous();
-    auto weight_ptr_int8 = weight_contig.data<int8_t>();
+    auto weight_ptr_int8 = reinterpret_cast<int8_t*>(weight.data<c10::qint8>());
 
     std::vector<int32_t> col_offsets(N);
     calc_col_offsets_transpose(
@@ -70,12 +72,14 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
 
     // TODO: we will need to replace this with torchscript classes at a later
     // point.
-    return cpp_custom_type_hack::create(std::move(ret_ptr), weight.options());
+    return cpp_custom_type_hack::create(
+        std::move(ret_ptr),
+        weight.options(),
+        weight.q_scale(),
+        weight.q_zero_point());
   }
 #else // USE_FBGEMM
-  at::Tensor operator()(
-      at::Tensor /* weight */,
-      int64_t /* weight_zero_point */
+  at::QTensor operator()(at::QTensor /* weight */
   ) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
@@ -87,9 +91,9 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    "quantized::fbgemm_fc_packed(Tensor W, int W_zero_point) -> Tensor W_prepack",
+    "quantized::fbgemm_fc_packed(Tensor W) -> Tensor W_prepack",
     c10::kernel<QFCPackWeightInt8>(),
-    c10::dispatchKey(CPUTensorId()));
+    c10::dispatchKey(QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at

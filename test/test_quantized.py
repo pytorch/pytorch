@@ -154,20 +154,19 @@ class TestQuantizedFC(unittest.TestCase):
         X_zp = 5
         X_value_min = 0
         X_value_max = 15
-        X_q = np.round(
-            np.random.rand(batch_size, input_channels) * (X_value_max - X_value_min)
+        X = torch.round(
+            torch.rand(batch_size, input_channels) * (X_value_max - X_value_min)
             + X_value_min
-        ).astype(np.uint8)
+        ).to(dtype=torch.float)
 
         W_scale = 0.4
         W_zp = 2
         W_value_min = -10
         W_value_max = 15
-        W_q = np.round(
-            np.random.rand(output_channels, input_channels)
-            * (W_value_max - W_value_min)
+        W = torch.round(
+            torch.rand(output_channels, input_channels) * (W_value_max - W_value_min)
             + W_value_min
-        ).astype(np.int8)
+        ).to(dtype=torch.float)
 
         b_q = np.round(np.random.randn(output_channels) * 10 - 10).astype(np.int32)
 
@@ -178,33 +177,31 @@ class TestQuantizedFC(unittest.TestCase):
             batch_size,
             input_channels,
             output_channels,
-            X_q,
+            X,
             X_value_min,
             X_value_max,
-            W_q,
+            W,
             W_value_min,
             W_value_max,
         )
 
+        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zp)
+        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp)
+        b_q = torch.round(torch.rand(output_channels) * 10 - 10).to(dtype=torch.int32)
+
         # Reference quantized FC operator
-        Y_q_ref = qfc_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp)
+        Y_q_ref = qfc_ref(X_q.int_repr().numpy(), X_scale, X_zp, W_q.int_repr().numpy(), W_scale, W_zp, b_q.numpy(), Y_scale, Y_zp)
 
         # Weight prepacking operator for quantized FC
-        W_prepack = qfc_packed(torch.from_numpy(W_q), W_zp)
-        [Y_q, Y_scale, Y_zp] = qfc(
-            torch.from_numpy(X_q),
-            X_scale,
-            X_zp,
-            W_prepack,
-            W_scale,
-            W_zp,
-            torch.from_numpy(b_q),
-            Y_scale,
-            Y_zp,
-        )
+        W_prepack = qfc_packed(W_q)
+        # Quantized FC operator with prepacked weight
+        Y_q = qfc(X_q, W_prepack, b_q, Y_scale, Y_zp)
+
+        # Y_q_ref_real = _dequantize(Y_q_ref, Y_scale, Y_zp)
+        # Y_q_real = Y_q.dequantize()
 
         # Assert equal
-        np.testing.assert_equal(Y_q_ref, Y_q.numpy())
+        np.testing.assert_equal(Y_q_ref, Y_q.int_repr().numpy())
 
 
 if __name__ == "__main__":

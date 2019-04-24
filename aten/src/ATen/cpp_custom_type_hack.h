@@ -7,15 +7,17 @@
 //
 // Template argument <T> has to be registered with CAFFE_KNOWN_TYPE mechanism.
 
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
+#include <ATen/quantized/Quantizer.h>
 
 namespace at {
 namespace cpp_custom_type_hack {
 
-template<typename T>
+template <typename T>
 T& cast(const Tensor& packed) {
   AT_CHECK(
-      packed.scalar_type() == kByte, "Expected temporary cpp type wrapper");
+      packed.scalar_type() == kByte || packed.scalar_type() == kQInt8,
+      "Expected temporary cpp type wrapper");
   AT_CHECK(
       packed.storage().data_ptr().get_deleter() ==
           caffe2::TypeMeta::Make<T>().deleteFn(),
@@ -24,17 +26,14 @@ T& cast(const Tensor& packed) {
   return *reinterpret_cast<T*>(packed.storage().data_ptr().get());
 }
 
-template<typename T>
+template <typename T>
 Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
   // We store this instance away in a Tensor and register a deleter function
   // so that we do not leak memory. On the other side, we pull out the storage's
   // data_ptr and get the right typed pointer.
   void* raw_ptr = ptr.release();
   at::DataPtr at_ptr(
-      raw_ptr,
-      raw_ptr,
-      caffe2::TypeMeta::Make<T>().deleteFn(),
-      at::kCPU);
+      raw_ptr, raw_ptr, caffe2::TypeMeta::Make<T>().deleteFn(), at::kCPU);
 
   // size doesn't really matter, but we can align it to the actual size
   // returning variables because one likely want to use this hack from python
@@ -42,5 +41,30 @@ Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
   retval.storage().set_data_ptr(std::move(at_ptr));
   return retval;
 }
+
+template <typename T>
+QTensor create(
+    std::unique_ptr<T> ptr,
+    TensorOptions options,
+    Scalar scale,
+    Scalar zero_point) {
+  // We store this instance away in a Tensor and register a deleter function
+  // so that we do not leak memory. On the other side, we pull out the storage's
+  // data_ptr and get the right typed pointer.
+  void* raw_ptr = ptr.release();
+  at::DataPtr at_ptr(
+      raw_ptr, raw_ptr, caffe2::TypeMeta::Make<T>().deleteFn(), at::kCPU);
+
+  // size doesn't really matter, but we can align it to the actual size
+  // returning variables because one likely want to use this hack from python
+  auto retval = at::_empty_affine_quantized(
+      {sizeof(T)},
+      options.device(kCPU).dtype(at::kQInt8),
+      scale.toFloat(),
+      zero_point.toInt());
+  retval.storage().set_data_ptr(std::move(at_ptr));
+  return retval;
 }
-}
+
+} // namespace cpp_custom_type_hack
+} // namespace at
