@@ -114,7 +114,6 @@ if TEST_TENSORBOARD:
                                     bucket_limits=limits.tolist(),
                                     bucket_counts=counts.tolist())
 
-
     class TestTensorBoardUtils(BaseTestCase):
         def test_to_HWC(self):
             test_image = np.random.randint(0, 256, size=(3, 32, 32), dtype=np.uint8)
@@ -136,7 +135,6 @@ if TEST_TENSORBOARD:
             V_after = np.reshape(V_after, newshape=(10, -1))
             np.testing.assert_array_almost_equal(np.sum(V_before, axis=1), np.sum(V_after, axis=1))
 
-
     freqs = [262, 294, 330, 349, 392, 440, 440, 440, 440, 440, 440]
 
     true_positive_counts = [75, 64, 21, 5, 0]
@@ -145,7 +143,6 @@ if TEST_TENSORBOARD:
     false_negative_counts = [0, 11, 54, 70, 75]
     precision = [0.3333333, 0.3786982, 0.5384616, 1.0, 0.0]
     recall = [1.0, 0.8533334, 0.28, 0.0666667, 0.0]
-
 
     class TestTensorBoardWriter(BaseTestCase):
         def test_writer(self):
@@ -183,7 +180,6 @@ if TEST_TENSORBOARD:
                 writer.export_scalars_to_json(os.path.join(d, "all_scalars.json"))
                 shutil.rmtree(d)
 
-
     class TestTensorBoardSummaryWriter(BaseTestCase):
         def test_summary_writer_ctx(self):
             # after using a SummaryWriter as a ctx it should be closed
@@ -214,7 +210,6 @@ if TEST_TENSORBOARD:
                 writer.add_scalar('test', 1)
             import shutil
             shutil.rmtree(str(p))
-
 
     class TestTensorBoardEmbedding(BaseTestCase):
         def test_embedding(self):
@@ -255,7 +250,6 @@ if TEST_TENSORBOARD:
                             label_img=all_images,
                             metadata_header=['digit', 'dataset'],
                             global_step=2)
-
 
     class TestTensorBoardSummary(BaseTestCase):
         def test_uint8_image(self):
@@ -338,10 +332,8 @@ if TEST_TENSORBOARD:
         def test_histogram_doane(self):
             self.assertTrue(compare_proto(summary.histogram('dummy', np.random.rand(1024), bins='doane', max_bins=5), self))
 
-
     def remove_whitespace(string):
         return string.replace(' ', '').replace('\t', '').replace('\n', '')
-
 
     def compare_proto(str_to_compare, function_ptr):
         # TODO: enable test after tensorboard is ready.
@@ -366,7 +358,6 @@ if TEST_TENSORBOARD:
         print(remove_whitespace(str_to_compare))
         print(remove_whitespace(expected))
         return remove_whitespace(str_to_compare) == remove_whitespace(expected)
-
 
     def write_proto(str_to_compare, function_ptr):
         module_id = function_ptr.__class__.__module__
@@ -403,9 +394,7 @@ if TEST_TENSORBOARD:
                 with SummaryWriter(comment='expect_error') as w:
                     w.add_graph(model, dummy_input)  # error
 
-
     class TestTensorBoardFigure(BaseTestCase):
-
         @skipIfNoMatplotlib
         def test_figure(self):
             writer = SummaryWriter()
@@ -447,7 +436,6 @@ if TEST_TENSORBOARD:
             self.assertTrue(all([plt.fignum_exists(figure.number) is False for figure in figures]))  # noqa F812
 
             writer.close()
-
 
     class TestTensorBoardNumpy(BaseTestCase):
         def test_scalar(self):
