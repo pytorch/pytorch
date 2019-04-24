@@ -294,9 +294,7 @@ struct GraphFuser {
 
     AT_ASSERT(isFusableNorm(normalization_op));
     WithInsertPoint insert_guard{normalization_op};
-    Value* new_output =
-        SubgraphUtils::inlineGraph(nm_graph, inputs, normalization_op).at(0);
-    return new_output;
+    return  inlineCallTo(*normalization_op->owningGraph(), *nm_graph, inputs).at(0);
   }
 
   void decomposeNormalizationOps(Node* normalization_op) {
