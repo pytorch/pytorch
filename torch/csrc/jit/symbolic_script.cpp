@@ -1268,6 +1268,35 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
+        def max_pool2d_with_indices(self,
+                                    kernel_size: List[int],
+                                    stride: List[int],
+                                    padding: List[int],
+                                    dilation: List[int],
+                                    ceil_mode: bool):
+            result0, result1 = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
+            def backward(grad_output):
+                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, result1)
+                return grad_self, None, None, None, None, None
+            return result0, result1, backward
+
+        def native_batch_norm(input,
+                              weight: Optional[Tensor],
+                              bias: Optional[Tensor],
+                              running_mean: Optional[Tensor],
+                              running_var: Optional[Tensor],
+                              training: bool,
+                              momentum: float,
+                              eps: float):
+            result, result1, result2 = torch.native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps)
+            has_weight = weight is not None
+            has_bias = bias is not None
+            def backward(grad_output):
+                grad_self, grad_weight, grad_bias = torch.native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, result1, result2, training, eps, [True, has_weight, has_bias])
+                return grad_self, grad_weight, grad_bias, None, None, None, None, None
+
+            return result, result1, result2, backward
+
         def nll_loss(self, target, weight: Optional[Tensor], reduction: int, ignore_index: int):
             result, total_weight = torch.nll_loss_forward(self, target, weight, reduction, ignore_index)
             def backward(grad):
@@ -1289,6 +1318,17 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None
 
             return torch.softmax(self, dim, dtype), backward
+
+        def thnn_conv2d_forward(self, weight,
+                                kernel_size: List[int],
+                                bias: Optional[Tensor],
+                                stride: List[int],
+                                padding: List[int]):
+            result0, result1, result2 = torch.thnn_conv2d_forward(self, weight, kernel_size, bias, stride, padding)
+            def backward(grad_output):
+                grad_self, grad_weight, grad_bias = torch.thnn_conv2d_backward(grad_output, self, weight, kernel_size, stride, padding, result1, result2, [True, True, True])
+                return grad_self, grad_weight, None, grad_bias, None, None
+            return result0, result1, result2, backward
 
         def AD_interpolate_backward(grad,
                                     input,
@@ -1511,7 +1551,7 @@ c10::optional<GradientPair> gradientInfoForSchema(
     //
     // c10::ReplaceAll(schema_str, "Scalar", "float");
     // For debugging AD change:
-    // std::cout << "Looking for " << schema_str << std::endl;
+     std::cout << "Looking for " << schema_str << std::endl;
 
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
