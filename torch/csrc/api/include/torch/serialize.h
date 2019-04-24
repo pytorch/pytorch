@@ -122,13 +122,13 @@ void load(std::vector<torch::Tensor>& tensor_vec, LoadFromArgs&&... args) {
 
   // NOTE: The number of elements in the serialized `std::vector<torch::Tensor>`
   // is not known ahead of time, so we need a while-loop to increment the index,
-  // and use `archive.has_key(...)` to check whether we have reached the end of
+  // and use `archive.try_read(...)` to check whether we have reached the end of
   // the serialized `std::vector<torch::Tensor>`.
   size_t index = 0;
-  while (archive.has_key(std::to_string(index))) {
-    torch::Tensor value;
-    archive.read(std::to_string(index), value);
-    tensor_vec.push_back(value);
+  torch::Tensor value;
+  while (archive.try_read(std::to_string(index), value)) {
+    tensor_vec.push_back(std::move(value));
+    value = torch::Tensor();
     index++;
   }
 }
