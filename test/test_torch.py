@@ -2680,9 +2680,9 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.item(), 1)
         self.assertEqual(qr[0].item(), 1)
         # assignment
-        # This calls _th_fill_
-        # qr[0] = 8 # float asignment
-        # self.assertEqual(qr.item(), 8)
+        self.assertTrue(qr[0].is_quantized)
+        qr[0] = 11.3 # float asignment
+        self.assertEqual(qr.item(), 11)
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
@@ -4765,6 +4765,10 @@ class _TestTorchMixin(object):
         self.assertEqual(res1, res2, 0)
         self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, -1))
         self.assertEqual(torch.logspace(0, 1, 1), torch.ones(1), 0)
+
+        # Check non-default base=2
+        self.assertEqual(torch.logspace(1, 1, 1, 2), torch.ones(1) * 2)
+        self.assertEqual(torch.logspace(0, 2, 3, 2), torch.Tensor((1, 2, 4)))
 
         # Check logspace_ for generating with start > end.
         self.assertEqual(torch.logspace(1, 0, 2), torch.Tensor((10, 1)), 0)

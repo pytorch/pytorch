@@ -235,20 +235,22 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs) {
       }
       return Tuple::create(std::move(elems));
     } else if (auto dict_type = type->cast<DictType>()) {
-      auto elem_pairs = input.toGenericDict()->elements();
+      auto dict = input.toGenericDict();
+      auto dict_size = dict->elements().size();
       auto unpack_to_list = state->graph->insert(aten::values, {value});
-      auto list_unpack = state->graph->createListUnpack(unpack_to_list, elem_pairs.size());
+      auto list_unpack = state->graph->createListUnpack(unpack_to_list, dict_size);
       auto unpack_node = state->graph->insertNode(list_unpack);
       auto elem_values = unpack_node->outputs();
 
-      AT_ASSERT(elem_pairs.size() == elem_values.size());
+      const auto order = dict->iterationOrder();
+      AT_ASSERT(order.size() == elem_values.size());
 
       size_t i = 0;
-      for (const auto &pair : elem_pairs) {
-        elem_pairs[pair.first] = add_input(pair.second, dict_type->getValueType(), elem_values[i++]);
+      for (const auto &pair : order) {
+        dict->elements()[pair.first] = add_input(pair.second, dict_type->getValueType(), elem_values[i++]);
       }
 
-      return c10::ivalue::GenericDict::create(std::move(elem_pairs));
+      return c10::ivalue::GenericDict::create(std::move(dict->elements()));
     } else {
       AT_ERROR(
           "Only tensors or (possibly nested) dict or tuples of tensors can be "
