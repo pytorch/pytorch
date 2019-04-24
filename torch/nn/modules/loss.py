@@ -372,6 +372,9 @@ class KLDivLoss(_Loss):
 
     @weak_script_method
     def forward(self, input, target):
+        if torch.max(input) > 0:
+            raise ValueError("The input must be a log form of probability. The max of "
+                             "input = ({}) > 0 ".format(torch.max(input)))
         return F.kl_div(input, target, reduction=self.reduction)
 
 
