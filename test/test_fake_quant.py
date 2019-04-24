@@ -25,6 +25,7 @@ def _fake_quantize_per_tensor_affine_grad_reference(X, dY, scale, zero_point, nu
 
 NP_RANDOM_SEED = 19
 
+
 class TestFakeQuantizePerTensorAffine(unittest.TestCase):
     """Tests the forward path of the FakeQuantizePerTensorAffine op."""
     def test_forward(self):
