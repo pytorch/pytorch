@@ -28,12 +28,12 @@ struct THGeneratorState {
 
 /**
  * THGeneratorStateNew is a POD class containing
- * new data introduced in at::CPUGenerator. It is used
+ * new data introduced in at::CPUGenerator and the legacy state. It is used
  * as a helper for torch.get_rng_state() and torch.set_rng_state()
  * functions.
  */ 
 struct THGeneratorStateNew {
-  at::mt19937 engine;
-  c10::optional<float> next_float_normal_sample;
-  c10::optional<double> next_double_normal_sample;
+  THGeneratorState legacy_pod;
+  float next_float_normal_sample;
+  bool is_next_float_normal_sample_valid;
 };

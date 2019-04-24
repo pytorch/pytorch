@@ -91,23 +91,42 @@ constexpr uint32_t LMASK = 0x7fffffff;
  * email: m-mat @ math.sci.hiroshima-u.ac.jp (remove space)
  */
 
+/**
+ * mt19937_data_pod is used to get POD data in and out
+ * of mt19937_engine. Used in torch.get_rng_state and
+ * torch.set_rng_state functions.
+ */
+struct mt19937_data_pod {
+  uint64_t seed_;
+  int left_;
+  bool seeded_;
+  uint32_t next_;
+  std::array<uint32_t, MERSENNE_STATE_N> state_;
+};
+
 class mt19937_engine {
 public:
 
-  inline explicit mt19937_engine(uint64_t seed = 5489) : seed_(seed) {
+  inline explicit mt19937_engine(uint64_t seed = 5489) {
     init_with_uint32(seed);
   }
 
-  inline mt19937_engine(uint64_t seed, int left, bool seeded, uint32_t next, 
-                        std::array<uint32_t, MERSENNE_STATE_N> state)
-         : seed_(seed), left_(left), seeded_(seeded), next_(next), state_(state) { }
+  inline mt19937_data_pod data() const {
+    return data_;
+  }
+
+  inline void set_data(mt19937_data_pod data) {
+    data_ = data;
+  }
 
   inline uint64_t seed() const {
-    return seed_;
+    return data_.seed_;
   }
 
   inline bool is_valid() {
-    if ((seeded_ == true) && (left_ > 0 && left_ <= MERSENNE_STATE_N) && (next_ <= MERSENNE_STATE_N)) {
+    if ((data_.seeded_ == true) 
+      && (data_.left_ > 0 && data_.left_ <= MERSENNE_STATE_N)
+      && (data_.next_ <= MERSENNE_STATE_N)) {
       return true;
     }
     return false;
@@ -116,10 +135,10 @@ public:
   inline uint32_t operator()() {
     uint32_t y;
     
-    if (--(left_) == 0) {
+    if (--(data_.left_) == 0) {
         next_state();
     }
-    y = *(state_.data() + next_++);
+    y = *(data_.state_.data() + data_.next_++);
     y ^= (y >> 11);
     y ^= (y << 7) & 0x9d2c5680;
     y ^= (y << 15) & 0xefc60000;
@@ -129,21 +148,18 @@ public:
   }
 
 private:
-  uint64_t seed_;
-  int left_;
-  bool seeded_;
-  uint32_t next_;
-  std::array<uint32_t, MERSENNE_STATE_N> state_;
+  mt19937_data_pod data_;
 
   inline void init_with_uint32(uint64_t seed) {
-    seeded_ = true;
-    state_[0] = seed & 0xffffffff;
+    data_.seed_ = seed;
+    data_.seeded_ = true;
+    data_.state_[0] = seed & 0xffffffff;
     for(int j = 1; j < MERSENNE_STATE_N; j++) {
-      state_[j] = (1812433253 * (state_[j-1] ^ (state_[j-1] >> 30)) + j);
-      state_[j] &= 0xffffffff;
+      data_.state_[j] = (1812433253 * (data_.state_[j-1] ^ (data_.state_[j-1] >> 30)) + j);
+      data_.state_[j] &= 0xffffffff;
     }
-    left_ = 1;
-    next_ = 0;
+    data_.left_ = 1;
+    data_.next_ = 0;
   }
 
   inline uint32_t mix_bits(uint32_t u, uint32_t v) {
@@ -155,9 +171,9 @@ private:
   }
 
   inline void next_state() {
-    uint32_t* p = state_.data();
-    left_ = MERSENNE_STATE_N;
-    next_ = 0;
+    uint32_t* p = data_.state_.data();
+    data_.left_ = MERSENNE_STATE_N;
+    data_.next_ = 0;
 
     for(int j = MERSENNE_STATE_N - MERSENNE_STATE_M + 1; --j; p++) {
       *p = p[MERSENNE_STATE_M] ^ twist(p[0], p[1]);
@@ -167,7 +183,7 @@ private:
       *p = p[MERSENNE_STATE_M - MERSENNE_STATE_N] ^ twist(p[0], p[1]);
     }
 
-    *p = p[MERSENNE_STATE_M - MERSENNE_STATE_N] ^ twist(p[0], state_[0]);
+    *p = p[MERSENNE_STATE_M - MERSENNE_STATE_N] ^ twist(p[0], data_.state_[0]);
   }
 
 };
