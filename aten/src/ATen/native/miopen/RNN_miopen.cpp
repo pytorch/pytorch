@@ -58,6 +58,10 @@ struct RNNDescriptorParams {
     miopenRNNInputMode_t input_mode = miopenRNNlinear;
     miopenBiasMode_t bias_mode = miopenRNNNoBias;
 
+    int64_t num_directions() const {
+    	return (direction == miopenRNNbidirection) ? 2 : 1;
+    }
+
     void set_bidirectional(bool fn_bidirectional) {
         direction = fn_bidirectional ? miopenRNNbidirection : miopenRNNunidirection;
     }
@@ -260,6 +264,26 @@ int64_t get_num_weights(miopenHandle_t handle, const RNNDescriptor& rnn_desc,
     return weight_size / element_size;
 }
 
+std::vector<int64_t> _input_size(const TensorDescriptorListParams& tensors) {
+	if (tensors.is_input_packed()) {
+		return {tensors.batch_sizes_sum, tensors.input_size};
+	} else {
+		return {tensors.seq_length, tensors.mini_batch, tensors.input_size};
+	}
+}
+
+std::vector<int64_t> _hidden_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
+	return {rnn.num_layers * rnn.num_directions(), tensors.mini_batch, tensors.hidden_size};
+}
+
+std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
+	if (tensors.is_input_packed()) {
+		return {tensors.batch_sizes_sum, rnn.hidden_size * rnn.num_directions()};
+	} else {
+		return {tensors.seq_length, tensors.mini_batch, rnn.hidden_size * rnn.num_directions()};
+	}
+}
+
 Tensor miopen_rnn_flatten_weight(
         TensorList weight_arr, int64_t weight_stride0, int64_t input_size,
         miopenRNNMode_t fn_mode, int64_t fn_hidden_size, int64_t fn_num_layers,
@@ -331,6 +355,101 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     }
 
     RNNParams fn;
+    auto datatype = getMiopenDataType(input);
+    fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, datatype);
+    fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
+
+    if (fn.rnn.mode != miopenLSTM) {
+    	AT_CHECK(!cx.defined(), "miopen_rnn: illegal defined cx for non-LSTM RNN.");
+    }
+
+    auto is_input_packed = fn.tensors.batch_sizes.size() != 0;
+    if (batch_first && !is_input_packed) {
+    	input = input.transpose(0, 1);
+    }
+
+    auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
+    auto output_size = _output_size(fn.rnn, fn.tensors);
+
+    AT_CHECK(hx.is_contiguous(), "miopen_rnn : hx is not contiguous.");
+    AT_CHECK(!cx.defined() || cx.is_contiguous(), "miopen_rnn : cx is not contiguous.");
+
+    auto x = input.contiguous();
+    auto output = at::empty(output_size, input.options());
+    auto hy = at::empty(hidden_size, hx.options());
+    Tensor cy;
+    if (cx.defined()) {
+    	cy = at::empty(hidden_size, cx.options());
+    } else {
+    	cy = at::empty({0}, hx.options());
+    }
+
+    auto y = output;
+    auto handle = getMiopenHandle();
+    miopenRNNAlgo_t algo = miopenRNNdefault;
+    fn.rnn.set_algo(algo);
+
+    RNNDescriptors descs(fn, handle, x, y, hx, cx);
+
+    FilterDescriptor w_desc;
+    if (!weight_buf.defined()) {
+    	auto num_weights = get_num_weights(handle, descs.rnn_desc(), descs.x_descs[0], datatype);
+    	weight_buf = at::empty(num_weights, x.options());
+    	w_desc.set(weight_buf, 3);
+    	weight_buf.zero_();
+    	std::vector<Tensor> params;
+    	size_t params_stride0;
+    	std::tie(params, params_stride0) = get_parameters(handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, weight_buf);
+    	_copyParams(MatrixRef<Tensor>{weight, static_cast<size_t>(weight_stride0)},
+    				MatrixRef<Tensor>{params, params_stride0});
+    } else {
+    	w_desc.set(weight_buf, 3);
+    }
+
+    AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size), "Expected cell size ", IntArrayRef{hidden_size}, ", got", cx.sizes());
+
+    size_t workspace_size;
+    auto x_descs_arr = descs.get_x_descs();
+    auto y_descs_arr = descs.get_y_descs();
+
+    //Allocate workspace size.
+    MIOPEN_CHECK(miopenGetRNNWorkspaceSize(handle, descs.rnn_desc.desc(), fn.tensors.seq_length, x_descs_arr.data(), &workspace_size));
+    auto workspace = at::empty(workspace_size, input.otpions().dtype(kByte));
+
+    //Train or inference.
+    Tensor reserve;
+    if (fn_train) { //Train.
+    	size_t reserver_size;
+    	MIOPEN_CHECK(miopenGetRNNTrainingReserverSize(handle, descs.rnn_desc.desc(), fn.tensors.seq_length, x_descs_arr.data(), &reserver_size));
+    	reserve = at::empty(reserver_size, input.options().dtype(kByte));
+
+    	MIOPEN_CHECK(miopenRNNForwardTraining(handle, descs.rnn_desc.desc(), fn.tensors.seq_length,
+    			x_descs_arr.data(), x.data_ptr(),
+    			descs.hx_desc.desc(), hx.data_ptr(),
+    			descs.cx_desc.desc(), cx.defined() ? cx.data_ptr() : nullptr,
+    			w_desc.desc(), weight_buf.data_ptr(),
+    			y_descs_arr.data(), y.data_ptr(),
+    			descs.hy_desc.desc(), hy.data_ptr(),
+    			descs.cy_desc.desc(), cy.defined() ? cy.data_ptr() : nullptr, 
+    			workspace.data_ptr(), workspace_size, reserve.data_ptr(), reserver_size ));
+    } else { //Inference.
+    	reserve = at::empty({0}, input.options().dtype(kByte));
+    	MIOPEN_CHECK(miopenRNNForwardInference(handle, descs.rnn_desc.desc(), fn.tensors.seq_length,
+    			x_descs_arr.data(), x.data_ptr(),
+    			descs.hx_desc.desc(), hx.data_ptr(),
+    			descs.cx_desc.desc(), cx.defined() ? cx.data_ptr() : nullptr,
+    			w_desc.desc(), weight_buf.data_ptr(),
+    			y_descs_arr.data(), y.data_ptr(),
+    			descs.hy_desc.desc(), hy.data_ptr(),
+    			descs.cy_desc.desc(), cy.defined() ? cy.data_ptr() : nullptr,
+    			workspace.data_ptr(), workspace_size));
+    }
+
+    if (batch_first && !is_input_packed) {
+    	output.transpose_(0, 1);
+    }
+
+    return std::make_tuple(output, hy, cy, reserve, weight_buf);
 
 }
 
