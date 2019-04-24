@@ -166,8 +166,10 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
     if (itr != ident_to_type_lut().end()) {
       return itr->second;
     }
-    if (auto typePtr = ClassType::get(*name)) {
-      return typePtr;
+    if (resolver_) {
+      if (auto typePtr = resolver_->resolveType(*name)) {
+        return typePtr;
+      }
     }
     throw ErrorReport(expr) << "Unknown type name " << *name;
   }

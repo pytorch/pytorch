@@ -1,6 +1,5 @@
 #pragma once
 #include <c10/util/Exception.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/graph_executor.h>
@@ -334,12 +333,7 @@ struct TORCH_API Module {
     fn(*this);
   }
   /// Enables "training" mode.
-  void train(bool on = true) {
-    for (auto& submod : get_modules()) {
-      submod->train(on);
-    }
-    register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
-  }
+  void train(bool on = true);
   /// Calls train(false) to enable "eval" mode.
   /// Do not override this method, override `train()` instead.
   void eval() {
@@ -464,12 +458,12 @@ struct TORCH_API Module {
   }
 
   // so that C++ users can easily add methods
-  void define(const std::string& src, const Resolver& resolver = nullptr);
+  void define(const std::string& src, const ResolverPtr& resolver = nullptr);
 
   void _define_lowered(
       const std::vector<Def>& definitions,
-      const std::vector<Resolver>& resolvers);
-  void _define_lowered(const std::string& src, const Resolver& resolver);
+      const std::vector<ResolverPtr>& resolvers);
+  void _define_lowered(const std::string& src, const ResolverPtr& resolver);
 
   Method& _define_lowered(
       std::string name,
