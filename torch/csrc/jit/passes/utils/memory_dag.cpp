@@ -2,7 +2,6 @@
 
 #include <torch/csrc/utils/memory.h>
 #include <algorithm>
-#include <iostream>
 #include <queue>
 
 namespace torch {
@@ -16,10 +15,9 @@ bool MemoryDAG::mayAlias(const Element* a, const Element* b) const {
   return mayAliasImpl(a, b);
 }
 
-bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
-  const auto aMemLoc = a->getMemoryLocations();
-  const auto bMemLoc = b->getMemoryLocations();
-
+bool MemoryDAG::memoryLocationOverlap(
+    const std::unordered_set<const Element*>& aMemLoc,
+    const std::unordered_set<const Element*>& bMemLoc) const {
   // XXX: This could be more efficiently done as a bitwise AND on two bitfields
   // that represent memory location membership. If these comparisons end up
   // being a bottleneck, consider implementing it that way.
@@ -30,7 +28,15 @@ bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
       }
     }
   }
+
   return false;
+}
+
+bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
+  const auto aMemLoc = a->getMemoryLocations();
+  const auto bMemLoc = b->getMemoryLocations();
+
+  return memoryLocationOverlap(aMemLoc, bMemLoc);
 }
 
 bool MemoryDAG::mayContainAlias(const Element* a, const Element* b) const {
@@ -67,15 +73,27 @@ bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
   collectAllContainedMemoryLocations(a, all_a_mlocs);
   collectAllContainedMemoryLocations(b, all_b_mlocs);
 
-  for (const auto a_mem : all_a_mlocs) {
-    for (const auto b_mem : all_b_mlocs) {
-      if (a_mem == b_mem) {
-        return true;
-      }
-    }
+  return memoryLocationOverlap(all_a_mlocs, all_b_mlocs);
+}
+
+bool MemoryDAG::mayContainAlias(
+    const at::ArrayRef<Element*>& a,
+    const at::ArrayRef<Element*>& b) const {
+  if (a.size() == 0 || b.size() == 0) {
+    return false;
   }
 
-  return false;
+  std::unordered_set<const Element*> all_a_mlocs;
+  for (const auto& elem : a) {
+    collectAllContainedMemoryLocations(elem, all_a_mlocs);
+  }
+
+  std::unordered_set<const Element*> all_b_mlocs;
+  for (const auto& elem : b) {
+    collectAllContainedMemoryLocations(elem, all_b_mlocs);
+  }
+
+  return memoryLocationOverlap(all_a_mlocs, all_b_mlocs);
 }
 
 // Make `v` point at `to`.

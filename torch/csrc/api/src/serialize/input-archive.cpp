@@ -19,17 +19,14 @@ namespace serialize {
 InputArchive::InputArchive()
     : module_(std::make_shared<jit::script::Module>()) {}
 
-void InputArchive::read(
+bool InputArchive::try_read(
     const std::string& key,
     Tensor& tensor,
     bool is_buffer) {
   auto param = module_->find_parameter(key);
   auto buffer = module_->find_buffer(key);
-  AT_CHECK(
-      param != nullptr || buffer != nullptr,
-      "No such serialized tensor '",
-      key,
-      "'");
+  if (param == nullptr && buffer == nullptr) return false;
+
   // clang-format off
   auto read_param = is_buffer ? buffer : param;
   auto read_tensor = read_param->value().toTensor();
@@ -48,6 +45,18 @@ void InputArchive::read(
   } else {
     tensor = std::move(read_tensor);
   }
+  return true;
+}
+
+void InputArchive::read(
+    const std::string& key,
+    Tensor& tensor,
+    bool is_buffer) {
+  AT_CHECK(
+    try_read(key, tensor, is_buffer),
+    "No such serialized tensor '",
+    key,
+    "'");
 }
 
 void InputArchive::read(const std::string& key, InputArchive& archive) {
