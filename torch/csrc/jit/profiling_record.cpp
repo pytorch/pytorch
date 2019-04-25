@@ -9,19 +9,15 @@ ProfilingRecord::ProfilingRecord(std::shared_ptr<Graph> g)
 Node* ProfilingRecord::createProfileNode(
     const std::function<void(Stack&)>& fp,
     at::ArrayRef<Value*> inputs) {
-  auto pn = profiled_graph_->create(prim::profile, 0);
+  auto pn = new ProfileOp(profiled_graph_.get(), fp);
+
   for (auto in : inputs) {
     pn->addInput(in);
   }
-
-  callbacks_.push_back(fp);
-  auto& stored_fp = callbacks_.back();
-  pn->i_(attr::data, reinterpret_cast<int64_t>(&stored_fp));
   return pn;
 }
 
 void ProfilingRecord::instrumentBlock(Block* block) {
-
   // iterating backwards allows us to easily insert profile nodes
   // without affecting an iterator
   for (auto it = block->nodes().rend(); it != block->nodes().rbegin(); --it) {
@@ -73,10 +69,9 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   return pr;
 }
 
-ProfiledTensorTypePtr ProfilingRecord::toProfiledTensorTypePtr(const IValue& ival)
-{
-  if (ival.isTensor())
-  {
+ProfiledTensorTypePtr ProfilingRecord::toProfiledTensorTypePtr(
+    const IValue& ival) {
+  if (ival.isTensor()) {
     auto tensor = ival.toTensor();
     return ProfiledTensorType::create(tensor);
   }
@@ -84,5 +79,5 @@ ProfiledTensorTypePtr ProfilingRecord::toProfiledTensorTypePtr(const IValue& iva
   return {nullptr};
 }
 
-} //jit
-} //torch
+} // namespace jit
+} // namespace torch

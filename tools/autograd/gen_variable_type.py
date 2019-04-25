@@ -196,7 +196,9 @@ DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
 """)
 
 SET_HISTORY = CodeTemplate("""\
-${fn}_history(${differentiable_outputs}, grad_fn);
+if (grad_fn) {
+    ${fn}_history(${differentiable_outputs}, grad_fn);
+}
 """)
 
 CONDITIONAL = CodeTemplate("""\

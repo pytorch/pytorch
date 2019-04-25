@@ -29,9 +29,8 @@ SKIP_PYTHON_BINDINGS = [
     'arange.*', 'range.*', '_solve.*', '_getri.*', '_inverse.*',
     '_cholesky.*', '_triangular_solve.*',
     'slice', 'randint(_out)?',
-    'item', '_local_scalar_dense',
-    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
-    'copy_sparse_to_sparse_',
+    'item', '_local_scalar_dense', 'linear', 'to',
+    'copy_sparse_to_sparse_', 'copy_',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -301,6 +300,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'c10::optional<ScalarType>': 'scalartypeOptional',
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
+        'c10::optional<bool>': 'toBoolOptional',
         'IntArrayRef': 'intlist',
         'int64_t': 'toInt64',
         'bool': 'toBool',

@@ -33,6 +33,7 @@ TH_API void THTensor_(neTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(eqTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 
 TH_API accreal THTensor_(sumall)(THTensor *t);
+TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
@@ -125,8 +126,6 @@ TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
 TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
 TH_API void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted);
 TH_API void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k);
-
-TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
 
 TH_API void THTensor_(pow)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(tpow)(THTensor *r_, scalar_t value, THTensor *t);
