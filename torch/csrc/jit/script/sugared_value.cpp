@@ -118,7 +118,6 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     if (auto method = classType->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), method);
     }
-
     if (!classType->hasAttribute(field)) {
       throw ErrorReport(loc)
           << "Tried to access to nonexistent attribute " << field
@@ -214,6 +213,35 @@ void SimpleValue::setAttr(
   auto& g = *m.graph();
   g.insertNode(g.createSetAttr(value_, field, newValue));
 }
+
+std::shared_ptr<SugaredValue> SimpleValue::call(
+    const SourceRange& loc,
+    Function& m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  // allow our 'fake' closures to be called, used for fork serialization
+  // at the moment, but can be expanded later
+  Node* self = getValue()->node();
+  if (self->kind() == prim::TupleConstruct && self->inputs().size() == 2 &&
+      self->inputs().at(0)->node()->kind() == prim::Function) {
+    std::shared_ptr<Graph> graph = self->inputs().at(0)->node()->g(attr::Subgraph);
+    Value* context = self->inputs().at(1);
+    AT_ASSERT(context->node()->kind() == prim::TupleConstruct);
+
+    // fork nodes are emitted in their own block but we do not simplify
+    // tuple construction across blocks. To ensure we clean up the tuple
+    // construct create another copy of the tuple construct in the fork block
+    Value* close_context =
+        m.graph()
+            ->insertNode(m.graph()->createTuple(context->node()->inputs()))
+            ->output();
+    auto fn = CompilationUnit().create_function("anon", graph);
+    return MethodValue(close_context, fn).call(loc, m, inputs, attributes, n_binders);
+  }
+  return SugaredValue::call(loc, m, inputs, attributes, n_binders);
+}
+
 
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
