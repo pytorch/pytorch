@@ -681,19 +681,21 @@ def trace(func,
 
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True, _frames_up=0):
-        self.module = torch._C.ScriptModule()
-        self.module._set_optimized(optimize)
+        self._c = torch._C.CompilationUnit()
+        self._c.set_optimized(optimize)
         if lang is not None:
             self.define(lang, _frames_up=_frames_up + 1)
-        self.optimize = optimize
 
     def define(self, lang, rcb=None, _frames_up=0):
         if not rcb:
             rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-        self.module._define(None, lang, rcb, False)
+        self._c.define(lang, rcb)
 
     def __getattr__(self, attr):
-        return self.module._get_method(attr)
+        r = self._c.find_function(attr)
+        if r is None:
+            raise AttributeError("'CompilationUnit' has no attribute '{}'".format(attr))
+        return r
 
 
 def _try_get_dispatched_fn(fn):
@@ -1592,6 +1594,7 @@ def _graph_for(self, *args, **kwargs):
     return last_executed_optimized_graph()
 
 torch._C.ScriptMethod.graph_for = _graph_for
+torch._C.Function.graph_for = _graph_for
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
