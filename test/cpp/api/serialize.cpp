@@ -304,3 +304,23 @@ TEST(
   const int output = in->named_buffers()["a.c.foo"].sum().item<int>();
   ASSERT_EQ(output, 5);
 }
+
+TEST(SerializeTest, VectorOfTensors) {
+  torch::manual_seed(0);
+
+  std::vector<torch::Tensor> x_vec = { torch::randn({1, 2}), torch::randn({3, 4}) };
+
+  std::stringstream stream;
+  torch::save(x_vec, stream);
+
+  std::vector<torch::Tensor> y_vec;
+  torch::load(y_vec, stream);
+
+  for (int64_t i = 0; i < x_vec.size(); i++) {
+    auto& x = x_vec[i];
+    auto& y = y_vec[i];
+    ASSERT_TRUE(y.defined());
+    ASSERT_EQ(x.sizes().vec(), y.sizes().vec());
+    ASSERT_TRUE(x.allclose(y));
+  }
+}

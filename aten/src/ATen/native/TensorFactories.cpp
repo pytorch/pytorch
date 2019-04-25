@@ -18,12 +18,15 @@
 #include <c10/core/TensorOptions.h>
 #include <TH/THRandom.h>
 #include <TH/THGenerator.hpp>
+#include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <string>
 
 namespace at {
 namespace native {
@@ -88,7 +91,6 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == Backend::CPU);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
@@ -734,5 +736,23 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
   }
 AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(TENSOR)
 #undef TENSOR
+
+Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
+    AT_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");
+    size_t my_size = size.value_or(0);
+    int flags = shared.value_or(false) ? TH_ALLOCATOR_MAPPED_SHARED : 0;
+    auto dtype = options.dtype();
+    auto storage_impl = c10::make_intrusive<at::StorageImpl>(
+      dtype,
+      my_size,
+      THMapAllocator::makeDataPtr(
+          filename.c_str(), flags, my_size * dtype.itemsize(), nullptr),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::CPUTensorId());
+    tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
+    return tensor;
+}
+
 } // namespace native
 } // namespace at
