@@ -12,18 +12,19 @@
 #include <cfloat>
 #include <cmath>
 
-#define CUDA_MAX_THREADS 1024   // this is safe, in reality 256 is our limit
-
-#define START_IND(a,b,c) (int)std::floor((float)(a * c) / b)
-#define END_IND(a,b,c) (int)std::ceil((float)((a + 1) * c) / b)
-// #define START_IND(a,b,c) a * c / b
-// #define END_IND(a,b,c)  (a + 1) * c / b + ((a + 1) * c % b > 0)?1:0
-
 
 namespace at {
 namespace native {
 
 namespace {
+
+__device__ inline int start_index(int a, int b, int c) {
+  return (int)std::floor((float)(a * c) / b);
+}
+
+__device__ inline int end_index(int a, int b, int c) {
+  return (int)std::ceil((float)((a + 1) * c) / b);
+}
 
 // 5d tensor B x D x T x H x W
 
@@ -58,8 +59,8 @@ __global__ void adaptivemaxpool(
   int d = o_plane / osizeT;  // slice/feature
 
   // input frame/time ramge is fixed.
-  int istartT = START_IND(ot, osizeT, isizeT);
-  int iendT = END_IND(ot, osizeT, isizeT);
+  int istartT = start_index(ot, osizeT, isizeT);
+  int iendT = end_index(ot, osizeT, isizeT);
   int kT = iendT - istartT;
 
   // input offset by slice/feature and earliest relevant frame/time
@@ -72,14 +73,14 @@ __global__ void adaptivemaxpool(
   // For all output pixels...
   for(oh = ostartH; oh < oendH; oh += ostepH) {
 
-    int istartH = START_IND(oh, osizeH, isizeH);
-    int iendH   = END_IND(oh, osizeH, isizeH);
+    int istartH = start_index(oh, osizeH, isizeH);
+    int iendH   = end_index(oh, osizeH, isizeH);
     int kH = iendH - istartH;
 
     for(ow = ostartW; ow < oendW; ow += ostepW) {
 
-      int istartW = START_IND(ow, osizeW, isizeW);
-      int iendW   = END_IND(ow, osizeW, isizeW);
+      int istartW = start_index(ow, osizeW, isizeW);
+      int iendW   = end_index(ow, osizeW, isizeW);
       int kW = iendW - istartW;
 
       // Compute the average pooling from corresponding input pixels
@@ -519,7 +520,3 @@ Tensor adaptive_max_pool3d_backward_cuda(
 
 } // at::native
 } // at
-
-#undef CUDA_MAX_THREADS
-#undef START_IND
-#undef END_IND
