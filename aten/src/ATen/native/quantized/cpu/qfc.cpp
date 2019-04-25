@@ -152,7 +152,7 @@ class QFCInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    "quantized::fbgemm_fc(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+    "quantized::fbgemm_fc_packed(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
     c10::kernel<QFCInt8>(),
     c10::dispatchKey(QuantizedCPUTensorId()));
 } // namespace
