@@ -52,7 +52,14 @@ class FileWriter(object):
           flush_secs: Number. How often, in seconds, to flush the
             pending events and summaries to disk.
           filename_suffix: A string. Suffix added to all event filenames.
+            More details on event filename construction in
+            tensorboard.summary.writer.event_file_writer.EventFileWriter.
         """
+        # Sometimes PosixPath is passed in and we need to coerce it to
+        # a string in all cases
+        # TODO: See if we can remove this in the future if we are
+        # actually the ones passing in a PosixPath
+        logdir = str(logdir)
         self.event_writer = EventFileWriter(
             logdir, max_queue, flush_secs, filename_suffix)
 
@@ -153,7 +160,8 @@ class SummaryWriter(object):
     """
 
     def __init__(self, log_dir=None, comment='', **kwargs):
-        """Creates a `SummaryWriter` which uses a `FileWriter` internally.
+        """Creates a `SummaryWriter` which uses a `FileWriter` internally to
+        write out events and summaries to the event file.
 
         Args:
             log_dir (string): save location, default is: runs/**CURRENT_DATETIME_HOSTNAME**, which changes after each
@@ -165,7 +173,9 @@ class SummaryWriter(object):
               whose global_step larger or equal to :math:`T` will be purged and hidden from TensorBoard.
               Note that the resumed experiment and crashed experiment should have the same ``log_dir``.
             filename_suffix (string):
-              Every event file's name is suffixed with suffix. example: ``SummaryWriter(filename_suffix='.123')``
+              Every event file's name is suffixed with suffix. Example: ``SummaryWriter(filename_suffix='.123')``
+              More details on event filename construction in
+              tensorboard.summary.writer.event_file_writer.EventFileWriter.
             kwargs: extra keyword arguments for FileWriter (e.g. 'flush_secs'
               controls how often to flush pending events). For more arguments
               please refer to docs for 'tf.summary.FileWriter'.

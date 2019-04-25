@@ -24,8 +24,7 @@ class NodeBase(object):
         self.tensor_size = tensor_size
         self.kind = op_type
         self.attributes = attributes
-        if scope is not None:
-            self.scope = scope
+        self.scope = scope
 
     def __repr__(self):
         repr = []
@@ -126,7 +125,7 @@ class GraphPy(object):
         for key, node in self.nodes_io.items():
             if hasattr(node, 'input_or_output'):
                 self.unique_name_to_scoped_name[key] = node.input_or_output + '/' + node.uniqueName
-            if hasattr(node, 'scope'):
+            if hasattr(node, 'scope') and node.scope is not None:
                 self.unique_name_to_scoped_name[key] = node.scope + '/' + node.uniqueName
                 if node.scope == '' and self.shallowest_scope_name:
                     self.unique_name_to_scoped_name[node.uniqueName] = self.shallowest_scope_name + '/' + node.uniqueName
@@ -158,15 +157,17 @@ class GraphPy(object):
         return nodes, node_stats
 
 
-# one argument: 'hasAttribute', 'hasAttributes',
 def parse(graph, args=None, omit_useless_nodes=True):
-    """This method parses a PyTorch graph.
+    """This method parses an optimized PyTorch model graph and produces
+    a list of nodes and node stats for eventual conversion to TensorBoard
+    protobuf format.
+
     Args:
       graph (PyTorch module): The model to be parsed.
       args (tuple): input tensor[s] for the model.
-      omit_useless_nodes (boolean) whether to remove nodes from the graph.
+      omit_useless_nodes (boolean): Whether to remove nodes from the graph.
     """
-    n_inputs = len(args)  # not sure...
+    n_inputs = len(args)
 
     scope = {}
     nodes_py = GraphPy()
@@ -191,8 +192,33 @@ def parse(graph, args=None, omit_useless_nodes=True):
 
 
 def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_nodes=True):
+    """
+    This method processes a PyTorch model and produces a `GraphDef` proto
+    that can be logged to TensorBoard.
+
+    Args:
+      model (PyTorch module): The model to be parsed.
+      args (tuple): input tensor[s] for the model.
+      verbose (bool): Whether to print out verbose information while
+        processing.
+      operator_export_type (str): One of 'ONNX', 'ONNX_ATEN', or 'RAW'.
+        Defaults to 'ONNX' format  because it outputs the most visually
+        understandable format.
+      omit_useless_nodes (boolean): Whether to remove nodes from the graph.
+    """
     operator_export_type = getattr(OperatorExportTypes, operator_export_type)
 
+    # This code is similar to torch/onnx/utils.py, but adjusted to provide
+    # the most visually understandable output.
+    #
+    # For example, the commented out line
+    #
+    #    # torch._C._jit_pass_onnx_peephole(graph).
+    #
+    # This pass removes a lot of scope information. The amount of optimization
+    # cannot be too much (lots of information lost) or too little (too much
+    # useless information), therefore I copy-pasted the code so that it will
+    # not be affected by torch/onnx/utils.py changes.
     def _optimize_trace(trace, operator_export_type):
         trace.set_graph(_optimize_graph(trace.graph(), operator_export_type))
 
@@ -250,9 +276,17 @@ def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_
                     model, args, tempfile.TemporaryFile(), verbose=True)
             except RuntimeError:
                 print("Your model fails onnx too, please report to onnx team")
+            # Create an object matching
+            # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/graph.proto
+            # The producer version has been reverse engineered from standard
+            # TensorBoard logged data.
             return GraphDef(versions=VersionDef(producer=22))
 
     try:
+        # An optimized graph helps debug at a higher level. Users can focus
+        # on connections between big modules such as Linear instead of W, x,
+        # bias, matmul, etc. Honestly, most users don't care about those
+        # detailed nodes information.
         _optimize_trace(trace, operator_export_type)
     except RuntimeError as e:
         # Optimize trace might fail (due to bad scopes in some cases we've seen)
