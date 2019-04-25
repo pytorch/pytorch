@@ -14,11 +14,8 @@ def figure_to_image(figures, close=True):
     Returns:
         numpy.array: image in [CHW] order
     """
-    try:
-        import matplotlib.pyplot as plt
-        import matplotlib.backends.backend_agg as plt_backend_agg
-    except ModuleNotFoundError:
-        print('please install matplotlib')
+    import matplotlib.pyplot as plt
+    import matplotlib.backends.backend_agg as plt_backend_agg
 
     def render_to_rgb(figure):
         canvas = plt_backend_agg.FigureCanvasAgg(figure)
