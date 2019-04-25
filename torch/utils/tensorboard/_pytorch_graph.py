@@ -91,9 +91,9 @@ class GraphPy(object):
         self.scope_name_appeared = []
 
     def append(self, x):
-        if type(x) == NodePyIO:
+        if isinstance(x, NodePyIO):
             self.nodes_io[x.uniqueName] = x
-        if type(x) == NodePyOP:
+        if isinstance(x, NodePyOP):
             self.nodes_op.append(x)
             for node_output, outputSize in zip(x.outputs, x.outputstensor_size):
                 self.scope_name_appeared.append(x.scopeName)
@@ -122,7 +122,7 @@ class GraphPy(object):
                 self.unique_name_to_scoped_name[input_node_id] = node.scopeName + '/' + input_node_id
 
         for key, node in self.nodes_io.items():
-            if type(node) == NodeBase:
+            if isinstance(node, NodeBase):
                 self.unique_name_to_scoped_name[key] = node.scope + '/' + node.uniqueName
             if hasattr(node, 'input_or_output'):
                 self.unique_name_to_scoped_name[key] = node.input_or_output + '/' + node.uniqueName
