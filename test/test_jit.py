@@ -248,6 +248,17 @@ def enable_cpu_fuser(fn):
     return wrapper
 
 
+def enable_cpu_fuser_if(cond):
+    if cond:
+        return enable_cpu_fuser
+    else:
+        def noop_fuser(fn):
+            def wrapper(*args, **kwargs):
+                return fn(*args, **kwargs)
+            return wrapper
+        return noop_fuser
+
+
 # note: not re-entrant, use unnested only
 @contextmanager
 def disable_autodiff_subgraph_inlining(enabled=True):
@@ -1823,6 +1834,17 @@ graph(%x : Tensor,
         trace, outputs, inputs = torch.jit.get_trace_graph(nn.Conv2d(16, 13, 3, bias=False), x, return_inputs=True)
         m = self.createScriptModuleFromGraph(trace)
         self.assertEqual(outputs, m(*inputs))
+
+    def test_max_pool(self):
+        x = torch.rand(20, 16, 10, 10)
+
+        def max_pool2d(x):
+            return F.max_pool2d(x, 2) + 2
+
+        trace = torch.jit.trace(max_pool2d, (x))
+        graph = trace.graph_for(x)
+        FileCheck().check("aten::max_pool2d(").run(graph)
+        self.assertEqual(max_pool2d(x), trace(x))
 
     def test_repeated_input(self):
         def fn(a, b):
@@ -11276,6 +11298,36 @@ a")
                         return 4
                 return 5
 
+    def test_nn_init(self):
+        tests = (
+            ('constant_', (lambda: (torch.ones(2, 2), 2.5)), "Tensor, float"),
+            ('ones_', (lambda: (torch.ones(2, 2),)), "Tensor"),
+            ('zeros_', (lambda: (torch.ones(2, 2),)), "Tensor"),
+            ('uniform_', (lambda: (torch.ones(2, 2),)), "Tensor"),
+            ('normal_', (lambda: (torch.ones(2, 2),)), "Tensor"),
+            ('xavier_normal_', (lambda: (torch.ones(2, 2),)), "Tensor"),
+            ('xavier_uniform_', (lambda: (torch.ones(2, 2),)), "Tensor"),
+        )
+
+        for name, args_fn, type_str in tests:
+            # Build test code
+            arg_str = ', '.join([chr(i + ord('a')) for i in range(len(args_fn()))])
+
+            code = dedent('''
+                def test({arg_str}):
+                    # type: ({type_str})
+                    return torch.nn.init.{name}({arg_str})
+            ''').format(arg_str=arg_str, type_str=type_str, name=name)
+            cu = torch.jit.CompilationUnit(code)
+
+            # Compare functions
+            init_fn = getattr(torch.nn.init, name)
+            script_out = self.runAndSaveRNG(cu.test, args_fn())
+            eager_out = self.runAndSaveRNG(init_fn, args_fn())
+            self.assertEqual(script_out, eager_out)
+
+            FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
+
     def test_overloading(self):
         @torch._jit_internal.weak_module
         class W(torch.nn.Module):
@@ -13045,7 +13097,8 @@ nn_functional_tests = [
     ('fractional_max_pool2d', (S, S, S, S), (3, [2, 3],)),
     ('max_pool1d', (S, S, S), (2, 1)),
     ('max_pool1d', (S, S, S), (2, 1, 1, 1, False, True), 'with_indices'),
-    ('max_pool2d', (S, S, S, S), (2, 1)),
+    ('max_pool2d', (S, S, S, S), (2, 1), '', (True, 'aten::max_pool2d_with_indices')),
+    ('max_pool2d', (S, S, S, S), (2, 1, 1, 1, False, True), 'with_indices', (True, 'aten::max_pool2d_with_indices')),
     ('max_pool3d', (S, S, S, S, S), (2, 1)),
     ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
     ('max_unpool2d', torch.tensor([[[[2., 4]]]]), (torch.tensor([[[[1, 3]]]]), 2, 2, 0)),
@@ -13253,7 +13306,7 @@ def add_autograd_test(
             # We enable the CPU fuser during these checks for more consistent
             # behavior. Otherwise, we are going to have to analyze the graph to
             # see if producer values are Dimension
-            @enable_cpu_fuser
+            @enable_cpu_fuser_if(not (IS_SANDCASTLE or IS_WINDOWS))
             def check(name):
                 set_rng_seed(2)
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
@@ -13286,7 +13339,7 @@ def add_autograd_test(
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
                             # Fuser not supported on windows
-                            if IS_WINDOWS:
+                            if IS_SANDCASTLE or IS_WINDOWS:
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
                                 fusible_nodes = []
                             self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
@@ -13298,7 +13351,7 @@ def add_autograd_test(
                                                     check_types=check_types)
 
                             # Fuser not supported on windows
-                            if IS_WINDOWS:
+                            if IS_SANDCASTLE or IS_WINDOWS:
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
                                 fusible_nodes = []
                             self.assertAutodiffNode(script_fn.last_graph,
