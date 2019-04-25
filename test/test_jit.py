@@ -1368,7 +1368,7 @@ graph(%x : Tensor,
 graph(%a, %b, %c):
   %q = aten::mul(%a, %b)
   %r = aten::mul(%q, %c)
-  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], m)
+  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], m._c)
         FileCheck().check_not("aten::mul").check("my::fused_mulmul") \
                    .check_next("my::fused_mulmul").run(str(m.graph))
 
