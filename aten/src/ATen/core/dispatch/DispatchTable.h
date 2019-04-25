@@ -54,71 +54,55 @@ inline std::string dispatch_key_to_string(TensorTypeId id) {
    return name + "[" + toString(id) + "]";
 }
 
-/// Kernel implementations in a thread-safe hash table.
-class ThreadsafeOperatorTable_ final {
+class KernelTable_ final {
  public:
   void emplace(TensorTypeId key, const DispatchTableEntry& value, const std::string& operator_name) {
-    bool res = map_.write([&](ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) -> bool {
-      auto result = map.emplace(key, value);
-      return result.second;
-    });
-    if (!res) {
+    auto emplaced = map_.emplace(key, value);
+    if (!emplaced.second) {
       AT_ERROR("Tried to register multiple kernels with same dispatch key '",
       detail::dispatch_key_to_string(key), "' for operator '", operator_name ,"'.");
     }
   }
 
   void erase(TensorTypeId key, const std::string& operator_name) {
-    map_.write([&](ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) {
-      auto num_removed = map.erase(key);
+    auto num_removed = map_.erase(key);
 
-      assert(num_removed <= 1); // This is not a multi-map
-      if (num_removed == 0) {
-        AT_ERROR("Tried to deregister a kernel with dispatch key '",
-                 detail::dispatch_key_to_string(key), "' for operator '", operator_name,
-                 "' but that kernel isn't registered. Registered dispatch keys are: ",
-                 list_all_dispatch_keys(map));
-      }
-    });
+    assert(num_removed <= 1); // This is not a multi-map
+    if (num_removed == 0) {
+      AT_ERROR("Tried to deregister a kernel with dispatch key '",
+               detail::dispatch_key_to_string(key), "' for operator '", operator_name,
+               "' but that kernel isn't registered. Registered dispatch keys are: ",
+               list_all_dispatch_keys());
+    }
   }
 
   const DispatchTableEntry* lookup(TensorTypeId key, const string& operator_name) const {
-    return map_.read([&](const ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) -> const DispatchTableEntry* {
-      auto found = map.find(key);
-      if (found != map.end()) {
-        return &found->second;
-      } else {
-        return nullptr;
-      }
-    });
+    auto found = map_.find(key);
+    if (found != map_.end()) {
+      return &found->second;
+    } else {
+      return nullptr;
+    }
   }
 
   bool isEmpty() const {
-    return map_.read([&](const ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) -> bool {
-      return map.size() == 0;
-    });
+    return map_.size() == 0;
   }
 
   std::string list_all_dispatch_keys() const {
-    return map_.read([&](const ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) -> std::string {
-      return list_all_dispatch_keys(map);
-    });
+    if (map_.size() == 0) {
+      return "";
+    }
+    std::ostringstream str;
+    str << detail::dispatch_key_to_string(map_.begin()->first);
+    for (auto iter = ++map_.begin(); iter != map_.end(); ++iter) {
+      str << ", " << detail::dispatch_key_to_string(iter->first);
+    }
+    return str.str();
   }
 
  private:
-   static std::string list_all_dispatch_keys(const ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) {
-     if (map.size() == 0) {
-       return "";
-     }
-     std::ostringstream str;
-     str << detail::dispatch_key_to_string(map.begin()->first);
-     for (auto iter = ++map.begin(); iter != map.end(); ++iter) {
-       str << ", " << detail::dispatch_key_to_string(iter->first);
-     }
-     return str.str();
-   }
-
-   LeftRight<ska::flat_hash_map<TensorTypeId, DispatchTableEntry>> map_;
+   ska::flat_hash_map<TensorTypeId, DispatchTableEntry> map_;
 };
 } // namespace detail
 
@@ -133,16 +117,11 @@ class ThreadsafeOperatorTable_ final {
  */
 class DispatchTable final {
  public:
-  explicit DispatchTable(const FunctionSchema& schema)
+  DispatchTable(const FunctionSchema& schema)
   : kernels_()
   , dispatch_strategy_(get_dispatch_strategy_(schema))
   , operator_name_(schema.name())
   , fallback_kernel_(c10::nullopt) {}
-
-  DispatchTable(DispatchTable&&) = delete;
-  DispatchTable& operator=(DispatchTable&&) = delete;
-  DispatchTable(const DispatchTable&) = delete;
-  DispatchTable& operator=(const DispatchTable&) = delete;
 
   /**
    * Register a kernel in the table at some dispatch key.
@@ -161,9 +140,6 @@ class DispatchTable final {
    *
    * @param dispatch_key Dispatch key to unregister.
    */
-  // TODO: This isn't going to work so well when we get more complicated
-  // override patterns! In this case, an operator will show up in multiple
-  // slots, and erasing them one-by-one is probably not such a good idea.
   void deregisterKernel(TensorTypeId dispatch_key) {
     kernels_.erase(dispatch_key, operator_name_);
   }
@@ -288,7 +264,7 @@ private:
     return result;
   }
 
-  detail::ThreadsafeOperatorTable_ kernels_;
+  detail::KernelTable_ kernels_;
   DispatchStrategy dispatch_strategy_;
   std::string operator_name_;
   c10::optional<DispatchTableEntry> fallback_kernel_;

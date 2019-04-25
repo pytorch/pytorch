@@ -13,47 +13,29 @@ RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) = default;
 class RegisterOperators::OperatorRegistrar final {
 public:
   explicit OperatorRegistrar(FunctionSchema&& schema, c10::optional<TensorTypeId> dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator)
-  : op_(Dispatcher::singleton().registerSchema(std::move(schema))), dispatch_key_(std::move(dispatch_key)), has_kernel_(kernel != nullptr), owns_registration_(true) {
+  : op_(Dispatcher::singleton().registerSchema(std::move(schema))), kernel_registration_handle_(c10::nullopt) {
     // either both, kernel and cache_creator, or none must be set.
     AT_ASSERT((kernel != nullptr) == static_cast<bool>(cache_creator));
 
-    if (has_kernel_) {
-      if (dispatch_key_.has_value()) {
-        Dispatcher::singleton().registerKernel(op_, *dispatch_key_, kernel, std::move(cache_creator));
+    if (kernel != nullptr) {
+      if (dispatch_key.has_value()) {
+        kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.first, *dispatch_key, kernel, std::move(cache_creator));
       } else {
-        Dispatcher::singleton().registerFallbackKernel(op_, kernel, std::move(cache_creator));
+        kernel_registration_handle_ = Dispatcher::singleton().registerFallbackKernel(op_.first, kernel, std::move(cache_creator));
       }
     }
   }
 
-  OperatorRegistrar(OperatorRegistrar&& rhs) noexcept
-  :  op_(std::move(rhs.op_)), dispatch_key_(std::move(rhs.dispatch_key_)), has_kernel_(rhs.has_kernel_), owns_registration_(rhs.owns_registration_) {
-    rhs.owns_registration_ = false;
-  }
+  OperatorRegistrar(OperatorRegistrar&& rhs) noexcept = default;
+  OperatorRegistrar& operator=(OperatorRegistrar&& rhs) noexcept = default;
 
   // not needed and would break RAII if defaulted.
-  OperatorRegistrar& operator=(OperatorRegistrar&& rhs) noexcept = delete;
   OperatorRegistrar(const OperatorRegistrar& rhs) = delete;
   OperatorRegistrar& operator=(const OperatorRegistrar& rhs) = delete;
 
-  ~OperatorRegistrar() {
-    if (owns_registration_) {
-      if (has_kernel_) {
-        if (dispatch_key_.has_value()) {
-          Dispatcher::singleton().deregisterKernel(op_, *dispatch_key_);
-        } else {
-          Dispatcher::singleton().deregisterFallbackKernel(op_);
-        }
-      }
-      Dispatcher::singleton().deregisterSchema(op_);
-    }
-  }
-
 private:
-  const OperatorHandle op_;
-  const c10::optional<TensorTypeId> dispatch_key_;
-  bool has_kernel_;
-  bool owns_registration_;
+  std::pair<OperatorHandle, RegistrationHandleRAII> op_;
+  c10::optional<RegistrationHandleRAII> kernel_registration_handle_;
 };
 
 void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNameStr, detail::KernelRegistrationConfig&& config) {
