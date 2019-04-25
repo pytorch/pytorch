@@ -509,7 +509,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
 
     RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
-    //TODO: Need to implement get_parameters that gets params and params_stride0.
+    //TODO: Need to implement get_parameters that gets params and params_stride0. [Done.]
     FilterDescriptor w_desc;
     if (!weight_buf.defined()) {
     	auto num_weights = get_num_weights(handle, descs.rnn_desc(), descs.x_descs[0], datatype);
