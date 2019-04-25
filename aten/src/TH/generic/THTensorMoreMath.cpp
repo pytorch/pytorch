@@ -176,7 +176,8 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
       at::Tensor values__wrap = THTensor_wrap(values_);
       at::Tensor t0_wrap = THTensor_wrap(t0);
-      at::_copy_same_type_(values__wrap, t0_wrap);
+      auto right_shape = t0_wrap.reshape(values__wrap.sizes());
+      at::_copy_same_type_(values__wrap, right_shape);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
@@ -259,7 +260,8 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
       at::Tensor values__wrap = THTensor_wrap(values_);
       at::Tensor t0_wrap = THTensor_wrap(t0);
-      at::_copy_same_type_(values__wrap, t0_wrap);
+      auto right_shape = t0_wrap.reshape(values__wrap.sizes());
+      at::_copy_same_type_(values__wrap, right_shape);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
