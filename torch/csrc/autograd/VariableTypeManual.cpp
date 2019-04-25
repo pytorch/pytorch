@@ -347,8 +347,8 @@ Tensor & VariableType::detach_(Tensor & self) const {
 
 Tensor VariableType::_sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, const TensorOptions & options) const {
   RECORD_FUNCTION("_sparse_coo_tensor_with_dims_and_tensors", std::vector<c10::IValue>({indices, values}), Function::peek_at_next_sequence_nr());
-  auto indices_ = as_variable_ref(indices).data();
-  auto values_ = as_variable_ref(values).data();
+  auto indices_ = Tensor(indices.unsafeGetTensorImpl()->shallow_copy_and_detach());
+  auto values_ = Tensor(values.unsafeGetTensorImpl()->shallow_copy_and_detach());
   auto options_ = TensorOptions(options).is_variable(false);
   check_no_requires_grad(indices, "indices");
   std::shared_ptr<SparseCooTensorWithDimsAndTensorsBackward> grad_fn;
@@ -399,7 +399,9 @@ Tensor VariableType::_sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim
     AT_ASSERT(values__storage_saved.value().is_alias_of(values_.storage()));
   if (values__impl_saved) AT_ASSERT(values__impl_saved == values_.getIntrusivePtr());
   #endif
-  set_history(flatten_tensor_args( result ), grad_fn);
+  if (grad_fn) {
+      set_history(flatten_tensor_args( result ), grad_fn);
+  }
   if (tracer_state) {
     jit::tracer::setTracingState(std::move(tracer_state));
     jit::tracer::addOutput(node, result);
