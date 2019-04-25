@@ -16,8 +16,7 @@ namespace cpp_custom_type_hack {
 template <typename T>
 T& cast(const Tensor& packed) {
   AT_CHECK(
-      packed.scalar_type() == kByte || packed.scalar_type() == kQInt8,
-      "Expected temporary cpp type wrapper");
+      packed.scalar_type() == kByte, "Expected temporary cpp type wrapper");
   AT_CHECK(
       packed.storage().data_ptr().get_deleter() ==
           caffe2::TypeMeta::Make<T>().deleteFn(),
@@ -38,30 +37,6 @@ Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
   // size doesn't really matter, but we can align it to the actual size
   // returning variables because one likely want to use this hack from python
   auto retval = at::empty({sizeof(T)}, options.device(kCPU).dtype(at::kByte));
-  retval.storage().set_data_ptr(std::move(at_ptr));
-  return retval;
-}
-
-template <typename T>
-Tensor create(
-    std::unique_ptr<T> ptr,
-    TensorOptions options,
-    Scalar scale,
-    Scalar zero_point) {
-  // We store this instance away in a Tensor and register a deleter function
-  // so that we do not leak memory. On the other side, we pull out the storage's
-  // data_ptr and get the right typed pointer.
-  void* raw_ptr = ptr.release();
-  at::DataPtr at_ptr(
-      raw_ptr, raw_ptr, caffe2::TypeMeta::Make<T>().deleteFn(), at::kCPU);
-
-  // size doesn't really matter, but we can align it to the actual size
-  // returning variables because one likely want to use this hack from python
-  auto retval = at::_empty_affine_quantized(
-      {sizeof(T)},
-      options.device(kCPU).dtype(at::kQInt8),
-      scale.toFloat(),
-      zero_point.toInt());
   retval.storage().set_data_ptr(std::move(at_ptr));
   return retval;
 }

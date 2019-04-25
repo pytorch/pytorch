@@ -58,9 +58,8 @@ class QFCInt8 final : public c10::OperatorKernel {
     float input_scale_float = input.q_scale().toFloat();
     int32_t input_zero_point_int32 = input.q_zero_point().toInt();
 
-    float weight_scale_float = packed_weight.q_scale().toFloat();
-
-    int32_t weight_zero_point_int32 = packed_weight.q_zero_point().toInt();
+    float weight_scale_float = pack_ptr.w_scale;
+    int32_t weight_zero_point_int32 = pack_ptr.w_zp;
 
     float output_multiplier_float = (input_scale_float * weight_scale_float) /
         static_cast<float>(output_scale);

@@ -16,6 +16,8 @@
 struct FBGEMM_API PackedFCWeight {
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
   std::vector<int32_t> col_offsets;
+  float w_scale;
+  int w_zp;
 };
 
 #endif // USE_FBGEMM
