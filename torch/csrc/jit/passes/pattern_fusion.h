@@ -42,7 +42,7 @@ TORCH_API std::shared_ptr<script::Module> PatternBasedFusion(
  * To enable fusion of custom patterns, they must be registered with
  * `RegisterFusionPattern`.
  */
-class PatternFuser {
+class TORCH_API PatternFuser {
  public:
   // \brief Run pattern-based fusion pass on the module.
   std::shared_ptr<script::Module> runOnModule(
