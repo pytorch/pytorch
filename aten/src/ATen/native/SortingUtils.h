@@ -44,5 +44,37 @@ static void _reduction_with_indices_allocate_or_resize_output(
   }
 }
 
+// ensure we get good values and indices for topk
+static void _allocate_or_resize_output_with_indices(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim_,
+    int64_t k) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
+  auto result_sizes = self.sizes().vec();
+  if (result_sizes.size() > 0) {
+    result_sizes[dim] = k;
+  }
+  if (values.defined()) {
+    AT_CHECK(
+        self.type() == values.type(),
+        "output values must be of same type as input");
+    values.resize_(result_sizes);
+  } else {
+    values = at::empty(result_sizes, self.options());
+  }
+  if (indices.defined()) {
+    AT_CHECK(
+        indices.dtype() == kLong, "output indices must be of scalar type Long");
+    AT_CHECK(
+        indices.device() == self.device(),
+        "output indices must be on same device as input");
+    indices.resize_(result_sizes);
+  } else {
+    indices = at::empty(result_sizes, self.options().dtype(kLong));
+  }
+}
+
 } // namespace native
 } // namespace at
