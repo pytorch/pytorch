@@ -8,11 +8,10 @@ torch.utils.tensorboard
     as well as Caffe2 nets and blobs.
 
     The SummaryWriter class is your main entry to log data for consumption
-    and visualization by TensorBoard.
+    and visualization by TensorBoard. For example:
 
-    A simple example is
+    .. code:: python
 
-    ::
         import torch
         import torchvision
         from torch.utils.tensorboard import SummaryWriter
@@ -34,15 +33,14 @@ torch.utils.tensorboard
         writer.close()
 
     This can then be visualized with TensorBoard, which should be installed
-    with `pip install tensorboard` or equivalent. More details on TensorBoard
-    are at https://www.tensorflow.org/tensorboard/r1/summaries
+    with ``pip install tensorboard`` or equivalent. More details on TensorBoard
+    can be found at https://www.tensorflow.org/tensorboard/
 
     .. warning::
 
         This code is EXPERIMENTAL and might change in the future. It also
-        currently does not support all model types for `add_graph`, which
+        currently does not support all model types for ``add_graph``, which
         we are actively working on.
 
-.. currentmodule:: torch.utils.tensorboard
+.. currentmodule:: torch.utils.tensorboard.writer
 .. autoclass:: SummaryWriter
-.. autoclass:: FileWriter
