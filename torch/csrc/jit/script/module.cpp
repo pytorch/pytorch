@@ -185,7 +185,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     }
     Slot slot(e.mod, e.mod->type()->getAttributeSlot(e.n->s(attr::name)));
     if (ClassTypePtr c = e.n->output()->type()->cast<ClassType>()) {
-      if (c->name() == "Module") {
+      if (c->name() == "$Module") {
         auto obj = slot.value().toObject();
         for (Use use : e.n->output()->uses()) {
           to_scan.emplace_back(ToScan{obj, use.user, use.offset});

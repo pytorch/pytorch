@@ -2263,7 +2263,7 @@ struct to_ir {
     }
     // Lambda lift block(0) into attr::Subgraph
     lambdaLiftFork(fork_node);
-
+    runCleanupPasses(fork_node->g(attr::Subgraph));
     return std::make_shared<SimpleValue>(node_output);
   }
 
@@ -2871,11 +2871,13 @@ void lambdaLiftFork(Node* fork_node) {
   auto env = [&](Value* v) -> Value* {
     if (!uncaptures_map.count(v)) {
       // Capture values for both graphs
-      uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
+      uncaptures_map[v] =
+          forked_graph->addInput()->copyMetadata(v);
       fork_node->addInput(v);
     }
     return uncaptures_map[v];
   };
+
   forked_graph->block()->cloneFrom(body_block, env);
 
   // Separate the subgraph and clean up the orignal one
