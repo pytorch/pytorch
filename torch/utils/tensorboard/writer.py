@@ -75,7 +75,7 @@ class FileWriter(object):
           step: Number. Optional global step value for training process
             to record with the event.
           walltime: float. Optional walltime to override the default (current)
-            walltime (from time.time())
+            walltime (from time.time()) seconds after epoch
         """
         event.wall_time = time.time() if walltime is None else walltime
         if step is not None:
@@ -94,7 +94,7 @@ class FileWriter(object):
           global_step: Number. Optional global step value for training process
             to record with the summary.
           walltime: float. Optional walltime to override the default (current)
-            walltime (from time.time())
+            walltime (from time.time()) seconds after epoch
         """
         event = event_pb2.Event(summary=summary)
         self.add_event(event, global_step, walltime)
@@ -105,7 +105,7 @@ class FileWriter(object):
         Args:
           graph_profile: A `Graph` and step stats protocol buffer.
           walltime: float. Optional walltime to override the default (current)
-            walltime (from time.time())
+            walltime (from time.time()) seconds after epoch
         """
         graph = graph_profile[0]
         stepstats = graph_profile[1]
@@ -123,7 +123,7 @@ class FileWriter(object):
         Args:
           graph: A `Graph` protocol buffer.
           walltime: float. Optional walltime to override the default (current)
-            walltime (from time.time())
+            _get_file_writerfrom time.time())
         """
         event = event_pb2.Event(graph_def=graph.SerializeToString())
         self.add_event(event, None, walltime)
@@ -151,7 +151,8 @@ class FileWriter(object):
 
 
 class SummaryWriter(object):
-    """Writes entries directly to event files to be consumed by TensorBoard.
+    """Writes entries directly to event files in the log_dir to be
+    consumed by TensorBoard.
 
     The `SummaryWriter` class provides a high-level API to create an event file
     in a given directory and add summaries and events to it. The class updates the
@@ -161,12 +162,14 @@ class SummaryWriter(object):
     """
 
     def __init__(self, log_dir=None, comment='', **kwargs):
-        """Creates a `SummaryWriter` which uses a `FileWriter` internally to
-        write out events and summaries to the event file.
+        """Creates a `SummaryWriter` that will write out events and summaries
+        to the event file.
 
         Args:
             log_dir (string): save location, default is: runs/**CURRENT_DATETIME_HOSTNAME**, which changes after each
-              run. Use hierarchical folder structure to compare between runs easily. e.g. 'runs/exp1', 'runs/exp2'
+              run. Use hierarchical folder structure to compare between runs easily. e.g. pass in
+              'runs/exp1', 'runs/exp2', etc. for each new experiment to compare across. Defaults
+              to ``./runs/``.
             comment (string): comment that appends to the default ``log_dir``. If ``log_dir`` is assigned,
               this argument will no effect.
             purge_step (int):
@@ -193,7 +196,7 @@ class SummaryWriter(object):
         # Initialize the file writers, but they can be cleared out on close
         # and recreated later as needed.
         self.file_writer = self.all_writers = None
-        self.get_file_writer()
+        self._get_file_writer()
 
         # Create default bins for histograms, see generate_testdata.py in tensorflow/tensorboard
         v = 1E-12
@@ -206,7 +209,7 @@ class SummaryWriter(object):
         self.default_bins = neg_buckets[::-1] + [0] + buckets
         self.scalar_dict = {}
 
-    def __append_to_scalar_dict(self, tag, scalar_value, global_step,
+    def _append_to_scalar_dict(self, tag, scalar_value, global_step,
                                 timestamp):
         """This adds an entry to the self.scalar_dict datastructure with format
         {writer_id : [[timestamp, step, value], ...], ...}.
@@ -231,7 +234,7 @@ class SummaryWriter(object):
         """
         return isinstance(item, six.string_types)
 
-    def get_file_writer(self):
+    def _get_file_writer(self):
         """Returns the default FileWriter instance. Recreates it if closed."""
         if self.all_writers is None or self.file_writer is None:
             if 'purge_step' in self.kwargs.keys():
@@ -253,11 +256,12 @@ class SummaryWriter(object):
             tag (string): Data identifier
             scalar_value (float or string/blobname): Value to save
             global_step (int): Global step value to record
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              with seconds after epoch of event
         """
         if self._check_caffe2_blob(scalar_value):
             scalar_value = workspace.FetchBlob(scalar_value)
-        self.get_file_writer().add_summary(
+        self._get_file_writer().add_summary(
             scalar(tag, scalar_value), global_step, walltime)
 
     def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
@@ -269,7 +273,8 @@ class SummaryWriter(object):
             main_tag (string): The parent name for the tags
             tag_scalar_dict (dict): Key-value pair storing the tag and corresponding values
             global_step (int): Global step value to record
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
 
         Examples::
 
@@ -280,7 +285,7 @@ class SummaryWriter(object):
             # 'run_14h' in TensorBoard's scalar section.
         """
         walltime = time.time() if walltime is None else walltime
-        fw_logdir = self.get_file_writer().get_logdir()
+        fw_logdir = self._get_file_writer().get_logdir()
         for tag, scalar_value in tag_scalar_dict.items():
             fw_tag = fw_logdir + "/" + main_tag + "/" + tag
             if fw_tag in self.all_writers.keys():
@@ -292,7 +297,7 @@ class SummaryWriter(object):
                 scalar_value = workspace.FetchBlob(scalar_value)
             fw.add_summary(scalar(main_tag, scalar_value),
                            global_step, walltime)
-            self.__append_to_scalar_dict(
+            self._append_to_scalar_dict(
                 fw_tag, scalar_value, global_step, walltime)
 
     def export_scalars_to_json(self, path):
@@ -315,13 +320,14 @@ class SummaryWriter(object):
             global_step (int): Global step value to record
             bins (string): one of {'tensorflow','auto', 'fd', ...}, this determines how the bins are made. You can find
               other options in: https://docs.scipy.org/doc/numpy/reference/generated/numpy.histogram.html
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
         """
         if self._check_caffe2_blob(values):
             values = workspace.FetchBlob(values)
         if isinstance(bins, six.string_types) and bins == 'tensorflow':
             bins = self.default_bins
-        self.get_file_writer().add_summary(
+        self._get_file_writer().add_summary(
             histogram(tag, values, bins, max_bins=max_bins), global_step, walltime)
 
     def add_histogram_raw(self, tag, min, max, num, sum, sum_squares,
@@ -339,10 +345,11 @@ class SummaryWriter(object):
             bucket_limits (torch.Tensor, numpy.array): Upper value per bucket
             bucket_counts (torch.Tensor, numpy.array): Number of values per bucket
             global_step (int): Global step value to record
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
             see: https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/histogram/README.md
         """
-        self.get_file_writer().add_summary(
+        self._get_file_writer().add_summary(
             histogram_raw(tag,
                           min,
                           max,
@@ -363,7 +370,8 @@ class SummaryWriter(object):
             tag (string): Data identifier
             img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data
             global_step (int): Global step value to record
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. You can use ``torchvision.utils.make_grid()`` to
             convert a batch of tensor into 3xHxW format or call ``add_images`` and let us do the job.
@@ -372,7 +380,7 @@ class SummaryWriter(object):
         """
         if self._check_caffe2_blob(img_tensor):
             img_tensor = workspace.FetchBlob(img_tensor)
-        self.get_file_writer().add_summary(
+        self._get_file_writer().add_summary(
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
 
     def add_images(self, tag, img_tensor, global_step=None, walltime=None, dataformats='NCHW'):
@@ -384,14 +392,15 @@ class SummaryWriter(object):
             tag (string): Data identifier
             img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data
             global_step (int): Global step value to record
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
         Shape:
             img_tensor: Default is :math:`(N, 3, H, W)`. If ``dataformats`` is specified, other shape will be
             accepted. e.g. NCHW or NHWC.
         """
         if self._check_caffe2_blob(img_tensor):
             img_tensor = workspace.FetchBlob(img_tensor)
-        self.get_file_writer().add_summary(
+        self._get_file_writer().add_summary(
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
 
     def add_image_with_boxes(self, tag, img_tensor, box_tensor, global_step=None,
@@ -403,7 +412,8 @@ class SummaryWriter(object):
             img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data
             box_tensor (torch.Tensor, numpy.array, or string/blobname): Box data (for detected objects)
             global_step (int): Global step value to record
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformat`` agrument.
             e.g. CHW or HWC
@@ -415,7 +425,7 @@ class SummaryWriter(object):
             img_tensor = workspace.FetchBlob(img_tensor)
         if self._check_caffe2_blob(box_tensor):
             box_tensor = workspace.FetchBlob(box_tensor)
-        self.get_file_writer().add_summary(image_boxes(
+        self._get_file_writer().add_summary(image_boxes(
             tag, img_tensor, box_tensor, dataformats=dataformats, **kwargs), global_step, walltime)
 
     def add_figure(self, tag, figure, global_step=None, close=True, walltime=None):
@@ -428,7 +438,8 @@ class SummaryWriter(object):
             figure (matplotlib.pyplot.figure) or list of figures: figure or a list of figures
             global_step (int): Global step value to record
             close (bool): Flag to automatically close the figure
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
         """
         if isinstance(figure, list):
             self.add_image(tag, figure_to_image(figure, close), global_step, walltime, dataformats='NCHW')
@@ -445,11 +456,12 @@ class SummaryWriter(object):
             vid_tensor (torch.Tensor): Video data
             global_step (int): Global step value to record
             fps (float or int): Frames per second
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
         Shape:
             vid_tensor: :math:`(N, T, C, H, W)`.
         """
-        self.get_file_writer().add_summary(
+        self._get_file_writer().add_summary(
             video(tag, vid_tensor, fps), global_step, walltime)
 
     def add_audio(self, tag, snd_tensor, global_step=None, sample_rate=44100, walltime=None):
@@ -460,13 +472,14 @@ class SummaryWriter(object):
             snd_tensor (torch.Tensor): Sound data
             global_step (int): Global step value to record
             sample_rate (int): sample rate in Hz
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
         Shape:
             snd_tensor: :math:`(1, L)`. The values should lie between [-1, 1].
         """
         if self._check_caffe2_blob(snd_tensor):
             snd_tensor = workspace.FetchBlob(snd_tensor)
-        self.get_file_writer().add_summary(
+        self._get_file_writer().add_summary(
             audio(tag, snd_tensor, sample_rate=sample_rate), global_step, walltime)
 
     def add_text(self, tag, text_string, global_step=None, walltime=None):
@@ -476,17 +489,18 @@ class SummaryWriter(object):
             tag (string): Data identifier
             text_string (string): String to save
             global_step (int): Global step value to record
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
         Examples::
 
             writer.add_text('lstm', 'This is an lstm', 0)
             writer.add_text('rnn', 'This is an rnn', 10)
         """
-        self.get_file_writer().add_summary(
+        self._get_file_writer().add_summary(
             text(tag, text_string), global_step, walltime)
 
     def add_onnx_graph(self, prototxt):
-        self.get_file_writer().add_onnx_graph(load_onnx_graph(prototxt))
+        self._get_file_writer().add_onnx_graph(load_onnx_graph(prototxt))
 
     def add_graph(self, model, input_to_model=None, verbose=False, **kwargs):
         # prohibit second call?
@@ -517,7 +531,7 @@ class SummaryWriter(object):
                 if not hasattr(torch.autograd.Variable, 'grad_fn'):
                     print('add_graph() only supports PyTorch v0.2.')
                     return
-            self.get_file_writer().add_graph(graph(model, input_to_model, verbose, **kwargs))
+            self._get_file_writer().add_graph(graph(model, input_to_model, verbose, **kwargs))
         else:
             # Caffe2 models do not have the 'forward' method
             from caffe2.proto import caffe2_pb2
@@ -538,7 +552,7 @@ class SummaryWriter(object):
                     model, **kwargs)
             event = event_pb2.Event(
                 graph_def=current_graph.SerializeToString())
-            self.get_file_writer().add_event(event)
+            self._get_file_writer().add_event(event)
 
     @staticmethod
     def _encode(rawstr):
@@ -590,7 +604,7 @@ class SummaryWriter(object):
         # Maybe we should encode the tag so slashes don't trip us up?
         # I don't think this will mess us up, but better safe than sorry.
         subdir = "%s/%s" % (str(global_step).zfill(5), self._encode(tag))
-        save_path = os.path.join(self.get_file_writer().get_logdir(), subdir)
+        save_path = os.path.join(self._get_file_writer().get_logdir(), subdir)
         try:
             os.makedirs(save_path)
         except OSError:
@@ -607,7 +621,7 @@ class SummaryWriter(object):
         make_mat(mat, save_path)
         # new funcion to append to the config file a new embedding
         append_pbtxt(metadata, label_img,
-                     self.get_file_writer().get_logdir(), subdir, global_step, tag)
+                     self._get_file_writer().get_logdir(), subdir, global_step, tag)
 
     def add_pr_curve(self, tag, labels, predictions, global_step=None,
                      num_thresholds=127, weights=None, walltime=None):
@@ -620,11 +634,12 @@ class SummaryWriter(object):
             The probability that an element be classified as true. Value should in [0, 1]
             global_step (int): Global step value to record
             num_thresholds (int): Number of thresholds used to draw the curve.
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
 
         """
         labels, predictions = make_np(labels), make_np(predictions)
-        self.get_file_writer().add_summary(
+        self._get_file_writer().add_summary(
             pr_curve(tag, labels, predictions, num_thresholds, weights),
             global_step, walltime)
 
@@ -650,10 +665,11 @@ class SummaryWriter(object):
             recall (torch.Tensor, numpy.array, or string/blobname): recall
             global_step (int): Global step value to record
             num_thresholds (int): Number of thresholds used to draw the curve.
-            walltime (float): Optional override default walltime (time.time()) of event
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
             see: https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/pr_curve/README.md
         """
-        self.get_file_writer().add_summary(
+        self._get_file_writer().add_summary(
             pr_curve_raw(tag,
                          true_positive_counts,
                          false_positive_counts,
@@ -678,7 +694,7 @@ class SummaryWriter(object):
             writer.add_custom_scalars_multilinechart(['twse/0050', 'twse/2330'])
         """
         layout = {category: {title: ['Multiline', tags]}}
-        self.get_file_writer().add_summary(custom_scalars(layout))
+        self._get_file_writer().add_summary(custom_scalars(layout))
 
     def add_custom_scalars_marginchart(self, tags, category='default', title='untitled'):
         """Shorthand for creating marginchart. Similar to ``add_custom_scalars()``, but the only necessary argument
@@ -693,7 +709,7 @@ class SummaryWriter(object):
         """
         assert len(tags) == 3
         layout = {category: {title: ['Margin', tags]}}
-        self.get_file_writer().add_summary(custom_scalars(layout))
+        self._get_file_writer().add_summary(custom_scalars(layout))
 
     def add_custom_scalars(self, layout):
         """Create special chart by collecting charts tags in 'scalars'. Note that this function can only be called once
@@ -714,7 +730,7 @@ class SummaryWriter(object):
 
             writer.add_custom_scalars(layout)
         """
-        self.get_file_writer().add_summary(custom_scalars(layout))
+        self._get_file_writer().add_summary(custom_scalars(layout))
 
     def close(self):
         if self.all_writers is None:
