@@ -461,13 +461,13 @@ class TestCase(expecttest.TestCase):
                             # check that NaNs are in the same locations
                             nan_mask = torch.isnan(a)
                             self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
-                            diff[nan_mask] = 0
+                            diff[nan_mask.byte()] = 0
                             # inf check if allow_inf=True
                             if allow_inf:
                                 inf_mask = torch.isinf(a)
                                 inf_sign = inf_mask.sign()
                                 self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
-                                diff[inf_mask] = 0
+                                diff[inf_mask.byte()] = 0
                         # TODO: implement abs on CharTensor (int8)
                         if diff.is_signed() and diff.dtype != torch.int8:
                             diff = diff.abs()
@@ -533,7 +533,7 @@ class TestCase(expecttest.TestCase):
                 diff = x - y
                 if diff.is_signed():
                     diff = diff.abs()
-                diff[nan_mask] = 0
+                diff[nan_mask.byte()] = 0
                 max_err = diff.max()
                 self.assertGreaterEqual(max_err, prec, message)
         elif type(x) == str and type(y) == str:

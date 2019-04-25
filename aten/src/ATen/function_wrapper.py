@@ -233,6 +233,7 @@ TYPE_FORMAL_GENERIC = {
     'THTensor*': 'Tensor &',
     'THSTensor*': 'SparseTensorRef',
     'THByteTensor*': 'Tensor &',
+    'THBoolTensor*': 'Tensor &',
     'THIndexTensor*': 'Tensor &',
     'THBoolTensor*': 'Tensor &',
     'THIntegerTensor*': 'Tensor &',

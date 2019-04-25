@@ -104,7 +104,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OObb|Ob", (char**)accepted_kwargs,
         &tensors, &grad_tensors, &keep_graph, &create_graph, &inputs, &allow_unreachable))
     return nullptr;
-
   THPUtils_assert(PyTuple_Check(tensors), "tensors argument is expected to "
       "be a tuple, but got %s", THPUtils_typename(tensors));
   THPUtils_assert(PyTuple_Check(grad_tensors), "grad_tensors argument is "
@@ -128,7 +127,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(gradient_edge.function,
         "element %d of tensors does not require grad and does not have a grad_fn", i);
     roots.push_back(std::move(gradient_edge));
-
     PyObject *grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
       grads.push_back(((THPVariable*)grad)->cdata);
@@ -139,7 +137,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
           "element %d of gradients tuple is None, but the corresponding Tensor requires grad");
     }
   }
-
   std::vector<Edge> output_edges;
   if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
@@ -163,10 +160,10 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       }
     }
   }
-
   variable_list outputs;
   {
     AutoNoGIL no_gil;
+
     outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges);
   }
 

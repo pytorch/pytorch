@@ -22,5 +22,4 @@ THC_API void THCTensor_(fmod)(THCState *state, THCTensor *self, THCTensor *src, 
 THC_API void THCTensor_(remainder)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value);
 
 #endif
-
 #endif

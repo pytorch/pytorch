@@ -12,7 +12,7 @@ Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, TensorOptions opt) {
   // or i <= j <= k <= ... (depending on diagonal)
   Tensor range = at::arange(n, opt.dtype(kLong));
   std::vector<Tensor> index_grids = at::meshgrid(std::vector<Tensor>(dims, range));
-  Tensor mask = at::ones(index_grids[0].sizes(), opt.dtype(kByte));
+  Tensor mask = at::ones(index_grids[0].sizes(), opt.dtype(kBool));
   if(diagonal) {
     for(int64_t i = 0; i < dims - 1; i++) {
       mask *= index_grids[i] <= index_grids[i+1];
@@ -51,7 +51,7 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   std::vector<Tensor> grids = at::meshgrid(std::vector<Tensor>(r, self));
   Tensor mask = _triu_mask(num_elements, r, with_replacement, self.options());
   for(Tensor &t : grids) {
-    t = t.masked_select(mask);
+    t = t.masked_select(mask.to(at::kByte));
   }
   return at::stack(grids, 1);
 }

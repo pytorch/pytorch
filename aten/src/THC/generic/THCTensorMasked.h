@@ -7,7 +7,6 @@ THC_API void THCTensor_(maskedFill)(THCState *state,
                                     THCudaByteTensor *mask,
                                     scalar_t value);
 
-
 THC_API void THCTensor_(maskedFillBool)(THCState *state,
                                         THCTensor *tensor,
                                         THCudaBoolTensor *mask,

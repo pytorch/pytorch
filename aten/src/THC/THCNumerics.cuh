@@ -70,8 +70,17 @@ struct THCNumerics<bool> {
   static inline __host__ __device__ bool le(uint8_t a, uint8_t b) { return a <= b; }
   static inline __host__ __device__ bool gt(uint8_t a, uint8_t b) { return a > b; }
   static inline __host__ __device__ bool ge(uint8_t a, uint8_t b) { return a >= b; }
-  static inline __host__ __device__ bool eq(uint8_t a, uint8_t b) { return a == b; }
+  static inline __host__ __device__ bool eq(bool a, bool b) { return a == b; }
   static inline __host__ __device__ bool ne(uint8_t a, uint8_t b) { return a != b; }
+  static inline __host__ __device__ bool add(uint8_t a, uint8_t b) { return a + b; }
+  static inline __host__ __device__ bool mul(uint8_t a, uint8_t b) { return a * b; }
+  static inline __host__ __device__ bool sub(uint8_t a, uint8_t b) { return a - b; }
+  static inline __host__ __device__ bool div(uint8_t a, uint8_t b) { return a / b; }
+  static inline __host__ __device__ bool pow(uint8_t a, uint8_t b) { return powi<bool>(a, b); }
+  static inline __host__ __device__ bool neg(int8_t a) { return -a; }
+  static inline __host__ __device__ bool abs(uint8_t a) { return a; }
+  static inline __host__ __device__ bool isnan(bool a) { return false; }
+  static inline __host__ __device__ bool isinf(bool a) { return false; }
 };
 
 template <>

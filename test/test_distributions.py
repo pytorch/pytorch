@@ -2243,8 +2243,8 @@ class TestDistributions(TestCase):
             self.assertEqual((beta_samples == 0).sum(), 0)
             self.assertEqual((beta_samples == 1).sum(), 0)
             # assert support is concentrated around 0 and 1
-            frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
-            frac_ones = float((beta_samples > 0.9).sum()) / num_samples
+            frac_zeros = float(((beta_samples < 0.1).byte()).sum()) / num_samples
+            frac_ones = float(((beta_samples > 0.9).byte()).sum()) / num_samples
             self.assertEqual(frac_zeros, 0.5, 0.05)
             self.assertEqual(frac_ones, 0.5, 0.05)
 
@@ -2254,11 +2254,11 @@ class TestDistributions(TestCase):
         num_samples = 50000
         conc = torch.tensor(1e-2, dtype=torch.float64).cuda()
         beta_samples = Beta(conc, conc).sample([num_samples])
-        self.assertEqual((beta_samples == 0).sum(), 0)
-        self.assertEqual((beta_samples == 1).sum(), 0)
+        self.assertEqual(((beta_samples == 0).byte()).sum(), 0)
+        self.assertEqual(((beta_samples == 1).byte()).sum(), 0)
         # assert support is concentrated around 0 and 1
-        frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
-        frac_ones = float((beta_samples > 0.9).sum()) / num_samples
+        frac_zeros = float(((beta_samples < 0.1).byte()).sum()) / num_samples
+        frac_ones = float(((beta_samples > 0.9).byte()).sum()) / num_samples
         # TODO: increase precision once imbalance on GPU is fixed.
         self.assertEqual(frac_zeros, 0.5, 0.12)
         self.assertEqual(frac_ones, 0.5, 0.12)
@@ -3299,9 +3299,9 @@ class TestKL(TestCase):
                 denominator += x.size(0)
                 expected = numerator / denominator
                 error = torch.abs(expected - actual) / (1 + expected)
-                if error[error == error].max() < self.precision:
+                if error[(error == error).byte()].max() < self.precision:
                     break
-            self.assertLess(error[error == error].max(), self.precision, '\n'.join([
+            self.assertLess(error[(error == error).byte()].max(), self.precision, '\n'.join([
                 'Incorrect KL(MultivariateNormal, MultivariateNormal) instance {}/{}'.format(i + 1, n),
                 'Expected ({} Monte Carlo sample): {}'.format(denominator, expected),
                 'Actual (analytic): {}'.format(actual),
@@ -3397,7 +3397,7 @@ class TestKL(TestCase):
 
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:
-            self.assertTrue((kl_divergence(p, q) == inf).all(),
+            self.assertTrue(((kl_divergence(p, q) == inf)).all(),
                             'Incorrect KL({}, {})'.format(type(p).__name__, type(q).__name__))
 
     def test_kl_edgecases(self):
@@ -3431,7 +3431,7 @@ class TestKL(TestCase):
                     continue
                 x = dist.sample(sample_shape=(60000,))
                 expected = -dist.log_prob(x).mean(0)
-                ignore = (expected == inf) | (expected == -inf)
+                ignore = (expected == inf).byte() | (expected == -inf).byte()
                 expected[ignore] = actual[ignore]
                 self.assertEqual(actual, expected, prec=0.2, message='\n'.join([
                     '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),

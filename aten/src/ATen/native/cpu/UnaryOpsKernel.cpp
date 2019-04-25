@@ -92,7 +92,7 @@ static void reciprocal_kernel(TensorIterator& iter) {
 }
 
 static void neg_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "neg_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "neg_cpu", [&]() {
     unary_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return -a; },

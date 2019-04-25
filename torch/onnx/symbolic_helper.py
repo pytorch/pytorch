@@ -248,6 +248,7 @@ cast_pytorch_to_onnx = {
     'Long': torch.onnx.TensorProtoDataType.INT64,
     'Short': torch.onnx.TensorProtoDataType.INT16,
     'Bool': torch.onnx.TensorProtoDataType.BOOL,
+    'Undefined': torch.onnx.TensorProtoDataType.UNDEFINED,
 }
 
 scalar_name_to_pytorch = {
@@ -259,6 +260,7 @@ scalar_name_to_pytorch = {
     'int': 'Int',
     'int64_t': 'Long',
     'int16_t': 'Short',
+    'bool': 'Bool',
 }
 
 
@@ -274,6 +276,7 @@ scalar_type_to_pytorch_type = [
     torch.half,     # 5
     torch.float,    # 6
     torch.double,   # 7
+    torch.bool,     # 11
 ]
 
 
@@ -290,4 +293,8 @@ scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Half"],
     cast_pytorch_to_onnx["Float"],
     cast_pytorch_to_onnx["Double"],
+    cast_pytorch_to_onnx["Undefined"],
+    cast_pytorch_to_onnx["Undefined"],
+    cast_pytorch_to_onnx["Undefined"],
+    cast_pytorch_to_onnx["Bool"],
 ]

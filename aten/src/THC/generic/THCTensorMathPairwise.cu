@@ -286,5 +286,4 @@ void THCTensor_(triu)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
 }
 
 #endif
-
 #endif

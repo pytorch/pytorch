@@ -367,5 +367,4 @@ void THCTensor_(min)(THCState *state,
 }
 
 #endif
-
 #endif
