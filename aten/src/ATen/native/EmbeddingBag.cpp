@@ -85,6 +85,7 @@ void index_select_add<float>(const Tensor &select_indices,
   if (isFastPathIndexSelect(src, output)) {
     auto accessor = offsets.accessor<int64_t, 1>();
     std::vector<int> lengths;
+    lengths.reserve(offsets.numel());
 
     int64_t lower = accessor[0];
     for (size_t i = 1; i < offsets.numel(); ++i) {
