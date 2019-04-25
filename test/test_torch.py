@@ -2680,9 +2680,13 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.item(), 1)
         self.assertEqual(qr[0].item(), 1)
         # assignment
-        # This calls _th_fill_
-        # qr[0] = 8 # float asignment
-        # self.assertEqual(qr.item(), 8)
+        self.assertTrue(qr[0].is_quantized)
+        qr[0] = 11.3  # float asignment
+        self.assertEqual(qr.item(), 11)
+        x = torch.ones(1, dtype=torch.float) * 15.3
+        # Copying from a float Tensor
+        qr[:] = x
+        self.assertEqual(qr.item(), 15)
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
@@ -3063,6 +3067,7 @@ class _TestTorchMixin(object):
             self.assertEqual(a > False, torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
             self.assertEqual(a == torch.tensor(True, dtype=torch.bool), torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
             self.assertEqual(a == torch.tensor(0, dtype=torch.bool), torch.tensor([0, 1, 0, 1, 0, 1], dtype=torch.uint8))
+            self.assertFalse(a.equal(b))
 
     def test_bool_tensor_value_change(self):
         for device in torch.testing.get_all_device_types():

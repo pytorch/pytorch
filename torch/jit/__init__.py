@@ -1528,6 +1528,11 @@ def _get_builtin_table():
     _builtin_table[id(torch.nn.functional.assert_int_or_pair)] = "aten::_assert_int_or_pair"
     _builtin_table[id(torch.nn.utils.rnn.get_packed_sequence)] = "aten::_pack_sequence"
 
+    _builtin_table[id(torch.nn.init._no_grad_fill_)] = "aten::_no_grad_fill_"
+    _builtin_table[id(torch.nn.init._no_grad_normal_)] = "aten::_no_grad_normal_"
+    _builtin_table[id(torch.nn.init._no_grad_uniform_)] = "aten::_no_grad_uniform_"
+    _builtin_table[id(torch.nn.init._no_grad_zero_)] = "aten::_no_grad_zero_"
+
     return _builtin_table
 
 
