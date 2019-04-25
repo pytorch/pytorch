@@ -210,11 +210,14 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-Method& Module::lower_first_class_method(Function* fn) {
+std::pair<std::shared_ptr<Function>, std::vector<Slot>> Module::
+    lower_first_class_method(Function* fn) {
   fn->ensure_defined();
   auto lowered = lower_graph(module_object(), *fn->graph());
-  Function& new_func =
-      lowered_methods_.create_function(fn->name(), lowered.first);
+  CompilationUnit cu;
+  cu.set_optimized(fn->is_optimized());
+  std::shared_ptr<Function> new_func =
+      cu.create_function(fn->name(), lowered.first);
 
   // generate the new schema
   // slice away the self argument
@@ -227,125 +230,107 @@ Method& Module::lower_first_class_method(Function* fn) {
     ss << "slot" << id++;
     args.emplace_back(ss.str(), slot.type());
   }
-  new_func.setSchema(fn->getSchema().cloneWithArguments(std::move(args)));
-  return _create_lowered_method(&new_func, std::move(lowered.second));
+  new_func->setSchema(fn->getSchema().cloneWithArguments(std::move(args)));
+  return std::make_pair(new_func, std::move(lowered.second));
 }
 
-static void createFirstClassValues(
-    Module* module,
-    Value* self,
-    std::unordered_map<Slot, Value*>& result) {
-  auto& g = *self->owningGraph();
-
-  std::vector<Node*> created;
-  struct ToScan {
-    Module* mod;
-    Value* v; // value representing module in the graph
-  };
-  std::vector<ToScan> to_scan = {{module, self}};
-
-  while (!to_scan.empty()) {
-    auto s = to_scan.back();
-    to_scan.pop_back();
-    size_t offset = 0;
-    for (const std::string& name :
-         s.mod->module_object()->type()->attributeNames()) {
-      Value* v = g.insertGetAttr(s.v, name);
-      result[Slot(s.mod->module_object(), offset++)] = v;
-      if (std::shared_ptr<Module> sub = s.mod->find_module(name)) {
-        to_scan.emplace_back(ToScan{sub.get(), v});
-      }
-    }
-  }
+static FunctionSchema sliceFirst(const FunctionSchema& schema) {
+  // we are required to slice out the self argument
+  // because it is not expected to appear in Module schema
+  // until the executor is made to be first-class
+  std::vector<Argument> sliced(
+      schema.arguments().begin() + 1, schema.arguments().end());
+  return schema.cloneWithArguments(std::move(sliced));
 }
 
-void Module::lift_lowered_method(Method& m) {
-  auto graph = m.graph()->copy();
-  Value* self = graph->insertInput(0, "self")->setType(module_object()->type());
-  std::unordered_map<Slot, Value*> slot_to_value;
-  if (!m.initial_ivalues().empty()) {
-    WithInsertPoint guard(*graph->nodes().begin());
-    createFirstClassValues(this, self, slot_to_value);
-  }
-
-  size_t orig_graph_inputs_size = graph->inputs().size();
-  for (size_t i = 0; i < m.initial_ivalues().size(); ++i) {
-    size_t input_offset = orig_graph_inputs_size - i - 1;
-    size_t ivalue_offset = m.initial_ivalues().size() - i - 1;
-    graph->inputs()
-        .at(input_offset)
-        ->replaceAllUsesWith(
-            slot_to_value.at(m.initial_ivalues().at(ivalue_offset)));
-    graph->eraseInput(input_offset);
-  }
-
-  if (!m.initial_ivalues().empty()) {
-    // we added _all_ the submodules as first-class values but maybe did not use
-    // them. So remove any dead attribute lookups
-    EliminateDeadCode(graph);
-  }
-
-  Function& new_fn = class_cu().create_function(m.name(), std::move(graph));
-  // created lifted schema
-  // self argument is named '$self' to prevent accidental name collisions
-  // with another input that the user named 'self'
-  std::vector<Argument> new_args = {Argument("$self", module_object()->type())};
-  const auto& lowered_args = m.function().getSchema().arguments();
-  new_args.insert(
-      new_args.end(),
-      lowered_args.begin(),
-      lowered_args.begin() + m.num_inputs());
-  new_fn.setSchema(m.function().getSchema().cloneWithArguments(std::move(new_args)));
-}
-
-Method& Module::_create_lowered_method(
-    Function* func,
-    std::vector<Slot> member_inputs) {
-  std::unique_ptr<Method> m(new Method(this, func, std::move(member_inputs)));
-  return *insert(func->name(), methods_, EntityType::METHOD, std::move(m));
-}
-
-void Module::lift_lowered_methods(size_t start) {
-  for (size_t i = start; i < lowered_methods_.get_functions().size(); ++i) {
-    Method& m = _create_lowered_method(
-        lowered_methods_.get_functions().at(i).get(), {});
-    lift_lowered_method(m);
-  }
-}
-
-void Module::_define_lowered(
-    const std::vector<Def>& definitions,
-    const std::vector<ResolverPtr>& resolvers) {
-  size_t start = lowered_methods_.get_functions().size();
-  lowered_methods_.define(definitions, resolvers, nullptr);
-  lift_lowered_methods(start);
-  // call lift_lowered_method for each definition
-}
-
-void Module::_define_lowered(
-    const std::string& src,
-    const ResolverPtr& resolver) {
-  size_t start = lowered_methods_.get_functions().size();
-  lowered_methods_.define(src, resolver, nullptr);
-  lift_lowered_methods(start);
-}
-
-Method& Module::_define_lowered(
-    std::string name,
-    std::shared_ptr<Graph> graph,
-    std::vector<Slot> slots) {
-  Method& m = _create_lowered_method(
-      &lowered_methods_.create_function(std::move(name), std::move(graph)),
-      std::move(slots));
-  lift_lowered_method(m);
-  return m;
+Method::Method(Module* owner, Function* first_class_function)
+    : owner_(owner), schema_(sliceFirst(first_class_function->getSchema())) {
+  std::tie(function_, initial_ivalues_) =
+      owner->lower_first_class_method(first_class_function);
 }
 
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
-  class_cu().define(
+  class_compilation_unit().define(
       src,
       resolver ? resolver : script::nativeResolver(),
       simpleSelf(module_object()->type()));
+}
+
+void Module::copy_into(
+    const ModuleLookup& module_lookup,
+    // translate current module singleton type to new module
+    // singleton type.
+    std::unordered_map<TypePtr, TypePtr>& type_remap,
+    std::vector<std::string> names) const {
+  auto curr = module_lookup(names);
+  type_remap[module_object()->type()] = curr->module_object()->type();
+  for (auto& param : get_parameters()) {
+    curr->register_parameter(
+        param.name(),
+        param.value().toTensor(),
+        /*is_buffer=*/false);
+  }
+  for (auto& attr : get_attributes()) {
+    curr->register_attribute(attr.name(), attr.type(), attr.value());
+  }
+
+  for (auto& mod : get_modules()) {
+    names.push_back(mod->name());
+    // Submodules must be translated first, otherwise parameter_remap entries
+    // will not be filled in for methods of this module.
+    mod->copy_into(module_lookup, type_remap, names);
+    names.pop_back();
+  }
+
+  for (auto& fn : class_compilation_unit().get_functions()) {
+    curr->clone_method(*this, fn->name(), type_remap);
+  }
+}
+
+
+void Module::clone_method(
+    const Module& orig,
+    const std::string& name,
+    const std::unordered_map<TypePtr, TypePtr>& type_remap) {
+  // type remapping - when we copy method implementations from one module
+  // singleton to another, we need to update the types of the self arguments
+  // to match the new module.
+  // XXX - this only handles modules that occur as variables, not modules
+  // that appear in aggregate types. Currently this works fine because
+  // we restrict how modules can be used during the lowering step. Eventually,
+  // we will need to decide what it means for us to 'copy' a module.
+  // For instance, we can copy just the state (parameters, attributes),
+  // but share the code. Or we can copy the code. If we choose to copy the
+  // code, what should we do about aggregate types that contain a module?
+  auto type_remap_fn = [&](TypePtr in) {
+    auto it = type_remap.find(in);
+    if (it == type_remap.end())
+      return in;
+    return it->second;
+  };
+  const Function& fn = orig.class_compilation_unit().get_function(name);
+  auto graph = fn.graph()->copy();
+  graph->remapTypes(type_remap_fn);
+  auto schema = fn.getSchema().cloneWithRemappedTypes(type_remap_fn);
+  auto copied = class_compilation_unit().create_function(fn.name(), graph);
+  copied->setSchema(std::move(schema));
+}
+
+void Module::clone_method(const Module& orig, const std::string& name) {
+  std::unordered_map<TypePtr, TypePtr> type_remap;
+  std::vector<std::pair<const Module*, const Module*>> to_scan = {
+      {&orig, this}};
+  while (!to_scan.empty()) {
+    auto entry = to_scan.back();
+    to_scan.pop_back();
+    type_remap[entry.first->module_object()->type()] =
+        entry.second->module_object()->type();
+    for (const auto& sub : entry.first->get_modules()) {
+      to_scan.emplace_back(
+          sub.get(), entry.second->get_module(sub->name()).get());
+    }
+  }
+  return clone_method(orig, name, type_remap);
 }
 
 void Module::train(bool on) {
