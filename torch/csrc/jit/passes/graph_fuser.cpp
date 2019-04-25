@@ -292,9 +292,8 @@ struct GraphFuser {
         source,
         method_name);
 
-    AT_ASSERT(isFusableNorm(normalization_op));
     WithInsertPoint insert_guard{normalization_op};
-    return  inlineCallTo(*normalization_op->owningGraph(), *nm_graph, inputs).at(0);
+    return inlineCallTo(*normalization_op->owningGraph(), *nm_graph, inputs).at(0);
   }
 
   void decomposeNormalizationOps(Node* normalization_op) {
@@ -325,6 +324,8 @@ struct GraphFuser {
 
             return (input - mean) * invstd
       )SCRIPT";
+    AT_ASSERT(isFusableNorm(normalization_op));
+    WithInsertPoint insert_guard{normalization_op};
     Value* input = normalization_op->namedInput(attr::input);
     if (normalization_op->kind() == aten::batch_norm) {
       Value* input_dim = graph_->insert(aten::dim, {input});
