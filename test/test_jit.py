@@ -1385,7 +1385,7 @@ graph(%a, %b, %c):
 graph(%a, %b, %c):
   %q = aten::mul(%a, %b)
   %r = aten::mul(%q, %c)
-  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], m)
+  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], m._c)
 
         FileCheck().check_not("aten::mul").check("my::fused_mulmul") \
                    .check_next("aten::mul").run(str(m.graph))
@@ -1401,7 +1401,7 @@ graph(%a, %b, %c):
 graph(%a, %b, %c, %d):
   %q = aten::mul(%a, %b)
   %r = aten::add(%q, %c, %d)
-  return (%r)""", "my::muladd", ["a", "b", "c", "d"], ["r"], m)
+  return (%r)""", "my::muladd", ["a", "b", "c", "d"], ["r"], m._c)
         FileCheck().check_not("aten::add").check_not("aten::mul") \
                    .check("my::muladd").check_next("return")      \
                    .run(str(m.graph))
