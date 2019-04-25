@@ -201,7 +201,7 @@ void dirichlet_scalar_cuda_kernel(
 namespace at { namespace native {
 Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
   Tensor ret = at::empty(lambda.sizes(), lambda.options());
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "poisson_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ret.scalar_type(), "poisson_cuda", [&] {
     poisson_cuda_kernel<scalar_t>(ret, lambda, next_philox_seed(gen, 20));
   });
   return ret;
@@ -209,7 +209,7 @@ Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
 
 Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "gamma_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ret.scalar_type(), "gamma_cuda", [&] {
      gamma_cuda_kernel<scalar_t>(ret, alpha, next_philox_seed(gen, 10));
    });
   return ret;
@@ -217,7 +217,7 @@ Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
 
 Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen) {
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
-  AT_DISPATCH_FLOATING_TYPES_AND(ret.type(), "dirichlet", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ret.type(), "dirichlet", [&] {
     Tensor gamma = at::empty(alpha.sizes(), alpha.options());
     gamma_cuda_kernel<scalar_t>(gamma, alpha, next_philox_seed(gen, 10));
     dirichlet_scalar_cuda_kernel<scalar_t>(ret, gamma);
