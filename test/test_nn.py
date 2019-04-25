@@ -7073,11 +7073,14 @@ class TestNN(NNTestCase):
         torch.set_printoptions(precision=5)
         self.assertEqual(out_t, expected_out_t)
 
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
+
         for align_corners in [True, False]:
             kwargs = dict(mode='bicubic', align_corners=align_corners)
-
             # test float scale factor up & downsampling
-            for device in ['cpu', 'cuda']:
+            for device in device_list:
                 for scale_factor in [0.5, 1.5, 2]:
                     in_t = torch.ones(2, 2, 2, 2).to(device)
                     out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
