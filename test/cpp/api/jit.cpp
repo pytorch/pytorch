@@ -101,18 +101,6 @@ TEST(TorchScriptTest, TestDictArgMatching) {
 }
 
 
-TEST(TorchScriptTest, Conversion_MultiCUDA) {
-    auto module = torch::jit::load("bn_gpu.pt");
-    module->to(torch::kCPU);
-
-    std::vector<torch::jit::IValue> inputs;
-    inputs.emplace_back(torch::randn({6, 10}));
-
-    // doesn't fail on new cpu scriptModule forward with proper parameter/tensor attributes
-    auto output = module->forward(inputs).toTensor();
-}
-
-
 TEST(TorchScriptTest, TestTupleArgMatching) {
   auto module = torch::jit::compile(R"JIT(
       def tuple_op(a: Tuple[List[int]]):
