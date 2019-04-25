@@ -14,11 +14,19 @@ from torch.onnx.utils import OperatorExportTypes
 
 methods_OP = ['attributeNames', 'hasMultipleOutputs', 'hasUses', 'inputs',
               'kind', 'outputs', 'outputsSize', 'scopeName']
-methods_IO = ['node', 'offset', 'uniqueName']  # 'unique' <int> , 'type' <Tensor<class 'torch._C.Type'>>
+# Some additional methods to explure for methods_IO are
+#
+#   'unique' (type int)
+#   'type' (type <Tensor<class 'torch._C.Type'>>)
+#
+# But the below are sufficient for now.
+methods_IO = ['node', 'offset', 'uniqueName']
 
 
 class NodeBase(object):
     def __init__(self, uniqueName=None, inputs=None, scope=None, tensor_size=None, op_type='UnSpecified', attributes=''):
+        # TODO; Specify a __slots__ for this class or potentially
+        # used namedtuple instead
         self.uniqueName = uniqueName
         self.inputs = inputs
         self.tensor_size = tensor_size
@@ -297,6 +305,16 @@ def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_
     if verbose:
         print(graph)
     list_of_nodes, node_stats = parse(graph, args, omit_useless_nodes)
+    # We are hardcoding that this was run on CPU even though it might have actually
+    # run on GPU. Note this is what is shown in TensorBoard and has no bearing
+    # on actual execution.
+    # TODO: See if we can extract GPU vs CPU information from the PyTorch model
+    # and pass it correctly to TensorBoard.
+    #
+    # Definition of StepStats and DeviceStepStats can be found at
+    # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/graph/tf_graph_common/test/graph-test.ts
+    # and
+    # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/step_stats.proto
     stepstats = RunMetadata(step_stats=StepStats(dev_stats=[DeviceStepStats(device="/device:CPU:0",
                                                                             node_stats=node_stats)]))
     return GraphDef(node=list_of_nodes, versions=VersionDef(producer=22)), stepstats
