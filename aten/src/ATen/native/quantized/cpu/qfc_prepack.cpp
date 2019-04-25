@@ -41,7 +41,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     }
   }
 
-  at::QTensor operator()(at::QTensor weight) {
+  at::Tensor operator()(at::Tensor weight) {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
@@ -79,7 +79,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
         weight.q_zero_point());
   }
 #else // USE_FBGEMM
-  at::QTensor operator()(at::QTensor /* weight */
+  at::Tensor operator()(at::Tensor /* weight */
   ) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
@@ -91,7 +91,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    "quantized::fc_prepack(Tensor W) -> Tensor W_prepack",
+    "quantized::fbgemm_fc_packed(Tensor W) -> Tensor W_prepack",
     c10::kernel<QFCPackWeightInt8>(),
     c10::dispatchKey(QuantizedCPUTensorId()));
 } // namespace
