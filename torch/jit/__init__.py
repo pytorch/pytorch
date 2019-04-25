@@ -469,12 +469,14 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, executor_options, module, check_tolerance, force_outplace):
+def _check_trace(check_inputs, func, executor_options, traced_func, check_tolerance, force_outplace):
     # Note: tracing is independent of optimizations, which consume the trace
     executor_options['optimize'] = False
+    func_name = traced_func.name
     for inputs in check_inputs:
         if isinstance(inputs, torch.Tensor):
             inputs = (inputs,)
+
         check_mod = torch.jit.trace(
             func,
             _clone_inputs(inputs),
@@ -482,10 +484,14 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance, 
             _force_outplace=force_outplace,
             **executor_options)
 
+        check_mod_func = check_mod
+        if isinstance(check_mod, TracedModule):
+            check_mod_func = check_mod._c._get_method(traced_func.name)
+
         def graph_diagnostic_info():
-            mod_canonicalized = torch._C._jit_pass_canonicalize(module.graph)
+            mod_canonicalized = torch._C._jit_pass_canonicalize(traced_func.graph)
             torch._C._jit_pass_erase_shape_information(mod_canonicalized)
-            check_canonicalized = torch._C._jit_pass_canonicalize(check_mod.graph)
+            check_canonicalized = torch._C._jit_pass_canonicalize(check_mod_func.graph)
             torch._C._jit_pass_erase_shape_information(check_canonicalized)
 
             graph_diff_errors = None
@@ -558,7 +564,7 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance, 
             if has_warned[0]:
                 return
             has_warned[0] = True
-            nondeterm_ops = [op for op in module.graph.nodes() if op.isNondeterministic()]
+            nondeterm_ops = [op for op in traced_func.graph.nodes() if op.isNondeterministic()]
             if len(nondeterm_ops) > 0:
                 nondeterministic_ops_warning = "Trace had nondeterministic nodes. "
                 nondeterministic_ops_warning += "Did you forget call .eval() on your model? Nodes:\n"
@@ -582,10 +588,10 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance, 
 
             return all_ok
 
-        traced_outs = run_mod_and_filter_tensor_outputs(module, inputs, 'trace')
+        traced_outs = run_mod_and_filter_tensor_outputs(traced_func, inputs, 'trace')
         fn_outs = run_mod_and_filter_tensor_outputs(func, inputs, 'Python function')
         if compare_outputs(traced_outs, fn_outs, 'Python function'):
-            check_outs = run_mod_and_filter_tensor_outputs(check_mod, inputs, 'repeated trace')
+            check_outs = run_mod_and_filter_tensor_outputs(check_mod_func, inputs, 'repeated trace')
             compare_outputs(traced_outs, check_outs, 'repeated trace')
 
         diag_info = graph_diagnostic_info()
@@ -599,15 +605,24 @@ class TracerWarning(Warning):
         # We ignore warnings from all submodules excluding the JIT, because we need them e.g. for _check_trace
         warnings.filterwarnings('ignore', category=TracerWarning, module='torch.(?!jit)')
 
-
 # We ignore the tracer warnings coming form inside the library, because all our shape
 # checks in nn will trigger them.
 TracerWarning.ignore_lib_warnings()
 torch._C._tracer_warn_use_python()
 
 
-def trace(func,
-          example_inputs,
+class trace_dict(dict):
+    def __init__(self, methods_inputs):
+        super(trace_dict, self).__init__()
+        if not isinstance(methods_inputs, dict):
+            raise RuntimeError("trace_dict only accepts one dict parameter")
+
+        for method_name, example_inputs in methods_inputs.items():
+            self[method_name] = example_inputs
+
+
+def trace(mod,
+          inputs,
           optimize=True,
           check_trace=True,
           check_inputs=None,
@@ -629,17 +644,21 @@ def trace(func,
         incorrect trace to be produced.
 
     Arguments:
-        func (callable or torch.nn.Module):  a Python function or ``torch.nn.Module``
-                                             that will be run with ``example_inputs``.
+        mod (callable or torch.nn.Module):   a python function or ``torch.nn.Module``
+                                             that will be run with example_inputs.
                                              arguments and returns to ``func`` must be tensors
                                              or (possibly nested) tuples that
                                              contain tensors.
-        example_inputs (tuple):  a tuple of example inputs that will be passed to the function
-                                 while tracing. The resulting trace can be run with
-                                 inputs of different types and shapes assuming the traced operations
-                                 support those types and shapes. ``example_inputs`` may also be a single
-                                 Tensor in which case it is automatically wrapped in a tuple
+        example_inputs (tuple or dict):  a tuple of example inputs that will be passed to the function
+                                         while tracing. The resulting trace can be run with
+                                         inputs of different types and shapes assuming the traced operations
+                                         support those types and shapes. example_inputs may also be a single
+                                         Tensor in which case it is automatically wrapped in a tuple
 
+                                         a dict containing sample inputs indexed by method names in ``mod``
+                                         The inputs will be passed to methods whose names correspond to inputs'
+                                         keys while tracing.
+                                         ``{ 'forward' : example_forward_input, 'method2': example_method2_input}``
     Keyword arguments:
         optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
         check_trace (bool, optional): check if the same inputs run through
@@ -672,38 +691,58 @@ def trace(func,
 
     """
     if not _enabled:
-        return func
-    executor_options = {'optimize': bool(optimize)}
-    # Special case for common case of passing a single Tensor
-    if isinstance(example_inputs, (torch.Tensor, dict)):
-        example_inputs = (example_inputs,)
-    # done primarily so that weird iterables fail here and not pybind11 code
-    elif not isinstance(example_inputs, tuple):
-        example_inputs = tuple(example_inputs)
-    var_lookup_fn = _create_interpreter_name_lookup_fn(0)
+        return mod
+    methods_inputs = {}
+    if isinstance(inputs, trace_dict):
+        for method_name, example_inputs in inputs.items():
+            methods_inputs[getattr(mod, method_name)] = (method_name, example_inputs)
+    else:
+        methods_inputs[mod] = (getattr(mod, '__name__', 'forward'), inputs)
+        if hasattr(mod, '__self__') and isinstance(mod.__self__, torch.nn.Module):
+                # override the default name for nn.Module's methods
+                # `forward` will stay `forward` and any other
+                # method will keep its original name
+                # make sure we capture module's parameters in TopLevelTracedModule
+                mod = mod.__self__
 
-    if isinstance(func, torch.nn.Module):
+    executor_options = {'optimize': bool(optimize)}
+
+    module = None
+    if isinstance(mod, torch.nn.Module):
         if _module_class is None:
             _module_class = TopLevelTracedModule
-        traced = _module_class(func, **executor_options)
-        traced._c._create_method_from_trace('forward', func, example_inputs,
-                                            var_lookup_fn, _force_outplace)
-    else:
-        name = getattr(func, '__name__', 'forward')
-        if name == '<lambda>':
-            name = '_lambda'  # make name a valid identifier
-        traced = torch._C._create_function_from_trace(name, func, example_inputs,
-                                                      var_lookup_fn,
-                                                      _force_outplace)
+        module = _module_class(mod, **executor_options)
 
-    # Check the trace against new traces created from user-specified inputs
-    if check_trace:
-        if check_inputs is not None:
-            _check_trace(check_inputs, func, executor_options, traced, check_tolerance, _force_outplace)
+    var_lookup_fn = _create_interpreter_name_lookup_fn(0)
+
+    for func, name_inputs in methods_inputs.items():
+        method_name = name_inputs[0]
+        example_inputs = name_inputs[1]
+        # Special case for common case of passing a single Tensor
+        if isinstance(example_inputs, (torch.Tensor, dict)):
+            example_inputs = (example_inputs,)
+        # done primarily so that weird iterables fail here and not pybind11 code
+        elif not isinstance(example_inputs, tuple):
+            example_inputs = tuple(example_inputs)
+
+        if module:
+            module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+            check_trace_method = module._c._get_method(method_name)
         else:
-            _check_trace([example_inputs], func, executor_options, traced, check_tolerance, _force_outplace)
+            if method_name == '<lambda>':
+                method_name = '_lambda'  # make name a valid identifier
+            traced = torch._C._create_function_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+            module = traced
+            check_trace_method = traced
 
-    return traced
+        # Check the trace against new traces created from user-specified inputs
+        if check_trace:
+            if check_inputs is not None:
+                _check_trace(check_inputs, func, executor_options, check_trace_method, check_tolerance, _force_outplace)
+            else:
+                _check_trace([example_inputs], func, executor_options, check_trace_method, check_tolerance, _force_outplace)
+
+    return module
 
 
 class CompilationUnit(object):
