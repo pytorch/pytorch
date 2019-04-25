@@ -3,9 +3,10 @@ import ast
 import inspect
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
-    BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict
+    BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
+    is_optional
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType, BoolType
+    ListType, StringType, DictType, BoolType, OptionalType
 from textwrap import dedent
 
 
@@ -30,6 +31,7 @@ _eval_env = {
     'typing': Module('typing', {'Tuple': Tuple}),
     'Tuple': Tuple,
     'List': List,
+    'Optional': Optional,
     'Dict': Dict,
 }
 
@@ -52,6 +54,7 @@ def get_signature(fn):
     if type_line is None:
         return None
 
+    print(type_line)
     return parse_type_line(type_line)
 
 
@@ -181,7 +184,9 @@ def ann_to_type(ann):
         return StringType.get()
     elif ann is bool:
         return BoolType.get()
-    raise ValueError("Unknown type annotation: '{}'".format(ann.__name__))
+    elif is_optional(ann):
+        return OptionalType(ann_to_type(ann._subs_tree()[1]))
+    raise ValueError("Unknown type annotation: '{}'".format(ann))
 
 
 __all__ = [

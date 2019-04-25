@@ -825,10 +825,10 @@ struct PythonPrintPass {
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_) {
           throw script::ErrorReport(node->getSourceLocation())
-              << "could not export python function call " << value->name()
-              << ". Remove calls to Python functions before export. "
-              << "Did you forget add @script or @script_method annotation? "
-              << "If this is a nn.ModuleList, add it to __constants__.";
+              << "Could not export Python function call '" << value->name()
+              << "'. Remove calls to Python functions before export. "
+              << "Did you forget to add a @script or @script_method annotation? "
+              << "If this is a nn.ModuleList, add it to __constants__";
         }
 
         stmt << "^" << value->name();

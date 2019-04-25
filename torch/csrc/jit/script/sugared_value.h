@@ -208,8 +208,8 @@ struct TORCH_API ClassValue : public SugaredValue {
 
 // defines how a method obtained from a module behaves in script
 struct MethodValue : public SugaredValue {
-  MethodValue(c10::optional<NamedValue> self, Function& method)
-      : self_(std::move(self)), method(method) {}
+  MethodValue(c10::optional<NamedValue> self, Function& method, std::shared_ptr<Module> mod = nullptr)
+      : self_(std::move(self)), method(method), mod_(mod) {}
   std::string kind() const override {
     return "method";
   }
@@ -235,6 +235,7 @@ struct MethodValue : public SugaredValue {
  private:
   c10::optional<NamedValue> self_;
   Function& method;
+  std::shared_ptr<Module> mod_;
 };
 
 struct TORCH_API PrintValue : public SugaredValue {

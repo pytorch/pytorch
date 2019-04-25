@@ -518,7 +518,7 @@ std::shared_ptr<MethodValue> moduleToMethod(
   if (!forward) {
     throw ErrorReport() << " expected this module to have a forward function.";
   }
-  return std::make_shared<MethodValue>(at::nullopt, forward->function());
+  return std::make_shared<MethodValue>(at::nullopt, forward->function(), mod);
 }
 
 std::shared_ptr<SugaredValue> toSugaredValue(
@@ -590,7 +590,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   if (py::isinstance<py::function>(obj)) {
     auto compiled_fn =
-        py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
+        py::module::import("torch.jit").attr("_try_compile_fn")(obj);
     if (!compiled_fn.is(py::none())) {
       auto mod = py::cast<std::shared_ptr<Module>>(compiled_fn);
       return moduleToMethod(mod);

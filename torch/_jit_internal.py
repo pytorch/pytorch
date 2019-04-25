@@ -179,7 +179,7 @@ def _parameter_list(parameter_names_fn):
 
 try:
     import typing
-    from typing import Tuple, List, Dict
+    from typing import Tuple, List, Dict, Optional
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -196,6 +196,16 @@ try:
         return ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.Dict or
              getattr(ann, '__origin__', None) is dict)
+
+    def is_optional(ann):
+        # is_union_optional = ann.__module__ == 'typing' and \
+        is_union_optional = False
+        if ann.__module__ == 'typing' and \
+                (getattr(ann, '__origin__', None) is typing.Union):
+            is_union_optional = len(ann._subs_tree()) == 3 and ann._subs_tree()[2] == type(None)
+        return is_union_optional or (ann.__module__ == 'typing' and \
+            (getattr(ann, '__origin__', None) is typing.Optional))
+
 except ImportError:
     # A minimal polyfill for versions of Python that don't have typing.
     # Note that this means that they also don't support the fancy annotation syntax, so
@@ -232,9 +242,20 @@ except ImportError:
         def __getitem__(self, types):
             return DictInstance(types)
 
+    class OptionalInstance(object):
+        __slots__ = ['__args__']
+
+        def __init__(self, types):
+            self.__args__ = types
+
+    class OptionalCls(object):
+        def __getitem__(self, types):
+            return OptionalInstance(types)
+
     Tuple = TupleCls()  # noqa: T484
     List = ListCls()  # noqa: T484
     Dict = DictCls()  # noqa: T484
+    Optional = OptionalCls()  # noqa: T484
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)
@@ -244,6 +265,9 @@ except ImportError:
 
     def is_dict(ann):
         return isinstance(ann, DictInstance)
+
+    def is_optional(ann):
+        return isinstance(ann, OptionalInstance)
 
 
 # allows BroadcastingList instance to be subscriptable
