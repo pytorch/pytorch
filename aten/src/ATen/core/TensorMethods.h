@@ -16,7 +16,7 @@ inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocki
   return to(
       at::device(t.device_type()).layout(t.layout()).dtype(t.scalarType()),
       non_blocking,
-      /*copy*/ true);
+      /*copy=*/ true);
 }
 
 inline Tensor Tensor::cpu() const {
