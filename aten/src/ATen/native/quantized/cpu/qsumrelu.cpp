@@ -4,15 +4,19 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
+#include <fbgemm/QuantUtils.h>
 
 #include <algorithm>
 
 namespace at { namespace native {
 namespace {
+inline int32_t clamp(int32_t val, int32_t lo, int32_t hi) {
+  return std::min(hi, std::max(lo, val));
+}
 
 class QSumReLUInt8 final : public c10::OperatorKernel {
  public:
-  QTensor operator()(const at::QTensor& qa, const at::QTensor& qb,
+  Tensor operator()(at::Tensor qa, at::Tensor qb,
                      double scale, int64_t zero_point) {
     AT_ASSERTM(qa.numel() == qb.numel(), "Sum operands must be the same size!");
     auto a = qa.dequantize();

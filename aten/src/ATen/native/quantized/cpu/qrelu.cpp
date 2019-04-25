@@ -12,11 +12,11 @@ namespace {
 
 class QReluInt8 final : public c10::OperatorKernel {
  public:
-  QTensor operator()(const at::QTensor& qx) {
-    QTensor qy = at::_empty_affine_quantized(qx.sizes(),
-                                             at::device(kCPU).dtype(kQInt8),
-                                             qx.q_scale().toDouble(),
-                                             qx.q_zero_point().toLong());
+  Tensor operator()(Tensor qx) {
+    Tensor qy = at::_empty_affine_quantized(qx.sizes(),
+                                            at::device(kCPU).dtype(kQInt8),
+                                            qx.q_scale().toDouble(),
+                                            qx.q_zero_point().toLong());
     auto iter = TensorIterator::unary_op(qy, qx);
     const auto zero_point = qx.q_zero_point().toByte();
     unary_kernel(*iter, [&](c10::qint8 value) -> c10::qint8 {

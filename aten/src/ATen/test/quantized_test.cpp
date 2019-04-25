@@ -47,6 +47,25 @@ TEST(TestQTensor, QuantDequantAPIs) {
   }
 }
 
+TEST(TestQTensor, RoundingMode) {
+  // We assume that quantization is defined as:
+  //   qx = clamp(round(x / scale + zero_point))
+  // If the zero_point is added after rounding, the result will be wrong.
+  constexpr int N = 7;
+  float x_values[N] = {0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5};
+  int32_t zero_point = 1;
+  uint8_t qx_expect[N] = {2, 2, 4, 4, 6, 6, 8};  // scale = 1.0
+
+  Tensor x = from_blob(x_values, {N});
+  Tensor qx = x.quantize_linear(/*scale=*/1.0, zero_point);
+
+  auto qx_data = qx.data<qint8>();
+  for (int idx = 0; idx < N; ++idx) {
+    ASSERT_EQ(qx_expect[idx], qx_data[idx].val_)
+      << "Tie breaking during rounding element " << idx << " failed!";
+  }
+}
+
 TEST(TestQTensor, Item) {
   Tensor r = at::ones({1});
   const float scale = 1;
@@ -60,7 +79,7 @@ TEST(TestQTensor, EmptyQuantized) {
   int zero_point = 10;
   int val = 100;
   int numel = 10;
-  QTensor q = at::_empty_affine_quantized({numel}, at::device(at::kCPU).dtype(kQInt8), scale, zero_point);
+  Tensor q = at::_empty_affine_quantized({numel}, at::device(at::kCPU).dtype(kQInt8), scale, zero_point);
   // Assigning to QTensor
   auto* q_data = q.data<qint8>();
   for (int i = 0; i < numel; ++i) {

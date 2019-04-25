@@ -47,6 +47,11 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   pip install mypy --user || true
 fi
 
+# faulthandler become built-in since 3.3
+if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
+  pip install -q faulthandler --user
+fi
+
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
