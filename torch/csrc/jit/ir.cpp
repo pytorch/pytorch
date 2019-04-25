@@ -626,6 +626,33 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
+void Block::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
+  for (Value* input : inputs()) {
+    input->setType(type_map(input->type()));
+  }
+  for (Node* node : nodes()) {
+    for (Value* output : node->outputs()) {
+      output->setType(type_map(output->type()));
+    }
+    for (Block* sub_block : node->blocks()) {
+      sub_block->remapTypes(type_map);
+    }
+    for (Symbol name : node->attributeNames()) {
+      if (node->kindOf(name) == AttributeKind::g) {
+        node->g(name)->remapTypes(type_map);
+      } else if (node->kindOf(name) == AttributeKind::gs) {
+          for(const auto& g : node->gs(name)) {
+            g->remapTypes(type_map);
+          }
+      }
+    }
+  }
+}
+
+void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
+  block()->remapTypes(type_map);
+}
+
 bool Value::mustBeNone() const {
   return node_->mustBeNone();
 }
