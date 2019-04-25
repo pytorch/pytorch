@@ -1024,6 +1024,37 @@ void initJitScriptBindings(PyObject* module) {
                 name, orig_method->graph()->copy(), std::move(member_inputs));
           });
 
+  py::class_<CompilationUnit, std::shared_ptr<CompilationUnit>>(m, "CompilationUnit")
+      .def(py::init<>())
+      .def("find_function", &CompilationUnit::find_function)
+      .def("set_optimized", &CompilationUnit::set_optimized)
+      .def(
+          "define",
+          [](CompilationUnit& cu,
+             const std::string& src,
+             ResolutionCallback rcb) {
+            cu.define(src, pythonResolver(rcb), nullptr);
+          });
+
+  py::class_<Function, std::shared_ptr<Function>>(m, "Function")
+    .def(
+        "__call__",
+        [](py::args args, py::kwargs kwargs) {
+          // see: [pybind11 varargs]
+          Function& callee = py::cast<Function&>(args[0]);
+          return invokeScriptMethodFromPython(
+              callee, tuple_slice(std::move(args), 1), std::move(kwargs));
+        })
+    .def_property_readonly("graph", &Function::graph)
+    .def_property_readonly("schema", &Function::getSchema)
+    .def_property_readonly("code", [](Function& self) {
+      std::ostringstream ss;
+      std::vector<at::Tensor> tensors;
+      std::vector<ClassTypePtr> classes;
+      PythonPrint(ss, self, tensors, classes, false);
+      return ss.str();
+    });
+
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
           "__call__",

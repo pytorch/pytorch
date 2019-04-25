@@ -3041,7 +3041,7 @@ class TestScript(JitTestCase):
             def bar(x):
                 return foo(x, y=x)
         ''')
-        self.assertTrue('*' in str(cu.module._get_method('foo').schema))
+        self.assertTrue('*' in str(cu.foo.schema))
         with self.assertRaisesRegex(RuntimeError, "not provided"):
             torch.jit.CompilationUnit('''
                 def foo(x, *, y) -> Tuple[Tensor, Tensor]:
