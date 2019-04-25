@@ -76,7 +76,7 @@ class FileWriter(object):
             event.step = int(step)
         self.event_writer.add_event(event)
 
-    def add_summary(self, summary, step=None, walltime=None):
+    def add_summary(self, summary, global_step=None, walltime=None):
         """Adds a `Summary` protocol buffer to the event file.
         This method wraps the provided summary in an `Event` protocol buffer
         and adds it to the event file.
