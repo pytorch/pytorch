@@ -5390,11 +5390,11 @@ a")
             # type: (float, int) -> float
             return math.pow(x, y)
 
-        def test_frexp_float(x, y)
+        def test_frexp_float(x, y):
             # type: (float, int) -> float
             return math.frexp(x, y)
 
-        def test_frexp_int(x, y)
+        def test_frexp_int(x, y):
             # type: (int, int) -> float
             return math.frexp(x, y)
 
