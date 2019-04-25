@@ -210,7 +210,7 @@ class SummaryWriter(object):
         self.scalar_dict = {}
 
     def _append_to_scalar_dict(self, tag, scalar_value, global_step,
-                                timestamp):
+                               timestamp):
         """This adds an entry to the self.scalar_dict datastructure with format
         {writer_id : [[timestamp, step, value], ...], ...}.
         """
