@@ -143,8 +143,8 @@ class TestQuantizedFC(unittest.TestCase):
     """Tests the correctness of the quantized::fc op."""
 
     def test_qfc(self):
-        qfc_packed = torch.ops.quantized.fbgemm_fc_packed
-        qfc = torch.ops.quantized.fbgemm_fc
+        qfc_packed = torch.ops.quantized.fbgemm_fc_packed_prepack
+        qfc = torch.ops.quantized.fbgemm_fc_packed
 
         batch_size = 4
         input_channels = 16
