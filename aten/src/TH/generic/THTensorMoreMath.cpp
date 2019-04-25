@@ -1139,7 +1139,7 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
 LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 
 #if defined(TH_REAL_IS_LONG)
-LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
+LAB_IMPLEMENT_BASIC_FUNCTION(abs,std::abs)
 #endif /* int64_t only part */
 
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_CHAR)
