@@ -56,27 +56,22 @@ inline std::string dispatch_key_to_string(TensorTypeId id) {
 
 class KernelTable_ final {
  public:
-  void emplace(TensorTypeId key, const DispatchTableEntry& value, const std::string& operator_name) {
+  void set(TensorTypeId key, const DispatchTableEntry& value, const std::string& operator_name) {
     auto emplaced = map_.emplace(key, value);
     if (!emplaced.second) {
-      AT_ERROR("Tried to register multiple kernels with same dispatch key '",
-      detail::dispatch_key_to_string(key), "' for operator '", operator_name ,"'.");
+      // Element already existed. Overwrite it.
+      emplaced.first->second = value;
+      AT_WARN("Registered a kernel that overwrote a previoulsy registered kernel with same dispatch key '",
+          detail::dispatch_key_to_string(key), "' for operator '", operator_name ,"'.");
     }
   }
 
-  void erase(TensorTypeId key, const std::string& operator_name) {
+  void removeIfExists(TensorTypeId key, const std::string& operator_name) {
     auto num_removed = map_.erase(key);
-
     assert(num_removed <= 1); // This is not a multi-map
-    if (num_removed == 0) {
-      AT_ERROR("Tried to deregister a kernel with dispatch key '",
-               detail::dispatch_key_to_string(key), "' for operator '", operator_name,
-               "' but that kernel isn't registered. Registered dispatch keys are: ",
-               list_all_dispatch_keys());
-    }
   }
 
-  const DispatchTableEntry* lookup(TensorTypeId key, const string& operator_name) const {
+  const DispatchTableEntry* lookup(TensorTypeId key) const {
     auto found = map_.find(key);
     if (found != map_.end()) {
       return &found->second;
@@ -85,8 +80,8 @@ class KernelTable_ final {
     }
   }
 
-  bool isEmpty() const {
-    return map_.size() == 0;
+  size_t size() const {
+    return map_.size();
   }
 
   std::string list_all_dispatch_keys() const {
@@ -120,46 +115,31 @@ class DispatchTable final {
   DispatchTable(const FunctionSchema& schema)
   : kernels_()
   , dispatch_strategy_(get_dispatch_strategy_(schema))
-  , operator_name_(schema.name())
-  , fallback_kernel_(c10::nullopt) {}
+  , operator_name_(schema.name()) {}
 
   /**
    * Register a kernel in the table at some dispatch key.
-   * @param dispatch_key Dispatch key to define when this kernel is selected
+   * @param dispatch_key Dispatch key to define when this kernel is selected.
+   *        If this is TensorTypeIds::undefined(), this registers a fallback
+   *        kernel that is called whenever no other kernel matches.
    * @param kernel Concrete kernel function implementation to register
    */
-  void registerKernel(
+  void setKernel(
       TensorTypeId dispatch_key,
       const DispatchTableEntry& kernel) {
-    AT_ASSERTM(dispatch_strategy_.is_valid_, "Tried to register a kernel with a dispatch key for operator schema ", operator_name_, " that doesn't have tensor arguments.");
-    kernels_.emplace(dispatch_key, kernel, operator_name_);
+    const bool is_fallback_kernel = (dispatch_key == TensorTypeIds::undefined());
+    AT_ASSERTM(is_fallback_kernel || dispatch_strategy_.is_valid_, "Tried to register a kernel with a dispatch key for operator schema ", operator_name_, " that doesn't have tensor arguments.");
+    kernels_.set(dispatch_key, kernel, operator_name_);
   }
 
   /**
    * Deregister the kernel for some dispatch key.
    *
-   * @param dispatch_key Dispatch key to unregister.
+   * @param dispatch_key Dispatch key to unregister. If this is
+   *        TensorTypeIds::undefined(), it will deregister the fallback kernel.
    */
-  void deregisterKernel(TensorTypeId dispatch_key) {
-    kernels_.erase(dispatch_key, operator_name_);
-  }
-
-  /**
-   * Register a fallback kernel. This kernel will be returned from lookup
-   * whenever no other kernel matches the dispatch key.
-   * @param kernel Concrete kernel function implementation to register
-   */
-  void registerFallbackKernel(const DispatchTableEntry& kernel) {
-    fallback_kernel_ = kernel;
-  }
-
-  /**
-   * Deregister the fallback kernel.
-   * Without a fallback kernel, lookup of a dispatch key that doesn't match
-   * a kernel will fail again.
-   */
-  void deregisterFallbackKernel() {
-    fallback_kernel_.reset();
+  void removeKernelIfExists(TensorTypeId dispatch_key) {
+    kernels_.removeIfExists(dispatch_key, operator_name_);
   }
 
   /**
@@ -172,14 +152,15 @@ class DispatchTable final {
    const DispatchTableEntry& lookup(const Stack* stack) const {
      if (C10_LIKELY(dispatch_strategy_.is_valid_)) {
        TensorTypeId dispatch_key = dispatch_strategy_.get_dispatch_key(stack);
-       auto found = kernels_.lookup(dispatch_key, operator_name_);
+       auto found = kernels_.lookup(dispatch_key);
        if (nullptr != found) {
          return *found;
        }
 
        // regular dispatch didn't find a kernel, let's check the fallback kernel.
-       if (fallback_kernel_.has_value()) {
-         return *fallback_kernel_;
+       const DispatchTableEntry* fallbackKernel = fallback_kernel();
+       if (nullptr != fallbackKernel) {
+         return *fallbackKernel;
        }
 
        // no kernel found and fallback kernel doesn't exist either
@@ -187,11 +168,13 @@ class DispatchTable final {
                 "'. Tried to look up kernel for dispatch key '", detail::dispatch_key_to_string(dispatch_key),
                 "'. Registered dispatch keys are: ", list_all_dispatch_keys_());
      } else {
-       AT_ASSERTM(kernels_.isEmpty(), "Cannot have an invalid dispatch key but registered kernels");
-
        // with an invalid dispatch key, only the fallback kernel is allowed.
-       if (fallback_kernel_.has_value()) {
-         return *fallback_kernel_;
+       const DispatchTableEntry* fallbackKernel = fallback_kernel();
+
+       AT_ASSERTM(kernels_.size() == ((nullptr == fallbackKernel)?0:1), "Cannot have an invalid dispatch key but registered kernels");
+
+       if (nullptr != fallbackKernel) {
+         return *fallbackKernel;
        }
 
        // no kernel registered and fallback kernel doesn't exist either
@@ -200,7 +183,7 @@ class DispatchTable final {
    }
 
    bool isEmpty() const {
-     return kernels_.isEmpty();
+     return 0 == kernels_.size();
    }
 
 private:
@@ -240,6 +223,10 @@ private:
     }
   };
 
+  const DispatchTableEntry* fallback_kernel() const {
+    return kernels_.lookup(TensorTypeIds::undefined());
+  }
+
   static DispatchStrategy get_dispatch_strategy_(const FunctionSchema& schema) {
     for (size_t i = 0; i < schema.arguments().size(); ++i) {
       const auto& type = schema.arguments()[i].type();
@@ -258,7 +245,7 @@ private:
 
   std::string list_all_dispatch_keys_() const {
     std::string result = kernels_.list_all_dispatch_keys();
-    if (fallback_kernel_.has_value()) {
+    if (fallback_kernel() != nullptr) {
       result += ", FALLBACK";
     }
     return result;
@@ -267,7 +254,6 @@ private:
   detail::KernelTable_ kernels_;
   DispatchStrategy dispatch_strategy_;
   std::string operator_name_;
-  c10::optional<DispatchTableEntry> fallback_kernel_;
 };
 
 } // namespace c10
