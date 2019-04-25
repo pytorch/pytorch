@@ -25,9 +25,6 @@ skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
 from common_utils import TestCase, run_tests
-from torch.utils.tensorboard import summary, SummaryWriter
-from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
-from torch.utils.tensorboard._convert_np import make_np
 
 
 class BaseTestCase(TestCase):
@@ -40,6 +37,10 @@ class BaseTestCase(TestCase):
 
 
 if TEST_TENSORBOARD:
+    from torch.utils.tensorboard import summary, SummaryWriter
+    from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
+    from torch.utils.tensorboard._convert_np import make_np
+
     class TestTensorBoardPyTorchNumpy(BaseTestCase):
         def test_pytorch_np(self):
             tensors = [torch.rand(3, 10, 10), torch.rand(1), torch.rand(1, 2, 3, 4, 5)]
