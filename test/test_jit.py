@@ -1809,6 +1809,17 @@ graph(%x : Tensor,
         m = self.createScriptModuleFromGraph(trace)
         self.assertEqual(outputs, m(*inputs))
 
+    def test_max_pool(self):
+        x = torch.rand(20, 16, 10, 10)
+
+        def max_pool2d(x):
+            return F.max_pool2d(x, 2) + 2
+
+        trace = torch.jit.trace(max_pool2d, (x))
+        graph = trace.graph_for(x)
+        FileCheck().check("aten::max_pool2d(").run(graph)
+        self.assertEqual(max_pool2d(x), trace(x))
+
     def test_repeated_input(self):
         def fn(a, b):
             return a + b
@@ -13068,7 +13079,8 @@ nn_functional_tests = [
     ('fractional_max_pool2d', (S, S, S, S), (3, [2, 3],)),
     ('max_pool1d', (S, S, S), (2, 1)),
     ('max_pool1d', (S, S, S), (2, 1, 1, 1, False, True), 'with_indices'),
-    ('max_pool2d', (S, S, S, S), (2, 1)),
+    ('max_pool2d', (S, S, S, S), (2, 1), '', (True, 'aten::max_pool2d_with_indices')),
+    ('max_pool2d', (S, S, S, S), (2, 1, 1, 1, False, True), 'with_indices', (True, 'aten::max_pool2d_with_indices')),
     ('max_pool3d', (S, S, S, S, S), (2, 1)),
     ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
     ('max_unpool2d', torch.tensor([[[[2., 4]]]]), (torch.tensor([[[[1, 3]]]]), 2, 2, 0)),
