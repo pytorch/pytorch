@@ -11,18 +11,6 @@ def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
 
 
-def _quantize(x, scale, zero_point):
-    """Quantizes a numpy array."""
-    qx = np.round(x / scale).astype(np.uint8) + zero_point
-    return qx
-
-
-def _dequantize(qx, scale, zero_point):
-    """Dequantizes a numpy array."""
-    x = (qx - zero_point) * scale
-    return x
-
-
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM
 def avoid_vpmaddubsw_overflow_fc(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
