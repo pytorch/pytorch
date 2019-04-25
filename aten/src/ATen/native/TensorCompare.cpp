@@ -109,8 +109,26 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
            "mode only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
-    AT_ASSERT(values.dim() == 0);
-    indices.resize_({}).fill_(0);
+    if (self.dim() == 0){
+      indices.resize_({}).fill_(0);
+    } else {
+
+      AT_CHECK(self.size(dim) > 0,
+               "cannot perform reduction function mode "
+               "on tensor with no elements because the "
+               "operation does not have an identity");
+
+      std::vector<int64_t> sizes = {};
+      for(int i = 0; i < self.dim(); i++){
+        if(i != dim){
+          sizes.push_back(self.size(i));
+        }
+      }
+
+      indices.resize_(sizes);
+      values.resize_(sizes);
+
+    }
     return std::forward_as_tuple(values, indices);
   } else {
     return at::legacy::th::_th_mode_out(values, indices, self, dim, keepdim);
@@ -144,8 +162,28 @@ std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
            "max only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
-    AT_ASSERT(max.dim() == 0);
-    max_indices.resize_({}).fill_(0);
+
+    if (self.dim() == 0){
+      max_indices.resize_({}).fill_(0);
+    } else {
+
+      AT_CHECK(self.size(dim) > 0,
+               "cannot perform reduction function max "
+               "on tensor with no elements because the "
+               "operation does not have an identity");
+
+      std::vector<int64_t> sizes = {};
+      for(int i = 0; i < self.dim(); i++){
+        if(i != dim){
+          sizes.push_back(self.size(i));
+        }
+      }
+
+      max_indices.resize_(sizes);
+      max.resize_(sizes);
+
+    }
+
     return std::forward_as_tuple(max, max_indices);
   } else {
     if (self.is_cuda()) {
@@ -183,8 +221,27 @@ std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
            "min only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {
-    AT_ASSERT(min.dim() == 0);
-    min_indices.resize_({}).fill_(0);
+    if (self.dim() == 0){
+      min_indices.resize_({}).fill_(0);
+    } else {
+
+      AT_CHECK(self.size(dim) > 0,
+               "cannot perform reduction function min "
+               "on tensor with no elements because the "
+               "operation does not have an identity");
+
+      std::vector<int64_t> sizes = {};
+      for(int i = 0; i < self.dim(); i++){
+        if(i != dim){
+          sizes.push_back(self.size(i));
+        }
+      }
+
+      min_indices.resize_(sizes);
+      min.resize_(sizes);
+
+    }
+
     return std::forward_as_tuple(min, min_indices);
   } else {
     if (self.is_cuda()) {

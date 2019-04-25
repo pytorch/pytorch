@@ -37,6 +37,10 @@ static bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &sel
     return true;
   }
 
+  if (self.numel() == 0 && self.ndimension() > 0) {
+    return true;
+  }
+
   if (self.numel() == 0) {
     AT_ERROR("cannot perform reduction function ", fn_name,
              " on tensor with no elements because the operation does not have an identity");

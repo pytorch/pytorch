@@ -920,6 +920,12 @@ class _TestTorchMixin(object):
     def test_max_min_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
+            y = torch.ones((0, 3, 4), device=device)
+            self.assertTrue(y.max(1)[0].size() == (0, 4))
+            self.assertTrue(y.max(1)[1].size() == (0, 4))
+            self.assertTrue(y.max(2)[0].size() == (0, 3))
+            self.assertTrue(y.max(2)[1].size() == (0, 3))
+
             x = torch.ones(0, device=device)
 
             if device == 'cpu': # Needed until #19673 is solved.
@@ -1137,14 +1143,8 @@ class _TestTorchMixin(object):
     def test_reduction_empty(self):
         fns_to_test = [
             # name, function, identity
-            ('max', torch.max, None),
             ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs), None),
-            ('argmax', torch.argmax, None),
-            ('min', torch.min, None),
-            ('argmin', torch.argmin, None),
-            ('mode', torch.mode, None),
             ('median', torch.median, None),
-
             ('prod', torch.prod, 1),
             ('sum', torch.sum, 0),
             ('norm', torch.norm, 0),
@@ -1152,6 +1152,21 @@ class _TestTorchMixin(object):
             ('var', torch.var, nan),
             ('std', torch.std, nan),
             ('logsumexp', torch.logsumexp, -inf),
+            # NOTE: these function's empty reduction doesn't raise an error anymore
+            #       for multi-dimensional empty tensors.
+            # ('max', torch.max, None),
+            # ('min', torch.min, None),
+            # ('argmax', torch.argmax, None),
+            # ('argmin', torch.argmin, None),
+            # ('mode', torch.mode, None),
+        ]
+
+        fns_to_test_too = [
+            ('max', torch.max),
+            ('min', torch.min),
+            ('argmax', torch.argmax),
+            ('argmin', torch.argmin),
+            ('mode', torch.mode),
         ]
 
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
@@ -1180,6 +1195,11 @@ class _TestTorchMixin(object):
                     except TypeError as err:
                         # ignore if there is no allreduce.
                         self.assertTrue('required positional arguments: "dim"' in str(err))
+
+            for name, fn in fns_to_test_too:
+                ident_err = 'does not have an identity'
+                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
+                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1, keepdim=True))
 
             # any
             xb = x.to(torch.uint8)
