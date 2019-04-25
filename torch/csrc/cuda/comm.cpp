@@ -73,8 +73,8 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
       tensors.push_back(tensor.to(
           at::Device(kCUDA, device),
           tensor.scalar_type(),
-          /*non_blocking*/true,
-          /*copy*/true));
+          /*non_blocking=*/true,
+          /*copy=*/true));
     }
   }
   return tensors;
