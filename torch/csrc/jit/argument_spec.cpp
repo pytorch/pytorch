@@ -140,7 +140,9 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
         // consume a tensor optional and add to the argspec
         auto& arg = *stack[stack_top]++;
         spec.addOptional(arg);
-        spec.addTensor(arg, with_grad);
+        if (!arg.isNone()) {
+          spec.addTensor(arg, with_grad);
+        }
       } break;
       case SPECIALIZE_TENSOR:
         // consume a tensor and add to the argspec
@@ -205,18 +207,17 @@ void ArgumentSpecCreator::specializeTypes(
       case SPECIALIZE_OPTIONAL_TENSOR: {
         auto& input_type = *input_stack.back()++;
         auto is_present = spec.isPresent(optional_arg_spec_offset++);
-        auto& arg = spec.tensorAt(tensor_arg_spec_offset++);
         if (!is_present) {
           result_stack.back().emplace_back(input_type);
-        } else if (!arg.defined()) {
-          result_stack.back().emplace_back(AutogradZeroTensorType::get());
-        } else {
-          result_stack.back().emplace_back(DimensionedTensorType::create(
-              arg.type(),
-              ConvertIntToCPUOrCUDA(arg.device()),
-              arg.dim(),
-              arg.requires_grad()));
+          break;
         }
+        auto& arg = spec.tensorAt(tensor_arg_spec_offset++);
+        AT_ASSERT(arg.defined());
+        result_stack.back().emplace_back(DimensionedTensorType::create(
+            arg.type(),
+            ConvertIntToCPUOrCUDA(arg.device()),
+            arg.dim(),
+            arg.requires_grad()));
       } break;
       case SPECIALIZE_TENSOR: {
         input_stack.back()++;

@@ -77,6 +77,7 @@ struct ArgumentSpec {
   }
 
   void addTensor(const IValue& input, bool with_grad) {
+    AT_ASSERT(input.isTensor());
     tensor_args.emplace_back();
     auto& arg = tensor_args.back();
     // Initialize all fields to 0. This is convenient, because e.g.
@@ -84,20 +85,16 @@ struct ArgumentSpec {
     // padding bits all 0s.
     std::memset(&arg, 0, sizeof(ArgumentInfo));
 
-    if (!input.isNone()) {
-      AT_ASSERT(input.isTensor());
-      // [argspec refcounting] reinterpret the IValue to avoid having to refcount
-      // the Tensor microbenchmarks
-      // https://github.com/zdevito/pytorch/commit/21e7200a0a0fc456bea2f10e95b1781f83933d10
-      // show overhead in extra refcounting along this path
-      const at::Tensor* t = reinterpret_cast<const at::Tensor*>(&input);
-      if ((arg.defined_ = t->defined())) {
-        arg.requires_grad_ =
-            with_grad && autograd::Variable(*t).requires_grad();
-        arg.dim_ = t->dim();
-        arg.device_ = t->is_cuda() ? t->get_device() : -1;
-        arg.type_ = static_cast<unsigned>(t->scalar_type());
-      }
+    // [argspec refcounting] reinterpret the IValue to avoid having to refcount
+    // the Tensor microbenchmarks
+    // https://github.com/zdevito/pytorch/commit/21e7200a0a0fc456bea2f10e95b1781f83933d10
+    // show overhead in extra refcounting along this path
+    const at::Tensor* t = reinterpret_cast<const at::Tensor*>(&input);
+    if ((arg.defined_ = t->defined())) {
+      arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
+      arg.dim_ = t->dim();
+      arg.device_ = t->is_cuda() ? t->get_device() : -1;
+      arg.type_ = static_cast<unsigned>(t->scalar_type());
     }
     combineHash(arg);
   }
