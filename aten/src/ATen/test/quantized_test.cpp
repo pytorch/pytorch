@@ -59,7 +59,7 @@ TEST(TestQTensor, RoundingMode) {
     0, 0, 2, 2, 4, 4,
     6, 6, 8, 8, 10, 10};  // scale = 1.0
 
-  Tensor x = from_blob(&x_values[0], x_values.size());
+  Tensor x = from_blob(x_values.data(), x_values.size());
   Tensor qx = x.quantize_linear(/*scale=*/1.0, zero_point);
 
   auto qx_data = qx.data<qint8>();
