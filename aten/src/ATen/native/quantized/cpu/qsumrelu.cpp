@@ -9,10 +9,6 @@
 
 namespace at { namespace native {
 namespace {
-inline int32_t clamp(int32_t val, int32_t lo, int32_t hi) {
-  return std::min(hi, std::max(lo, val));
-}
-
 class QSumReLUInt8 final : public c10::OperatorKernel {
  public:
   Tensor operator()(at::Tensor qa, at::Tensor qb,
@@ -31,7 +27,7 @@ class QSumReLUInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::sum_relu(Tensor qa, Tensor qb, float scale, int zero_point)"
-      "-> Tensor",
+     "-> Tensor qc",
     c10::kernel<QSumReLUInt8>(),
     c10::dispatchKey(QuantizedCPUTensorId()));
 }  // namespace
