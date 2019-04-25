@@ -11,15 +11,16 @@ def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
 
 
-def _quantize(x, scale, zero_point):
+def _quantize(x, scale, zero_point, qmin=0, qmax=255):
     """Quantizes a numpy array."""
-    qx = np.round(x / scale).astype(np.uint8) + zero_point
+    qx = np.round(x / scale + zero_point)
+    qx = np.clip(qx, qmin, qmax).astype(np.uint8)
     return qx
 
 
 def _dequantize(qx, scale, zero_point):
     """Dequantizes a numpy array."""
-    x = (qx - zero_point) * scale
+    x = (qx.astype(np.float) - zero_point) * scale
     return x
 
 
@@ -64,8 +65,10 @@ class TestQuantizedOps(unittest.TestCase):
 
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
-        zero_point = 5
+        zero_point = 1
         qX = X.quantize_linear(scale=scale, zero_point=zero_point)
+        print("X:\n{}".format(X))
+        print("\nQuantized:\n{}\nFake:\n{}".format(qX.int_repr(), _quantize(X.numpy(), scale, zero_point)))
 
         Y = X.numpy().copy()
         Y[Y < 0] = 0

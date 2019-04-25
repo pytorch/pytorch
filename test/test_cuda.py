@@ -2605,6 +2605,11 @@ class TestCuda(TestCase):
         b = torch.logspace(1, 10, 10)
         self.assertEqual(a, b.cuda())
 
+        # Check non-default base=2
+        a = torch.logspace(1, 10, 10, 2, device='cuda')
+        b = torch.logspace(1, 10, 10, 2)
+        self.assertEqual(a, b.cuda())
+
     def test_lerp(self):
         _TestTorchMixin._test_lerp(self, lambda t: t.cuda())
 

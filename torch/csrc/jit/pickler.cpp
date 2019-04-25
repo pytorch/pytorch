@@ -207,23 +207,6 @@ void Pickler::pushDouble(const IValue& ivalue) {
   }
 }
 
-using ivalue_pair = std::pair<IValue, IValue>;
-
-struct IValuePairComparator {
-  bool operator()(const ivalue_pair& lhs, const ivalue_pair& rhs) const {
-    if (lhs.first.isString()) {
-      return lhs.first.toStringRef() < rhs.first.toStringRef();
-    }
-    if (lhs.first.isInt()) {
-      return lhs.first.toInt() < rhs.first.toInt();
-    }
-    if (lhs.first.isDouble()) {
-      return lhs.first.toDouble() < rhs.first.toDouble();
-    }
-    AT_ERROR("Uncomparable IValue types");
-  }
-};
-
 void Pickler::pushDict(const IValue& ivalue) {
   auto dict = ivalue.toGenericDictRef();
 
@@ -233,9 +216,7 @@ void Pickler::pushDict(const IValue& ivalue) {
   push<OpCode>(OpCode::MARK);
 
   // Sort the dict for deterministic keys
-  std::vector<std::pair<IValue, IValue>> dict_items(dict.begin(), dict.end());
-  std::sort(dict_items.begin(), dict_items.end(), IValuePairComparator());
-
+  auto dict_items = ivalue.toGenericDict()->iterationOrder();
   for (const auto& pair : dict_items) {
     addIValue(pair.first);
     addIValue(pair.second);

@@ -1,4 +1,5 @@
 #include "caffe2/operators/batch_matmul_op.h"
+
 #include "caffe2/core/operator_schema.h"
 
 namespace caffe2 {
@@ -28,7 +29,8 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
       b_dim1 = in[1].dims(ndim - 1);
     }
 
-    auto output_dims = vector<int64_t>{in[0].dims().begin(), in[0].dims().end()};
+    auto output_dims =
+        vector<int64_t>{in[0].dims().begin(), in[0].dims().end()};
     output_dims[ndim - 2] = a_dim0;
     output_dims[ndim - 1] = b_dim1;
 
