@@ -242,21 +242,26 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
     if isinstance(args, torch.Tensor):
         args = (args, )
 
+    if isinstance(example_outputs, torch.Tensor):
+        example_outputs = [example_outputs]
+
+    torch_out = None
+
     if isinstance(model, torch.jit.ScriptModule):
-        torch_out = None
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
-        if isinstance(example_outputs, torch.Tensor):
-            example_outputs = [example_outputs]
         try:
-            method = model.__getattr__('forward')
+            method = model.forward
             params = method.initial_ivalues()
             graph = _propagate_and_assign_input_and_output_shapes(
                 method.graph, tuple(args) + tuple(params), example_outputs, False, propagate)
-            # Erase number types to bring the graph to a pre-NumberType state
-
         except AttributeError:
-            # TODO: just trace it
             raise RuntimeError('\'forward\' method must be a script method')
+    elif isinstance(model, torch.jit.Function):
+        assert example_outputs is not None, "example_outputs must be provided when exporting a TorchScript Function"
+        method = model
+        params = ()
+        graph = _propagate_and_assign_input_and_output_shapes(
+            model.graph, tuple(args), example_outputs, False, propagate)
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
         state_dict = _unique_state_dict(model)

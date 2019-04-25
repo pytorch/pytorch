@@ -2788,7 +2788,7 @@ struct to_ir {
 struct MethodResolver : public Resolver {
   explicit MethodResolver(
       const Resolver* otherResolver,
-      const std::unordered_map<std::string, Function*>& functionTable)
+      const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
   std::shared_ptr<SugaredValue> resolveValue(
@@ -2797,7 +2797,7 @@ struct MethodResolver : public Resolver {
       const SourceRange& loc) const override {
     auto it = functionTable_.find(name);
     if (it != functionTable_.end()) {
-      return std::make_shared<MethodValue>(c10::nullopt, *it->second);
+      return std::make_shared<MethodValue>(c10::nullopt, it->second);
     }
     return otherResolver_->resolveValue(name, m, loc);
   }
@@ -2808,7 +2808,7 @@ struct MethodResolver : public Resolver {
 
  private:
   const Resolver* otherResolver_;
-  const std::unordered_map<std::string, Function*>& functionTable_;
+  const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable_;
 };
 
 void CompilationUnit::define(
@@ -2818,7 +2818,7 @@ void CompilationUnit::define(
   AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Function*> methods;
-  std::unordered_map<std::string, Function*> function_table;
+  std::unordered_map<std::string, std::shared_ptr<Function>> function_table;
   for (const Def& def : definitions) {
     const std::string& name = def.name().name();
     ResolverPtr resolver = *resolver_it++;
@@ -2834,9 +2834,9 @@ void CompilationUnit::define(
       AT_ASSERT(resolver);
       to_ir(def, resolver, self, method);
     };
-    std::unique_ptr<Function> fn(
+    std::shared_ptr<Function> fn(
         new Function(name, is_optimized(), std::make_shared<Graph>(), creator));
-    function_table[name] = fn.get();
+    function_table[name] = fn;
     methods.push_back(fn.get());
     register_function(std::move(fn));
   }
