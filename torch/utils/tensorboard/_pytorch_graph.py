@@ -98,11 +98,11 @@ class GraphPy(object):
             for node_output, outputSize in zip(x.outputs, x.outputstensor_size):
                 self.scope_name_appeared.append(x.scopeName)
                 self.nodes_io[node_output] = NodeBase(node_output,
-                                                       x.inputs,
-                                                       x.scopeName,
-                                                       outputSize,
-                                                       op_type=x.kind,
-                                                       attributes=x.attributes)
+                                                      x.inputs,
+                                                      x.scopeName,
+                                                      outputSize,
+                                                      op_type=x.kind,
+                                                      attributes=x.attributes)
 
     def printall(self):
         print('all nodes')
