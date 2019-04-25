@@ -557,6 +557,20 @@ def squeeze(g, self, dim=None):
                 dims.append(i)
     else:
         dims = [_get_const(dim, 'i', 'dim')]
+        # Handle negative dims
+        for i, dim in enumerate(dims):
+            if dim < 0:
+                if self.type().kind() == "CompleteTensorType" or self.type().kind() == "DimensionedTensorType":
+                    warnings.warn("ONNX export squeeze with negative axis " + str(dim) +
+                                  " might cause the onnx model to be incorrect. " +
+                                  "Negative axis is not supported in ONNX. " +
+                                  "Axis is converted to " + str(dim + self.type().dim()) +
+                                  " based on input shape at export time. " +
+                                  "Passing an tensor of different rank in execution will be incorrect.")
+                    dims[i] += self.type().dim()
+                else:
+                    return _unimplemented('squeeze', 'negative axis with unknown input rank')
+
     return g.op("Squeeze", self, axes_i=dims)
 
 
@@ -1363,6 +1377,19 @@ def alias(g, self):
 
 @parse_args('v', 'i')
 def unsqueeze(g, self, dim):
+    # Handle negative dim
+    if dim < 0:
+        if self.type().kind() == "CompleteTensorType" or self.type().kind() == "DimensionedTensorType":
+            warnings.warn("ONNX export unsqueeze with negative axis " + str(dim) +
+                          " might cause the onnx model to be incorrect. " +
+                          "Negative axis is not supported in ONNX. " +
+                          "Axis is converted to " + str(dim + self.type().dim() + 1) +
+                          " based on input shape at export time. " +
+                          "Passing an tensor of different rank in execution will be incorrect.")
+            dim = dim + self.type().dim() + 1
+        else:
+            return _unimplemented('unsqueeze', 'negative axis with unknown input rank')
+
     return g.op("Unsqueeze", self, axes_i=[dim])
 
 

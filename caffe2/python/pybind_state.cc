@@ -32,6 +32,8 @@
 #include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/script/module_python.h"
+
 
 // Because of CMake setup, we can't depend on script module here just yet -
 // it pulls in generated files from a different directory and it
@@ -244,9 +246,9 @@ bool feedBlob(
     return true;
   }
 #ifdef FBCODE_CAFFE2
-  if (py::isinstance<torch::jit::script::Module>(arg)) {
+  if (auto module = torch::jit::script::as_module(arg)) {
     *blob->GetMutable<std::shared_ptr<torch::jit::script::Module>>() =
-        arg.cast<std::shared_ptr<torch::jit::script::Module>>();
+        module;
     return true;
   }
 #endif
