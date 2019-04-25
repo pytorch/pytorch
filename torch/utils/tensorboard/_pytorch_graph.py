@@ -124,11 +124,10 @@ class GraphPy(object):
                 self.unique_name_to_scoped_name[input_node_id] = node.scopeName + '/' + input_node_id
 
         for key, node in self.nodes_io.items():
-            if isinstance(node, NodeBase):
-                self.unique_name_to_scoped_name[key] = node.scope + '/' + node.uniqueName
             if hasattr(node, 'input_or_output'):
                 self.unique_name_to_scoped_name[key] = node.input_or_output + '/' + node.uniqueName
             if hasattr(node, 'scope'):
+                self.unique_name_to_scoped_name[key] = node.scope + '/' + node.uniqueName
                 if node.scope == '' and self.shallowest_scope_name:
                     self.unique_name_to_scoped_name[node.uniqueName] = self.shallowest_scope_name + '/' + node.uniqueName
 
