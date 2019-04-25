@@ -134,7 +134,7 @@ static inline void upsample_3d_shape_check(
 }
 
 template <typename scalar_t>
-static inline scalar_t area_mode_compute_sclae(
+static inline scalar_t area_pixel_compute_scale(
     int64_t input_size,
     int64_t output_size,
     bool align_corners) {
@@ -159,7 +159,7 @@ static inline scalar_t area_mode_compute_sclae(
 }
 
 template <typename scalar_t>
-static inline scalar_t area_mode_compute_source_index(
+static inline scalar_t area_pixel_compute_source_index(
     scalar_t scale,
     int64_t dst_index,
     bool align_corners,

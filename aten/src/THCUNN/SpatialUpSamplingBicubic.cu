@@ -48,11 +48,11 @@ __global__ void bicubic_interp2d_kernel(
   }
 
   // Interpolation kernel
-  Acctype real_x = area_mode_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
+  Acctype real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
   int in_x = floorf(real_x);
   Acctype t_x = real_x - in_x;
 
-  Acctype real_y = area_mode_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
+  Acctype real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
   int in_y = floorf(real_y);
   Acctype t_y = real_y - in_y;
 
@@ -124,11 +124,11 @@ __global__ void bicubic_interp2d_backward_kernel(
     return;
   }
 
-  Acctype real_x = area_mode_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
+  Acctype real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
   int input_x = floorf(real_x);
   Acctype t_x = real_x - input_x;
 
-  Acctype real_y = area_mode_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
+  Acctype real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
   int input_y = floorf(real_y);
   Acctype t_y = real_y - input_y;
 
