@@ -357,9 +357,9 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
   bool ret = this->debug_def().engine() != "DNNLOWP_ACC16" && group_ == M &&
       C_per_group == 1 && group_ % 8 == 0 && this->kernel_.size() == 3 &&
       this->kernel_[0] == 3 && this->kernel_[1] == 3 && this->kernel_[2] == 3 &&
-      this->stride_[0] == this->stride_[1] &&
-      this->stride_[0] == this->stride_[2] &&
       (this->stride_[0] == 1 || this->stride_[0] == 2) &&
+      (this->stride_[1] == 1 || this->stride_[1] == 2) &&
+      (this->stride_[2] == 1 || this->stride_[2] == 2) &&
       this->dilation_[0] == 1 && this->dilation_[1] == 1 &&
       this->dilation_[2] == 1 &&
       accumulate(
