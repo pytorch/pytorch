@@ -288,11 +288,13 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def _elman_rnn_test(self, layers, nonlinearity, bidirectional,
                         initial_state, packed_sequence, dropout):
+        batch_first = True if packed_sequence == 2 else False
         model = nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE,
                        layers,
                        nonlinearity=nonlinearity,
                        bidirectional=bidirectional,
-                       dropout=dropout)
+                       dropout=dropout,
+                       batch_first=batch_first)
 
         if packed_sequence == 1:
             model = RnnModelWithPackedSequence(model, False)
@@ -303,9 +305,7 @@ class TestCaffe2Backend(unittest.TestCase):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
-            inputs = rnn_utils.pad_sequence(inputs)
-            if packed_sequence == 2:
-                inputs = inputs.transpose(0, 1)
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
 
             directions = 2 if bidirectional else 1
@@ -331,9 +331,10 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def _lstm_test(self, layers, bidirectional, initial_state,
                    packed_sequence, dropout):
+        batch_first = True if packed_sequence == 2 else False
         model = LstmFlatteningResult(
             RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
-            bidirectional=bidirectional, dropout=dropout)
+            bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
         if packed_sequence == 1:
             model = RnnModelWithPackedSequence(model, False)
         if packed_sequence == 2:
@@ -343,9 +344,7 @@ class TestCaffe2Backend(unittest.TestCase):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
-            inputs = rnn_utils.pad_sequence(inputs)
-            if packed_sequence == 2:
-                inputs = inputs.transpose(0, 1)
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
 
             directions = 2 if bidirectional else 1
@@ -372,8 +371,9 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def _gru_test(self, layers, bidirectional, initial_state,
                   packed_sequence, dropout):
+        batch_first = True if packed_sequence == 2 else False
         model = nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
-                       bidirectional=bidirectional, dropout=dropout)
+                       bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
         if packed_sequence == 1:
             model = RnnModelWithPackedSequence(model, False)
         if packed_sequence == 2:
@@ -383,9 +383,7 @@ class TestCaffe2Backend(unittest.TestCase):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
-            inputs = rnn_utils.pad_sequence(inputs)
-            if packed_sequence == 2:
-                inputs = inputs.transpose(0, 1)
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
 
             directions = 2 if bidirectional else 1
