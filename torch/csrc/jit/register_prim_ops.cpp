@@ -2088,7 +2088,7 @@ RegisterOperators reg2({
         "aten::frexp(float a, int* b) -> float",
         [](Stack& stack) {
           float a;
-          int64_t b;
+          int b;
           pop(stack, a, b);
           push(stack, std::frexp(a, &b));
           return 0;
@@ -2097,7 +2097,7 @@ RegisterOperators reg2({
         "aten::frexp(int a, int* b) -> float",
         [](Stack& stack) {
           int64_t a;
-          int64_t b;
+          int b;
           pop(stack, a, b);
           push(stack, (float)std::frexp(a, &b));
           return 0;
