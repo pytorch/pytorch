@@ -939,7 +939,13 @@ void initJitScriptBindings(PyObject* module) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
             std::vector<ClassTypePtr> classes;
-            PythonPrint(ss, self, tensors, classes, false);
+            PythonPrint(
+                ss,
+                self.class_compilation_unit(),
+                true,
+                tensors,
+                classes,
+                false);
             return ss.str();
           })
       .def("apply", &Module::apply)
@@ -989,7 +995,7 @@ void initJitScriptBindings(PyObject* module) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
             std::vector<ClassTypePtr> classes;
-            PythonPrint(ss, self, tensors, classes, false);
+            PythonPrint(ss, self, false, tensors, classes, false);
             return ss.str();
           })
       .def(
@@ -1021,7 +1027,7 @@ void initJitScriptBindings(PyObject* module) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;
         std::vector<ClassTypePtr> classes;
-        PythonPrint(ss, self, tensors, classes, false);
+        PythonPrint(ss, self.function(), true, tensors, classes, false);
         return ss.str();
       });
 
@@ -1119,12 +1125,12 @@ void initJitScriptBindings(PyObject* module) {
     std::vector<at::Tensor> constants;
     std::vector<ClassTypePtr> classes;
     if (auto self = as_module(obj)) {
-      PythonPrint(ss, *self, constants, classes, true);
+      PythonPrint(ss, self->class_compilation_unit(), true, constants, classes, true);
     } else if (auto self = as_function(obj)) {
-      PythonPrint(ss, *self, constants, classes, true);
+      PythonPrint(ss, *self, false, constants, classes, true);
     } else {
       auto& m = py::cast<Method&>(obj);
-      PythonPrint(ss, m, constants, classes, true);
+      PythonPrint(ss, m.function(), true, constants, classes, true);
     }
     return std::make_pair(ss.str(), std::move(constants));
   });
