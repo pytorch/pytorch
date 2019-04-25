@@ -35,10 +35,8 @@ class QFCInt8 final : public c10::OperatorKernel {
         reinterpret_cast<uint8_t*>(input_contig.data<c10::qint8>());
 
     AT_ASSERT(input.dim() >= 2);
-    // M refers to M in the standard GEMM notation for C(output) = A(input) x
-    // B(weight), where C, A, B are MxN, MxK, KxN matrices, respectively.
-    // M is not the number of output channels for some operators implemented in
-    // popular deep learning frameworks.
+    // C(output) = A(input) x B(weight), where C, A, B are M x N, M x K, K x N
+    // matrices, respectively.
     int64_t M = 1;
     for (size_t i = 0; i < input.dim() - 1; ++i) {
       M *= input.size(i);
