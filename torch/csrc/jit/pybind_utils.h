@@ -5,6 +5,7 @@
 #include <ATen/core/stack.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
@@ -539,5 +540,6 @@ inline py::object invokeOperatorFromPython(
 
   return createPyObjectForStack(std::move(stack));
 }
+
 } // namespace jit
 } // namespace torch

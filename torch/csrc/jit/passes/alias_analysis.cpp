@@ -386,10 +386,13 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeTupleConstruct(node);
     case prim::sort:
       return analyzeSort(node);
+    case prim::GradOf:
+      return analyzeGradOf(node);
     case prim::Constant:
     case prim::DictConstruct:
     case prim::ListConstruct:
     case prim::AutogradZero:
+    case prim::AutogradAdd:
     case prim::FusedConcat:
     case prim::MMTreeReduce:
     case prim::MMBatchSide:
@@ -596,6 +599,12 @@ void AliasDb::analyzeLoop(Node* node) {
   mapAliases(node->outputs(), blockOutputs);
 }
 
+void AliasDb::analyzeGradOf(Node* node) {
+  const auto grad_of_block = node->blocks().at(0);
+  analyze(grad_of_block);
+  mapAliases(node->outputs(), grad_of_block->outputs());
+}
+
 void AliasDb::analyzeSubgraph(Node* node) {
   const auto subgraph = node->g(attr::Subgraph).get();
 
@@ -706,6 +715,11 @@ void AliasDb::analyzeWait(Node* node) {
 }
 
 void AliasDb::analyzeTupleConstruct(Node* node) {
+  // Because we currently mark all Tuples as needing annotation
+  // (even those containing just prmitive types), an element needs to be created
+  // for TupleConstruct. When that changes we can create an element
+  // only if it contains elements which need annotation
+  getOrCreateElement(node->output());
   for (const auto& input : node->inputs()) {
     if (shouldAnnotate(input)) {
       addToContainedElements(input, node->output());
@@ -841,16 +855,40 @@ bool AliasDb::cannotCheckAliasContainment(const Value* elem) const {
   return false;
 }
 
-bool AliasDb::mayContainAlias(const Value* a, const Value* b) const {
-  if (!shouldAnnotate(a) || !shouldAnnotate(b)) {
+bool AliasDb::mayContainAlias(Value* a, Value* b) const {
+  const std::vector<Value*> a_vec = {a};
+  const std::vector<Value*> b_vec = {b};
+
+  return mayContainAlias(a_vec, b_vec);
+}
+
+bool AliasDb::mayContainAlias(
+    const at::ArrayRef<Value*>& a,
+    const at::ArrayRef<Value*>& b) const {
+  std::vector<Element*> a_elements;
+  for (const auto& val : a) {
+    if (cannotCheckAliasContainment(val)) {
+      return true;
+    }
+    if (shouldAnnotate(val)) {
+      a_elements.push_back(elementMap_.at(val));
+    }
+  }
+
+  if (a_elements.size() == 0) {
     return false;
   }
 
-  if (cannotCheckAliasContainment(a) || cannotCheckAliasContainment(b)) {
-    return true;
+  std::vector<Element*> b_elements;
+  for (const auto& val : b) {
+    if (cannotCheckAliasContainment(val)) {
+      return true;
+    }
+    if (shouldAnnotate(val)) {
+      b_elements.push_back(elementMap_.at(val));
+    }
   }
-
-  return memoryDAG_->mayContainAlias(elementMap_.at(a), elementMap_.at(b));
+  return memoryDAG_->mayContainAlias(a_elements, b_elements);
 }
 
 // Make each value in the `from` list point to its partner in the `to` list
@@ -1251,6 +1289,7 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::TupleConstruct,
       prim::AutogradZero,
       prim::FusedConcat,
+      prim::GradOf,
       prim::MMTreeReduce,
       prim::MMBatchSide,
       prim::BroadcastSizes,
@@ -1267,6 +1306,7 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::fork,
       prim::sort,
       prim::CreateObject,
+      prim::AutogradAdd,
       prim::GetAttr,
       prim::SetAttr,
       aten::wait,
