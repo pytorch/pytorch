@@ -4,7 +4,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
-#include <fbgemm/QuantUtils.h>
 
 #include <algorithm>
 
