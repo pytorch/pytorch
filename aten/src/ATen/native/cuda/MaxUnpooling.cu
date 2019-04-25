@@ -154,7 +154,7 @@ Tensor& max_unpooling2d_forward_out_cuda(
 
   auto count = self.numel();
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
-      self.type(), "max_unpooling2d_forward_kernel", ([&] {
+      self.scalar_type(), "max_unpooling2d_forward_kernel", ([&] {
         max_unpooling2d_forward_kernel<<<
             GET_BLOCKS(count),
             CUDA_NUM_THREADS,
@@ -328,7 +328,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
   dim3 block(32, 8);
 
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
-      self.type(), "max_unpooling3d_forward_kernel", ([&] {
+      self.scalar_type(), "max_unpooling3d_forward_kernel", ([&] {
         while (totalZ > 0) {
           dim3 grid(
               ceilDiv(inputWidth, static_cast<int64_t>(block.x)),
@@ -439,7 +439,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
   int count = self.numel();
 
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
-      self.type(), "max_unpooling2d_backward_kernel", ([&] {
+      self.scalar_type(), "max_unpooling2d_backward_kernel", ([&] {
         max_unpooling2d_backward_kernel<<<
             GET_BLOCKS(count),
             CUDA_NUM_THREADS,
@@ -543,7 +543,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
   dim3 block(32, 8);
 
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
-      self.type(), "max_unpooling3d_backward_kernel", ([&] {
+      self.scalar_type(), "max_unpooling3d_backward_kernel", ([&] {
         while (totalZ > 0) {
           dim3 grid(
               ceilDiv(inputWidth, static_cast<int64_t>(block.x)),
