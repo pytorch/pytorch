@@ -707,15 +707,6 @@ class CompilationUnit(object):
     def _import(self, src, constants):
         """ test import logic for single function, use only for testing """
         src = "op_version_set = 0\n{}".format(src)
-        # HACK: export always adds a self argument
-        # even if the thing is a pure function,
-        # we just delete it here
-        # Once the serialization outputs the first-class
-        # functions and not the lowered functions,
-        # we can change this behavior
-        src = (src.replace('self,\n', '')
-                  .replace('(self)', '()')
-                  .replace('self.__forked_function', '__forked_function'))
         torch._C._jit_import_functions(self._c, src, constants, None)
         return self
 

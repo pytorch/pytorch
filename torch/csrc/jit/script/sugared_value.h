@@ -129,6 +129,14 @@ struct TORCH_API SimpleValue : public SugaredValue {
       const std::string& field,
       Value* newValue) override;
 
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      // note: names for args will be 'argument 0', 'argument 1', etc..
+      at::ArrayRef<NamedValue> inputs_,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
   Value* getValue() const {
     return value_;
   }
