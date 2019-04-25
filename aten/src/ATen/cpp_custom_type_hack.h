@@ -8,7 +8,6 @@
 // Template argument <T> has to be registered with CAFFE_KNOWN_TYPE mechanism.
 
 #include <ATen/ATen.h>
-#include <ATen/quantized/Quantizer.h>
 
 namespace at {
 namespace cpp_custom_type_hack {
