@@ -417,7 +417,7 @@ can be used to spawn multiple processes. It works by passing in the
 function that you want to run and spawns N processes to run it. This
 can be used for multiprocess distributed training as well.
 
-For references on how to use it, please refer to `PyToch example - ImageNet
+For references on how to use it, please refer to `PyTorch example - ImageNet
 implementation <https://github.com/pytorch/examples/tree/master/imagenet>`_
 
 Note that this function requires Python 3.4 or higher.

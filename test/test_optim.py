@@ -12,7 +12,7 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
     ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler, \
-    CyclicLR
+    CyclicLR, CosineAnnealingWarmRestarts
 from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
 
@@ -1059,6 +1059,62 @@ class TestLRScheduler(TestCase):
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
         self._test(scheduler, targets, epochs)
 
+    def test_CosineAnnealingWarmRestarts_lr1(self):
+        iters = 100
+        eta_min = 1e-10
+        T_mults = [1, 2, 4]
+        for T_mult in T_mults:
+            T_i = 10
+            T_cur = 0
+            targets = [[0.05], [0.5]]
+            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
+            for _ in range(1, iters, 1):
+                T_cur += 1
+                if T_cur >= T_i:
+                    T_cur = T_cur - T_i
+                    T_i = int(T_mult) * T_i
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            self._test(scheduler, targets, iters)
+
+    def test_CosineAnnealingWarmRestarts_lr2(self):
+        iters = 30
+        eta_min = 1e-10
+        T_mults = [1, 2, 4]
+        for T_mult in T_mults:
+            T_i = 10
+            T_cur = 0
+            targets = [[0.05], [0.5]]
+            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
+            for _ in torch.arange(0.1, iters, 0.1):
+                T_cur = round(T_cur + 0.1, 1)
+                if T_cur >= T_i:
+                    T_cur = T_cur - T_i
+                    T_i = int(T_mult) * T_i
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            self._test_CosineAnnealingWarmRestarts(scheduler, targets, iters)
+
+    def test_CosineAnnealingWarmRestarts_lr3(self):
+        epochs_for_T_mults = [[0, 1, 2, 3, 4, 5, 12, 27, 3, 4, 5, 6, 13],
+                              [0, 1, 2, 3, 4, 5, 25, 32, 33, 34, 80, 81, 3],
+                              [0, 0.1, 0.2, 0.3, 1.3, 2.3, 17.5, 18.5, 19.5, 29.5, 30.5, 31.5, 50]]
+        T_curs_for_T_mults = [[1, 2, 3, 4, 5, 2, 7, 3, 4, 5, 6, 3],
+                              [1, 2, 3, 4, 5, 15, 2, 3, 4, 10, 11, 3],
+                              [0.1, 0.2, 0.3, 1.3, 2.3, 7.5, 8.5, 9.5, 19.5, 20.5, 21.5, 10]]
+        T_is_for_T_mults = [[10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
+                            [10, 10, 10, 10, 10, 20, 40, 40, 40, 80, 80, 10],
+                            [10, 10, 10, 10, 10, 30, 30, 30, 30, 30, 30, 90]]
+        eta_min = 1e-10
+        T_mults = [1, 2, 3]
+        for epochs, T_mult, T_curs, T_is in zip(epochs_for_T_mults, T_mults, T_curs_for_T_mults, T_is_for_T_mults):
+            targets = [[0.05], [0.5]]
+            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=T_mult, eta_min=eta_min)
+            for T_cur, T_i in zip(T_curs, T_is):
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            self._test_interleaved_CosineAnnealingWarmRestarts(scheduler, targets, epochs)
+
     def test_step_lr_state_dict(self):
         self._check_scheduler_state_dict(
             lambda: StepLR(self.opt, gamma=0.1, step_size=3),
@@ -1114,6 +1170,11 @@ class TestLRScheduler(TestCase):
             if key not in {'optimizer'}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
 
+    def test_CosineAnnealingWarmRestarts_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=2),
+            lambda: CosineAnnealingWarmRestarts(self.opt, T_0=100))
+
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
         scheduler = constr()
         for _ in range(epochs):
@@ -1134,6 +1195,23 @@ class TestLRScheduler(TestCase):
                 self.assertAlmostEqual(target[epoch], param_group['lr'],
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                            epoch, target[epoch], param_group['lr']), delta=1e-5)
+
+    def _test_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs=10):
+        for index, epoch in enumerate(torch.arange(0, epochs, 0.1)):
+            epoch = round(epoch.item(), 1)
+            scheduler.step(epoch)
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(target[index], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, target[index], param_group['lr']), delta=1e-5)
+
+    def _test_interleaved_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs):
+        for index, epoch in enumerate(epochs):
+            scheduler.step(epoch)
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(target[index], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, target[index], param_group['lr']), delta=1e-5)
 
     def _test_against_legacy(self, scheduler, legacy_scheduler, epochs=10):
         self.setUp()
