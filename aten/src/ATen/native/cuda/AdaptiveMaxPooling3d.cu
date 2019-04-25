@@ -109,6 +109,33 @@ __global__ void adaptivemaxpool(
   }
 }
 
+template <typename scalar_t>
+void adaptivemaxpool_loop(
+                        scalar_t *input_data,
+                        scalar_t *output_data,
+                        int64_t *indices_data,
+                        int64_t totalZ,
+                        int isizeT, int isizeH, int isizeW,
+                        int osizeT, int osizeH, int osizeW,
+                        int64_t istrideD,
+                        int64_t istrideT, int64_t istrideH, int64_t istrideW)
+{
+  int64_t offsetZ = 0;
+  dim3 threads(32, 8);
+  // each H*W plane is processed by blocksH thread blocks
+  int blocksH = std::max((int)(16L / totalZ), 1);
+  while (totalZ > 0) {
+    dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);
+    adaptivemaxpool<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+      input_data, output_data, indices_data, isizeT, isizeH, isizeW,
+      osizeT, osizeH, osizeW, istrideD, istrideT, istrideH, istrideW, offsetZ);
+
+    totalZ -= 65535;
+    offsetZ += 65535;
+    THCudaCheck(cudaGetLastError());
+  }
+}
+
 /*
  * Description:
  *    This function computes the gradInput from gradOutput.
@@ -162,6 +189,30 @@ __global__ void adaptivemaxgradinput(
   }
 }
 
+template <typename scalar_t>
+void adaptivemaxgradinput_loop(
+  scalar_t *gradInput_data,
+  scalar_t *gradOutput_data,
+  int64_t *indices_data,
+  int64_t totalZ,
+  int isizeT, int isizeH, int isizeW,
+  int osizeT, int osizeH, int osizeW)
+{
+  int64_t offsetZ = 0;
+  dim3 threads(32, 8);
+  // each H*W plane is processed by blocksH thread blocks
+  int blocksH = std::max((int)(16L / totalZ), 1);
+  while (totalZ > 0) {
+    dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);
+    adaptivemaxgradinput<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+      gradInput_data, gradOutput_data, indices_data,
+      isizeT, isizeH, isizeW, osizeT, osizeH, osizeW, offsetZ);
+
+    totalZ -= 65535;
+    offsetZ += 65535;
+    THCudaCheck(cudaGetLastError());
+  }
+}
 
 /*
  * Description:
@@ -212,6 +263,31 @@ __global__ void atomicadaptivemaxgradinput(
       int64_t argmax = (*ptr_ind);
       atomicAdd(&(gradInput_d[argmax]), grad_delta);
     }
+  }
+}
+
+template <typename scalar_t>
+void atomicadaptivemaxgradinput_loop(
+  scalar_t *gradInput_data,
+  scalar_t *gradOutput_data,
+  int64_t *indices_data,
+  int64_t totalZ,
+  int isizeT, int isizeH, int isizeW,
+  int osizeT, int osizeH, int osizeW)
+{
+  int64_t offsetZ = 0;
+  dim3 threads(32, 8);
+  // each H*W plane is processed by blocksH thread blocks
+  int blocksH = std::max((int)(16L / totalZ), 1);
+  while (totalZ > 0) {
+    dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);
+    atomicadaptivemaxgradinput<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+      gradInput_data, gradOutput_data, indices_data,
+      isizeT, isizeH, isizeW, osizeT, osizeH, osizeW, offsetZ);
+
+    totalZ -= 65535;
+    offsetZ += 65535;
+    THCudaCheck(cudaGetLastError());
   }
 }
 
@@ -286,30 +362,18 @@ void adaptive_max_pool3d_out_cuda_template(
     totalZ = sizeB * sizeD * osizeT;
   }
 
-  int64_t offsetZ = 0;
-  dim3 threads(32, 8);
-  // each H*W plane is processed by blocksH thread blocks
-  int blocksH = std::max((int)(16L / totalZ), 1);
-  while (totalZ > 0) {
-    dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
-      "adaptive_max_pool3d_cuda",
-      [&] {
-        scalar_t *input_data = input.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    "adaptive_max_pool3d_cuda",
+    [&] {
+      scalar_t *input_data = input.data<scalar_t>();
+      scalar_t *output_data = output.data<scalar_t>();
+      int64_t *indices_data = indices.data<int64_t>();
 
-        adaptivemaxpool<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-          input_data, output_data, indices_data, isizeT, isizeH, isizeW,
-          osizeT, osizeH, osizeW, istrideD, istrideT, istrideH, istrideW, offsetZ
-      );
-
-      totalZ -= 65535;
-      offsetZ += 65535;
-      }
-    );
-    THCudaCheck(cudaGetLastError());
-  }
+      adaptivemaxpool_loop(
+        input_data, output_data, indices_data, totalZ, isizeT, isizeH, isizeW,
+        osizeT, osizeH, osizeW, istrideD, istrideT, istrideH, istrideW);
+    }
+  );
 }
 
 void adaptive_max_pool3d_backward_out_cuda_template(
@@ -364,47 +428,34 @@ void adaptive_max_pool3d_backward_out_cuda_template(
     totalZ = sizeB * sizeD * osizeT;
   }
 
-  int64_t offsetZ = 0;
-  dim3 threads(32, 8);
-  // each H*W plane is processed by blocksH thread blocks
-  int blocksH = std::max((int)(16L / totalZ), 1);
-  while (totalZ > 0) {
-    dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);
+  if (atomic) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+      "adaptive_max_pool3d_backward_cuda",
+      [&] {
+        scalar_t *gradInput_data = gradInput.data<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+        int64_t *indices_data = indices.data<int64_t>();
 
-    if (atomic)
-    {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
-        "adaptive_max_pool3d_backward_cuda",
-        [&] {
-          scalar_t *gradInput_data = gradInput.data<scalar_t>();
-          scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-          int64_t *indices_data = indices.data<int64_t>();
+        atomicadaptivemaxgradinput_loop(
+          gradInput_data, gradOutput_data, indices_data,
+          totalZ,
+          isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
+      }
+    );
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+      "adaptive_max_pool3d_backward_cuda",
+      [&] {
+        scalar_t *gradInput_data = gradInput.data<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+        int64_t *indices_data = indices.data<int64_t>();
 
-          atomicadaptivemaxgradinput<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-            gradInput_data, gradOutput_data, indices_data,
-            isizeT, isizeH, isizeW, osizeT, osizeH, osizeW, offsetZ
-          );
-        }
-      );
-    } else {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
-        "adaptive_max_pool3d_backward_cuda",
-        [&] {
-          scalar_t *gradInput_data = gradInput.data<scalar_t>();
-          scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-          int64_t *indices_data = indices.data<int64_t>();
-
-          adaptivemaxgradinput<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-            gradInput_data, gradOutput_data, indices_data,
-            isizeT, isizeH, isizeW, osizeT, osizeH, osizeW, offsetZ
-          );
-        }
-      );
-    }
-
-    totalZ -= 65535;
-    offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+        adaptivemaxgradinput_loop(
+          gradInput_data, gradOutput_data, indices_data,
+          totalZ,
+          isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
+      }
+    );
   }
 }
 
