@@ -153,7 +153,7 @@ Tensor& max_unpooling2d_forward_out_cuda(
   output.zero_();
 
   auto count = self.numel();
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
       self.type(), "max_unpooling2d_forward_kernel", ([&] {
         max_unpooling2d_forward_kernel<<<
             GET_BLOCKS(count),
@@ -327,7 +327,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
   int offsetZ = 0;
   dim3 block(32, 8);
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
       self.type(), "max_unpooling3d_forward_kernel", ([&] {
         while (totalZ > 0) {
           dim3 grid(
@@ -438,7 +438,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
 
   int count = self.numel();
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
       self.type(), "max_unpooling2d_backward_kernel", ([&] {
         max_unpooling2d_backward_kernel<<<
             GET_BLOCKS(count),
@@ -542,7 +542,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
 
   dim3 block(32, 8);
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
       self.type(), "max_unpooling3d_backward_kernel", ([&] {
         while (totalZ > 0) {
           dim3 grid(
