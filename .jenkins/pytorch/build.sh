@@ -65,10 +65,13 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
   build_args=()
-  build_args+=("-DBUILD_BINARY=ON")
-  build_args+=("-DBUILD_TEST=ON")
-  build_args+=("-DUSE_OBSERVERS=ON")
-  build_args+=("-DUSE_ZSTD=ON")
+  build_args+=("-DBUILD_TORCH=ON")
+  build_args+=("-DBUILD_TORCH_MOBILE=ON")
+  build_args+=("-DBUILD_CAFFE2_OPS=OFF")
+  build_args+=("-DUSE_DISTRIBUTED=OFF")
+  build_args+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+  build_args+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+  build_args+=("-DPYTHON_INCLUDE_DIR=$(python -c 'from distutils.sysconfig import get_python_inc; print(get_python_inc())')")
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
