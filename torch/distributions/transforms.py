@@ -16,6 +16,7 @@ __all__ = [
     'LowerCholeskyTransform',
     'PowerTransform',
     'SigmoidTransform',
+    'TanhTransform',
     'SoftmaxTransform',
     'StickBreakingTransform',
     'Transform',
@@ -358,6 +359,28 @@ class SigmoidTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         return -(y.reciprocal() + (1 - y).reciprocal()).log()
+
+
+class TanhTransform(Transform):
+    r"""
+    Transform via the mapping :math:`y = \tanh(x)`.
+    """
+    domain = constraints.real
+    codomain = constraints.interval(-1.0, 1.0)
+    bijective = True
+    sign = +1
+
+    def __eq__(self, other):
+        return isinstance(other, TanhTransform)
+
+    def _call(self, x):
+        return x.tanh()
+
+    def _inverse(self, y):
+        return atanh(y)
+
+    def log_abs_det_jacobian(self, x, y):
+        return torch.log(1 - y**2).sum(-1)
 
 
 class AbsTransform(Transform):
