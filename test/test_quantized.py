@@ -60,7 +60,7 @@ def qfc_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
     return Y_q_ref
 
 
-@skipIfNotRegistered("Relu_ENGINE_DNNLOWP",
+@skipIfNotRegistered("Relu_ENGINE_FBGEMM",
                      "fbgemm-based Caffe2 ops are not linked")
 class TestQuantized(TestCase):
     def test_relu(self):
@@ -141,7 +141,7 @@ class TestQuantizedFC(unittest.TestCase):
         X_scale = 1.5
         X_zp = 5
         X_value_min = 0
-        X_value_max = 15
+        X_value_max = 225
         X_q = np.round(
             np.random.rand(batch_size, input_channels) * (X_value_max - X_value_min)
             + X_value_min
@@ -149,8 +149,8 @@ class TestQuantizedFC(unittest.TestCase):
 
         W_scale = 0.4
         W_zp = 2
-        W_value_min = -10
-        W_value_max = 15
+        W_value_min = -128
+        W_value_max = 127
         W_q = np.round(
             np.random.rand(output_channels, input_channels)
             * (W_value_max - W_value_min)
