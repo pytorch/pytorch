@@ -68,15 +68,13 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
             /*ld=*/K,
             /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
             /*groups=*/1),
-        col_offsets});
+        col_offsets,
+        weight.q_scale().toFloat(),
+        weight.q_zero_point().toInt()});
 
     // TODO: we will need to replace this with torchscript classes at a later
     // point.
-    return cpp_custom_type_hack::create(
-        std::move(ret_ptr),
-        weight.options(),
-        weight.q_scale(),
-        weight.q_zero_point());
+    return cpp_custom_type_hack::create(std::move(ret_ptr), weight.options());
   }
 #else // USE_FBGEMM
   at::Tensor operator()(at::Tensor /* weight */
