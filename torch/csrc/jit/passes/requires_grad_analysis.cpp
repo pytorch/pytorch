@@ -1,5 +1,6 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 
@@ -64,6 +65,17 @@ void PropagateRequiresGradSimpleNode(Node* node) {
     return setRequiresGrad(node->output(), node->input(0)->requires_grad());
   } else if (node->matches("aten::detach(Tensor self) -> Tensor")) {
     return setRequiresGrad(node->output(), false);
+  } else if (node->kind() == aten::tensor) {
+    if (auto grad_index =
+            node->schema().argumentIndexWithName("requires_grad")) {
+      if (auto const_arg = constant_as<bool>(node->inputs().at(*grad_index))) {
+        return setRequiresGrad(node->output(), *const_arg);
+      }
+    }
+    if (auto type = node->output()->type()->cast<DimensionedTensorType>()) {
+      setRequiresGrad(node->output(), at::isFloatingType(type->scalarType()));
+    }
+    return;
   }
 
   auto inputs = node->inputs();
