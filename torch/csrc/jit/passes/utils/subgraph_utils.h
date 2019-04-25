@@ -31,11 +31,6 @@ void unmergeSubgraph(Node* subgraphNode);
 // Convenience function
 std::shared_ptr<Graph> getSubgraph(Node* n);
 
-std::vector<Value*> inlineGraph(
-    const std::shared_ptr<Graph>& subgraph,
-    at::ArrayRef<Value*> outerInputs,
-    Node* insertBefore);
-
 } // namespace SubgraphUtils
 } // namespace jit
 } // namespace torch
