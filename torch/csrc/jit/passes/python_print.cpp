@@ -127,22 +127,6 @@ struct QualifiedName : c10::intrusive_ptr_target {
   }
 };
 
-void createTensorToParameterNameMap(
-    const script::Module& module,
-    const QualifiedNamePtr& prefix,
-    std::unordered_map<script::Slot, QualifiedNamePtr>& result) {
-  for (const auto& param : module.get_parameters()) {
-    result[param] = QualifiedName::create(prefix, param.name());
-  }
-  for (const auto& param : module.get_attributes()) {
-    result[param] = QualifiedName::create(prefix, param.name());
-  }
-  for (const auto& elem : module.get_modules()) {
-    createTensorToParameterNameMap(
-        *elem, QualifiedName::create(prefix, elem->name()), result);
-  }
-}
-
 // some names are valid identifiers but off limits because
 // they are keywords or namespaces used in the output
 const static std::unordered_set<std::string> reserved_names = {
@@ -156,7 +140,6 @@ const static std::unordered_set<std::string> reserved_names = {
     "inf",
     "nan",
     "ops",
-    "self",
     // the python keywords
     "and",
     "as",
@@ -207,6 +190,12 @@ struct PythonPrintPass {
   std::vector<ClassTypePtr>& class_table_;
   // Helper to avoid duplicating class types
   void addToClassTable(const ClassTypePtr& classType) {
+    // we serialize module classes separately.
+    // Including them in the class table as well will cause the code
+    // to get imported twice.
+    if (classType->name() == "$Module") {
+      return;
+    }
     if (std::find(class_table_.cbegin(), class_table_.cend(), classType) ==
         class_table_.cend()) {
       class_table_.push_back(classType);
@@ -221,15 +210,20 @@ struct PythonPrintPass {
   // not be able to be reparsed?
   bool enforce_importable_;
 
+  // are funcitons being printed considered methods
+  // either of a class or some module?
+  // If true, this will surpress type annotation on their
+  // first (self) argument. And forked functions will
+  // be emitted as method calls (self.__fork...) rather
+  // than as method calls
+  bool is_method_;
+
+
   // what valid identifiers are in use for the current function
   std::unordered_set<std::string> used_names_;
 
   // used method names
   std::unordered_set<std::string> used_method_names_;
-
-  // for fork,
-  // subgraphs get added to the worklist, and will be printed later
-  std::vector<std::function<void(void)>> worklist;
 
   // scanValue, scanNode, scanBlock:
   // decide if it is safe to omit the output of a temporary variable,
@@ -275,6 +269,11 @@ struct PythonPrintPass {
     // w.r.t. to it
     if (use.user->kind() == prim::Loop && use.offset >= 2)
       return false;
+
+    // subgraph may use this more than once, so disable inlining
+    if (use.user->kind() == prim::fork)
+      return false;
+
     return true;
   }
 
@@ -726,6 +725,41 @@ struct PythonPrintPass {
         body_ << useOf(obj) << "." << attrname << " = " << useOf(newVal)
               << "\n";
       } break;
+      case prim::fork: {
+        // the subgraph gets emitted as another function
+        auto name = genName("__forked_function");
+        std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
+        indent();
+        body_ << "def " << name << "():\n";
+        for(size_t i = 0; i < node->inputs().size(); ++i) {
+          assignValue(graph->inputs().at(i), node->inputs().at(i));
+        }
+        printBody(graph->block());
+        std::stringstream ss;
+        ss << "fork(" << name << ")";
+        printOutputDefinition( node,ss.str());
+      } break;
+      case prim::Function: {
+        if (enforce_importable_) {
+          throw script::ErrorReport(node->getSourceLocation())
+              << "closures are not exportable";
+        }
+        assignValuesToTheirUniqueNames(node->outputs());
+        auto name = useOf(node->output());
+        std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
+        indent();
+        body_ << "def " << name << "(";
+        assignValuesToTheirUniqueNames(graph->inputs());
+        for(size_t i = 0; i < graph->inputs().size(); ++i) {
+          Value* v = graph->inputs().at(i);
+          if (i > 0) {
+            body_ << ", ";
+          }
+          body_ << useOf(v) << ": " << v->type()->python_str();
+        }
+        body_ << "):\n";
+        printBody(graph->block());
+      } break;
       default:
         std::stringstream ss;
         printRHS(ss, node);
@@ -899,30 +933,6 @@ struct PythonPrintPass {
         stmt << "(" << useOf(node->inputs().at(0)) << ")["
              << useOf(node->inputs().at(1)) << "]";
       } break;
-      case prim::fork: {
-        // the subgraph gets emitted as another function
-        auto name = genMethodName("__forked_function");
-        std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
-        worklist.emplace_back(
-            [graph, name, this] { printFunctionDefinition(*graph, name); });
-        // and we put a call to fork which invokes that function.
-        stmt << "fork(self." << name;
-        for (Value* v : node->inputs()) {
-          stmt << ", " << useOf(v);
-        }
-        stmt << ")";
-      } break;
-      case prim::Function: {
-        if (enforce_importable_) {
-          throw script::ErrorReport(node->getSourceLocation())
-              << "closures are not exportable";
-        }
-        auto name = genMethodName("__lambda");
-        std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
-        worklist.emplace_back(
-            [graph, name, this] { printFunctionDefinition(*graph, name); });
-        stmt << "self." << name;
-      } break;
       case prim::CreateObject: {
         const auto classType = node->output()->type()->expect<ClassType>();
         stmt << classType->name() << ".__new__(" << classType->name() << ")";
@@ -931,7 +941,13 @@ struct PythonPrintPass {
         const auto obj = node->inputs().at(0);
         const auto classType = obj->type()->expect<ClassType>();
         const auto& field = node->s(attr::name);
-        stmt << useOf(obj) << "." << field;
+        if (isValidIdentifier(field)) {
+          stmt << useOf(obj) << "." << field;
+        } else {
+          stmt << "getattr(" << useOf(obj) << ", ";
+          printQuotedString(stmt, field);
+          stmt << ")";
+        }
       } break;
       default: {
         Symbol kind = node->kind();
@@ -999,69 +1015,14 @@ struct PythonPrintPass {
     stmt << "=";
     printConstant(stmt, value);
   }
-  void printFunctionDefinition(
-      Graph& graph,
-      const std::string& name,
-      bool is_class = false,
-      const std::vector<c10::optional<IValue>>& defaults = {},
-      const std::vector<std::string>& param_names = {}) {
-    used_names_.clear(); // each graph can reuse local names
-
+  void printBody(Block* body) {
     // we always print constants at the top of the function, in the order
     // in which they are used.
     std::vector<Node*> constants;
-    buildConstantList(graph.block(), constants);
+    buildConstantList(body, constants);
 
     // current graph is used to de-dup names within a single graph
-    scanBlock(graph.block());
-
-    // last param_names.size() arguments to the graph are parameters and not
-    // actual inputs, we will print these as, e.g. self.foo.bar
-    // while we print the true_inputs out as parameters
-    auto true_inputs =
-        graph.inputs().slice(0, graph.inputs().size() - param_names.size());
-    auto param_names_it = param_names.begin();
-    for (auto param : graph.inputs().slice(true_inputs.size())) {
-      assignValue(param, *param_names_it++);
-    }
-    assignValuesToTheirUniqueNames(true_inputs);
-    auto defaults_offset = defaults.begin();
-
-    indent();
-    body_ << "def " << name << "(";
-
-    auto input_iter = true_inputs.begin();
-    // Print the `self` argument
-    if (is_class) {
-      // If this is a class, print the self var without a type annotation,
-      // following Python convention
-      AT_ASSERT(true_inputs.size() > 0);
-      body_ << useOf(*input_iter);
-      ++input_iter;
-
-      AT_ASSERT(!defaults_offset->has_value());
-      ++defaults_offset;
-    } else {
-      // If this is not a class, then we need to insert a "self".
-      body_ << "self";
-    }
-
-    // Print the rest of the arguments
-    for (; input_iter != true_inputs.end(); ++input_iter) {
-      auto input = *input_iter;
-      body_ << ",\n    " << useOf(input) << ": " << input->type()->python_str();
-      if (defaults_offset != defaults.end()) {
-        const c10::optional<IValue>& def = *defaults_offset++;
-        if (def) {
-          printDefaultValue(input->type(), body_, *def);
-        }
-      }
-    }
-
-    // have we use all the provided defaults?
-    AT_ASSERT(defaults_offset == defaults.end());
-
-    body_ << ") -> " << resultType(graph)->python_str() << ":\n";
+    scanBlock(body);
     {
       auto guard = WithIndented();
       // Print initial constant table (most are just inlined into their use,
@@ -1071,19 +1032,52 @@ struct PythonPrintPass {
       }
       // Print body
       printBlock(
-          graph.block(), graph.block()->return_node()->inputs().size() > 0);
-      printNode(graph.block()->return_node(), /*print_const=*/false);
+          body, body->return_node()->inputs().size() > 0);
+      printNode(body->return_node(), /*print_const=*/false);
     }
   }
 
- public:
+public:
+  void printFunction(script::Function& func) {
+    const FunctionSchema& schema = func.getSchema();
+    Graph& graph = *func.graph();
+    used_names_.clear(); // each graph can reuse local names
+
+
+    indent();
+    body_ << "def " << func.name() << "(";
+    auto param_it = graph.inputs().begin();
+    for(const Argument& arg : schema.arguments()) {
+      std::string arg_name = genName(arg.name());
+      if (param_it == graph.inputs().begin()) {
+        // the first argument may omit its type when it is implied by context
+        // the flag is_method_ determines when to do this
+        body_ << arg_name;
+        if (!is_method_) {
+           body_ << ": " << arg.type()->python_str();
+        }
+      } else {
+        body_ << ",\n    " << arg_name << ": " << arg.type()->python_str();
+      }
+      if (arg.default_value()) {
+        printDefaultValue(arg.type(), body_, *arg.default_value());
+      }
+      assignValue(*param_it++, arg_name);
+    }
+
+    body_ << ") -> " << resultType(graph)->python_str() << ":\n";
+    printBody(graph.block());
+  }
+
   PythonPrintPass(
       std::vector<at::Tensor>& tensor_table,
       std::vector<ClassTypePtr>& class_table,
-      bool enforce_importable)
+      bool enforce_importable,
+      bool is_method)
       : tensor_table_(tensor_table),
         class_table_(class_table),
-        enforce_importable_(enforce_importable) {}
+        enforce_importable_(enforce_importable),
+        is_method_(is_method) {}
 
   // TODO: we should consider forcing functions to return a single value
   // instead of handling this tuple logic both in the compiler and the printer
@@ -1096,63 +1090,9 @@ struct PythonPrintPass {
     }
   }
 
-  void printFunction(
-      Graph& graph,
-      const std::string& name,
-      bool is_class,
-      const std::vector<c10::optional<IValue>>& defaults = {},
-      const std::vector<std::string>& param_names = {}) {
-    printFunctionDefinition(graph, name, is_class, defaults, param_names);
-    while (!worklist.empty()) {
-      body_ << "\n\n";
-      auto work = worklist.back();
-      worklist.pop_back();
-      work();
-    }
-  }
-  void printMethod(script::Method& method) {
-    std::unordered_map<script::Slot, QualifiedNamePtr> extra_ivalue_names;
-    createTensorToParameterNameMap(
-        method.owner(), QualifiedName::create("self"), extra_ivalue_names);
-    printMethod(method, /*is_class=*/false, extra_ivalue_names);
-  }
-  void printMethod(
-      script::Method& method,
-      bool is_class,
-      const std::unordered_map<script::Slot, QualifiedNamePtr>&
-          extra_ivalue_names) {
-    std::vector<std::string> ivalue_names =
-        fmap(method.initial_ivalues(), [&](const script::Slot& slot) {
-          return extra_ivalue_names.at(slot)->str();
-        });
-    const std::string& name = method.name();
-    Graph& graph = *method.graph();
-    auto defaults = fmap(
-        method.getSchema().arguments(),
-        [](const Argument& arg) { return arg.default_value(); });
-    printFunction(graph, name, is_class, defaults, ivalue_names);
-  }
-  void printFunction(script::Function& method, bool is_class) {
-    const std::string& name = method.name();
-    Graph& graph = *method.graph();
-    auto defaults = fmap(
-        method.getSchema().arguments(),
-        [](const Argument& arg) { return arg.default_value(); });
-    printFunction(graph, name, is_class, defaults, {});
-  }
-  void printModule(script::Module& module) {
-    std::unordered_map<script::Slot, QualifiedNamePtr> extra_ivalue_names;
-    createTensorToParameterNameMap(
-        module, QualifiedName::create("self"), extra_ivalue_names);
-    for (auto& method : module.get_methods()) {
-      const std::string& name = method->name();
-      // we skip __forked_functions because they actually get inlined into their
-      // callers, exporting them again will lead to more code generated on each
-      // export
-      if (name.find("__forked_function") == 0) {
-        continue;
-      }
-      printMethod(*method, /*is_class=*/false, extra_ivalue_names);
+  void printCompilationUnit(script::CompilationUnit& cu) {
+    for (auto& func : cu.get_functions()) {
+      printFunction(*func);
     }
   }
 
@@ -1161,7 +1101,7 @@ struct PythonPrintPass {
     {
       const auto guard = WithIndented();
       for (auto& method : classType->methods()) {
-        printFunction(*method, /*is_class=*/true);
+        printFunction(*method);
       }
     }
   }
@@ -1173,49 +1113,27 @@ struct PythonPrintPass {
 
 TORCH_API void PythonPrint(
     std::ostream& out,
-    const Graph& graph,
+    const script::Function& func,
+    bool is_method,
     std::vector<at::Tensor>& tensor_table,
     std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable);
+  PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  pp.printFunction(const_cast<Graph&>(graph), "graph", /*is_class=*/false);
+  pp.printFunction(const_cast<script::Function&>(func));
   pp.print(out);
 }
 
 TORCH_API void PythonPrint(
     std::ostream& out,
-    const script::Method& method,
+    const script::CompilationUnit& cu,
+    bool is_method,
     std::vector<at::Tensor>& tensor_table,
     std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable);
+  PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  pp.printMethod(const_cast<script::Method&>(method));
-  pp.print(out);
-}
-
-TORCH_API void PythonPrint(
-    std::ostream& out,
-    const script::Function& callee,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<ClassTypePtr>& class_table,
-    bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  pp.printFunction(const_cast<script::Function&>(callee), /*is_class=*/false);
-  pp.print(out);
-}
-
-TORCH_API void PythonPrint(
-    std::ostream& out,
-    const script::Module& module,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<ClassTypePtr>& class_table,
-    bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  pp.printModule(const_cast<script::Module&>(module));
+  pp.printCompilationUnit(const_cast<script::CompilationUnit&>(cu));
   pp.print(out);
 }
 
@@ -1225,7 +1143,7 @@ TORCH_API void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
-  PythonPrintPass pp(tensor_table, class_table, enforce_importable);
+  PythonPrintPass pp(tensor_table, class_table, enforce_importable, true);
   pp.printClass(classType);
   pp.print(out);
 }
