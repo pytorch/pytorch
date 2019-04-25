@@ -34,6 +34,12 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   return mkldnn_tensor;
 }
 
+// Mkldnn tensor has special non-public format for conv2d weights
+// (dense_to_mkldnn only converts dense tensor to mkldnn tensor with
+// public format). Ideep conv kernel will do implicit reorder if the
+// weight is not already in this optimized format. By the time I'm
+// writing this note, we are seeing ~20% perf cost of doing the
+// on-the-fly reorder.
 Tensor mkldnn_reorder_conv2d_weight(
     const Tensor& self,
     IntArrayRef padding,
