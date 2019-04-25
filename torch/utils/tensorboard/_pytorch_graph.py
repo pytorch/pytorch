@@ -78,6 +78,8 @@ class NodePyIO(NodePy):
 class NodePyOP(NodePy):
     def __init__(self, node_cpp):
         super(NodePyOP, self).__init__(node_cpp, methods_OP)
+        # Replace single quote which causes strange behavior in TensorBoard
+        # TODO: See if we can remove this in the future
         self.attributes = str({k: node_cpp[k] for k in node_cpp.attributeNames()}).replace("'", ' ')
         self.kind = node_cpp.kind()
 
