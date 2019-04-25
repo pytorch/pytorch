@@ -646,14 +646,6 @@ Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
   return std::get<1>(at::legacy::th::_th_sort(self, dim, descending));
 }
 
-std::tuple<Tensor &,Tensor &> topk_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
-  return at::legacy::th::_th_topk_out(values, indices, self, k, dim, largest, sorted);
-}
-
-std::tuple<Tensor,Tensor> topk(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
-  return at::legacy::th::_th_topk(self, k, dim, largest, sorted);
-}
-
 Tensor & renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
   return at::legacy::th::_th_renorm_out(result, self, p, dim, maxnorm);
 }

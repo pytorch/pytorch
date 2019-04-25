@@ -3,6 +3,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
+#include <ATen/LegacyTHFunctions.h>
 
 namespace at {
 namespace native {
@@ -64,6 +65,21 @@ void dim_apply(TensorList tensors, int64_t dim, Fn f) {
       f(it, narrowed_tensors);
     }
   });
+}
+
+template <typename scalar_t, typename Comp, typename Fn>
+void sort_template(
+    TensorAccessor<scalar_t, 1> arr,
+    int64_t k,
+    Comp gt_or_nan,
+    Fn swap_fn) {
+  for (int64_t i = 0; i < k - 1; i++) {
+    for (int64_t j = 0; j < k - 1 - i; j++) {
+      if (gt_or_nan(arr[j], arr[j+1])) {
+         swap_fn(j, j+1);
+      }
+    }
+  }
 }
 
 template <typename scalar_t, typename Comp, typename Fn>
@@ -198,6 +214,87 @@ std::tuple<Tensor, Tensor> kthvalue(
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::kthvalue_out(values, indices, self, k, dim, keepdim);
+  return std::make_tuple(values, indices);
+}
+
+std::tuple<Tensor&, Tensor&> topk_out_cpu(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t k,
+    int64_t dim_,
+    bool largest,
+    bool sorted) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
+  AT_CHECK(
+      k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
+      "selected index k out of range");
+
+  _allocate_or_resize_output_with_indices(values, indices, self, dim_, k);
+  auto tmp_values = self.clone();
+  auto tmp_indices = at::empty(self.sizes(), self.options().dtype(kLong));
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "topk_cpu", [&] {
+    dim_apply(
+        {tmp_values, tmp_indices, values, indices},
+        dim,
+        [&](int64_t i, TensorList tl) {
+          auto tmp_values = tl[0].accessor<scalar_t, 1>();
+          auto tmp_indices = tl[1].accessor<int64_t, 1>();
+          auto mode_values = tl[2].accessor<scalar_t, 1>();
+          auto mode_indices = tl[3].accessor<int64_t, 1>();
+          for (int64_t j = 0; j < tmp_indices.size(0); j++) {
+            tmp_indices[j] = j;
+          }
+          // we want NaN to be sorted as top for numpy compatibility
+          auto cmp = largest ?
+              [](scalar_t x, scalar_t y) -> bool {
+                return ((!_isnan<scalar_t>(x) && _isnan<scalar_t>(y)) || (x < y));
+              } :
+              [](scalar_t x, scalar_t y) -> bool {
+                return ((_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
+              };
+          auto swap = [&](int64_t i, int64_t j) {
+                std::swap(tmp_values[i], tmp_values[j]);
+                std::swap(tmp_indices[i], tmp_indices[j]);
+              };
+          quick_select_template(tmp_values, k - 1, cmp, swap);
+          if (sorted) {
+            sort_template(tmp_values, k, cmp, swap);
+          }
+          for (int64_t ii = 0; ii < k; ii++) {
+            mode_values[ii] = tmp_values[ii];
+            mode_indices[ii] = tmp_indices[ii];
+          }
+        });
+  });
+
+  return std::forward_as_tuple(values, indices);
+}
+
+std::tuple<Tensor&, Tensor&> topk_out(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t k,
+    int64_t dim,
+    bool largest,
+    bool sorted) {
+  if (self.is_cuda()) {
+    return at::legacy::th::_th_topk_out(values, indices, self, k, dim, largest, sorted);
+  } else {
+    return at::native::topk_out_cpu(values, indices, self, k, dim, largest, sorted);
+  }
+}
+
+std::tuple<Tensor, Tensor> topk(
+    const Tensor& self,
+    int64_t k,
+    int64_t dim,
+    bool largest,
+    bool sorted) {
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  at::topk_out(values, indices, self, k, dim, largest, sorted);
   return std::make_tuple(values, indices);
 }
 
