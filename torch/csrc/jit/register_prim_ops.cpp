@@ -429,7 +429,8 @@ RegisterOperators reg(
 
            // Pickle the tensor
            Pickler p;
-           p.start(/*wrap_in_list=*/false);
+           p.pushMetadata();
+           p.start();
            p.addIValue(value);
            p.finish();
 

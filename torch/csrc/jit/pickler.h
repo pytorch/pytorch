@@ -88,8 +88,6 @@ enum PicklerClass : uint8_t {
   TENSOR = 0,
   // List[int]
   INTLIST = 1,
-  // A tensor that is stored entirely in the pickle file
-  LITERAL_TENSOR = 2,
 };
 
 using ::c10::IValue;
@@ -102,9 +100,14 @@ class Pickler {
       : tensor_table_(tensor_table) {}
 
   const std::vector<char>& stack();
-  void start(bool wrap_in_list = true);
+  void start();
   void finish();
   void addIValue(const IValue& ivalue);
+
+  // See torch/serialization.py for details, pushes a magic number, torch
+  // serialization version, and system info to the pickle archive all as
+  // individual pickle programs
+  void pushMetadata();
 
  private:
   void pushDict(const IValue& ivalue);
@@ -124,6 +127,7 @@ class Pickler {
   void pushGlobal(const std::string& name);
   void pushMemoization(const void* item);
   void pushString(const std::string& string);
+  void pushTensorData(const at::Tensor& tensor);
 
   const void* getPointer(const IValue& ivalue);
 

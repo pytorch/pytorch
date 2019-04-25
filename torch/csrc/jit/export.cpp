@@ -120,20 +120,20 @@ class EncoderBase {
  protected:
   // Using std::map instead of std::unordered_map for initializers
   // in EncodeGraph cosntructor so that the order in which initializers
-  // get written to the ONNX graph is always the deterministic and 
-  // predictable. While this is not a ONNX requirement, it is needed 
+  // get written to the ONNX graph is always the deterministic and
+  // predictable. While this is not a ONNX requirement, it is needed
   // for testing purposes in tests that use _export_to_pretty_string()
   // for validating ONNX graphs.
   void EncodeGraph(
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
-      const std::map<std::string, at::Tensor>& initializers = 
+      const std::map<std::string, at::Tensor>& initializers =
         std::map<std::string, at::Tensor>());
 
   void EncodeBlock(
       onnx::GraphProto* graph_proto,
       const Block* block,
-      const std::map<std::string, at::Tensor>& initializers = 
+      const std::map<std::string, at::Tensor>& initializers =
         std::map<std::string, at::Tensor>());
 
   virtual void EncodeTensor(

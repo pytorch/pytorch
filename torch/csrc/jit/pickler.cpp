@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/pickler.h>
+#include <ATen/ATen.h>
 #include <string>
 
 namespace torch {
@@ -27,23 +28,12 @@ const std::vector<char>& Pickler::stack() {
   return stack_;
 }
 
-void Pickler::start(bool wrap_in_list) {
+void Pickler::start() {
   push<OpCode>(OpCode::PROTO);
   push<uint8_t>(PROTOCOL_VERSION);
-
-  // All attributes get pushed into a list and their indices saved in the
-  // module def
-  wrap_in_list_ = wrap_in_list;
-  if (wrap_in_list_) {
-    push<OpCode>(OpCode::EMPTY_LIST);
-    push<OpCode>(OpCode::MARK);
-  }
 }
 
 void Pickler::finish() {
-  if (wrap_in_list_) {
-    push<OpCode>(OpCode::APPENDS);
-  }
   push<OpCode>(OpCode::STOP);
 
   // Add the binary data for all the tensors to be included in the same binary
@@ -52,30 +42,80 @@ void Pickler::finish() {
 
   // Insert storage keys
   if (literal_tensors_.size() > 0) {
-    Pickler p;
-    p.start(/*wrap_in_list=*/false);
-    auto storage_keys = IValue(c10::ivalue::GenericList::create({}));
+    // As another pickle program in the same binary archive, add a list of
+    // keys for each tensor (see torch/serialization.py)
+    start();
     size_t index = 0;
     for (auto tensor : literal_tensors_) {
-      storage_keys.toGenericList()->elements().push_back(std::to_string(index));
+      at::StorageImpl* key = tensor.storage().unsafeGetStorageImpl();
+      auto key_bytes = reinterpret_cast<uint8_t*>(&key);
+      push<OpCode>(OpCode::BINUNICODE);
+      auto size = sizeof(at::StorageImpl*);
+      push<uint32_t>(size);
+      stack_.insert(stack_.end(), key_bytes, key_bytes + size);
       index++;
     }
-    p.addIValue(storage_keys);
-    p.finish();
-    stack_.insert(
-        stack_.end(), p.stack().data(), p.stack().data() + p.stack().size());
+    push<OpCode>(OpCode::STOP);
 
+    // Now dump the tensor binary data
     for (auto tensor : literal_tensors_) {
-      // first dump size
-      auto numel = tensor.numel();
-      auto numel_ptr = reinterpret_cast<const char*>(&numel);
-      stack_.insert(stack_.end(), numel_ptr, numel_ptr + sizeof(numel));
-
-      uint64_t record_size = tensor.element_size() * tensor.numel();
-      auto storage_ptr = reinterpret_cast<const char*>(tensor.storage().data());
-      stack_.insert(stack_.end(), storage_ptr, storage_ptr + record_size);
+      pushTensorData(tensor);
     }
   }
+}
+
+void Pickler::pushTensorData(const at::Tensor& tensor) {
+  // first dump size
+  auto numel = tensor.numel();
+  auto numel_ptr = reinterpret_cast<const char*>(&numel);
+  stack_.insert(stack_.end(), numel_ptr, numel_ptr + sizeof(numel));
+
+  at::Tensor storage_tensor = tensor;
+  // TODO HIP support
+  if (tensor.storage().device_type() == at::DeviceType::CUDA) {
+    // NB: This new tensor is created to support cuda tensors.
+    // Storages can be mutated when converting tensors from cuda to cpu,
+    // and we need a cpu tensor to copy data from.
+    storage_tensor = at::empty({0}, tensor.options())
+                         .set_(
+                             tensor.storage(),
+                             /* storageOffset=*/0,
+                             /* size=*/
+                             {static_cast<int64_t>(tensor.storage().size())},
+                             /* stride=*/{1})
+                         .cpu();
+    AT_ASSERT(
+        storage_tensor.element_size() * storage_tensor.storage().size() ==
+        record_size);
+  }
+
+  uint64_t record_size = tensor.element_size() * tensor.numel();
+  auto storage_ptr = reinterpret_cast<const char*>(tensor.storage().data());
+  stack_.insert(stack_.end(), storage_ptr, storage_ptr + record_size);
+}
+
+void Pickler::pushMetadata() {
+  // Output data to match torch.save, see torch/serialization.py for details
+  // Magic number (0x1950a86a20f9469cfc6c)
+  start();
+  push<OpCode>(OpCode::LONG1);
+  // LONG1 size
+  pushString("\x0a");
+  // LONG1 data
+  pushString("\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19");
+  push<OpCode>(OpCode::STOP);
+
+  // Protocol Version (1001)
+  start();
+  push<OpCode>(OpCode::BININT2);
+  pushString("\xe9\x03");
+  push<OpCode>(OpCode::STOP);
+
+  // sys_info, this isn't actually used in de-serialization so we can leave this
+  // one empty
+  start();
+  push<OpCode>(OpCode::EMPTY_DICT);
+  push<OpCode>(OpCode::STOP);
 }
 
 void Pickler::addIValue(const IValue& ivalue) {
@@ -400,8 +440,7 @@ void Pickler::pushTuple(const IValue& ivalue) {
 
 std::vector<IValue> Unpickler::parse_ivalue_list() {
   run();
-  AT_ASSERT(stack_.size() == 1);
-  return stack_[0].toGenericListRef();
+  return stack_;
 }
 
 double Unpickler::readFloat() {

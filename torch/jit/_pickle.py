@@ -1,9 +1,5 @@
 import pickle
 
-# This flag has torch.load skip looking for a magic number, protocol version,
-# and sys info
-_unpickle_skip_metadata = True
-
 
 class TensorID(object):
     def __setstate__(self, id):
