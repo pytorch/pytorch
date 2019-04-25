@@ -1,6 +1,5 @@
 #pragma once
 #include <c10/util/Exception.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/graph_executor.h>
@@ -334,12 +333,7 @@ struct TORCH_API Module {
     fn(*this);
   }
   /// Enables "training" mode.
-  void train(bool on = true) {
-    for (auto& submod : get_modules()) {
-      submod->train(on);
-    }
-    register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
-  }
+  void train(bool on = true);
   /// Calls train(false) to enable "eval" mode.
   /// Do not override this method, override `train()` instead.
   void eval() {
