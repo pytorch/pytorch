@@ -10,7 +10,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
-#include <ATen/Device.h>
+#include <c10/core/Device.h>
 
 /**
  * Note [Generator]
