@@ -667,11 +667,11 @@ def trace(func,
             _module_class = TopLevelTracedModule
         traced = _module_class(func, **executor_options)
         traced._c._create_method_from_trace('forward', func, example_inputs,
-                                           var_lookup_fn, _force_outplace)
+                                            var_lookup_fn, _force_outplace)
     else:
         name = getattr(func, '__name__', 'forward')
         if name == '<lambda>':
-            name = '_lambda' # make name a valid identifier
+            name = '_lambda'  # make name a valid identifier
         traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                       var_lookup_fn,
                                                       _force_outplace)
@@ -1232,7 +1232,7 @@ if _enabled:
             # createResolutionCallback internally adds 1 to get us to our frame, then
             # we add 1 to get to the proper surrounding scope.
             rcb = _jit_internal.createResolutionCallback(frames_up=1)
-            self._c._define(self, lang, rcb, True)
+            self._c._define(self, lang, rcb)
 
         def copy(self):
             m = ScriptModule()
