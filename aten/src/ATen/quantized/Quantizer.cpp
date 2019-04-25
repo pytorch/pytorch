@@ -18,7 +18,7 @@ QuantizerPtr make_per_tensor_affine_quantizer(
       static_cast<float>(scale), static_cast<uint8_t>(zero_point));
 }
 
-QTensorImpl* get_qtensorimpl(const QTensor& self) {
+QTensorImpl* get_qtensorimpl(const Tensor& self) {
   // TODO: remove this when Variable and Tensor are merged
   AT_ASSERTM(
       !self.is_variable(),
@@ -29,7 +29,7 @@ QTensorImpl* get_qtensorimpl(const QTensor& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-inline QTensor new_qtensor_cpu(
+inline Tensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer) {
@@ -40,7 +40,7 @@ inline QTensor new_qtensor_cpu(
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
   AT_CHECK(isQIntType(typeMetaToScalarType(dtype)),
-           "ScalarType not supported for QTensor in new_qtensor_cpu.");
+           "ScalarType is not supported in new_qtensor_cpu.");
   auto storage = c10::make_intrusive<StorageImpl>(
       dtype,
       nelements,
@@ -76,14 +76,14 @@ qint8 quantize_uint8(float scale, uint8_t zero_point, float value) {
   return static_cast<qint8>(qvalue);
 }
 
-QTensor PerTensorAffineQuantizer::quantize(RealTensor tensor) {
+Tensor PerTensorAffineQuantizer::quantize(Tensor tensor) {
   IntArrayRef sizes = tensor.sizes();
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   AT_CHECK(
       tensor.options().device() == kCPU,
       "quantize only works for CPU backend right now.");
-  QTensor qv = new_qtensor_cpu(
+  Tensor qv = new_qtensor_cpu(
       sizes,
       tensor.options().dtype(at::kQInt8),
       intrusive_from_this());
@@ -110,11 +110,11 @@ QTensor PerTensorAffineQuantizer::quantize(RealTensor tensor) {
   return qv;
 }
 
-RealTensor PerTensorAffineQuantizer::dequantize(QTensor tensor) {
+Tensor PerTensorAffineQuantizer::dequantize(Tensor tensor) {
   std::vector<int64_t> sizes = tensor.sizes().vec();
-  at::TensorOptions real_options = tensor.options().dtype(at::kFloat);
+  at::TensorOptions options = tensor.options().dtype(at::kFloat);
 
-  RealTensor rv = at::empty(sizes, real_options);
+  Tensor rv = at::empty(sizes, options);
   float* rvd = rv.data<float>();
   tensor = tensor.contiguous();
 

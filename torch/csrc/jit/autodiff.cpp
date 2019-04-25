@@ -804,7 +804,14 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     // we create an incorrect sum that doesn't use prev vjp, replace uses, and
     // fix the sum.
     Value* new_vjp = createAutogradAdd(tmp_vjp_in, tmp_vjp_in);
-    new_vjp->node()->moveAfter(tmp_vjp_prev->node());
+    if (tmp_vjp_prev->node()->kind() == prim::Param) {
+      // can't move a node after a block param node
+      new_vjp->node()->moveBefore(
+          *tmp_vjp_prev->node()->owningBlock()->nodes().begin());
+    } else {
+      new_vjp->node()->moveAfter(tmp_vjp_prev->node());
+    }
+
     tmp_vjp_prev->replaceAllUsesWith(new_vjp);
     new_vjp->node()->replaceInput(1, tmp_vjp_prev);
     grad_desc.df_input_vjps.emplace_back(i);
@@ -859,6 +866,5 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   ConstantPooling(grad_desc.df);
   return grad_desc;
 }
-
 } // namespace jit
 } // namespace torch
