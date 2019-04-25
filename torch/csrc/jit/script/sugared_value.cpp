@@ -116,7 +116,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
     if (auto method = classType->getMethod(field)) {
-      return std::make_shared<MethodValue>(getValue(), *method);
+      return std::make_shared<MethodValue>(getValue(), method);
     }
 
     if (!classType->hasAttribute(field)) {
@@ -232,7 +232,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   AT_ASSERT(initMethod);
 
   // Call the init function
-  MethodValue(self, *initMethod).call(loc, m, inputs, attributes, n_binders);
+  MethodValue(self, initMethod).call(loc, m, inputs, attributes, n_binders);
 
   return std::make_shared<SimpleValue>(self);
 }
