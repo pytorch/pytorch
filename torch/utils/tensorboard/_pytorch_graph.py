@@ -39,10 +39,10 @@ class NodeBase(object):
 class NodePy(NodeBase):
     def __init__(self, node_cpp, valid_methods):
         super(NodePy, self).__init__(node_cpp)
-        self.valid_methods = valid_methods[:]
+        valid_methods = valid_methods[:]
         self.inputs = []
 
-        for m in self.valid_methods:
+        for m in valid_methods:
             if m == 'inputs' or m == 'outputs':
                 list_of_node = list(getattr(node_cpp, m)())
                 io_unique_names = []

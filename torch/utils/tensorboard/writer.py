@@ -26,7 +26,8 @@ from .summary import (
 
 
 class FileWriter(object):
-    """Writes `Summary` protocol buffers to event files.
+    """Writes protocol buffers to event files to be consumed by TensorBoard.
+
     The `FileWriter` class provides a mechanism to create an event file in a
     given directory and add summaries and events to it. The class updates the
     file contents asynchronously. This allows a training program to call methods
@@ -36,28 +37,22 @@ class FileWriter(object):
 
     def __init__(self,
                  logdir,
-                 graph=None,
                  max_queue=10,
                  flush_secs=120,
-                 filename_suffix='',
-                 graph_def=None):
+                 filename_suffix=''):
         """Creates a `FileWriter` and an event file.
-        On construction the summary writer creates a new event file in `logdir`.
+        On construction the writer creates a new event file in `logdir`.
         The other arguments to the constructor control the asynchronous writes to
-        the event file:
-        *  `flush_secs`: How often, in seconds, to flush the added summaries
-           and events to disk.
-        *  `max_queue`: Maximum number of summaries or events pending to be
-           written to disk before one of the 'add' calls block.
+        the event file.
+
         Args:
           logdir: A string. Directory where event file will be written.
-          graph: A `Graph` object, such as `sess.graph`.
-          max_queue: Integer. Size of the queue for pending events and summaries.
+          max_queue: Integer. Size of the queue for pending events and
+            summaries before one of the 'add' calls forces a flush to disk.
           flush_secs: Number. How often, in seconds, to flush the
             pending events and summaries to disk.
-          graph_def: DEPRECATED: Use the `graph` argument instead.
+          filename_suffix: A string. Suffix added to all event filenames.
         """
-        logdir = str(logdir)
         self.event_writer = EventFileWriter(
             logdir, max_queue, flush_secs, filename_suffix)
 
@@ -69,20 +64,27 @@ class FileWriter(object):
         """Adds an event to the event file.
         Args:
           event: An `Event` protocol buffer.
+          step: Number. Optional global step value for training process
+            to record with the event.
+          walltime: float. Optional walltime to override the default (current)
+            walltime (from time.time())
         """
         event.wall_time = time.time() if walltime is None else walltime
         if step is not None:
+            # Make sure step is converted from numpy or other formats
+            # since protobuf might not convert depending on version
             event.step = int(step)
         self.event_writer.add_event(event)
 
-    def add_summary(self, summary, global_step=None, walltime=None):
+    def add_summary(self, summary, step=None, walltime=None):
         """Adds a `Summary` protocol buffer to the event file.
         This method wraps the provided summary in an `Event` protocol buffer
         and adds it to the event file.
+
         Args:
           summary: A `Summary` protocol buffer.
-          global_step: Number. Optional global step value to record with the
-            summary.
+          global_step: Number. Optional global step value for training process
+            to record with the summary.
           walltime: float. Optional walltime to override the default (current)
             walltime (from time.time())
         """
@@ -90,7 +92,12 @@ class FileWriter(object):
         self.add_event(event, global_step, walltime)
 
     def add_graph(self, graph_profile, walltime=None):
-        """Adds a `Graph` protocol buffer to the event file.
+        """Adds a `Graph` and step stats protocol buffer to the event file.
+
+        Args:
+          graph_profile: A `Graph` and step stats protocol buffer.
+          walltime: float. Optional walltime to override the default (current)
+            walltime (from time.time())
         """
         graph = graph_profile[0]
         stepstats = graph_profile[1]
@@ -104,6 +111,11 @@ class FileWriter(object):
 
     def add_onnx_graph(self, graph, walltime=None):
         """Adds a `Graph` protocol buffer to the event file.
+
+        Args:
+          graph: A `Graph` protocol buffer.
+          walltime: float. Optional walltime to override the default (current)
+            walltime (from time.time())
         """
         event = event_pb2.Event(graph_def=graph.SerializeToString())
         self.add_event(event, None, walltime)
@@ -131,16 +143,18 @@ class FileWriter(object):
 
 
 class SummaryWriter(object):
-    """Writes `Summary` directly to event files.
-    The `SummaryWriter` class provides a high-level api to create an event file in a
-    given directory and add summaries and events to it. The class updates the
+    """Writes entries directly to event files to be consumed by TensorBoard.
+
+    The `SummaryWriter` class provides a high-level API to create an event file
+    in a given directory and add summaries and events to it. The class updates the
     file contents asynchronously. This allows a training program to call methods
     to add data to the file directly from the training loop, without slowing down
     training.
     """
 
     def __init__(self, log_dir=None, comment='', **kwargs):
-        """
+        """Creates a `SummaryWriter` which uses a `FileWriter` internally.
+
         Args:
             log_dir (string): save location, default is: runs/**CURRENT_DATETIME_HOSTNAME**, which changes after each
               run. Use hierarchical folder structure to compare between runs easily. e.g. 'runs/exp1', 'runs/exp2'
@@ -180,7 +194,6 @@ class SummaryWriter(object):
             v *= 1.1
         self.default_bins = neg_buckets[::-1] + [0] + buckets
         self.scalar_dict = {}
-        self.caffe2_enabled = True
 
     def __append_to_scalar_dict(self, tag, scalar_value, global_step,
                                 timestamp):
@@ -192,7 +205,7 @@ class SummaryWriter(object):
         self.scalar_dict[tag].append(
             [timestamp, global_step, float(make_np(scalar_value))])
 
-    def _check_caffe2(self, item):
+    def _check_caffe2_blob(self, item):
         """
         Caffe2 users have the option of passing a string representing the name of
         a blob in the workspace instead of passing the actual Tensor/array containing
@@ -205,8 +218,7 @@ class SummaryWriter(object):
         workspace.FetchBlob(blob_name)
         workspace.FetchBlobs([blob_name1, blob_name2, ...])
         """
-        # TODO (ml7): Remove caffe2_enabled check when PyTorch 1.0 merges PyTorch and Caffe2
-        return self.caffe2_enabled and isinstance(item, six.string_types)
+        return isinstance(item, six.string_types)
 
     def get_file_writer(self):
         """Returns the default FileWriter instance. Recreates it if closed."""
@@ -232,7 +244,7 @@ class SummaryWriter(object):
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time()) of event
         """
-        if self._check_caffe2(scalar_value):
+        if self._check_caffe2_blob(scalar_value):
             scalar_value = workspace.FetchBlob(scalar_value)
         self.get_file_writer().add_summary(
             scalar(tag, scalar_value), global_step, walltime)
@@ -265,7 +277,7 @@ class SummaryWriter(object):
             else:
                 fw = FileWriter(logdir=fw_tag)
                 self.all_writers[fw_tag] = fw
-            if self._check_caffe2(scalar_value):
+            if self._check_caffe2_blob(scalar_value):
                 scalar_value = workspace.FetchBlob(scalar_value)
             fw.add_summary(scalar(main_tag, scalar_value),
                            global_step, walltime)
@@ -294,7 +306,7 @@ class SummaryWriter(object):
               other options in: https://docs.scipy.org/doc/numpy/reference/generated/numpy.histogram.html
             walltime (float): Optional override default walltime (time.time()) of event
         """
-        if self._check_caffe2(values):
+        if self._check_caffe2_blob(values):
             values = workspace.FetchBlob(values)
         if isinstance(bins, six.string_types) and bins == 'tensorflow':
             bins = self.default_bins
@@ -347,7 +359,7 @@ class SummaryWriter(object):
             Tensor with :math:`(1, H, W)`, :math:`(H, W)`, :math:`(H, W, 3)` is also suitible as long as
             corresponding ``dataformats`` argument is passed. e.g. CHW, HWC, HW.
         """
-        if self._check_caffe2(img_tensor):
+        if self._check_caffe2_blob(img_tensor):
             img_tensor = workspace.FetchBlob(img_tensor)
         self.get_file_writer().add_summary(
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
@@ -366,7 +378,7 @@ class SummaryWriter(object):
             img_tensor: Default is :math:`(N, 3, H, W)`. If ``dataformats`` is specified, other shape will be
             accepted. e.g. NCHW or NHWC.
         """
-        if self._check_caffe2(img_tensor):
+        if self._check_caffe2_blob(img_tensor):
             img_tensor = workspace.FetchBlob(img_tensor)
         self.get_file_writer().add_summary(
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
@@ -388,9 +400,9 @@ class SummaryWriter(object):
             box_tensor: (torch.Tensor, numpy.array, or string/blobname): NX4,  where N is the number of
             boxes and each 4 elememts in a row represents (xmin, ymin, xmax, ymax).
         """
-        if self._check_caffe2(img_tensor):
+        if self._check_caffe2_blob(img_tensor):
             img_tensor = workspace.FetchBlob(img_tensor)
-        if self._check_caffe2(box_tensor):
+        if self._check_caffe2_blob(box_tensor):
             box_tensor = workspace.FetchBlob(box_tensor)
         self.get_file_writer().add_summary(image_boxes(
             tag, img_tensor, box_tensor, dataformats=dataformats, **kwargs), global_step, walltime)
@@ -441,7 +453,7 @@ class SummaryWriter(object):
         Shape:
             snd_tensor: :math:`(1, L)`. The values should lie between [-1, 1].
         """
-        if self._check_caffe2(snd_tensor):
+        if self._check_caffe2_blob(snd_tensor):
             snd_tensor = workspace.FetchBlob(snd_tensor)
         self.get_file_writer().add_summary(
             audio(tag, snd_tensor, sample_rate=sample_rate), global_step, walltime)
@@ -497,17 +509,11 @@ class SummaryWriter(object):
             self.get_file_writer().add_graph(graph(model, input_to_model, verbose, **kwargs))
         else:
             # Caffe2 models do not have the 'forward' method
-            if not self.caffe2_enabled:
-                # TODO (ml7): Remove when PyTorch 1.0 merges PyTorch and Caffe2
-                return
             from caffe2.proto import caffe2_pb2
             from caffe2.python import core
             from ._caffe2_graph import (
                 model_to_graph_def, nets_to_graph_def, protos_to_graph_def
             )
-            # notimporterror should be already handled when checking self.caffe2_enabled
-
-            '''Write graph to the summary. Check model type and handle accordingly.'''
             if isinstance(model, list):
                 if isinstance(model[0], core.Net):
                     current_graph = nets_to_graph_def(
@@ -515,8 +521,8 @@ class SummaryWriter(object):
                 elif isinstance(model[0], caffe2_pb2.NetDef):
                     current_graph = protos_to_graph_def(
                         model, **kwargs)
-            # Handles cnn.CNNModelHelper, model_helper.ModelHelper
             else:
+                # Handles cnn.CNNModelHelper, model_helper.ModelHelper
                 current_graph = model_to_graph_def(
                     model, **kwargs)
             event = event_pb2.Event(
