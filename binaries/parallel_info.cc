@@ -14,11 +14,6 @@
  * limitations under the License.
  */
 
-// This script converts the MNIST dataset to leveldb.
-// The MNIST dataset could be downloaded at
-//    http://yann.lecun.com/exdb/mnist/
-
-
 #include "ATen/Parallel.h"
 
 #include <iostream>
