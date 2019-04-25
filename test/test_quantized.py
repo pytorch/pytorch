@@ -143,8 +143,8 @@ class TestQuantizedFC(unittest.TestCase):
     """Tests the correctness of the quantized::fc op."""
 
     def test_qfc(self):
-        qfc_packed = torch.ops.quantized.fbgemm_fc_packed_prepack
-        qfc = torch.ops.quantized.fbgemm_fc_packed
+        qfc_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qfc = torch.ops.quantized.fbgemm_linear
 
         batch_size = 4
         input_channels = 16
@@ -193,7 +193,7 @@ class TestQuantizedFC(unittest.TestCase):
         Y_q_ref = qfc_ref(X_q.int_repr().numpy(), X_scale, X_zp, W_q.int_repr().numpy(), W_scale, W_zp, b_q.numpy(), Y_scale, Y_zp)
 
         # Weight prepacking operator for quantized FC
-        W_prepack = qfc_packed(W_q)
+        W_prepack = qfc_prepack(W_q)
         # Quantized FC operator with prepacked weight
         Y_q = qfc(X_q, W_prepack, b_q, Y_scale, Y_zp)
 
@@ -204,8 +204,8 @@ class TestQuantizedFC(unittest.TestCase):
         np.testing.assert_equal(Y_q_ref, Y_q.int_repr().numpy())
 
     def test_qfcrelu(self):
-        qfc_packed = torch.ops.quantized.fbgemm_fc_packed
-        qfcrelu = torch.ops.quantized.fbgemm_fcrelu
+        qfc_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qfcrelu = torch.ops.quantized.fbgemm_linear_relu
 
         batch_size = 4
         input_channels = 16
@@ -255,7 +255,7 @@ class TestQuantizedFC(unittest.TestCase):
         Y_q_ref[Y_q_ref < Y_zp] = 0
 
         # Weight prepacking operator for quantized FC
-        W_prepack = qfc_packed(W_q)
+        W_prepack = qfc_prepack(W_q)
         # Quantized FC operator with prepacked weight
         Y_q = qfcrelu(X_q, W_prepack, b_q, Y_scale, Y_zp)
 
