@@ -540,19 +540,32 @@ class BCEWithLogitsLoss(_Loss):
     between 0 and 1.
 
     It's possible to trade off recall and precision by adding weights to positive examples.
-    In this case the loss can be described as:
+    In the case of multi-label classification the loss can be described as:
 
     .. math::
-        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_n \left[ p_n y_n \cdot \log \sigma(x_n)
-        + (1 - y_n) \cdot \log (1 - \sigma(x_n)) \right],
+        \ell_c(x, y) = L_c = \{l_{1,c},\dots,l_{N,c}\}^\top, \quad
+        l_{n,c} = - w_{n,c} \left[ p_c y_{n,c} \cdot \log \sigma(x_{n,c})
+        + (1 - y_{n,c}) \cdot \log (1 - \sigma(x_{n,c})) \right],
 
-    where :math:`p_n` is the weight of the positive class for sample :math:`n` in the batch.
-    :math:`p_n > 1` increases the recall, :math:`p_n < 1` increases the precision.
+    where :math:`c` is the class number (:math:`c > 1` for multi-label binary classification,
+    :math:`c = 1` for single-label binary classification),
+    :math:`n` is the number of the sample in the batch and
+    :math:`p_c` is the weight of the positive answer for the class :math:`c`.
+
+    :math:`p_c > 1` increases the recall, :math:`p_c < 1` increases the precision.
 
     For example, if a dataset contains 100 positive and 300 negative examples of a single class,
     then `pos_weight` for the class should be equal to :math:`\frac{300}{100}=3`.
     The loss would act as if the dataset contains :math:`3\times 100=300` positive examples.
+
+    Examples::
+
+        >>> target = torch.ones([10, 64], dtype=torch.float32)  # 64 classes, batch size = 10
+        >>> output = torch.full([10, 64], 0.999)  # A prediction (logit)
+        >>> pos_weight = torch.ones([64])  # All weights are equal to 1
+        >>> criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        >>> criterion(output, target)  # -log(sigmoid(0.999))
+        tensor(0.3135)
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/ArrayRef.h>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -45,6 +46,10 @@ class MemoryDAG {
   bool mayContainAlias(const Element* a, const Element* b) const;
   bool mayContainAlias(Element* a, Element* b) const;
 
+  bool mayContainAlias(
+      const at::ArrayRef<Element*>& a,
+      const at::ArrayRef<Element*>& b) const;
+
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`?
   //
@@ -86,6 +91,9 @@ class MemoryDAG {
   }
 
  private:
+  bool memoryLocationOverlap(
+      const std::unordered_set<const Element*>& a,
+      const std::unordered_set<const Element*>& b) const;
   bool mayAliasImpl(const Element* a, const Element* b) const;
   bool mayContainAliasImpl(const Element* contained, const Element* container)
       const;
