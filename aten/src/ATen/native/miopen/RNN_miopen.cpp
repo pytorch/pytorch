@@ -264,6 +264,124 @@ int64_t get_num_weights(miopenHandle_t handle, const RNNDescriptor& rnn_desc,
     return weight_size / element_size;
 }
 
+int64_t _num_linear_layers(miopenRNNMode_t mode) {
+	switch(mode) {
+		case miopenLSTM:
+			return 8;
+		case miopenGRU:
+			return 6;
+		case miopenRNNRELU:
+			return 2;
+		case miopenRNNTANH:
+			return 2;
+		default:
+			AT_ERROR("Unknown miopen RNN mode : ", mode);
+	}
+}
+
+std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, const RNNDescriptorParams& rnn,
+					const RNNDescriptor& rnn_desc, const TensorDescriptor& x_desc, const FilterDescriptor& w_desc,
+					const Tensor& weight_buf)
+{
+	/*TODO:
+		1. implement _num_linear_layers method. [Done]
+		2. Find equivalent to cudnnGetLinearMatrixParams and cudnnGetRNNLinearLayerBiasParams. (mioepnGetLayerParams, miopenGetBiasParams.) [Done]
+		3. 
+	*/
+	std::vector<Tensor> params;
+	int64_t num_linear_layers = _num_linear_layers(rnn.mode);
+	int64_t num_layers = rnn.num_directions() * rnn.num_layers;
+	size_t cur_offset = 0;
+	size_t global_layer_params_count = 0;
+	auto miopen_param_methods = { miopenGetRNNLayerParam, miopenGetRNNLayerBias};
+	auto miopen_param_size_methods = {miopenGetRNNLayerParamSize, miopenGetRNNLayerBiasSize};
+
+	for (int64_t layer=0; layer < num_layers; layer++) {
+		size_t layer_params_count = 0;
+		//Get all the weight parameters.
+		for(int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
+			FilterDescriptor lin_linear_mat_desc;
+			void* matrix_pointer;
+			size_t param_size;
+			MIOPEN_CHECK(miopenGetRNNLayerParamSize(handle, rnn_desc.desc(), layer, x_desc.desc(), linear_id, &param_size));
+			MIOPEN_CHECK(miopenGetRNNLayerParam(handle, rnn_desc.desc(), layer, x_desc.desc(), w_desc.desc(), weight_buf.data_ptr(), 
+													lienar_id, lin_linear_mat_desc.mut_desc(), matrix_pointer));
+			miopenDataType_t data_type;
+			int nb_dims;
+			constexpr int min_dim = 3;
+			//Tensor filter_dim_a = at::empty(min_dim, at::InitialTensorOptions().dtype(kInt));
+			//Tensor stride_dim_a = at::empty(min_dim, at::InitialTensorOptions().dtype(kInt));
+			std::array<int,3> matDims {1,1,1};
+			std::array<int,3> strideDims {1,1,1};
+			MIOPEN_CHECK(miopenGetTensorDescriptor(lin_linear_mat_desc.desc(), &data_type, matDims.data(), strideDims.data()));
+
+			auto elem_size = dataSize(getMiopenDataType(weight_buf));
+			auto offset_bytes = (char *) matrix_pointer - (char *) weight_buf.data_ptr();
+			AT_ASSERTM(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
+			size_t offset = offset_bytes / elem_size;
+
+			int mat_numel = matDims[0] * matDims[1] * matDims[2];
+			if (linear_id == 0 || linear_id == num_linear_layers / 2) {
+				std::initializer_list<int64_t> size = {mat_numel * num_linear_layers / 2, 1};
+
+				//Generate new parameter tensor which is a view into the weight_buf.
+				Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
+				params.emplace_back(std::move(param));
+				layer_params_count++;
+			} else {
+				AT_ASSERTM(cur_offset == offset, "cur_offset = ", cur_offset, " ; offset = ", offset);
+			}
+
+			cur_offset = offset + mat_numel;
+		}
+
+		//Get all the bias parameters.
+		for(int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
+			FilterDescriptor lin_linear_mat_desc;
+			void* matrix_pointer;
+			size_t param_size;
+			MIOPEN_CHECK(miopenGetRNNLayerBiasSize(handle, rnn_desc.desc(), layer, x_desc.desc(), linear_id, &param_size));
+			MIOPEN_CHECK(miopenGetRNNLayerBias(handle, rnn_desc.desc(), layer, x_desc.desc(), w_desc.desc(), weight_buf.data_ptr(), 
+													lienar_id, lin_linear_mat_desc.mut_desc(), matrix_pointer));
+			miopenDataType_t data_type;
+			int nb_dims;
+			constexpr int min_dim = 3;
+			//Tensor filter_dim_a = at::empty(min_dim, at::InitialTensorOptions().dtype(kInt));
+			//Tensor stride_dim_a = at::empty(min_dim, at::InitialTensorOptions().dtype(kInt));
+			std::array<int,3> matDims {1,1,1};
+			std::array<int,3> strideDims {1,1,1};
+			MIOPEN_CHECK(miopenGetTensorDescriptor(lin_linear_mat_desc.desc(), &data_type, matDims.data(), strideDims.data()));
+
+			auto elem_size = dataSize(getMiopenDataType(weight_buf));
+			auto offset_bytes = (char *) matrix_pointer - (char *) weight_buf.data_ptr();
+			AT_ASSERTM(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
+			size_t offset = offset_bytes / elem_size;
+
+			int mat_numel = matDims[0] * matDims[1] * matDims[2];
+			if (linear_id == 0 || linear_id == num_linear_layers / 2) {
+				std::initializer_list<int64_t> size = {mat_numel * num_linear_layers / 2, 1};
+
+				//Generate new parameter tensor which is a view into the weight_buf.
+				Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
+				params.emplace_back(std::move(param));
+				layer_params_count++;
+			} else {
+				AT_ASSERTM(cur_offset == offset, "cur_offset = ", cur_offset, " ; offset = ", offset);
+			}
+
+			cur_offset = offset + mat_numel;
+		}
+
+		if (layer == 0) {
+			global_layer_params_count = layer_params_count;
+		} else {
+			 AT_ASSERTM(global_layer_params_count == layer_params_count,  "global_layer_params_count = ", global_layer_params_count, "; layer_params_count = ", layer_params_count);
+		}
+	}
+
+	return std::make_pair(params, global_layer_params_count);
+}
+
 std::vector<int64_t> _input_size(const TensorDescriptorListParams& tensors) {
 	if (tensors.is_input_packed()) {
 		return {tensors.batch_sizes_sum, tensors.input_size};
@@ -391,6 +509,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
 
     RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
+    //TODO: Need to implement get_parameters that gets params and params_stride0.
     FilterDescriptor w_desc;
     if (!weight_buf.defined()) {
     	auto num_weights = get_num_weights(handle, descs.rnn_desc(), descs.x_descs[0], datatype);
