@@ -2494,6 +2494,12 @@
   dispatch:
     CPU: dense_to_mkldnn
 
+- func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1) -> Tensor
+  variants: function
+  python_module: nn
+  dispatch:
+    MkldnnCPU: mkldnn_reorder_conv2d_weight
+
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
 
 - func: quantize_linear(Tensor self, float scale, int zero_point) -> Tensor
