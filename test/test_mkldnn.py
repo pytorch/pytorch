@@ -109,6 +109,45 @@ class TestMkldnn(TestCase):
                     conv2d(x),
                     mkldnn_conv2d(x.to_mkldnn()).to_dense())
 
+    def test_relu(self):
+        x = torch.randn((4, 5), dtype=torch.float32) * 10
+        self.assertEqual(torch.relu(x), torch.relu(x.to_mkldnn()).to_dense())
+
+    def test_relu_(self):
+        x1 = torch.randn((4, 5), dtype=torch.float32) * 10
+        x2 = x1.clone().to_mkldnn()
+        self.assertEqual(torch.relu_(x1), torch.relu_(x2).to_dense())
+
+    def test_max_pool2d(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+        x = torch.randn(N, C, 64, 64, dtype=torch.float32) * 10
+
+        max_pool2d = torch.nn.MaxPool2d(
+            kernel_size=3,
+            stride=2,
+            padding=1)
+
+        self.assertEqual(
+            max_pool2d(x),
+            max_pool2d(x.to_mkldnn()).to_dense())
+
+    def test_avg_pool2d(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+        x = torch.randn(N, C, 64, 64, dtype=torch.float32) * 10
+
+        for count_include_pad in [True, False]:
+            avg_pool2d = torch.nn.AvgPool2d(
+                kernel_size=3,
+                stride=2,
+                padding=1,
+                count_include_pad=count_include_pad)
+
+            self.assertEqual(
+                avg_pool2d(x),
+                avg_pool2d(x.to_mkldnn()).to_dense())
+
 
 if __name__ == '__main__':
     run_tests()
