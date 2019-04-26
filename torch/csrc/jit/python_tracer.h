@@ -9,6 +9,11 @@
 
 namespace torch {
 namespace jit {
+
+namespace script {
+  struct Module;
+}
+
 namespace tracer {
 void initPythonTracerBindings(PyObject* module);
 
@@ -24,7 +29,7 @@ std::shared_ptr<Graph> createGraphByTracing(
     TypedStack inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
-    const c10::optional<size_t>& num_real_inputs = c10::nullopt);
+    const std::shared_ptr<script::Module>& self = nullptr);
 } // namespace tracer
 } // namespace jit
 } // namespace torch
