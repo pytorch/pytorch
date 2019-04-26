@@ -51,15 +51,15 @@ static void upsample_trilinear3d_out_frame(
     }
     return;
   }
-  const scalar_t rdepth = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t rdepth = area_pixel_compute_scale<scalar_t>(
       input_depth, output_depth, align_corners);
-  const scalar_t rheight = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t rheight = area_pixel_compute_scale<scalar_t>(
       input_height, output_height, align_corners);
-  const scalar_t rwidth = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
       input_width, output_width, align_corners);
   for (int64_t t2 = 0; t2 < output_depth; ++t2) {
-    const scalar_t t1r = linear_upsample_compute_source_index<scalar_t>(
-        rdepth, t2, align_corners);
+    const scalar_t t1r = area_pixel_compute_source_index<scalar_t>(
+        rdepth, t2, align_corners, /*cubic=*/false);
 
     const int64_t t1 = t1r;
     const int64_t t1p = (t1 < input_depth - 1) ? 1 : 0;
@@ -67,8 +67,8 @@ static void upsample_trilinear3d_out_frame(
     const scalar_t t0lambda = static_cast<scalar_t>(1.) - t1lambda;
 
     for (int64_t h2 = 0; h2 < output_height; ++h2) {
-      const scalar_t h1r = linear_upsample_compute_source_index<scalar_t>(
-          rheight, h2, align_corners);
+      const scalar_t h1r = area_pixel_compute_source_index<scalar_t>(
+          rheight, h2, align_corners, /*cubic=*/false);
 
       const int64_t h1 = h1r;
       const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
@@ -76,8 +76,8 @@ static void upsample_trilinear3d_out_frame(
       const scalar_t h0lambda = static_cast<scalar_t>(1.) - h1lambda;
 
       for (int64_t w2 = 0; w2 < output_width; ++w2) {
-        const scalar_t w1r = linear_upsample_compute_source_index<scalar_t>(
-            rwidth, w2, align_corners);
+        const scalar_t w1r = area_pixel_compute_source_index<scalar_t>(
+            rwidth, w2, align_corners, /*cubic=*/false);
 
         const int64_t w1 = w1r;
         const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
@@ -158,34 +158,34 @@ static void upsample_trilinear3d_backward_out_frame(
     }
     return;
   }
-  const scalar_t rdepth = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t rdepth = area_pixel_compute_scale<scalar_t>(
       input_depth, output_depth, align_corners);
 
-  const scalar_t rheight = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t rheight = area_pixel_compute_scale<scalar_t>(
       input_height, output_height, align_corners);
 
-  const scalar_t rwidth = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
       input_width, output_width, align_corners);
 
   for (int64_t t2 = 0; t2 < output_depth; ++t2) {
-    const scalar_t t1r = linear_upsample_compute_source_index<scalar_t>(
-        rdepth, t2, align_corners);
+    const scalar_t t1r = area_pixel_compute_source_index<scalar_t>(
+        rdepth, t2, align_corners, /*cubic=*/false);
     const int64_t t1 = t1r;
     const int64_t t1p = (t1 < input_depth - 1) ? 1 : 0;
     const scalar_t t1lambda = t1r - t1;
     const scalar_t t0lambda = static_cast<scalar_t>(1.) - t1lambda;
 
     for (int64_t h2 = 0; h2 < output_height; ++h2) {
-      const scalar_t h1r = linear_upsample_compute_source_index<scalar_t>(
-          rheight, h2, align_corners);
+      const scalar_t h1r = area_pixel_compute_source_index<scalar_t>(
+          rheight, h2, align_corners, /*cubic=*/false);
       const int64_t h1 = h1r;
       const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
       const scalar_t h1lambda = h1r - h1;
       const scalar_t h0lambda = static_cast<scalar_t>(1.) - h1lambda;
 
       for (int64_t w2 = 0; w2 < output_width; ++w2) {
-        const scalar_t w1r = linear_upsample_compute_source_index<scalar_t>(
-            rwidth, w2, align_corners);
+        const scalar_t w1r = area_pixel_compute_source_index<scalar_t>(
+            rwidth, w2, align_corners, /*cubic=*/false);
         const int64_t w1 = w1r;
         const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
         const scalar_t w1lambda = w1r - w1;
