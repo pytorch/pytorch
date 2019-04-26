@@ -45,7 +45,6 @@ Reducer::Reducer(
     : replicas_(std::move(replicas)),
       process_group_(std::move(process_group)),
       expect_autograd_hooks_(false),
-      has_queued_final_callback_(false),
       has_marked_unused_parameters_(false),
       next_bucket_(0),
       backward_stats_base_(0) {
@@ -229,10 +228,10 @@ void Reducer::mark_variable_ready(
     }
   }
 
-  // Autograd callbacks can only be registered while the engine is running.
-  // Register this reducer's final callback once per backward pass.
-  if (!has_queued_final_callback_ && called_from_autograd) {
-    has_queued_final_callback_ = true;
+  // Queue function to finalize once the final bucket was marked ready.
+  if (next_bucket_ == buckets_.size()) {
+    // Autograd callbacks can only be registered while the engine is running.
+    AT_ASSERT(called_from_autograd);
     torch::autograd::Engine::get_default_engine().queue_callback(
         [=] { this->finalize_backward(); });
   }
@@ -377,7 +376,6 @@ void Reducer::prepare_for_backward(
   std::vector<torch::autograd::Function*> queue;
 
   // Reset accounting.
-  has_queued_final_callback_ = false;
   has_marked_unused_parameters_ = true;
   expect_autograd_hooks_ = true;
   next_bucket_ = 0;
