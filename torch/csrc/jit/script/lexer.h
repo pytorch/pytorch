@@ -4,6 +4,8 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/script/strtod.h>
 #include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <ATen/core/Macros.h>
 #include <algorithm>
 #include <clocale>
 #include <cstdlib>
