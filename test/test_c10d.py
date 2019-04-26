@@ -1468,6 +1468,81 @@ class ProcessGroupNCCLTest(TestCase):
             for s_idx, t in enumerate(device_ts):
                 self.assertEqual(torch.Tensor([s_idx]), t)
 
+    def test_reduce_scatter_ops(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def reduce_scatter(outputs, input_lists, op):
+            opts = c10d.ReduceScatterOptions()
+            opts.reduceOp = op
+            work = pg.reduce_scatter(outputs, input_lists, opts)
+            work.wait()
+
+        virtual_rank = self.rank * self.world_size
+        virtual_world_size = self.num_gpus * self.world_size
+
+        output = [
+            torch.Tensor([0]).cuda(i)
+            for i in range(self.num_gpus)
+        ]
+
+        #           0                   1                   2
+        #   0   [0..11]             [1..12]
+        #   1   [3..14]
+        #   2
+        #   3
+
+        # Sum
+        tensor_lists = [
+            [
+                torch.Tensor([self.rank * self.num_gpus + i + j]).cuda(i)
+                for j in range(virtual_world_size)
+            ]
+            for i in range(self.num_gpus)
+        ]
+
+        reduce_scatter(output, tensor_lists, c10d.ReduceOp.SUM)
+
+        for i in range(self.num_gpus):
+            expected = torch.Tensor([
+                float(self.num_gpus * (self.num_gpus - 1) / 2) +
+                (virtual_rank + i) * virtual_world_size
+            ])
+            self.assertEqual(expected, output[i])
+
+        # Min
+        reduce_scatter(output, tensor_lists, c10d.ReduceOp.MIN)
+
+        for i in range(self.num_gpus):
+            expected = torch.Tensor([self.rank * self.world_size + i])
+            self.assertEqual(expected, output[i])
+
+        # Max
+        reduce_scatter(output, tensor_lists, c10d.ReduceOp.MAX)
+
+        for i in range(self.num_gpus):
+            expected = torch.Tensor(
+                [self.rank * self.world_size + i + virtual_world_size - 1]
+            )
+            self.assertEqual(expected, output[i])
+
+        # Product
+        tensor_lists = [
+            [
+                torch.Tensor([
+                    (self.rank * self.num_gpus + i + j) % virtual_world_size + 1
+                ]).cuda(i)
+                for j in range(virtual_world_size)
+            ]
+            for i in range(self.num_gpus)
+        ]
+
+        reduce_scatter(output, tensor_lists, c10d.ReduceOp.PRODUCT)
+
+        for i in range(self.num_gpus):
+            expected = torch.Tensor([float(math.factorial(virtual_world_size))])
+            self.assertEqual(expected, output[i])
+
     def test_barrier(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
