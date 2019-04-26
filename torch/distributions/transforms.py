@@ -357,7 +357,7 @@ class SigmoidTransform(Transform):
         return y.log() - (-y).log1p()
 
     def log_abs_det_jacobian(self, x, y):
-        return -(y.reciprocal() + (1 - y).reciprocal()).log()
+        return -torch.log(1e-6 + y.reciprocal() + (1 - y).reciprocal())
 
 
 class AbsTransform(Transform):
