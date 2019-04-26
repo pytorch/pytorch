@@ -664,7 +664,7 @@ std::pair<void*, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
         "Storage tensor size did not match record size");
   }
 
-  return std::make_pair(tensor.storage().data(), record_size);
+  return std::make_pair(storage_tensor.storage().data(), record_size);
 }
 
 uint64_t getTensorKey(const at::Tensor& tensor) {
