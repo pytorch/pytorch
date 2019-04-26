@@ -49,12 +49,13 @@
 // where & and * represent the C-style address-of and indirection operations.
 
 #include <ATen/native/Indexing.h>
+#include <ATen/native/IndexingUtils.h>
 
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHFunctions.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/native/TensorIterator.h>
+//#include <aten/expandutils.h>
+//#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
 #include <functional>
@@ -66,16 +67,16 @@ namespace at { namespace native {
 DEFINE_DISPATCH(index_stub);
 DEFINE_DISPATCH(index_put_stub);
 
-[[noreturn]]
+/*[[noreturn]]
 static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, int64_t maskIdx) {
   std::stringstream ss;
   ss << "The shape of the mask " << mask.sizes() << " at index " << maskIdx;
   ss << " does not match the shape of the indexed tensor " << self.sizes();
   ss << " at index " << idx;
   AT_INDEX_ERROR(ss.str());
-}
+}*/
 
-static void checkIndexTensorTypes(TensorList indices) {
+/*static void checkIndexTensorTypes(TensorList indices) {
   for (auto& tensor : indices) {
     if (tensor.defined()) {
       auto scalarType = tensor.scalar_type();
@@ -84,9 +85,9 @@ static void checkIndexTensorTypes(TensorList indices) {
       }
     }
   }
-}
+}*/
 
-static std::vector<Tensor> expandTensors(const Tensor & self, TensorList indices) {
+/*static std::vector<Tensor> expandTensors(const Tensor & self, TensorList indices) {
   // Expands ByteTensor (masks) or BoolTensor (masks) into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (auto & index : indices) {
@@ -116,9 +117,9 @@ static std::vector<Tensor> expandTensors(const Tensor & self, TensorList indices
     }
   }
   return result;
-}
+}*/
 
-static bool hasContiguousSubspace(TensorList tl) {
+/*static bool hasContiguousSubspace(TensorList tl) {
   // true if all the non-null tensors are adjacent
   auto isDefined = [](const Tensor & tensor){ return tensor.defined(); };
   auto isNull = [](const Tensor & tensor){ return !tensor.defined(); };
@@ -126,7 +127,7 @@ static bool hasContiguousSubspace(TensorList tl) {
   auto stop = std::find_if(tl.rbegin(), tl.rend(), isDefined);
   auto it = std::find_if(start, stop.base(), isNull);
   return it == stop.base();
-}
+}*/
 
 // Transposes the tensor and indices together so that all the non-null indices
 // index the first k dimensions of the tensor. Returns the transposed tensor
@@ -134,7 +135,7 @@ static bool hasContiguousSubspace(TensorList tl) {
 //  transposeToFront(tensor, {nullptr, a, nullptr, b})
 // returns
 //  tensor.permute([1, 3, 0, 2]), {a, b, nullptr, nullptr}
-static std::tuple<Tensor, std::vector<Tensor>>
+/*static std::tuple<Tensor, std::vector<Tensor>>
 transposeToFront(Tensor self, TensorList indices) {
   std::vector<int64_t> dims;
   std::vector<Tensor> transposedIndices;
@@ -152,9 +153,9 @@ transposeToFront(Tensor self, TensorList indices) {
     }
   }
   return std::make_tuple(self.permute(dims), std::move(transposedIndices));
-}
+}*/
 
-static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
+/*static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
   // computes the stride as if tensor were contigous
   auto sizes = tensor.sizes();
   std::vector<int64_t> stride(tensor.dim());
@@ -240,8 +241,8 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   }
   return linearIndex;
 }
-
-static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) {
+*/
+/*static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) {
   checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
@@ -258,7 +259,7 @@ static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) 
   }
   auto linearIndex = computeLinearIndex(self, indices);
   return std::make_tuple(self, linearIndex);
-}
+}*/
 
 static bool all_strides_match(TensorList tensors) {
   AT_ASSERT(tensors.size() >= 1);
@@ -271,7 +272,7 @@ static bool all_strides_match(TensorList tensors) {
   return true;
 }
 
-static std::string shapes_as_str(TensorList tensors) {
+/*static std::string shapes_as_str(TensorList tensors) {
   std::ostringstream os;
   bool first = true;
   for (auto& tensor : tensors) {
@@ -284,9 +285,9 @@ static std::string shapes_as_str(TensorList tensors) {
     }
   }
   return os.str();
-}
+}*/
 
-struct AdvancedIndex {
+/*struct AdvancedIndex {
   AdvancedIndex(const Tensor& src, TensorList indices);
 
   Tensor src;
@@ -295,7 +296,7 @@ struct AdvancedIndex {
   DimVector indexed_strides;
   int64_t dims_before;
   int64_t dims_after;
-};
+};*/
 
 // Replace indexed dimensions in src with stride 0 and the size of the result tensor.
 // The offset in these dimensions is computed by the kernel using the index tensor's
@@ -375,7 +376,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   }
 }
 
-static AdvancedIndex make_info(Tensor self, TensorList orig) {
+/*static AdvancedIndex make_info(Tensor self, TensorList orig) {
   checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
@@ -402,7 +403,7 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
     }
   }
   return AdvancedIndex(self, indices);
-}
+}*/
 
 static std::unique_ptr<TensorIterator> make_index_iterator(const AdvancedIndex& info) {
   auto builder = TensorIterator::Builder();
@@ -415,7 +416,7 @@ static std::unique_ptr<TensorIterator> make_index_iterator(const AdvancedIndex& 
   return builder.build();
 }
 
-static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
+/*static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
   if (!is_expandable_to(value.sizes(), info.src.sizes())) {
     AT_ERROR("shape mismatch: value tensor of shape ", value.sizes(),
              " cannot be broadcast to indexing result of shape ", info.src.sizes());
@@ -429,7 +430,7 @@ static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedInd
     builder.add_input(index);
   }
   return builder.build();
-}
+}*/
 
 Tensor index(const Tensor & self, TensorList indices) {
   if (indices.size() > (size_t)self.dim()) {
@@ -446,16 +447,16 @@ Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, 
   return self.clone().index_put_(indices, value, accumulate);
 }
 
-Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
+Tensor & index_put_cpu_(Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
   if (indices.size() > (size_t)self.dim()) {
     AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
-  if (accumulate && self.type().device_type() == kCUDA) {
+/*  if (accumulate && self.type().device_type() == kCUDA) {
     Tensor src, linearIndex, expandedValue;
     std::tie(src, linearIndex) = makeLinearIndex(self, indices);
     std::tie(expandedValue) = expand_inplace(linearIndex, value);
     return src.put_(linearIndex, expandedValue, true);
-  }
+  }*/
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
   index_put_stub(iter->device_type(), *iter, info.indexed_sizes, info.indexed_strides, accumulate);
