@@ -786,6 +786,35 @@ class TestLayers(LayersTestCase):
         loss = self.model.BatchLRLoss(input_record)
         self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
 
+    def testBatchLRLossWithUncertaintyBeforeSigmoid(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float32, (2,)))),
+            ('logit', schema.Scalar((np.float32, (2, )))),
+            ('log_variance', schema.Scalar((np.float32, (2,)))),
+            ('weight', schema.Scalar((np.float64, (2,))))
+        ))
+        label_items = np.array([1.0, 0.0], dtype=np.float32)
+        logit_items = np.array([1.0, -1.0], dtype=np.float32)
+        log_variance_items = np.array([0, 1.0], dtype=np.float32)
+        weight_items = np.array([1.0, 1.0], dtype=np.float32)
+        schema.FeedRecord(
+            input_record,
+            [label_items, logit_items, log_variance_items, weight_items]
+        )
+        loss = self.model.BatchLRLoss(
+            input_record,
+            uncertainty_before_sigmoid=True,
+        )
+        self.run_train_net_forward_only()
+        tensor_loss = workspace.FetchBlob(loss.field_blobs()[0])
+
+        self.assertAlmostEqual(
+            tensor_loss,
+            0.39,
+            delta=0.03,
+            msg="Too large loss difference {}".format(tensor_loss)
+        )
+
     def testMarginRankLoss(self):
         input_record = self.new_record(schema.Struct(
             ('pos_prediction', schema.Scalar((np.float32, (1,)))),
