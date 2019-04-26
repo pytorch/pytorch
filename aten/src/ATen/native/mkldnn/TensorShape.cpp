@@ -16,6 +16,10 @@ Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
   AT_ERROR("mkldnn_reshape: ATen not compiled with MKLDNN support");
 }
 
+Tensor mkldnn_clone(const Tensor& self) {
+  AT_ERROR("mkldnn_clone: ATen not compiled with MKLDNN support");
+}
+
 } // namespace native
 } // namespace at
 
@@ -38,6 +42,12 @@ Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
   ideep::direct_copy::compute<AllocForMKLDNN>(x, y);
   y.reshape({inferred_size.cbegin(), inferred_size.cend()});
   return new_with_itensor_mkldnn(std::move(y), self.options());
+}
+
+Tensor mkldnn_clone(const Tensor& self) {
+  ideep::tensor& src = itensor_from_mkldnn(self);
+  ideep::tensor dst{src};
+  return new_with_itensor_mkldnn(std::move(dst), self.options());
 }
 
 } // namespace native
