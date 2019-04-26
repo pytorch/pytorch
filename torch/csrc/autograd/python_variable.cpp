@@ -509,7 +509,6 @@ void initTensorImplConversion(PyObject* module) {
     auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
         unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
     AT_CHECK(p.defined(), "Can't wrap undefined tensor");
-    AT_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
     auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
     return py::cast(torch::autograd::Variable(
         torch::autograd::make_variable(std::move(tensor), false)));
