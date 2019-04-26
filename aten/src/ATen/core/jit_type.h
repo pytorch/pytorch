@@ -226,6 +226,10 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 // with a particular type: v: Optional[int] = None()
 struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType, OptionalType> {
   static OptionalTypePtr create(TypePtr element) {
+    // Optional is a union of [None, T], so Optional[[Optional[T]]] -> Optional[T]
+    if (auto opt_ptr = element->cast<OptionalType>()) {
+      return opt_ptr;
+    }
     return OptionalTypePtr(new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(OptionalType);
