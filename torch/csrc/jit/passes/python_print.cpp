@@ -867,10 +867,6 @@ struct PythonPrintPass {
         stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::index)
              << "]";
       } break;
-      case prim::sort: {
-        stmt << useOf(node->inputs().at(0))
-             << ".sort(reverse=" << useOf(node->inputs().at(1)) << ")";
-      } break;
       case prim::TupleSlice: {
         stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::beg) << ":"
              << node->i(attr::end) << "]";
@@ -1246,7 +1242,6 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::CreateObject,
       prim::GetAttr,
       prim::SetAttr,
-      prim::sort,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
@@ -1284,6 +1279,5 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
   return handled.count(sym) || unneeded.count(sym) ||
       !required_namespaces.count(sym.ns());
 }
-
 } // namespace jit
 } // namespace torch

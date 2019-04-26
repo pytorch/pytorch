@@ -189,7 +189,6 @@ class AliasDb {
   void analyzeIf(Node* node);
   void analyzeLoop(Node* node);
   void analyzeSubgraph(Node* node);
-  void analyzeSort(Node* node);
   void analyzeCreator(Node* node);
   void analyzeExtractor(Node* node);
   void analyzeChunk(Node* node);
