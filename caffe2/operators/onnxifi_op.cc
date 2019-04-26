@@ -48,9 +48,10 @@ void SetInputTensorDescriptorTypeAndBuffer(
     CAFFE_THROW(
         "Unsupported Int8Tensor type in ONNXIFI: ", cpu_tensor.dtype().name());
   }
-  desc->is_quantized = true;
-  desc->scale = cpu_int8tensor.scale;
-  desc->bias = cpu_int8tensor.zero_point;
+  desc->quantizationParams = 1;
+  desc->quantizationAxis = 1;
+  desc->scales = &cpu_int8tensor.scale;
+  desc->biases = &cpu_int8tensor.zero_point;
 }
 
 TypeMeta OnnxifiTypeToDataType(uint64_t onnxifi_type) {
@@ -89,9 +90,10 @@ void SetOutputTensorDescriptorTypeAndBuffer(
 
   desc->buffer = reinterpret_cast<onnxPointer>(
       cpu_tensor->raw_mutable_data(OnnxifiTypeToDataType(onnxifi_type)));
-  desc->is_quantized = true;
-  desc->scale = cpu_int8tensor->scale;
-  desc->bias = cpu_int8tensor->zero_point;
+  desc->quantizationParams = 1;
+  desc->quantizationAxis = 1;
+  desc->scales = &cpu_int8tensor->scale;
+  desc->biases = &cpu_int8tensor->zero_point;
 }
 void BlobToTensorDescriptor(
     const std::string& name,
@@ -131,7 +133,7 @@ void BlobToTensorDescriptor(
     desc->dimensions = shape.size();
     shapes->emplace_back(shape.cbegin(), shape.cend());
     desc->shape = shapes->back().data();
-    desc->is_quantized = 0;
+    desc->quantizationParams = 0;
   }
 }
 } // namespace
@@ -168,6 +170,10 @@ OnnxifiOp<CPUContext>::buildInitializationList(
 
 template <>
 std::vector<int> OnnxifiOp<CPUContext>::extractOutputBatchSizes() const {
+  if (!adjust_output_batch_) {
+    return std::vector<int>();
+  }
+
   CAFFE_ENFORCE_EQ(
       input_shapes_.size(),
       InputSize(),
@@ -285,6 +291,18 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
     ext_supported = true;
     output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
     output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
+    if (enable_tracing_) {
+      traces_.reset();
+      traces_ = std::shared_ptr<onnxTraceEventList>(
+          new onnxTraceEventList(), [this](onnxTraceEventList* p) {
+            if (p && onnxReleaseTraceEventsPointer_) {
+              CAFFE_ENFORCE_EQ(
+                  (*onnxReleaseTraceEventsPointer_)(p), ONNXIFI_STATUS_SUCCESS);
+            }
+            delete p;
+          });
+      traces_->numEvents = 0;
+    }
     CAFFE_ENFORCE_EQ(
         (*onnxSetIOAndRunGraphPointer_)(
             graph_,
@@ -293,7 +311,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
             output_desc_.size(),
             output_desc_.data(),
             &output_fence,
-            /* traceEvents */ nullptr),
+            traces_.get()),
         ONNXIFI_STATUS_SUCCESS);
     output_batch_sizes = extractOutputBatchSizes();
     CAFFE_ENFORCE_EQ(
@@ -338,7 +356,10 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
   }
 
-  maybeAdjustOutputBatchSizes(output_batch_sizes);
+  if (adjust_output_batch_) {
+    maybeAdjustOutputBatchSizes(output_batch_sizes);
+  }
+  enable_tracing_ = false;
   return true;
 }
 

@@ -2069,6 +2069,119 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             unbox=lambda obj: obj["list"][3],
         )
 
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_find_unused_parameters_kwarg(self):
+        """
+        Note: this test can be sped up by only running it on a CPU module
+        once DistributedDataParallel supports them.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class FindUnusedParametersModule(nn.Module):
+            def __init__(self):
+                super(FindUnusedParametersModule, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.fc3 = nn.Linear(4, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                # Return the fc3 module so that the caller can invoke it
+                # outside of the forward function. While this is bad practice,
+                # we can use it to trigger a reducer error.
+                return (F.softmax(x, dim=1), self.fc3)
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+
+        def test_find_unused_parameters(find_unused_parameters):
+            model = DistributedDataParallel(
+                FindUnusedParametersModule().float().to(device_id),
+                device_ids=[device_id],
+                process_group=process_group,
+                find_unused_parameters=find_unused_parameters,
+            )
+
+            output, fc3 = model(input)
+            output = fc3(output)
+            loss = criterion(output, target)
+            loss.backward()
+
+        # First test that the default behavior under these conditions is to
+        # trigger an error when `backward` is called (because fc3 is an unused
+        # parameter and will therefore be marked ready twice).
+        try:
+            test_find_unused_parameters(True)
+        except Exception as ex:
+            self.assertTrue(
+                str(ex).startswith("Expected to mark a variable ready only once."))
+        else:
+            self.fail("Expected exception")
+
+        # Then test that the default behavior can be overridden by setting
+        # `find_unused_parameters=False`.
+        try:
+            test_find_unused_parameters(False)
+        except Exception as ex:
+            self.fail("Unexpected exception: %s" % ex)
+
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_multiple_outputs_multiple_backward(self):
+        """
+        Note: this test can be sped up by only running it on a CPU module
+        once DistributedDataParallel supports them.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class MultipleOutputModule(nn.Module):
+            def __init__(self):
+                super(MultipleOutputModule, self).__init__()
+
+                def define_module():
+                    return nn.Sequential(
+                        nn.Linear(2, 10, bias=False),
+                        nn.ReLU(),
+                        nn.Linear(10, 4, bias=False),
+                        nn.ReLU(),
+                    )
+
+                self.module0 = define_module()
+                self.module1 = define_module()
+
+            def forward(self, x):
+                return (
+                    F.softmax(self.module0(x), dim=1),
+                    F.softmax(self.module1(x), dim=1),
+                )
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = DistributedDataParallel(
+            MultipleOutputModule().float().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+
+        # Compute loss and gradients for both outputs
+        output1, output2 = model(input)
+        loss1 = criterion(output1, target)
+        loss1.backward()
+        loss2 = criterion(output2, target)
+        loss2.backward()
+
 
 class ReducerModule(nn.Module):
     def __init__(self):

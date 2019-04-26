@@ -14,10 +14,6 @@
 namespace at {
 
 struct QTensorImpl;
-
-using QTensor = Tensor;
-using RealTensor = Tensor;
-
 struct Quantizer;
 using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
 
@@ -42,7 +38,7 @@ using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
  * they should have one to one mapping.
  *
  * Note about intrusive_ptr:
- * QTensor holds an intrusive_ptr to Quantizer, and multiple Tensor can
+ * Quantized Tensor holds an intrusive_ptr to Quantizer, and multiple Tensor can
  * share the same Quantizer. Quantizer should be immutable.
  */
 struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
@@ -66,12 +62,12 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
   /**
    * quantize a float Tensor into a quantized Tensor.
    */
-  virtual QTensor quantize(RealTensor t) = 0;
+  virtual Tensor quantize(Tensor t) = 0;
 
   /**
    * dequantize a quantized Tensor into a float Tensor.
    */
-  virtual RealTensor dequantize(QTensor t) = 0;
+  virtual Tensor dequantize(Tensor t) = 0;
 };
 
 /**
@@ -173,8 +169,8 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
         scale_(scale),
         zero_point_(zero_point) {}
 
-  QTensor quantize(RealTensor tensor) override;
-  RealTensor dequantize(QTensor tensor) override;
+  Tensor quantize(Tensor tensor) override;
+  Tensor dequantize(Tensor tensor) override;
 
   float scale() const {
     return scale_;
@@ -231,7 +227,7 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
 // setters/getters for QTensorImpl fields; otherwise, you should use
 // the low level setters/getters that were implemented using this.
 // This may be called repeatedly, so make sure it's pretty cheap.
-CAFFE2_API QTensorImpl* get_qtensorimpl(const QTensor& self);
+CAFFE2_API QTensorImpl* get_qtensorimpl(const Tensor& self);
 
 // Quantize a float value into a uint8 value given scale and zero_point
 CAFFE2_API qint8 quantize_uint8(float scale, uint8_t zero_point, float value);
@@ -241,8 +237,8 @@ CAFFE2_API qint8 quantize_uint8(float scale, uint8_t zero_point, float value);
 CAFFE2_API QuantizerPtr
 make_per_tensor_affine_quantizer(double scale, int64_t zero_point);
 
-// Create a QTensor given arguments for normal Tensor and a quantizer
-CAFFE2_API QTensor new_qtensor_cpu(
+// Create a Quantized Tensor given arguments for normal Tensor and a quantizer
+CAFFE2_API Tensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer);

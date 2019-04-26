@@ -5,6 +5,7 @@
 #include <ATen/core/stack.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
@@ -51,9 +52,9 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
   if (py::isinstance<py::str>(key)) {
     return TypedIValue(ConstantString::create(py::cast<std::string>(key)),
                        StringType::create());
-  } else if (PyLong_Check(key.ptr())) {
+  } else if (py::isinstance<py::int_>(key)) {
     return TypedIValue(py::cast<int64_t>(key), IntType::create());
-  } else if (PyFloat_Check(key.ptr())) {
+  } else if (py::isinstance<py::float_>(key)) {
     return TypedIValue(py::cast<double>(key), FloatType::create());
   } else {
     AT_ERROR("Dictionary inputs may only have string, int, or float keys");
@@ -549,15 +550,16 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
   return result;
 }
 
+template<typename MethodOrFunction>
 inline py::object invokeScriptMethodFromPython(
-    script::Method& method,
+    MethodOrFunction& callee,
     tuple_slice args,
     py::kwargs kwargs) {
   auto stack = createStackForSchema(
-      method.getSchema(), std::move(args), std::move(kwargs));
+      callee.getSchema(), std::move(args), std::move(kwargs));
   {
     AutoNoGIL no_gil_guard;
-    method.run(stack);
+    callee.run(stack);
   }
   return toPyObject(std::move(stack.back()));
 }
@@ -575,5 +577,6 @@ inline py::object invokeOperatorFromPython(
 
   return createPyObjectForStack(std::move(stack));
 }
+
 } // namespace jit
 } // namespace torch

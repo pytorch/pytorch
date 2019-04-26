@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 #endif
 
+#include <c10/macros/Export.h>
+
 // To add a new test file:
 // 1. Add a test_foo.h file in this directory
 // 2. include test_base.h
@@ -25,6 +27,7 @@
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
 #include <test/cpp/jit/test_peephole_optimize.h>
+#include <test/cpp/jit/test_subgraph_matcher.h>
 #include <test/cpp/jit/test_subgraph_utils.h>
 
 using namespace torch::jit::script;
@@ -56,6 +59,7 @@ namespace jit {
   _(TopologicalMove)               \
   _(SubgraphUtils)                 \
   _(AliasAnalysis)                 \
+  _(ContainerAliasing)             \
   _(WriteTracking)                 \
   _(Wildcards)                     \
   _(MemoryDAG)                     \
@@ -69,6 +73,7 @@ namespace jit {
   _(Profiler)                      \
   _(PeepholeOptimize)              \
   _(RecordFunction)                \
+  _(SubgraphMatching)              \
   _(ModuleDefine)
 
 #define TH_FORALL_TESTS_CUDA(_) \
