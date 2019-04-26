@@ -114,10 +114,10 @@ struct generic_graph_node_list {
     return generic_graph_node_list_iterator<const T>(head->next_in_graph[d], d);
   }
   generic_graph_node_list_iterator<T> end() {
-    return generic_graph_node_list_iterator<T>(head, d);
+    return generic_graph_node_list_iterator<T>(head->next_in_graph[!d], d);
   }
   generic_graph_node_list_iterator<const T> end() const {
-    return generic_graph_node_list_iterator<const T>(head, d);
+    return generic_graph_node_list_iterator<const T>(head->next_in_graph[!d], d);
   }
   generic_graph_node_list_iterator<T> rbegin() {
     return reverse().begin();
@@ -133,11 +133,11 @@ struct generic_graph_node_list {
   }
   generic_graph_node_list reverse() {
     return generic_graph_node_list(
-        head, d == kNextDirection ? kPrevDirection : kNextDirection);
+        head->next_in_graph[!d], !d);
   }
   const generic_graph_node_list reverse() const {
     return generic_graph_node_list(
-        head, d == kNextDirection ? kPrevDirection : kNextDirection);
+        head->next_in_graph[!d], !d);
   }
   T* front() {
     return head->next_in_graph[d];
