@@ -149,10 +149,10 @@ They requires JetPack 4.2 and above and are maintained by @dusty-nv
 
 ### From Source
 
-If you are installing from source, we highly recommend installing an [Anaconda](https://www.continuum.io/downloads) environment.
+If you are installing from source, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
 You will get a high-quality BLAS library (MKL) and you get a controlled compiler version regardless of your Linux distro.
 
-Once you have [Anaconda](https://www.continuum.io/downloads) installed, here are the instructions.
+Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
 
 If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
