@@ -369,7 +369,10 @@ class TanhTransform(Transform):
     codomain = constraints.open_interval(-1.0, 1.0)
     bijective = True
     sign = +1
-    atanh = lambda x: 0.5*torch.log((1 + x)/(1 - x))
+
+    @staticmethod
+    def atanh(x):
+        return 0.5 * (x.log1p() - (-x).log1p())
 
     def __eq__(self, other):
         return isinstance(other, TanhTransform)
