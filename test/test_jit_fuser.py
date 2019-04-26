@@ -743,6 +743,7 @@ class TestFuser(JitTestCase):
             __constants__ = ['d']
 
             def __init__(self):
+                super(M, self).__init__()
                 self.d = torch.device('cuda')
 
             @torch.jit.script_method

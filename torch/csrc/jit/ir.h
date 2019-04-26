@@ -912,7 +912,7 @@ struct Block {
   // value_map is used whenever a node in src references a free variable
   // in src to look up its corresponding value
   TORCH_API void cloneFrom(Block* src, std::function<Value*(Value*)> value_map);
-
+  TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
  private:
   void reIndexTopology();
 
@@ -1165,10 +1165,8 @@ struct Graph {
 
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 
-  TORCH_API std::ostream& prettyPrint(std::ostream& out);
-  TORCH_API void dumpPretty();
-
   TORCH_API std::shared_ptr<Graph> copy();
+  TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
   TORCH_API void freeNode(Node* n);
