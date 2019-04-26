@@ -207,6 +207,25 @@ class TestMkldnn(TestCase):
             x.to_mkldnn().reshape(size).to_dense(),
         )
 
+    def test_clone(self):
+        x = torch.randn(4, 5, dtype=torch.float32) * 10
+        self.assertEqual(
+            x.clone(),
+            x.to_mkldnn().clone().to_dense(),
+        )
+
+    def test_linear(self):
+        in_features = torch.randint(3, 10, (1,)).item()
+        out_features = torch.randint(3, 100, (1,)).item()
+        x = torch.randn(3, in_features, dtype=torch.float32) * 10
+
+        for bias in [True, False]:
+            linear = torch.nn.Linear(in_features, out_features).float()
+            mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
+            self.assertEqual(
+                linear(x),
+                mkldnn_linear(x.to_mkldnn()).to_dense())
+
 
 if __name__ == '__main__':
     run_tests()

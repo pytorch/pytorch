@@ -1,4 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+import functools
 
 import torch
 
@@ -9,6 +10,16 @@ def to_mkldnn(module):
             return t.to_mkldnn()
 
     def m_fn(m):
+        # TODO: This is a temporary hack to work around the fact that
+        # nn.Linear is decomposed into addmm/matmul. Later we will
+        # change nn.Linear to directly call aten linear and we can
+        # remove this patch
+        if isinstance(m, torch.nn.Linear):
+            m.forward = functools.partial(
+                torch._C._nn.linear,
+                weight=m.weight,
+                bias=m.bias)
+
         for param in m._parameters.values():
             if param is not None:
                 # Tensors stored in modules are graph leaves, and we don't
