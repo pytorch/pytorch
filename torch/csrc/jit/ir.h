@@ -912,7 +912,7 @@ struct Block {
   // value_map is used whenever a node in src references a free variable
   // in src to look up its corresponding value
   TORCH_API void cloneFrom(Block* src, std::function<Value*(Value*)> value_map);
-
+  TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
  private:
   void reIndexTopology();
 
@@ -1165,10 +1165,8 @@ struct Graph {
 
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 
-  TORCH_API std::ostream& prettyPrint(std::ostream& out);
-  TORCH_API void dumpPretty();
-
   TORCH_API std::shared_ptr<Graph> copy();
+  TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
   TORCH_API void freeNode(Node* n);
@@ -1241,6 +1239,21 @@ inline const Graph* Value::owningGraph() const {
 }
 
 /************* All nodes not required to be defined before Graph **************/
+struct ProfileOp : public Node {
+  static constexpr Symbol Kind = ::c10::prim::profile;
+  ProfileOp(Graph* graph, std::function<void(std::vector<IValue>&)> callback)
+      : Node(graph, ::c10::prim::profile), callback_(callback) {}
+
+  void cloneFrom(Node* other_) override;
+  Node* allocNewInstance(Graph* g) override;
+
+  const std::function<void(std::vector<IValue>&)>& getCallback() const {
+    return callback_;
+  }
+
+ private:
+  std::function<void(std::vector<IValue>&)> callback_;
+};
 
 // execute a Python function, used for Ops we can't optimize but that we want to
 // optimize around

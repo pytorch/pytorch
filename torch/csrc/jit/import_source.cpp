@@ -135,25 +135,37 @@ struct SourceImporter {
   }
 };
 
-void import_methods(
-    const std::shared_ptr<Module>& mod,
+void import_functions(
+    CompilationUnit& cu,
     const std::string& src,
-    const std::vector<at::Tensor>& constant_table) {
+    const std::vector<at::Tensor>& constant_table,
+    const Self& self) {
   SourceImporter importer(src, constant_table);
   auto& p = importer.parser_;
 
   std::vector<Def> definitions;
   std::vector<ResolverPtr> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
-    auto def = Def(p.parseFunction(/*is_method=*/true));
+    auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
     definitions.emplace_back(def);
     resolvers.emplace_back(importer.resolver_);
   }
+  cu.define(definitions, resolvers, self);
+}
+
+void import_methods(
+    const std::shared_ptr<Module>& mod,
+    const std::string& src,
+    const std::vector<at::Tensor>& constant_table) {
   auto self = [&](Value* v) {
     v->setType(mod->module_object()->type());
     return std::make_shared<SimpleValue>(v);
   };
-  mod->module_object()->type()->compilation_unit().define(definitions, resolvers, self);
+  import_functions(
+      mod->module_object()->type()->compilation_unit(),
+      src,
+      constant_table,
+      self);
 }
 
 void import_libs(

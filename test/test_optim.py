@@ -12,8 +12,9 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
     ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler, \
-    CyclicLR
-from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
+    CyclicLR, CosineAnnealingWarmRestarts
+from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
+    skipIfRocm
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -237,7 +238,15 @@ class TestOptim(TestCase):
     def _build_params_dict_single(self, weight, bias, **kwargs):
         return [dict(params=bias, **kwargs)]
 
+    @skipIfRocm
     def test_sgd(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.SGD([bias], lr=1e-3)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.SGD([weight, bias], lr=1e-3)
         )
@@ -282,7 +291,15 @@ class TestOptim(TestCase):
             [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
         )
 
+    @skipIfRocm
     def test_adam(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Adam([bias], lr=1e-3)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adam([weight, bias], lr=1e-3)
         )
@@ -332,6 +349,13 @@ class TestOptim(TestCase):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
     def test_adadelta(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Adadelta([bias], rho=0.95)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adadelta([weight, bias])
         )
@@ -349,6 +373,13 @@ class TestOptim(TestCase):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
     def test_adagrad(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Adagrad([bias], lr=1e-1)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
         )
@@ -377,6 +408,29 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
             optim.Adagrad(None, lr=1e-2, lr_decay=-0.5)
 
+    def test_adagrad_share_memory_flag(self):
+        "Adagrad has a unique share_memory method"
+        linear = torch.nn.Linear(1, 1)
+        optimizer = optim.Adagrad([linear.weight], lr=1e-2)
+
+        optimizer.share_memory()
+        optimizer.add_param_group({'params': [linear.bias]})
+        dummy_loss = linear.weight.sum() + linear.bias.sum()
+        dummy_loss.backward()
+        optimizer.step()
+        for pg in optimizer.param_groups:
+            for p in pg['params']:
+                self.assertTrue(optimizer.state[p]['sum'].is_shared())
+
+    def test_adagrad_share_memory_flag_default(self):
+        "Test if Adagrad can load the state without flag"
+        linear = torch.nn.Linear(1, 1)
+        optimizer = optim.Adagrad([linear.weight], lr=1e-2)
+
+        another_optimizer = optim.SGD([linear.weight], lr=0.01)
+        optimizer.load_state_dict(another_optimizer.state_dict())
+        self.assertFalse(optimizer._is_share_memory)
+
     def test_adagrad_sparse(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.Adagrad(params, lr=1e-1)
@@ -387,7 +441,15 @@ class TestOptim(TestCase):
              lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
         )
 
+    @skipIfRocm
     def test_adamax(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Adamax([bias], lr=1e-1)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
         )
@@ -399,7 +461,15 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
             optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
 
+    @skipIfRocm
     def test_rmsprop(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.RMSprop([bias], lr=1e-2)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2)
         )
@@ -411,7 +481,15 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
             optim.RMSprop(None, lr=1e-2, momentum=-1.0)
 
+    @skipIfRocm
     def test_asgd(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.ASGD([bias], lr=1e-3, t0=100)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100)
         )
@@ -423,7 +501,15 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
             optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
 
+    @skipIfRocm
     def test_rprop(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Rprop([bias], lr=1e-3)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Rprop([weight, bias], lr=1e-3)
         )
@@ -435,7 +521,15 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
             optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
 
+    @skipIfRocm
     def test_lbfgs(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.ASGD([bias])
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.LBFGS([weight, bias]),
             ignore_multidevice=True
@@ -577,8 +671,9 @@ class TestLRScheduler(TestCase):
     def test_legacy_cos_anneal_lr(self):
         eta_min = 1e-10
         epochs = 20
-        scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
-        legacy_scheduler = LegacyCosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
+        T_max = 5
+        scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
+        legacy_scheduler = LegacyCosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
         self._test_against_legacy(scheduler, legacy_scheduler, epochs)
 
     def test_reduce_lr_on_plateau1(self):
@@ -964,6 +1059,62 @@ class TestLRScheduler(TestCase):
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
         self._test(scheduler, targets, epochs)
 
+    def test_CosineAnnealingWarmRestarts_lr1(self):
+        iters = 100
+        eta_min = 1e-10
+        T_mults = [1, 2, 4]
+        for T_mult in T_mults:
+            T_i = 10
+            T_cur = 0
+            targets = [[0.05], [0.5]]
+            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
+            for _ in range(1, iters, 1):
+                T_cur += 1
+                if T_cur >= T_i:
+                    T_cur = T_cur - T_i
+                    T_i = int(T_mult) * T_i
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            self._test(scheduler, targets, iters)
+
+    def test_CosineAnnealingWarmRestarts_lr2(self):
+        iters = 30
+        eta_min = 1e-10
+        T_mults = [1, 2, 4]
+        for T_mult in T_mults:
+            T_i = 10
+            T_cur = 0
+            targets = [[0.05], [0.5]]
+            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
+            for _ in torch.arange(0.1, iters, 0.1):
+                T_cur = round(T_cur + 0.1, 1)
+                if T_cur >= T_i:
+                    T_cur = T_cur - T_i
+                    T_i = int(T_mult) * T_i
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            self._test_CosineAnnealingWarmRestarts(scheduler, targets, iters)
+
+    def test_CosineAnnealingWarmRestarts_lr3(self):
+        epochs_for_T_mults = [[0, 1, 2, 3, 4, 5, 12, 27, 3, 4, 5, 6, 13],
+                              [0, 1, 2, 3, 4, 5, 25, 32, 33, 34, 80, 81, 3],
+                              [0, 0.1, 0.2, 0.3, 1.3, 2.3, 17.5, 18.5, 19.5, 29.5, 30.5, 31.5, 50]]
+        T_curs_for_T_mults = [[1, 2, 3, 4, 5, 2, 7, 3, 4, 5, 6, 3],
+                              [1, 2, 3, 4, 5, 15, 2, 3, 4, 10, 11, 3],
+                              [0.1, 0.2, 0.3, 1.3, 2.3, 7.5, 8.5, 9.5, 19.5, 20.5, 21.5, 10]]
+        T_is_for_T_mults = [[10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
+                            [10, 10, 10, 10, 10, 20, 40, 40, 40, 80, 80, 10],
+                            [10, 10, 10, 10, 10, 30, 30, 30, 30, 30, 30, 90]]
+        eta_min = 1e-10
+        T_mults = [1, 2, 3]
+        for epochs, T_mult, T_curs, T_is in zip(epochs_for_T_mults, T_mults, T_curs_for_T_mults, T_is_for_T_mults):
+            targets = [[0.05], [0.5]]
+            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=T_mult, eta_min=eta_min)
+            for T_cur, T_i in zip(T_curs, T_is):
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            self._test_interleaved_CosineAnnealingWarmRestarts(scheduler, targets, epochs)
+
     def test_step_lr_state_dict(self):
         self._check_scheduler_state_dict(
             lambda: StepLR(self.opt, gamma=0.1, step_size=3),
@@ -1019,6 +1170,11 @@ class TestLRScheduler(TestCase):
             if key not in {'optimizer'}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
 
+    def test_CosineAnnealingWarmRestarts_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=2),
+            lambda: CosineAnnealingWarmRestarts(self.opt, T_0=100))
+
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
         scheduler = constr()
         for _ in range(epochs):
@@ -1039,6 +1195,23 @@ class TestLRScheduler(TestCase):
                 self.assertAlmostEqual(target[epoch], param_group['lr'],
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                            epoch, target[epoch], param_group['lr']), delta=1e-5)
+
+    def _test_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs=10):
+        for index, epoch in enumerate(torch.arange(0, epochs, 0.1)):
+            epoch = round(epoch.item(), 1)
+            scheduler.step(epoch)
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(target[index], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, target[index], param_group['lr']), delta=1e-5)
+
+    def _test_interleaved_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs):
+        for index, epoch in enumerate(epochs):
+            scheduler.step(epoch)
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(target[index], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, target[index], param_group['lr']), delta=1e-5)
 
     def _test_against_legacy(self, scheduler, legacy_scheduler, epochs=10):
         self.setUp()
