@@ -1522,6 +1522,12 @@
   variants: function, method
   device_guard: False
 
+- func: mkldnn_reshape(Tensor self, int[] shape) -> Tensor
+  device_guard: False
+  requires_tensor: True
+  dispatch:
+    MkldnnCPU: mkldnn_reshape
+
 - func: reshape_as(Tensor self, Tensor other) -> Tensor
   variants: method
   device_guard: False
