@@ -216,6 +216,11 @@ std::tuple<Tensor&, Tensor&> topk_out_cpu(
       "selected index k out of range");
 
   _allocate_or_resize_output_with_indices(values, indices, self, dim_, k);
+  if (self.dim() == 0 && self.numel() == 1) {
+    values.copy_(self);
+    indices.zero_();
+    return std::forward_as_tuple(values, indices);
+  }
   auto tmp_values = self.clone();
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "topk_cpu", [&] {
     dim_apply(
