@@ -128,13 +128,13 @@ class EncoderBase {
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
       const std::map<std::string, at::Tensor>& initializers =
-        std::map<std::string, at::Tensor>());
+          std::map<std::string, at::Tensor>());
 
   void EncodeBlock(
       onnx::GraphProto* graph_proto,
       const Block* block,
       const std::map<std::string, at::Tensor>& initializers =
-        std::map<std::string, at::Tensor>());
+          std::map<std::string, at::Tensor>());
 
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
@@ -281,8 +281,8 @@ void EncoderBase::EncodeBlock(
     if (is_raw_export) {
       AT_ASSERT(!node->kind().is_onnx());
     } else if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-      AT_ASSERT(!node->kind().is_aten() &&
-          !node->kind().is_prim() &&
+      AT_ASSERT(
+          !node->kind().is_aten() && !node->kind().is_prim() &&
           !node->kind().is_attr());
     }
     p_n->set_op_type(node->kind().toUnqualString());
@@ -522,7 +522,7 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   void convertParameter(
-      const script::Slot & param,
+      const script::Slot& param,
       torch::ParameterDef* param_def,
       bool is_parameter);
 
@@ -539,8 +539,6 @@ class ScriptModuleSerializer final {
   // all classes used by this module hierarchy
   std::vector<ClassTypePtr> class_table_;
   OrderedDict<ClassTypePtr, std::string> converted_classes_;
-
-  static const size_t op_version_set = 0;
 };
 
 // ScriptModuleSerializer's methods
@@ -582,7 +580,7 @@ void ScriptModuleSerializer::serialize(
 void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   auto lib_def = model_def->mutable_libs();
   std::ostringstream lib_stream;
-  lib_stream << "op_version_set = " << op_version_set << "\n";
+  lib_stream << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
   // Convert all the classes that
   for (const auto& class_type : class_table_) {
     convertClass(class_type, model_def);
@@ -764,7 +762,7 @@ void ScriptModuleSerializer::convertModule(
 
   if (module.get_methods().size() > 0) {
     std::ostringstream methods;
-    methods << "op_version_set = " << op_version_set << "\n";
+    methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
         module.class_compilation_unit(),

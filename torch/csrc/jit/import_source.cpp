@@ -1,5 +1,6 @@
 #include "import_source.h"
 
+#include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/resolver.h>
 
@@ -105,22 +106,9 @@ struct SourceResolver : public Resolver {
   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
 };
 
-// Helper that contains the state for a parsing a TorchScript source string.
-struct SourceImporter {
-  SourceImporter(
-      const std::string& src,
-      const std::vector<at::Tensor>& constant_table)
-      : parser_(src) {
-    const auto version = parseVersionNumber();
-    resolver_ = std::make_shared<SourceResolver>(version, constant_table);
-  }
-
-  Parser parser_;
-  ResolverPtr resolver_;
-
-  size_t parseVersionNumber() {
-    auto& L = parser_.lexer();
-    auto range = L.cur().range;
+static size_t parseOptionalVersionNumber(Lexer& L) {
+  auto range = L.cur().range;
+  if (L.cur().kind == TK_IDENT) {
     auto name = L.expect(TK_IDENT).text();
     L.expect('=');
     std::string version_text = L.expect(TK_NUMBER).text();
@@ -133,22 +121,39 @@ struct SourceImporter {
           << "expected an integral version but found " << version.text();
     return size_t(version.asIntegral());
   }
-};
+  // Our tests generate a bunch of code where the version number is not
+  // set. In this case, we just choose the most up-to-date version.
+  // Actual archives should always set the version.
+  return CURRENT_OP_VERSION_SET;
+}
+
+std::shared_ptr<SourceResolver> getResolver(
+    Parser& p,
+    const std::vector<at::Tensor>& constant_table) {
+  const auto version = parseOptionalVersionNumber(p.lexer());
+  if (version > CURRENT_OP_VERSION_SET) {
+    throw ErrorReport(p.lexer().cur().range)
+        << "Attempting to load a script generated from a newer version of PyTorch. Maximum supported TorchScript version is "
+        << CURRENT_OP_VERSION_SET << " but the script being loaded is version "
+        << version << ".";
+  }
+  return std::make_shared<SourceResolver>(version, constant_table);
+}
 
 void import_functions(
     CompilationUnit& cu,
     const std::string& src,
     const std::vector<at::Tensor>& constant_table,
     const Self& self) {
-  SourceImporter importer(src, constant_table);
-  auto& p = importer.parser_;
+  Parser p(src);
+  auto resolver = getResolver(p, constant_table);
 
   std::vector<Def> definitions;
   std::vector<ResolverPtr> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
     definitions.emplace_back(def);
-    resolvers.emplace_back(importer.resolver_);
+    resolvers.emplace_back(resolver);
   }
   cu.define(definitions, resolvers, self);
 }
@@ -171,8 +176,8 @@ void import_methods(
 void import_libs(
     const std::string& src,
     const std::vector<at::Tensor>& constant_table) {
-  SourceImporter importer(src, constant_table);
-  auto& p = importer.parser_;
+  Parser p(src);
+  auto resolver = getResolver(p, constant_table);
 
   while (p.lexer().cur().kind != TK_EOF) {
     std::vector<Def> definitions;
@@ -180,7 +185,7 @@ void import_libs(
     auto class_def = ClassDef(p.parseClass());
     for (const auto& method_def : class_def.defs()) {
       definitions.emplace_back(method_def);
-      resolvers.emplace_back(importer.resolver_);
+      resolvers.emplace_back(resolver);
     }
 
     auto cu = std::make_shared<CompilationUnit>();
