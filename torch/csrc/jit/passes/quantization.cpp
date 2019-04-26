@@ -11,20 +11,6 @@ namespace torch {
 namespace jit {
 namespace {
 // QuantizerUtils
-enum insert_position {
-  BEFORE_INSERTION_POINT=0, //Default behaviour
-  AFTER_INSERTION_POINT,
-};
-
-void insertNodeHelper(Node* new_n, Node* ins_node, insert_position pos) {
-  AT_ASSERT(ins_node != nullptr);
-  AT_ASSERT(new_n != nullptr);
-  if (pos == AFTER_INSERTION_POINT) {
-    new_n->insertAfter(ins_node);
-  } else {
-    new_n->insertBefore(ins_node);
-  }
-}
 
 bool checkIfNodeQuantizable(Node* n) {
   AT_ASSERT(n != nullptr);
@@ -115,8 +101,7 @@ void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
-static void addObserverFor(Value* v, Node* original_observer_node,
-  Node* def, insert_position pos) {
+static Node* addObserverFor(Value* v, Node* original_observer_node, Node* def) {
   AT_ASSERT(def != nullptr);
   WithInsertPoint ins(def);
 
@@ -125,12 +110,9 @@ static void addObserverFor(Value* v, Node* original_observer_node,
   Value* vname = def->owningGraph()->insertConstant(v->uniqueName());
 
   // Create a new observer node. We just need to clone the original one.
-  Node* observerNode =
-      def->owningGraph()
-          ->createClone(
-              &*original_observer_node, [&](Value* v) { return v; }, false);
+  Node* observerNode = def->owningGraph()->createClone(
+      &*original_observer_node, [&](Value* v) { return v; }, false);
 
-  insertNodeHelper(observerNode, def, pos);
   // Set the type and the name of the output of the new observer node. It will
   // be used instead of the original value v.
   Value* observedValue = observerNode->addOutput();
@@ -140,22 +122,25 @@ static void addObserverFor(Value* v, Node* original_observer_node,
   // Now we can add the inputs.
   observerNode->addInput(v);
   observerNode->addInput(vname);
+  return observerNode;
 }
 
 static bool outputsNeedToBeObserved(Node* n) {
-  return n->kind() != prim::Constant && n->kind() != prim::PythonOp;
+  return n->kind() != prim::Constant;
 }
 
-void InsertObserverNodes(const std::unique_ptr<script::Method>& method,
-  Node* observer_node) {
-  AT_ASSERT(method != nullptr);
-  auto graph = method->graph();
+void InsertObserverNodes(const script::Method& method, Node* observer_node) {
+  auto graph = method.graph();
   AT_ASSERT(graph != nullptr);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
   // For traversing all blocks in the graph including subblocks.
   std::stack<Block*> blocks_to_visit;
+
+  // Mark observer nodes for inputs so we dont add observers
+  // for observers while traversing graph
+  std::unordered_set<Node*> observer_for_input;
 
   // Add observer for external input nodes excluding parameters
   // These are treated as activation as they vary across batches
@@ -165,10 +150,12 @@ void InsertObserverNodes(const std::unique_ptr<script::Method>& method,
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
   Node* insert_node = *graph->nodes().begin();
-  for (auto idx = 0; idx < method->num_inputs(); ++idx) {
+  for (size_t idx = 0; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      addObserverFor(v, observer_node, insert_node, BEFORE_INSERTION_POINT);
+      Node* clone_observer_node = addObserverFor(v, observer_node, insert_node);
+      clone_observer_node->insertBefore(insert_node);
+      observer_for_input.emplace(clone_observer_node);
     }
   }
 
@@ -177,8 +164,9 @@ void InsertObserverNodes(const std::unique_ptr<script::Method>& method,
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      // Skip nodes that we don't need to observe, e.g. 'prim::Constant'.
-      if (!outputsNeedToBeObserved(n)) {
+      // Skip nodes that we don't need to observe, e.g. 'prim::Constant' or
+      // observer nodes
+      if (!outputsNeedToBeObserved(n) || observer_for_input.count(n) != 0) {
         continue;
       }
 
@@ -198,9 +186,18 @@ void InsertObserverNodes(const std::unique_ptr<script::Method>& method,
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      addObserverFor(v, observer_node, v->node(), AFTER_INSERTION_POINT);
+      Node* clone_observer_node = addObserverFor(v, observer_node, v->node());
+      clone_observer_node->insertAfter(v->node());
     }
   }
+}
+
+void InsertObserverNodes(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    Node* observer_node) {
+  const auto& method = moduleObj->get_method(method_name);
+  InsertObserverNodes(method, observer_node);
 }
 
 void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {

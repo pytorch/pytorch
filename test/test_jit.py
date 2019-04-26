@@ -1194,7 +1194,7 @@ graph(%x : Tensor,
 
         m = torch.jit.script(fn)
         # Insert observers
-        torch._C._jit_pass_insert_observers(m, observe)
+        torch._C._jit_pass_insert_observers(m, "forward", observe)
 
         # Collect statistics
         m.forward(x1, y1)
@@ -1202,6 +1202,7 @@ graph(%x : Tensor,
         # Check what we collected
         self.assertTrue('x' in value_stats and 'y' in value_stats)
         self.assertTrue('p' in value_stats and 'z' in value_stats)
+        self.assertEqual(len(value_stats), 5)
         self.assertEqual(len(value_stats['p']), 1)
         self.assertEqual(len(value_stats['z']), 1)
         self.assertEqual(value_stats['p'][0], x1 + y1)
