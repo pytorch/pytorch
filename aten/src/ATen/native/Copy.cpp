@@ -9,23 +9,6 @@
 
 namespace {
 
-template <typename self_T, typename src_T>
-void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
-  at::CPU_tensor_apply2<self_T, src_T>(
-      self, src, [](self_T& self_val, const src_T& src_val) {
-        self_val = static_cast<self_T>(
-            static_cast<at::native::inter_copy_type_t<self_T>>(src_val));
-      });
-}
-
-template <typename self_T>
-void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
-  AT_CHECK(self.numel() == src.numel(), "sizes do not match");
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, src.scalar_type(), "_copy__cpu", [&]() {
-    _copy__cpu<self_T, scalar_t>(self, src);
-  });
-}
-
 bool copy_transpose_valid(const at::Tensor& self, const at::Tensor& src) {
   const int MIN_SZ = 60 * 60;
   return self.is_contiguous() && src.numel() != 0 && src.dim() == 2 &&
@@ -56,8 +39,13 @@ Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
     _s_copy_from(src, self, non_blocking);
     return self;
   }
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool,
-      self.scalar_type(), "_copy__cpu", [&]() { ::_copy__cpu<scalar_t>(self, src); });
+
+  if (self.scalar_type() == src.scalar_type()) {
+    copy_kernel_same_type(kCPU, self, src);
+  } else {
+    AT_CHECK(self.numel() == src.numel(), "sizes do not match");
+    copy_kernel_cast(kCPU, self, src);
+  }
   return self;
 }
 
@@ -119,46 +107,15 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
     return;
   }
 
-  // TODO: Replace this with TensorIterator!
-  bool serial_path = false;
-  if (self.numel() == src.numel()) {
-    if (self.is_contiguous() && src.is_contiguous()) {
-      copy_kernel(kCPU, self, src);
-    } else if (copy_transpose_valid(self, src)) {
-      _copy_same_type_transpose_(self, src);
-    } else {
-#ifdef _OPENMP
-      if (!in_parallel_region()) {
-        AT_DISPATCH_ALL_TYPES_AND(
-          at::ScalarType::Half, self.scalar_type(), "_copy_same_type_", [&]() {
-            at::CPU_tensor_parallel_apply2<scalar_t, scalar_t>(
-                self, src, [](scalar_t& self_val, const scalar_t& src_val) {
-                  self_val = src_val;
-                });
-          });
-      } else {
-        serial_path = true;
-      }
-#else
-      serial_path = true;
-#endif
-    }
-  } else {
-    serial_path = true;
+  if (self.numel() == src.numel() && copy_transpose_valid(self, src)) {
+    return _copy_same_type_transpose_(self, src);
   }
 
-  if (serial_path) {
-    AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::Half, self.scalar_type(), "_copy_same_type_", [&]() {
-        at::CPU_tensor_apply2<scalar_t, scalar_t>(
-            self, src, [](scalar_t& self_val, const scalar_t& src_val) {
-              self_val = src_val;
-            });
-        });
-  }
+  copy_kernel_same_type(kCPU, self, src);
 }
 
-DEFINE_DISPATCH(copy_kernel);
+DEFINE_DISPATCH(copy_kernel_cast);
+DEFINE_DISPATCH(copy_kernel_same_type);
 
 } // namespace native
 } // namespace at
