@@ -343,8 +343,6 @@ void Pickler::pushDouble(const IValue& ivalue) {
 }
 
 void Pickler::pushDict(const IValue& ivalue) {
-  auto dict = ivalue.toGenericDictRef();
-
   push<OpCode>(OpCode::EMPTY_DICT);
   pushMemoization(ivalue);
 
@@ -655,7 +653,7 @@ std::pair<void*, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
     storage_tensor = at::empty({0}, tensor.options())
                          .set_(
                              tensor.storage(),
-                             /* storageOffset = */ 0,
+                             /* storage_offset = */ 0,
                              /* size = */
                              {static_cast<int64_t>(tensor.storage().size())},
                              /* stride = */ {1})
