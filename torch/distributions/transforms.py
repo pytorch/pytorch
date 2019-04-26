@@ -369,6 +369,7 @@ class TanhTransform(Transform):
     codomain = constraints.interval(-1.0, 1.0)
     bijective = True
     sign = +1
+    atanh = lambda x: 0.5*(torch.log(1 + x) - torch.log(1 - x))
 
     def __eq__(self, other):
         return isinstance(other, TanhTransform)
@@ -380,7 +381,7 @@ class TanhTransform(Transform):
         return atanh(y)
 
     def log_abs_det_jacobian(self, x, y):
-        return torch.log(1 - y**2).sum(-1)
+        return torch.log(1 - y**2)
 
 
 class AbsTransform(Transform):
