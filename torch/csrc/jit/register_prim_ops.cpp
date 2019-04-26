@@ -872,7 +872,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            // Todo: add special unitialized ivalue that will error
            // whenever it is used
-           push(stack, 1);
+           push(stack, IValue());
            return 0;
          }),
      Operator(
@@ -1620,11 +1620,13 @@ RegisterOperators reg2({
     DEFINE_STRING_OP(aten::ne, a != b, bool),
     DEFINE_STRING_OP(aten::add, a + b, str),
 #undef DEFINE_STRING_OP
-    Operator("aten::len(str s) -> int", [](Stack& stack) {
-        auto string = pop(stack).toStringRef();
-        push(stack, static_cast<int64_t>(string.size()));
-        return 0;
-    }),
+    Operator(
+        "aten::len(str s) -> int",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          push(stack, static_cast<int64_t>(string.size()));
+          return 0;
+        }),
     // tensor length op (size of 1st dimension)
     Operator(
         "aten::len(Tensor t) -> int",
@@ -2039,7 +2041,7 @@ RegisterOperators reg2({
     DEFINE_COMPARISON_OP(aten::le, a <= b),
     DEFINE_COMPARISON_OP(aten::ge, a >= b),
 
-    DEFINE_BOOL_OP(aten::__and__, a && b),
+    DEFINE_BOOL_OP(aten::__and__, a&& b),
     DEFINE_BOOL_OP(aten::__or__, a || b),
     DEFINE_BOOL_OP(aten::__xor__, a != b),
 

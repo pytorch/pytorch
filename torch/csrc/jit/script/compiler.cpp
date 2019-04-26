@@ -525,6 +525,10 @@ struct to_ir {
         environment_stack(nullptr) {
     AT_ASSERT(resolver);
     pushFrame(graph->block(), /*starts_def=*/true);
+    WithInsertPoint guard(graph->block()->nodes().front());
+    bottom_val = graph->insertNode(graph->create(prim::Bottom, {}, 1))
+                     ->output()
+                     ->setType(BottomType::get());
 
     // Type annotations exclude explicitly typing the "self" parameter, so in
     // the case that this is a method with self we expect one fewer parameter
@@ -543,6 +547,7 @@ struct to_ir {
   Resolver resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
+  Value* bottom_val;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
 
@@ -1216,15 +1221,10 @@ struct to_ir {
       }
     }
 
-    WithInsertPoint guard(graph->block()->nodes().front());
-    auto b_val = graph->insertNode(graph->create(prim::Bottom, {}, 1))
-                     ->output()
-                     ->setType(BottomType::get());
-
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
-      auto tv = true_exits ? b_val : save_true->getVar(x, stmt.range());
-      auto fv = false_exits ? b_val : save_false->getVar(x, stmt.range());
+      auto tv = true_exits ? bottom_val : save_true->getVar(x, stmt.range());
+      auto fv = false_exits ? bottom_val : save_false->getVar(x, stmt.range());
       auto unified = unifyTypes(tv->type(), fv->type());
 
       // attempt to unify the types. we allow variables to be set to different
@@ -2882,7 +2882,6 @@ void lambdaLiftFork(Node* fork_node) {
   fork_node->g_(attr::Subgraph, forked_graph);
   fork_node->eraseBlock(0);
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch
