@@ -20,7 +20,11 @@ binary_linux_build: &binary_linux_build
         set -ex
         source /env
         if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
-          /builder/upgrade_gcc_abi.sh
+          source "/builder/upgrade_gcc_abi.sh"
+
+          # Env variables are not persisted into the next step
+          echo "export PATH=$PATH" > /env
+          echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH" > /env
         else
           echo "Not upgrading gcc version"
         fi

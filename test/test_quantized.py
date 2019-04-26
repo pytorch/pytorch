@@ -11,6 +11,19 @@ def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
 
 
+def _quantize(x, scale, zero_point, qmin=0, qmax=255, qtype=np.uint8):
+    """Quantizes a numpy array."""
+    qx = np.round(x / scale + zero_point)
+    qx = np.clip(qx, qmin, qmax).astype(qtype)
+    return qx
+
+
+def _dequantize(qx, scale, zero_point):
+    """Dequantizes a numpy array."""
+    x = (qx.astype(np.float) - zero_point) * scale
+    return x
+
+
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM
 def avoid_vpmaddubsw_overflow_fc(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
@@ -44,19 +57,13 @@ def qfc_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
     col_offsets_ref = W_q.sum(axis=1).astype(np.int32).reshape((1, -1))
     assert X_q.ndim == 2
     batch_size, input_channels = X_q.shape
-
     Prod_XqWq_ref = (
         np.matmul(X_q.astype(np.int32), W_q.astype(np.int32).T)
         - W_zp * row_offsets_ref
         - X_zp * col_offsets_ref
         + input_channels * X_zp * W_zp
     )
-
-    Y_q_ref = (
-        (np.round((Prod_XqWq_ref + b_q) * (X_scale * W_scale / Y_scale)) + Y_zp)
-        .clip(0, 255)
-        .astype(np.uint8)
-    )
+    Y_q_ref = _quantize(Prod_XqWq_ref + b_q, Y_scale / (X_scale * W_scale), Y_zp)
     return Y_q_ref
 
 
@@ -100,25 +107,68 @@ graph(%x : (Tensor, float, int)):
         )
 
 
-class TestQuantizedRelu(unittest.TestCase):
+class TestQuantizedOps(unittest.TestCase):
     """Tests the correctness of the quantized::relu op."""
 
     def test_qrelu(self):
         relu = torch.ops.quantized.relu
 
-        X_tensor = np.arange(0, 10, dtype=np.uint8)
-        scale = 255.0
-        zero_point = 5
+        X = torch.arange(-5, 5, dtype=torch.float)
+        scale = 2.0
+        zero_point = 1
+        qX = X.quantize_linear(scale=scale, zero_point=zero_point)
+        print("X:\n{}".format(X))
+        print("\nQuantized:\n{}\nFake:\n{}".format(qX.int_repr(), _quantize(X.numpy(), scale, zero_point)))
 
-        Y_tensor = X_tensor.copy()
-        Y_tensor[X_tensor < zero_point] = zero_point
+        Y = X.numpy().copy()
+        Y[Y < 0] = 0
+        qY = _quantize(Y, scale, zero_point)
+        qY_hat = relu(qX)
+        np.testing.assert_equal(qY, qY_hat.int_repr())
 
-        X = (torch.from_numpy(X_tensor), scale, zero_point)
+    """Tests the correctness of the quantized::sum_relu op."""
+    def test_qsumrelu_same_qparams(self):
+        sum_relu = torch.ops.quantized.sum_relu
 
-        Y_hat = relu(*X)
-        Y_hat_tensor = Y_hat[0].numpy()
+        A = torch.arange(-25, 25, dtype=torch.float)
+        B = torch.arange(-25, 25, dtype=torch.float)
+        scale = 2.0
+        zero_point = 127
+        qA = A.quantize_linear(scale=scale, zero_point=zero_point)
+        qB = A.quantize_linear(scale=scale, zero_point=zero_point)
 
-        np.testing.assert_equal(Y_tensor, Y_hat_tensor)
+        # Sum + ReLU ground truth
+        C = (qA.dequantize() + qB.dequantize()).numpy()
+        C[C < 0] = 0
+        qC = _quantize(C, scale, zero_point)
+
+        qC_hat = sum_relu(qA, qB, scale=scale, zero_point=zero_point)
+        np.testing.assert_equal(qC, qC_hat.int_repr())
+
+    """Tests the correctness of the quantized::sum_relu op."""
+    def test_qsumrelu_different_qparams(self):
+        sum_relu = torch.ops.quantized.sum_relu
+
+        A = torch.arange(-25, 25, dtype=torch.float)
+        B = torch.arange(-25, 25, dtype=torch.float)
+        scale_A = 3.0
+        zero_point_A = 7
+        scale_B = 5.0
+        zero_point_B = 127
+
+        scale_C = 0.5
+        zero_point_C = 5
+
+        qA = A.quantize_linear(scale=scale_A, zero_point=zero_point_A)
+        qB = A.quantize_linear(scale=scale_B, zero_point=zero_point_B)
+
+        # Sum + ReLU ground truth
+        C = (qA.dequantize() + qB.dequantize()).numpy()
+        C[C < 0] = 0
+        qC = _quantize(C, scale_C, zero_point_C)
+
+        qC_hat = sum_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
+        np.testing.assert_equal(qC, qC_hat.int_repr())
 
 
 @unittest.skipIf(
@@ -156,8 +206,8 @@ class TestQuantizedFC(unittest.TestCase):
             + W_value_min
         ).to(dtype=torch.float)
 
-        b_q = np.round(np.random.randn(output_channels) * 10 - 10).astype(np.int32)
-
+        # Make sure X_scale * W_scale * input_channels * X_value_max * W_value_max
+        # matches Y_scale * 255 (max for uint8).
         Y_scale = 7.1234
         Y_zp = 5
 
@@ -216,8 +266,6 @@ class TestQuantizedFC(unittest.TestCase):
             torch.rand(output_channels, input_channels) * (W_value_max - W_value_min)
             + W_value_min
         ).to(dtype=torch.float)
-
-        b_q = np.round(np.random.randn(output_channels) * 10 - 10).astype(np.int32)
 
         Y_scale = 7.1234
         Y_zp = 5
