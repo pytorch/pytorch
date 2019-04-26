@@ -1022,6 +1022,12 @@
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+  python_module: nn
+
+- func: mkldnn_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+  python_module: nn
+  dispatch:
+    MkldnnCPU: mkldnn_linear
 
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
@@ -2130,6 +2136,7 @@
     CUDA: clone
     SparseCPU: clone_sparse
     SparseCUDA: clone_sparse
+    MkldnnCPU: mkldnn_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   cpu_bool: True
