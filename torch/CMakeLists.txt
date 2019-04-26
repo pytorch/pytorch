@@ -104,6 +104,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/function_hook.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/accumulate_grad.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/basic_ops.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
@@ -190,6 +191,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/jit_exception.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
@@ -229,6 +231,14 @@ if (USE_CUDA)
     ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   )
 endif()
+
+
+if (USE_ROCM)
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
+  )
+endif()
+
 
 if (NOT NO_API)
   list(APPEND TORCH_SRCS
@@ -543,7 +553,6 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/utils/structseq.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_apply.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_layouts.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_list.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
@@ -615,7 +624,6 @@ if (BUILD_PYTHON)
       ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
       ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp
@@ -662,7 +670,6 @@ if (BUILD_PYTHON)
       ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
       ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp
