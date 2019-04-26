@@ -13131,7 +13131,7 @@ nn_functional_tests = [
     ('feature_alpha_dropout', (S, S, S), (0.5,)),
     ('threshold', (S, S, S), (0.1, 2.), '', (True,)),
     ('threshold', (S, S, S), (0.1, 2., True), 'inplace'),
-    ('relu', (S, S, S), (),),
+    ('relu', (S, S, S), (), '', (True,)),
     ('relu', (S, S, S), (), 'inplace'),
     ('glu', (S - 1, S - 1, S - 1), (),),
     ('hardtanh', (S, S, S), (-0.5, 0.5),),
@@ -13155,10 +13155,11 @@ nn_functional_tests = [
     ('softmin', (S, S, S), (0,),),
     ('softmax', (S, S, S), (0,), '', (True,)),
     ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args', (True,)),
-    ('tanh', (S, S, S), (),),
-    ('sigmoid', (S, S, S), (),),
+    ('tanh', (S, S, S), (), '', (True,)),
+    ('sigmoid', (S, S, S), (), '', (True,)),
     ('log_softmax', (S, S, S), (0,), '', (True,)),
-    ('linear', (S, S), ((M, S),),),
+    ('linear', (S, S), ((M, S),), '', (True, ['aten::t', 'aten::matmul'])),
+    ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::add', 'aten::mm'])),
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
@@ -13336,6 +13337,8 @@ def add_autograd_test(
                     return output_process_fn(output)
 
                 check_types = test_name not in EXCLUDE_TYPE_CHECK
+                # XXX: this test should always run with disable_autodiff_subgraph_inlining(True),
+                #      so that we don't regress on autodiff support.
                 with disable_autodiff_subgraph_inlining():
                     if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
                         # Test with disable_autodiff_subgraph_inlining, which forces the graph
@@ -13446,7 +13449,9 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
         should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
         if test_name not in EXCLUDE_SCRIPT:
             def run_test():
-                with disable_autodiff_subgraph_inlining(should_autodiff_node):
+                # XXX: this test should always run with disable_autodiff_subgraph_inlining(True),
+                #      so that we don't regress on autodiff support.
+                with disable_autodiff_subgraph_inlining():
                     script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn)
                     check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
                     # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
