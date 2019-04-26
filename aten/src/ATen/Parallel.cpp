@@ -1,5 +1,6 @@
 #include <ATen/Parallel.h>
 
+#include <ATen/Config.h>
 #include <ATen/Version.h>
 
 #include <atomic>
@@ -77,14 +78,14 @@ std::string get_parallel_info() {
      << at::get_num_threads() << std::endl;
 
   ss << at::get_openmp_version() << std::endl;
-# ifdef _OPENMP
+#ifdef _OPENMP
   ss << "\tomp_get_max_threads() : " << omp_get_max_threads() << std::endl;
-# endif
+#endif
 
   ss << at::get_mkl_version() << std::endl;
-# ifdef TH_BLAS_MKL
+#if AT_MKLDNN_ENABLED()
   ss << "\tmkl_get_max_threads() : " << mkl_get_max_threads() << std::endl;
-# endif
+#endif
 
   ss << at::get_mkldnn_version() << std::endl;
 
