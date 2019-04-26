@@ -9,6 +9,7 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCGeneral.h>
+#include <THC/THCTensorSort.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THCThrustAllocator.cuh>
 #include <thrust/execution_policy.h>
@@ -127,8 +128,7 @@ Tensor & index_put_cuda_(Tensor & self, TensorList indices, const Tensor & value
 
     // Sort; a stable sort is not required
     auto sorted_data = device_ptr(sorted_indices.data<int64_t>());
-    //should not be nans in indices, use default sorting comparator
-    thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data);
+    thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
     }
     AT_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel());
     dim3 grid(THCCeilDiv(num_indices, (int64_t) 4), THCCeilDiv(sliceSize, (int64_t) 128), std::max<int>(1,nElemBefore));
