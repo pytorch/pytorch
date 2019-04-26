@@ -582,12 +582,6 @@ struct to_ir {
 
   // If the graph might not return, at an implicit None return at the end
   void handleMaybeNoReturn(const Def& def, Block* block) {
-    // if we're emitting a block that isn't the graph block,
-    // (like in a closure), do not add a return
-    if (block != block->owningGraph()->block()) {
-      return;
-    }
-
     if (exit_blocks.count(graph->block()) == 0) {
       auto decl_ret = def_stack_.back().declared_return_type_;
       if (decl_ret && decl_ret != NoneType::get() &&
@@ -598,11 +592,9 @@ struct to_ir {
             << OptionalType::create(decl_ret)->python_str()
             << " because it does not return on all paths";
       }
-      auto insert = graph->block()->appendNode(graph->create(prim::Constant));
-      WithInsertPoint b(insert);
+      WithInsertPoint b(*block->nodes().end());
       emitReturn(Return::create(
           def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
-      insert->destroy();
     }
   }
 

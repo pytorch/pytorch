@@ -10928,6 +10928,49 @@ a")
         self.checkScript(fn3, ("abcdefghi",))
         self.checkScript(fn4, ("abcdefghi",))
 
+    def test_early_return_closure(self):
+        code = dedent('''
+            def tanh(self):
+                output = torch.tanh(self)
+                def backward(grad_output):
+                    pass
+                return output, backward
+        ''')
+        cu = torch.jit.CompilationUnit(code)
+        g = cu.tanh.graph
+        FileCheck().check_count("prim::Function_0", 2).check("None = prim::Constant") \
+                   .check_next("return").run(g)
+
+        code = dedent('''
+            def tanh(self):
+                output = torch.tanh(self)
+                def backward(grad_output):
+                    a = 1
+                    if True:
+                        return 1
+                    else:
+                        a = 2
+                    return a
+                return output, backward
+        ''')
+        cu = torch.jit.CompilationUnit(code)
+        g = cu.tanh.graph
+        FileCheck().check_count("prim::Function_0", 2).check("%_return : int = prim::If") \
+                   .run(g)
+
+        code = dedent('''
+            def tanh(self):
+                output = torch.tanh(self)
+                def backward(grad_output):
+                    if True:
+                        return 1
+                    else:
+                        return 1.
+                return output, backward
+        ''')
+        with self.assertRaisesRegex(RuntimeError, "returned a value of type int but"):
+            cu = torch.jit.CompilationUnit(code)
+
     def test_early_return_type_refinement(self):
         @torch.jit.script
         def test(x):
