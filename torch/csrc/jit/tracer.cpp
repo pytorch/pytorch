@@ -244,6 +244,25 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
     }
 
     return c10::ivalue::GenericDict::create(std::move(dict->elements()));
+  } else if (auto list_type = type->cast<ListType>()) {
+    size_t num_elems = input.isGenericList() ? input.toGenericListRef().size()
+                                             : input.toTensorListRef().size();
+    auto list_unpack = state->graph->insertNode(state->graph->createListUnpack(value, num_elems));
+    auto unpack_outputs = list_unpack->outputs();
+
+    if (input.isTensorList()) {
+      auto elems = input.toTensorListRef();
+      for (size_t i = 0; i < num_elems; i++) {
+        elems[i] = addInput(state, elems[i], list_type->getElementType(), unpack_outputs[i]).toTensor();
+      }
+      return elems;
+    } else {
+      auto elems = input.toGenericListRef();
+      for (size_t i = 0; i < num_elems; i++) {
+        elems[i] = addInput(state, elems[i], list_type->getElementType(), unpack_outputs[i]);
+      }
+      return elems;
+    }
   } else {
     AT_ERROR(
         "Only tensors or (possibly nested) dict or tuples of tensors can be "
