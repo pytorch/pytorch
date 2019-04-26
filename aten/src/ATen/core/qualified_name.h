@@ -19,7 +19,7 @@ struct QualifiedName : c10::intrusive_ptr_target {
         "'");
   }
 
-  const QualifiedNamePtr prefix_;
+  const QualifiedNamePtr prefix_ = QualifiedNamePtr();
   const std::string name_;
 
   static QualifiedNamePtr create(QualifiedNamePtr prefix, std::string name) {
