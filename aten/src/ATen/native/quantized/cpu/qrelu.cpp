@@ -31,5 +31,5 @@ static auto registry = c10::RegisterOperators().op(
     c10::kernel<QReluInt8>(),
     c10::dispatchKey(QuantizedCPUTensorId()));
 
-} // namespace
-}} // namespace at::native
+}  // namespace
+}}  // namespace at::native
