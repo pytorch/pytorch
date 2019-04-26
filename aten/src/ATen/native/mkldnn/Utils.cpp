@@ -1,4 +1,5 @@
 #include <ATen/native/mkldnn/Utils.h>
+#include <THNN/generic/pooling_shape.h>
 
 namespace at { namespace native {
 
@@ -18,6 +19,32 @@ std::vector<int64_t> conv_output_size(
                         - kernel) / stride[d - 2] + 1;
   }
   return output_size;
+}
+
+std::vector<int64_t> pool_output_sizes(
+    IntArrayRef input_size,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  std::vector<int64_t> output_size(input_size.size());
+  // copy N and C
+  output_size[0] = input_size[0];
+  output_size[1] = input_size[1];
+
+  for (int i = 2; i < input_size.size(); ++i) {
+    output_size[i] = pooling_output_shape<int64_t>(
+      input_size[i],
+      kernel_size[i - 2],
+      padding[i - 2],
+      stride[i - 2],
+      dilation[i - 2],
+      ceil_mode
+    );
+  }
+
+   return output_size;
 }
 
 }}
