@@ -1573,7 +1573,7 @@ int dictKeys(Stack& stack) {
 
 template <typename Elem>
 std::vector<Elem> makeListForDictValues(
-    const c10::ivalue::GenericDict::IterationOrder &order) {
+    const c10::ivalue::GenericDict::IterationOrder& order) {
   std::vector<Elem> values;
   values.reserve(order.size());
   for (auto item : order) {
@@ -1585,7 +1585,7 @@ std::vector<Elem> makeListForDictValues(
 Operation dictValues(const Node* n) {
   auto outputType = n->output()->type()->expect<ListType>();
   return [=](Stack& stack) -> int {
-    const auto &order = pop(stack).toGenericDict()->iterationOrder();
+    const auto& order = pop(stack).toGenericDict()->iterationOrder();
     if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
       push(stack, makeListForDictValues<at::Tensor>(order));
     } else if (outputType->getElementType() == IntType::get()) {
