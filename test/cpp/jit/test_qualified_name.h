@@ -21,7 +21,6 @@ void testQualifiedName() {
     ASSERT_EQ(baz->name_, "baz");
     auto empty = QualifiedName::create("");
     ASSERT_EQ(empty->toString(), "");
-    ASSERT_EQ(empty->prefix_->toString(), "");
     ASSERT_EQ(empty->name_, "");
   }
   {
