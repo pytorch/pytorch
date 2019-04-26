@@ -19,60 +19,15 @@
 #include <iostream>
 #include <sstream>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
-#ifdef TH_BLAS_MKL
-#include <mkl.h>
-#endif
-
 #ifdef __linux__
 #include <sys/types.h>
 #include <unistd.h>
 #endif
 
-const char* get_env_var(const char* var_name) {
-  const char* value = std::getenv(var_name);
-  return value ? value : "[not set]";
-}
-
 int main(int argc, char** argv) {
   at::init_num_threads();
 
-  std::cout << "std::thread::hardware_concurrency() :\t"
-            << std::thread::hardware_concurrency() << std::endl;
-  std::cout << std::endl;
-
-  std::cout << "ATen/Parallel:" << std::endl;
-  std::cout << "\tat::get_num_threads()\t:\t"
-            << at::get_num_threads() << std::endl;
-  std::cout << std::endl;
-
-  std::cout << "OpenMP:" << std::endl;
-# ifdef _OPENMP
-  std::cout << "\tomp_get_max_threads()\t:\t"
-            << omp_get_max_threads() << std::endl;
-# else
-  std::cout << "\tnot available" << std::endl;
-# endif
-  std::cout << std::endl;
-
-  std::cout << "MKL:" << std::endl;
-# ifdef TH_BLAS_MKL
-  std::cout << "\tmkl_get_max_threads()\t:\t"
-            << mkl_get_max_threads() << std::endl;
-# else
-  std::cout << "\tnot available" << std::endl;
-# endif
-  std::cout << std::endl;
-
-  std::cout << "Environment variables:" << std::endl;
-  std::cout << "\tOMP_NUM_THREADS\t:\t"
-            << get_env_var("OMP_NUM_THREADS") << std::endl;
-  std::cout << "\tMKL_NUM_THREADS\t:\t"
-            << get_env_var("MKL_NUM_THREADS") << std::endl;
-  std::cout << std::endl;
+  std::cout << at::get_parallel_info() << std::endl;
 
 # ifdef __linux__
   std::ostringstream cmd;

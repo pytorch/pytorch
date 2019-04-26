@@ -203,6 +203,7 @@ test_xla() {
 }
 
 (cd test && python -c "import torch; print(torch.__config__.show())")
+(cd test && python -c "import torch; print(torch.parallel_info())")
 
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   test_torchvision
