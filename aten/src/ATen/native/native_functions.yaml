@@ -453,7 +453,7 @@
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  variants: function, method
+  variants: method
   device_guard: False
 
 - func: s_copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
@@ -463,6 +463,7 @@
   dispatch:
     CPU: _s_copy__cpu
     CUDA: _s_copy__cuda
+    QuantizedCPU: _s_copy__quantized
 
 - func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   cpu_half: True
@@ -706,7 +707,7 @@
 
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0) -> Tensor
   dispatch:
-    CPU: empty_affine_quantized_cpu
+    QuantizedCPU: empty_affine_quantized_cpu
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   variants: method
@@ -857,6 +858,10 @@
 - func: full_like(Tensor self, Scalar fill_value) -> Tensor
 
 - func: full_like(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+
+- func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CPU: from_file
 
 # NOTE [ grid_sampler Native Functions ]
 # `grid_sampler` does all the shape checking and then dispatches to one of
