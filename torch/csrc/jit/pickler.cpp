@@ -98,13 +98,13 @@ const void* Pickler::getPointer(const IValue& ivalue) {
   if (ivalue.isGenericDict()) {
     return ivalue.toGenericDict().get();
   } else if (ivalue.isGenericList()) {
-    return ivalue.toGenericList().get();
+    return ivalue.toGenericListRef().data();
   } else if (ivalue.isTuple()) {
-    return ivalue.toTuple().get();
+    return ivalue.toTuple()->elements().data();
   } else if (ivalue.isString()) {
-    return ivalue.toString().get();
+    return ivalue.toStringRef().data();
   } else if (ivalue.isIntList()) {
-    return ivalue.toIntList().get();
+    return ivalue.toIntListRef().data();
   }
 
   return nullptr;
@@ -176,7 +176,9 @@ void Pickler::pushTensor(const IValue& ivalue) {
   int64_t tensor_id = tensor_table_->size() - 1;
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
   // so wrap in a tuple
-  addIValue(c10::ivalue::Tuple::create({tensor_id}));
+  push<OpCode>(OpCode::MARK);
+  addIValue(tensor_id);
+  push<OpCode>(OpCode::TUPLE);
 
   push<OpCode>(OpCode::REDUCE);
 }
