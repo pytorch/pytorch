@@ -11,9 +11,19 @@ TORCH_API void didFinishEmitModule(std::shared_ptr<script::Module> module) {
     emit_module_callback(std::move(module));
   }
 }
-TORCH_API void setEmitModuleHook(
-    std::function<void(std::shared_ptr<script::Module> module)> cb) {
-  emit_module_callback = std::move(cb);
+static std::function<void(std::shared_ptr<script::Function> fn)>
+    emit_function_callback;
+TORCH_API void didFinishEmitFunction(std::shared_ptr<script::Function> fn) {
+  if (emit_function_callback) {
+    emit_function_callback(fn);
+  }
 }
+TORCH_API void setEmitHooks(
+    std::function<void(std::shared_ptr<script::Module> module)> for_mod,
+    std::function<void(std::shared_ptr<script::Function> for_fn)> for_fn) {
+  emit_module_callback = std::move(for_mod);
+  emit_function_callback = std::move(for_fn);
+}
+
 } // namespace jit
 } // namespace torch

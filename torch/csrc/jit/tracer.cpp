@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
+#include <torch/csrc/jit/script/module.h>
 
 #include <memory>
 #include <sstream>
@@ -200,72 +201,98 @@ Value* getNestedOutputTrace(
   }
 }
 
+// XXX: this function mutates input
+static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue& input, const TypePtr& type, Value* value) {
+  value->setType(type);
+  if (type->isSubtypeOf(TensorType::get())) {
+    auto input_tensor = input.toTensor();
+    auto name = Variable(input_tensor).name();
+    auto& value_map = state->env_stack.back().value_map;
+    if (value_map.find(input_tensor) != value_map.end()) {
+      input_tensor = input_tensor.view(input_tensor.sizes());
+    }
+    value->setUniqueName(name);
+    value_map[input_tensor] = value;
+    return input_tensor;
+  } else if (auto tuple_type = type->cast<TupleType>()) {
+    auto unpack_node =
+        state->graph->insertNode(state->graph->createTupleUnpack(value));
+    auto elem_values = unpack_node->outputs();
+    auto elem_types = tuple_type->elements();
+    Stack elems = input.toTuple()->elements();
+    size_t num_elems = elems.size();
+    AT_ASSERT(
+        elem_values.size() == num_elems && elem_types.size() == num_elems);
+    for (size_t i = 0; i < num_elems; ++i) {
+      elems[i] = addInput(state, elems[i], elem_types[i], elem_values[i]);
+    }
+    return Tuple::create(std::move(elems));
+  } else if (auto dict_type = type->cast<DictType>()) {
+    auto dict = input.toGenericDict();
+    auto dict_size = dict->elements().size();
+    auto unpack_to_list = state->graph->insert(aten::values, {value});
+    auto list_unpack = state->graph->createListUnpack(unpack_to_list, dict_size);
+    auto unpack_node = state->graph->insertNode(list_unpack);
+    auto elem_values = unpack_node->outputs();
+
+    const auto order = dict->iterationOrder();
+    AT_ASSERT(order.size() == elem_values.size());
+
+    size_t i = 0;
+    for (const auto &pair : order) {
+      dict->elements()[pair.first] = addInput(state, pair.second, dict_type->getValueType(), elem_values[i++]);
+    }
+
+    return c10::ivalue::GenericDict::create(std::move(dict->elements()));
+  } else {
+    AT_ERROR(
+        "Only tensors or (possibly nested) dict or tuples of tensors can be "
+        "inputs to traced functions. Got ", type);
+  }
+}
+
+static void gatherParametersAndBuffers(
+    const std::shared_ptr<TracingState>& state,
+    Value* self_value,
+    const script::Module& self) {
+  Graph& g = *self_value->owningGraph();
+  for (auto& param : self.get_parameters()) {
+    addInput(state, param.value(), param.type(), g.insertGetAttr(self_value, param.name()));
+  }
+  for (auto& param : self.get_attributes()) {
+    if (param.type()->isSubtypeOf(TensorType::get())) {
+      addInput(state, param.value(), param.type(), g.insertGetAttr(self_value, param.name()));
+    }
+  }
+  for (const auto& sub : self.get_modules()) {
+    gatherParametersAndBuffers(state, g.insertGetAttr(self_value, sub->name()),  *sub);
+  }
+}
+
+
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
-std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs) {
+std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs, const std::shared_ptr<script::Module>& self) {
   if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
   }
   auto state = std::make_shared<TracingState>();
   setTracingState(state);
-  // XXX: this function mutates input
-  const std::function<IValue(IValue, TypePtr, Value*)> add_input =
-      [&](IValue input, TypePtr type, Value* value) -> IValue {
-    value->setType(type);
-    if (type->isSubtypeOf(TensorType::get())) {
-      auto input_tensor = input.toTensor();
-      auto name = Variable(input_tensor).name();
-      auto& value_map = state->env_stack.back().value_map;
-      if (value_map.find(input_tensor) != value_map.end()) {
-        input_tensor = input_tensor.view(input_tensor.sizes());
-      }
-      value->setUniqueName(name);
-      value_map[input_tensor] = value;
-      return input_tensor;
-    } else if (auto tuple_type = type->cast<TupleType>()) {
-      auto unpack_node =
-          state->graph->insertNode(state->graph->createTupleUnpack(value));
-      auto elem_values = unpack_node->outputs();
-      auto elem_types = tuple_type->elements();
-      Stack elems = input.toTuple()->elements();
-      size_t num_elems = elems.size();
-      AT_ASSERT(
-          elem_values.size() == num_elems && elem_types.size() == num_elems);
-      for (size_t i = 0; i < num_elems; ++i) {
-        elems[i] = add_input(elems[i], elem_types[i], elem_values[i]);
-      }
-      return Tuple::create(std::move(elems));
-    } else if (auto dict_type = type->cast<DictType>()) {
-      auto dict = input.toGenericDict();
-      auto dict_size = dict->elements().size();
-      auto unpack_to_list = state->graph->insert(aten::values, {value});
-      auto list_unpack =
-          state->graph->createListUnpack(unpack_to_list, dict_size);
-      auto unpack_node = state->graph->insertNode(list_unpack);
-      auto elem_values = unpack_node->outputs();
 
-      const auto order = dict->iterationOrder();
-      AT_ASSERT(order.size() == elem_values.size());
+  // if we are a module, then make sure the modules parameters are in the map
+  // and mapped to accesses to the self object
+  if (self) {
+    Value* self_value =
+        state->graph->insertInput(0, "self")->setType(self->module_object()->type());
+    gatherParametersAndBuffers(state, self_value, *self);
+  }
 
-      size_t i = 0;
-      for (const auto& pair : order) {
-        dict->elements()[pair.first] =
-            add_input(pair.second, dict_type->getValueType(), elem_values[i++]);
-      }
-
-      return c10::ivalue::GenericDict::create(std::move(dict->elements()));
-    } else {
-      AT_ERROR(
-          "Only tensors or (possibly nested) dict or tuples of tensors can be "
-          "inputs to traced functions. Got ",
-          type);
-    }
-  };
   size_t i = 0;
   auto input_types = inputs.types()->elements();
   for (IValue& input : inputs.stack()) {
-    input = add_input(input, input_types[i++], state->graph->addInput());
+    input = addInput(state,
+        input, input_types[i++], state->graph->addInput());
   }
   return std::make_pair(state, inputs.stack());
 }

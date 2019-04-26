@@ -21,6 +21,16 @@ TORCH_API void import_libs(
     const std::string& src,
     const std::vector<at::Tensor>& constant_table);
 
+// Add the functions defined in `src` to the module `mod`.
+// self is passed through the CompilationUnit's define function.
+// If present, it determines the SugaredValue for the first argument
+// and that argument is no longer expected to have type annotations.
+TORCH_API void import_functions(
+    CompilationUnit& cu,
+    const std::string& src,
+    const std::vector<at::Tensor>& constant_table,
+    const Self& self=nullptr);
+
 } // namespace script
 } // namespace jit
 } // namespace torch
