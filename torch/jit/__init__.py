@@ -100,20 +100,25 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             A ``ScriptModule`` object.
 
         Example:
-            >>> torch.jit.load('scriptmodule.pt')
+            torch.jit.load('scriptmodule.pt')
+
             # Load ScriptModule from io.BytesIO object
-            >>> with open('scriptmodule.pt', 'rb') as f:
-                    buffer = io.BytesIO(f.read())
+            with open('scriptmodule.pt', 'rb') as f:
+                buffer = io.BytesIO(f.read())
+
             # Load all tensors to the original device
-            >>> torch.jit.load(buffer)
+            torch.jit.load(buffer)
+
             # Load all tensors onto CPU, using a device
-            >>> torch.jit.load(buffer, map_location=torch.device('cpu'))
+            torch.jit.load(buffer, map_location=torch.device('cpu'))
+
             # Load all tensors onto CPU, using a string
-            >>> torch.jit.load(buffer, map_location='cpu')
+            torch.jit.load(buffer, map_location='cpu')
+
             # Load with extra files.
-            >>> files = {'metadata.json' : ''}
-            >>> torch.jit.load('scriptmodule.pt', _extra_files = files)
-            >>> print (files['metadata.json'])
+            files = {'metadata.json' : ''}
+            torch.jit.load('scriptmodule.pt', _extra_files = files)
+            print (files['metadata.json'])
     """
     m = ScriptModule()
 
@@ -148,32 +153,45 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
 
 def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     """
-        Saves a ScriptModule to a file.
+        Save an offline version of this module for use in a separate process. The saved
+        module serializes all of the methods, submodules, parameters, and attributes of this
+        module. It can be loaded into the C++ API using ``torch::jit::load(filename)`` or into the Python
+        API with ``torch.jit.load(filename)``.
 
-        Args:
+        To be able to save a module, it must not make any calls to native Python functions.
+        This means that all submodules must be subclasses of ``torch.jit.ScriptModule`` as well.
+
+        .. DANGER::
+           All modules, no matter their device, are always loaded onto the CPU during loading.
+           This is different from :func:`torch.load`'s semantics and may change in the future.
+
+        Arguments:
             m: a ScriptModule to save
             f: a file-like object (has to implement write and flush) or a string
                containing a file name
             _extra_files: Map from filename to contents which will be stored as part of 'f'
 
         .. warning::
-            If you are using Python 2, torch.save does NOT support StringIO.StringIO
+            If you are using Python 2, ``torch.save`` does NOT support ``StringIO.StringIO``
             as a valid file-like object. This is because the write method should return
-            the number of bytes written; StringIO.write() does not do this.
+            the number of bytes written; ``StringIO.write()`` does not do this.
 
-            Please use something like io.BytesIO instead.
+            Please use something like ``io.BytesIO`` instead.
 
         Example:
-            >>> m = torch.jit.ScriptModule()
-            >>> # Save to file
-            >>> torch.jit.save(m, 'scriptmodule.pt')
-            >>> # Save to io.BytesIO buffer
-            >>> buffer = io.BytesIO()
-            >>> torch.jit.save(m, buffer)
-            >>> # Save with extra files
-            >>> extra_files = torch._C.ExtraFilesMap()
-            >>> extra_files['foo.txt'] = 'bar'
-            >>> torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
+            m = torch.jit.ScriptModule()
+
+            # Save to file
+            torch.jit.save(m, 'scriptmodule.pt')
+
+            # Save to io.BytesIO buffer
+            buffer = io.BytesIO()
+            torch.jit.save(m, buffer)
+
+            # Save with extra files
+            extra_files = torch._C.ExtraFilesMap()
+            extra_files['foo.txt'] = 'bar'
+            torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
@@ -596,13 +614,13 @@ def trace(func,
           _force_outplace=False,
           _module_class=None):
     """
-    Trace a function and return an executable trace that will be optimized
+    Trace a function and return an executable ``ScriptModule`` that will be optimized
     using just-in-time compilation.
 
     .. warning::
 
         Tracing only correctly records functions and modules which are not data
-        dependent (e.g., have conditionals on data in tensors) and do not have
+        dependent (e.g., do not have conditionals on data in tensors) and do not have
         any untracked external dependencies (e.g., perform input/output or
         access global variables). If you trace such models, you may silently get
         incorrect results on subsequent invocations of the model. The tracer
@@ -610,15 +628,15 @@ def trace(func,
         incorrect trace to be produced.
 
     Arguments:
-        func (callable or torch.nn.Module):  a python function or torch.nn.Module
-                                             that will be run with example_inputs.
-                                             arguments and returns to func must be Tensors
+        func (callable or torch.nn.Module):  a Python function or ``torch.nn.Module``
+                                             that will be run with ``example_inputs``.
+                                             arguments and returns to ``func`` must be tensors
                                              or (possibly nested) tuples that
                                              contain tensors.
         example_inputs (tuple):  a tuple of example inputs that will be passed to the function
                                  while tracing. The resulting trace can be run with
                                  inputs of different types and shapes assuming the traced operations
-                                 support those types and shapes. example_inputs may also be a single
+                                 support those types and shapes. ``example_inputs`` may also be a single
                                  Tensor in which case it is automatically wrapped in a tuple
 
     Keyword arguments:
@@ -631,24 +649,25 @@ def trace(func,
 
         check_inputs (list of tuples, optional): A list of tuples of input arguments that should be used
                                                  to check the trace against what is expected. Each tuple
-                                                 is equivalent to a seet of input arguments that would
-                                                 be specified in ``args``. For best results, pass in a
+                                                 is equivalent to a set of input arguments that would
+                                                 be specified in ``example_inputs``. For best results, pass in a
                                                  set of checking inputs representative of the space of
                                                  shapes and types of inputs you expect the network to see.
-                                                 If not specified, the original ``args`` is used for checking
+                                                 If not specified, the original ``example_inputs`` are used for checking
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
 
     Returns:
         A ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
-        When func is a ``torch.nn.Module``, the returned ``ScriptModule`` will have the same set of
-        sub-modules and parameters as func.
+        When ``func`` is a ``torch.nn.Module``, the returned ``ScriptModule`` will have the same set of
+        sub-modules and parameters as ``func``.
 
-    Example:
-       >>> def f(x):
-       ...     return x * 2
-       >>> traced_f = torch.jit.trace(f, torch.rand(1))
+    Example::
+
+        def f(x):
+            return x * 2
+        traced_f = torch.jit.trace(f, torch.rand(1))
 
     """
     if not _enabled:
@@ -1001,39 +1020,38 @@ if _enabled:
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
         r"""
         The core data structure in TorchScript is the ``ScriptModule``. It is an
-        analogue of torch's nn.Module and represents an entire model as a tree of
-        submodules. Like normal modules, each individual module in a ScriptModule can
-        have submodules, parameters, and methods. In nn.Modules methods are implemented
-        as Python functions, but in ScriptModules methods typically implemented as
-        *TorchScript* functions,  a statically-typed subset of Python that contains all
+        analogue of torch's ``nn.Module`` and represents an entire model as a tree of
+        submodules. Like normal modules, each individual module in a ``ScriptModule`` can
+        have submodules, parameters, and methods. In ``nn.Module``s methods are implemented
+        as Python functions, but in ``ScriptModule``s methods are implemented as
+        TorchScript functions,  a statically-typed subset of Python that contains all
         of PyTorch's built-in Tensor operations. This difference allows your
         ScriptModules code to run without the need for a Python interpreter.
 
-        ScriptModules and the TorchScript functions inside of them can be created in
-        two ways:
+        ``ScriptModule``s be created in two ways:
 
         **Tracing:**
 
-            Using ``torch.jit.trace``, you can take an existing module or python
-            function, provide example inputs, and we run the function, recording the
-            operations performed on all the tensors. We turn the resulting recording
+            Using ``torch.jit.trace``, you can turn an existing module or Python
+            function into a TorchScript program. You must provide example inputs,
+            and we run the function, recording the operations performed on all the tensors. We turn the resulting recording
             into a TorchScript method that is installed as the ``forward`` method of a
-            ScriptModule. This module also contains any parameters that the original
+            ``ScriptModule``. This module also contains any parameters that the original
             module had as well.
 
-            Example::
+            Example (tracing a function)::
 
                 import torch
                 def foo(x, y):
-                    return 2*x + y
+                    return 2 * x + y
                 traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
 
             .. note::
-                Tracing a *function* will produce a ``ScriptModule`` with a single
-                ``forward`` method that implements that function, and that contains
-                no parameters.
+                Tracing a function will construct a ``ScriptModule`` with a single
+                ``forward`` method that implements the function. The resulting
+                ``ScriptModule`` has no parameters or attributes.
 
-            Example::
+            Example (tracing an existing module)::
 
                 import torch
                 import torchvision
@@ -1048,9 +1066,9 @@ if _enabled:
                 expected to run different sets of operations, depending on the input and/or the
                 module state. For example,
 
-                    + Tracing will not record any control-flow like if statements or loops. When
+                    + Tracing will not record any control-flow like if-statements or loops. When
                       this control-flow is constant across your module, this is fine and it often
-                      just inlines configuration decisions. But sometimes the control-flow is
+                      inlines the control-flow decisions. But sometimes the control-flow is
                       actually part of the model itself. For instance, a recurrent network is
                       a loop over the (possibly dynamic) length of an input sequence.
 
@@ -1065,15 +1083,15 @@ if _enabled:
         **Scripting:**
 
             You can write TorchScript code directly using Python syntax. You do this
-            using the ``torch.jit.script`` annotation (for functions) or
-            ``torch.jit.script_method`` annotation (for methods) on subclasses of
-            ScriptModule. With this annotation the body of the annotated function is
+            using the ``@torch.jit.script`` decorator (for functions) or
+            ``@torch.jit.script_method`` decorator (for methods) on subclasses of
+            ScriptModule. With this decorator the body of the annotated function is
             directly translated into TorchScript. TorchScript itself is a subset of
             the Python language, so not all features in python work, but we provide
             enough functionality to compute on tensors and do control-dependent
             operations.
 
-            Example::
+            Example (scripting a function)::
 
                 import torch
                 @torch.jit.script
@@ -1085,11 +1103,11 @@ if _enabled:
                     return r
 
             .. note::
-                A script *function* annotation will construct a ScriptModule
-                with a single ``forward`` method that implements that function,
-                and that contains no parameters.
+                A ``@torch.jit.script`` decorator will construct a ``ScriptModule`` with a single
+                ``forward`` method that implements the function. The resulting
+                ``ScriptModule`` has no parameters or attributes.
 
-            Example::
+            Example (scripting a simple module with a Parameter)::
 
               import torch
               class MyModule(torch.jit.ScriptModule):
@@ -1101,21 +1119,20 @@ if _enabled:
                   def forward(self, input):
                       return self.weight.mv(input)
 
-            Example::
+            Example (scripting a module with traced submodules)::
 
                 import torch
                 import torch.nn as nn
                 import torch.nn.functional as F
-                from torch.jit import ScriptModule, script_method, trace
 
-                class MyScriptModule(ScriptModule):
+                class MyScriptModule(torch.jit.ScriptModule):
                     def __init__(self):
                         super(MyScriptModule, self).__init__()
-                        # trace produces a ScriptModule's conv1 and conv2
-                        self.conv1 = trace(nn.Conv2d(1, 20, 5), torch.rand(1, 1, 16, 16))
-                        self.conv2 = trace(nn.Conv2d(20, 20, 5), torch.rand(1, 20, 16, 16))
+                        # torch.jit.trace produces a ScriptModule's conv1 and conv2
+                        self.conv1 = torch.jit.trace(nn.Conv2d(1, 20, 5), torch.rand(1, 1, 16, 16))
+                        self.conv2 = torch.jit.trace(nn.Conv2d(20, 20, 5), torch.rand(1, 20, 16, 16))
 
-                    @script_method
+                    @torch.jit.script_method
                     def forward(self, input):
                       input = F.relu(self.conv1(input))
                       input = F.relu(self.conv2(input))
