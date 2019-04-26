@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 #endif
 
+#include <c10/macros/Export.h>
+
 // To add a new test file:
 // 1. Add a test_foo.h file in this directory
 // 2. include test_base.h
