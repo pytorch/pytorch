@@ -24,7 +24,7 @@ void printQuotedString(std::ostream& stmt, const std::string& str);
 // Constants relating to maintaining the topological index of nodes.
 //
 // Lower and upper bounds of the index. Inclusive range.
-static constexpr topo_position_t kLowerBound = INT64_MIN; // using INT64_MIN overflows average calculations
+static constexpr topo_position_t kLowerBound = INT64_MIN;
 static constexpr topo_position_t kUpperBound = INT64_MAX;
 static constexpr topo_position_t kMidPoint = 0;
 
@@ -884,7 +884,7 @@ bool Node::hasSideEffects() const {
 void Node::assignTopoPosition() {
   bool is_first = prev() == owningBlock()->param_node();
   bool is_last = next() == owningBlock()->return_node();
-  auto paramNode = owningBlock()->return_node();
+
   const auto prevPos = prev()->topo_position_;
   const auto nextPos = next()->topo_position_;
 
