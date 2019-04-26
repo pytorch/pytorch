@@ -127,11 +127,29 @@
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: add
+    CUDA: add
+    SparseCPU: add
+    SparseCUDA: add
+    MkldnnCPU: mkldnn_add
 
 - func: add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: add_
+    CUDA: add_
+    SparseCPU: add_
+    SparseCUDA: add_
+    MkldnnCPU: mkldnn_add_
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: add_out
+    CUDA: add_out
+    SparseCPU: add_out
+    SparseCUDA: add_out
+    MkldnnCPU: mkldnn_add_out
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: add(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
