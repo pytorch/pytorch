@@ -392,7 +392,7 @@ class Caffe2Backend(Backend):
         direction = force_unicode(attrs.pop('direction', 'forward'))
 
         if n.op_type == 'RNN':
-            activation = force_unicode(attrs.pop('activations', ('tanh',))[0])
+            activation = force_unicode(attrs.pop('activations', ('tanh',))[0].lower())
         elif n.op_type == 'GRU':
             linear_before_reset = attrs.pop('linear_before_reset', 0)
 
