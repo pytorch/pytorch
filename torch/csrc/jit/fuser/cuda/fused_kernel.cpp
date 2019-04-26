@@ -57,11 +57,10 @@ std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
 }
 #else
 std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
-  std::string path = cpu::DynamicLibrary::directoryOf((void*)checkCUDAVersion);
 #ifdef __APPLE__
-  std::string libthnvrtc = path + "/libthnvrtc.dylib";
+  std::string libthnvrtc = "libthnvrtc.dylib";
 #else
-  std::string libthnvrtc = path + "/libthnvrtc.so";
+  std::string libthnvrtc = "libthnvrtc.so";
 #endif
   std::unique_ptr<cpu::DynamicLibrary> libnvrtc_stub(
       new cpu::DynamicLibrary(libthnvrtc.c_str()));

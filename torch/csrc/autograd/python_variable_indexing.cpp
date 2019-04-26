@@ -15,6 +15,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <c10/core/TensorOptions.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 #include <vector>
 #include <tuple>
@@ -334,7 +335,12 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
 
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  auto value = valueToTensor(self_.dispatch_type(), self_.scalar_type(), py_value);
+  Variable value;
+  if (isQIntType(self_.scalar_type())) {
+    value = valueToTensor(at::globalContext().getVariableType(at::Backend::CPU, at::kFloat), at::kFloat, py_value);
+  } else {
+    value = valueToTensor(self_.dispatch_type(), self_.scalar_type(), py_value);
+  }
 
   // handle simple types: integers, slices, ellipsis, bool
   if (index == Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
