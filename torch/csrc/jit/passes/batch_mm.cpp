@@ -77,10 +77,21 @@ static constexpr size_t min_fusion_size = 4;
 
 bool have_same_shape(at::TensorList inputs) {
   auto expected_sizes = inputs[0].sizes();
-  return std::all_of(
+  return (std::all_of(
       inputs.begin(), inputs.end(), [expected_sizes](const at::Tensor& t) {
         return t.sizes() == expected_sizes;
-      });
+      }));
+}
+
+bool should_be_transposed(at::TensorList inputs) {
+  return (std::all_of(
+      inputs.begin(), inputs.end(), [](const at::Tensor& t) {
+        return t.stride(0) == 1 && t.stride(1) == t.size(0);
+      }));
+}
+
+std::vector<at::Tensor> transpose_inputs(at::TensorList inputs){
+    return fmap(inputs, [](const at::Tensor& i) { return i.t(); });
 }
 
 bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
@@ -111,8 +122,25 @@ RegisterOperators mm_tree_reduction_reg(
         // failing
         if (have_same_shape(lhs_inputs) && have_same_shape(rhs_inputs) &&
             shape_is_fast_for_reduce(lhs_inputs[0], rhs_inputs[0])) {
-          auto lhs = at::cat(lhs_inputs, /*dim=*/1);
-          auto rhs = at::cat(rhs_inputs, /*dim=*/0);
+          //sometimes lhs_inputs or rhs_inputs are not contiguous, and that causes at::cat to go through slow path
+          //view them as contiguous if possible by transposing
+          bool lhs_input_transposed = should_be_transposed(lhs_inputs);
+          bool rhs_input_transposed = should_be_transposed(rhs_inputs);
+          at::Tensor lhs, rhs;
+          if (lhs_input_transposed) {
+            std::vector<at::Tensor> lhs_contig_inputs = transpose_inputs(lhs_inputs);
+            lhs = at::cat(lhs_contig_inputs, /*dim*/0);
+            lhs = lhs.t();
+          } else {
+            lhs = at::cat(lhs_inputs, /*dim=*/1);
+          }
+          if (rhs_input_transposed) {
+            std::vector<at::Tensor> rhs_contig_inputs = transpose_inputs(rhs_inputs);
+            rhs = at::cat(rhs_contig_inputs, /*dim*/1);
+            rhs = rhs.t();
+          } else {
+            rhs = at::cat(rhs_inputs, /*dim=*/0);
+          }
           push(stack, at::mm(lhs, rhs));
         } else {
           auto acc = at::mm(inputs[0], inputs[side_num_elems]);

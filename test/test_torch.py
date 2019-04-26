@@ -2680,20 +2680,27 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.item(), 1)
         self.assertEqual(qr[0].item(), 1)
         # assignment
-        # This calls _th_fill_
-        # qr[0] = 8 # float asignment
-        # self.assertEqual(qr.item(), 8)
+        self.assertTrue(qr[0].is_quantized)
+        qr[0] = 11.3  # float asignment
+        self.assertEqual(qr.item(), 11)
+        x = torch.ones(1, dtype=torch.float) * 15.3
+        # Copying from a float Tensor
+        qr[:] = x
+        self.assertEqual(qr.item(), 15)
         # we can also print a qtensor
+        sys.stderr.write(str(qr))
         self.assertEqual(str(qr),
-                         "tensor(is_quantized=True, qscheme=per_tensor_affine,\n" +
-                         " " * 7 + "float_values=tensor([1.]),\n" + " " * 7 +
-                         "int_repr=tensor([3]), size=(1,), dtype=torch.qint8)")
+                         "tensor(float_values=tensor([15.]),\n" + " " * 7 +
+                         "int_repr=tensor([17]), size=(1,), dtype=torch.qint8,\n" +
+                         " " * 7 + "quantization_scheme=per_tensor_affine, scale=" +
+                         "tensor(1.),\n" + " " * 7 + "zero_point=tensor(2))")
         empty_r = torch.ones((0, 1), dtype=torch.float)
         empty_qr = empty_r.quantize_linear(scale, zero_point)
         self.assertEqual(str(empty_qr),
-                         "tensor(is_quantized=True, qscheme=per_tensor_affine,\n" +
-                         " " * 7 + "float_values=tensor([]),\n" + " " * 7 +
-                         "int_repr=tensor([]), size=(0, 1), dtype=torch.qint8)")
+                         "tensor(float_values=tensor([]),\n" + " " * 7 +
+                         "int_repr=tensor([]), size=(0, 1), dtype=torch.qint8,\n" +
+                         " " * 7 + "quantization_scheme=per_tensor_affine, scale=" +
+                         "tensor(1.),\n" + " " * 7 + "zero_point=tensor(2))")
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
@@ -3074,6 +3081,7 @@ class _TestTorchMixin(object):
             self.assertEqual(a > False, torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
             self.assertEqual(a == torch.tensor(True, dtype=torch.bool), torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
             self.assertEqual(a == torch.tensor(0, dtype=torch.bool), torch.tensor([0, 1, 0, 1, 0, 1], dtype=torch.uint8))
+            self.assertFalse(a.equal(b))
 
     def test_bool_tensor_value_change(self):
         for device in torch.testing.get_all_device_types():
@@ -9746,6 +9754,28 @@ class _TestTorchMixin(object):
 
             # check mapping
             s2 = torch.FloatStorage.from_file(f.name, True, size)
+            t2 = torch.FloatTensor(s2)
+            self.assertEqual(t1, t2, 0)
+
+            # check changes to t1 from t2
+            rnum = random.uniform(-1, 1)
+            t1.fill_(rnum)
+            self.assertEqual(t1, t2, 0)
+
+            # check changes to t2 from t1
+            rnum = random.uniform(-1, 1)
+            t2.fill_(rnum)
+            self.assertEqual(t1, t2, 0)
+
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
+    def test_torch_from_file(self):
+        size = 10000
+        with tempfile.NamedTemporaryFile() as f:
+            s1 = torch.from_file(f.name, True, size, dtype=torch.float)
+            t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
+
+            # check mapping
+            s2 = torch.from_file(f.name, True, size, dtype=torch.float)
             t2 = torch.FloatTensor(s2)
             self.assertEqual(t1, t2, 0)
 
