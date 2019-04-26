@@ -873,7 +873,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *
    * See NOTE [ TensorImpl Shallow-Copying ] for details.
    */
-  friend void copy_tensor_data(const TensorImpl* src_impl, TensorImpl* dest_impl) {
+  void copy_tensor_data(const TensorImpl* src_impl, TensorImpl* dest_impl) const {
     dest_impl->storage_ = src_impl->storage_;
     dest_impl->sizes_ = src_impl->sizes_;
     dest_impl->strides_ = src_impl->strides_;
