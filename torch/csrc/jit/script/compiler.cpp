@@ -1442,9 +1442,9 @@ struct to_ir {
     auto max_trip_count_val = emitBuiltinCall(
         range,
         *graph,
-        aten::select,
+        Symbol::fromQualString("aten::select0"),
         c10::nullopt,
-        {sizes_tuple, outermost_dim_index},
+        {sizes_tuple},
         {},
         /*required=*/true);
 

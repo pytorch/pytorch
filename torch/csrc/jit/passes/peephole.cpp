@@ -238,19 +238,6 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             node->owningGraph()->insertConstant(dim_tensor->device().is_cuda());
         node->output()->replaceAllUsesWith(output);
       }
-    } else if (node->matches("aten::size(Tensor self) -> int[]")) {
-      // This is our best effort at keeping an error message the same
-      // across python and jit
-      if (auto dim_tensor =
-              node->input()->type()->cast<DimensionedTensorType>()) {
-        if (dim_tensor->dim() == 0) {
-          WithInsertPoint guard(node);
-          node->owningGraph()->insert(
-              prim::RaiseException,
-              {std::string("iteration over a 0-d tensor")},
-              {});
-        }
-      }
     }
   }
 }
