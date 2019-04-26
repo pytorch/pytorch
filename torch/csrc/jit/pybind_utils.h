@@ -514,15 +514,16 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
   return result;
 }
 
+template<typename MethodOrFunction>
 inline py::object invokeScriptMethodFromPython(
-    script::Method& method,
+    MethodOrFunction& callee,
     tuple_slice args,
     py::kwargs kwargs) {
   auto stack = createStackForSchema(
-      method.getSchema(), std::move(args), std::move(kwargs));
+      callee.getSchema(), std::move(args), std::move(kwargs));
   {
     AutoNoGIL no_gil_guard;
-    method.run(stack);
+    callee.run(stack);
   }
   return toPyObject(std::move(stack.back()));
 }
