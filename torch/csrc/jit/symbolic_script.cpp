@@ -1008,6 +1008,18 @@ const std::vector<std::string> functions = {
 
             return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad), backward
 
+        def max_pool2d(self,
+                       kernel_size: List[int],
+                       stride: List[int],
+                       padding: List[int],
+                       dilation: List[int],
+                       ceil_mode: bool):
+            output, indices = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
+            def backward(grad_output):
+                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
+                return grad_self, None, None, None, None, None
+            return output, backward
+
         def batch_norm(input : Tensor,
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],

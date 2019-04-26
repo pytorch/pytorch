@@ -33,6 +33,19 @@ TORCH_API void InsertObserverNodes(
     const std::string& methodName,
     Node* observer_node);
 
+/** \brief Inserts observer nodes for collecting distribution of values taken by
+ * a tensor. This is overloaded InsertObserverNodes which takes in different
+ * arguments and operates on pure functions not associated with module.
+ *
+ * The distribution can then be used for computing qparams for quantization.
+ * \param function_var is a pure script function whose graph is instrumented
+ * \param observer_node is a Node representing a call to observer function. It
+ * will be cloned into all the places where we need to add instrumentation.
+ */
+TORCH_API void InsertObserverNodes(
+    std::shared_ptr<script::Function>& function_var,
+    Node* observer_node);
+
 /** \brief Inserts quant-dequant nodes.
  *
  * This actually changes the numerical semantics of the original model and thus
