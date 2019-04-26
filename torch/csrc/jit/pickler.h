@@ -100,14 +100,25 @@ class Pickler {
       : tensor_table_(tensor_table) {}
 
   const std::vector<char>& stack();
+
+  // Push protocol onto the stack
   void start();
+
+  // Push STOP OpCode onto the stack
   void finish();
+
   void addIValue(const IValue& ivalue);
 
   // See torch/serialization.py for details, pushes a magic number, torch
   // serialization version, and system info to the pickle archive all as
   // individual pickle programs
   void pushMetadata();
+
+  // If more than 1 value is being added to this pickle archive, then this
+  // must be called before adding any values in order to mark that they should
+  // be wrapped in a tuple
+  void pushTuple();
+  void endTuple();
 
  private:
   void pushDict(const IValue& ivalue);

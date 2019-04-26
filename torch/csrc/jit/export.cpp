@@ -712,9 +712,11 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
 void ScriptModuleSerializer::writeAttributeTable() {
   Pickler pickler(&tensor_table_);
   pickler.start();
+  pickler.pushTuple();
   for (const IValue& ivalue : attribute_table_) {
     pickler.addIValue(ivalue);
   }
+  pickler.endTuple();
   pickler.finish();
   writer_.writeRecord(
       "attributes.pkl", pickler.stack().data(), pickler.stack().size());

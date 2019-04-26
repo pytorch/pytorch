@@ -33,26 +33,32 @@ void Pickler::start() {
   push<uint8_t>(PROTOCOL_VERSION);
 }
 
+void Pickler::pushTuple() {
+  push<OpCode>(OpCode::MARK);
+}
+
+void Pickler::endTuple() {
+  push<OpCode>(OpCode::TUPLE);
+}
+
 void Pickler::finish() {
   push<OpCode>(OpCode::STOP);
 
   // Add the binary data for all the tensors to be included in the same binary
-  // TODO: The pickler should be refactored to stream out to a file directly
+  // TODO: The pickler should be refactored to stream out to a stream directly
   // instead of staging in the stack_ array
-
-  // Insert storage keys
   if (literal_tensors_.size() > 0) {
     // As another pickle program in the same binary archive, add a list of
     // keys for each tensor (see torch/serialization.py)
     start();
-    push<OpCode>(OpCode::MARK);
+    pushTuple();
     for (auto tensor : literal_tensors_) {
       std::string key = std::to_string(getTensorKey(tensor));
       push<OpCode>(OpCode::BINUNICODE);
       push<uint32_t>(key.size());
       pushString(key);
     }
-    push<OpCode>(OpCode::TUPLE);
+    endTuple();
     push<OpCode>(OpCode::STOP);
 
     // Now dump the tensor binary data
@@ -421,7 +427,11 @@ void Pickler::pushTuple(const IValue& ivalue) {
 
 std::vector<IValue> Unpickler::parse_ivalue_list() {
   run();
-  return stack_;
+  AT_CHECK(
+      stack_.size() == 1,
+      "Unpickler expected 1 element on the stack, but found ",
+      stack_.size());
+  return stack_.at(0).toTuple()->elements();
 }
 
 double Unpickler::readFloat() {
