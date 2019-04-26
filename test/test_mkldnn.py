@@ -88,10 +88,5 @@ class TestMkldnn(TestCase):
         self.assertTrue("layout=torch._mkldnn" in str(torch.randn((1, 2, 3, 4),
                         dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
 
-    def test_is_mkldnn(self):
-        x = torch.randn(4, 5, dtype=torch.float32)
-        self.assertFalse(x.is_mkldnn)
-        self.assertTrue(x.to_mkldnn().is_mkldnn)
-
 if __name__ == '__main__':
     run_tests()
