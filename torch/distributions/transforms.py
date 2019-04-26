@@ -366,10 +366,10 @@ class TanhTransform(Transform):
     Transform via the mapping :math:`y = \tanh(x)`.
     """
     domain = constraints.real
-    codomain = constraints.interval(-1.0, 1.0)
+    codomain = constraints.open_interval(-1.0, 1.0)
     bijective = True
     sign = +1
-    atanh = lambda x: 0.5*(torch.log(1 + x) - torch.log(1 - x))
+    atanh = lambda x: 0.5*torch.log((1 + x)/(1 - x))
 
     def __eq__(self, other):
         return isinstance(other, TanhTransform)
@@ -378,7 +378,7 @@ class TanhTransform(Transform):
         return x.tanh()
 
     def _inverse(self, y):
-        return atanh(y)
+        return self.atanh(y)
 
     def log_abs_det_jacobian(self, x, y):
         return torch.log(1 - y**2)
