@@ -790,7 +790,8 @@ void ScriptModuleSerializer::convertModule(
     methods << "op_version_set = " << op_version_set << "\n";
     PythonPrint(
         methods,
-        module,
+        module.class_compilation_unit(),
+        /*is_method=*/true,
         tensor_table_,
         class_table_,
         /*enforce_importable=*/true);

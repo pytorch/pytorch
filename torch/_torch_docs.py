@@ -2536,10 +2536,11 @@ Example::
 
 add_docstr(torch.logspace,
            r"""
-logspace(start, end, steps=100, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+logspace(start, end, steps=100, base=10.0, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a one-dimensional tensor of :attr:`steps` points
-logarithmically spaced between :math:`10^{{\text{{start}}}}` and :math:`10^{{\text{{end}}}}`.
+logarithmically spaced with base :attr:`base` between
+:math:`{{\text{{base}}}}^{{\text{{start}}}}` and :math:`{{\text{{base}}}}^{{\text{{end}}}}`.
 
 The output tensor is 1-D of size :attr:`steps`.
 
@@ -2548,6 +2549,7 @@ Args:
     end (float): the ending value for the set of points
     steps (int): number of points to sample between :attr:`start`
         and :attr:`end`. Default: ``100``.
+    base (float): base of the logarithm function. Default: ``10.0``.
     {out}
     {dtype}
     {layout}
@@ -2562,6 +2564,8 @@ Example::
     tensor([  1.2589,   2.1135,   3.5481,   5.9566,  10.0000])
     >>> torch.logspace(start=0.1, end=1.0, steps=1)
     tensor([1.2589])
+    >>> torch.logspace(start=2, end=2, steps=1, base=2)
+    tensor([4.0])
 """.format(**factory_common_args))
 
 add_docstr(torch.logsumexp,

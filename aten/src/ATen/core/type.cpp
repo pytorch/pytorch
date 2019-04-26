@@ -513,7 +513,7 @@ ClassTypePtr ClassType::create(
 
 ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
   return ClassTypePtr(new ClassType(
-      QualifiedName(QualifiedName("__torch__"), "Module"), std::move(cu)));
+      QualifiedName(QualifiedName("__torch__"), "%Module"), std::move(cu)));
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
