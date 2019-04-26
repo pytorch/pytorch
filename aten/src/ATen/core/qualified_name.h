@@ -19,7 +19,7 @@ struct QualifiedName : c10::intrusive_ptr_target {
         "'");
   }
 
-  const QualifiedNamePtr prefix_ = nullptr;
+  const QualifiedNamePtr prefix_ = QualifiedNamePtr();
   const std::string name_;
 
   static QualifiedNamePtr create(QualifiedNamePtr prefix, std::string name) {
@@ -80,7 +80,7 @@ struct QualifiedName : c10::intrusive_ptr_target {
 
  private:
   std::ostream& toString(std::ostream& ss) const {
-    if (prefix_ == nullptr) {
+    if (!prefix_) {
       ss << name_;
       return ss;
     }
