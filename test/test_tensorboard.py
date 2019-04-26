@@ -18,6 +18,9 @@ except ImportError:
 
 TEST_MATPLOTLIB = True
 try:
+    import matplotlib
+    if os.environ.get('DISPLAY', '') == '':
+        matplotlib.use('Agg')
     import matplotlib.pyplot as plt
 except ImportError:
     TEST_MATPLOTLIB = False
