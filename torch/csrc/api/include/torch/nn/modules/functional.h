@@ -88,6 +88,8 @@ class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
   /// Calls forward(input).
   Tensor operator()(Tensor input);
 
+  bool is_serializable() const override;
+
  private:
   Function function_;
 };
