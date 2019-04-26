@@ -52,7 +52,7 @@ void Pickler::finish() {
     // keys for each tensor (see torch/serialization.py)
     start();
     pushTuple();
-    for (auto tensor : literal_tensors_) {
+    for (const auto& tensor : literal_tensors_) {
       std::string key = std::to_string(getTensorKey(tensor));
       push<OpCode>(OpCode::BINUNICODE);
       push<uint32_t>(key.size());
@@ -62,7 +62,7 @@ void Pickler::finish() {
     push<OpCode>(OpCode::STOP);
 
     // Now dump the tensor binary data
-    for (auto tensor : literal_tensors_) {
+    for (const auto& tensor : literal_tensors_) {
       pushTensorData(tensor);
     }
   }
@@ -274,7 +274,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   // size
   std::vector<IValue> size_ivalues;
   for (auto size : tensor.sizes()) {
-    size_ivalues.push_back(size);
+    size_ivalues.emplace_back(size);
   }
   auto sizes = c10::ivalue::Tuple::create(size_ivalues);
   addIValue(sizes);
@@ -282,7 +282,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   // stride
   std::vector<IValue> stride_ivalues;
   for (auto stride : tensor.strides()) {
-    stride_ivalues.push_back(stride);
+    stride_ivalues.emplace_back(stride);
   }
   auto strides = c10::ivalue::Tuple::create(stride_ivalues);
   addIValue(strides);
