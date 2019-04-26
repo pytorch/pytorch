@@ -40,21 +40,6 @@ using IDeepTensorWrapperPtr = c10::intrusive_ptr<IDeepTensorWrapper>;
 using MKLDNNTensorImpl = OpaqueTensorImpl<IDeepTensorWrapperPtr>;
 using MKLDNNTensor = Tensor;
 
-// Custom allocator using c10 CPU allocator for `ideep::tensor`
-struct AllocForMKLDNN {
-  template<class computation_t = void>
-  static char* malloc(size_t size) {
-    auto allocator = c10::GetAllocator(c10::DeviceType::CPU);
-    return (char*)allocator->raw_allocate(size);
-  }
-
-  template<class computation_t = void>
-  static void free(void* p) {
-    auto allocator = c10::GetAllocator(c10::DeviceType::CPU);
-    allocator->raw_deallocate(p);
-  }
-};
-
 Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options) {
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
@@ -76,7 +61,7 @@ Tensor new_with_sizes_mkldnn(IntArrayRef sizes, const TensorOptions& options) {
 }
 
 ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
-  AT_ASSERTM(mkldnn_tensor.type_id() == MkldnnCPUTensorId(),
+  AT_ASSERTM(mkldnn_tensor.is_mkldnn(),
              "mkldnn_to_dense expects MKL-DNN tensor input");
   AT_ASSERTM(!mkldnn_tensor.is_variable(), "_internal_get_MKLDNNImpl: should not be a variable");
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
