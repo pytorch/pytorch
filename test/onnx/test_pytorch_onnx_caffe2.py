@@ -1047,13 +1047,29 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_unsqueeze(self):
         shape = (3, 4, 5)
-        for dim in range(len(shape) + 1):
+        # test negative dim as well.
+        for dim in range(-len(shape) - 1, len(shape) + 1):
+
             class MyModel(torch.nn.Module):
                 def __init__(self):
                     super(MyModel, self).__init__()
 
                 def forward(self, x):
                     return x.unsqueeze(dim)
+            x = torch.randn(*shape)
+            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, atol=1e-7)
+
+    def test_squeeze(self):
+        shape = (1, 1, 1)
+        # test negative dim as well
+        for dim in range(-len(shape), len(shape)):
+
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super(MyModel, self).__init__()
+
+                def forward(self, x):
+                    return x.squeeze(dim)
             x = torch.randn(*shape)
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, atol=1e-7)
 

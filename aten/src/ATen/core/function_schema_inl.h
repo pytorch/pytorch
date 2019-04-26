@@ -142,4 +142,23 @@ inline void FunctionSchema::checkAndNormalizeInputs(
   }
 }
 
+inline FunctionSchema FunctionSchema::cloneWithRemappedTypes(
+    const std::function<TypePtr(TypePtr)> type_map) const {
+  auto update_args = [&](const std::vector<Argument>& args) {
+    std::vector<Argument> new_args;
+    new_args.reserve(args.size());
+    for(const Argument& arg : args) {
+      new_args.emplace_back(arg.cloneWithType(type_map(arg.type())));
+    }
+    return new_args;
+  };
+  return FunctionSchema(
+      name(),
+      overload_name(),
+      update_args(arguments()),
+      update_args(returns()),
+      is_vararg(),
+      is_varret());
+}
+
 } // namespace c10

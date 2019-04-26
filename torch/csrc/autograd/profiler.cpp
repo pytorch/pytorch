@@ -12,7 +12,7 @@ constexpr CUDAStubs* default_stubs_addr = &default_stubs;
 // static initialization calls which may invoke registerCUDAMethods
 static CUDAStubs* cuda_stubs = default_stubs_addr;
 
-TORCH_API void registerCUDAMethods(CUDAStubs* stubs) {
+void registerCUDAMethods(CUDAStubs* stubs) {
   cuda_stubs = stubs;
 }
 
