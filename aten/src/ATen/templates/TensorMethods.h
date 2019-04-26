@@ -16,7 +16,7 @@ inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocki
   return to(
       at::device(t.device_type()).layout(t.layout()).dtype(t.scalarType()),
       non_blocking,
-      /*copy*/ true);
+      /*copy=*/ true);
 }
 
 inline Tensor Tensor::cpu() const {
@@ -110,6 +110,15 @@ inline bool Tensor::is_sparse() const {
 
 inline bool is_sparse(Tensor self) {
   return self.is_sparse();
+}
+
+inline bool Tensor::is_mkldnn() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_mkldnn();
+}
+
+inline bool is_mkldnn(Tensor self) {
+  return self.is_mkldnn();
 }
 
 inline bool Tensor::is_quantized() const {
