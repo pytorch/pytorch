@@ -84,7 +84,7 @@ YAML_SOURCES = [
     Treegen(pytorch_build_definitions.add_build_env_defs, 0),
     File("job-specs-custom.yml"),
     Treegen(caffe2_build_definitions.add_caffe2_builds, 1),
-    File("job-specs-html-update.yml"),
+    File("binary_update_htmls.yml"),
     Header("Binary build specs individual job specifications"),
     Treegen(binary_build_definitions.add_binary_build_specs, 1),
     Header(

@@ -511,7 +511,7 @@ ClassTypePtr ClassType::create(
 }
 
 ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
-  return ClassTypePtr(new ClassType("Module", std::move(cu)));
+  return ClassTypePtr(new ClassType("$Module", std::move(cu)));
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
