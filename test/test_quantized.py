@@ -11,6 +11,19 @@ def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
 
 
+def _quantize(x, scale, zero_point, qmin=0, qmax=255):
+    """Quantizes a numpy array."""
+    qx = np.round(x / scale + zero_point)
+    qx = np.clip(qx, qmin, qmax).astype(np.uint8)
+    return qx
+
+
+def _dequantize(qx, scale, zero_point):
+    """Dequantizes a numpy array."""
+    x = (qx.astype(np.float) - zero_point) * scale
+    return x
+
+
 @skipIfNotRegistered("Relu_ENGINE_DNNLOWP",
                      "fbgemm-based Caffe2 ops are not linked")
 class TestQuantized(TestCase):
@@ -45,24 +58,23 @@ graph(%x : (Tensor, float, int)):
 ''')
 
 
-class TestQuantizedRelu(unittest.TestCase):
+class TestQuantizedOps(unittest.TestCase):
     """Tests the correctness of the quantized::relu op."""
     def test_qrelu(self):
         relu = torch.ops.quantized.relu
 
-        X_tensor = np.arange(0, 10, dtype=np.uint8)
-        scale = 255.0
-        zero_point = 5
+        X = torch.arange(-5, 5, dtype=torch.float)
+        scale = 2.0
+        zero_point = 1
+        qX = X.quantize_linear(scale=scale, zero_point=zero_point)
+        print("X:\n{}".format(X))
+        print("\nQuantized:\n{}\nFake:\n{}".format(qX.int_repr(), _quantize(X.numpy(), scale, zero_point)))
 
-        Y_tensor = X_tensor.copy()
-        Y_tensor[X_tensor < zero_point] = zero_point
-
-        X = (torch.from_numpy(X_tensor), scale, zero_point)
-
-        Y_hat = relu(*X)
-        Y_hat_tensor = Y_hat[0].numpy()
-
-        np.testing.assert_equal(Y_tensor, Y_hat_tensor)
+        Y = X.numpy().copy()
+        Y[Y < 0] = 0
+        qY = _quantize(Y, scale, zero_point)
+        qY_hat = relu(qX)
+        np.testing.assert_equal(qY, qY_hat.int_repr())
 
 
 if __name__ == '__main__':
