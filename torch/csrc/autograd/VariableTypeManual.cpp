@@ -347,6 +347,13 @@ Tensor & VariableType::detach_(Tensor & self) const {
 
 Tensor VariableType::_sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, const TensorOptions & options) const {
   RECORD_FUNCTION("_sparse_coo_tensor_with_dims_and_tensors", std::vector<c10::IValue>({indices, values}), Function::peek_at_next_sequence_nr());
+
+  // SparseTensorImpl's `set_indices_and_values_unsafe(indices, values)` function expects
+  // `indices` and `values` to not require grad. The `unpack()` function calls in the
+  // auto-generated version of this function doesn't always return `indices_` and `values_`
+  // with requires_grad=false, and we need another way to create non-requires-grad `indices_`
+  // and `values_` tensors that contains the same data as `indices` and `values`, which is
+  // achieved by shallow-copying `indices` and `values` and wrapping them in new Tensors here.
   auto indices_ = Tensor(indices.unsafeGetTensorImpl()->shallow_copy_and_detach());
   auto values_ = Tensor(values.unsafeGetTensorImpl()->shallow_copy_and_detach());
   auto options_ = TensorOptions(options).is_variable(false);
