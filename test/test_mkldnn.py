@@ -90,11 +90,6 @@ class TestMkldnn(TestCase):
         self.assertTrue("layout=torch._mkldnn" in str(torch.randn((1, 2, 3, 4),
                         dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
 
-    def test_is_mkldnn(self):
-        x = torch.randn(4, 5, dtype=torch.float32)
-        self.assertFalse(x.is_mkldnn)
-        self.assertTrue(x.to_mkldnn().is_mkldnn)
-
     def test_conv2d(self):
         for groups in [1, 4]:
             N = torch.randint(3, 10, (1,)).item()
@@ -113,6 +108,7 @@ class TestMkldnn(TestCase):
                 self.assertEqual(
                     conv2d(x),
                     mkldnn_conv2d(x.to_mkldnn()).to_dense())
+
 
 if __name__ == '__main__':
     run_tests()
