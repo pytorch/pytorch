@@ -2132,6 +2132,56 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         except Exception as ex:
             self.fail("Unexpected exception: %s" % ex)
 
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_multiple_outputs_multiple_backward(self):
+        """
+        Note: this test can be sped up by only running it on a CPU module
+        once DistributedDataParallel supports them.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class MultipleOutputModule(nn.Module):
+            def __init__(self):
+                super(MultipleOutputModule, self).__init__()
+
+                def define_module():
+                    return nn.Sequential(
+                        nn.Linear(2, 10, bias=False),
+                        nn.ReLU(),
+                        nn.Linear(10, 4, bias=False),
+                        nn.ReLU(),
+                    )
+
+                self.module0 = define_module()
+                self.module1 = define_module()
+
+            def forward(self, x):
+                return (
+                    F.softmax(self.module0(x), dim=1),
+                    F.softmax(self.module1(x), dim=1),
+                )
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = DistributedDataParallel(
+            MultipleOutputModule().float().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+
+        # Compute loss and gradients for both outputs
+        output1, output2 = model(input)
+        loss1 = criterion(output1, target)
+        loss1.backward()
+        loss2 = criterion(output2, target)
+        loss2.backward()
+
 
 class ReducerModule(nn.Module):
     def __init__(self):
