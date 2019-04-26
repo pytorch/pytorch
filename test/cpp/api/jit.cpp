@@ -2,7 +2,6 @@
 
 #include <torch/jit.h>
 #include <torch/types.h>
-#include <torch/script.h>
 
 #include <string>
 
@@ -99,7 +98,6 @@ TEST(TorchScriptTest, TestDictArgMatching) {
   auto output = module->run_method("dict_op", dict, std::string("hello"));
   ASSERT_EQ(1, output.toTensor()[0].item<int64_t>());
 }
-
 
 TEST(TorchScriptTest, TestTupleArgMatching) {
   auto module = torch::jit::compile(R"JIT(
