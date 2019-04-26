@@ -136,8 +136,10 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
     }
     
     if (full) {
-        auto mask = (target > 1).toType(c10::kLong);
-        loss.index_select(0, mask) += (target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target)).index_select(0, mask);
+        auto mask1 = (target > 1);
+        auto mask0 = (target <= 1);
+        loss[1] += (target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target)).masked_select(mask1);
+        loss[0] += (target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target)).masked_select(mask0);
     }
 
     return apply_loss_reduction(loss, reduction);
