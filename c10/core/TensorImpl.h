@@ -846,16 +846,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // NOTE [ TensorImpl Shallow-Copying ]
   //
-  // TensorImpl shallow-copying is used when we want to have two Variables share the same storage and tensor
-  // metadata, but each with a different autograd history. There are two example call sites:
+  // TensorImpl shallow-copying is used when we want to have two Variables share the same storage pointer
+  // and tensor metadata, but each with a different autograd history. There are two example call sites:
   //
-  // 1. `var = make_variable(tensor)` uses `shallow_copy_and_detach()` to create `var` that shares the same storage
-  // and tensor metadata with `tensor`, but with a completely new autograd history.
+  // 1. `var = make_variable(tensor)` uses `shallow_copy_and_detach()` to create `var` that shares the same
+  // storage pointer and tensor metadata with `tensor`, but with a completely new autograd history.
   // 2. `var.set_data(tensor)` uses `shallow_copy_from()` to copy storage pointer and tensor metadata from
   // `tensor` into `var`, while keeping `var`'s original AutogradMeta.
   //
   // Functions that shallow-copy a TensorImpl (such as `shallow_copy_and_detach()` and `shallow_copy_from()`)
-  // copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage / storage_offset) 
+  // copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
   // by value. However, the following fields are not copied:
   //
   // 1. the AutogradMeta pointer, because it is unique for each Variable.
@@ -868,10 +868,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // and setting `allow_tensor_metadata_change_` to false would prevent those changes from happening and is undesirable.
 
   /**
-   * Copy tensor metadata from one TensorImpl to another TensorImpl.
+   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * from one TensorImpl to another TensorImpl.
+   *
    * See NOTE [ TensorImpl Shallow-Copying ] for details.
    */
-  friend void copy_tensor_metadata(const TensorImpl* src_impl, TensorImpl* dest_impl) {
+  friend void copy_tensor_data(const TensorImpl* src_impl, TensorImpl* dest_impl) {
+    dest_impl->storage_ = src_impl->storage_;
     dest_impl->sizes_ = src_impl->sizes_;
     dest_impl->strides_ = src_impl->strides_;
     dest_impl->storage_offset_ = src_impl->storage_offset_;
@@ -889,7 +892,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id());
-    copy_tensor_metadata(/*src_impl=*/this, /*dest_impl=*/impl.get());
+    copy_tensor_data(/*src_impl=*/this, /*dest_impl=*/impl.get());
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;
@@ -900,8 +903,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See NOTE [ TensorImpl Shallow-Copying ] for details.
    */
   virtual void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) {
-    set_storage(impl->storage());
-    copy_tensor_metadata(/*src_impl=*/impl.get(), /*dest_impl=*/this);
+    copy_tensor_data(/*src_impl=*/impl.get(), /*dest_impl=*/this);
     refresh_numel();
     refresh_contiguous();
   }

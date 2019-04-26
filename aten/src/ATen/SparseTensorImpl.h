@@ -189,14 +189,13 @@ public:
    */
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
     auto impl = c10::make_intrusive<SparseTensorImpl>(type_id(), dtype());
-    copy_tensor_metadata(/*src_impl=*/this, /*dest_impl=*/impl.get());
+    copy_tensor_data(/*src_impl=*/this, /*dest_impl=*/impl.get());
 
     // Sparse-specific fields
     impl->sparse_dim_ = sparse_dim();
     impl->dense_dim_ = dense_dim();
     impl->indices_ = indices();
     impl->values_ = values();
-    impl->device_opt_ = device();
     impl->coalesced_ = coalesced();
     impl->refresh_numel();
     return impl;
@@ -208,7 +207,7 @@ public:
    */
   void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
     AT_ASSERT(impl->is_sparse());
-    copy_tensor_metadata(/*src_impl=*/impl.get(), /*dest_impl=*/this);
+    copy_tensor_data(/*src_impl=*/impl.get(), /*dest_impl=*/this);
 
     // Sparse-specific fields
     auto sparse_impl = static_cast<SparseTensorImpl*>(impl.get());
@@ -216,7 +215,6 @@ public:
     dense_dim_ = sparse_impl->dense_dim();
     indices_ = sparse_impl->indices();
     values_ = sparse_impl->values();
-    device_opt_ = sparse_impl->device();
     coalesced_ = sparse_impl->coalesced();
     refresh_numel();
   }
