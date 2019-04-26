@@ -261,7 +261,7 @@ void Pickler::pushMemoization(const IValue& ivalue) {
       ivalue.tagKind(),
       " IValue ",
       ivalue)
-  pushMemoization(getPointer(ivalue));
+  pushMemoization(ptr);
 }
 
 void Pickler::pushList(const IValue& ivalue) {
