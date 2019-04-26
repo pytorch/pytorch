@@ -136,6 +136,9 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
+  std::shared_ptr<ProcessGroup::Work> barrier(
+      const BarrierOptions& opts = BarrierOptions()) override;
+
   // Unsupported Ops
   std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -161,9 +164,6 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> barrier(
-      const BarrierOptions& opts = BarrierOptions()) override;
-
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(ncclUniqueId* ncclID);
@@ -174,12 +174,27 @@ class ProcessGroupNCCL : public ProcessGroup {
       const std::string& devicesKey,
       const std::vector<at::Device>& devices);
 
-  // Tensor checker helper
-  void tensorCheckHelper(
-      const std::vector<at::Tensor>& input,
-      const std::vector<at::Tensor>& output,
-      int outputOverInput = 1);
+ private:
+  // Helper that encapsulates work shared across all collective communication
+  // primitives.  The callbacks have the following signatures:
+  //
+  //    ncclResult_t fn(at::Tensor& input, at::Tensor& output,
+  //                    ncclComm_t, at::cuda::CUDAStream&);
+  //    void {pre,post}(std::vector<at::cuda::CUDAStream&>);
+  template<typename Fn>
+  std::shared_ptr<ProcessGroup::Work> collective(
+      std::vector<at::Tensor>& input,
+      std::vector<at::Tensor>& output,
+      Fn fn);
+  template<typename Fn, typename PreProcess, typename PostProcess>
+  std::shared_ptr<ProcessGroup::Work> collective(
+      std::vector<at::Tensor>& input,
+      std::vector<at::Tensor>& output,
+      Fn fn,
+      PreProcess pre,
+      PostProcess post);
 
+ protected:
   // Store that is used to exchange each Ranks's NCCL unique ID
   std::shared_ptr<Store> store_;
 
