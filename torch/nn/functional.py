@@ -1401,7 +1401,15 @@ def linear(input, weight, bias=None):
         - Bias: :math:`(out\_features)`
         - Output: :math:`(N, *, out\_features)`
     """
-    return torch._C._nn.linear(input, weight, bias)
+    if input.dim() == 2 and bias is not None:
+        # fused op is marginally faster
+        ret = torch.addmm(bias, input, weight.t())
+    else:
+        output = input.matmul(weight.t())
+        if bias is not None:
+            output += bias
+        ret = output
+    return ret
 
 
 @weak_script
