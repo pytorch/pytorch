@@ -233,13 +233,15 @@ std::tuple<Tensor&, Tensor&> topk_out_cpu(
 
           // we want NaN to be sorted as top for numpy compatibility
           using elem_t = std::pair<scalar_t, int64_t>;
-          auto cmp = largest ?
-              [](elem_t& x, elem_t& y) -> bool {
-                return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
-              } :
-              [](elem_t& x, elem_t& y) -> bool {
-                return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
-              };
+          std::function<bool(elem_t&, elem_t&)> cmp =
+            [](elem_t& x, elem_t& y) -> bool {
+              return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
+            };
+          if (largest) {
+            cmp = [](elem_t& x, elem_t& y) -> bool {
+              return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
+            };
+          }
 
           std::vector<elem_t> queue;
           for (int64_t j = 0; j < tmp_values.size(0); j++) {
