@@ -849,7 +849,7 @@ struct PythonPrintPass {
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
   void printRHS(std::ostream& stmt, Node* node) {
     switch (node->kind()) {
-      case PythonOp::Kind: {
+      case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_) {
           throw script::ErrorReport(node->getSourceLocation())
@@ -1121,7 +1121,7 @@ struct PythonPrintPass {
   }
 };
 
-TORCH_API void PythonPrint(
+void PythonPrint(
     std::ostream& out,
     const script::Function& func,
     bool is_method,
@@ -1134,7 +1134,7 @@ TORCH_API void PythonPrint(
   pp.print(out);
 }
 
-TORCH_API void PythonPrint(
+void PythonPrint(
     std::ostream& out,
     const script::CompilationUnit& cu,
     bool is_method,
@@ -1147,7 +1147,7 @@ TORCH_API void PythonPrint(
   pp.print(out);
 }
 
-TORCH_API void PythonPrint(
+void PythonPrint(
     std::ostream& out,
     const ClassTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
@@ -1158,7 +1158,7 @@ TORCH_API void PythonPrint(
   pp.print(out);
 }
 
-TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
+bool printerHasSpecialCaseFor(Symbol sym) {
   // WARNING: by adding a value to this set, you are asserting
   // that you have also added special handling of this symbol to
   // the printer above. Not adding handling will cause import and export
