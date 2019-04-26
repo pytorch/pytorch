@@ -161,6 +161,37 @@ class TestMkldnn(TestCase):
                 bn(x),
                 mkldnn_bn(x.to_mkldnn()).to_dense())
 
+    def test_add(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 100, (1,)).item()
+        alpha = torch.randn(1, dtype=torch.float32).item()
+
+        x = torch.randn(N, C, 35, 45, dtype=torch.float32) * 10
+        y = torch.randn(N, C, 35, 45, dtype=torch.float32) * 10
+        mx = x.to_mkldnn()
+        my = y.to_mkldnn()
+
+        # add
+        self.assertEqual(
+            x + y,
+            (mx + my).to_dense())
+
+        self.assertEqual(
+            torch.add(x, y, alpha=alpha),
+            torch.add(mx, my, alpha=alpha).to_dense())
+
+        # add_
+        x += y
+        mx += my
+        self.assertEqual(x, mx.to_dense())
+
+        # add_out
+        out = x.clone()
+        mkldnn_out = out.to_mkldnn()
+        torch.add(x, y, alpha=alpha, out=out)
+        torch.add(mx, my, alpha=alpha, out=mkldnn_out)
+        self.assertEqual(out, mkldnn_out.to_dense())
+
 
 if __name__ == '__main__':
     run_tests()
