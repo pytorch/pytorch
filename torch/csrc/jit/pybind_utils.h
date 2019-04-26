@@ -5,6 +5,7 @@
 #include <ATen/core/stack.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
@@ -513,15 +514,16 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
   return result;
 }
 
+template<typename MethodOrFunction>
 inline py::object invokeScriptMethodFromPython(
-    script::Method& method,
+    MethodOrFunction& callee,
     tuple_slice args,
     py::kwargs kwargs) {
   auto stack = createStackForSchema(
-      method.getSchema(), std::move(args), std::move(kwargs));
+      callee.getSchema(), std::move(args), std::move(kwargs));
   {
     AutoNoGIL no_gil_guard;
-    method.run(stack);
+    callee.run(stack);
   }
   return toPyObject(std::move(stack.back()));
 }
@@ -539,5 +541,6 @@ inline py::object invokeOperatorFromPython(
 
   return createPyObjectForStack(std::move(stack));
 }
+
 } // namespace jit
 } // namespace torch

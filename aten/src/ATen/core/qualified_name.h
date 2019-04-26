@@ -16,7 +16,7 @@ struct QualifiedName {
     AT_ASSERT(!name.empty());
     // split the string into its atoms.
     size_t startSearchFrom = 0;
-    size_t pos = name.find('.', startSearchFrom);
+    size_t pos = name.find(delimiter_, startSearchFrom);
 
     while (pos != std::string::npos) {
       auto atom = name.substr(startSearchFrom, pos - startSearchFrom);
@@ -24,7 +24,7 @@ struct QualifiedName {
           atom.size() > 0, "Invalid name for qualified name: '", name, "'");
       atoms_.push_back(std::move(atom));
       startSearchFrom = pos + 1;
-      pos = name.find('.', startSearchFrom);
+      pos = name.find(delimiter_, startSearchFrom);
     }
 
     auto finalAtom = name.substr(startSearchFrom, pos - startSearchFrom);
@@ -68,8 +68,10 @@ struct QualifiedName {
   }
 
  private:
+  char delimiter_ = '.';
+
   void cacheAccessors() {
-    qualifiedName_ = Join(".", atoms_);
+    qualifiedName_ = Join(std::string(1, delimiter_), atoms_);
     if (atoms_.size() > 1) {
       ArrayRef<std::string> view(atoms_);
       const auto prefixView = view.slice(0, view.size() - 1);
@@ -78,26 +80,6 @@ struct QualifiedName {
 
     if (atoms_.size() >= 1) {
       name_ = atoms_.back();
-    }
-    checkInvariants();
-  }
-  void checkInvariants() {
-    if (prefix_.empty()) {
-      AT_ASSERT(qualifiedName_ == name_);
-    } else {
-      AT_ASSERT(qualifiedName_ == str(prefix_, ".", name_));
-    }
-
-    // No separators allowed in the base name
-    AT_ASSERT(name_.find(".") == std::string::npos);
-
-    // No empty atomic names allowed (e.g. "foo..bar")
-    AT_ASSERT(qualifiedName_.find("..") == std::string::npos);
-
-    // Check individual atoms
-    for (const auto& atom : atoms_) {
-      AT_ASSERT(!atom.empty());
-      AT_ASSERT(atom.find(".") == std::string::npos);
     }
   }
 
