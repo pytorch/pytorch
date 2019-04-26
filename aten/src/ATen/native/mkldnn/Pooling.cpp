@@ -132,16 +132,8 @@ Tensor& mkldnn_avg_pool2d_out(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad) {
-  output = _mkldnn_pool2d(
-      input,
-      kernel_size,
-      stride,
-      padding,
-      std::vector<int64_t>{1, 1},
-      ceil_mode,
-      count_include_pad ? ideep::algorithm::pooling_avg_include_padding
-                        : ideep::algorithm::pooling_avg_exclude_padding);
-  return output;
+  AT_ERROR(
+      "mkldnn_avg_pool2d_out: in-place mkldnn operations are not supported yet");
 }
 
 } // namespace native
