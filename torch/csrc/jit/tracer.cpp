@@ -39,7 +39,7 @@ void badArgType(const T& v) {
 thread_local std::shared_ptr<TracingState> tracing_state;
 } // namespace detail
 
-TORCH_API std::function<void()> pauseTracing() {
+std::function<void()> pauseTracing() {
   // NOLINTNEXTLINE
   std::shared_ptr<tracer::TracingState> state = getTracingState();
   tracer::setTracingState(nullptr);
