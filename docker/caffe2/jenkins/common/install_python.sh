@@ -76,6 +76,12 @@ install_centos() {
           python34-setuptools
       PYTHON=python3
       ;;
+    3.6)
+      yum install -y \
+          python36-devel \
+          python36-setuptools
+      PYTHON=python3
+      ;;
     *)
       echo "Invalid PYTHON_VERSION..."
       exit 1
