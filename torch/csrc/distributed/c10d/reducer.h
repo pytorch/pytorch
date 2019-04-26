@@ -54,7 +54,6 @@ class Reducer {
   std::unordered_map<torch::autograd::Function*, std::tuple<int, int>> func_;
 
   bool expect_autograd_hooks_;
-  bool has_queued_final_callback_;
   bool has_marked_unused_parameters_;
   size_t next_bucket_;
 

@@ -758,6 +758,30 @@ void testModuleDefine() {
   AT_ASSERT(result.toTensor().item<float>() == 6)
 }
 
+void testModuleConversion() {
+  auto m = std::make_shared<script::Module>();
+  {
+    // test cuda to cpu for params and buffers
+    m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
+    m->register_buffer("bar", torch::ones({}, at::kCUDA));
+    
+    m->to(at::kCUDA);
+    m->to(at::kCPU);
+    AT_ASSERT(m->get_parameter("foo").data().device().is_cpu());
+    AT_ASSERT(m->get_buffer("bar").data().device().is_cpu());
+  }
+  {
+    // test cpu to cuda for params and buffers
+    m->register_parameter("foo", torch::ones({}), false);
+    m->register_buffer("bar", torch::ones({}));
+    
+    m->to(at::kCUDA);
+    AT_ASSERT(m->get_parameter("foo").data().device().is_cuda());
+    AT_ASSERT(m->get_buffer("bar").data().device().is_cuda());
+  }
+}
+
+
 static int testPassValue = 0;
 void fakePass(std::shared_ptr<Graph>& g) {
   testPassValue++;
