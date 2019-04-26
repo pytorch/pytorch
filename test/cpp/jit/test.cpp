@@ -80,6 +80,7 @@ namespace jit {
   _(ArgumentSpec)               \
   _(Fusion)                     \
   _(GraphExecutor)              \
+  _(ModuleConversion)           \
   _(Interp)
 
 #if defined(USE_GTEST)
