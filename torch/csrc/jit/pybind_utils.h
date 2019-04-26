@@ -52,13 +52,34 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
   if (py::isinstance<py::str>(key)) {
     return TypedIValue(ConstantString::create(py::cast<std::string>(key)),
                        StringType::create());
-  } else if (PyLong_Check(key.ptr())) {
+  } else if (py::isinstance<py::int_>(key)) {
     return TypedIValue(py::cast<int64_t>(key), IntType::create());
-  } else if (PyFloat_Check(key.ptr())) {
+  } else if (py::isinstance<py::float_>(key)) {
     return TypedIValue(py::cast<double>(key), FloatType::create());
   } else {
     AT_ERROR("Dictionary inputs may only have string, int, or float keys");
   }
+}
+
+inline TypedIValue trySpecializeTensorList(std::vector<IValue> &elems, TypePtr type) {
+  // Since we only call this function for trace inputs, the only options are
+  // generic list, and list of tensors. We do not need to check for primitive types.
+  if (!type->isSubtypeOf(TensorType::get())) {
+    return TypedIValue(elems, ListType::create(type));
+  }
+  std::vector<at::Tensor> tensors;
+  tensors.reserve(elems.size());
+  for (auto elem : elems) {
+    tensors.push_back(elem.toTensor());
+  }
+  return TypedIValue(tensors, ListType::ofTensors());
+}
+
+inline c10::optional<TypePtr> unifyOrInitializeType(TypePtr accum, TypePtr unify) {
+  if (!accum) {
+    return unify;
+  }
+  return unifyTypes(accum, unify);
 }
 
 inline TypedIValue toTypedIValue(py::handle input) {
@@ -96,22 +117,37 @@ inline TypedIValue toTypedIValue(py::handle input) {
     for (auto entry : dict) {
       auto keyInfo = toDictKeyIValue(entry.first);
       auto valInfo = toTypedIValue(entry.second);
-      if (!keyType) {
-        keyType = keyInfo.second;
-        valueType = valInfo.second;
-      } else {
-        auto unifiedKey = unifyTypes(keyType, keyInfo.second);
-        auto unifiedValue = unifyTypes(valueType, valInfo.second);
-        if (!unifiedKey || !unifiedValue) {
-          AT_ERROR("Dictionary inputs to traced functions must have consistent type");
-        }
-        keyType = *unifiedKey;
-        valueType = *unifiedValue;
+      auto unifiedKey = unifyOrInitializeType(keyType, keyInfo.second);
+      auto unifiedValue = unifyOrInitializeType(valueType, valInfo.second);
+      if (!unifiedKey || !unifiedValue) {
+        AT_ERROR("Dictionary inputs to traced functions must have consistent type");
       }
+      keyType = *unifiedKey;
+      valueType = *unifiedValue;
       elems.insert(std::make_pair(keyInfo.first, valInfo.first));
     }
     return TypedIValue(at::ivalue::GenericDict::create(std::move(elems)),
                        DictType::create(keyType, valueType));
+  } else if (PyList_Check(input.ptr())) {
+    auto list = py::cast<py::list>(input);
+    std::vector<IValue> elems;
+    size_t len = py::len(list);
+    if (!len) {
+      AT_ERROR("List trace inputs must have elements");
+    }
+    elems.reserve(len);
+
+    TypePtr listType = nullptr;
+    for (auto elem: list) {
+      TypedIValue typedVal = toTypedIValue(elem);
+      elems.push_back(typedVal.ivalue());
+      auto unify = unifyOrInitializeType(listType, typedVal.type());
+      if (!unify) {
+        AT_ERROR("List inputs to traced functions must have consistent element type");
+      }
+      listType = *unify;
+    }
+    return trySpecializeTensorList(elems, listType);
   } else {
     throw std::runtime_error(c10::str(
         "Only tensors and (possibly nested) tuples of tensors or dicts are supported ",
