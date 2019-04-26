@@ -76,6 +76,50 @@ class TestQuantizedOps(unittest.TestCase):
         qY_hat = relu(qX)
         np.testing.assert_equal(qY, qY_hat.int_repr())
 
+    """Tests the correctness of the quantized::sum_relu op."""
+    def test_qsumrelu_same_qparams(self):
+        sum_relu = torch.ops.quantized.sum_relu
+
+        A = torch.arange(-25, 25, dtype=torch.float)
+        B = torch.arange(-25, 25, dtype=torch.float)
+        scale = 2.0
+        zero_point = 127
+        qA = A.quantize_linear(scale=scale, zero_point=zero_point)
+        qB = A.quantize_linear(scale=scale, zero_point=zero_point)
+
+        # Sum + ReLU ground truth
+        C = (qA.dequantize() + qB.dequantize()).numpy()
+        C[C < 0] = 0
+        qC = _quantize(C, scale, zero_point)
+
+        qC_hat = sum_relu(qA, qB, scale=scale, zero_point=zero_point)
+        np.testing.assert_equal(qC, qC_hat.int_repr())
+
+    """Tests the correctness of the quantized::sum_relu op."""
+    def test_qsumrelu_different_qparams(self):
+        sum_relu = torch.ops.quantized.sum_relu
+
+        A = torch.arange(-25, 25, dtype=torch.float)
+        B = torch.arange(-25, 25, dtype=torch.float)
+        scale_A = 3.0
+        zero_point_A = 7
+        scale_B = 5.0
+        zero_point_B = 127
+
+        scale_C = 0.5
+        zero_point_C = 5
+
+        qA = A.quantize_linear(scale=scale_A, zero_point=zero_point_A)
+        qB = A.quantize_linear(scale=scale_B, zero_point=zero_point_B)
+
+        # Sum + ReLU ground truth
+        C = (qA.dequantize() + qB.dequantize()).numpy()
+        C[C < 0] = 0
+        qC = _quantize(C, scale_C, zero_point_C)
+
+        qC_hat = sum_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
+        np.testing.assert_equal(qC, qC_hat.int_repr())
+
 
 if __name__ == '__main__':
     run_tests()
