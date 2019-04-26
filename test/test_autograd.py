@@ -2908,6 +2908,18 @@ class TestAutograd(TestCase):
         # gpu thread ReadyQueue
         out.sum().backward()
 
+    def test_set_data_preserve_version_counter(self):
+        a = torch.randn(1, 2)
+        b = torch.randn(1, 2)
+
+        b_saved_version = b._version
+        b.add_(1)
+        self.assertTrue(b._version > b_saved_version)
+
+        a_saved_version = a._version
+        a.data = b
+        self.assertTrue(a._version == a_saved_version)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
