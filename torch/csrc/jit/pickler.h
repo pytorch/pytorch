@@ -207,5 +207,12 @@ class Unpickler {
   OpCode last_opcode_;
 };
 
+// returns (record_size, data_ptr) for a tensor, converting it to a CPU tensor
+// if necessary
+std::pair<void*, uint64_t> getWriteableTensor(const at::Tensor& tensor);
+
+// return a unique ID for this tensor
+uint64_t getTensorKey(const at::Tensor& tensor);
+
 } // namespace jit
 } // namespace torch

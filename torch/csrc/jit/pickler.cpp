@@ -45,16 +45,14 @@ void Pickler::finish() {
     // As another pickle program in the same binary archive, add a list of
     // keys for each tensor (see torch/serialization.py)
     start();
-    size_t index = 0;
+    push<OpCode>(OpCode::MARK);
     for (auto tensor : literal_tensors_) {
-      at::StorageImpl* key = tensor.storage().unsafeGetStorageImpl();
-      auto key_bytes = reinterpret_cast<uint8_t*>(&key);
+      std::string key = std::to_string(getTensorKey(tensor));
       push<OpCode>(OpCode::BINUNICODE);
-      auto size = sizeof(at::StorageImpl*);
-      push<uint32_t>(size);
-      stack_.insert(stack_.end(), key_bytes, key_bytes + size);
-      index++;
+      push<uint32_t>(key.size());
+      pushString(key);
     }
+    push<OpCode>(OpCode::TUPLE);
     push<OpCode>(OpCode::STOP);
 
     // Now dump the tensor binary data
@@ -70,28 +68,11 @@ void Pickler::pushTensorData(const at::Tensor& tensor) {
   auto numel_ptr = reinterpret_cast<const char*>(&numel);
   stack_.insert(stack_.end(), numel_ptr, numel_ptr + sizeof(numel));
 
-  at::Tensor storage_tensor = tensor;
-  // TODO HIP support
-  if (tensor.storage().device_type() == at::DeviceType::CUDA) {
-    // NB: This new tensor is created to support cuda tensors.
-    // Storages can be mutated when converting tensors from cuda to cpu,
-    // and we need a cpu tensor to copy data from.
-    storage_tensor = at::empty({0}, tensor.options())
-                         .set_(
-                             tensor.storage(),
-                             /* storageOffset=*/0,
-                             /* size=*/
-                             {static_cast<int64_t>(tensor.storage().size())},
-                             /* stride=*/{1})
-                         .cpu();
-    AT_ASSERT(
-        storage_tensor.element_size() * storage_tensor.storage().size() ==
-        record_size);
-  }
-
-  uint64_t record_size = tensor.element_size() * tensor.numel();
-  auto storage_ptr = reinterpret_cast<const char*>(tensor.storage().data());
-  stack_.insert(stack_.end(), storage_ptr, storage_ptr + record_size);
+  uint64_t record_size;
+  void* storage_ptr;
+  std::tie(storage_ptr, record_size) = getWriteableTensor(tensor);
+  auto storage_byte_ptr = reinterpret_cast<uint8_t*>(storage_ptr);
+  stack_.insert(stack_.end(), storage_byte_ptr, storage_byte_ptr + record_size);
 }
 
 void Pickler::pushMetadata() {
@@ -268,7 +249,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   data_type << "torch\n" << toString(tensor.scalar_type()) << "Storage\n";
   pushGlobal(data_type.str());
   // root_key
-  pushMemoizedString(std::to_string(literal_tensors_.size()));
+  pushMemoizedString(std::to_string(getTensorKey(tensor)));
   // location
   pushMemoizedString(std::string("cpu"));
   // size
@@ -658,6 +639,36 @@ std::string Unpickler::readString() {
 
 OpCode Unpickler::readOpCode() {
   return static_cast<OpCode>(read<uint8_t>());
+}
+
+std::pair<void*, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
+  at::Tensor storage_tensor = tensor;
+  uint64_t record_size = tensor.element_size() * tensor.storage().size();
+  // TODO HIP support
+  if (tensor.storage().device_type() == at::DeviceType::CUDA) {
+    // NB: This new tensor is created to support cuda tensors.
+    // Storages can be mutated when converting tensors from cuda to cpu,
+    // and we need a cpu tensor to copy data from.
+    storage_tensor = at::empty({0}, tensor.options())
+                         .set_(
+                             tensor.storage(),
+                             /* storageOffset = */ 0,
+                             /* size = */
+                             {static_cast<int64_t>(tensor.storage().size())},
+                             /* stride = */ {1})
+                         .cpu();
+    AT_CHECK(
+        storage_tensor.element_size() * storage_tensor.storage().size() ==
+            record_size,
+        "Storage tensor size did not match record size");
+  }
+
+  return std::make_pair(tensor.storage().data(), record_size);
+}
+
+uint64_t getTensorKey(const at::Tensor& tensor) {
+  at::StorageImpl* storage_key = tensor.storage().unsafeGetStorageImpl();
+  return reinterpret_cast<intptr_t>(storage_key);
 }
 
 } // namespace jit
