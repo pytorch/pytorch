@@ -11743,7 +11743,7 @@ a")
             self.assertEqual(out[0], {"I": "am", "a test": "test"})
             self.assertEqual(out[1], 2.3)
             self.assertEqual(out[2], 99)
-            self.assertEqual(out[5], [1, 2, 3, 4])
+            self.assertEqual(out[6], [1, 2, 3, 4])
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):
