@@ -584,13 +584,10 @@ struct to_ir {
   void handleMaybeNoReturn(const Def& def, Block* block) {
     if (exit_blocks.count(graph->block()) == 0) {
       auto decl_ret = def_stack_.back().declared_return_type_;
-      if (decl_ret && decl_ret != NoneType::get() &&
-          !decl_ret->cast<OptionalType>()) {
+      if (decl_ret && decl_ret != NoneType::get()) {
         throw ErrorReport(def.range())
-            << "Return value was annotated as having type "
-            << decl_ret->python_str() << " but is actually of type "
-            << OptionalType::create(decl_ret)->python_str()
-            << " because it does not return on all paths";
+            << "Function was not annotated as having type None, but does not "
+            << "return along all paths";
       }
       WithInsertPoint b(*block->nodes().end());
       emitReturn(Return::create(

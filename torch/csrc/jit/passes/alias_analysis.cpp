@@ -724,6 +724,7 @@ void AliasDb::analyzeBroadcastingChunk(Node* node) {
 
 // Register the fact that `value` is a pointer to `to`
 void AliasDb::makePointerTo(const Value* from, const Value* to) {
+  // BottomType values are guaranteed never to be used, so we do not track them
   if (from->type() == BottomType::get() || to->type() == BottomType::get()) {
     return;
   }

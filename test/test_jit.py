@@ -11092,18 +11092,24 @@ a")
         FileCheck().check("Long(*, *)").check("prim::If").run(graph)
 
     def test_partial_returns(self):
-        with self.assertRaisesRegex(RuntimeError, "does not return on all paths"):
+        with self.assertRaisesRegex(RuntimeError, "does not return along all"):
             @torch.jit.script
             def no_ret():
                 # type: () -> int
                 pass
 
-        with self.assertRaisesRegex(RuntimeError, "does not return on all paths"):
+        with self.assertRaisesRegex(RuntimeError, "does not return along all"):
             @torch.jit.script
             def partial(x):
                 # type: (Tensor) -> int
                 if x:
                     return x
+
+        with self.assertRaisesRegex(RuntimeError, "does not return along all"):
+            @torch.jit.script
+            def typed_none():
+                # type: () -> Optional[int]
+                pass
 
         @torch.jit.script
         def none_ret():
@@ -11111,14 +11117,6 @@ a")
 
         self.assertIs(none_ret(), None)
         FileCheck().check(": None").run(none_ret.graph)
-
-        @torch.jit.script
-        def typed_none():
-            # type: () -> Optional[int]
-            pass
-
-        self.assertIs(none_ret(), None)
-        FileCheck().check(": int?").run(typed_none.graph)
 
     def test_early_returns_error(self):
         with self.assertRaisesRegex(RuntimeError, "within loops"):
