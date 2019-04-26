@@ -192,6 +192,21 @@ class TestMkldnn(TestCase):
         torch.add(mx, my, alpha=alpha, out=mkldnn_out)
         self.assertEqual(out, mkldnn_out.to_dense())
 
+    def test_view(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
+        self.assertRaisesRegex(RuntimeError,
+                               "Change to use reshape",
+                               lambda: x.view(x.size(0), -1))
+
+    def test_reshape(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
+        size = (x.size(0), -1)
+
+        self.assertEqual(
+            x.reshape(size),
+            x.to_mkldnn().reshape(size).to_dense(),
+        )
+
 
 if __name__ == '__main__':
     run_tests()
