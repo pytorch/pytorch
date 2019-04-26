@@ -44,8 +44,8 @@ class TORCH_API InputArchive final {
 
   ~InputArchive() = default;
 
-  /// Reads a `tensor` associated with a given `key`. If the `InputArchive` doesn't
-  /// contain `key`, this function returns false, otherwise it returns true.
+  /// Reads a `tensor` associated with a given `key`. If there is no `tensor`
+  /// associated with the `key`, this returns false, otherwise it returns true.
   /// If the tensor is expected to be a buffer (not differentiable), `is_buffer`
   /// must be `true`.
   bool try_read(const std::string& key, Tensor& tensor, bool is_buffer = false);
@@ -54,6 +54,11 @@ class TORCH_API InputArchive final {
   /// If the tensor is expected to be a buffer (not differentiable), `is_buffer`
   /// must be `true`.
   void read(const std::string& key, Tensor& tensor, bool is_buffer = false);
+
+  /// Reads a `InputArchive` associated with a given `key`. If there is no
+  /// `InputArchive` associated with the `key`, this returns false, otherwise
+  /// it returns true.
+  bool try_read(const std::string& key, InputArchive& archive);
 
   /// Reads an `InputArchive` associated with a given `key`.
   /// The archive can thereafter be used for further deserialization of the
