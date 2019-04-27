@@ -101,6 +101,22 @@ void Module::save(
   ExportModule(*this, filename, extra_files);
 }
 
+void module_state_to(
+    const Slot& s,
+    const c10::optional<at::Device>& device,
+    const c10::optional<at::ScalarType>& dtype,
+    bool non_blocking) {
+    // Need to access the `at::Tensor` as a `Variable` here.
+    autograd::Variable variable = s.value().toTensor();
+    at::Tensor data = variable.data();
+    // Use the data's original device or dtype if not supplied here.
+    auto new_data = data.to(
+        device.value_or(data.device()),
+        dtype.value_or(data.scalar_type()),
+        non_blocking);
+    variable.set_data(new_data);
+}
+
 void Module::to_impl(
     const c10::optional<at::Device>& device,
     const c10::optional<at::ScalarType>& dtype,
@@ -111,15 +127,13 @@ void Module::to_impl(
   }
   // Then convert every of our parameters.
   for (auto& parameter : get_parameters()) {
-    // Need to access the `at::Tensor` as a `Variable` here.
-    autograd::Variable variable = parameter.value().toTensor();
-    at::Tensor data = variable.data();
-    // Use the data's original device or dtype if not supplied here.
-    auto new_data = data.to(
-        device.value_or(data.device()),
-        dtype.value_or(data.scalar_type()),
-        non_blocking);
-    variable.set_data(new_data);
+    module_state_to(parameter, device, dtype, non_blocking);
+  }
+  // Then convert every tensor attributes (buffers).
+  for (auto& attr : get_attributes()) {
+    if (attr.type()->isSubtypeOf(TensorType::get())) {
+      module_state_to(attr, device, dtype, non_blocking);
+    }
   }
 }
 

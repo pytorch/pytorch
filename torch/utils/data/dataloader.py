@@ -55,7 +55,38 @@ class DataLoader(object):
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
 
-    .. note:: By default, each worker will have its PyTorch seed set to
+    .. note:: When ``num_workers != 0``, the corresponding worker processes are created each time
+              iterator for the DataLoader is obtained (as in when you call
+              ``enumerate(dataloader,0)``).
+              At this point, the dataset, ``collate_fn`` and ``worker_init_fn`` are passed to each
+              worker, where they are used to access and initialize data based on the indices
+              queued up from the main process. This means that dataset access together with
+              its internal IO, transforms and collation runs in the worker, while any
+              shuffle randomization is done in the main process which guides loading by assigning
+              indices to load. Workers are shut down once the end of the iteration is reached.
+
+              Since workers rely on Python multiprocessing, worker launch behavior is different
+              on Windows compared to Unix. On Unix fork() is used as the default
+              muliprocessing start method, so child workers typically can access the dataset and
+              Python argument functions directly through the cloned address space. On Windows, another
+              interpreter is launched which runs your main script, followed by the internal
+              worker function that receives the dataset, collate_fn and other arguments
+              through Pickle serialization.
+
+              This separate serialization means that you should take two steps to ensure you
+              are compatible with Windows while using workers
+              (this also works equally well on Unix):
+
+              - Wrap most of you main script's code within ``if __name__ == '__main__':`` block,
+                to make sure it doesn't run again (most likely generating error) when each worker
+                process is launched. You can place your dataset and DataLoader instance creation
+                logic here, as it doesn't need to be re-executed in workers.
+              - Make sure that ``collate_fn``, ``worker_init_fn`` or any custom dataset code
+                is declared as a top level def, outside of that ``__main__`` check. This ensures
+                they are available in workers as well
+                (this is needed since functions are pickled as references only, not bytecode).
+
+              By default, each worker will have its PyTorch seed set to
               ``base_seed + worker_id``, where ``base_seed`` is a long generated
               by main process using its RNG. However, seeds for other libraies
               may be duplicated upon initializing workers (w.g., NumPy), causing
