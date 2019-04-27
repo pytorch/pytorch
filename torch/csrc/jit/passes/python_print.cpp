@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
 
-using c10::QualifiedNamePtr;
 using c10::QualifiedName;
 
 namespace torch {
@@ -88,19 +87,19 @@ static bool isValidIdentifier(const std::string& name) {
   return true;
 }
 
-static void emitQualifiedName(std::ostream& out, QualifiedNamePtr name) {
-  const auto& name_ = name->name_;
-  const auto& prefix_ = name->prefix_;
+static void emitQualifiedName(std::ostream& out, const QualifiedName& name) {
+  const auto& name_ = name.name();
+  const auto& prefix_ = name.prefix();
   if (isValidIdentifier(name_)) {
-    if (prefix_) {
-      emitQualifiedName(out, prefix_);
+    if (!prefix_.empty()) {
+      emitQualifiedName(out, QualifiedName(prefix_));
       out << ".";
     }
     out << name_;
   } else {
-    AT_ASSERT(prefix_);
+    AT_ASSERT(!prefix_.empty());
     out << "getattr(";
-    emitQualifiedName(out, prefix_);
+    emitQualifiedName(out, QualifiedName(prefix_));
     out << ", ";
     printQuotedString(out, name_);
     out << ")";
@@ -110,9 +109,9 @@ static void emitQualifiedName(std::ostream& out, QualifiedNamePtr name) {
 // Get a stringified version of the qualified name.
 // if a field is not a valid Python identifier, then it will print as, e.g.
 // getattr(self, "0").b
-static std::string getValidQualifiedName(QualifiedNamePtr name) {
+static std::string getValidQualifiedName(const QualifiedName& name) {
   std::stringstream ss;
-  emitQualifiedName(ss, std::move(name));
+  emitQualifiedName(ss, name);
   return ss.str();
 }
 
