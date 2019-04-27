@@ -1,91 +1,96 @@
 #pragma once
 
-#include <c10/util/intrusive_ptr.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <string>
 
 namespace c10 {
 
-// Represents names of the form, e.g., self.a.b
-struct QualifiedName;
-using QualifiedNamePtr = c10::intrusive_ptr<QualifiedName>;
-struct QualifiedName : c10::intrusive_ptr_target {
-  QualifiedName(QualifiedNamePtr prefix, std::string name)
-      : prefix_(std::move(prefix)), name_(std::move(name)) {
-    const auto pos = name_.find('.');
-    AT_ASSERTM(
-        pos == std::string::npos,
-        "Invalid name for qualified name: '",
-        name_,
-        "'");
-  }
+// Represents a name of the form "foo.bar.baz"
+struct QualifiedName {
+  QualifiedName() {}
 
-  const QualifiedNamePtr prefix_ = QualifiedNamePtr();
-  const std::string name_;
-
-  static QualifiedNamePtr create(QualifiedNamePtr prefix, std::string name) {
-    return c10::make_intrusive<QualifiedName>(
-        std::move(prefix), std::move(name));
-  }
-  static QualifiedNamePtr create(std::string name) {
-    return c10::make_intrusive<QualifiedName>(
-        QualifiedNamePtr(), std::move(name));
-  }
-
-  // Create a qualified name from a dotted string, splitting it as necessary.
-  // Example input: "foo.bar.baz"
-  static QualifiedNamePtr createFromDotted(const std::string& name) {
+  // `name` can be a dotted string, like "foo.bar.baz", or just a bare name.
+  explicit QualifiedName(std::string name) {
+    AT_ASSERT(!name.empty());
+    // split the string into its atoms.
     size_t startSearchFrom = 0;
-    size_t pos = name.find('.', startSearchFrom);
+    size_t pos = name.find(delimiter_, startSearchFrom);
 
-    auto qualifiedName = QualifiedNamePtr();
     while (pos != std::string::npos) {
       auto atom = name.substr(startSearchFrom, pos - startSearchFrom);
       AT_ASSERTM(
           atom.size() > 0, "Invalid name for qualified name: '", name, "'");
-      qualifiedName = QualifiedName::create(qualifiedName, std::move(atom));
+      atoms_.push_back(std::move(atom));
       startSearchFrom = pos + 1;
-      pos = name.find('.', startSearchFrom);
+      pos = name.find(delimiter_, startSearchFrom);
     }
 
     auto finalAtom = name.substr(startSearchFrom, pos - startSearchFrom);
     AT_ASSERTM(
         finalAtom.size() > 0, "Invalid name for qualified name: '", name, "'");
-    return QualifiedName::create(qualifiedName, std::move(finalAtom));
+    atoms_.push_back(std::move(finalAtom));
+
+    cacheAccessors();
   }
 
-  // Flatten this qualified name and convert the whole thing to a string, like
-  // "foo.bar.baz".
-  std::string toString() const {
-    std::ostringstream ss;
-    toString(ss);
-    return ss.str();
+  // `name` must be a bare name (no dots!)
+  explicit QualifiedName(const QualifiedName& prefix, std::string name) {
+    AT_ASSERT(!name.empty());
+    atoms_.insert(atoms_.begin(), prefix.atoms_.begin(), prefix.atoms_.end());
+    atoms_.push_back(std::move(name));
+
+    cacheAccessors();
   }
 
-  // Compares `this` with `other` for equality, starting from the furthest
-  // prefix.
-  bool equals(const QualifiedNamePtr& other) const {
-    if (!other) {
-      return false;
-    }
+  // The fully qualified name, like "foo.bar.baz"
+  const std::string& qualifiedName() const {
+    return qualifiedName_;
+  }
 
-    if (name_ != other->name_) {
-      return false;
-    }
+  // The leading qualifier, like "foo.bar"
+  const std::string& prefix() const {
+    return prefix_;
+  }
 
-    if (!prefix_) {
-      return !other->prefix_;
-    }
-    return prefix_->equals(other->prefix_);
+  // The base name, like "baz"
+  const std::string& name() const {
+    return name_;
+  }
+
+  bool operator==(const QualifiedName& other) const {
+    return this->qualifiedName_ == other.qualifiedName_;
+  }
+
+  bool operator!=(const QualifiedName& other) const {
+    return !(*this == other);
   }
 
  private:
-  std::ostream& toString(std::ostream& ss) const {
-    if (!prefix_) {
-      ss << name_;
-      return ss;
+  char delimiter_ = '.';
+
+  void cacheAccessors() {
+    qualifiedName_ = Join(std::string(1, delimiter_), atoms_);
+    if (atoms_.size() > 1) {
+      ArrayRef<std::string> view(atoms_);
+      const auto prefixView = view.slice(0, view.size() - 1);
+      prefix_ = Join(".", prefixView);
     }
-    prefix_->toString(ss) << "." << name_;
-    return ss;
+
+    if (atoms_.size() >= 1) {
+      name_ = atoms_.back();
+    }
   }
+
+  // The actual list of names, like "{foo, bar, baz}"
+  std::vector<std::string> atoms_;
+
+  /*
+   * Cached accessors, derived from `atoms_`.
+   */
+  std::string qualifiedName_;
+  std::string prefix_;
+  std::string name_;
 };
 } // namespace c10
