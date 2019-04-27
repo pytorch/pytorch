@@ -761,6 +761,52 @@ def _is_new_style_class(cls):
         return ('__dict__' in dir(cls) or hasattr(cls, '__slots__'))
 
 
+def whichmodule(obj):
+    """Find the module an object belong to."""
+    module_name = getattr(obj, '__module__', None)
+    # Protect the iteration by using a list copy of sys.modules against dynamic
+    # modules that trigger imports of other modules upon calls to getattr.
+    for name, module in list(sys.modules.items()):
+        if name == '__main__' or module is None:
+            continue
+        try:
+            if _getattribute(module, name)[0] is obj:
+                return module_name
+        except AttributeError:
+            pass
+    return '__main__'
+
+
+# Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
+def _qualified_name(obj):
+    name = obj.__name__
+    module_name = obj.__module__
+
+    # The Python docs are very clear that `__module__` can be None, but I can't
+    # figure out when it actually would be.
+    if module_name is None:
+        raise RuntimeError("Could not get qualified name for class '{}': "
+                           "__module__ can't be None.".format(name))
+
+    # if getattr(sys.modules[module_name], name) is not obj:
+    #     raise RuntimeError("Could not get qualified name for class '{}': "
+    #                        "the attr {} on module {} is not the the class".format(name, name, module_name))
+
+    # __main__ is a builtin module, so rewrite it to "__torch__".
+    if module_name == "__main__":
+        module_name = "__torch__"
+    else:
+        # Everything else gets a "__torch__" prefix to avoid name collisions
+        # with the names of user values.
+        module_name = "__torch__." + module_name
+
+    if "." in name:
+        raise RuntimeError("Could not get qualified name for class '{}': "
+                           "'{}' is not a valid identifier".format(name, name))
+
+    return module_name + "." + name
+
+
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return obj
@@ -769,9 +815,10 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
-        ast = get_jit_class_def(obj)
+        name = _qualified_name(obj)
+        ast = get_jit_class_def(obj, name)
         _jit_script_class_compile(ast, _rcb)
-        _add_script_class(obj, obj.__name__)
+        _add_script_class(obj, name)
         return obj
     else:
         ast = get_jit_def(obj)
@@ -1575,6 +1622,7 @@ def _find_builtin(fn):
 _register_builtin(len, 'aten::len')
 _register_builtin(_wait, 'aten::wait')
 
+# qualified_name => ScriptClass mapping
 _script_classes = {}
 
 
