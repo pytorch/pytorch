@@ -329,14 +329,7 @@ struct TORCH_API ClassNewMethod : public SugaredValue {
 
   std::shared_ptr<SugaredValue> createObject(
       const SourceRange& loc,
-      Function& m,
-      const std::string& classname) {
-    if (classname != type_->name()) {
-      throw ErrorReport(loc)
-          << "Argument to __new__() must match the class "
-          << "you are calling __new__() on. "
-          << "Got: " << classname << ", expected: " << type_->name();
-    }
+      Function& m) {
     auto& g = *m.graph();
     auto createNode = g.insertNode(g.createObject(type_));
     return std::make_shared<SimpleValue>(createNode->output());
@@ -357,7 +350,6 @@ static inline Self simpleSelf(const TypePtr& typ) {
     return std::make_shared<SimpleValue>(v);
   };
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch

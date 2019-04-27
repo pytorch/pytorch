@@ -6,9 +6,9 @@
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/sugared_value.h>
-#include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 #include <torch/csrc/jit/constants.h>
@@ -590,6 +590,15 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
 
+  py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
+  if (py::cast<bool>(isClass)) {
+    py::str qualifiedName =
+        py::module::import("torch.jit").attr("_qualified_name")(obj);
+    if (auto classType = ClassType::get(qualifiedName)) {
+      return std::make_shared<ClassValue>(classType);
+    }
+  }
+
   return std::make_shared<PythonValue>(obj);
 }
 
@@ -628,7 +637,20 @@ struct PythonResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name) const override {
-    return ClassType::get(name);
+    AutoGIL ag;
+    py::object obj = rcb_(name);
+    if (obj.is(py::none())) {
+      return nullptr;
+    }
+    py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
+    if (!py::cast<bool>(isClass)) {
+      return nullptr;
+    }
+
+    py::str qualifiedName =
+        py::module::import("torch.jit").attr("_qualified_name")(obj);
+
+    return ClassType::get(qualifiedName);
   }
 
  private:
@@ -1109,7 +1131,14 @@ void initJitScriptBindings(PyObject* module) {
         import_ir_module(module_lookup, in, optional_device, extra_files);
       });
 
-  m.def("_jit_import_functions", import_functions);
+  m.def(
+      "_jit_import_functions",
+      [](CompilationUnit& cu,
+         const std::string& src,
+         const std::vector<at::Tensor>& constant_table,
+         const Self& self) {
+        import_functions(cu, src, constant_table, self, nullptr);
+      });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_clear_class_registry", ClassType::clearRegistry);
@@ -1125,7 +1154,8 @@ void initJitScriptBindings(PyObject* module) {
     std::vector<at::Tensor> constants;
     std::vector<ClassTypePtr> classes;
     if (auto self = as_module(obj)) {
-      PythonPrint(ss, self->class_compilation_unit(), true, constants, classes, true);
+      PythonPrint(
+          ss, self->class_compilation_unit(), true, constants, classes, true);
     } else if (auto self = as_function(obj)) {
       PythonPrint(ss, *self, false, constants, classes, true);
     } else {

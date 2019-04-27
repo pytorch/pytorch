@@ -503,19 +503,19 @@ ClassTypeRegistry& getRegistry() {
 } // namespace
 
 ClassTypePtr ClassType::create(
-    const std::string& name,
+    const std::string& qualifiedName,
     std::shared_ptr<CompilationUnit> cu) {
-  auto ptr = ClassTypePtr(new ClassType(name, std::move(cu)));
-  getRegistry().registerType(name, ptr);
+  auto ptr = ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
+  getRegistry().registerType(qualifiedName, ptr);
   return ptr;
 }
 
 ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
-  return ClassTypePtr(new ClassType("$Module", std::move(cu)));
+  return ClassTypePtr(new ClassType("__torch__.$Module", std::move(cu)));
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassTypePtr(new ClassType(typename_, compilation_unit_));
+  auto ptr = ClassTypePtr(new ClassType(qualifiedName_, compilation_unit_));
   AT_ASSERT(numAttributes() == refined_slots.size());
   for(size_t i = 0; i < attributeNames_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
@@ -524,10 +524,9 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   return ptr;
 }
 
-ClassTypePtr ClassType::get(const std::string& name) {
-  return getRegistry().getType(name);
+ClassTypePtr ClassType::get(const std::string& qualifiedName) {
+  return getRegistry().getType(qualifiedName);
 }
-
 
 void ClassType::clearRegistry() {
   getRegistry().clear();
@@ -576,6 +575,30 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     }
     out << ")";
     return out;
+}
+
+ClassType::ClassType(
+    std::string qualifiedName,
+    std::shared_ptr<CompilationUnit> cu)
+    : Type(TypeKind::ClassType),
+      qualifiedName_(std::move(qualifiedName)),
+      compilation_unit_(std::move(cu)) {
+  // Compute the base name based on the qualified name
+  const auto pos = qualifiedName_.rfind('.');
+  if (pos == std::string::npos) {
+    // If there are no delimiters, the qualname and name are the same
+    basename_ = qualifiedName_;
+  } else {
+    AT_ASSERTM(
+        pos < qualifiedName_.size() - 1,
+        "'.' can't be the last character in qualified name: ",
+        qualifiedName_);
+
+    // Otherwise take the name that trails the last '.'
+    basename_ = qualifiedName_.substr(pos + 1);
+    qualifier_ = qualifiedName_.substr(0, pos);
+  }
+  AT_ASSERT(qualifier_ + "." + basename_ == qualifiedName_);
 }
 
 } // namespace c10
