@@ -1,3 +1,4 @@
+#include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
@@ -7,6 +8,9 @@
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
+
+using c10::QualifiedNamePtr;
+using c10::QualifiedName;
 
 namespace torch {
 namespace jit {
@@ -84,48 +88,33 @@ static bool isValidIdentifier(const std::string& name) {
   return true;
 }
 
-// handles names of the form, e.g., self.a.b
-// if a field is not a valid identifier, then it will print as, e.g.
-// getattr(self, "0").b
-struct QualifiedName;
-using QualifiedNamePtr = c10::intrusive_ptr<QualifiedName>;
-struct QualifiedName : c10::intrusive_ptr_target {
-  QualifiedName(QualifiedNamePtr prefix, std::string name)
-      : prefix_(std::move(prefix)), name_(std::move(name)) {}
-  QualifiedNamePtr prefix_;
-  std::string name_;
-  static QualifiedNamePtr create(QualifiedNamePtr prefix, std::string name) {
-    return c10::make_intrusive<QualifiedName>(
-        std::move(prefix), std::move(name));
-  }
-  static QualifiedNamePtr create(std::string name) {
-    return c10::make_intrusive<QualifiedName>(
-        QualifiedNamePtr(), std::move(name));
-  }
-  std::string str() const {
-    std::stringstream ss;
-    emit(ss);
-    return ss.str();
-  }
-
- private:
-  void emit(std::ostream& out) const {
-    if (isValidIdentifier(name_)) {
-      if (prefix_) {
-        prefix_->emit(out);
-        out << ".";
-      }
-      out << name_;
-    } else {
-      AT_ASSERT(prefix_);
-      out << "getattr(";
-      prefix_->emit(out);
-      out << ", ";
-      printQuotedString(out, name_);
-      out << ")";
+static void emitQualifiedName(std::ostream& out, QualifiedNamePtr name) {
+  const auto& name_ = name->name_;
+  const auto& prefix_ = name->prefix_;
+  if (isValidIdentifier(name_)) {
+    if (prefix_) {
+      emitQualifiedName(out, prefix_);
+      out << ".";
     }
+    out << name_;
+  } else {
+    AT_ASSERT(prefix_);
+    out << "getattr(";
+    emitQualifiedName(out, prefix_);
+    out << ", ";
+    printQuotedString(out, name_);
+    out << ")";
   }
-};
+}
+
+// Get a stringified version of the qualified name.
+// if a field is not a valid Python identifier, then it will print as, e.g.
+// getattr(self, "0").b
+static std::string getValidQualifiedName(QualifiedNamePtr name) {
+  std::stringstream ss;
+  emitQualifiedName(ss, std::move(name));
+  return ss.str();
+}
 
 // some names are valid identifiers but off limits because
 // they are keywords or namespaces used in the output
