@@ -1918,7 +1918,7 @@ RegisterOperators reg2({
           return 0;
         }),
     Operator(
-        "aten::floor(float a) -> float",
+        "aten::floor(float a) -> int",
         [](Stack& stack) {
           double a;
           pop(stack, a);
