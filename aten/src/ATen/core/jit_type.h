@@ -1312,22 +1312,22 @@ using ::torch::jit::script::Function;
 struct CAFFE2_API ClassType : public Type {
   // Create a user type and register it globally.
   static ClassTypePtr create(
-      const std::string& name,
-      std::shared_ptr<CompilationUnit> module);
+      const std::string& qualifiedName,
+      std::shared_ptr<CompilationUnit> cu);
 
   // Create a type representing a Module,
   // These do not have methods, and are not globally registered
   static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
 
   // returns nullptr if there is no type with that name
-  static ClassTypePtr get(const std::string& name);
+  static ClassTypePtr get(const std::string& qualifiedName);
   // For testing: delete all registered types
   static void clearRegistry();
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
-      return typename_ == user_rhs->typename_;
+      return qualifiedName_ == user_rhs->qualifiedName_;
     }
     return false;
   }
@@ -1337,12 +1337,25 @@ struct CAFFE2_API ClassType : public Type {
     // same can subtype from each other.
     return *this == *rhs;
   }
+
   std::string str() const override {
-    return std::string("ClassType<") + typename_ + ">";
+    return std::string("ClassType<") + basename_ + ">";
   }
 
   std::string python_str() const override {
-    return typename_;
+    return qualifiedName_;
+  }
+
+  const std::string& qualname() const {
+    return qualifiedName_;
+  }
+
+  const std::string& qualifier() const {
+    return qualifier_;
+  }
+
+  const std::string& basename() const {
+    return basename_;
   }
 
   TypePtr getAttribute(const std::string& name) const {
@@ -1378,10 +1391,6 @@ struct CAFFE2_API ClassType : public Type {
   const CompilationUnit& compilation_unit() const;
   std::vector<Function*> methods() const;
 
-
-  const std::string& name() const {
-    return typename_;
-  }
 
   size_t numAttributes() const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
@@ -1434,13 +1443,17 @@ struct CAFFE2_API ClassType : public Type {
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(std::string name, std::shared_ptr<CompilationUnit> cu)
-      : Type(TypeKind::ClassType),
-        typename_(std::move(name)),
-        compilation_unit_(std::move(cu)) {}
+  ClassType(std::string qualifiedName, std::shared_ptr<CompilationUnit> cu);
 
-  // Name of type (note that this has to be globally unique).
-  std::string typename_;
+  // Fully qualified name of type (note that this has to be globally unique).
+  // Looks like: "foo.bar.Baz".
+  std::string qualifiedName_;
+
+  // We store the qualifier and base name for ease.
+  // Qualifier, like "foo.bar"
+  std::string qualifier_;
+  // Base name, like: "Baz".
+  std::string basename_;
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module

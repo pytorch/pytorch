@@ -32,6 +32,30 @@ struct ConstantValue : public SugaredValue {
   }
 };
 
+// Represents nested class namespaces, like `foo.bar.Baz`.
+// Right now these namespaces can only contain other namespaces or a class type.
+struct TORCH_API ClassNamespaceValue : public SugaredValue {
+  explicit ClassNamespaceValue(std::string name) : basename_(std::move(name)) {}
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& name) override {
+    const auto fullName = basename_ + "." + name;
+    if (auto classType = ClassType::get(fullName)) {
+      return std::make_shared<ClassValue>(classType);
+    }
+
+    return std::make_shared<ClassNamespaceValue>(fullName);
+  }
+  std::string kind() const override {
+    return "Class Namespace";
+  }
+
+ private:
+  std::string basename_;
+};
+
 // This value maps attributes CONSTANTS.c0 CONSTANTS.c1 to entries
 // in the 'constants' vector. This table is will be stored in a container format
 // and given to the import_method when restoring the code.
@@ -91,10 +115,14 @@ struct SourceResolver : public Resolver {
       Function& m,
       const SourceRange& loc) const override {
     auto it = env_.find(name);
-    if (it == env_.end()) {
-      return nullptr;
+    if (it != env_.end()) {
+      return it->second;
     }
-    return it->second;
+
+    if (name == "__torch__") {
+      return std::make_shared<ClassNamespaceValue>(name);
+    }
+    return nullptr;
   }
 
   TypePtr resolveType(const std::string& name) const override {
@@ -105,21 +133,59 @@ struct SourceResolver : public Resolver {
   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
 };
 
-// Helper that contains the state for a parsing a TorchScript source string.
 struct SourceImporter {
   SourceImporter(
       const std::string& src,
-      const std::vector<at::Tensor>& constant_table)
-      : parser_(src) {
-    const auto version = parseVersionNumber();
-    resolver_ = std::make_shared<SourceResolver>(version, constant_table);
+      const std::vector<at::Tensor>& constant_table,
+      const std::function<void(const std::string&)>& import_callback)
+      : p_(src),
+        import_callback_(import_callback),
+        constant_table_(constant_table) {
+    version_ = parseVersionNumber();
+    resolver_ = std::make_shared<SourceResolver>(version_, constant_table_);
   }
 
-  Parser parser_;
-  ResolverPtr resolver_;
+  void importLibs(const std::string& class_qualifier) {
+    auto& L = p_.lexer();
+
+    while (L.cur().kind != TK_EOF) {
+      parseImportsAndDoCallback();
+
+      std::vector<Def> definitions;
+      std::vector<ResolverPtr> resolvers;
+      auto class_def = ClassDef(p_.parseClass());
+      for (const auto& method_def : class_def.defs()) {
+        definitions.emplace_back(method_def);
+        resolvers.emplace_back(resolver_);
+      }
+
+      auto cu = std::make_shared<CompilationUnit>();
+      const auto qualified_classname =
+          class_qualifier + "." + class_def.name().name();
+      auto class_type = ClassType::create(qualified_classname, cu);
+      auto self = [&](Value* v) {
+        v->setType(class_type);
+        return std::make_shared<SimpleValue>(v);
+      };
+      cu->define(definitions, resolvers, self);
+    }
+  }
+
+  void importFunctions(CompilationUnit& cu, const Self& self) {
+    parseImportsAndDoCallback();
+
+    std::vector<Def> definitions;
+    std::vector<ResolverPtr> resolvers;
+    while (p_.lexer().cur().kind != TK_EOF) {
+      auto def = Def(p_.parseFunction(/*is_method=*/bool(self)));
+      definitions.emplace_back(def);
+      resolvers.emplace_back(resolver_);
+    }
+    cu.define(definitions, resolvers, self);
+  }
 
   size_t parseVersionNumber() {
-    auto& L = parser_.lexer();
+    auto& L = p_.lexer();
     auto range = L.cur().range;
     auto name = L.expect(TK_IDENT).text();
     L.expect('=');
@@ -133,30 +199,54 @@ struct SourceImporter {
           << "expected an integral version but found " << version.text();
     return size_t(version.asIntegral());
   }
+
+  void parseImportsAndDoCallback() {
+    // Gather all imports
+    auto& L = p_.lexer();
+    std::vector<std::string> imports;
+    while (L.nextIf(TK_IMPORT)) {
+      std::ostringstream s;
+      while (L.cur().kind != TK_NEWLINE) {
+        s << L.cur().text();
+        L.next();
+      }
+      L.expect(TK_NEWLINE);
+      const auto str = s.str();
+      AT_ASSERT(!str.empty());
+      imports.push_back(str);
+    }
+
+    // Call the callback to actually compile them
+    for (const auto& import : imports) {
+      if (import_callback_) {
+        import_callback_(import);
+      }
+    }
+  }
+
+ private:
+  Parser p_;
+  size_t version_;
+  const std::function<void(const std::string&)>& import_callback_;
+  const std::vector<at::Tensor>& constant_table_;
+  std::shared_ptr<SourceResolver> resolver_;
 };
 
 void import_functions(
     CompilationUnit& cu,
     const std::string& src,
     const std::vector<at::Tensor>& constant_table,
-    const Self& self) {
-  SourceImporter importer(src, constant_table);
-  auto& p = importer.parser_;
-
-  std::vector<Def> definitions;
-  std::vector<ResolverPtr> resolvers;
-  while (p.lexer().cur().kind != TK_EOF) {
-    auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
-    definitions.emplace_back(def);
-    resolvers.emplace_back(importer.resolver_);
-  }
-  cu.define(definitions, resolvers, self);
+    const Self& self,
+    const std::function<void(const std::string&)>& import_callback) {
+  SourceImporter importer(src, constant_table, import_callback);
+  importer.importFunctions(cu, self);
 }
 
 void import_methods(
     const std::shared_ptr<Module>& mod,
     const std::string& src,
-    const std::vector<at::Tensor>& constant_table) {
+    const std::vector<at::Tensor>& constant_table,
+    const std::function<void(const std::string&)>& import_callback) {
   auto self = [&](Value* v) {
     v->setType(mod->module_object()->type());
     return std::make_shared<SimpleValue>(v);
@@ -165,32 +255,17 @@ void import_methods(
       mod->module_object()->type()->compilation_unit(),
       src,
       constant_table,
-      self);
+      self,
+      import_callback);
 }
 
 void import_libs(
+    const std::string& class_qualifier,
     const std::string& src,
-    const std::vector<at::Tensor>& constant_table) {
-  SourceImporter importer(src, constant_table);
-  auto& p = importer.parser_;
-
-  while (p.lexer().cur().kind != TK_EOF) {
-    std::vector<Def> definitions;
-    std::vector<ResolverPtr> resolvers;
-    auto class_def = ClassDef(p.parseClass());
-    for (const auto& method_def : class_def.defs()) {
-      definitions.emplace_back(method_def);
-      resolvers.emplace_back(importer.resolver_);
-    }
-
-    auto cu = std::make_shared<CompilationUnit>();
-    auto class_type = ClassType::create(class_def.name().name(), cu);
-    auto self = [&](Value* v) {
-      v->setType(class_type);
-      return std::make_shared<SimpleValue>(v);
-    };
-    cu->define(definitions, resolvers, self);
-  }
+    const std::vector<at::Tensor>& constant_table,
+    const std::function<void(const std::string&)>& import_callback) {
+  SourceImporter importer(src, constant_table, import_callback);
+  importer.importLibs(class_qualifier);
 }
 
 } // namespace script

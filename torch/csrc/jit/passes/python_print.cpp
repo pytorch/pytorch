@@ -140,6 +140,7 @@ const static std::unordered_set<std::string> reserved_names = {
     "inf",
     "nan",
     "ops",
+    "__torch__",
     // the python keywords
     "and",
     "as",
@@ -188,17 +189,22 @@ struct PythonPrintPass {
   // Any classes used are written to this table, to be later written out as
   // dependencies.
   std::vector<ClassTypePtr>& class_table_;
+  std::vector<ClassTypePtr> class_deps_;
   // Helper to avoid duplicating class types
   void addToClassTable(const ClassTypePtr& classType) {
     // we serialize module classes separately.
     // Including them in the class table as well will cause the code
     // to get imported twice.
-    if (classType->name() == "$Module") {
+    if (classType->qualname() == "__torch__.$Module") {
       return;
     }
     if (std::find(class_table_.cbegin(), class_table_.cend(), classType) ==
         class_table_.cend()) {
       class_table_.push_back(classType);
+    }
+    if (std::find(class_deps_.cbegin(), class_deps_.cend(), classType) ==
+        class_deps_.cend()) {
+      class_deps_.push_back(classType);
     }
   }
 
@@ -217,7 +223,6 @@ struct PythonPrintPass {
   // be emitted as method calls (self.__fork...) rather
   // than as method calls
   bool is_method_;
-
 
   // what valid identifiers are in use for the current function
   std::unordered_set<std::string> used_names_;
@@ -731,13 +736,13 @@ struct PythonPrintPass {
         std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
         indent();
         body_ << "def " << name << "():\n";
-        for(size_t i = 0; i < node->inputs().size(); ++i) {
+        for (size_t i = 0; i < node->inputs().size(); ++i) {
           assignValue(graph->inputs().at(i), node->inputs().at(i));
         }
         printBody(graph->block());
         std::stringstream ss;
         ss << "fork(" << name << ")";
-        printOutputDefinition( node,ss.str());
+        printOutputDefinition(node, ss.str());
       } break;
       case prim::Function: {
         if (enforce_importable_) {
@@ -750,7 +755,7 @@ struct PythonPrintPass {
         indent();
         body_ << "def " << name << "(";
         assignValuesToTheirUniqueNames(graph->inputs());
-        for(size_t i = 0; i < graph->inputs().size(); ++i) {
+        for (size_t i = 0; i < graph->inputs().size(); ++i) {
           Value* v = graph->inputs().at(i);
           if (i > 0) {
             body_ << ", ";
@@ -935,7 +940,8 @@ struct PythonPrintPass {
       } break;
       case prim::CreateObject: {
         const auto classType = node->output()->type()->expect<ClassType>();
-        stmt << classType->name() << ".__new__(" << classType->name() << ")";
+        stmt << classType->python_str() << ".__new__("
+             << classType->python_str() << ")";
       } break;
       case prim::GetAttr: {
         const auto obj = node->inputs().at(0);
@@ -1031,30 +1037,28 @@ struct PythonPrintPass {
         printNode(n, /*print_const=*/true);
       }
       // Print body
-      printBlock(
-          body, body->return_node()->inputs().size() > 0);
+      printBlock(body, body->return_node()->inputs().size() > 0);
       printNode(body->return_node(), /*print_const=*/false);
     }
   }
 
-public:
+ public:
   void printFunction(script::Function& func) {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
 
-
     indent();
     body_ << "def " << func.name() << "(";
     auto param_it = graph.inputs().begin();
-    for(const Argument& arg : schema.arguments()) {
+    for (const Argument& arg : schema.arguments()) {
       std::string arg_name = genName(arg.name());
       if (param_it == graph.inputs().begin()) {
         // the first argument may omit its type when it is implied by context
         // the flag is_method_ determines when to do this
         body_ << arg_name;
         if (!is_method_) {
-           body_ << ": " << arg.type()->python_str();
+          body_ << ": " << arg.type()->python_str();
         }
       } else {
         body_ << ",\n    " << arg_name << ": " << arg.type()->python_str();
@@ -1067,6 +1071,19 @@ public:
 
     body_ << ") -> " << resultType(graph)->python_str() << ":\n";
     printBody(graph.block());
+  }
+
+  std::string getImports() {
+    std::ostringstream ret;
+    std::unordered_set<std::string> already_printed;
+    for (const auto& c : class_deps_) {
+      if (already_printed.count(c->qualifier())) {
+        continue;
+      }
+      ret << "import " << c->qualifier() << "\n";
+      already_printed.insert(c->qualifier());
+    }
+    return ret.str();
   }
 
   PythonPrintPass(
@@ -1097,17 +1114,21 @@ public:
   }
 
   void printClass(const ClassTypePtr& classType) {
-    body_ << "class " << classType->name() << ":\n";
+    body_ << "class " << classType->basename() << ":\n";
     {
       const auto guard = WithIndented();
       for (auto& method : classType->methods()) {
         printFunction(*method);
       }
     }
+    // remove `classType` from the list of deps
+    class_deps_.erase(
+        std::remove(class_deps_.begin(), class_deps_.end(), classType),
+        class_deps_.end());
   }
 
   void print(std::ostream& out) {
-    out << body_.str();
+    out << getImports() << body_.str();
   }
 };
 

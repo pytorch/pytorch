@@ -134,6 +134,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import_source.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/import_export_helpers.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
