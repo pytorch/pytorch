@@ -5293,6 +5293,20 @@ a")
                 return a + b
             ''')
 
+    def test_opt_opt_refinement(self):
+        @torch.jit.script
+        def test_unify(weight, bias):
+            # type: (Optional[int], Optional[int]) -> Optional[int]
+            if weight is not None:
+                opt = None
+            else:
+                if bias is not None:
+                    opt = 1
+                else:
+                    opt = None
+
+            return opt
+
     def test_optional_refinement(self):
         @torch.jit.script
         def test_if_none_assignment(x):
