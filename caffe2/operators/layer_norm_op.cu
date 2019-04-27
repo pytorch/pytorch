@@ -11,39 +11,36 @@ namespace caffe2 {
 namespace {
 
 template <typename T>
-__global__ void ComputeStdDevAndFusedParamsCUDAKernel(
+__global__ void ComputeSigmaAndFusedParamsCUDAKernel(
     const int N,
-    const T epsilon,
+    const T eps,
     const T* mean,
     const T* var,
-    T* stddev,
+    T* sigma,
     T* scale,
     T* bias);
 
-template <>
-__global__ void ComputeStdDevAndFusedParamsCUDAKernel<float>(
-    const int N,
-    const float epsilon,
-    const float* mean,
-    const float* var,
-    float* stddev,
-    float* scale,
-    float* bias) {
-  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
-  if (index < N) {
-#if __CUDA_ARCH__ >= 350
-    const float rstd = rsqrtf(__ldg(var + index) + epsilon);
-    stddev[index] = rstd * (__ldg(var + index) + epsilon);
-    scale[index] = rstd;
-    bias[index] = -rstd * __ldg(mean + index);
-#else
-    const float rstd = rsqrtf(var[index] + epsilon);
-    stddev[index] = rstd * (var[index] + epsilon);
-    scale[index] = rstd;
-    bias[index] = -rstd * mean[index];
-#endif
+#define DELEGATE_COMPUTE_SIGMA_AND_FUSED_PARAMS_CUDA_KERNEL(T, RsqrtFunc) \
+  template <>                                                             \
+  __global__ void ComputeSigmaAndFusedParamsCUDAKernel<T>(                \
+      const int N,                                                        \
+      const T eps,                                                        \
+      const T* mean,                                                      \
+      const T* var,                                                       \
+      T* sigma,                                                           \
+      T* scale,                                                           \
+      T* bias) {                                                          \
+    const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;  \
+    if (index < N) {                                                      \
+      const T rstd = RsqrtFunc(var[index] + eps);                         \
+      sigma[index] = rstd * (var[index] + eps);                           \
+      scale[index] = rstd;                                                \
+      bias[index] = -rstd * mean[index];                                  \
+    }                                                                     \
   }
-}
+DELEGATE_COMPUTE_SIGMA_AND_FUSED_PARAMS_CUDA_KERNEL(float, rsqrtf)
+DELEGATE_COMPUTE_SIGMA_AND_FUSED_PARAMS_CUDA_KERNEL(double, rsqrt)
+#undef DELEGATE_COMPUTE_SIGMA_AND_FUSED_PARAMS_CUDA_KERNEL
 
 template <typename T>
 __global__ void LayerNormForwardCUDAKernel(
@@ -54,25 +51,53 @@ __global__ void LayerNormForwardCUDAKernel(
     const T* bias,
     T* Y);
 
-template <>
-__global__ void LayerNormForwardCUDAKernel<float>(
+template <typename T>
+__global__ void LayerNormForwardCUDAKernel(
     const int M,
     const int N,
-    const float* X,
-    const float* scale,
-    const float* bias,
-    float* Y) {
-  const int size = M * N;
-  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
-  if (index < size) {
-    const int i = index / N;
-#if __CUDA_ARCH__ >= 350
-    Y[index] = fmaf(__ldg(X + index), __ldg(scale + i), __ldg(bias + i));
-#else
-    Y[index] = fmaf(X[index], scale[i], bias[i]);
-#endif
+    const T* X,
+    const T* scale,
+    const T* bias,
+    const T* gamma,
+    const T* beta,
+    T* Y);
+
+#define DELEGATE_LAYER_NORM_FORWARD_CUDA_KERNEL(T, FmaFunc)                 \
+  template <>                                                               \
+  __global__ void LayerNormForwardCUDAKernel<T>(                            \
+      const int M,                                                          \
+      const int N,                                                          \
+      const T* X,                                                           \
+      const T* scale,                                                       \
+      const T* bias,                                                        \
+      T* Y) {                                                               \
+    const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;    \
+    if (index < M * N) {                                                    \
+      const int i = index / N;                                              \
+      Y[index] = FmaFunc(X[index], scale[i], bias[i]);                      \
+    }                                                                       \
+  }                                                                         \
+  template <>                                                               \
+  __global__ void LayerNormForwardCUDAKernel<T>(                            \
+      const int M,                                                          \
+      const int N,                                                          \
+      const T* X,                                                           \
+      const T* scale,                                                       \
+      const T* bias,                                                        \
+      const T* gamma,                                                       \
+      const T* beta,                                                        \
+      T* Y) {                                                               \
+    const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;    \
+    if (index < M * N) {                                                    \
+      const int i = index / N;                                              \
+      const int j = index % N;                                              \
+      Y[index] =                                                            \
+          FmaFunc(FmaFunc(X[index], scale[i], bias[i]), gamma[j], beta[j]); \
+    }                                                                       \
   }
-}
+DELEGATE_LAYER_NORM_FORWARD_CUDA_KERNEL(float, fmaf)
+DELEGATE_LAYER_NORM_FORWARD_CUDA_KERNEL(double, fma)
+#undef DELEGATE_LAYER_NORM_FORWARD_CUDA_KERNEL
 
 template <typename T>
 __global__ void ComputeInternalGradientsCUDAKernel(
@@ -192,19 +217,21 @@ __global__ void LayerNormBackwardCUDAKenrel<float>(
 
 template <>
 template <typename T>
-void LayerNormOp<CUDAContext>::ComputeStdDevAndFusedParams(
+void LayerNormOp<CUDAContext>::ComputeSigmaAndFusedParams(
     const int N,
+    const float eps,
     const T* mean,
     const T* var,
-    T* stddev,
+    T* sigma,
     T* scale,
     T* bias,
-    float epsilon,
     CUDAContext* context) {
-  const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
-  ComputeStdDevAndFusedParamsCUDAKernel<T>
-      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
-          N, static_cast<T>(epsilon), mean, var, stddev, scale, bias);
+  if (N > 0) {
+    const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
+    ComputeSigmaAndFusedParamsCUDAKernel<T>
+        <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+            N, static_cast<T>(eps), mean, var, sigma, scale, bias);
+  }
 }
 
 template <>
@@ -215,12 +242,24 @@ void LayerNormOp<CUDAContext>::LayerNormForward(
     const T* X,
     const T* scale,
     const T* bias,
+    const T* gamma,
+    const T* beta,
     T* Y,
     CUDAContext* context) {
-  const int K = math::DivUp(M * N, CAFFE_CUDA_NUM_THREADS);
-  LayerNormForwardCUDAKernel<T>
-      <<<K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
-          M, N, X, scale, bias, Y);
+  if (M * N > 0) {
+    const int K = math::DivUp(M * N, CAFFE_CUDA_NUM_THREADS);
+    if (gamma != nullptr && beta != nullptr) {
+      LayerNormForwardCUDAKernel<T>
+          <<<K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+              M, N, X, scale, bias, gamma, beta, Y);
+    } else {
+      CAFFE_ENFORCE(gamma == nullptr);
+      CAFFE_ENFORCE(beta == nullptr);
+      LayerNormForwardCUDAKernel<T>
+          <<<K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+              M, N, X, scale, bias, Y);
+    }
+  }
 }
 
 REGISTER_CUDA_OPERATOR(LayerNorm, LayerNormOp<CUDAContext>);
@@ -283,7 +322,9 @@ C10_REGISTER_CAFFE2_OPERATOR_CUDA(
     caffe2::LayerNormOp<caffe2::CUDAContext>)
 
 namespace caffe2 {
+
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(
     "_caffe2::LayerNorm",
     C10LayerNorm_DontUseThisOpYet);
-}
+
+} // namespace caffe2
