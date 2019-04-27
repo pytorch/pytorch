@@ -258,7 +258,7 @@ T quantize_uint(float scale, int32_t zero_point, float value) {
 #else
   constexpr int32_t qmin = std::numeric_limits<typename T::underlying>::min();
   constexpr int32_t qmax = std::numeric_limits<typename T::underlying>::max();
-  qvalue = zero_point + static_cast<int32_t>(std::nearbyint(value / scale));
+  qvalue = static_cast<int32_t>(std::nearbyint(value / scale + zero_point));
   qvalue = std::max(qvalue, qmin);
   qvalue = std::min(qvalue, qmax);
 #endif
