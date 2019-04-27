@@ -1,5 +1,6 @@
 #include "import_source.h"
 
+#include <ATen/core/qualified_name.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/resolver.h>
 
@@ -35,25 +36,26 @@ struct ConstantValue : public SugaredValue {
 // Represents nested class namespaces, like `foo.bar.Baz`.
 // Right now these namespaces can only contain other namespaces or a class type.
 struct TORCH_API ClassNamespaceValue : public SugaredValue {
-  explicit ClassNamespaceValue(std::string name) : basename_(std::move(name)) {}
+  explicit ClassNamespaceValue(c10::QualifiedName name)
+      : basename_(std::move(name)) {}
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
       Function& m,
       const std::string& name) override {
-    const auto fullName = basename_ + "." + name;
+    auto fullName = c10::QualifiedName(basename_, name);
     if (auto classType = ClassType::get(fullName)) {
       return std::make_shared<ClassValue>(classType);
     }
 
-    return std::make_shared<ClassNamespaceValue>(fullName);
+    return std::make_shared<ClassNamespaceValue>(std::move(fullName));
   }
   std::string kind() const override {
     return "Class Namespace";
   }
 
  private:
-  std::string basename_;
+  c10::QualifiedName basename_;
 };
 
 // This value maps attributes CONSTANTS.c0 CONSTANTS.c1 to entries
@@ -120,13 +122,13 @@ struct SourceResolver : public Resolver {
     }
 
     if (name == "__torch__") {
-      return std::make_shared<ClassNamespaceValue>(name);
+      return std::make_shared<ClassNamespaceValue>(c10::QualifiedName(name));
     }
     return nullptr;
   }
 
   TypePtr resolveType(const std::string& name) const override {
-    return ClassType::get(name);
+    return ClassType::get(c10::QualifiedName(name));
   }
 
  private:
@@ -162,7 +164,8 @@ struct SourceImporter {
       auto cu = std::make_shared<CompilationUnit>();
       const auto qualified_classname =
           class_qualifier + "." + class_def.name().name();
-      auto class_type = ClassType::create(qualified_classname, cu);
+      auto class_type =
+          ClassType::create(c10::QualifiedName(qualified_classname), cu);
       auto self = [&](Value* v) {
         v->setType(class_type);
         return std::make_shared<SimpleValue>(v);

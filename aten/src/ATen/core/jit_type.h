@@ -5,6 +5,7 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
 #include <caffe2/core/common.h>
 
@@ -1312,7 +1313,7 @@ using ::torch::jit::script::Function;
 struct CAFFE2_API ClassType : public Type {
   // Create a user type and register it globally.
   static ClassTypePtr create(
-      const std::string& qualifiedName,
+      QualifiedName qualifiedName,
       std::shared_ptr<CompilationUnit> cu);
 
   // Create a type representing a Module,
@@ -1320,14 +1321,14 @@ struct CAFFE2_API ClassType : public Type {
   static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
 
   // returns nullptr if there is no type with that name
-  static ClassTypePtr get(const std::string& qualifiedName);
+  static ClassTypePtr get(const QualifiedName& qualifiedName);
   // For testing: delete all registered types
   static void clearRegistry();
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
-      return qualifiedName_ == user_rhs->qualifiedName_;
+      return name_ == user_rhs->name_;
     }
     return false;
   }
@@ -1339,23 +1340,23 @@ struct CAFFE2_API ClassType : public Type {
   }
 
   std::string str() const override {
-    return std::string("ClassType<") + basename_ + ">";
+    return std::string("ClassType<") + name_.name() + ">";
   }
 
   std::string python_str() const override {
-    return qualifiedName_;
+    return name_.qualifiedName();
   }
 
-  const std::string& qualname() const {
-    return qualifiedName_;
+  std::string qualname() const {
+    return name_.qualifiedName();
   }
 
-  const std::string& qualifier() const {
-    return qualifier_;
+  std::string qualifier() const {
+    return name_.prefix();
   }
 
-  const std::string& basename() const {
-    return basename_;
+  std::string basename() const {
+    return name_.name();
   }
 
   TypePtr getAttribute(const std::string& name) const {
@@ -1443,17 +1444,11 @@ struct CAFFE2_API ClassType : public Type {
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(std::string qualifiedName, std::shared_ptr<CompilationUnit> cu);
+  ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu);
 
   // Fully qualified name of type (note that this has to be globally unique).
   // Looks like: "foo.bar.Baz".
-  std::string qualifiedName_;
-
-  // We store the qualifier and base name for ease.
-  // Qualifier, like "foo.bar"
-  std::string qualifier_;
-  // Base name, like: "Baz".
-  std::string basename_;
+  QualifiedName name_;
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module

@@ -15,6 +15,7 @@
 #include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
+#include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 
@@ -36,6 +37,7 @@ namespace script {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
+using ::c10::QualifiedName;
 // Map which stores filename to content.
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
@@ -565,6 +567,10 @@ struct TORCH_API Module {
 
   mutable std::recursive_mutex create_method_guard_;
   friend struct Method;
+
+  // TEMPRORARY: this should only be non-empty on the root module. Represents
+  // all class types used by this module hierarchy.
+  std::unordered_map<QualifiedName, ClassTypePtr> classes_;
 };
 
 } // namespace script
