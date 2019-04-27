@@ -60,7 +60,7 @@ CONFIG_TREE_DATA = OrderedDict(
 )
 
 
-DEVTOOLSET_VERSIONS = [3, 7]
+DEVTOOLSET_VERSIONS = [3]
 
 
 class TopLevelNode(ConfigNode):

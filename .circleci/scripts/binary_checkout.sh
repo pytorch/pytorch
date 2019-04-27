@@ -20,7 +20,7 @@ export BUILDER_ROOT="$workdir/builder"
 # Clone the Pytorch branch
 git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
 pushd "$PYTORCH_ROOT"
-git checkout my_branch
+git checkout v1.1.0
 git reset --hard
 git submodule update --init --recursive --quiet
 echo "Using Pytorch from "

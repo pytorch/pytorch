@@ -52,7 +52,7 @@ fi
 
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
-export PYTORCH_BUILD_VERSION="1.2.0"
+export PYTORCH_BUILD_VERSION="1.1.0"
 export PYTORCH_BUILD_NUMBER=1
 
 cat >>"$envfile" <<EOL

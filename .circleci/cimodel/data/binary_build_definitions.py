@@ -195,9 +195,10 @@ def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
     for build_config in configs:
         build_name = build_config.gen_build_name("build")
         jobs_list.append(build_name)
+    return jobs_list
 
     jobs_dict[toplevel_key] = OrderedDict(
-        triggers=gen_schedule_tree(cron_schedule),
+        # triggers=gen_schedule_tree(cron_schedule),
         jobs=jobs_list,
     )
 
@@ -205,9 +206,11 @@ def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
     graph.draw(toplevel_key + "-config-dimensions.png", prog="twopi")
 
 
-def add_binary_build_jobs(jobs_dict):
-    add_jobs_and_render(jobs_dict, "binarybuilds", False, "5 5 * * *")
+
+def add_binary_build_jobs():
+    jobs_dict = {}
+    return add_jobs_and_render(jobs_dict, "binarybuilds", False, "5 5 * * *")
 
 
-def add_binary_smoke_test_jobs(jobs_dict):
-    add_jobs_and_render(jobs_dict, "binarysmoketests", True, "15 16 * * *")
+# def add_binary_smoke_test_jobs(jobs_dict):
+#     add_jobs_and_render(jobs_dict, "binarysmoketests", True, "15 16 * * *")

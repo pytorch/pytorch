@@ -6,8 +6,8 @@ cat >/Users/distiller/project/login_to_anaconda.sh <<EOL
 set +x
 echo "Trying to login to Anaconda"
 yes | anaconda login \
-    --username "$PYTORCH_BINARY_PJH5_CONDA_USERNAME" \
-    --password "$PYTORCH_BINARY_PJH5_CONDA_PASSWORD"
+    --username "$PYTORCH_BINARY_SOUMITH_CONDA_USERNAME" \
+    --password "$PYTORCH_BINARY_SOUMITH_CONDA_PASSWORD"
 set -x
 EOL
 chmod +x /Users/distiller/project/login_to_anaconda.sh
@@ -24,7 +24,7 @@ pushd "$workdir/final_pkgs"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda install -yq anaconda-client
   retry /Users/distiller/project/login_to_anaconda.sh
-  retry anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
+  retry anaconda upload "$(ls)" -u pytorch-testing --label main --no-progress --force
 elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
   retry pip install -q awscli
   s3_dir="s3://pytorch/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
