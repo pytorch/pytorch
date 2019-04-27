@@ -98,13 +98,13 @@ const void* Pickler::getPointer(const IValue& ivalue) {
   if (ivalue.isGenericDict()) {
     return ivalue.toGenericDict().get();
   } else if (ivalue.isGenericList()) {
-    return ivalue.toGenericListRef().data();
+    return ivalue.toGenericList().get();
   } else if (ivalue.isTuple()) {
-    return ivalue.toTuple()->elements().data();
+    return ivalue.toTuple().get();
   } else if (ivalue.isString()) {
-    return ivalue.toStringRef().data();
+    return ivalue.toString().get();
   } else if (ivalue.isIntList()) {
-    return ivalue.toIntListRef().data();
+    return ivalue.toIntList().get();
   }
 
   return nullptr;
