@@ -342,8 +342,10 @@ if(BUILD_TEST)
   # Otherwise, it will sometimes break the build.
   if (MSVC AND MSVC_Z7_OVERRIDE)
     execute_process(
-      COMMAND "cmake" "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest"
-              "-P" "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
+      COMMAND "cmake"
+              "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
+              "-P"
+              "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
       RESULT_VARIABLE _exitcode)
     if(NOT ${_exitcode} EQUAL 0)
       message(WARNING "Patching failed for Google Test. The build may fail.")
