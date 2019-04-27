@@ -228,12 +228,16 @@ void Reducer::mark_variable_ready(
     }
   }
 
-  // Queue function to finalize once the final bucket was marked ready.
+  // Run finalizer function once the final bucket was marked ready.
   if (next_bucket_ == buckets_.size()) {
-    // Autograd callbacks can only be registered while the engine is running.
-    AT_ASSERT(called_from_autograd);
-    torch::autograd::Engine::get_default_engine().queue_callback(
-        [=] { this->finalize_backward(); });
+    if (called_from_autograd) {
+      torch::autograd::Engine::get_default_engine().queue_callback([=] {
+        std::lock_guard<std::mutex> lock(this->mutex_);
+        this->finalize_backward();
+      });
+    } else {
+      finalize_backward();
+    }
   }
 }
 
@@ -375,6 +379,28 @@ void Reducer::prepare_for_backward(
   std::unordered_set<torch::autograd::Function*> seen;
   std::vector<torch::autograd::Function*> queue;
 
+  // Check that any prior reduction has finished.
+  // The variable `expect_autograd_hooks` is true until gradients for all
+  // parameters have been received and all buckets are ready.
+  if (expect_autograd_hooks_) {
+    AT_ERROR(
+        "Expected to have finished reduction in the prior iteration before ",
+        "starting a new one. ",
+        "",
+        "This error indicates that your module has parameters that were ",
+        "not used in producing its output (the return value of `forward`). ",
+        "",
+        "You can enable unused parameter detection by passing the keyword "
+        "argument `find_unused_parameters=True` to ",
+        "`torch.nn.parallel.DistributedDataParallel`. ",
+        "",
+        "If you already have this argument set, then the distributed data ",
+        "parallel module wasn't able to locate the output tensors in the ",
+        "return value of your module's `forward` function. ",
+        "Please include the structure of the return value of `forward` of ",
+        "your module when reporting this issue (e.g. list, dict, iterable).");
+  }
+
   // Reset accounting.
   has_marked_unused_parameters_ = true;
   expect_autograd_hooks_ = true;
@@ -433,34 +459,12 @@ void Reducer::prepare_for_backward(
 }
 
 void Reducer::finalize_backward() {
-  std::lock_guard<std::mutex> lock(mutex_);
-
   // No longer expect autograd hooks to fire after this function returns.
   AT_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
 
   // Check that all buckets were completed and had their work kicked off.
-  if (next_bucket_ < buckets_.size()) {
-    // If the reducer marked unused parameters and we STILL didn't get
-    // gradients for all module parameters, something is seriously wrong.
-    AT_ASSERT(!has_marked_unused_parameters_);
-    AT_ERROR(
-        "Expected to have gradients for all module parameters upon returning ",
-        "from the call to `torch.autograd.backward`. ",
-        "",
-        "This error indicates that your module has parameters that were ",
-        "not used in producing its output (the return value of `forward`). ",
-        "",
-        "You can enable unused parameter detection by passing the keyword "
-        "argument `find_unused_parameters=True` to ",
-        "`torch.nn.parallel.DistributedDataParallel`. ",
-        "",
-        "If you already have this argument set, then the distributed data ",
-        "parallel module wasn't able to locate the output tensors in the ",
-        "return value of your module's `forward` function. ",
-        "Please include the structure of the return value of `forward` of ",
-        "your module when reporting this issue (e.g. list, dict, iterable).");
-  }
+  AT_ASSERT(next_bucket_ == buckets_.size());
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
