@@ -6,6 +6,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include "caffe2/core/operator.h"
+#include "caffe2/core/c10_operator.h"
 
 namespace caffe2 {
 
