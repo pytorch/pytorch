@@ -109,7 +109,7 @@ void IValue::dump() const {
 }
 
 
-const std::string& ivalue::Object::name() const {
+std::string ivalue::Object::name() const {
   return this->type_->qualname();
 }
 
