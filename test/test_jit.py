@@ -5492,7 +5492,7 @@ a")
         self.checkScript(one_return, [a], optimize=True)
         self.checkScript(multiple_returns, [a], optimize=True)
 
-        with self.assertRaisesRegex(RuntimeError, "but is actually of type Optional\[Tensor\]"):  # noqa
+        with self.assertRaisesRegex(RuntimeError, "does not return along all paths"):  # noqa
             torch.jit.CompilationUnit('''
             def no_return_bad_annotation(a):
                 # type: (Tensor) -> Tensor
