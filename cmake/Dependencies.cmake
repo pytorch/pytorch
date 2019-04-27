@@ -338,6 +338,17 @@ if(BUILD_TEST)
   if (NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
       set(gtest_force_shared_crt ON CACHE BOOL "force shared crt on gtest" FORCE)
   endif()
+  # We need to replace googletest cmake scripts too.
+  # Otherwise, it will sometimes break the build.
+  if (MSVC AND MSVC_Z7_OVERRIDE)
+    execute_process(
+      COMMAND "cmake" "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest"
+              "-P" "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
+      RESULT_VARIABLE _exitcode)
+    if(NOT ${_exitcode} EQUAL 0)
+      message(WARNING "Patching failed for Google Test. The build may fail.")
+    endif()
+  endif()
 
   # Add googletest subdirectory but make sure our INCLUDE_DIRECTORIES
   # don't bleed into it. This is because libraries installed into the root conda
