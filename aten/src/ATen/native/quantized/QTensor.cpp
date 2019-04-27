@@ -7,9 +7,17 @@
 namespace at {
 namespace native {
 
-Tensor quantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point) {
-  auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point);
+Tensor quantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point, optional<ScalarType> dtype) {
+  auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point, dtype);
   return quantizer->quantize(self);
+}
+
+Tensor quantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point, ScalarType dtype) {
+  return quantize_linear_cpu(self, scale, zero_point, optional<ScalarType>(dtype));
+}
+
+Tensor quantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point) {
+  return quantize_linear_cpu(self, scale, zero_point, c10::nullopt);
 }
 
 Tensor dequantize_quant(const Tensor& self) {

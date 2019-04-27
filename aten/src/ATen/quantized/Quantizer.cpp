@@ -5,17 +5,20 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 
-#ifdef USE_FBGEMM
-#include <fbgemm/QuantUtils.h>
-#endif
-
 namespace at {
+
+#define AT_DISPATCH_ALL_QINT_TYPES(TYPE, NAME, ...)
 
 QuantizerPtr make_per_tensor_affine_quantizer(
     double scale,
-    int64_t zero_point) {
-  return c10::make_intrusive<PerTensorAffineQuantizer>(
-      static_cast<float>(scale), static_cast<uint8_t>(zero_point));
+    int64_t zero_point,
+    optional<ScalarType> scalar_type_opt = c10::nullopt) {
+  auto scalar_type = scalar_type_opt;
+  if (scalar_type == c10::nullopt) {
+    scalar_type = c10::kQInt8;
+  }
+  return c10::make_intrusive<PerTensorAffineQuantizer>(scalar_type.value(),
+      static_cast<float>(scale), static_cast<int32_t>(zero_point));
 }
 
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
@@ -53,29 +56,6 @@ inline Tensor new_qtensor_cpu(
   return tensor;
 }
 
-qint8 quantize_uint8(float scale, uint8_t zero_point, float value) {
-  // Internally, fbgemm::Quantize uses std::nearbyint.
-  // std::nearbyint results in nearest integer value according to the current
-  // rounding mode and the default rounding mode is rounds to even in half-way
-  // cases in most popular processor architectures like x86 and ARM. This is
-  // typically faster than an alternatives like std::round that rounds half-way
-  // cases away from zero, and can be consistent with SIMD implementations for
-  // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
-  // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
-  int32_t qvalue;
-#ifdef USE_FBGEMM
-  qvalue = fbgemm::Quantize<uint8_t>(value, zero_point, scale,
-                                     /*result_precision=*/8);
-#else
-  constexpr int32_t qmin = std::numeric_limits<uint8_t>::min();
-  constexpr int32_t qmax = std::numeric_limits<uint8_t>::max();
-  qvalue = zero_point + static_cast<int32_t>(std::nearbyint(value / scale));
-  qvalue = std::max(qvalue, qmin);
-  qvalue = std::min(qvalue, qmax);
-#endif
-  return static_cast<qint8>(qvalue);
-}
-
 Tensor PerTensorAffineQuantizer::quantize(Tensor tensor) {
   IntArrayRef sizes = tensor.sizes();
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
@@ -85,27 +65,18 @@ Tensor PerTensorAffineQuantizer::quantize(Tensor tensor) {
       "quantize only works for CPU backend right now.");
   Tensor qv = new_qtensor_cpu(
       sizes,
-      tensor.options().dtype(at::kQInt8),
+      tensor.options().dtype(scalar_type_),
       intrusive_from_this());
 
   tensor = tensor.contiguous();
-  const float* svd = tensor.data<float>();
-
 #ifdef USE_FBGEMM
-  auto qvd = reinterpret_cast<uint8_t*>(qv.data<qint8>());
-  fbgemm::TensorQuantizationParams qparams;
-  qparams.scale = scale_;
-  qparams.zero_point = zero_point_;
-  qparams.precision = 8;
-  fbgemm::Quantize<uint8_t>(/*src=*/svd,
-                            /*dst=*/qvd,
-                            /*len=*/tensor.numel(),
-                            /*qparams=*/qparams);
+  AT_DISPATCH_QINT_TYPES(qv.scalar_type(), "quantize_fbgemm", [&]() {
+    qv = quantize_fbgemm<scalar_t>(tensor, qv, scale_, zero_point_);
+  });
 #else
-  auto qvd = qv.data<qint8>();
-  for (int i = 0; i < tensor.numel(); ++i) {
-    qvd[i] = quantize_uint8(scale_, zero_point_, svd[i]);
-  }
+  AT_DISPATCH_QINT_TYPES(qv.scalar_type(), "quantize_naive", [&]() {
+    qv = quantize_naive<scalar_t>(tensor, qv, scale_, zero_point_);
+  });
 #endif
   return qv;
 }

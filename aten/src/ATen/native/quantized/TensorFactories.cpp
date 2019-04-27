@@ -11,7 +11,12 @@ namespace native {
 // support quantizer in python frontend, once
 // that is ready, we'll change to use quantizer
 Tensor empty_affine_quantized_cpu(IntArrayRef size, const TensorOptions& options, double scale, int64_t zero_point) {
-  return new_qtensor_cpu(size, options, make_per_tensor_affine_quantizer(scale, zero_point));
+  TensorOptions opts = options;
+  // default scalar_type to kQInt8
+  if (!opts.has_dtype()) {
+    opts = opts.dtype(kQInt8);
+  }
+  return new_qtensor_cpu(size, options, make_per_tensor_affine_quantizer(scale, zero_point, typeMetaToScalarType(opts.dtype())));
 }
 
 }} // at::native

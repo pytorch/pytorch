@@ -17,9 +17,10 @@ Tensor& _s_copy__quantized(Tensor& self, const Tensor& src, bool /* unused */) {
   qint8* self_data = self.data<qint8>();
   float* src_data = src.data<float>();
   for (int i = 0; i < self.numel(); ++i) {
-    self_data[i] = quantize_uint8(
+    // TODO: DISPATCH
+    self_data[i] = quantize_uint<qint8>(
         self.q_scale().to<float>(),
-        self.q_zero_point().to<uint8_t>(),
+        self.q_zero_point().to<int32_t>(),
         src_data[i]);
   }
   return self;

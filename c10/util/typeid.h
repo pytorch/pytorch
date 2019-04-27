@@ -24,6 +24,7 @@
 #include "c10/util/Half.h"
 #include "c10/util/IdWrapper.h"
 #include "c10/util/qint8.h"
+#include "c10/util/qint32.h"
 
 #include "c10/util/Type.h"
 
@@ -624,6 +625,7 @@ CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(
     detail::_guard_long_unique<std::vector<long>>)
 
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(27, c10::qint8);
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(28, c10::qint32);
 
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(28, _CaffeHighestPreallocatedTypeId)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(29, _CaffeHighestPreallocatedTypeId)
 } // namespace caffe2
