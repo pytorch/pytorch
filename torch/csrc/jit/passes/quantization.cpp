@@ -110,11 +110,8 @@ static Node* addObserverFor(Value* v, Node* original_observer_node, Node* def) {
   Value* vname = def->owningGraph()->insertConstant(v->uniqueName());
 
   // Create a new observer node. We just need to clone the original one.
-  Node* observerNode =
-      def->owningGraph()
-          ->createClone(
-              &*original_observer_node, [&](Value* v) { return v; }, false)
-          ->insertAfter(def);
+  Node* observerNode = def->owningGraph()->createClone(
+      &*original_observer_node, [&](Value* v) { return v; }, false);
 
   // Set the type and the name of the output of the new observer node. It will
   // be used instead of the original value v.
@@ -154,14 +151,15 @@ void InsertObserverNodes(
   // These are treated as activation as they vary across batches
   // and need to be observed.
 
-  // prim::Param nodes do not belong to the graph. param_node->next()
-  // is first node in graph and insertion point. This safe guards against
+  // prim::Param nodes do not belong to the graph. Hence the Insert
+  // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
+  Node* insert_node = *graph->nodes().begin();
   for (size_t idx = 0; idx < num_activation_inputs; ++idx) {
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      Node* new_observer_node =
-          addObserverFor(v, observer_node, v->node()->next());
+      Node* new_observer_node = addObserverFor(v, observer_node, insert_node);
+      new_observer_node->insertBefore(insert_node);
       observer_for_input.emplace(new_observer_node);
     }
   }
@@ -193,7 +191,8 @@ void InsertObserverNodes(
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      addObserverFor(v, observer_node, v->node());
+      Node* clone_observer_node = addObserverFor(v, observer_node, v->node());
+      clone_observer_node->insertAfter(v->node());
     }
   }
 }

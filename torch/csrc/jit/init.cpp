@@ -144,6 +144,7 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_insert_observers",
           [](std::shared_ptr<script::Function>& function_var,
              py::object pyObserverFunction) {
+            // Overloaded jit pass for pure functions instead of modules.
             // Create a new node that would be used in the insert observer pass:
             // all observer nodes will be cloned from this one.
             Graph g;
