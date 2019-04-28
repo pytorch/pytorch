@@ -11,10 +11,12 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <c10/core/Tensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 
+namespace caffe2 {
+class Tensor;
+}
 namespace c10{
 struct TensorOptions;
 }
@@ -71,18 +73,6 @@ class CAFFE2_API Tensor {
     Tensor r(std::move(tensor_impl));
     r.enforce_invariants();
     return r;
-  }
-
-  explicit Tensor(C10Tensor tensor) : impl_(std::move(tensor).impl()) {
-    enforce_invariants();
-  }
-
-  explicit operator C10Tensor() const & {
-    return C10Tensor(impl_);
-  }
-
-  explicit operator C10Tensor() && {
-    return C10Tensor(std::move(impl_));
   }
 
   int64_t dim() const {
@@ -222,7 +212,6 @@ class CAFFE2_API Tensor {
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
-  Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor toType(const DeprecatedTypeProperties & t, bool non_blocking=false) const;
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
@@ -251,6 +240,9 @@ class CAFFE2_API Tensor {
 
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
+
+  /// Returns if a `Tensor` is mkldnn tensor.
+  bool is_mkldnn() const;
 
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
@@ -362,6 +354,8 @@ class CAFFE2_API Tensor {
   friend struct WeakTensor;
 
 protected:
+  friend class ::caffe2::Tensor;
+
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };

@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/utils/hash.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
@@ -44,7 +45,7 @@ Reducer::Reducer(
     : replicas_(std::move(replicas)),
       process_group_(std::move(process_group)),
       expect_autograd_hooks_(false),
-      has_queued_final_callback_(false),
+      has_marked_unused_parameters_(false),
       next_bucket_(0),
       backward_stats_base_(0) {
   AT_ASSERTM(replicas_.size() >= 1, "Expected at least one model replica.");
@@ -162,6 +163,31 @@ void Reducer::mark_variable_ready(
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& replica = bucket.replicas[replica_index];
+
+  // Something is wrong if all variables contained in this bucket replica have
+  // already been marked as ready.
+  if (replica.pending == 0) {
+    // Receiving a call to `mark_variable_ready` twice for the same variable
+    // is only possible if the variable was initially deemed unused, and was
+    // marked ready from the `prepare_for_backward` function, only to become
+    // part of the autograd graph at a later point in time.
+    AT_ASSERT(has_marked_unused_parameters_);
+    AT_ERROR(
+        "Expected to mark a variable ready only once. ",
+        "",
+        "This error is caused by use of a module parameter outside the ",
+        "`forward` function. The return value of the `forward` function ",
+        "is inspected by the distributed data parallel wrapper to figure ",
+        "out if any of the module's parameters went unused. If this is the ",
+        "case, it knows they won't receive gradients in a backward pass. ",
+        "If any of those parameters are then used outside `forward`, this ",
+        "error condition is triggered. ",
+        "",
+        "You can disable unused parameter detection by passing the keyword "
+        "argument `find_unused_parameters=False` to ",
+        "`torch.nn.parallel.DistributedDataParallel`.");
+  }
+
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
   const auto offset = replica.offsets[bucket_index.intra_bucket_index];
   const auto length = replica.lengths[bucket_index.intra_bucket_index];
@@ -202,12 +228,16 @@ void Reducer::mark_variable_ready(
     }
   }
 
-  // Autograd callbacks can only be registered while the engine is running.
-  // Register this reducer's final callback once per backward pass.
-  if (!has_queued_final_callback_ && called_from_autograd) {
-    has_queued_final_callback_ = true;
-    torch::autograd::Engine::get_default_engine().queue_callback(
-        [=] { this->finalize_backward(); });
+  // Run finalizer function once the final bucket was marked ready.
+  if (next_bucket_ == buckets_.size()) {
+    if (called_from_autograd) {
+      torch::autograd::Engine::get_default_engine().queue_callback([=] {
+        std::lock_guard<std::mutex> lock(this->mutex_);
+        this->finalize_backward();
+      });
+    } else {
+      finalize_backward();
+    }
   }
 }
 
@@ -349,8 +379,30 @@ void Reducer::prepare_for_backward(
   std::unordered_set<torch::autograd::Function*> seen;
   std::vector<torch::autograd::Function*> queue;
 
+  // Check that any prior reduction has finished.
+  // The variable `expect_autograd_hooks` is true until gradients for all
+  // parameters have been received and all buckets are ready.
+  if (expect_autograd_hooks_) {
+    AT_ERROR(
+        "Expected to have finished reduction in the prior iteration before ",
+        "starting a new one. ",
+        "",
+        "This error indicates that your module has parameters that were ",
+        "not used in producing its output (the return value of `forward`). ",
+        "",
+        "You can enable unused parameter detection by passing the keyword "
+        "argument `find_unused_parameters=True` to ",
+        "`torch.nn.parallel.DistributedDataParallel`. ",
+        "",
+        "If you already have this argument set, then the distributed data ",
+        "parallel module wasn't able to locate the output tensors in the ",
+        "return value of your module's `forward` function. ",
+        "Please include the structure of the return value of `forward` of ",
+        "your module when reporting this issue (e.g. list, dict, iterable).");
+  }
+
   // Reset accounting.
-  has_queued_final_callback_ = false;
+  has_marked_unused_parameters_ = true;
   expect_autograd_hooks_ = true;
   next_bucket_ = 0;
   backward_stats_base_ = current_time_in_nanos();
@@ -359,6 +411,14 @@ void Reducer::prepare_for_backward(
       replica.pending = replica.variables.size();
     }
     bucket.pending = bucket.replicas.size();
+  }
+
+  // If no outputs are specified, we assume that autograd hooks for ALL
+  // variables will be called, and we don't have to search the autograd graph
+  // for presence of these hooks.
+  if (outputs.empty()) {
+    has_marked_unused_parameters_ = false;
+    return;
   }
 
   // Seed queue with the grad functions of all outputs.
@@ -399,16 +459,12 @@ void Reducer::prepare_for_backward(
 }
 
 void Reducer::finalize_backward() {
-  std::lock_guard<std::mutex> lock(mutex_);
-
   // No longer expect autograd hooks to fire after this function returns.
   AT_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
 
   // Check that all buckets were completed and had their work kicked off.
-  AT_ASSERTM(
-      next_bucket_ == buckets_.size(),
-      "Expected all buckets to be ready at the end of the backward pass.");
+  AT_ASSERT(next_bucket_ == buckets_.size());
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
@@ -431,6 +487,108 @@ void Reducer::finalize_backward() {
       }
     }
   }
+}
+
+namespace {
+
+// Tensors may be coalesced into buckets. Buckets must contain tensors of
+// the same type, on the same device, so a bucket can identified by a
+// composite key of a tensor's type identifier and its device.
+struct BucketKey {
+  BucketKey(c10::ScalarType type, c10::Device device)
+      : type(std::move(type)), device(std::move(device)) {}
+
+  const c10::ScalarType type;
+  const c10::Device device;
+
+  // See torch/csrc/utils/hash.h for dispatch code.
+  static size_t hash(const BucketKey& key) {
+    return torch::get_hash(key.type, key.device);
+  }
+};
+
+inline bool operator==(const BucketKey& lhs, const BucketKey& rhs) {
+  return lhs.type == rhs.type && lhs.device == rhs.device;
+}
+
+} // namespace
+
+// This is equivalent to take_tensors but returns indices into the
+// tensor list argument for bucket assignment. Also, it is aware
+// of device placement and will not allow buckets to span devices.
+std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+    const std::vector<at::Tensor>& tensors,
+    std::vector<size_t> bucket_size_limits) {
+  std::vector<std::vector<size_t>> result;
+  result.reserve(tensors.size());
+
+  // Keep iterator into the size_limit vector by tensor type and device.
+  // This is done so that we can use the consecutive bucket limits per type.
+  std::unordered_map<
+      BucketKey,
+      std::vector<size_t>::iterator,
+      torch::hash<BucketKey>>
+      bucket_size_limit_iterators;
+
+  // Local accumulator type for a single bucket.
+  struct BucketAccumulator {
+    std::vector<size_t> indices;
+    size_t size = 0;
+  };
+
+  // Keep vector of indices and size accumulator by tensor type and device.
+  std::unordered_map<BucketKey, BucketAccumulator, torch::hash<BucketKey>>
+      buckets;
+
+  for (size_t i = 0; i < tensors.size(); i++) {
+    const auto& tensor = tensors[i];
+    AT_ASSERTM(!tensor.is_sparse(), "No support for sparse tensors.");
+    auto key = BucketKey(tensor.scalar_type(), tensor.device());
+    auto& bucket = buckets[key];
+    bucket.indices.push_back(i);
+    bucket.size += tensor.numel() * tensor.element_size();
+
+    // Initialize bucket size limit iterator if necessary.
+    if (bucket_size_limit_iterators.count(key) == 0) {
+      bucket_size_limit_iterators[key] = bucket_size_limits.begin();
+    }
+
+    auto& bucket_size_limit_iterator = bucket_size_limit_iterators[key];
+    const auto bucket_size_limit = *bucket_size_limit_iterator;
+    if (bucket.size >= bucket_size_limit) {
+      result.emplace_back(std::move(bucket.indices));
+      bucket = BucketAccumulator();
+
+      // Advance to the next bucket size limit for this type/device.
+      auto next = bucket_size_limit_iterator + 1;
+      if (next != bucket_size_limits.end()) {
+        bucket_size_limit_iterator = next;
+      }
+    }
+  }
+
+  // Add remaining buckets.
+  for (auto& it : buckets) {
+    auto& bucket = it.second;
+    if (!bucket.indices.empty()) {
+      result.emplace_back(std::move(bucket.indices));
+    }
+  }
+
+  // Sort resulting buckets by the minimum tensor index they include.
+  // We assume that the order of the tensors is the order in which they are
+  // used (or the reverse order in which their gradients are produced).
+  // This sorting step ensures that the buckets are ready in consecutive order.
+  std::sort(
+      result.begin(),
+      result.end(),
+      [](const std::vector<size_t>& a, const std::vector<size_t>& b) {
+        const auto amin = std::min_element(a.begin(), a.end());
+        const auto bmin = std::min_element(b.begin(), b.end());
+        return *amin < *bmin;
+      });
+
+  return result;
 }
 
 } // namespace c10d

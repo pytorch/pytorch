@@ -75,6 +75,8 @@ def _parse_arg(value, desc):
             return int(tval)
         elif desc == 'f':
             return float(tval)
+        elif desc == 'b':
+            return bool(tval)
         elif desc == 't':
             return tval
         elif desc == 'is':
@@ -215,7 +217,7 @@ _export_onnx_opset_version = _default_onnx_opset_version
 
 def _set_opset_version(opset_version):
     global _export_onnx_opset_version
-    if opset_version == _default_onnx_opset_version:
+    if opset_version == _export_onnx_opset_version:
         return
     if opset_version in _onnx_stable_opsets + [_onnx_master_opset]:
         _export_onnx_opset_version = opset_version
@@ -555,6 +557,20 @@ def squeeze(g, self, dim=None):
                 dims.append(i)
     else:
         dims = [_get_const(dim, 'i', 'dim')]
+        # Handle negative dims
+        for i, dim in enumerate(dims):
+            if dim < 0:
+                if self.type().kind() == "CompleteTensorType" or self.type().kind() == "DimensionedTensorType":
+                    warnings.warn("ONNX export squeeze with negative axis " + str(dim) +
+                                  " might cause the onnx model to be incorrect. " +
+                                  "Negative axis is not supported in ONNX. " +
+                                  "Axis is converted to " + str(dim + self.type().dim()) +
+                                  " based on input shape at export time. " +
+                                  "Passing an tensor of different rank in execution will be incorrect.")
+                    dims[i] += self.type().dim()
+                else:
+                    return _unimplemented('squeeze', 'negative axis with unknown input rank')
+
     return g.op("Squeeze", self, axes_i=dims)
 
 
@@ -665,104 +681,63 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     return padding_ceil
 
 
-@parse_args('v', 'is', 'is', 'is', 'is', 'i')
-def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode and input.type().kind() != "CompleteTensorType":
-        return _unimplemented("max_pool1d_with_indices", "input size not accesible")
-    if set(_single(dilation)) != {1}:
-        return _unimplemented("max_pool1d_with_indices", "dilation")
-    if stride is None:
-        stride = kernel_size
-    padding = tuple(_single(padding))
-    if ceil_mode:
-        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-        padding = padding + tuple(numpy.add(padding_ceil, padding))
-    else:
-        padding = padding * 2
-    r, indices = g.op("MaxPool", input, outputs=2,
-                      kernel_shape_i=_single(kernel_size),
-                      pads_i=padding,
-                      strides_i=_single(stride))
-    # easy but hacky way to get flattened indices values
-    # to be used to convert the indices values to non-flattened.
-    # In ONNX the indices are computed as a flatten 1-D tensor,
-    # so the values in indices are in [0, N x C x D1 x ... x Dn).
-    # To convert the indices to the same format used by Pytorch,
-    # we first execute a maxpool with a kernel and stride of 1 on the same input.
-    # This will result in a tensor of indices in which each index will have it's own value.
-    # Using this tensor as a reference, we extract the first index of each axis and substract
-    # it from each index of this axis in the indices to convert.
-    # This step will result in a tensor were each dimension has values of indices within
-    # the dimension it is in.
-    # For more information :
-    # https://github.com/pytorch/pytorch/pull/16455#issuecomment-460776407
-    _, flattened_indices = g.op("MaxPool", input, outputs=2,
-                                kernel_shape_i=[1],
-                                strides_i=[1])
-    # convert indices to have non-flattened indices values
-    s = _slice_op(g, flattened_indices, axes=[2], starts=[0], ends=[1])
-    indices = sub(g, indices, s)
-    return r, indices
+def _max_pool(name, tuple_fn, ndims, return_indices):
+    @parse_args('v', 'is', 'is', 'is', 'is', 'i')
+    def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+        if ceil_mode and input.type().kind() != "CompleteTensorType":
+            return _unimplemented(name, "input size not accesible")
+        if set(tuple_fn(dilation)) != {1}:
+            return _unimplemented(name, "dilation")
+        if not stride:
+            stride = kernel_size
+        padding = tuple(tuple_fn(padding))
+        if ceil_mode:
+            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+            padding = padding + tuple(numpy.add(padding_ceil, padding))
+        else:
+            padding = padding * 2
+        # easy but hacky way to get flattened indices values
+        # to be used to convert the indices values to non-flattened.
+        # In ONNX the indices are computed as a flatten 1-D tensor,
+        # so the values in indices are in [0, N x C x D1 x ... x Dn).
+        # To convert the indices to the same format used by Pytorch,
+        # we first execute a maxpool with a kernel and stride of 1 on the same input.
+        # This will result in a tensor of indices in which each index will have it's own value.
+        # Using this tensor as a reference, we extract the first index of each axis and substract
+        # it from each index of this axis in the indices to convert.
+        # This step will result in a tensor were each dimension has values of indices within
+        # the dimension it is in.
+        # For more information :
+        # https://github.com/pytorch/pytorch/pull/16455#issuecomment-460776407
+        if return_indices:
+            r, indices = g.op("MaxPool", input, outputs=2,
+                              kernel_shape_i=tuple_fn(kernel_size),
+                              pads_i=padding,
+                              strides_i=tuple_fn(stride))
+            _, flattened_indices = g.op("MaxPool", input, outputs=2,
+                                        kernel_shape_i=[1 for _ in range(ndims)],
+                                        strides_i=[1 for _ in range(ndims)])
+            # convert indices to have non-flattened indices values
+            s = _slice_op(g, flattened_indices, axes=[2 + i for i in range(ndims)],
+                          starts=tuple_fn(0), ends=tuple_fn(1))
+            indices = sub(g, indices, s)
+            return r, indices
+        else:
+            r = g.op("MaxPool", input, outputs=1,
+                     kernel_shape_i=tuple_fn(kernel_size),
+                     pads_i=padding,
+                     strides_i=tuple_fn(stride))
+            return r
+
+    return symbolic_fn
 
 
-@parse_args('v', 'is', 'is', 'is', 'is', 'i')
-def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode and input.type().kind() != "CompleteTensorType":
-        return _unimplemented("max_pool2d_with_indices", "input size not accesible")
-    if set(_pair(dilation)) != {1}:
-        return _unimplemented("max_pool2d_with_indices", "dilation")
-    if not stride:
-        stride = kernel_size
-    padding = tuple(_pair(padding))
-    if ceil_mode:
-        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-        padding = padding + tuple(numpy.add(padding_ceil, padding))
-    else:
-        padding = padding * 2
-    r, indices = g.op("MaxPool", input, outputs=2,
-                      kernel_shape_i=_pair(kernel_size),
-                      pads_i=padding,
-                      strides_i=_pair(stride))
-    # easy but hacky way to get flattened indices values
-    # to be used to convert the indices values to non-flattened
-    # See comment in max_pool1d_with_indices for details.
-    _, flattened_indices = g.op("MaxPool", input, outputs=2,
-                                kernel_shape_i=[1, 1],
-                                strides_i=[1, 1])
-    # convert indices to have non-flattened indices values
-    s = _slice_op(g, flattened_indices, axes=[2, 3], starts=[0, 0], ends=[1, 1])
-    indices = sub(g, indices, s)
-    return r, indices
-
-
-@parse_args('v', 'is', 'is', 'is', 'is', 'i')
-def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode and input.type().kind() != "CompleteTensorType":
-        return _unimplemented("max_pool3d_with_indices", "input size not accesible")
-    if set(_triple(dilation)) != {1}:
-        return _unimplemented("max_pool3d_with_indices", "dilation")
-    if not stride:
-        stride = kernel_size
-    padding = tuple(_triple(padding))
-    if ceil_mode:
-        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-        padding = padding + tuple(numpy.add(padding_ceil, padding))
-    else:
-        padding = padding * 2
-    r, indices = g.op("MaxPool", input, outputs=2,
-                      kernel_shape_i=_triple(kernel_size),
-                      pads_i=padding,
-                      strides_i=_triple(stride))
-    # easy but hacky way to get flattened indices values
-    # to be used to convert the indices values to non-flattened
-    # See comment in max_pool1d_with_indices for details.
-    _, flattened_indices = g.op("MaxPool", input, outputs=2,
-                                kernel_shape_i=[1, 1, 1],
-                                strides_i=[1, 1, 1])
-    # convert indices to have non-flattened indices values
-    s = _slice_op(g, flattened_indices, axes=[2, 3, 4], starts=[0, 0, 0], ends=[1, 1, 1])
-    indices = sub(g, indices, s)
-    return r, indices
+max_pool1d = _max_pool("max_pool1d", _single, 1, return_indices=False)
+max_pool2d = _max_pool("max_pool2d", _pair, 2, return_indices=False)
+max_pool3d = _max_pool("max_pool3d", _triple, 3, return_indices=False)
+max_pool1d_with_indices = _max_pool("max_pool1d_with_indices", _single, 1, return_indices=True)
+max_pool2d_with_indices = _max_pool("max_pool2d_with_indices", _pair, 2, return_indices=True)
+max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, return_indices=True)
 
 
 def _avg_pool(name, tuple_fn):
@@ -1245,6 +1220,13 @@ def _unique(g, input, sorted, return_inverse):
                 return_inverse_i=return_inverse, outputs=2)
 
 
+@parse_args('v', 'i', 'i', 'i')
+def _unique2(g, input, sorted, return_inverse, return_counts):
+    return g.op("ATen", input, operator_s="_unique2", sorted_i=sorted,
+                return_inverse_i=return_inverse, return_counts_i=return_counts,
+                outputs=3)
+
+
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an
 # ONNX cast node with `to` attribute 'UINT8'
@@ -1310,34 +1292,44 @@ scalar_type_to_onnx = [
 ]
 
 
-@parse_args('v', 'i', 'v', 'v')
-def zeros(g, sizes, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def zeros(g, sizes, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def zeros_like(g, input, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def zeros_like(g, input, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def ones(g, sizes, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def ones(g, sizes, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def ones_like(g, input, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def ones_like(g, input, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-def full(g, sizes, value, dtype, layout, device):
+def full(g, sizes, value, dtype, layout, device, pin_memory=False):
+    if pin_memory and _parse_arg(pin_memory, 'b'):
+        raise RuntimeError("onnx pin_memory support is not implemented")
     const_value = _maybe_get_const(value, 't')
     if _is_value(const_value):
         tmp = zeros(sizes, dtype, layout, device)
@@ -1348,8 +1340,10 @@ def full(g, sizes, value, dtype, layout, device):
                     value_t=torch.tensor([const_value], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v')
-def full_like(g, input, fill_value, dtype, layout, device):
+@parse_args('v', 'f', 'i', 'v', 'v', 'b')
+def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
+    if pin_memory:
+        raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([fill_value], dtype=scalar_type_to_pytorch_type[dtype]))
@@ -1383,6 +1377,19 @@ def alias(g, self):
 
 @parse_args('v', 'i')
 def unsqueeze(g, self, dim):
+    # Handle negative dim
+    if dim < 0:
+        if self.type().kind() == "CompleteTensorType" or self.type().kind() == "DimensionedTensorType":
+            warnings.warn("ONNX export unsqueeze with negative axis " + str(dim) +
+                          " might cause the onnx model to be incorrect. " +
+                          "Negative axis is not supported in ONNX. " +
+                          "Axis is converted to " + str(dim + self.type().dim() + 1) +
+                          " based on input shape at export time. " +
+                          "Passing an tensor of different rank in execution will be incorrect.")
+            dim = dim + self.type().dim() + 1
+        else:
+            return _unimplemented('unsqueeze', 'negative axis with unknown input rank')
+
     return g.op("Unsqueeze", self, axes_i=[dim])
 
 
@@ -1412,6 +1419,11 @@ def to(g, self, *args):
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
     elif len(args) == 5:
         # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
+        dtype = _get_const(args[0], 'i', 'dtype')
+        # Layout and device are ignored
+        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+    elif len(args) == 6:
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool) -> Tensor
         dtype = _get_const(args[0], 'i', 'dtype')
         # Layout and device are ignored
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
@@ -1454,6 +1466,9 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                  num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
+    onnxActivations = ['Relu', 'Tanh', 'Sigmoid', 'Affine', 'LeakyRelu', 'ThresholdedRelu',
+                       'ScaledTanh', 'HardSigmoid', 'Elu', 'Softsign', 'Softplus']
+    variantToOnnxActivationMap = dict(zip([act_fun.lower() for act_fun in onnxActivations], onnxActivations))
     weights_per_layer = 4 if has_biases else 2
     assert len(all_weights) == num_layers * weights_per_layer * (1 + bidirectional)
     layer_weights = [all_weights[i:i + weights_per_layer] for i in range(0, len(all_weights), weights_per_layer)]
@@ -1463,7 +1478,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         return _unimplemented("RNN/GRU/LSTM", "dropout in training mode")
 
     if variant.startswith('RNN'):
-        nonlinearity = variant[4:].lower()
+        nonlinearity = variantToOnnxActivationMap[variant[4:].lower()]
         variant = 'RNN'
 
     w_hh = all_weights[1]

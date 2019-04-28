@@ -9,7 +9,7 @@ import cimodel.lib.visualization as visualization
 
 
 class Conf(object):
-    def __init__(self, os, cuda_version, pydistro, parms, smoke=False, libtorch_variant=None):
+    def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, devtoolset_version):
 
         self.os = os
         self.cuda_version = cuda_version
@@ -17,9 +17,13 @@ class Conf(object):
         self.parms = parms
         self.smoke = smoke
         self.libtorch_variant = libtorch_variant
+        self.devtoolset_version = devtoolset_version
 
     def gen_build_env_parms(self):
-        return [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.cuda_version)]
+        elems = [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.cuda_version)]
+        if self.devtoolset_version is not None:
+            elems.append("devtoolset" + str(self.devtoolset_version))
+        return elems
 
     def gen_docker_image(self):
 
@@ -38,6 +42,7 @@ class Conf(object):
         return "smoke" if self.smoke else "binary"
 
     def gen_build_name(self, build_or_test):
+
         parts = [self.get_name_prefix(), self.os] + self.gen_build_env_parms()
 
         if self.smoke:
@@ -101,22 +106,31 @@ def gen_build_env_list(smoke):
             c.find_prop("package_format"),
             [c.find_prop("pyver")],
             c.find_prop("smoke"),
-            c.find_prop("libtorch_variant")
+            c.find_prop("libtorch_variant"),
+            c.find_prop("devtoolset_version"),
         )
         newlist.append(conf)
 
     return newlist
 
 
-def add_build_entries(jobs_dict, phase, smoke):
+def predicate_exclude_nonlinux_and_libtorch(config):
+    return config.os == "linux" and (config.smoke or config.pydistro != "libtorch")
+
+
+def add_build_entries(jobs_dict, phase, smoke, filter_predicate=lambda x: True):
 
     configs = gen_build_env_list(smoke)
-    for conf_options in configs:
+    for conf_options in filter(filter_predicate, configs):
         jobs_dict[conf_options.gen_build_name(phase)] = conf_options.gen_yaml_tree(phase)
 
 
 def add_binary_build_specs(jobs_dict):
     add_build_entries(jobs_dict, "build", False)
+
+
+def add_binary_build_tests(jobs_dict):
+    add_build_entries(jobs_dict, "test", False, predicate_exclude_nonlinux_and_libtorch)
 
 
 def add_binary_build_uploads(jobs_dict):
@@ -160,19 +174,6 @@ def get_nightly_uploads():
     return mylist
 
 
-def predicate_exclude_nonlinux_and_libtorch(config):
-    return config.os == "linux" and (config.smoke or config.pydistro != "libtorch")
-
-
-def add_binary_build_tests(jobs_dict):
-
-    configs = gen_build_env_list(False)
-    filtered_configs = filter(predicate_exclude_nonlinux_and_libtorch, configs)
-
-    for conf_options in filtered_configs:
-        jobs_dict[conf_options.gen_build_name("test")] = conf_options.gen_yaml_tree("test")
-
-
 def gen_schedule_tree(cron_timing):
     return [{
         "schedule": {
@@ -195,12 +196,10 @@ def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
         build_name = build_config.gen_build_name("build")
         jobs_list.append(build_name)
 
-    d = OrderedDict(
+    jobs_dict[toplevel_key] = OrderedDict(
         triggers=gen_schedule_tree(cron_schedule),
         jobs=jobs_list,
     )
-
-    jobs_dict[toplevel_key] = d
 
     graph = visualization.generate_graph(get_root(smoke, toplevel_key))
     graph.draw(toplevel_key + "-config-dimensions.png", prog="twopi")

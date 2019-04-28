@@ -207,23 +207,6 @@ void Pickler::pushDouble(const IValue& ivalue) {
   }
 }
 
-using ivalue_pair = std::pair<IValue, IValue>;
-
-struct IValuePairComparator {
-  bool operator()(const ivalue_pair& lhs, const ivalue_pair& rhs) const {
-    if (lhs.first.isString()) {
-      return lhs.first.toStringRef() < rhs.first.toStringRef();
-    }
-    if (lhs.first.isInt()) {
-      return lhs.first.toInt() < rhs.first.toInt();
-    }
-    if (lhs.first.isDouble()) {
-      return lhs.first.toDouble() < rhs.first.toDouble();
-    }
-    AT_ERROR("Uncomparable IValue types");
-  }
-};
-
 void Pickler::pushDict(const IValue& ivalue) {
   auto dict = ivalue.toGenericDictRef();
 
@@ -233,9 +216,7 @@ void Pickler::pushDict(const IValue& ivalue) {
   push<OpCode>(OpCode::MARK);
 
   // Sort the dict for deterministic keys
-  std::vector<std::pair<IValue, IValue>> dict_items(dict.begin(), dict.end());
-  std::sort(dict_items.begin(), dict_items.end(), IValuePairComparator());
-
+  auto dict_items = ivalue.toGenericDict()->iterationOrder();
   for (const auto& pair : dict_items) {
     addIValue(pair.first);
     addIValue(pair.second);
@@ -364,9 +345,27 @@ OpCode Unpickler::readInstruction() {
       }
       memo_table_.push_back(stack_.back());
     } break;
+    case OpCode::LONG_BINPUT: {
+      AT_CHECK(
+          std::numeric_limits<size_t>::max() >=
+              std::numeric_limits<uint32_t>::max(),
+          "Found a LONG_BINPUT opcode, but size_t on this system is "
+          "not big enough to decode it");
+      size_t memo_id = read<uint32_t>();
+      if (memo_table_.size() <= memo_id) {
+        memo_table_.reserve(1 + 2 * memo_id);
+      }
+      memo_table_.push_back(stack_.back());
+    } break;
     case OpCode::MARK: {
       // Mark location of the container ivalue in the stack
       marks_.push_back(stack_.size());
+    } break;
+    case OpCode::NEWTRUE: {
+      stack_.emplace_back(true);
+    } break;
+    case OpCode::NEWFALSE: {
+      stack_.emplace_back(false);
     } break;
     case OpCode::BININT1: {
       int8_t value = read<int8_t>();
@@ -418,6 +417,9 @@ OpCode Unpickler::readInstruction() {
     case OpCode::BINGET: {
       stack_.push_back(memo_table_.at(read<uint8_t>()));
     } break;
+    case OpCode::LONG_BINGET: {
+      stack_.push_back(memo_table_.at(read<uint32_t>()));
+    } break;
     case OpCode::STOP:
       break;
     case OpCode::GLOBAL: {
@@ -449,7 +451,7 @@ OpCode Unpickler::readInstruction() {
       }
     } break;
     default:
-      AT_ERROR("Unknown opcode for unpickling");
+      AT_ERROR("Unknown opcode for unpickling: ", static_cast<uint8_t>(opcode));
   }
   return opcode;
 }
@@ -502,6 +504,5 @@ std::string Unpickler::readString() {
 OpCode Unpickler::readOpCode() {
   return static_cast<OpCode>(read<uint8_t>());
 }
-
 } // namespace jit
 } // namespace torch
