@@ -40,19 +40,19 @@ fi
 
 # Upload to parallel folder for gcc abis
 if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
-  export PIP_UPLOAD_FOLDER='nightly/devtoolset7/'
+  export PIP_UPLOAD_FOLDER='devtoolset7/'
   if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
     echo "We don't handle conda builds with gcc ABI of 1, since we don't"
     echo "want to add a new package name to the conda builds"
     exit 1
   fi
 else
-  export PIP_UPLOAD_FOLDER='nightly/'
+  export PIP_UPLOAD_FOLDER=''
 fi
 
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
-export PYTORCH_BUILD_VERSION="1.1.0.dev$DATE"
+export PYTORCH_BUILD_VERSION="1.1.0"
 export PYTORCH_BUILD_NUMBER=1
 
 cat >>"$envfile" <<EOL
@@ -73,8 +73,8 @@ export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
 
-export TORCH_PACKAGE_NAME='torch-nightly'
-export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
+export TORCH_PACKAGE_NAME='torch'
+export TORCH_CONDA_BUILD_FOLDER='pytorch'
 
 export NO_FBGEMM=1
 export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
