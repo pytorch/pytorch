@@ -2,6 +2,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
