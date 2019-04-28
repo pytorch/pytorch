@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/jit/code_template.h>
 
 #include <sstream>
 #include <fstream>
