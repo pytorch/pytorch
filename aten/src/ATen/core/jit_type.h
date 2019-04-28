@@ -226,6 +226,10 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 // with a particular type: v: Optional[int] = None()
 struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType, OptionalType> {
   static OptionalTypePtr create(TypePtr element) {
+    // Optional is a union of [None, T], so Optional[[Optional[T]]] -> Optional[T]
+    if (auto opt_ptr = element->cast<OptionalType>()) {
+      return opt_ptr;
+    }
     return OptionalTypePtr(new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(OptionalType);
@@ -1199,6 +1203,20 @@ inline TypePtr CompleteTensorType::fromBoolType() {
   return CompleteTensorType::create(at::kLong, at::kCPU, {});
 }
 
+inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+  if (type == FloatType::get()) {
+    return at::ScalarType::Double;
+  } else if (type == IntType::get()) {
+    return at::ScalarType::Long;
+  } else if (type == BoolType::get()) {
+    return at::ScalarType::Byte;
+  }
+  AT_ASSERTM(
+      0,
+      "Add new condition, expected Float, Int, or Bool but got",
+      type->str());
+}
+
 // Attempt to find the correct supertype of t1 and t2. If none is found then
 // nullopt will be returned. If t1 == t2, or t1 is a type refinement of t2,
 // then t2 will be returned (and vice versa).
@@ -1355,7 +1373,7 @@ struct CAFFE2_API ClassType : public Type {
     return attributeNames_[slot];
   }
 
-  Function* getMethod(const std::string& name) const;
+  std::shared_ptr<Function> getMethod(const std::string& name) const;
   CompilationUnit& compilation_unit();
   const CompilationUnit& compilation_unit() const;
   std::vector<Function*> methods() const;

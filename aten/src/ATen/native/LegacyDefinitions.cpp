@@ -2,6 +2,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHFunctions.h>
 
+#include <ATen/native/mkldnn/TensorShape.h>
+
 namespace at { namespace native {
 
 // Methods
@@ -63,6 +65,9 @@ Tensor & masked_scatter_(Tensor& self, const Tensor & mask, const Tensor & sourc
 }
 
 Tensor view(const Tensor& self, IntArrayRef size) {
+  if (self.is_mkldnn()) {
+    return mkldnn_view(self, size);
+  }
   return at::legacy::th::_th_view(self, size);
 }
 
@@ -448,11 +453,11 @@ std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some, bool comput
   return at::legacy::th::_th_svd(self, some, compute_uv);
 }
 
-Tensor & potri_out(Tensor & result, const Tensor & self, bool upper) {
+Tensor & cholesky_inverse_out(Tensor & result, const Tensor & self, bool upper) {
   return at::legacy::th::_th_potri_out(result, self, upper);
 }
 
-Tensor potri(const Tensor & self, bool upper) {
+Tensor cholesky_inverse(const Tensor & self, bool upper) {
   return at::legacy::th::_th_potri(self, upper);
 }
 

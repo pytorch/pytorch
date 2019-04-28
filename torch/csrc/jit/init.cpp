@@ -22,10 +22,10 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/onnx.h>
+#include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
-#include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -44,6 +44,7 @@
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
 
+#include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/core/function_schema.h>
@@ -85,7 +86,7 @@ void runJITCPPTests(bool runCuda) {
   AT_ERROR("JIT tests not yet supported on Windows");
 }
 #else
-void runJITCPPTests(bool runCuda);
+CAFFE2_API void runJITCPPTests(bool runCuda);
 #endif
 
 void initJITBindings(PyObject* module) {
@@ -104,12 +105,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
       .def(
-           "_jit_pass_onnx_constant_fold",
-           [](std::shared_ptr<Graph>& graph,
-               std::map<std::string, at::Tensor>& paramsDict) {
-           ConstantFoldONNX(graph->block(), paramsDict); // overload resolution
-           return paramsDict;
-          }, pybind11::return_value_policy::move)
+          "_jit_pass_onnx_constant_fold",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, at::Tensor>& paramsDict) {
+            ConstantFoldONNX(graph->block(), paramsDict); // overload resolution
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -127,16 +129,28 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_insert_observers",
           [](std::shared_ptr<script::Module>& moduleObj,
-              py::function pyObserverFunction) {
+             const std::string& methodName,
+             py::object pyObserverFunction) {
             // Create a new node that would be used in the insert observer pass:
-           // all observer nodes will be cloned from this one.
+            // all observer nodes will be cloned from this one.
             Graph g;
             Node* new_node = g.createPythonOp(
-               THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            const auto& methods = moduleObj->get_methods();
-            for (const auto& metd : methods) {
-              InsertObserverNodes(metd, new_node);
-            }
+                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
+            InsertObserverNodes(moduleObj, methodName, new_node);
+            // We don't need this node anymore, don't forget to remove it.
+            new_node->destroy();
+          })
+      .def(
+          "_jit_pass_insert_observers",
+          [](std::shared_ptr<script::Function>& function_var,
+             py::object pyObserverFunction) {
+            // Overloaded jit pass for pure functions instead of modules.
+            // Create a new node that would be used in the insert observer pass:
+            // all observer nodes will be cloned from this one.
+            Graph g;
+            Node* new_node = g.createPythonOp(
+                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
+            InsertObserverNodes(function_var, new_node);
             // We don't need this node anymore, don't forget to remove it.
             new_node->destroy();
           })
@@ -226,8 +240,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
-      .def("_jit_can_fuse_on_cpu", canFuseOnCPU)
-      .def("_jit_can_fuse_on_gpu", canFuseOnGPU)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def(
           "_jit_differentiate",
