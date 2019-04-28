@@ -340,10 +340,13 @@ if(BUILD_TEST)
   endif()
   # We need to replace googletest cmake scripts too.
   # Otherwise, it will sometimes break the build.
+  # To make the git clean after the build, we make a backup first.
   if (MSVC AND MSVC_Z7_OVERRIDE)
     execute_process(
       COMMAND "cmake"
               "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
+              "-DBACKUP=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake.bak"
+              "-DREVERT=0"
               "-P"
               "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
       RESULT_VARIABLE _exitcode)
@@ -376,6 +379,21 @@ if(BUILD_TEST)
 
   # Recover build options.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+
+  # To make the git clean after the build, we revert the changes here.
+  if (MSVC AND MSVC_Z7_OVERRIDE)
+    execute_process(
+      COMMAND "cmake"
+              "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
+              "-DBACKUP=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake.bak"
+              "-DREVERT=1"
+              "-P"
+              "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
+      RESULT_VARIABLE _exitcode)
+    if(NOT ${_exitcode} EQUAL 0)
+      message(WARNING "Reverting changes failed for Google Test. The build may fail.")
+    endif()
+  endif()
 endif()
 
 # ---[ FBGEMM
