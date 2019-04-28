@@ -2257,6 +2257,57 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         loss2 = criterion(output2, target)
         loss2.backward()
 
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_no_used_parameters(self):
+        """
+        Note: this test can be sped up by only running it on a CPU module
+        once DistributedDataParallel supports them.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class NoUsedParameters(nn.Module):
+            def __init__(self):
+                super(NoUsedParameters, self).__init__()
+
+                # Make sure this module has some parameters, only to then decide
+                # to never use them from the `forward` function.
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.fc3 = nn.Linear(4, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                return x * 0.0
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = DistributedDataParallel(
+            NoUsedParameters().float().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+
+        # After initialization, no parameter has their gradient set.
+        for p in model.parameters():
+            self.assertTrue(p.requires_grad)
+            self.assertIsNone(p.grad)
+
+        # Run `forward` function.
+        model(input)
+
+        # Because none of the parameters were used, we expect reduction for
+        # all parameters will be executed right when initializing the reducer.
+        # Once `forward` returns, all the parameter's gradients must be set.
+        for p in model.parameters():
+            self.assertTrue(p.requires_grad)
+            self.assertIsNotNone(p.grad)
+            self.assertTrue(torch.is_tensor(p.grad))
+            self.assertEqual(p.size(), p.grad.size())
+
 
 class ReducerModule(nn.Module):
     def __init__(self):
