@@ -2,11 +2,10 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/variable_tensor_list.h>
 #include <torch/csrc/utils/hash.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <iostream>
 #include <vector>
 
