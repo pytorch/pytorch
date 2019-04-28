@@ -343,7 +343,7 @@ if(BUILD_TEST)
   # To make the git clean after the build, we make a backup first.
   if (MSVC AND MSVC_Z7_OVERRIDE)
     execute_process(
-      COMMAND "cmake"
+      COMMAND ${CMAKE_COMMAND}
               "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
               "-DBACKUP=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake.bak"
               "-DREVERT=0"
@@ -383,7 +383,7 @@ if(BUILD_TEST)
   # To make the git clean after the build, we revert the changes here.
   if (MSVC AND MSVC_Z7_OVERRIDE)
     execute_process(
-      COMMAND "cmake"
+      COMMAND ${CMAKE_COMMAND}
               "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
               "-DBACKUP=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake.bak"
               "-DREVERT=1"
