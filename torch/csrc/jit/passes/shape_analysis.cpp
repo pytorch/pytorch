@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
@@ -157,8 +156,8 @@ class ShapePropagator {
       return *iv;
     }
     if (CompleteTensorTypePtr type = type_->cast<CompleteTensorType>()) {
-      auto attype = type->device().is_cpu() ?
-          at::CPU(type->scalarType()) : at::CUDA(type->scalarType());
+      auto attype = type->device().is_cpu() ? at::CPU(type->scalarType())
+                                            : at::CUDA(type->scalarType());
       at::DeviceGuard device_guard(type->device());
       auto t =
           at::empty_strided(type->sizes(), type->strides(), attype.options())
