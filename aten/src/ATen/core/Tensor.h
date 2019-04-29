@@ -241,6 +241,9 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
 
+  /// Returns if a `Tensor` is mkldnn tensor.
+  bool is_mkldnn() const;
+
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
@@ -706,7 +709,7 @@ class CAFFE2_API Tensor {
   Tensor cholesky(bool upper=false) const;
   Tensor cholesky_solve(const Tensor & input2, bool upper=false) const;
   std::tuple<Tensor,Tensor> solve(const Tensor & A) const;
-  Tensor potri(bool upper=true) const;
+  Tensor cholesky_inverse(bool upper=false) const;
   std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
   std::tuple<Tensor,Tensor> qr() const;
   std::tuple<Tensor,Tensor> geqrf() const;

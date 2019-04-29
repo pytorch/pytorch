@@ -53,10 +53,7 @@ enum class TypeID {
   QuantizedCPU,
   MSNPU,
   XLA,
-  CPUComplexFloat,
-  CPUComplexDouble,
-  CUDAComplexFloat,
-  CUDAComplexDouble,
+  ComplexCPU,
   Undefined,
   NumOptions
 };
@@ -523,7 +520,7 @@ struct CAFFE2_API Type {
   virtual Tensor cholesky(const Tensor & self, bool upper) const = 0;
   virtual Tensor cholesky_solve(const Tensor & self, const Tensor & input2, bool upper) const = 0;
   virtual std::tuple<Tensor,Tensor> solve(const Tensor & self, const Tensor & A) const = 0;
-  virtual Tensor potri(const Tensor & self, bool upper) const = 0;
+  virtual Tensor cholesky_inverse(const Tensor & self, bool upper) const = 0;
   virtual std::tuple<Tensor,Tensor> pstrf(const Tensor & self, bool upper, Scalar tol) const = 0;
   virtual std::tuple<Tensor,Tensor> qr(const Tensor & self) const = 0;
   virtual std::tuple<Tensor,Tensor> geqrf(const Tensor & self) const = 0;

@@ -43,6 +43,7 @@
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
 
+#include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/core/function_schema.h>
@@ -84,7 +85,7 @@ void runJITCPPTests(bool runCuda) {
   AT_ERROR("JIT tests not yet supported on Windows");
 }
 #else
-void runJITCPPTests(bool runCuda);
+CAFFE2_API void runJITCPPTests(bool runCuda);
 #endif
 
 void initJITBindings(PyObject* module) {
@@ -213,8 +214,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
-      .def("_jit_can_fuse_on_cpu", canFuseOnCPU)
-      .def("_jit_can_fuse_on_gpu", canFuseOnGPU)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def(
           "_jit_differentiate",
