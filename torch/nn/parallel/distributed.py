@@ -380,14 +380,16 @@ class DistributedDataParallel(Module):
         else:
             output = self.module(*inputs, **kwargs)
 
-        # We'll return the output object verbatim since it is a freeform object.
-        # We need to find any tensors in this object, though, because we need to
-        # figure out which parameters were used during this forward pass,
-        # to ensure we short circuit reduction for any unused parameters.
-        if self.find_unused_parameters:
-            self.reducer.prepare_for_backward(list(_find_tensors(output)))
-        else:
-            self.reducer.prepare_for_backward([])
+        if torch.is_grad_enabled():
+            # We'll return the output object verbatim since it is a freeform
+            # object. We need to find any tensors in this object, though,
+            # because we need to figure out which parameters were used during
+            # this forward pass, to ensure we short circuit reduction for any
+            # unused parameters. Only if `find_unused_parameters` is set.
+            if self.find_unused_parameters:
+                self.reducer.prepare_for_backward(list(_find_tensors(output)))
+            else:
+                self.reducer.prepare_for_backward([])
         return output
 
     def scatter(self, inputs, kwargs, device_ids):
