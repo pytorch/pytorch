@@ -49,12 +49,11 @@ void Pickler::start() {
 
   // All attributes get pushed into a list and their indices saved in the
   // module def
-  push<OpCode>(OpCode::EMPTY_LIST);
   push<OpCode>(OpCode::MARK);
 }
 
 void Pickler::finish() {
-  push<OpCode>(OpCode::APPENDS);
+  push<OpCode>(OpCode::TUPLE);
   push<OpCode>(OpCode::STOP);
 }
 
