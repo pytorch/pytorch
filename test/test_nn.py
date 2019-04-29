@@ -2089,7 +2089,6 @@ class TestNN(NNTestCase):
         self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3, 8, 1, 3]]))
         self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(6, 3))
 
-
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_embedding_sparse_half_backward(self):
         # same as test_embedding_sparse_backward above but testing half types in
