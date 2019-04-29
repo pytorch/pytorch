@@ -6534,6 +6534,48 @@ a")
                 code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
                 run_test(code)
 
+    def test_python_math(self):
+        funcs_two_argument_template = dedent('''
+        def func():
+            return {func}({scalar1}, {scalar2})
+        ''')
+        funcs_two_argument = ['math.pow']
+        funcs_one_argument_template = dedent('''
+        def func():
+            return {func}({scalar1})
+        ''')
+        funcs_one_argument = ['math.floor', 'math.ceil', 'math.log', 'math.log1p', 'math.log10', 'math.exp', 'math.sqrt',
+        'math.pow', 'math.isnan', 'math.asinh', 'math.atanh', 'math.cosh', 'math.sinh', 'math.tanh']
+        scalars_float = ['-1000000.0', '-1000.0', '-2.0', '0.0', '1.0', '3.0', '1000.0', '10000000.0']
+        scalars_int = ['-1000000', '-1000', '-2', '0', '1', '3', '1000', '10000000']
+
+        scalar_float_pairs = [(scalar1, scalar2) for scalar1 in scalars_float for scalar2 in scalars_float]
+        scalar_int_pairs = [(scalar1, scalar2) for scalar1 in scalars_int for scalar2 in scalars_int]
+
+        def run_test(code):
+            scope = {}
+            execWrapper(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+
+            self.assertEqual(cu.func(), scope['func']())
+
+        for scalar1, scalar2 in scalar_float_pairs:
+            for func in funcs_two_argument:
+                code = funcs_two_argument_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
+                run_test(code)
+        for scalar1 in scalars_float:
+            for func in funcs_one_argument:
+                code = funcs_template.format(func=func, scalar1=scalar1)
+                run_test(code)
+        for scalar1, scalar2 in scalar_int_pairs:
+            for func in funcs_two_argument:
+                code = funcs_two_argument_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
+                run_test(code)
+        for scalar1 in scalars_int:
+            for func in funcs_one_argument:
+                code = funcs_template.format(func=func, scalar1=scalar1)
+                run_test(code)
+
     def test_number_abs(self):
         def func1(x):
             # type: (float) -> float
