@@ -619,26 +619,6 @@ def error_worker_init_fn(_):
     raise RuntimeError("Error in worker_init_fn")
 
 
-def test_iterable_dataset_multiprocessing():
-    num_workers = 3
-    sizes_for_all_workers = [0, 4, 20]
-    expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
-    assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
-    dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
-    dataloader = DataLoader(dataset, num_workers=num_workers)
-    dataloader_iter = iter(dataloader)
-    retrieved = sorted([d.item() for d in dataloader_iter])
-
-    for a, b in zip(retrieved, expected):
-        assert a == b
-
-    workers = dataloader_iter.workers
-    del dataloader_iter
-    for w in workers:
-        w.join(JOIN_TIMEOUT)
-        assert not w.is_alive()
-
-
 # used with test_error_in_init
 class ErrorIterableDataset(IterableDataset):
     def __iter__(self):
@@ -793,14 +773,29 @@ class TestDataLoader(TestCase):
             self.assertEqual(d, i)
 
         # multiprocessing loading
-        p = ErrorTrackingProcess(target=test_iterable_dataset_multiprocessing, disable_stderr=False)
-        p.start()
-        p.join(JOIN_TIMEOUT)
+        num_workers = 3
+        sizes_for_all_workers = [0, 4, 20]
+        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
+        dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
+        dataloader = DataLoader(dataset, num_workers=num_workers)
+        dataloader_iter = iter(dataloader)
+        retrieved = sorted([d.item() for d in dataloader_iter])
+
+        for a, b in zip(retrieved, expected):
+            self.assertEqual(a, b)
+
+        # test that workers exit gracefully
+        workers = dataloader_iter.workers
+        del dataloader_iter
         try:
-            self.assertFalse(p.is_alive())
-            self.assertEqual(p.exitcode, 0)
+            for w in workers:
+                w.join(JOIN_TIMEOUT)
+                self.assertFalse(w.is_alive())
+                self.assertEqual(w.exitcode, 0)
         finally:
-            p.terminate()
+            for w in workers:
+                w.terminate()
 
     def test_chain_iterable_dataset(self):
         # chaining (concatenation)

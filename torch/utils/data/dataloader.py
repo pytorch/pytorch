@@ -178,7 +178,7 @@ class DataLoader(object):
 
     def __len__(self):
         if self.mode == _DataLoaderStrategy.Iterable:
-            raise len(self.dataset)
+            return len(self.dataset)
         return len(self.sampler)
 
 
@@ -375,7 +375,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #           from `data_queue`, and check the workers' status on each timeout
     #           and error.
     #           See `_DataLoaderiter._get_batch()` and
-    #           `_DataLoaderiter.try_get_data()` for details.
+    #           `_DataLoaderiter._try_get_data()` for details.
     #
     #           Additionally, for child exit on non-Windows platforms, we also
     #           register a SIGCHLD handler (which is supported on Windows) on
@@ -558,9 +558,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
         # prime the prefetch loop
         for _ in range(2 * self.num_workers):
-            self.try_put_index()
+            self._try_put_index()
 
-    def try_get_data(self, timeout=_utils.MP_STATUS_CHECK_INTERVAL):
+    def _try_get_data(self, timeout=_utils.MP_STATUS_CHECK_INTERVAL):
         # Tries to fetch data from `self.data_queue` once for a given timeout.
         # This can also be used as inner loop of fetching without timeout, with
         # the sender status as the loop condition.
@@ -583,7 +583,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             for worker_id, w in enumerate(self.workers):
                 if self.worker_status[worker_id] and not w.is_alive():
                     failed_workers.append(w)
-                    self.shutdown_worker(worker_id)
+                    self._shutdown_worker(worker_id)
             if len(failed_workers) > 0:
                 pids_str = ', '.join(str(w.pid) for w in failed_workers)
                 raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str))
@@ -591,11 +591,11 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 return (False, None)
             raise
 
-    def get_data(self):
+    def _get_data(self):
         # Fetches data from `self.data_queue`.
         #
         # We check workers' status every `MP_STATUS_CHECK_INTERVAL` seconds,
-        # which we achieve by running `self.try_get_data(timeout=MP_STATUS_CHECK_INTERVAL)`
+        # which we achieve by running `self._try_get_data(timeout=MP_STATUS_CHECK_INTERVAL)`
         # in a loop. This is the only mechanism to detect worker failures for
         # Windows. For other platforms, a SIGCHLD handler is also used for
         # worker failure detection.
@@ -603,14 +603,14 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # If `pin_memory=True`, we also need check if `pin_memory_thread` had
         # died at timeouts.
         if self.timeout > 0:
-            success, data = self.try_get_data(self.timeout)
+            success, data = self._try_get_data(self.timeout)
             if success:
                 return data
             else:
                 raise RuntimeError('DataLoader timed out after {} seconds'.format(self.timeout))
         elif self.pin_memory:
             while self.pin_memory_thread.is_alive():
-                success, data = self.try_get_data()
+                success, data = self._try_get_data()
                 if success:
                     return data
             else:
@@ -620,7 +620,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # need to call `.task_done()` because we don't use `.join()`.
         else:
             while True:
-                success, data = self.try_get_data()
+                success, data = self._try_get_data()
                 if success:
                     return data
 
@@ -630,7 +630,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # and was unable to fulfill this task (due to exhausting an `IterableDataset`),
             # we try to advance `self.rcvd_idx` to find the next valid index.
             #
-            # This part needs to run in the loop because both the `self.get_data()`
+            # This part needs to run in the loop because both the `self._get_data()`
             # call and `IterableDatasetStopIteration` check below can mark
             # extra worker(s) as dead.
             while self.rcvd_idx < self.send_idx:
@@ -642,7 +642,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 self.rcvd_idx += 1
             else:
                 # no valid `self.rcvd_idx` is found (i.e., didn't break)
-                self.shutdown_workers()
+                self._shutdown_workers()
                 raise StopIteration
 
             # Now `self.rcvd_idx` is the batch index we want to fetch
@@ -650,17 +650,17 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # Check if the next sample has already been generated
             if len(self.task_info[self.rcvd_idx]) == 2:
                 data = self.task_info.pop(self.rcvd_idx)[1]
-                return self.process_data(data)
+                return self._process_data(data)
 
             assert (not self.shutdown and self.tasks_outstanding > 0)
-            idx, data = self.get_data()
+            idx, data = self._get_data()
             self.tasks_outstanding -= 1
 
             if self.mode == _DataLoaderStrategy.Iterable:
                 # Check for IterableDatasetStopIteration
                 if isinstance(data, _utils.worker.IterableDatasetStopIteration):
-                    self.shutdown_worker(data.worker_id)
-                    self.try_put_index()
+                    self._shutdown_worker(data.worker_id)
+                    self._try_put_index()
                     continue
 
             if idx != self.rcvd_idx:
@@ -668,11 +668,11 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 self.task_info[idx] += (data,)
             else:
                 del self.task_info[idx]
-                return self.process_data(data)
+                return self._process_data(data)
 
     next = __next__  # Python 2 compatibility
 
-    def try_put_index(self):
+    def _try_put_index(self):
         assert self.tasks_outstanding < 2 * self.num_workers
         try:
             index = self._next_index()
@@ -691,9 +691,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self.tasks_outstanding += 1
         self.send_idx += 1
 
-    def process_data(self, data):
+    def _process_data(self, data):
         self.rcvd_idx += 1
-        self.try_put_index()
+        self._try_put_index()
         if isinstance(data, _utils.ExceptionWrapper):
             # make multiline KeyError msg readable by working around
             # a python bug https://bugs.python.org/issue2651
@@ -703,7 +703,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 raise data.exc_type(data.exc_msg)
         return data
 
-    def shutdown_worker(self, worker_id):
+    def _shutdown_worker(self, worker_id):
         # Mark a worker as having finished its work and dead, e.g., due to
         # exhausting an `IterableDataset`. This should be used only when this
         # `_DataLoaderIter` is going to continue running.
@@ -722,12 +722,12 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # (2) since we don't join, the worker may still raise error, and we
         # prefer capturing those, rather than ignoring them, even though they
         # are raised after the worker has finished its job.
-        # Joinning is deferred to `shutdown_workers`, which it is called when
+        # Joinning is deferred to `_shutdown_workers`, which it is called when
         # all workers finish their jobs (e.g., `IterableDataset` replicas) or
         # when this iterator is garbage collected.
         self.worker_status[worker_id] = False
 
-    def shutdown_workers(self):
+    def _shutdown_workers(self):
         # Called when shutting down this `_DataLoaderIter`.
         # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on
         # the logic of this function.
@@ -764,7 +764,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 # Exit workers now.
                 for worker_id in range(self.num_workers):
                     if self.worker_status[worker_id]:
-                        self.shutdown_worker(worker_id)
+                        self._shutdown_worker(worker_id)
                 for w in self.workers:
                     w.join()
             finally:
@@ -783,4 +783,4 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self.worker_pids_set = False
 
     def __del__(self):
-        self.shutdown_workers()
+        self._shutdown_workers()
