@@ -51,7 +51,7 @@ Tensor& zero_(Tensor& self) {
 }
 
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, Scalar value) {
-  // As we dispatch on self and TH is type-chcked, we need different definitions.
+  // As we dispatch on self and TH is type-checked, we need different definitions.
   // This can be fixed by moving to ATen.
   if (mask.dtype() == at::ScalarType::Byte) {
     return at::legacy::th::_th_masked_fill_(self, mask, value);
@@ -61,7 +61,7 @@ Tensor & masked_fill_(Tensor& self, const Tensor & mask, Scalar value) {
 }
 
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, const Tensor & value) {
-  // As we dispatch on self and TH is type-chcked, we need different definitions.
+  // As we dispatch on self and TH is type-checked, we need different definitions.
   // This can be fixed by moving to ATen.
   if (mask.dtype() == at::ScalarType::Byte) {
     return at::legacy::th::_th_masked_fill_(self, mask, value);
@@ -71,7 +71,7 @@ Tensor & masked_fill_(Tensor& self, const Tensor & mask, const Tensor & value) {
 }
 
 Tensor & masked_scatter_(Tensor& self, const Tensor & mask, const Tensor & source) {
-  // As we dispatch on self and TH is type-chcked, we need different definitions.
+  // As we dispatch on self and TH is type-checked, we need different definitions.
   // This can be fixed by moving to ATen.
   if (mask.dtype() == at::ScalarType::Byte) {
     return at::legacy::th::_th_masked_scatter_(self, mask, source);
