@@ -132,7 +132,7 @@ static bool outputsNeedToBeObserved(Node* n) {
 void InsertObserverNodes(
     const std::shared_ptr<Graph>& graph,
     Node* observer_node,
-    ssize_t num_activation_inputs) {
+    size_t num_activation_inputs) {
   AT_ASSERT(graph != nullptr);
   // num_activation_inputs is the number of activations or external data
   // excluding the parameters
