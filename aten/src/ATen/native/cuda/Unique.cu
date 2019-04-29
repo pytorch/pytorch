@@ -150,7 +150,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
         }
     }
     if (well_formed_tensor) {
-      Tensor output = self;
+      Tensor output = at::empty({0},self.options().dtype(kLong));
       Tensor inverse_indices =
           at::empty(self.sizes(), self.options().dtype(kLong));
       Tensor counts = at::empty({0}, self.options().dtype(kLong));
