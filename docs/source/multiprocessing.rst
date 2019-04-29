@@ -19,6 +19,9 @@ Strategy management
 .. autofunction:: get_sharing_strategy
 .. autofunction:: set_sharing_strategy
 
+
+.. _multiprocessing-cuda-sharing-details:
+
 Sharing CUDA tensors
 --------------------
 
