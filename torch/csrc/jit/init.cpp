@@ -150,8 +150,7 @@ void initJITBindings(PyObject* module) {
             Graph g;
             Node* new_node = g.createPythonOp(
                 THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(
-                function_var->graph(), new_node, function_var->num_inputs());
+            InsertObserverNodes(function_var, new_node);
             // We don't need this node anymore, don't forget to remove it.
             new_node->destroy();
           })
