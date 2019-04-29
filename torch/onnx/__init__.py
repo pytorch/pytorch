@@ -6,6 +6,10 @@ PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
+ir_version = 4
+producer_name = "pytorch"
+producer_version = "1.1"
+
 
 class ExportTypes:
     PROTOBUF_FILE = 1
