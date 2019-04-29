@@ -2322,6 +2322,54 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             self.assertTrue(torch.is_tensor(p.grad))
             self.assertEqual(p.size(), p.grad.size())
 
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_no_grad(self):
+        """
+        Note: this test can be sped up by only running it on a CPU module
+        once DistributedDataParallel supports them.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class NoGradModule(nn.Module):
+            def __init__(self):
+                super(NoGradModule, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = DistributedDataParallel(
+            NoGradModule().float().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+
+        def check_no_grads():
+            for p in model.parameters():
+                self.assertTrue(p.requires_grad)
+                self.assertIsNone(p.grad)
+
+        # After initialization, no parameter has their gradient set.
+        check_no_grads()
+
+        # Run `forward` function with torch.no_grad()
+        with torch.no_grad():
+            output = model(input)
+            self.assertTrue(torch.is_tensor(output))
+
+        # No parameter should have their gradient set.
+        check_no_grads()
+
 
 class ReducerModule(nn.Module):
     def __init__(self):
