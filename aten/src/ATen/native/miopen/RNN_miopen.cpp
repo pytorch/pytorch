@@ -43,7 +43,27 @@ namespace at { namespace native {
 
 }} //namespace at::native
 
-#else // AT_CUDNN_ENABLED()
+#else // AT_ROCM_ENABLED()
+
+#include <THH/THH.h>
+
+#include <ATen/miopen/miopen-wrapper.h>
+#include <ATen/miopen/Descriptors.h>
+#include <ATen/miopen/Types.h>
+#include <ATen/miopen/Utils.h>
+
+#include <ATen/TensorUtils.h>
+
+#include <functional>
+#include <iterator>
+#include <sstream>
+#include <algorithm>
+#include <memory>
+#include <mutex>
+#include <stdint.h>
+#include <unordered_map>
+
+namespace at { namespace native {
 
 //RNNDescriptor.
 struct RNNDescriptorParams {
@@ -54,7 +74,7 @@ struct RNNDescriptorParams {
     miopenDataType_t datatype;
     miopenRNNAlgo_t algo = miopenRNNdefault;
     miopenRNNInputMode_t input_mode = miopenRNNlinear;
-    miopenBiasMode_t bias_mode = miopenRNNNoBias;
+    miopenRNNBiasMode_t bias_mode = miopenRNNNoBias;
 
     int64_t num_directions() const {
     	return (direction == miopenRNNbidirection) ? 2 : 1;
@@ -94,11 +114,11 @@ struct RNNDescriptorParams {
         }	
     }
 
-    void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, miopenDataType_t datatype, miopenBiasMode_t bias_mode) {
+    void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, miopenDataType_t datatype, miopenRNNBiasMode_t bias_mode) {
         this->set_mode(mode);
         this->hidden_size = hidden_size;
         this->num_layers = num_layers;
-        this->direction = this->set_bidirectional(bidirectional);
+        this->set_bidirectional(bidirectional);
         this->datatype = datatype;
         this->bias_mode = bias_mode;
     }
@@ -137,7 +157,6 @@ std::vector<TensorDescriptor> rnn_descriptor(const Tensor& tensor, int64_t N) {
 
 struct TensorDescriptorListParams {
 	IntArrayRef batch_sizes;
-	int64_t batch_sizes;
 	int64_t seq_length;
 	int64_t mini_batch;
 
@@ -197,10 +216,10 @@ struct RNNDescriptors {
 		x_descs = fn.tensors.descriptors(x);
 		y_descs = fn.tensors.descriptors(y);
 		hx_desc.set(hx, 5);
-		hy_desc.set(hy, 5);
+		hy_desc.set(hx, 5);
 		if (cx.defined()) {
 			cx_desc.set(cx, 5);
-			cy_desc.set(cy, 5);
+			cy_desc.set(cx, 5);
 		}
 	}
 
@@ -287,12 +306,10 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
 		3. 
 	*/
 	std::vector<Tensor> params;
-	int64_t num_linear_layers = _num_linear_layers(rnn.mode);
+	int64_t num_linear_layers = _num_linear_layers(rnn.rnn_mode);
 	int64_t num_layers = rnn.num_directions() * rnn.num_layers;
 	size_t cur_offset = 0;
 	size_t global_layer_params_count = 0;
-	auto miopen_param_methods = { miopenGetRNNLayerParam, miopenGetRNNLayerBias};
-	auto miopen_param_size_methods = {miopenGetRNNLayerParamSize, miopenGetRNNLayerBiasSize};
 
 	for (int64_t layer=0; layer < num_layers; layer++) {
 		size_t layer_params_count = 0;
@@ -303,7 +320,7 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
 			size_t param_size;
 			MIOPEN_CHECK(miopenGetRNNLayerParamSize(handle, rnn_desc.desc(), layer, x_desc.desc(), linear_id, &param_size));
 			MIOPEN_CHECK(miopenGetRNNLayerParam(handle, rnn_desc.desc(), layer, x_desc.desc(), w_desc.desc(), weight_buf.data_ptr(), 
-													lienar_id, lin_linear_mat_desc.mut_desc(), matrix_pointer));
+													linear_id, lin_linear_mat_desc.mut_desc(), matrix_pointer));
 			miopenDataType_t data_type;
 			int nb_dims;
 			constexpr int min_dim = 3;
@@ -338,9 +355,9 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
 			FilterDescriptor lin_linear_mat_desc;
 			void* matrix_pointer;
 			size_t param_size;
-			MIOPEN_CHECK(miopenGetRNNLayerBiasSize(handle, rnn_desc.desc(), layer, x_desc.desc(), linear_id, &param_size));
+			MIOPEN_CHECK(miopenGetRNNLayerBiasSize(handle, rnn_desc.desc(), layer, linear_id, &param_size));
 			MIOPEN_CHECK(miopenGetRNNLayerBias(handle, rnn_desc.desc(), layer, x_desc.desc(), w_desc.desc(), weight_buf.data_ptr(), 
-													lienar_id, lin_linear_mat_desc.mut_desc(), matrix_pointer));
+													linear_id, lin_linear_mat_desc.mut_desc(), matrix_pointer));
 			miopenDataType_t data_type;
 			int nb_dims;
 			constexpr int min_dim = 3;
@@ -389,7 +406,7 @@ std::vector<int64_t> _input_size(const TensorDescriptorListParams& tensors) {
 }
 
 std::vector<int64_t> _hidden_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
-	return {rnn.num_layers * rnn.num_directions(), tensors.mini_batch, tensors.hidden_size};
+	return {rnn.num_layers * rnn.num_directions(), tensors.mini_batch, rnn.hidden_size};
 }
 
 std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
@@ -410,11 +427,12 @@ Tensor miopen_rnn_flatten_weight(
     AT_CHECK(weight_arr.size() > 0, "miopen_rnn_flatten_weight : cannot flatten empty weight list.");
 
     auto any_param = weight_arr[0];
+    auto handle = getMiopenHandle();
     auto datatype = getMiopenDataType(any_param);
 
-    RNNDescriptorParam rnn;
+    RNNDescriptorParams rnn;
     miopenRNNBiasMode_t bias_mode = (weight_stride0 == 4) ? miopenRNNwithBias : miopenRNNNoBias;
-    rnn.set(fn_mode, hidden_size, num_layers, bidirectional, datatype, bias_mode);
+    rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, datatype, bias_mode);
 
     RNNDescriptor rnn_desc = rnn.descriptor();
 
@@ -477,7 +495,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, datatype, bias_mode);
     fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
-    if (fn.rnn.mode != miopenLSTM) {
+    if (fn.rnn.rnn_mode != miopenLSTM) {
     	AT_CHECK(!cx.defined(), "miopen_rnn: illegal defined cx for non-LSTM RNN.");
     }
 
@@ -512,7 +530,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     //TODO: Need to implement get_parameters that gets params and params_stride0. [Done.]
     FilterDescriptor w_desc;
     if (!weight_buf.defined()) {
-    	auto num_weights = get_num_weights(handle, descs.rnn_desc(), descs.x_descs[0], datatype);
+    	auto num_weights = get_num_weights(handle, descs.rnn_desc, descs.x_descs[0], datatype);
     	weight_buf = at::empty(num_weights, x.options());
     	w_desc.set(weight_buf, 3);
     	weight_buf.zero_();
@@ -533,13 +551,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
 
     //Allocate workspace size.
     MIOPEN_CHECK(miopenGetRNNWorkspaceSize(handle, descs.rnn_desc.desc(), fn.tensors.seq_length, x_descs_arr.data(), &workspace_size));
-    auto workspace = at::empty(workspace_size, input.otpions().dtype(kByte));
+    auto workspace = at::empty(workspace_size, input.options().dtype(kByte));
 
     //Train or inference.
     Tensor reserve;
     if (fn_train) { //Train.
     	size_t reserver_size;
-    	MIOPEN_CHECK(miopenGetRNNTrainingReserverSize(handle, descs.rnn_desc.desc(), fn.tensors.seq_length, x_descs_arr.data(), &reserver_size));
+    	MIOPEN_CHECK(miopenGetRNNTrainingReserveSize(handle, descs.rnn_desc.desc(), fn.tensors.seq_length, x_descs_arr.data(), &reserver_size));
     	reserve = at::empty(reserver_size, input.options().dtype(kByte));
 
     	MIOPEN_CHECK(miopenRNNForwardTraining(handle, descs.rnn_desc.desc(), fn.tensors.seq_length,
@@ -582,5 +600,6 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
     AT_ERROR("miopen_rnn_backward: not implemented yet.");
 }
 
+}} //namespace native.
 
 #endif 
