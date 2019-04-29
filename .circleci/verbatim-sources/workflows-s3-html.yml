@@ -9,5 +9,7 @@
               only:
                 - master
     jobs:
-      - update_s3_htmls:
+      - update_s3_htmls_for_nightlies:
+          context: org-member
+      - update_s3_htmls_for_nightlies_devtoolset7:
           context: org-member

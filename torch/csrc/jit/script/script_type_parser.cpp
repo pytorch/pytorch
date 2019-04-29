@@ -25,6 +25,15 @@ const std::unordered_map<std::string, TypePtr>& ident_to_type_lut() {
 bool isTorch(const Expr& expr) {
   return expr.kind() == TK_VAR && Var(expr).name().name() == "torch";
 }
+
+std::string collectQualname(const Select& select) {
+  Expr base = select.value();
+  if (base.kind() == TK_VAR) {
+    return Var(base).name().name() + "." + select.selector().name();
+  }
+  std::string basename = collectQualname(Select(base));
+  return basename + "." + select.selector().name();
+}
 } // namespace
 
 TypePtr ScriptTypeParser::subscriptToType(
@@ -145,8 +154,13 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
     case '.': {
       auto select = Select(expr);
       const std::string& name = select.selector().name();
-      if (isTorch(select.value()) && name == "Tensor")
+      // Special case for torch.Tensor
+      if (isTorch(select.value()) && name == "Tensor") {
         return "Tensor";
+      } else {
+        // Otherwise, it's a fully qualified class name
+        return collectQualname(select);
+      }
     } break;
   }
   return at::nullopt;
