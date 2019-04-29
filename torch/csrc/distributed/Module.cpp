@@ -108,7 +108,7 @@ extern PyObject* THCPByteTensorClass;
 
 THDTensorDescriptor THDPModule_makeDescriptor(PyObject *obj) {
   auto var = (THPVariable*)obj;
-  return var->cdata;
+  return var->cdata.data();
 }
 
 static THDRequest* _unpackRequest(PyObject *obj)
