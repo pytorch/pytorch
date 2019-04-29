@@ -2318,9 +2318,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file.name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        class NoUsedParameters(nn.Module):
+        class NoGradModule(nn.Module):
             def __init__(self):
-                super(NoUsedParameters, self).__init__()
+                super(NoGradModule, self).__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.relu = nn.ReLU()
@@ -2332,7 +2332,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         model = DistributedDataParallel(
-            NoUsedParameters().float().to(device_id),
+            NoGradModule().float().to(device_id),
             device_ids=[device_id],
             process_group=process_group,
         )
