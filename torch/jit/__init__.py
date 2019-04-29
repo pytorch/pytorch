@@ -703,7 +703,7 @@ def trace(mod,
     else:
         methods_inputs[mod] = (getattr(mod, '__name__', 'forward'), inputs)
         if hasattr(mod, '__self__') and isinstance(mod.__self__, torch.nn.Module):
-                mod = mod.__self__
+            mod = mod.__self__
 
     executor_options = {'optimize': bool(optimize)}
 
