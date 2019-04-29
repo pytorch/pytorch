@@ -83,7 +83,7 @@ std::string get_parallel_info() {
 #endif
 
   ss << at::get_mkl_version() << std::endl;
-#if AT_MKLDNN_ENABLED()
+#ifdef TH_BLAS_MKL
   ss << "\tmkl_get_max_threads() : " << mkl_get_max_threads() << std::endl;
 #endif
 
