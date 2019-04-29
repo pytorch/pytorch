@@ -3648,20 +3648,14 @@ a")
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
 
     def test_tensor_item(self):
-        def test_scalar_to_float_coercion(x):
-            return x.item() == 1
-
-        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
-        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
-
         def test_scalar_cast(x):
             scalar = x.item()
             return int(scalar), float(scalar)
 
         graph = torch.jit.script(test_scalar_cast).graph
         FileCheck().check("(int, float) = prim::TupleConstruct").run(graph)
-        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
-        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
+        self.checkScript(test_scalar_cast, (torch.tensor(1.0),))
+        self.checkScript(test_scalar_cast, (torch.tensor(1),))
 
         expected_str = r"Use int\(tensor\) or float\(tensor\) to retrieve"
         with self.assertRaisesRegex(RuntimeError, expected_str):

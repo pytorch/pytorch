@@ -107,10 +107,6 @@ Value* tryConvertToType(
         DeviceObjType::get()->isSubtypeOf(concrete_type)) {
       return graph.insert(aten::device, {value}, {}, loc);
     }
-    if (concrete_type == FloatType::get() &&
-        value->type() == NumberType::get()) {
-      return graph.insert(prim::Float, {value}, {}, loc);
-    }
   }
 
   return value;
