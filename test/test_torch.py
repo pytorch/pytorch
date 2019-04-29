@@ -7580,57 +7580,60 @@ class _TestTorchMixin(object):
         self._test_scatter_base(self, lambda t: t, 'scatter_', True)
 
     def test_masked_scatter(self):
-        num_copy, num_dest = 3, 10
-        dest = torch.randn(num_dest)
-        src = torch.randn(num_copy)
-        mask = torch.ByteTensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0))
-        dest2 = dest.clone()
-        dest.masked_scatter_(mask, src)
-        j = 0
-        for i in range(num_dest):
-            if mask[i]:
-                dest2[i] = src[j]
-                j += 1
-        self.assertEqual(dest, dest2, 0)
+        for dtype in [torch.uint8, torch.bool]:
+            num_copy, num_dest = 3, 10
+            dest = torch.randn(num_dest)
+            src = torch.randn(num_copy)
+            mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=dtype)
+            dest2 = dest.clone()
+            dest.masked_scatter_(mask, src)
+            j = 0
+            for i in range(num_dest):
+                if mask[i]:
+                    dest2[i] = src[j]
+                    j += 1
+            self.assertEqual(dest, dest2, 0)
 
-        # make source bigger than number of 1s in mask
-        src = torch.randn(num_dest)
-        dest.masked_scatter_(mask, src)
-
-        # make src smaller. this should fail
-        src = torch.randn(num_copy - 1)
-        with self.assertRaises(RuntimeError):
+            # make source bigger than number of 1s in mask
+            src = torch.randn(num_dest)
             dest.masked_scatter_(mask, src)
 
+            # make src smaller. this should fail
+            src = torch.randn(num_copy - 1)
+            with self.assertRaises(RuntimeError):
+                dest.masked_scatter_(mask, src)
+
     def test_masked_select(self):
-        num_src = 10
-        src = torch.randn(num_src)
-        mask = torch.rand(num_src).clamp(0, 1).mul(2).floor().byte()
-        dst = src.masked_select(mask)
-        dst2 = []
-        for i in range(num_src):
-            if mask[i]:
-                dst2 += [src[i]]
-        self.assertEqual(dst, torch.Tensor(dst2), 0)
+        for dtype in [torch.uint8, torch.bool]:
+            num_src = 10
+            src = torch.randn(num_src)
+            mask = torch.rand(num_src).clamp(0, 1).mul(2).floor().to(dtype)
+            dst = src.masked_select(mask)
+            dst2 = []
+            for i in range(num_src):
+                if mask[i]:
+                    dst2 += [src[i]]
+            self.assertEqual(dst, torch.Tensor(dst2), 0)
 
     def test_masked_fill(self):
-        num_dest = 10
-        dst = torch.randn(num_dest)
-        mask = torch.rand(num_dest).mul(2).floor().byte()
-        val = random.random()
-        dst2 = dst.clone()
-        dst.masked_fill_(mask, val)
-        for i in range(num_dest):
-            if mask[i]:
-                dst2[i] = val
-        self.assertEqual(dst, dst2, 0)
+        for dtype in [torch.uint8, torch.bool]:
+            num_dest = 10
+            dst = torch.randn(num_dest)
+            mask = torch.rand(num_dest).mul(2).floor().to(dtype)
+            val = random.random()
+            dst2 = dst.clone()
+            dst.masked_fill_(mask, val)
+            for i in range(num_dest):
+                if mask[i]:
+                    dst2[i] = val
+            self.assertEqual(dst, dst2, 0)
 
-        # test non-contiguous case
-        dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
-        dst2 = dst.clone()
-        dst.masked_fill_(dst > 0, val)
-        dst2.masked_fill_(dst2 > 0, val)
-        self.assertEqual(dst, dst2, 0)
+            # test non-contiguous case
+            dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
+            dst2 = dst.clone()
+            dst.masked_fill_((dst > 0).to(dtype), val)
+            dst2.masked_fill_((dst2 > 0).to(dtype), val)
+            self.assertEqual(dst, dst2, 0)
 
     def test_abs(self):
         def _test_abs(tensors_dict):
