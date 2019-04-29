@@ -1,5 +1,6 @@
 #pragma once
 #include <c10/util/Exception.h>
+#include <c10/util/Color.h>
 #include <torch/csrc/jit/source_location.h>
 
 #include <algorithm>
@@ -23,44 +24,77 @@ struct SourceRange : public SourceLocation {
 
   static const size_t CONTEXT = 10;
   void highlight(std::ostream& out) const override {
+    c10::color::colorize(out);
     const std::string& str = file();
-    size_t begin_line = start(); // beginning of line to highlight
-    size_t end_line = start(); // end of line to highlight
-    while (begin_line > 0 && str[begin_line - 1] != '\n')
-      --begin_line;
-    while (end_line < str.size() && str[end_line] != '\n')
-      ++end_line;
-    AT_ASSERT(begin_line == 0 || str[begin_line - 1] == '\n');
-    AT_ASSERT(end_line == str.size() || str[end_line] == '\n');
 
-    size_t begin_highlight = begin_line; // beginning of context, CONTEXT lines
-                                         // before the highlight line
-    for (size_t i = 0; begin_highlight > 0; --begin_highlight) {
-      if (str[begin_highlight - 1] == '\n')
-        ++i;
-      if (i >= CONTEXT)
-        break;
+    // Find the start of the line to highlight
+    size_t highlighted_line_start = start();
+    while (highlighted_line_start > 0 &&
+           str[highlighted_line_start - 1] != '\n') {
+      --highlighted_line_start;
     }
-    AT_ASSERT(begin_highlight == 0 || str[begin_highlight - 1] == '\n');
+    AT_ASSERT(
+        highlighted_line_start == 0 || str[highlighted_line_start - 1] == '\n');
 
-    size_t end_highlight =
-        end_line; // end of context, CONTEXT lines after the highlight line
-    for (size_t i = 0; end_highlight < str.size(); ++end_highlight) {
-      if (str[end_highlight] == '\n')
-        ++i;
-      if (i >= CONTEXT)
-        break;
+    // Find the end of the line to highlight
+    size_t highlighted_line_end = start();
+    while (highlighted_line_end < str.size() &&
+           str[highlighted_line_end] != '\n') {
+      ++highlighted_line_end;
     }
-    AT_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
+    AT_ASSERT(
+        highlighted_line_end == str.size() ||
+        str[highlighted_line_end] == '\n');
 
-    out << str.substr(begin_highlight, end_line - begin_highlight) << "\n";
-    out << std::string(start() - begin_line, ' ');
-    size_t len = std::min(size(), end_line - start());
-    out << std::string(len, '~')
+    // Find where in the string the context should start
+    size_t context_start = highlighted_line_start;
+    for (size_t num_lines_seen = 0; context_start > 0; --context_start) {
+      if (str[context_start - 1] == '\n') {
+        ++num_lines_seen;
+      }
+      if (num_lines_seen >= CONTEXT) {
+        break;
+      }
+    }
+    AT_ASSERT(context_start == 0 || str[context_start - 1] == '\n');
+
+    // Find where in the string the context should end
+    size_t context_end = highlighted_line_end;
+    for (size_t num_lines_seen = 0; context_end < str.size(); ++context_end) {
+      if (str[context_end] == '\n') {
+        ++num_lines_seen;
+      }
+      if (num_lines_seen >= CONTEXT) {
+        break;
+      }
+    }
+    AT_ASSERT(context_end == str.size() || str[context_end] == '\n');
+
+    // Beginning context + start of highlighted line
+    out << str.substr(context_start, start() - context_start);
+
+    // Highlighted section
+    out << c10::color::red;
+    out << str.substr(start(), end() - start());
+    out << c10::color::reset;
+
+    // Finish highlighted line
+    out << str.substr(end(), highlighted_line_end - end());
+    out << "\n";
+
+
+    // Indent to highlighted section
+    out << std::string(start() - highlighted_line_start, ' ');
+    size_t len = std::min(size(), highlighted_line_end - start());
+    out << c10::color::red << std::string(len, '~') << c10::color::reset
         << (len < size() ? "...  <--- HERE" : " <--- HERE");
-    out << str.substr(end_line, end_highlight - end_line);
-    if (!str.empty() && str.back() != '\n')
+
+    // Ending context
+    out << str.substr(highlighted_line_end, context_end - highlighted_line_end);
+
+    if (!str.empty() && str.back() != '\n') {
       out << "\n";
+    }
   }
   const std::string& file() const {
     return *file_;
