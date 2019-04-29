@@ -83,7 +83,6 @@ void addQuantDeQuantNodes(Value* v,
   auto qparam_values = insertQuantParamNodes(quant, qparam);
   for (Value* qparam_value : qparam_values) {
     quant->addInput(qparam_value);
-    dequant->addInput(qparam_value);
   }
 }
 
@@ -109,7 +108,6 @@ void addQuantDeQuantNodesForInput(Value* v, Node* n,
   auto qparam_values = insertQuantParamNodes(quant, qparam);
   for (Value* qparam_value : qparam_values) {
     quant->addInput(qparam_value);
-    dequant->addInput(qparam_value);
   }
 }
 
