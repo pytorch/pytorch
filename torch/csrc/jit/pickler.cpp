@@ -344,14 +344,29 @@ OpCode Unpickler::readInstruction() {
   auto opcode = readOpCode();
   switch (opcode) {
     case OpCode::EMPTY_LIST: {
-      if (stack_.size() > 0 && stack_.back().pickler_class_opt()) {
-          // Check if we're in a GLOBAL opcode and if so, if it's a list
-          // specialization
-          if (stack_.back().pickler_class() == PicklerClass::INTLIST) {
-            stack_.emplace_back(std::vector<int64_t>());
-          } else {
-            AT_ERROR("Unknown list specialization");
-          }
+      if (last_opcode_ == OpCode::NEWOBJ) {
+        // TODO [unpickler refactor] remove this case
+        // It's a list specialization, the enum ID of which is on the stack
+        AT_CHECK(
+            stack_.size() > 0,
+            "Unpickler found an empty stack when it expected a value");
+        auto value = stack_.back().ivalue().toInt();
+        AT_CHECK(
+            value >= 0 && value <= std::numeric_limits<uint8_t>::max(),
+            "Unpickler could not decode PicklerClass for ",
+            value);
+        PicklerClass cls = static_cast<PicklerClass>(uint8_t(value));
+        if (cls == PicklerClass::INTLIST) {
+          stack_.emplace_back(std::vector<int64_t>());
+        }
+      } else if (stack_.size() > 0 && stack_.back().pickler_class_opt()) {
+        // Check if we're in a GLOBAL opcode and if so, if it's a list
+        // specialization
+        if (stack_.back().pickler_class() == PicklerClass::INTLIST) {
+          stack_.emplace_back(std::vector<int64_t>());
+        } else {
+          AT_ERROR("Unknown list specialization");
+        }
       } else {
         stack_.emplace_back(std::vector<IValue>());
       }
@@ -446,9 +461,37 @@ OpCode Unpickler::readInstruction() {
       break;
     case OpCode::GLOBAL: {
       // Module name, it's not needed for anything
-      readString();
+      auto module_name = readString();
+      if (module_name == "__main__") {
+
+      }
       // Push class name to stack
       stack_.emplace_back(getClass(readString()));
+    } break;
+    case OpCode::NEWOBJ: {
+      // pop empty tuple
+      stack_.pop_back();
+    } break;
+    case OpCode::BUILD: {
+      // TODO: [unpickler refactor]
+      auto setitem_data = stack_.back().ivalue();
+      stack_.pop_back();
+
+
+      auto class_name =
+        static_cast<PicklerClass>(uint8_t(stack_.back().ivalue().toInt()));
+      stack_.pop_back();
+
+      switch (class_name) {
+      case PicklerClass::TENSOR:
+        stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
+        break;
+      case PicklerClass::INTLIST:
+        stack_.push_back(setitem_data);
+        break;
+      default:
+        AT_ERROR("Unknown pickler class id");
+      }
     } break;
     case OpCode::REDUCE: {
       // Pop reduce arg off the stack

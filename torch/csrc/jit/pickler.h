@@ -171,6 +171,10 @@ struct StackItem {
   c10::optional<IValue> ivalue_;
 };
 
+// [unpickler refactor] there is some cruft around OpCode::BUILD,
+// OpCode::NEWOBJ, and the last_opcode_ member below that should be deleted at
+// some point, the Pickler doesn't produce it and it's only around to support
+// models saved before 1.1
 class Unpickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
 
@@ -181,7 +185,8 @@ class Unpickler {
       const std::vector<at::Tensor>* tensor_table)
       : bytes_(static_cast<const uint8_t*>(data)),
         end_ptr_(bytes_ + size),
-        tensor_table_(tensor_table) {}
+        tensor_table_(tensor_table),
+        last_opcode_(OpCode::STOP) {}
 
   std::vector<IValue> parse_ivalue_list();
 
@@ -212,6 +217,9 @@ class Unpickler {
   const uint8_t* bytes_;
   const uint8_t* end_ptr_;
   const std::vector<at::Tensor>* tensor_table_;
+
+  // [unpickler refactor]
+  OpCode last_opcode_;
 };
 
 } // namespace jit
