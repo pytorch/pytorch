@@ -266,28 +266,55 @@ T quantize_uint(float scale, int32_t zero_point, float value) {
 }
 
 template <typename T>
-Tensor quantize_fbgemm(Tensor tensor, Tensor qv, float scale, int32_t zero_point) {
-  const float* svd = tensor.data<float>();
-  auto qvd = reinterpret_cast<typename T::underlying*>(qv.data<T>());
+Tensor quantize_fbgemm(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point) {
+  const float* rd = rtensor.data<float>();
+  auto qd = reinterpret_cast<typename T::underlying*>(qtensor.data<T>());
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale;
   qparams.zero_point = zero_point;
   qparams.precision = 8;
-  fbgemm::Quantize<typename T::underlying>(/*src=*/svd,
-                             /*dst=*/qvd,
-                             /*len=*/tensor.numel(),
+  fbgemm::Quantize<typename T::underlying>(/*src=*/rd,
+                             /*dst=*/qd,
+                             /*len=*/rtensor.numel(),
                              /*qparams=*/qparams);
-  return qv;
+  return qtensor;
 }
 
 template <typename T>
-Tensor quantize_naive(Tensor tensor, Tensor qv, float scale, int32_t zero_point) {
-  const float* svd = tensor.data<float>();
-  auto qvd = qv.data<T>();
-  for (int i = 0; i < tensor.numel(); ++i) {
-    qvd[i] = quantize_uint<T>(scale, zero_point, svd[i]);
+Tensor quantize_naive(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point) {
+  const float* rdata = rtensor.data<float>();
+  auto qdata = qtensor.data<T>();
+  for (int i = 0; i < rtensor.numel(); ++i) {
+    qdata[i] = quantize_uint<T>(scale, zero_point, rdata[i]);
   }
-  return qv;
+  return qtensor;
+}
+
+template <typename T>
+Tensor dequantize_fbgemm(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point) {
+  const auto* qd = reinterpret_cast<const typename T::underlying*>(qtensor.data<T>());
+  fbgemm::TensorQuantizationParams qparams;
+  qparams.scale = scale;
+  qparams.zero_point = zero_point;
+  qparams.precision = 8;
+  float* rd = rtensor.data<float>();
+  fbgemm::Dequantize<typename T::underlying>(/*src=*/qd,
+                              /*dst=*/rd,
+                              /*len=*/qtensor.numel(),
+                              /*qparams=*/qparams);
+  return rtensor;
+}
+
+template <typename T>
+Tensor dequantize_naive(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point) {
+  const auto* qd = qtensor.data<typename T::underlying>();
+  float* rd = rtensor.data<float>();
+  for (auto i = 0; i < qtensor.numel(); ++i) {
+    // We need to convert the qint8 value to float to ensure the subtraction
+    // subexpression returns a float
+    rd[i] = (static_cast<float>(qd[i].val_) - zero_point) * scale;
+  }
+  return rtensor;
 }
 
 // double and int64_t are because of the native function API, we only have these

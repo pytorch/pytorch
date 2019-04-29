@@ -56,59 +56,49 @@ inline Tensor new_qtensor_cpu(
   return tensor;
 }
 
-Tensor PerTensorAffineQuantizer::quantize(Tensor tensor) {
-  IntArrayRef sizes = tensor.sizes();
+Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
+  IntArrayRef sizes = rtensor.sizes();
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   AT_CHECK(
-      tensor.options().device() == kCPU,
+      rtensor.options().device() == kCPU,
       "quantize only works for CPU backend right now.");
-  Tensor qv = new_qtensor_cpu(
+  Tensor qtensor = new_qtensor_cpu(
       sizes,
-      tensor.options().dtype(scalar_type_),
+      rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
 
-  tensor = tensor.contiguous();
+  rtensor = rtensor.contiguous();
 #ifdef USE_FBGEMM
-  AT_DISPATCH_QINT_TYPES(qv.scalar_type(), "quantize_fbgemm", [&]() {
-    qv = quantize_fbgemm<scalar_t>(tensor, qv, scale_, zero_point_);
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "quantize_fbgemm", [&]() {
+    qtensor = quantize_fbgemm<scalar_t>(rtensor, qtensor, scale_, zero_point_);
   });
 #else
-  AT_DISPATCH_QINT_TYPES(qv.scalar_type(), "quantize_naive", [&]() {
-    qv = quantize_naive<scalar_t>(tensor, qv, scale_, zero_point_);
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "quantize_naive", [&]() {
+    qtensor = quantize_naive<scalar_t>(qtensor, qtensor, scale_, zero_point_);
   });
 #endif
-  return qv;
+  return qtensor;
 }
 
-Tensor PerTensorAffineQuantizer::dequantize(Tensor tensor) {
-  std::vector<int64_t> sizes = tensor.sizes().vec();
-  at::TensorOptions options = tensor.options().dtype(at::kFloat);
+Tensor PerTensorAffineQuantizer::dequantize(Tensor qtensor) {
+  std::vector<int64_t> sizes = qtensor.sizes().vec();
+  at::TensorOptions options = qtensor.options().dtype(at::kFloat);
 
-  Tensor rv = at::empty(sizes, options);
-  float* rvd = rv.data<float>();
-  tensor = tensor.contiguous();
+  Tensor rtensor = at::empty(sizes, options);
+  qtensor = qtensor.contiguous();
 
 #ifdef USE_FBGEMM
-  const auto* qvd = reinterpret_cast<const uint8_t*>(tensor.data<qint8>());
-  fbgemm::TensorQuantizationParams qparams;
-  qparams.scale = scale_;
-  qparams.zero_point = zero_point_;
-  qparams.precision = 8;
-  fbgemm::Dequantize<uint8_t>(/*src=*/qvd,
-                              /*dst=*/rvd,
-                              /*len=*/tensor.numel(),
-                              /*qparams=*/qparams);
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_fbgemm", [&]() {
+    rtensor = dequantize_fbgemm<scalar_t>(qtensor, rtensor, scale_, zero_point_);
+  });
 #else
-  const auto* qvd = tensor.data<qint8>();
-  for (auto i = 0; i < tensor.numel(); ++i) {
-    // We need to convert the qint8 value to float to ensure the subtraction
-    // subexpression returns a float
-    rvd[i] = (static_cast<float>(qvd[i].val_) - zero_point_) * scale_;
-  }
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_naive", [&]() {
+    rtensor = dequantize_naive<scalar_t>(qtensor, rtensor, scale_, zero_point_);
+  });
 #endif
 
-  return rv;
+  return rtensor;
 }
 
 Quantizer::~Quantizer() {}
