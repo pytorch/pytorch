@@ -11730,6 +11730,8 @@ a")
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_attribute_unpickling(self):
+        tensor = torch.randn(2, 2)
+
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__()
@@ -11738,37 +11740,24 @@ a")
                 self.int = torch.jit.Attribute(99, int)
                 self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
                 self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
-                self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.tensor = torch.jit.Attribute(tensor, torch.Tensor)
                 self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
 
             @torch.jit.script_method
             def forward(self):
                 return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
 
-        class TensorID(object):
-            def __setstate__(self, id):
-                self.id = id
-
-        class IntList(object):
-            def __setstate__(self, data):
-                self.data = data
-
-        class JitUnpickler(pickle.Unpickler):
-            def find_class(self, module, name):
-                if not module == '__main__':
-                    return None
-
-                if name == 'TensorID':
-                    return TensorID
-                elif name == 'IntList':
-                    return IntList
-
         with TemporaryFileName() as fname:
             M().save(fname)
             archive_name = os.path.basename(os.path.normpath(fname))
             archive = zipfile.ZipFile(fname, 'r')
             pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
-            JitUnpickler(io.BytesIO(pickled_data)).load()
+            out = pickle.load(io.BytesIO(pickled_data))
+
+            self.assertEqual(out[0], {"I": "am", "a test": "test"})
+            self.assertEqual(out[1], 2.3)
+            self.assertEqual(out[2], 99)
+            self.assertEqual(out[6], [1, 2, 3, 4])
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):
