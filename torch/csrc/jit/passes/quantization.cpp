@@ -56,58 +56,77 @@ Node* createQuantNode(Value* v, Node* n) {
 // Create Dequant node
 Node* createDeQuantNode(Value* v, Node* n) {
   Node* dequant =
-      n->owningGraph()->create(at::Symbol::fromQualString("aten::dequantize"));
+      n->owningGraph()->create(at::Symbol::fromQualString(
+      "aten::dequantize_linear"));
   AT_ASSERTM(dequant != nullptr, "Failed to create dequant node");
   dequant->output()->setUniqueName(v->uniqueName() + ".dequant");
   dequant->setScope(n->scope());
   return dequant;
 }
 
-// Insert Quant-Dequant node pair for quantizable node outputs
+// Create IntTensor Node
+Node* createIntReprNode(Value* v, Node* n) {
+  Node* intrepr =
+      n->owningGraph()->create(at::Symbol::fromQualString("aten::int_repr"));
+  AT_ASSERTM(intrepr != nullptr, "Failed to create inttensor node");
+  intrepr->output()->setUniqueName(v->uniqueName() + ".intrepr");
+  intrepr->setScope(n->scope());
+  return intrepr;
+}
+
+// Insert Quant-Dequant node pattern for quantizable node outputs
 void addQuantDeQuantNodes(Value* v,
   std::tuple<std::string, float, int>& qparam) {
   AT_ASSERT(v != nullptr);
   Node* n = v->node();
   Node* quant = createQuantNode(v, n);
+  Node* intrepr = createIntReprNode(v, n);
   Node* dequant = createDeQuantNode(v, n);
 
-  // Add quant-dequant nodes and replace for all uses of Value
+  // Add quant-intrepr-dequant nodes and replace for all uses of Value
   quant->insertAfter(n);
-  dequant->insertAfter(quant);
+  intrepr->insertAfter(quant);
+  dequant->insertAfter(intrepr);
   v->replaceAllUsesWith(dequant->output());
 
-  // Attach inputs to quant and dequant nodes
+  // Attach inputs to quantization pattern nodes
   quant->addInput(v);
-  dequant->addInput(quant->output());
+  intrepr->addInput(quant->output());
+  dequant->addInput(intrepr->output());
   // Insert qparam nodes
   auto qparam_values = insertQuantParamNodes(quant, qparam);
   for (Value* qparam_value : qparam_values) {
     quant->addInput(qparam_value);
+    dequant->addInput(qparam_value);
   }
 }
 
-// Insert Quant-Dequant node pair for specific input to node n
+// Insert Quant-Dequant node pattern for specific input to node n
 void addQuantDeQuantNodesForInput(Value* v, Node* n,
   const std::tuple<std::string, float, int>& qparam) {
   AT_ASSERT(v != nullptr);
   AT_ASSERT(n != nullptr);
   Node* quant = createQuantNode(v, n);
+  Node* intrepr = createIntReprNode(v, n);
   Node* dequant = createDeQuantNode(v, n);
 
-  // Insert the quant-dequant node for the V->N
+  // Insert the quant-intrepr-dequant node for the V->N
   // pair which is identified as quantizable during
   // graph iteration
   dequant->insertBefore(n);
-  quant->insertBefore(dequant);
+  intrepr->insertBefore(dequant);
+  quant->insertBefore(intrepr);
   n->replaceInputWith(v, dequant->output());
 
-  // Attach inputs to quant and dequant nodes
+  // Attach inputs to quantization pattern nodes
   quant->addInput(v);
-  dequant->addInput(quant->output());
+  intrepr->addInput(quant->output());
+  dequant->addInput(intrepr->output());
   // Insert qparam nodes
   auto qparam_values = insertQuantParamNodes(quant, qparam);
   for (Value* qparam_value : qparam_values) {
     quant->addInput(qparam_value);
+    dequant->addInput(qparam_value);
   }
 }
 
