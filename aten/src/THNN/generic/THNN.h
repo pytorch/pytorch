@@ -669,6 +669,24 @@ TH_API void THNN_(unfolded_copy)(
           int inputWidth, int inputHeight,
           int outputWidth, int outputHeight);
 
+TH_API void THNN_(VolumetricAveragePooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          bool ceil_mode, bool count_include_pad);
+TH_API void THNN_(VolumetricAveragePooling_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          bool ceil_mode, bool count_include_pad);
+
 TH_API void THNN_(VolumetricDilatedConvolution_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -789,19 +807,6 @@ TH_API void THNN_(VolumetricMaxUnpooling_updateGradInput)(
           int oT, int oW, int oH,
           int dT, int dW, int dH,
           int pT, int pW, int pH);
-
-TH_API void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          int osizeT,
-          int osizeW,
-          int osizeH);
-TH_API void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput);
 
 TH_API void THNN_(FeatureLPPooling_updateOutput)(
           THNNState *state,
