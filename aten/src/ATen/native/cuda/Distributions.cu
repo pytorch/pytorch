@@ -120,22 +120,22 @@ void bernoulli_tensor_cuda_kernel(
         float4 rand = curand_uniform4(&state);
         switch (n) {
           case 4: {
-            assert(0 <= p4 && p4 <= 1);
+            std::is_unsigned<prob_t>::value ? assert(p4 <= 1) : assert(0 <= p4 && p4 <= 1);
             v4 = static_cast<scalar_t>(rand.w <= p4);
             // fallthrough
           }
           case 3: {
-            assert(0 <= p3 && p3 <= 1);
+            std::is_unsigned<prob_t>::value ? assert(p3 <= 1) : assert(0 <= p3 && p3 <= 1);
             v3 = static_cast<scalar_t>(rand.z <= p3);
             // fallthrough
           }
           case 2: {
-            assert(0 <= p2 && p2 <= 1);
+            std::is_unsigned<prob_t>::value ? assert(p2 <= 1) : assert(0 <= p2 && p2 <= 1);
             v2 = static_cast<scalar_t>(rand.y <= p2);
             // fallthrough
           }
           case 1: {
-            assert(0 <= p1 && p1 <= 1);
+            std::is_unsigned<prob_t>::value ? assert(p1 <= 1) : assert(0 <= p1 && p1 <= 1);
             v1 = static_cast<scalar_t>(rand.x <= p1);
           }
         }
@@ -217,7 +217,7 @@ Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
 
 Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen) {
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "dirichlet", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "dirichlet", [&] {
     Tensor gamma = at::empty(alpha.sizes(), alpha.options());
     gamma_cuda_kernel<scalar_t>(gamma, alpha, next_philox_seed(gen, 10));
     dirichlet_scalar_cuda_kernel<scalar_t>(ret, gamma);
