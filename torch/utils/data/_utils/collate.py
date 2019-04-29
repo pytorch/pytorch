@@ -44,10 +44,6 @@ def default_convert(data):
     raise TypeError("default_convert: found unexpected input type {}".format(elem_type))
 
 
-_use_shared_memory = False
-r"""Whether to collate into shared memory in default_collate"""
-
-
 default_collate_err_msg_format = (
     "default_collate: batch must contain tensors, numpy arrays, numbers, "
     "dicts or lists; found {}")
@@ -60,7 +56,7 @@ def default_collate(batch):
     elem_type = type(elem)
     if isinstance(elem, torch.Tensor):
         out = None
-        if _use_shared_memory:
+        if torch.utils.data.get_worker_info() is not None:
             # If we're in a background process, concatenate directly into a
             # shared memory tensor to avoid an extra copy
             numel = sum([x.numel() for x in batch])

@@ -10,8 +10,7 @@ import sys
 import os
 from collections import namedtuple
 from torch._six import queue
-from . import collate, signal_handling, MP_STATUS_CHECK_INTERVAL, \
-    ExceptionWrapper, IS_WINDOWS
+from . import signal_handling, MP_STATUS_CHECK_INTERVAL, ExceptionWrapper, IS_WINDOWS
 
 if IS_WINDOWS:
     import ctypes
@@ -111,8 +110,6 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
     # logic of this function.
 
     try:
-        collate._use_shared_memory = True
-
         # Intialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
         # module's handlers are executed after Python returns from C low-level
         # handlers, likely when the same fatal signal had already happened

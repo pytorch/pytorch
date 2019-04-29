@@ -562,12 +562,12 @@ class TestWorkerInfoDataset(SynchronizedDataset):
 # See _test_get_worker_info below for usage.
 def test_worker_info_init_fn(worker_id):
     worker_info = torch.utils.data.get_worker_info()
-    assert worker_id == worker_info.id
-    assert worker_id < worker_info.num_workers
-    assert worker_info.seed == torch.initial_seed()
+    assert worker_id == worker_info.id, "worker_init_fn and worker_info should have consistent id"
+    assert worker_id < worker_info.num_workers, "worker_init_fn and worker_info should have valid id"
+    assert worker_info.seed == torch.initial_seed(), "worker_init_fn and worker_info should have consistent seed"
     dataset = worker_info.dataset
-    assert isinstance(dataset, TestWorkerInfoDataset)
-    assert not hasattr(dataset, 'value')
+    assert isinstance(dataset, TestWorkerInfoDataset), "worker_info should have correct dataset copy"
+    assert not hasattr(dataset, 'value'), "worker_info should have correct dataset copy"
     # test that WorkerInfo attributes are read-only
     try:
         worker_info.id = 3999
@@ -1278,13 +1278,16 @@ class TestDataLoader(TestCase):
         self.assertEqual(_utils.collate.default_collate([t_in]).is_shared(), False)
         self.assertEqual(_utils.collate.default_collate([n_in]).is_shared(), False)
 
-        old = _utils.collate._use_shared_memory
+        # FIXME: fix the following hack that makes `default_collate` believe
+        #        that it is in a worker process (since it tests
+        #        `get_worker_info() != None`), even though it is not.
+        old = _utils.worker._worker_info
         try:
-            _utils.collate._use_shared_memory = True
+            _utils.worker._worker_info = 'x'
             self.assertEqual(_utils.collate.default_collate([t_in]).is_shared(), True)
             self.assertEqual(_utils.collate.default_collate([n_in]).is_shared(), True)
         finally:
-            _utils.collate._use_shared_memory = old
+            _utils.worker._worker_info = old
 
 
 class StringDataset(Dataset):
