@@ -229,8 +229,6 @@ void Pickler::pushDouble(const IValue& ivalue) {
 }
 
 void Pickler::pushDict(const IValue& ivalue) {
-  auto dict = ivalue.toGenericDictRef();
-
   push<OpCode>(OpCode::EMPTY_DICT);
   pushMemoization(ivalue);
 
@@ -502,7 +500,7 @@ OpCode Unpickler::readInstruction() {
         stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
         break;
       case PicklerClass::INTLIST:
-        stack_.push_back(setitem_data);
+        stack_.emplace_back(setitem_data);
         break;
       default:
         AT_ERROR("Unknown pickler class id");
