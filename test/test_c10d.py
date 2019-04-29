@@ -2176,20 +2176,27 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         input = torch.rand([batch_size, 2], dtype=torch.float)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
 
-        def test_find_unused_parameters(find_unused_parameters):
-            model = DistributedDataParallel(
-                FindUnusedParametersModule().float().to(device_id),
-                device_ids=[device_id],
-                process_group=process_group,
-                find_unused_parameters=find_unused_parameters,
-            )
+        def test_find_unused_parameters(find_unused_parameters, test_default=False):
+            if test_default:
+                model = DistributedDataParallel(
+                    FindUnusedParametersModule().float().to(device_id),
+                    device_ids=[device_id],
+                    process_group=process_group,
+                )
+            else:
+                model = DistributedDataParallel(
+                    FindUnusedParametersModule().float().to(device_id),
+                    device_ids=[device_id],
+                    process_group=process_group,
+                    find_unused_parameters=find_unused_parameters,
+                )
 
             output, fc3 = model(input)
             output = fc3(output)
             loss = criterion(output, target)
             loss.backward()
 
-        # First test that the default behavior under these conditions is to
+        # First test that finding unused params under these conditions is to
         # trigger an error when `backward` is called (because fc3 is an unused
         # parameter and will therefore be marked ready twice).
         try:
@@ -2204,6 +2211,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # `find_unused_parameters=False`.
         try:
             test_find_unused_parameters(False)
+        except Exception as ex:
+            self.fail("Unexpected exception: %s" % ex)
+
+        # Test find_unused_parameters defaults to False
+        try:
+            test_find_unused_parameters(True, test_default=True)
         except Exception as ex:
             self.fail("Unexpected exception: %s" % ex)
 
@@ -2286,6 +2299,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             NoUsedParameters().float().to(device_id),
             device_ids=[device_id],
             process_group=process_group,
+            find_unused_parameters=True,
         )
 
         batch_size = 4
