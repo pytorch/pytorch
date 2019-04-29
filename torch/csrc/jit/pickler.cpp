@@ -305,7 +305,13 @@ std::vector<IValue> Unpickler::parse_ivalue_list() {
       stack_.size() == 1,
       "Expected stack to end with a size of 1 but got ",
       stack_.size());
-  return stack_[0].ivalue().toGenericListRef();
+
+  auto value = stack_[0].ivalue();
+  if (value.isGenericList()) {
+    // TODO [unpickler refactor]
+    return value.toGenericListRef();
+  }
+  return value.toTuple()->elements();
 }
 
 double Unpickler::readFloat() {
