@@ -198,7 +198,7 @@ class DistributedDataParallel(Module):
                                        Parameters that don't receive gradients as
                                        part of this graph are preemptively marked
                                        as being ready to be reduced.
-                                       (default: ``True``)
+                                       (default: ``False``)
         check_reduction: when setting to ``True``, it enables DistributedDataParallel
                          to automatically check if the previous iteration's
                          backward reductions were successfully issued at the
@@ -220,7 +220,7 @@ class DistributedDataParallel(Module):
     def __init__(self, module, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
                  process_group=None, bucket_cap_mb=25,
-                 find_unused_parameters=True,
+                 find_unused_parameters=False,
                  check_reduction=False):
 
         super(DistributedDataParallel, self).__init__()
