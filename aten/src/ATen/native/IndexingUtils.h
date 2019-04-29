@@ -83,6 +83,13 @@ static bool hasContiguousSubspace(TensorList tl) {
   return it == stop.base();
 }
 
+
+// Transposes the tensor and indices together so that all the non-null indices		
+// index the first k dimensions of the tensor. Returns the transposed tensor		
+// and the reordered indices. For example:		
+// transposeToFront(tensor, {nullptr, a, nullptr, b})		
+// returns		
+// tensor.permute([1, 3, 0, 2]), {a, b, nullptr, nullptr}
 static std::tuple<Tensor, std::vector<Tensor>>
 transposeToFront(Tensor self, TensorList indices) {
   std::vector<int64_t> dims;
@@ -160,88 +167,6 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size)
     }
   }
   return index.remainder(dim_size);
-}
-
-static std::tuple<Tensor, int64_t, int64_t, int64_t> 
-computeLinearIndex(const Tensor & src, TensorList indices) {
-  auto strides = computeLinearStride(src);
-
-  // Compute the linear index by multiplying the indexing tensors by the
-  // stride and summing them. All the indexing tensors have the same shape at
-  // this point. We also compute the number of dimensions before and after that
-  // are not being index.
-  Tensor linearIndex;
-  int64_t emptyBefore = 0, emptyAfter = 0, nElemBefore = 1, nElemAfter = 1, strideBefore =0;
-  for (int64_t i = 0; i < src.dim(); i++) {
-    if (indices[i].defined()) {
-      // Cast index to the longType matching src's backend
-      // This allows us to support ie indexing a cuda tensor with a cpu tensor
-      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i)) * strides[i]).to(kLong);
-      if (linearIndex.defined()) {
-        linearIndex += index;
-      } else {
-        linearIndex = index;
-        if (i>0) {
-           strideBefore = src.stride(i-1); // stride after undefined dimensions
-        }
-      }
-    } else if (linearIndex.defined()) {
-      emptyAfter++;
-      nElemAfter *= src.size(i);
-    } else {
-      emptyBefore++;
-      nElemBefore *= src.size(i);
-    }
-  }
-
-  // Compute the linear indices for the parts of the tensor not being indexed
-/*  Tensor beforeIndex;
-  if (emptyBefore > 0) {
-    auto index = at::arange(0, nElemBefore, src.options().dtype(kLong)) * strides[emptyBefore - 1];
-    index = index.view(src.sizes().slice(0, emptyBefore));
-    beforeIndex = unsqueezeN(index, 0, linearIndex.dim() + emptyAfter);
-  }
-  Tensor afterIndex;
-  if (emptyAfter > 0) {
-    auto index = at::arange(0, nElemAfter, src.options().dtype(kLong));
-    index = index.view(src.sizes().slice(src.dim() - emptyAfter, emptyAfter));
-    afterIndex = unsqueezeN(index, linearIndex.dim() + emptyBefore, 0);
-  }*/
-
-//  std::cout << "linearIndex " << linearIndex << "\n";
-
-  // Sum with broadcasting to compute the full index
-/*  linearIndex = unsqueezeN(linearIndex, emptyBefore, emptyAfter);
-  if (beforeIndex.defined()) {
-    linearIndex = linearIndex + beforeIndex;
-  }
-  if (afterIndex.defined()) {
-    linearIndex = linearIndex + afterIndex;
-  }*/
-  return std::make_tuple(std::move(linearIndex), nElemBefore, strideBefore, nElemAfter);
-}
-
-
-static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, TensorList orig) {
-  checkIndexTensorTypes(orig);
-  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
-  auto indices = expandTensors(self, orig);
-  // next broadcast all index tensors together
-  indices = expand_outplace(indices);
-  // add missing null Tensors so that it matches self.dim()
-  while (indices.size() < (size_t)self.dim()) {
-    indices.emplace_back();
-  }
-  // if the non-null indices are not all adjacent, transpose self and indices
-  // together so that they're adjacent at the front
-  std::vector<int64_t> inversePerm;
-  if (!hasContiguousSubspace(indices)) {
-    std::tie(self, indices, inversePerm) = transposeToFrontAndInvPerm(self, indices);
-  }
-  int64_t nElemBefore, strideBefore, nElemAfter;
-  Tensor linearIndex;
-  std::tie(linearIndex, nElemBefore, strideBefore, nElemAfter) = computeLinearIndex(self, indices);
-  return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, inversePerm);
 }
 
 struct AdvancedIndex {

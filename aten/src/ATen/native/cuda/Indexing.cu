@@ -92,6 +92,67 @@ __global__ void indexing_backward_kernel(
 
 
 namespace at { namespace native {
+
+static std::tuple<Tensor, int64_t, int64_t, int64_t> 
+computeLinearIndex(const Tensor & src, TensorList indices) {
+  auto strides = computeLinearStride(src);
+
+  // Compute the linear index by multiplying the indexing tensors by the
+  // stride and summing them. All the indexing tensors have the same shape at
+  // this point. We also compute the number of dimensions before and after that
+  // are not being index.
+  Tensor linearIndex;
+  int64_t emptyBefore = 0, emptyAfter = 0, nElemBefore = 1, nElemAfter = 1, strideBefore =0;
+  for (int64_t i = 0; i < src.dim(); i++) {
+    if (indices[i].defined()) {
+      // Cast index to the longType matching src's backend
+      // This allows us to support ie indexing a cuda tensor with a cpu tensor
+      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i)) * strides[i]).to(kLong);
+      if (linearIndex.defined()) {
+        linearIndex += index;
+      } else {
+        linearIndex = index;
+        if (i>0) {
+           strideBefore = src.stride(i-1); // stride after undefined dimensions
+        }
+      }
+    } else if (linearIndex.defined()) {
+      emptyAfter++;
+      nElemAfter *= src.size(i);
+    } else {
+      emptyBefore++;
+      nElemBefore *= src.size(i);
+    }
+  }
+
+  return std::make_tuple(std::move(linearIndex), nElemBefore, strideBefore, nElemAfter);
+}
+
+
+static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, TensorList orig) {
+  checkIndexTensorTypes(orig);
+  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
+  auto indices = expandTensors(self, orig);
+  // next broadcast all index tensors together
+  indices = expand_outplace(indices);
+  // add missing null Tensors so that it matches self.dim()
+  while (indices.size() < (size_t)self.dim()) {
+    indices.emplace_back();
+  }
+  // if the non-null indices are not all adjacent, transpose self and indices
+  // together so that they're adjacent at the front
+  std::vector<int64_t> inversePerm;
+  if (!hasContiguousSubspace(indices)) {
+    std::tie(self, indices, inversePerm) = transposeToFrontAndInvPerm(self, indices);
+  }
+  int64_t nElemBefore, strideBefore, nElemAfter;
+  Tensor linearIndex;
+  std::tie(linearIndex, nElemBefore, strideBefore, nElemAfter) = computeLinearIndex(self, indices);
+  return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, inversePerm);
+}
+
+
+    
 Tensor & index_put_cuda_(Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
   if (indices.size() > (size_t)self.dim()) {
     AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
@@ -115,7 +176,6 @@ Tensor & index_put_cuda_(Tensor & self, TensorList indices, const Tensor & value
   // don't need a stable or multidimensional sort, so just use Thrust
   // directly
     linearIndex.div_(sliceSize);
-//    std::cout << "linearIndex " << linearIndex << "\n";
     {
     sorted_indices.copy_(linearIndex);
     auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
@@ -152,8 +212,6 @@ Tensor & index_put_cuda_(Tensor & self, TensorList indices, const Tensor & value
   } else {
     return self;
   }
-//    return self.put_(linearIndex, expandedValue, true);
-//  }
 /*  auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
   index_put_stub(iter->device_type(), *iter, info.indexed_sizes, info.indexed_strides, accumulate);
