@@ -120,22 +120,22 @@ void bernoulli_tensor_cuda_kernel(
         float4 rand = curand_uniform4(&state);
         switch (n) {
           case 4: {
-            std::is_unsigned<prob_t>::value ? assert(p4 <= 1) : assert(0 <= p4 && p4 <= 1);
+            assert(0 <= p4 && p4 <= 1);
             v4 = static_cast<scalar_t>(rand.w <= p4);
             // fallthrough
           }
           case 3: {
-            std::is_unsigned<prob_t>::value ? assert(p3 <= 1) : assert(0 <= p3 && p3 <= 1);
+            assert(0 <= p3 && p3 <= 1);
             v3 = static_cast<scalar_t>(rand.z <= p3);
             // fallthrough
           }
           case 2: {
-            std::is_unsigned<prob_t>::value ? assert(p2 <= 1) : assert(0 <= p2 && p2 <= 1);
+            assert(0 <= p2 && p2 <= 1);
             v2 = static_cast<scalar_t>(rand.y <= p2);
             // fallthrough
           }
           case 1: {
-            std::is_unsigned<prob_t>::value ? assert(p1 <= 1) : assert(0 <= p1 && p1 <= 1);
+            assert(0 <= p1 && p1 <= 1);
             v1 = static_cast<scalar_t>(rand.x <= p1);
           }
         }
@@ -239,7 +239,7 @@ Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen) {
     at::ScalarType::Half, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
       using self_t = scalar_t;
       auto seeds = next_philox_seed(gen, 10);
-      AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, p.scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
         using p_t = scalar_t;
         return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, seeds);
       });
