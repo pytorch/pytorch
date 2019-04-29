@@ -7,8 +7,6 @@
 #include <ATen/TensorUtils.h>
 
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/Exceptions.h>
 #include <c10/util/Exception.h>
 
 #if !AT_ROCM_ENABLED()
@@ -415,7 +413,8 @@ Tensor miopen_rnn_flatten_weight(
     auto datatype = getMiopenDataType(any_param);
 
     RNNDescriptorParam rnn;
-    rnn.set(fn_mode, hidden_size, num_layers, bidirectional, datatype);
+    miopenRNNBiasMode_t bias_mode = (weight_stride0 == 4) ? miopenRNNwithBias : miopenRNNNoBias;
+    rnn.set(fn_mode, hidden_size, num_layers, bidirectional, datatype, bias_mode);
 
     RNNDescriptor rnn_desc = rnn.descriptor();
 
@@ -474,7 +473,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
 
     RNNParams fn;
     auto datatype = getMiopenDataType(input);
-    fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, datatype);
+    miopenRNNBiasMode_t bias_mode = (weight_stride0 == 4) ? miopenRNNwithBias : miopenRNNNoBias;
+    fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, datatype, bias_mode);
     fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
     if (fn.rnn.mode != miopenLSTM) {
