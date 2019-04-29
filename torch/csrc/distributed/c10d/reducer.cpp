@@ -471,7 +471,7 @@ void Reducer::finalize_backward() {
   expect_autograd_hooks_ = false;
 
   // No longer require call to finalize after this function returns.
-  AT_ASSERT(expect_autograd_hooks_);
+  AT_ASSERT(require_finalize_);
   require_finalize_ = false;
 
   // Check that all buckets were completed and had their work kicked off.
