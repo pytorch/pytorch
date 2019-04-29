@@ -72,21 +72,21 @@ class IterableDataset(Dataset):
         ...             iter_end = min(iter_start + per_worker, self.end)
         ...         return iter(range(iter_start, iter_end))
         ...
-        >>> # should give same set of data as range(3, 11)
-        >>> ds = MyIterableDataset(start=3, end=11)
+        >>> # should give same set of data as range(3, 7), i.e., [3, 4, 5, 6].
+        >>> ds = MyIterableDataset(start=3, end=7)
 
         >>> # Single-process loading
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
-        [tensor(3), tensor(4), tensor(5), tensor(6), tensor(7), tensor(8), tensor(9), tensor(10)]
+        [tensor(3), tensor(4), tensor(5), tensor(6)]
 
         >>> # Mult-process loading with two worker processes
-        >>> # Worker 0 fetched [3, 4, 5, 6]. Worker 1 fetched [7, 8, 9, 10].
+        >>> # Worker 0 fetched [3, 4].  Worker 1 fetched [5, 6].
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=2)))
-        [tensor(3), tensor(7), tensor(4), tensor(8), tensor(5), tensor(9), tensor(6), tensor(10)]
+        [tensor(3), tensor(5), tensor(4), tensor(6)]
 
         >>> # With even more workers
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20)))
-        [tensor(3), tensor(4), tensor(5), tensor(6), tensor(7), tensor(8), tensor(9), tensor(10)]
+        [tensor(3), tensor(4), tensor(5), tensor(6)]
 
     Example 2: splitting workload across all workers using :attr:`worker_init_fn`::
 
@@ -100,16 +100,16 @@ class IterableDataset(Dataset):
         ...     def __iter__(self):
         ...         return iter(range(self.start, self.end))
         ...
-        >>> # should give same set of data as range(3, 11)
-        >>> ds = MyIterableDataset(start=3, end=11)
+        >>> # should give same set of data as range(3, 7), i.e., [3, 4, 5, 6].
+        >>> ds = MyIterableDataset(start=3, end=7)
 
         >>> # Single-process loading
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
-        [tensor(3), tensor(4), tensor(5), tensor(6), tensor(7), tensor(8), tensor(9), tensor(10)]
+        [tensor(3), tensor(4), tensor(5), tensor(6)]
         >>>
         >>> # Directly doing multi-process loading yields duplicate data
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=2)))
-        [tensor(3), tensor(3), tensor(4), tensor(4), tensor(5), tensor(5), tensor(6), tensor(6), tensor(7), tensor(7), tensor(8), tensor(8), tensor(9), tensor(9), tensor(10), tensor(10)]
+        [tensor(3), tensor(3), tensor(4), tensor(4), tensor(5), tensor(5), tensor(6), tensor(6)]
 
         >>> # Define a `worker_init_fn` that configures each dataset copy differently
         >>> def worker_init_fn(worker_id):
@@ -125,13 +125,13 @@ class IterableDataset(Dataset):
         ...
 
         >>> # Mult-process loading with the custom `worker_init_fn`
-        >>> # Worker 0 fetched [3, 4, 5, 6]. Worker 1 fetched [7, 8, 9, 10].
+        >>> # Worker 0 fetched [3, 4].  Worker 1 fetched [5, 6].
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=2, worker_init_fn=worker_init_fn)))
-        [tensor(3), tensor(7), tensor(4), tensor(8), tensor(5), tensor(9), tensor(6), tensor(10)]
+        [tensor(3), tensor(5), tensor(4), tensor(6)]
 
         >>> # With even more workers
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
-        [tensor(3), tensor(4), tensor(5), tensor(6), tensor(7), tensor(8), tensor(9), tensor(10)]
+        [tensor(3), tensor(4), tensor(5), tensor(6)]
     """
 
     def __iter__(self):
