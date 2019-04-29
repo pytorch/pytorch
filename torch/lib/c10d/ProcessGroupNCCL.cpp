@@ -548,12 +548,56 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
         for (size_t j = 0; j < outputTensors[0].size(); ++j) {
           // See [Sync Streams].
           c10::cuda::CUDACachingAllocator::recordStream(
-            outputTensors[i][i].storage().data(), ncclStreams[i]);
+            outputTensors[i][j].storage().data(), ncclStreams[i]);
 
           outputTensors[i][j].copy_(outputFlattened[i][j], true);
         }
       }
     }
+  );
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<std::vector<at::Tensor>>& inputTensors,
+    const ReduceScatterOptions& opts) {
+  check_gpu_tensors(outputTensors);
+
+  auto inputFlattened = flatten_for_scatter_gather(
+    inputTensors, outputTensors, size_
+  );
+  check_gpu_tensors(inputFlattened);
+
+  return collective(inputFlattened, outputTensors,
+    [&] (at::Tensor& input, at::Tensor& output,
+         ncclComm_t comm, at::cuda::CUDAStream& stream) {
+      c10::cuda::CUDACachingAllocator::recordStream(
+        output.storage().data(), stream
+      );
+      return ncclReduceScatter(
+        input.data_ptr(),
+        output.data_ptr(),
+        output.numel(),
+        getNcclDataType(input.scalar_type()),
+        ncclOp[opts.reduceOp],
+        comm,
+        stream.stream()
+      );
+    },
+    [&] (std::vector<at::cuda::CUDAStream>& ncclStreams) {
+      // Copy the input tensors to the flattened inputs.
+      for (size_t i = 0; i < inputTensors.size(); ++i) {
+        at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
+        for (size_t j = 0; j < inputTensors[0].size(); ++j) {
+          // See [Sync Streams].
+          c10::cuda::CUDACachingAllocator::recordStream(
+            inputTensors[i][j].storage().data(), ncclStreams[i]);
+
+          inputFlattened[i][j].copy_(inputTensors[i][j], true);
+        }
+      }
+    },
+    [&] (std::vector<at::cuda::CUDAStream>& ncclStreams) {}
   );
 }
 
