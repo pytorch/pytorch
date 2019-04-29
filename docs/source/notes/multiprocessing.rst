@@ -25,7 +25,7 @@ CUDA in multiprocessing
 
 The CUDA runtime does not support the ``fork`` start method. However,
 :mod:`python:multiprocessing` in Python 2 can only create subprocesses using
-``fork``. So Python 3 and either ``spawn`` or ``forkserver`` start method is
+``fork``. So Python 3 and either ``spawn`` or ``forkserver`` start method are
 required to use CUDA in subprocesses.
 
 .. note::
