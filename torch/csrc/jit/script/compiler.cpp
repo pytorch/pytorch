@@ -413,7 +413,8 @@ struct Environment {
     }
 
     if (!retval) {
-      if (auto class_type = ClassType::get(ident)) {
+      if (auto type = resolver->resolveType(ident)) {
+        const auto class_type = type->expect<ClassType>();
         retval = std::make_shared<script::ClassValue>(class_type);
       }
     }
@@ -2112,8 +2113,21 @@ struct to_ir {
       if (apply.inputs().size() != 1) {
         throw ErrorReport(loc) << "Only one argument to __new__ allowed";
       }
-      return classNew->createObject(
-          apply.range(), method, Var(apply.inputs()[0]).name().name());
+      auto arg = emitSugaredExpr(apply.inputs()[0], 1);
+      auto class_arg = dynamic_cast<ClassValue*>(arg.get());
+      if (!class_arg) {
+        throw ErrorReport(loc)
+            << "Expected class value as argument to __new__, got "
+            << arg->kind() << " instead";
+      }
+      if (class_arg->type_ != classNew->type_) {
+        throw ErrorReport(loc) << "Argument to __new__() must match the class "
+                               << "you are calling __new__() on. "
+                               << "Got: " << class_arg->type_->str()
+                               << ", expected: " << classNew->type_->str();
+      }
+
+      return classNew->createObject(apply.range(), method);
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
@@ -2263,7 +2277,7 @@ struct to_ir {
     }
     // Lambda lift block(0) into attr::Subgraph
     lambdaLiftFork(fork_node);
-
+    runCleanupPasses(fork_node->g(attr::Subgraph));
     return std::make_shared<SimpleValue>(node_output);
   }
 
@@ -2788,7 +2802,7 @@ struct to_ir {
 struct MethodResolver : public Resolver {
   explicit MethodResolver(
       const Resolver* otherResolver,
-      const std::unordered_map<std::string, Function*>& functionTable)
+      const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
   std::shared_ptr<SugaredValue> resolveValue(
@@ -2797,7 +2811,7 @@ struct MethodResolver : public Resolver {
       const SourceRange& loc) const override {
     auto it = functionTable_.find(name);
     if (it != functionTable_.end()) {
-      return std::make_shared<MethodValue>(c10::nullopt, *it->second);
+      return std::make_shared<MethodValue>(c10::nullopt, it->second);
     }
     return otherResolver_->resolveValue(name, m, loc);
   }
@@ -2808,7 +2822,7 @@ struct MethodResolver : public Resolver {
 
  private:
   const Resolver* otherResolver_;
-  const std::unordered_map<std::string, Function*>& functionTable_;
+  const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable_;
 };
 
 void CompilationUnit::define(
@@ -2818,7 +2832,7 @@ void CompilationUnit::define(
   AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Function*> methods;
-  std::unordered_map<std::string, Function*> function_table;
+  std::unordered_map<std::string, std::shared_ptr<Function>> function_table;
   for (const Def& def : definitions) {
     const std::string& name = def.name().name();
     ResolverPtr resolver = *resolver_it++;
@@ -2834,9 +2848,9 @@ void CompilationUnit::define(
       AT_ASSERT(resolver);
       to_ir(def, resolver, self, method);
     };
-    std::unique_ptr<Function> fn(
+    std::shared_ptr<Function> fn(
         new Function(name, is_optimized(), std::make_shared<Graph>(), creator));
-    function_table[name] = fn.get();
+    function_table[name] = fn;
     methods.push_back(fn.get());
     register_function(std::move(fn));
   }
@@ -2871,11 +2885,13 @@ void lambdaLiftFork(Node* fork_node) {
   auto env = [&](Value* v) -> Value* {
     if (!uncaptures_map.count(v)) {
       // Capture values for both graphs
-      uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
+      uncaptures_map[v] =
+          forked_graph->addInput()->copyMetadata(v);
       fork_node->addInput(v);
     }
     return uncaptures_map[v];
   };
+
   forked_graph->block()->cloneFrom(body_block, env);
 
   // Separate the subgraph and clean up the orignal one

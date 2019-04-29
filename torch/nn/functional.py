@@ -2657,25 +2657,25 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest`` or
     ``bilinear`` interpolation method to sample the input pixels.
 
-    :attr:`grid` should have most values in the range of ``[-1, 1]``. This is
-    because the pixel locations are normalized by the :attr:`input` spatial
-    dimensions. For example, values ``x = -1, y = -1`` is the left-top pixel of
-    :attr:`input`, and values  ``x = 1, y = 1`` is the right-bottom pixel of
-    :attr:`input`.
+    :attr:`grid` specifies the sampling pixel locations normalized by the
+    :attr:`input` spatial dimensions. Therefore, it should have most values in
+    the range of ``[-1, 1]``. For example, values ``x = -1, y = -1`` is the
+    left-top pixel of :attr:`input`, and values  ``x = 1, y = 1`` is the
+    right-bottom pixel of :attr:`input`.
 
-    If :attr:`grid` has values outside the range of ``[-1, 1]``, those locations
-    are handled as defined by :attr:`padding_mode`. Options are
+    If :attr:`grid` has values outside the range of ``[-1, 1]``, the corresponding
+    outputs are handled as defined by :attr:`padding_mode`. Options are
 
-        * ``padding_mode="zeros"``: use ``0`` for out-of-bound values,
-        * ``padding_mode="border"``: use border values for out-of-bound values,
+        * ``padding_mode="zeros"``: use ``0`` for out-of-bound grid locations,
+        * ``padding_mode="border"``: use border values for out-of-bound grid locations,
         * ``padding_mode="reflection"``: use values at locations reflected by
-          the border for out-of-bound values. For location far away from the
-          border, it will keep being reflected until becoming in bound, e.g.,
-          (normalized) pixel location ``x = -3.5`` reflects by ``-1`` and
-          becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
+          the border for out-of-bound grid locations. For location far away
+          from the border, it will keep being reflected until becoming in bound,
+          e.g., (normalized) pixel location ``x = -3.5`` reflects by border ``-1``
+          and becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
           ``x'' = -0.5``.
 
-    .. Note:: This function is often used in building Spatial Transformer Networks.
+    .. Note:: This function is often used in building `Spatial Transformer Networks`_ .
     .. include:: cuda_deterministic_backward.rst
 
     Args:
@@ -2691,6 +2691,8 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     Returns:
         output (Tensor): output Tensor
 
+    .. _`Spatial Transformer Networks`: 
+        https://arxiv.org/abs/1506.02025
     """
     if mode != 'bilinear' and mode != 'nearest':
         raise ValueError("nn.functional.grid_sample(): expected mode to be "

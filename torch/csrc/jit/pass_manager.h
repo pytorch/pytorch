@@ -19,9 +19,9 @@ namespace jit {
 // A pass modifies a Graph in place.
 using Pass = std::function<void(std::shared_ptr<Graph>&)>;
 
-std::vector<Pass>& getCustomPasses();
+TORCH_API std::vector<Pass>& getCustomPasses();
 
-struct RegisterPass {
+struct TORCH_API RegisterPass {
   RegisterPass(Pass p);
 };
 
