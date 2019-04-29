@@ -201,15 +201,9 @@ void InsertObserverNodes(
     std::shared_ptr<script::Module>& moduleObj,
     const std::string& method_name,
     Node* observer_node) {
+  // TODO: Add deepcopy for module
   const auto& method = moduleObj->get_method(method_name);
   InsertObserverNodes(method.graph(), observer_node, method.num_inputs());
-}
-
-void InsertObserverNodes(
-    std::shared_ptr<script::Function>& function_var,
-    Node* observer_node) {
-  InsertObserverNodes(
-      function_var->graph(), observer_node, function_var->num_inputs());
 }
 
 void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
