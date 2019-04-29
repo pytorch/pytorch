@@ -612,6 +612,10 @@ torch._C._tracer_warn_use_python()
 
 
 class trace_dict(dict):
+    """
+    A tagging interface to differentiate when inputs to trace is a dictionary
+    of methods-inputs pairs or dictionary of regular inputs
+    """
     def __init__(self, methods_inputs):
         super(trace_dict, self).__init__()
         if not isinstance(methods_inputs, dict):
@@ -699,10 +703,6 @@ def trace(mod,
     else:
         methods_inputs[mod] = (getattr(mod, '__name__', 'forward'), inputs)
         if hasattr(mod, '__self__') and isinstance(mod.__self__, torch.nn.Module):
-                # override the default name for nn.Module's methods
-                # `forward` will stay `forward` and any other
-                # method will keep its original name
-                # make sure we capture module's parameters in TopLevelTracedModule
                 mod = mod.__self__
 
     executor_options = {'optimize': bool(optimize)}
@@ -718,7 +718,6 @@ def trace(mod,
     for func, name_inputs in methods_inputs.items():
         method_name = name_inputs[0]
         example_inputs = name_inputs[1]
-        # Special case for common case of passing a single Tensor
         if isinstance(example_inputs, (torch.Tensor, dict)):
             example_inputs = (example_inputs,)
         # done primarily so that weird iterables fail here and not pybind11 code
