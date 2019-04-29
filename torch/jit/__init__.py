@@ -9,7 +9,6 @@ import torch._jit_internal as _jit_internal
 from torch._six import with_metaclass, get_function_from_type, \
     string_classes
 from torch._jit_internal import ignore  # noqa: F401
-from torch.jit._pickle import Unpickler  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
