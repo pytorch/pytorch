@@ -107,7 +107,7 @@ computeLinearIndex(const Tensor & src, TensorList indices) {
     if (indices[i].defined()) {
       // Cast index to the longType matching src's backend
       // This allows us to support ie indexing a cuda tensor with a cpu tensor
-      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i)) * strides[i]).to(kLong);
+      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i), false) * strides[i]).to(kLong);
       if (linearIndex.defined()) {
         linearIndex += index;
       } else {

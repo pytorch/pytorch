@@ -155,8 +155,9 @@ static Tensor unsqueezeN(const Tensor & src, int64_t before, int64_t after) {
   return src.view(sizes);
 }
 
-static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size) {
-  if (index.numel() != 0) {
+static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size, bool check_range=true) {
+//we don't need to check range in backward - if there were out of bounds indices forward should already have errored out 
+  if (index.numel() != 0 && check_range) {
     auto max_idx = index.max().item<int64_t>();
     auto min_idx = index.min().item<int64_t>();
     if (max_idx >= dim_size) {
