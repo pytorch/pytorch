@@ -57,9 +57,10 @@ TORCH_API void InsertObserverNodes(
  * \param qparam_dict dictionary of tensor unique names to qparams.
  *
  */
-TORCH_API void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph,
-  const std::unordered_map<std::string,
-  std::tuple<std::string, float, int>>& qparam_dict);
+TORCH_API void InsertQuantDequantNodes(
+    std::shared_ptr<Graph>& graph,
+    const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
+        qparam_dict);
 
 /** \brief Check that all expected optimizations after quant-dequant nodes
  * insertion actually happened.

@@ -161,8 +161,9 @@ void initJITBindings(PyObject* module) {
               return;
             }
 
-            auto qparam_dict = py::cast<std::unordered_map<std::string,
-              std::tuple<std::string, float, int>>>(pyQParamDict);
+            auto qparam_dict = py::cast<std::unordered_map<
+                std::string,
+                std::tuple<std::string, float, int>>>(pyQParamDict);
             return InsertQuantDequantNodes(g, qparam_dict);
           })
       .def(
