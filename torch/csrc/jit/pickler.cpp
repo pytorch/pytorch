@@ -11,6 +11,13 @@ PicklerClass getClass(const std::string& str) {
   } else if (str == "build_intlist") {
     return PicklerClass::INTLIST;
   }
+
+  // TODO [unpickler refactor]
+  if (str == "TensorID") {
+    return PicklerClass::TENSOR;
+  } else if (str == "IntList") {
+    return PicklerClass::INTLIST;
+  }
   AT_ERROR("Unknown class name for unpickler: ", str);
 }
 
