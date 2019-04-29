@@ -2366,8 +2366,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         check_no_grads()
 
 
-
-
 class ReducerModule(nn.Module):
     def __init__(self):
         super(ReducerModule, self).__init__()
