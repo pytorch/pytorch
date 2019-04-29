@@ -2370,6 +2370,51 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # No parameter should have their gradient set.
         check_no_grads()
 
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_ignored_output(self):
+        """
+        Note: this test can be sped up by only running it on a CPU module
+        once DistributedDataParallel supports them.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class IgnoredOutput(nn.Module):
+            def __init__(self):
+                super(IgnoredOutput, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = DistributedDataParallel(
+            IgnoredOutput().float().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+
+        # Run a few iterations where we ignore the output.
+        for _ in range(4):
+            output = model(input)
+            del output
+
+        # Run a few iterations where we use the output.
+        for _ in range(4):
+            output = model(input)
+            loss = criterion(output, target)
+            loss.backward()
+
 
 class ReducerModule(nn.Module):
     def __init__(self):
