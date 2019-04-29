@@ -2386,11 +2386,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
         batch_size = 4
+        criterion = nn.CrossEntropyLoss()
         input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
 
+        # Run a few iterations where we ignore the output.
         for _ in range(4):
             output = model(input)
             del output
+
+        # Run a few iterations where we use the output.
+        for _ in range(4):
+            output = model(input)
+            loss = criterion(output, target)
+            loss.backward()
 
 
 class ReducerModule(nn.Module):
