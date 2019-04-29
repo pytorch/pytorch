@@ -183,6 +183,11 @@ void addInputs(Node* n, const char* name, std::array<bool, N> value) {
       "Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
+template <typename T>
+void addInputs(Node*n, const char* name, const c10::optional<T>& value) {
+  throw std::runtime_error("Don't support tracing c10::optional");
+}
+
 TORCH_API void ensureUniqueIfOutOfPlaced(
     const char* name,
     const at::Tensor& tensor);

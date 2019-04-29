@@ -237,6 +237,11 @@ struct CAFFE2_API IValue final {
 
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
+  template <typename... Args>
+  IValue(std::tuple<Args...> args) {
+    std::vector<IValue> as_vec {args};
+    IValue(ivalue::Tuple::create(as_vec));
+  }
   bool isTuple() const { return Tag::Tuple == tag; }
   c10::intrusive_ptr<ivalue::Tuple> toTuple() && {
     AT_ASSERT(isTuple());
@@ -487,7 +492,7 @@ struct CAFFE2_API IValue final {
 
   // ToOptional: convert a IValue to the Optional obj that accepts both T and None
   template<typename T>
-  optional<T> toOptional();
+  optional<T> toOptional() const;
 
   // this is a shallow comparison of two IValues to test the object identity
   bool isSameIdentity(IValue& rhs);
@@ -836,6 +841,13 @@ std::unordered_map<K, V> generic_to(
 }
 
 template <typename T>
+at::optional<T> generic_to(
+    const IValue* ivalue,
+    _fake_type<at::optional<T>>) {
+  return ivalue->toOptional<T>();
+}
+
+template <typename T>
 inline T IValue::to() && {
   return generic_to(this, _fake_type<T>{});
 }
@@ -942,7 +954,7 @@ inline const std::string& IValue::toStringRef() const {
 }
 
 template<typename T>
-inline optional<T> IValue::toOptional() {
+inline optional<T> IValue::toOptional() const {
   if (this->isNone()) {
     return nullopt;
   }
