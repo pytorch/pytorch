@@ -25,24 +25,24 @@ Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_gr
   if (!self_impl) {
     throw std::runtime_error("Attempted to set requires_grad of an undefined Variable");
   }
-  grad_fn_ = std::move(gradient_edge.function);
+  self_impl->set_grad_fn(std::move(gradient_edge.function));
   requires_grad_ = false;
   is_view_ = false;
-  output_nr_ = gradient_edge.input_nr;
+  self_impl->set_output_nr(gradient_edge.input_nr);
 
   // set_requires_grad also checks error conditions.
   set_requires_grad(requires_grad, self_impl);
   AT_CHECK(
-      !grad_fn_ || !requires_grad_,
+      !self_impl->grad_fn() || !requires_grad_,
       "requires_grad should be false if grad_fn is set");
 }
 
 std::shared_ptr<Function> Variable::grad_accumulator() const {
-  auto autograd_meta = get_autograd_meta();
-  if (autograd_meta->grad_fn_) {
+  if (get()->grad_fn()) {
     throw std::logic_error(
         "grad_accumulator() should be only called on leaf Variables");
   }
+  auto autograd_meta = get_autograd_meta();
   if (!autograd_meta->requires_grad_) {
     return nullptr;
   }
@@ -66,8 +66,9 @@ void Variable::detach_() {
   }
   auto autograd_meta = get_autograd_meta();
   autograd_meta->set_requires_grad(false, unsafeGetTensorImpl());
-  autograd_meta->grad_fn_.reset();
-  autograd_meta->output_nr_ = 0;
+  // autograd_meta->grad_fn_.reset();
+  get()->set_grad_fn(nullptr);  // yf225 TODO: is this correct?
+  get()->set_output_nr(0);
 }
 
 void Variable::backward(
@@ -76,7 +77,7 @@ void Variable::backward(
     bool create_graph) const {
   auto autograd_meta = get_autograd_meta();
   std::vector<Edge> edges;
-  edges.emplace_back(autograd_meta->grad_fn_, autograd_meta->output_nr_);
+  edges.emplace_back(get()->grad_fn(), get()->output_nr());
 
   std::vector<Variable> inputs;
   if (!gradient.has_value()) {
@@ -129,12 +130,12 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
   if (is_view()) {
     auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
     std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
-    if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
-      return diff_view_meta->grad_fn_;
+    if (!get()->grad_fn() && !diff_view_meta->base_.requires_grad()) {
+      return get()->grad_fn();
     }
     auto current_version = this->current_version();
     if (diff_view_meta->attr_version != current_version) {
-      AT_ASSERT(diff_view_meta->output_nr_ == 0);
+      AT_ASSERT(get()->output_nr() == 0);
       auto fn = std::make_shared<generated::AsStridedBackward>();
       fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
       fn->size = sizes().vec();
@@ -145,12 +146,12 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
         diff_view_meta->base_.type()
       , sizes() // Note: sizes(), not base_.sizes(), is intentional
       , diff_view_meta->base_.device());
-      diff_view_meta->grad_fn_ = std::move(fn);
+      get()->set_grad_fn(std::move(fn));
       diff_view_meta->attr_version = current_version;
     }
-    return diff_view_meta->grad_fn_;
+    return get()->grad_fn();  // yf225 TODO: can unify this with the if-branch below
   } else {
-    return get_autograd_meta()->grad_fn_;
+    return get()->grad_fn();
   }
 }
 
@@ -163,7 +164,7 @@ void Variable::rebase_history(Edge gradient_edge) {
     AT_CHECK(
         gradient_edge.function->num_inputs() == 1,
         "Functions which modify views in-place must return a single Variable");
-    diff_view_meta->output_nr_ = gradient_edge.input_nr;
+    get()->set_output_nr(gradient_edge.input_nr);
     auto copy_slices = std::make_shared<CopySlices>(
         diff_view_meta->base_, at::TensorGeometry(*this), std::move(gradient_edge.function));
     diff_view_meta->base_.set_gradient_edge({std::move(copy_slices), 0});

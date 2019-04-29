@@ -37,6 +37,10 @@ namespace at {
 class Tensor;
 }
 
+namespace torch { namespace autograd {
+struct Function;
+}}
+
 namespace c10 {
 class Scalar;
 struct Storage;
@@ -132,7 +136,7 @@ struct TensorImpl;
 
 struct C10_API AutogradMetaInterface {
   virtual void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) = 0;
-  virtual bool requires_grad() const = 0;
+  virtual bool requires_grad(const at::TensorImpl* self_impl) const = 0;
   virtual at::Tensor& grad() = 0;
   virtual const at::Tensor& grad() const = 0;
   virtual ~AutogradMetaInterface();
@@ -546,7 +550,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   bool requires_grad() const {
     if (autograd_meta()) {
-      return autograd_meta()->requires_grad();
+      return autograd_meta()->requires_grad(this);
     } else {
       AT_ERROR("requires_grad is not implemented for Tensor");
     }
@@ -919,6 +923,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   void bump_version() noexcept {
     version_counter_.bump();
+  }
+
+  void set_grad_fn(std::shared_ptr<torch::autograd::Function> grad_fn) noexcept {
+    grad_fn_ = grad_fn;
+  }
+
+  const std::shared_ptr<torch::autograd::Function>& grad_fn() const noexcept {
+    return grad_fn_;
+  }
+
+  void set_output_nr(uint32_t output_nr) noexcept {
+    output_nr_ = output_nr;
+  }
+
+  uint32_t output_nr() const noexcept {
+    return output_nr_;
   }
 
   inline void set_pyobj(PyObject* pyobj) noexcept {
@@ -1442,6 +1462,16 @@ protected:
 
   c10::VariableVersion version_counter_;
 
+  // yf225 TODO: add comment
+  std::shared_ptr<torch::autograd::Function> grad_fn_;
+
+  // yf225 TODO: fix comment
+  // The "output number" of this variable; e.g., if this variable
+  // was the second output of a function, then output_nr == 1.
+  // We use this to make sure we can setup the backwards trace
+  // correctly when this variable is passed to another function.
+  uint32_t output_nr_;
+
   PyObject* pyobj_ = nullptr; // weak reference
 
   // We could save a word or two by combining the SmallVector structs,
@@ -1523,6 +1553,8 @@ protected:
 //
 // Current breakdown:
 //
+// yf225 TODO: add the two new fields to this list!
+//
 //    vtable pointer
 //    strong refcount           TODO: pack these into one word
 //    weak refcount
@@ -1554,7 +1586,7 @@ protected:
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 29,
+              sizeof(TensorImpl) == sizeof(int64_t) * 32,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 

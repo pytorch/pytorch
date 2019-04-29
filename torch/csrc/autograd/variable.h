@@ -343,7 +343,6 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   std::string name;
 
   Variable grad_;
-  std::shared_ptr<Function> grad_fn_;
   std::weak_ptr<Function> grad_accumulator_;
 
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
@@ -352,12 +351,6 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   bool requires_grad_;
 
   bool is_view_;
-
-  // The "output number" of this variable; e.g., if this variable
-  // was the second output of a function, then output_nr == 1.
-  // We use this to make sure we can setup the backwards trace
-  // correctly when this variable is passed to another function.
-  uint32_t output_nr_;
 
   // Mutex to ensure that concurrent read operations that modify internal
   // state are still thread-safe. Used by grad_fn() and
@@ -374,8 +367,8 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
     requires_grad_ = requires_grad;
   }
 
-  bool requires_grad() const override {
-    return requires_grad_ || grad_fn_;
+  bool requires_grad(const at::TensorImpl* self_impl) const override {
+    return requires_grad_ || self_impl->grad_fn();
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
@@ -475,8 +468,8 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
   /// version_counter.current_version().
   uint32_t attr_version;
 
-  bool requires_grad() const override {
-    return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
+  bool requires_grad(const at::TensorImpl* self_impl) const override {
+    return requires_grad_ || self_impl->grad_fn() || (is_view_ && base_.requires_grad());
   }
 
   DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge);
@@ -594,7 +587,7 @@ inline at::Tensor Variable::data() const noexcept {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline Function* Variable::grad_fn_unsafe() const {
-  return get_autograd_meta()->grad_fn_.get();
+  return get()->grad_fn().get();
 }
 
 inline void Variable::set_grad_accumulator(
@@ -612,16 +605,16 @@ inline Variable Variable::detach() const {
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
-  get_autograd_meta()->grad_fn_ = std::move(edge.function);
-  get_autograd_meta()->output_nr_ = edge.input_nr;
+  get()->set_grad_fn(std::move(edge.function));
+  get()->set_output_nr(edge.input_nr);
 }
 
 inline uint32_t Variable::output_nr() const noexcept {
-  return get_autograd_meta()->output_nr_;
+  return get()->output_nr();
 }
 
 inline bool Variable::is_leaf() const noexcept {
-  return get_autograd_meta()->grad_fn_ == nullptr;
+  return get()->grad_fn() == nullptr;
 }
 
 // Versions
