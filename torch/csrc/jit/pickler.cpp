@@ -341,6 +341,7 @@ void Unpickler::run() {
     if (opcode == OpCode::STOP) {
       return;
     }
+    last_opcode_ = opcode;
   }
 
   AT_ERROR("Overran buffer while unpickling data, didn't find STOP opcode");
@@ -469,11 +470,13 @@ OpCode Unpickler::readInstruction() {
     case OpCode::GLOBAL: {
       // Module name, it's not needed for anything
       auto module_name = readString();
+      // TODO [unpickler refactor] __main__ isn't used by the pickler anymore
       if (module_name == "__main__") {
-
+        stack_.emplace_back(static_cast<uint8_t>(getClass(readString())));
+      } else {
+        // Push class name to stack
+        stack_.emplace_back(getClass(readString()));
       }
-      // Push class name to stack
-      stack_.emplace_back(getClass(readString()));
     } break;
     case OpCode::NEWOBJ: {
       // pop empty tuple

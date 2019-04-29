@@ -146,9 +146,9 @@ class Pickler {
 // between a GLOBAL item (PicklerClass) and a normal value item (IValue)
 struct StackItem {
   StackItem(IValue ivalue)
-      : pickler_class_(c10::nullopt), ivalue_(std::move(ivalue)){};
+      : pickler_class_(c10::nullopt), ivalue_(std::move(ivalue)) {}
   StackItem(PicklerClass pickler_class)
-      : pickler_class_(pickler_class), ivalue_(c10::nullopt){};
+      : pickler_class_(pickler_class), ivalue_(c10::nullopt) {}
 
   IValue ivalue() {
     return *ivalue_;
