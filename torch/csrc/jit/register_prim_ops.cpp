@@ -879,19 +879,6 @@ RegisterOperators reg(
            };
          }),
      Operator(
-         "aten::select0(int[] self) -> int",
-         [](Stack& stack) {
-           Shared<IntList> list;
-           pop(stack, list);
-           // select0d always extracts the element at 0-th position
-           auto& elements = list->elements();
-           if (elements.size() == 0) {
-             AT_ERROR("iteration over a 0-d tensor");
-           }
-           push(stack, static_cast<int64_t>(elements.at(0)));
-           return 0;
-         }),
-     Operator(
          prim::GetAttr,
          [](const Node* node) {
            const auto type = node->input()->type()->expect<ClassType>();

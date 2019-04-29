@@ -535,7 +535,6 @@ struct to_ir {
     }
 
     method.setSchema(emitDef(def, self, graph->block()));
-
     runCleanupPasses(graph);
   }
 
@@ -1429,6 +1428,30 @@ struct to_ir {
     auto body = stmt.body();
     auto& range = stmt.range();
 
+    auto outermost_dim_index = graph->insertConstant(0, IntType::get(), range);
+    auto num_dim = graph->insert(aten::dim, {tensorArg});
+    Value* cond_value = emitBuiltinCall(
+        range,
+        *method.graph(),
+        aten::eq,
+        c10::nullopt,
+        {num_dim, outermost_dim_index},
+        {},
+        /*required=*/true);
+
+    Node* n = graph->insertNode(create(prim::If, range, 0));
+    n->addInput(cond_value);
+    auto true_block = n->addBlock();
+    n->addBlock();
+    {
+      WithInsertPoint guard(true_block);
+      graph->insert(
+          prim::RaiseException,
+          {std::string("iteration over a 0-d tensor")},
+          {},
+          range);
+    }
+
     auto sizes_tuple = emitBuiltinCall(
         range,
         *graph,
@@ -1438,13 +1461,12 @@ struct to_ir {
         {},
         /*required=*/true);
 
-    auto outermost_dim_index = graph->insertConstant(0, IntType::get(), range);
     auto max_trip_count_val = emitBuiltinCall(
         range,
         *graph,
-        Symbol::fromQualString("aten::select0"),
+        aten::select,
         c10::nullopt,
-        {sizes_tuple},
+        {sizes_tuple, outermost_dim_index},
         {},
         /*required=*/true);
 
@@ -1467,10 +1489,10 @@ struct to_ir {
 
   void emitFor(const For& stmt) {
     // For now, we only support range loops. e.g. for i in range(3): ...
+
     auto targets = stmt.targets();
     auto itrs = stmt.itrs();
     auto body = stmt.body();
-
     if (stmt.itrs().size() != 1) {
       throw ErrorReport(stmt)
           << "List of iterables is not supported currently.";
