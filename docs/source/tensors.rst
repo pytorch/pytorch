@@ -412,7 +412,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: squeeze
    .. automethod:: squeeze_
    .. automethod:: std
-   .. automethod:: std_mean
    .. automethod:: stft
    .. automethod:: storage
    .. automethod:: storage_offset
@@ -458,7 +457,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unsqueeze_
    .. automethod:: values
    .. automethod:: var
-   .. automethod:: var_mean
    .. automethod:: view
    .. automethod:: view_as
    .. automethod:: where

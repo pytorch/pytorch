@@ -4701,7 +4701,7 @@ Example::
             [-1.9711, -0.7748, -1.3840,  0.5067]])
     >>> torch.std_mean(a, 1)
     (tensor([0.9110, 0.8197, 1.2552, 1.0608]), tensor([-0.6871,  0.6229,  0.2169, -0.9058]))
-""")
+""".format(**multi_dim_common))
 
 add_docstr(torch.sum,
            r"""
@@ -5603,7 +5603,7 @@ Example::
             [-0.6706, -1.5893,  0.6827,  1.6727]])
     >>> torch.var_mean(a, 1)
     (tensor([2.3174, 1.6403, 1.4092, 2.0791]), tensor([-0.0512, -1.0946, -0.3403,  0.0239]))
-""")
+""".format(**multi_dim_common))
 
 add_docstr(torch.zeros,
            r"""

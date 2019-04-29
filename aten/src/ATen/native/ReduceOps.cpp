@@ -645,7 +645,7 @@ Tensor max_values(const Tensor& self, IntArrayRef dims, bool keepdim) {
 
 static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "std and var only support CPU AND CUDA backend, got: ", toString(self.type().backend()));
+           "std and var only support CPU and CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.scalar_type()), "std and var only support floating-point dtypes");
   ScalarType dtype = get_dtype(result, self, {}, true);
   auto iter = make_reduction("std or var", result, self, dim, keepdim, dtype);
@@ -659,7 +659,7 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
 
 static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, c10::optional<IntArrayRef> dim, bool unbiased, bool keepdim, bool take_sqrt) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           fname, " only support CPU AND CUDA backend, got: ", toString(self.type().backend()));
+           fname, " only support CPU and CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), fname, " only support floating-point dtypes");
   ScalarType dtype;
   if (result1.defined()) {

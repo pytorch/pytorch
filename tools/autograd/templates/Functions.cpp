@@ -676,34 +676,46 @@ Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbi
   return (2.0 / (_safe_size(self.sizes(), dim) - unbiased)) * grad * (self - self.mean(dim, true));
 }
 
+Tensor std_backward(const Tensor & result, const Tensor & grad, const Tensor & self, bool unbiased) {
+  return var_backward(grad / (result * 2), self, unbiased);
+}
+
+Tensor std_backward(const Tensor & result, Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  return var_backward(grad / (result * 2), self, dim, unbiased, keepdim);
+}
+
+Tensor mean_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool keepdim) {
+  return sum_backward(grad, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim);
+}
+
+Tensor mean_backward(Tensor grad, const Tensor & self) {
+  return grad.expand(self.sizes()) / self.numel();
+}
+
 Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, IntArrayRef dim, bool unbiased, bool keepdim, bool is_std) {
-  AT_ASSERTM(grads.size() > 0 && grads.size() <= 2, "grads size should be in interval [0,2]");
-  std::vector<Tensor> results;
+  AT_ASSERTM(grads.size() >= 1 && grads.size() <= 2, "grads size should be in interval [1,2]");
   if (grads[0].defined()) {
-    Tensor grad = grads[0];
-    Tensor grad_for_var_backward = is_std ? grad / (r1 * 2) : grad;
-    results.push_back(var_backward(grad_for_var_backward, self, dim, unbiased, keepdim));
+    Tensor std_var_backward = is_std ? std_backward(r1, grads[0], self, dim, unbiased, keepdim) : var_backward(grads[0], self, dim, unbiased, keepdim);
+    if (grads[1].defined()) {
+      return std_var_backward + mean_backward(grads[1], self, dim, keepdim);
+    } else {
+      return std_var_backward;
+    }
   }
-  if (grads[1].defined()) {
-    Tensor grad_for_mean_backward = grads[1];
-    results.push_back(sum_backward(grad_for_mean_backward, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim));
-  }
-  return at::stack(results, 0);
+  return mean_backward(grads[1], self, dim, keepdim);
 }
 
 Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, bool unbiased, bool is_std) {
-  AT_ASSERTM(grads.size() > 0 && grads.size() <= 2, "grads size should be in interval [0,2]");
-  std::vector<Tensor> results;
+  AT_ASSERTM(grads.size() >= 1 && grads.size() <= 2, "grads size should be in interval [1,2]");
   if (grads[0].defined()) {
-    Tensor grad = grads[0];
-    Tensor grad_for_var_backward = is_std ? grad / (r1 * 2) : grad;
-    results.push_back(var_backward(grad_for_var_backward, self, unbiased));
+    Tensor std_var_backward = is_std ? std_backward(r1, grads[0], self, unbiased) : var_backward(grads[0], self, unbiased);
+    if (grads[1].defined()) {
+      return std_var_backward + mean_backward(grads[1], self);
+    } else {
+      return std_var_backward;
+    }
   }
-  if (grads[1].defined()) {
-    Tensor grad_for_mean_backward = grads[1];
-    results.push_back(grad_for_mean_backward.expand(self.sizes()) / self.numel());
-  }
-  return at::stack(results, 0);
+  return mean_backward(grads[1], self);
 }
 
 Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArrayRef sizes) {

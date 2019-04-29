@@ -486,12 +486,10 @@ std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tens
   return builder.build();
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
-  AT_ASSERT(out1.defined());
-  AT_ASSERT(out2.defined());
+std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
+  AT_ASSERT(out.defined());
   auto builder = TensorIterator::Builder();
-  builder.add_output(out1);
-  builder.add_output(out2);
+  builder.add_output(out);
   builder.add_input(a);
   builder.iter_->promote_gpu_output_dtypes_ = true;
   builder.iter_->resize_outputs_ = false;
@@ -499,10 +497,12 @@ std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out1, Tensor& 
   return builder.build();
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
-  AT_ASSERT(out.defined());
+std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
+  AT_ASSERT(out1.defined());
+  AT_ASSERT(out2.defined());
   auto builder = TensorIterator::Builder();
-  builder.add_output(out);
+  builder.add_output(out1);
+  builder.add_output(out2);
   builder.add_input(a);
   builder.iter_->promote_gpu_output_dtypes_ = true;
   builder.iter_->resize_outputs_ = false;
