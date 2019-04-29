@@ -72,7 +72,6 @@ class ScriptModuleDeserializer final {
   std::vector<at::Tensor> tensor_table_;
   std::vector<IValue> attribute_table_;
   std::unordered_set<std::string> imported_libs_;
-  std::unordered_set<ClassTypePtr> imported_classes_;
 
   std::shared_ptr<script::Module> main_module_;
 };
