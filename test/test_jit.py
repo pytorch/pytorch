@@ -5293,6 +5293,20 @@ a")
                 return a + b
             ''')
 
+    def test_opt_opt_refinement(self):
+        @torch.jit.script
+        def test_unify(weight, bias):
+            # type: (Optional[int], Optional[int]) -> Optional[int]
+            if weight is not None:
+                opt = None
+            else:
+                if bias is not None:
+                    opt = 1
+                else:
+                    opt = None
+
+            return opt
+
     def test_optional_refinement(self):
         @torch.jit.script
         def test_if_none_assignment(x):
@@ -14429,6 +14443,36 @@ class TestClassType(JitTestCase):
         sfoo = self.checkScript(use_foo, input)
         graphstr = str(sfoo.graph_for(*input))
         FileCheck().check_count("Double(*, *) = prim::GetAttr", 4).run(graphstr)
+
+    @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
+    def test_imported_classes(self):
+        import jit.foo
+        import jit.bar
+        import jit.very.very.nested
+
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                foo = jit.foo.FooSameName(a)
+                bar = jit.bar.FooSameName(a)
+                three = jit.very.very.nested.FooUniqueName(a)
+                return foo.x + bar.y + three.y
+
+        m = MyMod()
+
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+
+        # classes are globally registered for now, so we need to clear the JIT
+        # registry to simulate loading a new model
+        torch._C._jit_clear_class_registry()
+
+        buffer.seek(0)
+        m_loaded = torch.jit.load(buffer)
+
+        input = torch.rand(2, 3)
+        output = m_loaded(input)
+        self.assertEqual(3 * input, output)
 
 
 class TestLogging(JitTestCase):

@@ -22,7 +22,7 @@ inline int end_index(int a, int b, int c) {
 // 4d tensor B x D x H x W
 
 template <typename scalar_t>
-static void adaptive_max_pool2d_out_frame(
+static void adaptive_max_pool2d_single_out_frame(
         scalar_t *input_p,
         scalar_t *output_p,
         int64_t *ind_p,
@@ -82,6 +82,35 @@ static void adaptive_max_pool2d_out_frame(
         *indp = maxindex;
       }
     }
+  }
+}
+
+template <typename scalar_t>
+static void adaptive_max_pool2d_out_frame(
+  scalar_t *input_data,
+  scalar_t *output_data,
+  int64_t *indices_data,
+  int64_t sizeB,
+  int64_t sizeD,
+  int64_t isizeH,
+  int64_t isizeW,
+  int64_t osizeH,
+  int64_t osizeW,
+  int64_t istrideB,
+  int64_t istrideD,
+  int64_t istrideH,
+  int64_t istrideW)
+{
+  int64_t b;
+#pragma omp parallel for private(b)
+  for (b = 0; b < sizeB; b++) {
+    adaptive_max_pool2d_single_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeH*osizeW,
+                                                   indices_data+b*sizeD*osizeH*osizeW,
+                                                   sizeD,
+                                                   isizeH, isizeW,
+                                                   osizeH, osizeW,
+                                                   istrideD,
+                                                   istrideH, istrideW);
   }
 }
 
@@ -149,47 +178,41 @@ void adaptive_max_pool2d_out_cpu_template(
       auto output_data = output.data<scalar_t>();
       auto indices_data = indices.data<int64_t>();
 
-      adaptive_max_pool2d_out_frame<scalar_t>(input_data, output_data,
-                                              indices_data,
-                                              sizeD,
-                                              isizeH, isizeW,
-                                              osizeH, osizeW,
-                                              istrideD,
-                                              istrideH, istrideW);
+      adaptive_max_pool2d_single_out_frame<scalar_t>(input_data, output_data,
+                                                     indices_data,
+                                                     sizeD,
+                                                     isizeH, isizeW,
+                                                     osizeH, osizeW,
+                                                     istrideD,
+                                                     istrideH, istrideW);
       }
     );
   }
   else
   {
-    int64_t b;
-
     output.resize_({sizeB, sizeD, osizeH, osizeW});
     /* indices will contain i,j locations for each output point */
     indices.resize_({sizeB, sizeD, osizeH, osizeW});
 
-  #pragma omp parallel for private(b)
-    for (b = 0; b < sizeB; b++)
-    {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool2d_cpu", [&] {
-        auto input_data = input.data<scalar_t>();
-        auto output_data = output.data<scalar_t>();
-        auto indices_data = indices.data<int64_t>();
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool2d_cpu", [&] {
+      auto input_data = input.data<scalar_t>();
+      auto output_data = output.data<scalar_t>();
+      auto indices_data = indices.data<int64_t>();
 
-        adaptive_max_pool2d_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeH*osizeW,
-                                                indices_data+b*sizeD*osizeH*osizeW,
-                                                sizeD,
-                                                isizeH, isizeW,
-                                                osizeH, osizeW,
-                                                istrideD,
-                                                istrideH, istrideW);
-        }
-      );
-    }
+      adaptive_max_pool2d_out_frame<scalar_t>(input_data, output_data,
+                                              indices_data,
+                                              sizeB, sizeD,
+                                              isizeH, isizeW,
+                                              osizeH, osizeW,
+                                              istrideB, istrideD,
+                                              istrideH, istrideW);
+      }
+    );
   }
 }
 
 template <typename scalar_t>
-static void adaptive_max_pool2d_backward_out_frame(
+static void adaptive_max_pool2d_backward_single_out_frame(
           scalar_t *gradInput_p,
           scalar_t *gradOutput_p,
           int64_t *indices,
@@ -220,6 +243,30 @@ static void adaptive_max_pool2d_backward_out_frame(
         gradInput_p_d[maxp] += gradOutput_p_d[oh*osizeW + ow];
       }
     }
+  }
+}
+
+template <typename scalar_t>
+static void adaptive_max_pool2d_backward_out_frame(
+          scalar_t *gradInput_data,
+          scalar_t *gradOutput_data,
+          int64_t *indices_data,
+          int64_t sizeB,
+          int64_t sizeD,
+          int64_t isizeH,
+          int64_t isizeW,
+          int64_t osizeH,
+          int64_t osizeW)
+{
+  int64_t b;
+#pragma omp parallel for private(b)
+  for (b = 0; b < sizeB; b++) {
+    adaptive_max_pool2d_backward_single_out_frame<scalar_t>(gradInput_data+b*sizeD*isizeH*isizeW,
+                                                            gradOutput_data+b*sizeD*osizeH*osizeW,
+                                                            indices_data+b*sizeD*osizeH*osizeW,
+                                                            sizeD,
+                                                            isizeH, isizeW,
+                                                            osizeH, osizeW);
   }
 }
 
@@ -266,35 +313,32 @@ Tensor& adaptive_max_pool2d_backward_out_cpu_template(
       scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
       int64_t *indices_data = indices.data<int64_t>();
 
-      adaptive_max_pool2d_backward_out_frame<scalar_t>(gradInput_data, gradOutput_data,
-                                                       indices_data,
-                                                       sizeD,
-                                                       isizeH, isizeW,
-                                                       osizeH, osizeW);
+      adaptive_max_pool2d_backward_single_out_frame<scalar_t>(gradInput_data,
+                                                              gradOutput_data,
+                                                              indices_data,
+                                                              sizeD,
+                                                              isizeH, isizeW,
+                                                              osizeH, osizeW);
       }
     );
   }
   else
   {
-    int64_t b;
-#pragma omp parallel for private(b)
-    for (b = 0; b < sizeB; b++)
-    {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool2d_backward", [&] {
-        /* get raw pointers */
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool2d_backward", [&] {
+      /* get raw pointers */
+      scalar_t *gradInput_data = gradInput.data<scalar_t>();
+      scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+      int64_t *indices_data = indices.data<int64_t>();
 
-        adaptive_max_pool2d_backward_out_frame<scalar_t>(gradInput_data+b*sizeD*isizeH*isizeW,
-                                                         gradOutput_data+b*sizeD*osizeH*osizeW,
-                                                         indices_data+b*sizeD*osizeH*osizeW,
-                                                         sizeD,
-                                                         isizeH, isizeW,
-                                                         osizeH, osizeW);
-        }
-      );
-    }
+      adaptive_max_pool2d_backward_out_frame<scalar_t>(gradInput_data,
+                                                       gradOutput_data,
+                                                       indices_data,
+                                                       sizeB,
+                                                       sizeD,
+                                                       isizeH, isizeW,
+                                                       osizeH, osizeW);
+      }
+    );
   }
 
   return gradInput;

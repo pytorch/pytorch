@@ -417,6 +417,9 @@ OpCode Unpickler::readInstruction() {
     case OpCode::BINGET: {
       stack_.push_back(memo_table_.at(read<uint8_t>()));
     } break;
+    case OpCode::LONG_BINGET: {
+      stack_.push_back(memo_table_.at(read<uint32_t>()));
+    } break;
     case OpCode::STOP:
       break;
     case OpCode::GLOBAL: {

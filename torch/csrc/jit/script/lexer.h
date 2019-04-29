@@ -1,14 +1,15 @@
 #pragma once
-#include <c10/util/Exception.h>
+#include <ATen/core/Macros.h>
 #include <c10/util/C++17.h>
-#include <torch/csrc/jit/source_range.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/script/strtod.h>
+#include <torch/csrc/jit/source_range.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/Macros.h>
 #include <algorithm>
 #include <clocale>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -102,7 +103,8 @@ namespace script {
   _(TK_DOTS, "dots", "...")                      \
   _(TK_LIST_COMP, "list comprehension", "")      \
   _(TK_PASS, "pass", "pass")                     \
-  _(TK_CLASS_DEF, "class", "class")
+  _(TK_CLASS_DEF, "class", "class")              \
+  _(TK_IMPORT, "import", "import")
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|";
 
@@ -471,7 +473,8 @@ struct Lexer {
             indent_stack.pop_back();
             next_tokens.emplace_back(TK_DEDENT, r.range);
             if (indent_stack.size() == 0) {
-              reportError("invalid indent level " + c10::guts::to_string(depth), r);
+              reportError(
+                  "invalid indent level " + c10::guts::to_string(depth), r);
             }
           }
           return; // We've already queued the tokens
