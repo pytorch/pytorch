@@ -14487,7 +14487,7 @@ class TestClassType(JitTestCase):
                 li.sort(li)
                 return li
 
-        with self.assertRaisesRegex(RuntimeError, "that defines the __lt__ compare method"):
+        with self.assertRaisesRegex(RuntimeError, "must define a __lt__"):
             @torch.jit.script
             class Foo(object):
                 def __init__(self):
@@ -14508,7 +14508,7 @@ class TestClassType(JitTestCase):
             def __lt__(self, other):
                 pass
 
-        with self.assertRaisesRegex(RuntimeError, "defines the __lt__ compare method"):
+        with self.assertRaisesRegex(RuntimeError, "must define a __lt__"):
             @torch.jit.script
             def test():
                 li = [WrongLt(), WrongLt()]

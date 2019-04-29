@@ -2195,28 +2195,36 @@ bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
   return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
 }
 
-void checkSortInput(const Node* node, const c10::TypePtr& list_element_type) {
+void checkSortSchema(const Node* node, const c10::TypePtr& list_element_type) {
+  std::stringstream error_str;
   if (auto class_type = list_element_type->cast<ClassType>()) {
     if (auto method = class_type->getMethod("__lt__")) {
       const auto& lt_schema = method->getSchema();
       const auto& schema_args = lt_schema.arguments();
-      bool error = schema_args.size() != 2;
-      if (!error) {
-        error |= !simpleClassTypeArg(schema_args[0], class_type) ||
-            !simpleClassTypeArg(schema_args[1], class_type);
-      }
-      error |= lt_schema.returns().size() != 1 ||
-          lt_schema.returns()[0].type() != BoolType::get();
+      bool error =
+          (schema_args.size() != 2 ||
+           !simpleClassTypeArg(schema_args[0], class_type) ||
+           !simpleClassTypeArg(schema_args[1], class_type) ||
+           lt_schema.returns().size() != 1 ||
+           lt_schema.returns()[0].type() != BoolType::get());
       if (!error) {
         return;
       }
     }
+    error_str << "To sort a list of " << class_type->python_str()
+              << " it must define a "
+              << "__lt__ method with two inputs of type "
+              << class_type->python_str() << " that "
+              << "returns a bool";
+  } else {
+    error_str
+        << "Input to list sort must be of Tensors, ints, floats, bools or "
+        << "a User Defined Class that defines the __lt__ compare method"
+        << ", got list of " << list_element_type->python_str() << "\n";
   }
 
   auto error_msg = script::ErrorReport(node->getSourceLocation());
-  error_msg << "Input to list sort must be of Tensors, ints, floats, bools or "
-            << "a User Defined Class that defines the __lt__ compare method"
-            << ", got list of " << list_element_type->str() << "\n";
+  error_msg << error_str;
   throw error_msg;
 }
 
@@ -2227,7 +2235,7 @@ RegisterOperators regSort({
         [](const Node* node) {
           const auto list_type =
               node->inputs().at(0)->type()->expect<ListType>();
-          checkSortInput(node, list_type->getElementType());
+          checkSortSchema(node, list_type->getElementType());
           const auto elem = list_type->getElementType()->expect<ClassType>();
           auto func = elem->getMethod("__lt__");
           return [func](Stack& stack) {
@@ -2241,9 +2249,7 @@ RegisterOperators regSort({
                   sort_stack.push_back(a);
                   sort_stack.push_back(b);
                   func->run(sort_stack);
-                  auto out = pop(sort_stack).toBool();
-                  out = reverse ? !out : out;
-                  return out;
+                  return pop(sort_stack).toBool() ^ reverse;
                 });
             return 0;
           };
