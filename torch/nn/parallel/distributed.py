@@ -165,6 +165,15 @@ class DistributedDataParallel(Module):
         (e.g. BatchNorm stats) are broadcast from the module in process of rank
         0, to all other replicas in the system in every iteration.
 
+    .. note::
+        Sometimes, a batch of inputs is too large to fit into GPU, which has to
+        be split into several micro-batches. However, to improve efficiency,
+        it would be helpful to only apply params/gradients sync at original batch
+        boundaries instead of micro-batch boundaries.
+        Function: ``accumulate_gradients`` enabled the model to accumulate gradients
+        locally without calling all-reduction, we should set accumulate_grads to
+        False before calling ``optimizer.step()``.
+
     Args:
         module (Module): module to be parallelized
         device_ids (list of int or torch.device): CUDA devices. This should
@@ -264,6 +273,7 @@ class DistributedDataParallel(Module):
         self.module = module
         self.broadcast_buffers = broadcast_buffers
         self.find_unused_parameters = find_unused_parameters
+        self.accumulate_grads = False
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -369,7 +379,9 @@ class DistributedDataParallel(Module):
                                "process_group argument to DDP constructor")
 
     def forward(self, *inputs, **kwargs):
-        self._sync_params()
+        if not self.accumulate_grads:
+            self._sync_params()
+
         if self.device_ids:
             inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
             if len(self.device_ids) == 1:
@@ -380,7 +392,7 @@ class DistributedDataParallel(Module):
         else:
             output = self.module(*inputs, **kwargs)
 
-        if torch.is_grad_enabled():
+        if torch.is_grad_enabled() and not self.accumulate_grads:
             # We'll return the output object verbatim since it is a freeform
             # object. We need to find any tensors in this object, though,
             # because we need to figure out which parameters were used during
@@ -405,6 +417,9 @@ class DistributedDataParallel(Module):
         super(DistributedDataParallel, self).train(mode)
         for module in self._module_copies[1:]:
             module.train(mode)
+
+    def accumulate_gradients(self, enable):
+        self.accumulate_grads = enable
 
     def _dist_broadcast_coalesced(self, tensors, buffer_size):
         dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size, False)
