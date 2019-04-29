@@ -2409,13 +2409,10 @@ class TestNN(NNTestCase):
 
         # We have more floating point error here because we are dealing with larger numbers
         if backward_prec is None:
-            # torch.half is particularly imprecise
-            if dtype == torch.half:
-                needed_prec = dtype2prec[dtype] * 3
-            else:
-                needed_prec = dtype2prec[dtype] * 2
+            needed_prec = dtype2prec[dtype] * 2
         else:
             needed_prec = backward_prec
+
         self.assertEqual(es_weight_grad, e.weight.grad, needed_prec)
 
         if test_per_sample_weights and trainable_per_sample_weights:
@@ -2603,12 +2600,13 @@ class TestNN(NNTestCase):
 
     def test_embedding_bag(self):
         for dtype in [torch.double, torch.float]:
-            # TODO: figure out why backward on float breaks
-            test_backward = dtype is not torch.float
-            self._test_EmbeddingBag(False, 'sum', False, test_backward=test_backward, dtype=dtype)
-            self._test_EmbeddingBag(False, 'mean', False, test_backward=test_backward, dtype=dtype)
-            self._test_EmbeddingBag(False, 'max', False, test_backward=test_backward, dtype=dtype)
+            self._test_EmbeddingBag(False, 'sum', False, dtype=dtype)
+            self._test_EmbeddingBag(False, 'mean', False, dtype=dtype)
+            self._test_EmbeddingBag(False, 'max', False, dtype=dtype)
 
+            # TODO: figure out why precision on sparse embeddings isn't the
+            # same as for dense.
+            test_backward = dtype is not torch.float
             self._test_EmbeddingBag(False, 'sum', True, test_backward=test_backward, dtype=dtype)
             self._test_EmbeddingBag(False, 'mean', True, test_backward=test_backward, dtype=dtype)
 
@@ -2773,8 +2771,10 @@ class TestNN(NNTestCase):
         self._test_EmbeddingBag(True, 'mean', False, dtype)
         self._test_EmbeddingBag(True, 'max', False, dtype)
 
-        self._test_EmbeddingBag(True, 'sum', True, dtype)
-        self._test_EmbeddingBag(True, 'mean', True, dtype)
+        # see test_embedding_bag
+        test_backward = dtype is not torch.float16
+        self._test_EmbeddingBag(True, 'sum', True, dtype, test_backward=test_backward)
+        self._test_EmbeddingBag(True, 'mean', True, dtype, test_backward=test_backward)
 
     def test_fractional_max_pool2d(self):
         x = torch.randn(1, 2, 7, 7, requires_grad=True)
