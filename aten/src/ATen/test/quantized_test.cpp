@@ -33,7 +33,7 @@ TEST(TestQTensor, QuantDequantAPIs) {
 
   // Check for correct quantization
   auto r_data = r.data<float>();
-  auto qr_data = qr.data<qint8>();
+  auto qr_data = qr.data<quint8>();
   for (auto i = 0; i < num_elements; ++i) {
     ASSERT_EQ(
         quantize_uint8(scale, zero_point, r_data[i]).val_, qr_data[i].val_);
@@ -62,7 +62,7 @@ TEST(TestQTensor, RoundingMode) {
   Tensor x = from_blob(x_values.data(), x_values.size());
   Tensor qx = x.quantize_linear(/*scale=*/1.0, zero_point);
 
-  auto qx_data = qx.data<qint8>();
+  auto qx_data = qx.data<quint8>();
   for (int idx = 0; idx < x_values.size(); ++idx) {
     ASSERT_EQ(qx_expect[idx], qx_data[idx].val_)
       << "Tie breaking during rounding element " << idx << " failed!";
@@ -82,9 +82,9 @@ TEST(TestQTensor, EmptyQuantized) {
   int zero_point = 10;
   int val = 100;
   int numel = 10;
-  Tensor q = at::_empty_affine_quantized({numel}, at::device(at::kCPU).dtype(kQInt8), scale, zero_point);
+  Tensor q = at::_empty_affine_quantized({numel}, at::device(at::kCPU).dtype(kQUInt8), scale, zero_point);
   // Assigning to QTensor
-  auto* q_data = q.data<qint8>();
+  auto* q_data = q.data<quint8>();
   for (int i = 0; i < numel; ++i) {
     q_data[i].val_ = val;
   }
