@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 
 namespace torch {
 namespace jit {
@@ -314,14 +315,16 @@ void Module::lift_lowered_methods(size_t start) {
 
 void Module::_define_lowered(
     const std::vector<Def>& definitions,
-    const std::vector<Resolver>& resolvers) {
+    const std::vector<ResolverPtr>& resolvers) {
   size_t start = lowered_methods_.get_functions().size();
   lowered_methods_.define(definitions, resolvers, nullptr);
   lift_lowered_methods(start);
   // call lift_lowered_method for each definition
 }
 
-void Module::_define_lowered(const std::string& src, const Resolver& resolver) {
+void Module::_define_lowered(
+    const std::string& src,
+    const ResolverPtr& resolver) {
   size_t start = lowered_methods_.get_functions().size();
   lowered_methods_.define(src, resolver, nullptr);
   lift_lowered_methods(start);
@@ -338,11 +341,18 @@ Method& Module::_define_lowered(
   return m;
 }
 
-void Module::define(const std::string& src, const Resolver& resolver) {
+void Module::define(const std::string& src, const ResolverPtr& resolver) {
   class_cu().define(
       src,
-      resolver ? resolver : nativeResolver,
+      resolver ? resolver : script::nativeResolver(),
       simpleSelf(module_object()->type()));
+}
+
+void Module::train(bool on) {
+ for (auto& submod : get_modules()) {
+   submod->train(on);
+ }
+ register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
 }
 
 } // namespace script

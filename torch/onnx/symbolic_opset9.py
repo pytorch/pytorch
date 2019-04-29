@@ -348,6 +348,20 @@ def squeeze(g, self, dim=None):
                 dims.append(i)
     else:
         dims = [sym_help._get_const(dim, 'i', 'dim')]
+        # Handle negative dims
+        for i, dim in enumerate(dims):
+            if dim < 0:
+                if self.type().kind() == "CompleteTensorType" or self.type().kind() == "DimensionedTensorType":
+                    warnings.warn("ONNX export squeeze with negative axis " + str(dim) +
+                                  " might cause the onnx model to be incorrect. " +
+                                  "Negative axis is not supported in ONNX. " +
+                                  "Axis is converted to " + str(dim + self.type().dim()) +
+                                  " based on input shape at export time. " +
+                                  "Passing an tensor of different rank in execution will be incorrect.")
+                    dims[i] += self.type().dim()
+                else:
+                    return _unimplemented('squeeze', 'negative axis with unknown input rank')
+
     return g.op("Squeeze", self, axes_i=dims)
 
 
@@ -458,104 +472,63 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     return padding_ceil
 
 
-@parse_args('v', 'is', 'is', 'is', 'is', 'i')
-def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode and input.type().kind() != "CompleteTensorType":
-        return _unimplemented("max_pool1d_with_indices", "input size not accesible")
-    if set(_single(dilation)) != {1}:
-        return _unimplemented("max_pool1d_with_indices", "dilation")
-    if stride is None:
-        stride = kernel_size
-    padding = tuple(_single(padding))
-    if ceil_mode:
-        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-        padding = padding + tuple(numpy.add(padding_ceil, padding))
-    else:
-        padding = padding * 2
-    r, indices = g.op("MaxPool", input, outputs=2,
-                      kernel_shape_i=_single(kernel_size),
-                      pads_i=padding,
-                      strides_i=_single(stride))
-    # easy but hacky way to get flattened indices values
-    # to be used to convert the indices values to non-flattened.
-    # In ONNX the indices are computed as a flatten 1-D tensor,
-    # so the values in indices are in [0, N x C x D1 x ... x Dn).
-    # To convert the indices to the same format used by Pytorch,
-    # we first execute a maxpool with a kernel and stride of 1 on the same input.
-    # This will result in a tensor of indices in which each index will have it's own value.
-    # Using this tensor as a reference, we extract the first index of each axis and substract
-    # it from each index of this axis in the indices to convert.
-    # This step will result in a tensor were each dimension has values of indices within
-    # the dimension it is in.
-    # For more information :
-    # https://github.com/pytorch/pytorch/pull/16455#issuecomment-460776407
-    _, flattened_indices = g.op("MaxPool", input, outputs=2,
-                                kernel_shape_i=[1],
-                                strides_i=[1])
-    # convert indices to have non-flattened indices values
-    s = _slice_op(g, flattened_indices, axes=[2], starts=[0], ends=[1])
-    indices = sub(g, indices, s)
-    return r, indices
+def _max_pool(name, tuple_fn, ndims, return_indices):
+    @parse_args('v', 'is', 'is', 'is', 'is', 'i')
+    def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+        if ceil_mode and input.type().kind() != "CompleteTensorType":
+            return _unimplemented(name, "input size not accesible")
+        if set(tuple_fn(dilation)) != {1}:
+            return _unimplemented(name, "dilation")
+        if not stride:
+            stride = kernel_size
+        padding = tuple(tuple_fn(padding))
+        if ceil_mode:
+            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+            padding = padding + tuple(numpy.add(padding_ceil, padding))
+        else:
+            padding = padding * 2
+        # easy but hacky way to get flattened indices values
+        # to be used to convert the indices values to non-flattened.
+        # In ONNX the indices are computed as a flatten 1-D tensor,
+        # so the values in indices are in [0, N x C x D1 x ... x Dn).
+        # To convert the indices to the same format used by Pytorch,
+        # we first execute a maxpool with a kernel and stride of 1 on the same input.
+        # This will result in a tensor of indices in which each index will have it's own value.
+        # Using this tensor as a reference, we extract the first index of each axis and substract
+        # it from each index of this axis in the indices to convert.
+        # This step will result in a tensor were each dimension has values of indices within
+        # the dimension it is in.
+        # For more information :
+        # https://github.com/pytorch/pytorch/pull/16455#issuecomment-460776407
+        if return_indices:
+            r, indices = g.op("MaxPool", input, outputs=2,
+                              kernel_shape_i=tuple_fn(kernel_size),
+                              pads_i=padding,
+                              strides_i=tuple_fn(stride))
+            _, flattened_indices = g.op("MaxPool", input, outputs=2,
+                                        kernel_shape_i=[1 for _ in range(ndims)],
+                                        strides_i=[1 for _ in range(ndims)])
+            # convert indices to have non-flattened indices values
+            s = _slice_op(g, flattened_indices, axes=[2 + i for i in range(ndims)],
+                          starts=tuple_fn(0), ends=tuple_fn(1))
+            indices = sub(g, indices, s)
+            return r, indices
+        else:
+            r = g.op("MaxPool", input, outputs=1,
+                     kernel_shape_i=tuple_fn(kernel_size),
+                     pads_i=padding,
+                     strides_i=tuple_fn(stride))
+            return r
+
+    return symbolic_fn
 
 
-@parse_args('v', 'is', 'is', 'is', 'is', 'i')
-def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode and input.type().kind() != "CompleteTensorType":
-        return _unimplemented("max_pool2d_with_indices", "input size not accesible")
-    if set(_pair(dilation)) != {1}:
-        return _unimplemented("max_pool2d_with_indices", "dilation")
-    if not stride:
-        stride = kernel_size
-    padding = tuple(_pair(padding))
-    if ceil_mode:
-        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-        padding = padding + tuple(numpy.add(padding_ceil, padding))
-    else:
-        padding = padding * 2
-    r, indices = g.op("MaxPool", input, outputs=2,
-                      kernel_shape_i=_pair(kernel_size),
-                      pads_i=padding,
-                      strides_i=_pair(stride))
-    # easy but hacky way to get flattened indices values
-    # to be used to convert the indices values to non-flattened
-    # See comment in max_pool1d_with_indices for details.
-    _, flattened_indices = g.op("MaxPool", input, outputs=2,
-                                kernel_shape_i=[1, 1],
-                                strides_i=[1, 1])
-    # convert indices to have non-flattened indices values
-    s = _slice_op(g, flattened_indices, axes=[2, 3], starts=[0, 0], ends=[1, 1])
-    indices = sub(g, indices, s)
-    return r, indices
-
-
-@parse_args('v', 'is', 'is', 'is', 'is', 'i')
-def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode and input.type().kind() != "CompleteTensorType":
-        return _unimplemented("max_pool3d_with_indices", "input size not accesible")
-    if set(_triple(dilation)) != {1}:
-        return _unimplemented("max_pool3d_with_indices", "dilation")
-    if not stride:
-        stride = kernel_size
-    padding = tuple(_triple(padding))
-    if ceil_mode:
-        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-        padding = padding + tuple(numpy.add(padding_ceil, padding))
-    else:
-        padding = padding * 2
-    r, indices = g.op("MaxPool", input, outputs=2,
-                      kernel_shape_i=_triple(kernel_size),
-                      pads_i=padding,
-                      strides_i=_triple(stride))
-    # easy but hacky way to get flattened indices values
-    # to be used to convert the indices values to non-flattened
-    # See comment in max_pool1d_with_indices for details.
-    _, flattened_indices = g.op("MaxPool", input, outputs=2,
-                                kernel_shape_i=[1, 1, 1],
-                                strides_i=[1, 1, 1])
-    # convert indices to have non-flattened indices values
-    s = _slice_op(g, flattened_indices, axes=[2, 3, 4], starts=[0, 0, 0], ends=[1, 1, 1])
-    indices = sub(g, indices, s)
-    return r, indices
+max_pool1d = _max_pool("max_pool1d", _single, 1, return_indices=False)
+max_pool2d = _max_pool("max_pool2d", _pair, 2, return_indices=False)
+max_pool3d = _max_pool("max_pool3d", _triple, 3, return_indices=False)
+max_pool1d_with_indices = _max_pool("max_pool1d_with_indices", _single, 1, return_indices=True)
+max_pool2d_with_indices = _max_pool("max_pool2d_with_indices", _pair, 2, return_indices=True)
+max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, return_indices=True)
 
 
 def _avg_pool(name, tuple_fn):
@@ -1037,6 +1010,13 @@ def _unique(g, input, sorted, return_inverse):
                 return_inverse_i=return_inverse, outputs=2)
 
 
+@parse_args('v', 'i', 'i', 'i')
+def _unique2(g, input, sorted, return_inverse, return_counts):
+    return g.op("ATen", input, operator_s="_unique2", sorted_i=sorted,
+                return_inverse_i=return_inverse, return_counts_i=return_counts,
+                outputs=3)
+
+
 for k, v in sym_help.cast_pytorch_to_onnx.items():
     name = '_cast_{}'.format(k)
     globals()[name] = parse_args('v', 'i')(partial(sym_help._cast_func_template, v))
@@ -1127,6 +1107,19 @@ def alias(g, self):
 
 @parse_args('v', 'i')
 def unsqueeze(g, self, dim):
+    # Handle negative dim
+    if dim < 0:
+        if self.type().kind() == "CompleteTensorType" or self.type().kind() == "DimensionedTensorType":
+            warnings.warn("ONNX export unsqueeze with negative axis " + str(dim) +
+                          " might cause the onnx model to be incorrect. " +
+                          "Negative axis is not supported in ONNX. " +
+                          "Axis is converted to " + str(dim + self.type().dim() + 1) +
+                          " based on input shape at export time. " +
+                          "Passing an tensor of different rank in execution will be incorrect.")
+            dim = dim + self.type().dim() + 1
+        else:
+            return _unimplemented('unsqueeze', 'negative axis with unknown input rank')
+
     return g.op("Unsqueeze", self, axes_i=[dim])
 
 

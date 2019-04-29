@@ -1,4 +1,5 @@
 import copy
+import itertools
 
 import torch
 
@@ -13,6 +14,19 @@ from .replicate import replicate
 from .scatter_gather import scatter_kwargs, gather
 from .parallel_apply import parallel_apply
 from torch.cuda._utils import _get_device_index
+
+
+def _find_tensors(obj):
+    r"""
+    Recursively find all tensors contained in the specified object.
+    """
+    if isinstance(obj, torch.Tensor):
+        return [obj]
+    if isinstance(obj, (list, tuple)):
+        return itertools.chain(*map(_find_tensors, obj))
+    if isinstance(obj, dict):
+        return itertools.chain(*map(_find_tensors, obj.values()))
+    return []
 
 
 class DistributedDataParallel(Module):
@@ -178,6 +192,13 @@ class DistributedDataParallel(Module):
                        bucket can potentially overlap with backward computation.
                        :attr:`bucket_cap_mb` controls the bucket size in MegaBytes (MB)
                        (default: 25)
+        find_unused_parameters (bool): Traverse the autograd graph of all tensors
+                                       contained in the return value of the wrapped
+                                       module's ``forward`` function.
+                                       Parameters that don't receive gradients as
+                                       part of this graph are preemptively marked
+                                       as being ready to be reduced.
+                                       (default: ``True``)
         check_reduction: when setting to ``True``, it enables DistributedDataParallel
                          to automatically check if the previous iteration's
                          backward reductions were successfully issued at the
@@ -199,6 +220,7 @@ class DistributedDataParallel(Module):
     def __init__(self, module, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
                  process_group=None, bucket_cap_mb=25,
+                 find_unused_parameters=True,
                  check_reduction=False):
 
         super(DistributedDataParallel, self).__init__()
@@ -241,6 +263,7 @@ class DistributedDataParallel(Module):
         self.dim = dim
         self.module = module
         self.broadcast_buffers = broadcast_buffers
+        self.find_unused_parameters = find_unused_parameters
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -361,14 +384,10 @@ class DistributedDataParallel(Module):
         # We need to find any tensors in this object, though, because we need to
         # figure out which parameters were used during this forward pass,
         # to ensure we short circuit reduction for any unused parameters.
-        output_tensors = []
-        if isinstance(output, torch.Tensor):
-            output_tensors = [output]
-        if isinstance(output, (list, tuple)):
-            def istensor(obj):
-                return isinstance(obj, torch.Tensor)
-            output_tensors = list(filter(istensor, output))
-        self.reducer.prepare_for_backward(output_tensors)
+        if self.find_unused_parameters:
+            self.reducer.prepare_for_backward(list(_find_tensors(output)))
+        else:
+            self.reducer.prepare_for_backward([])
         return output
 
     def scatter(self, inputs, kwargs, device_ids):

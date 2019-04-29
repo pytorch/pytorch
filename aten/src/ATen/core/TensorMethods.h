@@ -1189,8 +1189,8 @@ inline Tensor Tensor::cholesky_solve(const Tensor & input2, bool upper) const {
 inline std::tuple<Tensor,Tensor> Tensor::solve(const Tensor & A) const {
     return dispatch_type().solve(*this, A);
 }
-inline Tensor Tensor::potri(bool upper) const {
-    return dispatch_type().potri(*this, upper);
+inline Tensor Tensor::cholesky_inverse(bool upper) const {
+    return dispatch_type().cholesky_inverse(*this, upper);
 }
 inline std::tuple<Tensor,Tensor> Tensor::pstrf(bool upper, Scalar tol) const {
     return dispatch_type().pstrf(*this, upper, tol);
