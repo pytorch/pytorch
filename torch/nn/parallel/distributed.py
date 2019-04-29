@@ -380,7 +380,7 @@ class DistributedDataParallel(Module):
         else:
             output = self.module(*inputs, **kwargs)
 
-        if self.training and torch.is_grad_enabled():
+        if torch.is_grad_enabled():
             # We'll return the output object verbatim since it is a freeform
             # object. We need to find any tensors in this object, though,
             # because we need to figure out which parameters were used during

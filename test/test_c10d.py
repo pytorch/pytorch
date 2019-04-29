@@ -2348,15 +2348,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # After initialization, no parameter has their gradient set.
         check_no_grads()
 
-        # Run `forward` function in eval mode
-        model.eval()
-        output = model(input)
-        self.assertTrue(torch.is_tensor(output))
-        model.train()
-
-        # No parameter should have their gradient set.
-        check_no_grads()
-
         # Run `forward` function with torch.no_grad()
         with torch.no_grad():
             output = model(input)
