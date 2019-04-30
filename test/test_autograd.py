@@ -2,6 +2,8 @@ import contextlib
 import gc
 import sys
 import math
+import tempfile
+import time
 import torch
 import unittest
 import warnings
@@ -13,11 +15,11 @@ from functools import reduce
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
-from torch.autograd.profiler import profile
+from torch.autograd.profiler import profile, format_time, EventList, FunctionEvent
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
-                          load_tests)
+                          load_tests, random_symmetric_pd_matrix)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -626,6 +628,7 @@ class TestAutograd(TestCase):
                                     "calculating the gradient of a sparse Tensor argument to mm is not supported."):
             z.sum().backward()
 
+    # NOTE: flaky on ROCm CI
     @skipIfRocm
     def test_sparse_ctor_getter_backward(self):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
@@ -2161,19 +2164,19 @@ class TestAutograd(TestCase):
 
     @skipIfNoLapack
     def test_cholesky(self):
-        def func(root):
+        def func(root, upper):
             x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
             return torch.cholesky(x, upper)
 
         def run_test(upper, dims):
-            root = torch.rand(*dims)
-            indices = torch.ones(dims[-1], dims[-1], dtype=torch.uint8).tril()
-            indices = indices.expand_as(root)
-            root[indices] = 0
-            root.requires_grad_()
+            root = torch.rand(*dims, requires_grad=True)
 
-            gradcheck(func, [root])
-            gradgradcheck(func, [root])
+            gradcheck(func, [root, upper])
+            gradgradcheck(func, [root, upper])
+
+            root = random_symmetric_pd_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            chol = root.cholesky().sum().backward()
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2))  # Check the gradient is symmetric
 
         for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
@@ -2407,6 +2410,80 @@ class TestAutograd(TestCase):
             self.assertGreater(info.cpu_interval.start, last_end)
             self.assertEqual(info.name, expected_name)
             last_end = info.cpu_interval.end
+
+    def test_profiler_aggregation_fake(self):
+        events = EventList()
+        id = [0]
+
+        def get_id():
+            id[0] = id[0] + 1
+            return id[0]
+
+        # [[thread_id, [(start, end, id), ....]], ...]
+        # Using list instead of a dict so order is guaranteed for any Python
+        # version
+        threads = [
+            [1, [(0, 1, get_id()), (1, 2, get_id())]],
+            [0, [(0, 2, get_id()), (1, 2, get_id()), (1, 3, get_id())]],
+        ]
+        for thread, ranges in threads:
+            for range in ranges:
+                assert(len(range) == 3)
+                events.append(
+                    FunctionEvent(
+                        id=range[2],
+                        name="",
+                        thread=thread,
+                        cpu_start=range[0],
+                        cpu_end=range[1],
+                    )
+                )
+
+        events.populate_cpu_children()
+
+        print()
+        for event in events:
+            print(event)
+
+        # Note that [1, 3] pushes out [0, 2] first. Then we record [1, 2]
+        # as a child of [1, 3]
+        res = [[], [], [], [], [4]]
+
+        def get_children_ids(event):
+            return [child.id for child in event.cpu_children]
+
+        assert([get_children_ids(event) for event in events] == res)
+
+    def test_profiler_aggregation_lstm(self):
+        rnn = torch.nn.LSTM(10, 20, 2)
+        total_time_s = 0
+        with profile() as prof:
+            for i in range(20):
+                input = torch.randn(5, 3, 10)
+                h = torch.randn(2, 3, 20)
+                c = torch.randn(2, 3, 20)
+                start = time.time()
+                rnn(input, (h, c))
+                end = time.time()
+                total_time_s += end - start
+
+        print(prof.table(sort_by="self_cpu_time_total", row_limit=10))
+        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+
+        total_time_us = total_time_s * 1000.0 * 1000.0  # make it us which is profiler default
+        print(
+            "Total time based on python measurements: ",
+            format_time(total_time_us)
+        )
+        print(
+            "CPU time measurement python side overhead: {:.2f}%".format(
+                (total_time_us / prof.self_cpu_time_total - 1.0) * 100.0
+            )
+        )
+
+        if sys.platform != "win32":
+            with tempfile.NamedTemporaryFile() as trace_file:
+                prof.export_chrome_trace(trace_file.name)
 
     def test_dir(self):
         x = torch.randn(10, 10)

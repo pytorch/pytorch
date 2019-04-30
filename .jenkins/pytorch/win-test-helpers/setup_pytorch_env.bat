@@ -22,6 +22,8 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba
 )
 pip install -q ninja future hypothesis "librosa>=0.6.2" psutil
+:: No need to install faulthandler since we only test Python >= 3.6 on Windows
+:: faulthandler is builtin since Python 3.3
 
 pushd .
 call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvarsall.bat" x86_amd64
@@ -41,7 +43,7 @@ set NUMBAPRO_NVVM=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\nvvm\b
 
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     pushd %TMP_DIR_WIN%\build
-    python %TMP_DIR_WIN%\ci_scripts\download_image.py %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z
+    python %SCRIPT_HELPERS_DIR%\download_image.py %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z
     :: 7z: -aos skips if exists because this .bat can be called multiple times
     7z x %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z -aos
     popd

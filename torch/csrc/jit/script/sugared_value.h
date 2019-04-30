@@ -22,20 +22,20 @@ namespace script {
 
 enum NoneStatus { ALWAYS, MAYBE, NEVER };
 
-struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
+struct TORCH_API SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // what is this node? for error reporting (e.g. Module, python function)
   virtual std::string kind() const = 0;
 
   // what can we do with this thing?
   // use it as a value e.g.  `this + 4`
-  virtual Value* asValue(const SourceRange& loc, Method& m) {
+  virtual Value* asValue(const SourceRange& loc, Function& m) {
     throw ErrorReport(loc) << kind() << " cannot be used as a value";
   }
 
   // select an attribute on it, e.g. `this.field`
   virtual std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       const std::string& field) {
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
   }
@@ -43,7 +43,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // assign an attribute on it, e.g. `this.field = newValue`
   virtual void setAttr(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       const std::string& field,
       Value* newValue) {
     throw ErrorReport(loc) << "attribute assignment is not defined on "
@@ -57,15 +57,21 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // a method invocation
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       const c10::optional<size_t>& size_hint = {}) {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
+  }
+
+  virtual std::vector<std::shared_ptr<SugaredValue>> asType(
+      const SourceRange& loc,
+      Method& m) {
+    throw ErrorReport(loc) << kind() << " cannot be used as a type";
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       // note: names for args will be 'argument 0', 'argument 1', etc..
       at::ArrayRef<NamedValue> inputs_,
       at::ArrayRef<NamedValue> attributes,
@@ -97,7 +103,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   std::string kind() const override {
     return "value";
   }
-  Value* asValue(const SourceRange& range, Method& m) override {
+  Value* asValue(const SourceRange& range, Function& m) override {
     return value_;
   }
   NoneStatus isNone() override {
@@ -110,18 +116,26 @@ struct TORCH_API SimpleValue : public SugaredValue {
   }
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       const c10::optional<size_t>& size_hint = {}) override;
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       const std::string& field) override;
 
   void setAttr(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       const std::string& field,
       Value* newValue) override;
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      // note: names for args will be 'argument 0', 'argument 1', etc..
+      at::ArrayRef<NamedValue> inputs_,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
 
   Value* getValue() const {
     return value_;
@@ -146,7 +160,7 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       at::ArrayRef<NamedValue> attributes,
       at::ArrayRef<NamedValue> inputs,
       size_t n_binders) override;
@@ -161,7 +175,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       const std::string& field) override {
     return std::make_shared<BuiltinFunction>(
         Symbol::fromQualString(name + "::" + field), c10::nullopt);
@@ -183,14 +197,14 @@ struct TORCH_API ClassValue : public SugaredValue {
   //    n = Foo(constructor_arg)
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override;
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       const std::string& field) override;
 
   std::string kind() const override {
@@ -202,34 +216,33 @@ struct TORCH_API ClassValue : public SugaredValue {
 
 // defines how a method obtained from a module behaves in script
 struct MethodValue : public SugaredValue {
-  MethodValue(std::shared_ptr<SugaredValue> self, Method& method)
-      : self_(std::move(self)), method(method) {}
+  MethodValue(c10::optional<NamedValue> self, std::shared_ptr<Function> method)
+      : self_(std::move(self)), method_(std::move(method)) {}
   std::string kind() const override {
     return "method";
   }
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Method& caller,
+      Function& f,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    if (auto classType = dynamic_cast<SimpleValue*>(self_.get())) {
-      // If self_ is a class, then it will be expected as part of
-      // the schema. Add it to the front of the inputs.
+    Graph& graph = *f.graph();
+    if (self_) {
       std::vector<NamedValue> inputsWithSelf;
-      inputsWithSelf.emplace_back(loc, classType->getValue());
+      inputsWithSelf.emplace_back(loc, self_->value(graph));
       inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
       return std::make_shared<SimpleValue>(
-          caller.emit_call_to(loc, method, inputsWithSelf, attributes));
+          method_->emit_call(graph, loc, inputsWithSelf, attributes));
     }
 
     return std::make_shared<SimpleValue>(
-        caller.emit_call_to(loc, method, inputs, attributes));
+        method_->emit_call(graph, loc, inputs, attributes));
   }
 
  private:
-  std::shared_ptr<SugaredValue> self_;
-  Method& method;
+  c10::optional<NamedValue> self_;
+  std::shared_ptr<Function> method_;
 };
 
 struct TORCH_API PrintValue : public SugaredValue {
@@ -238,7 +251,7 @@ struct TORCH_API PrintValue : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override;
@@ -252,7 +265,7 @@ struct TORCH_API CastValue : public BuiltinFunction {
       : BuiltinFunction(method, c10::nullopt), type_(std::move(type)) {}
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
@@ -316,14 +329,7 @@ struct TORCH_API ClassNewMethod : public SugaredValue {
 
   std::shared_ptr<SugaredValue> createObject(
       const SourceRange& loc,
-      Method& m,
-      const std::string& classname) {
-    if (classname != type_->name()) {
-      throw ErrorReport(loc)
-          << "Argument to __new__() must match the class "
-          << "you are calling __new__() on. "
-          << "Got: " << classname << ", expected: " << type_->name();
-    }
+      Function& m) {
     auto& g = *m.graph();
     auto createNode = g.insertNode(g.createObject(type_));
     return std::make_shared<SimpleValue>(createNode->output());
@@ -338,6 +344,12 @@ static inline std::vector<Value*> toValues(
   return fmap(nvs, [&](const NamedValue& v) { return v.value(g); });
 }
 
+static inline Self simpleSelf(const TypePtr& typ) {
+  return [typ](Value* v) {
+    v->setType(typ);
+    return std::make_shared<SimpleValue>(v);
+  };
+}
 } // namespace script
 } // namespace jit
 } // namespace torch

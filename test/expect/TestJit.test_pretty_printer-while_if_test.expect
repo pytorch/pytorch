@@ -1,5 +1,4 @@
-def graph(self,
-    a: Tensor,
+def while_if_test(a: Tensor,
     b: Tensor) -> Tensor:
   a0, b0, c = a, b, 0
   _0 = bool(torch.lt(a, 10))

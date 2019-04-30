@@ -33,10 +33,6 @@ static constexpr topo_position_t kMidPoint = 0;
 //   - 2^(64-n) is the maximum number of appends to the end without reindex
 static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
-// Sigh, see
-// https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
-constexpr Symbol PythonOp::Kind;
-
 static void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->uniqueName();
 }
@@ -288,19 +284,6 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
   return out;
 }
 
-std::ostream& Graph::prettyPrint(std::ostream& out) {
-  std::vector<at::Tensor> tensor_table;
-  std::vector<ClassTypePtr> class_table;
-  PythonPrint(out, *this, tensor_table, class_table);
-  return out;
-}
-
-void Graph::dumpPretty() {
-  std::vector<at::Tensor> tensor_table;
-  std::vector<ClassTypePtr> class_table;
-  PythonPrint(std::cout, *this, tensor_table, class_table);
-}
-
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
   c10::optional<at::Device> device = c10::nullopt;
@@ -382,20 +365,8 @@ void Node::lint() const {
       break;
     case prim::PythonOp: {
       // Python operator cconv is correct
-      size_t n_scalars = 0, n_tensors = 0;
       auto* value = static_cast<const PythonOp*>(this);
-      for (auto c : value->cconv) {
-        if (c == 'c') {
-          n_scalars++;
-        } else if (c == 'd') {
-          n_tensors++;
-        } else {
-          AT_ASSERT(0);
-        }
-        AT_ASSERT(static_cast<bool>(value->pyobj));
-      }
-      AT_ASSERT(n_scalars == value->scalar_args.size());
-      AT_ASSERT(n_tensors == inputs_.size());
+      value->lint_python();
       break;
     }
     case prim::Eval:
@@ -638,6 +609,33 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
+void Block::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
+  for (Value* input : inputs()) {
+    input->setType(type_map(input->type()));
+  }
+  for (Node* node : nodes()) {
+    for (Value* output : node->outputs()) {
+      output->setType(type_map(output->type()));
+    }
+    for (Block* sub_block : node->blocks()) {
+      sub_block->remapTypes(type_map);
+    }
+    for (Symbol name : node->attributeNames()) {
+      if (node->kindOf(name) == AttributeKind::g) {
+        node->g(name)->remapTypes(type_map);
+      } else if (node->kindOf(name) == AttributeKind::gs) {
+          for(const auto& g : node->gs(name)) {
+            g->remapTypes(type_map);
+          }
+      }
+    }
+  }
+}
+
+void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
+  block()->remapTypes(type_map);
+}
+
 bool Value::mustBeNone() const {
   return node_->mustBeNone();
 }
@@ -845,11 +843,19 @@ bool Node::hasSideEffects() const {
     case prim::RaiseException:
     case prim::SetAttr:
     case aten::warn:
+    case aten::manual_seed:
     case prim::AddStatValue:
-     case prim::TimePoint:
+    case prim::TimePoint:
       return true;
   }
-  return false;
+  // All other builtin ops are known to be safe.
+  // see [custom operator aliasing]
+  if (kind_.is_aten() || kind_.is_prim() || kind_.is_onnx()) {
+    return false;
+  }
+
+  // Custom ops may have arbitrary side effects
+  return true;
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and
@@ -1463,19 +1469,16 @@ std::vector<Value*> inlineCallTo(
   return outputs;
 }
 
-PythonOp* defaultAllocPythonOp(Graph* g) {
-  throw std::runtime_error(
-      "Trying to allocate a Python object without python bindings loaded");
+void ProfileOp::cloneFrom(Node* other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<ProfileOp>();
+  this->callback_ = other->getCallback();
 }
-std::atomic<decltype(&defaultAllocPythonOp)> alloc_python_op;
+Node* ProfileOp::allocNewInstance(Graph* g) {
+  return new ProfileOp(g, {nullptr});
+}
 
-// patched in when python bindings are loaded
-PythonOp* allocPythonOp(Graph* g) {
-  return alloc_python_op.load()(g);
-}
-void setAllocPythonOp(PythonOp* (*v)(Graph* g)) {
-  alloc_python_op.store(v);
-}
+constexpr Symbol ProfileOp::Kind;
 
 } // namespace jit
 } // namespace torch

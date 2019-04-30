@@ -45,6 +45,7 @@ PyObject* c10d_init(PyObject* _unused) {
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(py::init<
            std::vector<std::vector<torch::autograd::Variable>>,
+           std::vector<std::vector<size_t>>,
            std::shared_ptr<::c10d::ProcessGroup>>())
       .def(
           "initialize_buckets",
@@ -104,6 +105,11 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::ScatterOptions::rootRank)
       .def_readwrite("timeout", &::c10d::ScatterOptions::timeout);
+
+  py::class_<::c10d::ReduceScatterOptions>(module, "ReduceScatterOptions")
+      .def(py::init<>())
+      .def_readwrite("reduceOp", &::c10d::ReduceScatterOptions::reduceOp)
+      .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout);
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
@@ -316,6 +322,28 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "reduce_scatter",
+              &::c10d::ProcessGroup::reduce_scatter,
+              py::arg("output_tensors"),
+              py::arg("input_tensors"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "reduce_scatter",
+              [](::c10d::ProcessGroup& pg,
+                 at::Tensor& output,
+                 std::vector<at::Tensor>& input) {
+                std::vector<at::Tensor> outputs = {output};
+                std::vector<std::vector<at::Tensor>> inputs = {input};
+                return pg.reduce_scatter(
+                    outputs, inputs, ::c10d::ReduceScatterOptions());
+              },
+              py::arg("output_tensors"),
+              py::arg("input_tensor"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "send",
               &::c10d::ProcessGroup::send,
               py::call_guard<py::gil_scoped_release>())
@@ -340,11 +368,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
               "barrier",
               &::c10d::ProcessGroup::barrier,
               py::arg("opts") = ::c10d::BarrierOptions(),
-              py::call_guard<py::gil_scoped_release>())
-
-          .def(
-              "group_ranks",
-              &::c10d::ProcessGroup::getGroupRank,
               py::call_guard<py::gil_scoped_release>());
 
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
@@ -434,11 +457,17 @@ They are used in specifying strategies for reduction collectives, e.g.,
 #endif
 
 #ifdef USE_C10D_MPI
-  shared_ptr_class_<::c10d::ProcessGroupMPI>(
-      module, "ProcessGroupMPI", processGroup)
-      .def(py::init([](std::vector<int> ranks) {
+  auto processGroupMPI = shared_ptr_class_<::c10d::ProcessGroupMPI>(
+      module, "ProcessGroupMPI", processGroup);
+
+  // Define static create function instead of a constructor, because
+  // this function may return null. This happens if this process is not
+  // part of a sub group that is to be created.
+  processGroupMPI.def_static(
+      "create",
+      [](std::vector<int> ranks) {
         return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
-      }));
+      });
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
@@ -497,6 +526,13 @@ They are used in specifying strategies for reduction collectives, e.g.,
       py::arg("grads_batch_coalesced"),
       py::call_guard<py::gil_scoped_release>());
 #endif
+
+  module.def(
+      "_compute_bucket_assignment_by_size",
+      &::c10d::compute_bucket_assignment_by_size,
+      py::arg("tensors"),
+      py::arg("bucket_size"),
+      py::call_guard<py::gil_scoped_release>());
 
   Py_RETURN_TRUE;
 }

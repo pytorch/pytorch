@@ -735,6 +735,7 @@ if __name__ == '__main__':
                 'cuda/*.pyi',
                 'optim/*.pyi',
                 'autograd/*.pyi',
+                'utils/data/*.pyi',
                 'lib/*.so*',
                 'lib/*.dylib*',
                 'lib/*.dll',

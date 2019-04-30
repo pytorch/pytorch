@@ -179,6 +179,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bernoulli_
    .. automethod:: bincount
    .. automethod:: bmm
+   .. automethod:: bool
    .. automethod:: byte
    .. automethod:: btrifact
    .. automethod:: btrifact_with_info
@@ -188,6 +189,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ceil_
    .. automethod:: char
    .. automethod:: cholesky
+   .. automethod:: cholesky_inverse
    .. automethod:: cholesky_solve
    .. automethod:: chunk
    .. automethod:: clamp
@@ -277,6 +279,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_select
    .. automethod:: indices
    .. automethod:: int
+   .. automethod:: int_repr
    .. automethod:: inverse
    .. automethod:: irfft
    .. automethod:: is_contiguous
@@ -308,6 +311,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lt
    .. automethod:: lt_
    .. automethod:: lu
+   .. automethod:: lu_solve
    .. automethod:: map_
    .. automethod:: masked_scatter_
    .. automethod:: masked_scatter
@@ -367,6 +371,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
+   .. automethod:: repeat_interleave
    .. automethod:: requires_grad
    .. automethod:: requires_grad_
    .. automethod:: reshape
@@ -423,6 +428,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: t
    .. automethod:: t_
    .. automethod:: to
+   .. automethod:: to_mkldnn
    .. automethod:: take
    .. automethod:: tan
    .. automethod:: tan_
@@ -448,6 +454,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unfold
    .. automethod:: uniform_
    .. automethod:: unique
+   .. automethod:: unique_consecutive
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
    .. automethod:: values

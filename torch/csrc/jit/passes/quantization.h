@@ -10,10 +10,6 @@
 namespace torch {
 namespace jit {
 
-/** \brief Replace all FakeQuant nodes with corresponding Quant-Dequant nodes
- * pair. */
-TORCH_API void ExpandFakeQuantNodes(std::shared_ptr<Graph>& graph);
-
 /** \brief Propagates QParams through nodes that are not supposed to change it.
  *
  * An example of such node is `Split`: even though the observed distribution
@@ -34,18 +30,19 @@ TORCH_API void InsertObserverNodes(
     std::shared_ptr<Graph>& graph,
     Node* observer_node);
 
-/** \brief Inserts fake-quant nodes.
+/** \brief Inserts quant-dequant nodes.
  *
  * This actually changes the numerical semantics of the original model and thus
  * we only run it when user explicitly wants that. This pass essentially
- * performs quantization of the model - later passes only cleanup the IR and
+ * performs quantization of the model by inserting quant-dequant node pairs for
+ * quantizatable tensors - later passes only cleanup the IR and
  * make sure the model runs faster/consumes less memory.
  *
  * TODO: This should also take a qparam-map as an input.
  */
-TORCH_API void InsertFakeQuantNodes(std::shared_ptr<Graph>& graph);
+TORCH_API void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph);
 
-/** \brief Check that all expected optimizations after fake-quant nodes
+/** \brief Check that all expected optimizations after quant-dequant nodes
  * insertion actually happened.
  *
  * Even though semantically it would be correct to just execute the initial

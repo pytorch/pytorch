@@ -56,8 +56,8 @@ setup_linux_system_environment: &setup_linux_system_environment
 
     cat /etc/apt/sources.list
 
-    ps ax | grep apt
-    ps ax | grep dpkg
+    ps auxfww | grep [a]pt
+    ps auxfww | grep dpkg
 
 install_doc_push_script: &install_doc_push_script
   name: Install the doc push script
@@ -109,6 +109,9 @@ install_doc_push_script: &install_doc_push_script
     export PATH=/opt/conda/bin:$PATH
 
     rm -rf pytorch || true
+
+    # Install TensorBoard in python 3 so torch.utils.tensorboard classes render
+    pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
 
     # Get all the documentation sources, put them in one place
     pushd "\$pt_checkout"
@@ -223,6 +226,7 @@ setup_ci_environment: &setup_ci_environment
       linux-image-generic \
       moreutils \
       docker-ce=5:18.09.4~3-0~ubuntu-xenial \
+      nvidia-container-runtime=2.0.0+docker18.09.4-1 \
       nvidia-docker2=2.0.3+docker18.09.4-1 \
       expect-dev
 

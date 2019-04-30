@@ -151,7 +151,6 @@ auto result_ = (${first}).${name}(${args_with_tensor_options});
 
 CONSTRUCTOR = CodeTemplate("""\
 [](Stack & stack) {
-    autograd::profiler::RecordFunction record("${name}");
     ${lvalues}
     ${call}
     drop(stack, ${num_inputs});
@@ -358,7 +357,7 @@ def gen_jit_dispatch(declarations, out, template_path):
             # device is specified as an IntArrayRef of { at::Device::Type, device_id }
             {'name': 'device', 'simple_type': 'Device'},
             # pin_memory is specified as a boolean
-            {'name': 'pin_memory', 'simple_type': 'bool'},
+            {'name': 'pin_memory', 'simple_type': 'bool', 'default': False},
         ]
         # TODO: Don't repack this into TensorOptions. Needs various changes in downstream code.
         if 'default' in arg:

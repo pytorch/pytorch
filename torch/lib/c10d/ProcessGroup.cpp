@@ -29,9 +29,7 @@ void ProcessGroup::Work::synchronize() {}
 
 void ProcessGroup::Work::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
-  while (!completed_) {
-    cv_.wait(lock);
-  }
+  cv_.wait(lock, [&] { return completed_; });
   if (exception_) {
     std::rethrow_exception(exception_);
   }
@@ -39,9 +37,10 @@ void ProcessGroup::Work::wait() {
 }
 
 void ProcessGroup::Work::finish(std::exception_ptr exception) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
   exception_ = exception;
+  lock.unlock();
   cv_.notify_all();
 }
 

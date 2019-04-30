@@ -7,13 +7,13 @@ TorchScript
 .. currentmodule:: torch.jit
 
 TorchScript is a way to create serializable and optimizable models from PyTorch code.
-Any code written in TorchScript can be saved from your Python
+Any code written in TorchScript can be saved from a Python
 process and loaded in a process where there is no Python dependency.
 
-We provide tools to incrementally transition a model from being a pure Python program
+We provide tools to incrementally transition a model from a pure Python program
 to a TorchScript program that can be run independently from Python, for instance, in a standalone C++ program.
 This makes it possible to train models in PyTorch using familiar tools and then export
-the model to a production environment where it is not a good idea to run models as Python programs
+the model via TorchScript to a production environment where it is not a good idea to run models as Python programs
 for performance and multi-threading reasons.
 
 Creating TorchScript Code
@@ -23,20 +23,7 @@ Creating TorchScript Code
 .. autoclass:: ScriptModule
     :members:
 
-    .. method:: save(filename)
-
-       Save an offline version of this module for use in a separate process. The saved
-       module serializes all of the methods and parameters of this module. It can be
-       loaded into the C++ API using ``torch::jit::load(filename)`` or into the Python
-       API with ``torch.jit.load(filename)``.
-
-       To be able to save a module, it must not make any calls to native python functions.
-       This means that all submodules must be subclasses of ScriptModules as well.
-
-       .. DANGER::
-          All modules, no matter their device, are always loaded onto the CPU during loading.
-          This is different from :func:`torch.load`'s semantics and may change in the future.
-
+.. autofunction:: save
 
 .. autofunction:: load
 
@@ -46,18 +33,16 @@ Creating TorchScript Code
 Mixing Tracing and Scripting
 ----------------------------
 
-In many cases either tracing or script is an easier approach for converting a model.
+In many cases either tracing or scripting is an easier approach for converting a model to TorchScript.
 We allow you to compose tracing and scripting to suit the particular requirements
 of a part of a model.
 
-Scripted functions can call traced ones. This is particularly useful when you need
+Scripted functions can call traced functions. This is particularly useful when you need
 to use control-flow around a simple feed-forward model. For instance the beam search
 of a sequence to sequence model will typically be written in script but can call an
 encoder module generated using tracing.
 
-Example:
-
-::
+Example::
 
     import torch
 
@@ -74,9 +59,7 @@ a model requires some control-flow even though most of the model is just a feed-
 network. Control-flow inside of a script function called by a traced function is
 preserved correctly:
 
-Example:
-
-::
+Example::
 
     import torch
 
@@ -92,14 +75,12 @@ Example:
     def bar(x, y, z):
         return foo(x, y) + z
 
-    traced_bar = torch.jit.trace(bar, (torch.rand(3), torch.rand(3), torch.rand(3))
+    traced_bar = torch.jit.trace(bar, (torch.rand(3), torch.rand(3), torch.rand(3)))
 
-This composition also works for modules as well, where it can be used to generate
+This composition also works for ``ScriptModule``\s as well, where it can be used to generate
 a submodule using tracing that can be called from the methods of a script module:
 
-Example:
-
-::
+Example::
 
     import torch
     import torchvision
@@ -120,21 +101,21 @@ Example:
 TorchScript Language Reference
 -------------------------------
 
-TorchScript is a subset of Python that can either be written directly (using
-the @script annotations) or generated automatically from Python code via
+TorchScript is a statically typed subset of Python that can either be written directly (using
+the ``@torch.jit.script`` decorator) or generated automatically from Python code via
 tracing. When using tracing, code is automatically converted into this subset of
 Python by recording only the actual operators on tensors and simply executing and
 discarding the other surrounding Python code.
 
-When writing TorchScript directly using @script annotations, the programmer must
+When writing TorchScript directly using ``@torch.jit.script`` decorator, the programmer must
 only use the subset of Python supported in TorchScript. This section documents
 what is supported in TorchScript as if it were a language reference for a stand
 alone language. Any features of Python not mentioned in this reference are not
 part of TorchScript.
 
 As a subset of Python any valid TorchScript function is also a valid Python
-function. This makes it possible to remove the @script annotations and debug the
-function using standard Python tools like pdb. The reverse is not true: there
+function. This makes it possible to remove the ``@torch.jit.script`` decorator and debug the
+function using standard Python tools like ``pdb``. The reverse is not true: there
 are many valid python programs that are not valid TorchScript programs.
 Instead, TorchScript focuses specifically on the features of Python that are
 needed to represent neural network models in Torch.
@@ -154,30 +135,18 @@ The largest difference between TorchScript and the full Python language is that
 TorchScript only supports a small set of types that are needed to express neural
 net models. In particular, TorchScript supports:
 
-``Tensor``
-    A PyTorch tensor of any dtype, dimension, or backend.
+.. csv-table::
+   :header: "Type", "Description"
 
-``Tuple[T0, T1, ...]``
-    A tuple containing subtypes ``T0``, ``T1``, etc. (e.g. ``Tuple[Tensor, Tensor]``)
+   "``Tensor``", "A PyTorch tensor of any dtype, dimension, or backend"
+   "``Tuple[T0, T1, ...]``", "A tuple containing subtypes ``T0``, ``T1``, etc. (e.g. ``Tuple[Tensor, Tensor]``)"
+   "``bool``", "A boolean value"
+   "``int``", "A scalar integer"
+   "``float``", "A scalar floating point number"
+   "``List[T]``", "A list of which all members are type ``T``"
+   "``Optional[T]``", "A value which is either None or type ``T``"
+   "``Dict[K, V]``", "A dict with key type ``K`` and value type ``V``. Only ``str``, ``int``, and ``float`` are allowed as key types."
 
-``bool``
-    A boolean value
-
-``int``
-    A scalar integer
-
-``float``
-    A scalar floating point number
-
-``List[T]``
-    A list of which all members are type ``T``
-
-``Optional[T]``
-    A value which is either None or type ``T``
-
-``Dict[K, V]``
-    A dict with key type ``K`` and value type ``V``. Only ``str``, ``int``, and
-    ``float`` are allowed as key types.
 
 Unlike Python, each variable in TorchScript function must have a single static type.
 This makes it easier to optimize TorchScript functions.
@@ -645,7 +614,7 @@ Python-defined Constants
                    super(Foo, self).__init__(False)
                    self.a = 1 + 4
 
-              @torch.jit.ScriptModule
+              @torch.jit.script_method
               def forward(self, input):
                   return self.a + input
 
@@ -770,34 +739,34 @@ Interpreting Graphs
 
     The example script above produces the graph::
 
-	graph(%len : int) {
-	  %15 : int = prim::Constant[value=1]()
-	  %9 : bool = prim::Constant[value=1]()
-	  %7 : Device = prim::Constant[value="cpu"]()
-	  %6 : int = prim::Constant[value=0]()
-	  %5 : int = prim::Constant[value=6]()
-	  %1 : int = prim::Constant[value=3]()
-	  %2 : int = prim::Constant[value=4]()
-	  %11 : int = prim::Constant[value=10]()
-	  %14 : float = prim::Constant[value=1]()
-	  %4 : int[] = prim::ListConstruct(%1, %2)
-	  %rv.1 : Tensor = aten::zeros(%4, %5, %6, %7)
-	  %rv : Tensor = prim::Loop(%len, %9, %rv.1)
-	    block0(%i : int, %13 : Tensor) {
-	      %12 : bool = aten::lt(%i, %11)
-	      %rv.4 : Tensor = prim::If(%12)
-		block0() {
-		  %rv.2 : Tensor = aten::sub(%13, %14, %15)
-		  -> (%rv.2)
-		}
-		block1() {
-		  %rv.3 : Tensor = aten::add(%13, %14, %15)
-		  -> (%rv.3)
-		}
-	      -> (%9, %rv.4)
-	    }
-	  return (%rv);
-	}
+        graph(%len : int) {
+          %15 : int = prim::Constant[value=1]()
+          %9 : bool = prim::Constant[value=1]()
+          %7 : Device = prim::Constant[value="cpu"]()
+          %6 : int = prim::Constant[value=0]()
+          %5 : int = prim::Constant[value=6]()
+          %1 : int = prim::Constant[value=3]()
+          %2 : int = prim::Constant[value=4]()
+          %11 : int = prim::Constant[value=10]()
+          %14 : float = prim::Constant[value=1]()
+          %4 : int[] = prim::ListConstruct(%1, %2)
+          %rv.1 : Tensor = aten::zeros(%4, %5, %6, %7)
+          %rv : Tensor = prim::Loop(%len, %9, %rv.1)
+            block0(%i : int, %13 : Tensor) {
+              %12 : bool = aten::lt(%i, %11)
+              %rv.4 : Tensor = prim::If(%12)
+                block0() {
+                  %rv.2 : Tensor = aten::sub(%13, %14, %15)
+                  -> (%rv.2)
+                }
+                block1() {
+                  %rv.3 : Tensor = aten::add(%13, %14, %15)
+                  -> (%rv.3)
+                }
+              -> (%9, %rv.4)
+            }
+          return (%rv);
+        }
 
 
     Take the instruction ``%rv.1 : Dynamic = aten::zeros(%3, %4, %5, %6)`` for
@@ -850,39 +819,39 @@ Automatic Trace Checking
         traced = torch.jit.trace(loop_in_traced_fn, inputs, check_inputs=check_inputs)
 
     Gives us the following diagnostic information::
-	ERROR: Graphs differed across invocations!
-	Graph diff::
+        ERROR: Graphs differed across invocations!
+        Graph diff::
 
-		  graph(%x : Tensor) {
-		    %1 : int = prim::Constant[value=0]()
-		    %2 : int = prim::Constant[value=0]()
-		    %result.1 : Tensor = aten::select(%x, %1, %2)
-		    %4 : int = prim::Constant[value=0]()
-		    %5 : int = prim::Constant[value=0]()
-		    %6 : Tensor = aten::select(%x, %4, %5)
-		    %result.2 : Tensor = aten::mul(%result.1, %6)
-		    %8 : int = prim::Constant[value=0]()
-		    %9 : int = prim::Constant[value=1]()
-		    %10 : Tensor = aten::select(%x, %8, %9)
-		-   %result : Tensor = aten::mul(%result.2, %10)
-		+   %result.3 : Tensor = aten::mul(%result.2, %10)
-		?          ++
-		    %12 : int = prim::Constant[value=0]()
-		    %13 : int = prim::Constant[value=2]()
-		    %14 : Tensor = aten::select(%x, %12, %13)
-		+   %result : Tensor = aten::mul(%result.3, %14)
-		+   %16 : int = prim::Constant[value=0]()
-		+   %17 : int = prim::Constant[value=3]()
-		+   %18 : Tensor = aten::select(%x, %16, %17)
-		-   %15 : Tensor = aten::mul(%result, %14)
-		?     ^                                 ^
-		+   %19 : Tensor = aten::mul(%result, %18)
-		?     ^                                 ^
-		-   return (%15);
-		?             ^
-		+   return (%19);
-		?             ^
-		  }
+                  graph(%x : Tensor) {
+                    %1 : int = prim::Constant[value=0]()
+                    %2 : int = prim::Constant[value=0]()
+                    %result.1 : Tensor = aten::select(%x, %1, %2)
+                    %4 : int = prim::Constant[value=0]()
+                    %5 : int = prim::Constant[value=0]()
+                    %6 : Tensor = aten::select(%x, %4, %5)
+                    %result.2 : Tensor = aten::mul(%result.1, %6)
+                    %8 : int = prim::Constant[value=0]()
+                    %9 : int = prim::Constant[value=1]()
+                    %10 : Tensor = aten::select(%x, %8, %9)
+                -   %result : Tensor = aten::mul(%result.2, %10)
+                +   %result.3 : Tensor = aten::mul(%result.2, %10)
+                ?          ++
+                    %12 : int = prim::Constant[value=0]()
+                    %13 : int = prim::Constant[value=2]()
+                    %14 : Tensor = aten::select(%x, %12, %13)
+                +   %result : Tensor = aten::mul(%result.3, %14)
+                +   %16 : int = prim::Constant[value=0]()
+                +   %17 : int = prim::Constant[value=3]()
+                +   %18 : Tensor = aten::select(%x, %16, %17)
+                -   %15 : Tensor = aten::mul(%result, %14)
+                ?     ^                                 ^
+                +   %19 : Tensor = aten::mul(%result, %18)
+                ?     ^                                 ^
+                -   return (%15);
+                ?             ^
+                +   return (%19);
+                ?             ^
+                  }
 
 
     This message indicates to us that the computation differed between when
@@ -912,19 +881,19 @@ Automatic Trace Checking
 
     Which produces::
 
-	graph(%x : Tensor) {
-	  %5 : bool = prim::Constant[value=1]()
-	  %1 : int = prim::Constant[value=0]()
-	  %result.1 : Tensor = aten::select(%x, %1, %1)
-	  %4 : int = aten::size(%x, %1)
-	  %result : Tensor = prim::Loop(%4, %5, %result.1)
-	    block0(%i : int, %7 : Tensor) {
-	      %10 : Tensor = aten::select(%x, %1, %i)
-	      %result.2 : Tensor = aten::mul(%7, %10)
-	      -> (%5, %result.2)
-	    }
-	  return (%result);
-	}
+        graph(%x : Tensor) {
+          %5 : bool = prim::Constant[value=1]()
+          %1 : int = prim::Constant[value=0]()
+          %result.1 : Tensor = aten::select(%x, %1, %1)
+          %4 : int = aten::size(%x, %1)
+          %result : Tensor = prim::Loop(%4, %5, %result.1)
+            block0(%i : int, %7 : Tensor) {
+              %10 : Tensor = aten::select(%x, %1, %i)
+              %result.2 : Tensor = aten::mul(%7, %10)
+              -> (%5, %result.2)
+            }
+          return (%result);
+        }
 
 Tracer Warnings
 ^^^^^^^^^^^^^^^

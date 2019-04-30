@@ -1,43 +1,12 @@
 #include "import_source.h"
 
+#include <ATen/core/qualified_name.h>
 #include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/script/resolver.h>
 
 namespace torch {
 namespace jit {
 namespace script {
-
-// this is a much simpler accessor that only handles modules, parameters, and
-// and methods. It does not depend on python to work.
-struct ModuleAccessorValue : public SugaredValue {
-  ModuleAccessorValue(std::shared_ptr<Module> module)
-      : module(std::move(module)) {}
-  std::string kind() const override {
-    return "module";
-  }
-  // select an attribute on it, e.g. `this.field`
-  std::shared_ptr<SugaredValue> attr(
-      const SourceRange& loc,
-      Method& m,
-      const std::string& field) override {
-    if (NamedModule* v = module->find_module(field)) {
-      return std::make_shared<ModuleAccessorValue>(v->module);
-    } else if (NamedIValue* v = module->find_parameter(field)) {
-      return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
-    } else if (NamedIValue* v = module->find_buffer(field)) {
-      return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
-    } else if (script::NamedIValue* v = module->find_attribute(field)) {
-      return std::make_shared<script::SimpleValue>(
-          m.get_or_add_attribute(v->type(), v->slot()));
-    } else if (Method* m = module->find_method(field)) {
-      return std::make_shared<MethodValue>(shared_from_this(), *m);
-    } else {
-      throw ErrorReport(loc) << "unknown attr: " << field;
-    }
-  }
-
- private:
-  std::shared_ptr<Module> module;
-};
 
 struct OpsValue : public SugaredValue {
   OpsValue(size_t version) : version_(version) {}
@@ -46,7 +15,7 @@ struct OpsValue : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       const std::string& field) override {
     return std::make_shared<BuiltinModule>(field, version_);
   }
@@ -59,9 +28,34 @@ struct ConstantValue : public SugaredValue {
   std::string kind() const override {
     return "constant";
   }
-  Value* asValue(const SourceRange& loc, Method& m) override {
+  Value* asValue(const SourceRange& loc, Function& m) override {
     return m.graph()->insertConstant(value_);
   }
+};
+
+// Represents nested class namespaces, like `foo.bar.Baz`.
+// Right now these namespaces can only contain other namespaces or a class type.
+struct TORCH_API ClassNamespaceValue : public SugaredValue {
+  explicit ClassNamespaceValue(c10::QualifiedName name)
+      : basename_(std::move(name)) {}
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& name) override {
+    auto fullName = c10::QualifiedName(basename_, name);
+    if (auto classType = ClassType::get(fullName)) {
+      return std::make_shared<ClassValue>(classType);
+    }
+
+    return std::make_shared<ClassNamespaceValue>(std::move(fullName));
+  }
+  std::string kind() const override {
+    return "Class Namespace";
+  }
+
+ private:
+  c10::QualifiedName basename_;
 };
 
 // This value maps attributes CONSTANTS.c0 CONSTANTS.c1 to entries
@@ -75,7 +69,7 @@ struct ConstantTableValue : public SugaredValue {
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Method& m,
+      Function& m,
       const std::string& field) override {
     const char* field_s = field.c_str();
     char* end;
@@ -95,16 +89,17 @@ struct ConstantTableValue : public SugaredValue {
   ArrayRef<at::Tensor> constants_;
 };
 
-// Helper that contains the state for a parsing a TorchScript source string.
-struct SourceImporter {
-  SourceImporter(
-      const std::string& src,
-      const std::vector<at::Tensor>& constant_table)
-      : parser_(src), constant_table_(constant_table) {
-    const auto version = parseVersionNumber();
+// A resolver that doesn't rely on Python, and understands references to model
+// constants.
+struct SourceResolver : public Resolver {
+  explicit SourceResolver(
+      size_t version,
+      const std::vector<at::Tensor>& constant_table) {
     env_ = {
         {"torch", std::make_shared<BuiltinModule>("aten", version)},
         {"ops", std::make_shared<OpsValue>(version)},
+        // Constants present in the model. Used to resolve "CONSTANTS.n" to the
+        // actual value
         {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
         {"fork", std::make_shared<ForkValue>()},
         {"annotate", std::make_shared<AnnotateValue>()},
@@ -115,29 +110,85 @@ struct SourceImporter {
          std::make_shared<ConstantValue>(
              std::numeric_limits<double>::quiet_NaN())},
     };
-
-    resolver_ = [&](const std::string& name,
-                    Method& m,
-                    const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
-      auto it = env_.find(name);
-      if (it == env_.end()) {
-        return nullptr;
-      }
-      return it->second;
-    };
   }
 
-  Parser parser_;
-  // Constants present in the model. Used to resolve "CONSTANTS.n" to the actual
-  // value
-  const std::vector<at::Tensor>& constant_table_;
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) const override {
+    auto it = env_.find(name);
+    if (it != env_.end()) {
+      return it->second;
+    }
+
+    if (name == "__torch__") {
+      return std::make_shared<ClassNamespaceValue>(c10::QualifiedName(name));
+    }
+    return nullptr;
+  }
+
+  TypePtr resolveType(const std::string& name) const override {
+    return ClassType::get(c10::QualifiedName(name));
+  }
+
+ private:
   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
-  std::function<std::shared_ptr<
-      SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>
-      resolver_;
+};
+
+struct SourceImporter {
+  SourceImporter(
+      const std::string& src,
+      const std::vector<at::Tensor>& constant_table,
+      const std::function<void(const std::string&)>& import_callback)
+      : p_(src),
+        import_callback_(import_callback),
+        constant_table_(constant_table) {
+    version_ = parseVersionNumber();
+    resolver_ = std::make_shared<SourceResolver>(version_, constant_table_);
+  }
+
+  void importLibs(const std::string& class_qualifier) {
+    auto& L = p_.lexer();
+
+    while (L.cur().kind != TK_EOF) {
+      parseImportsAndDoCallback();
+
+      std::vector<Def> definitions;
+      std::vector<ResolverPtr> resolvers;
+      auto class_def = ClassDef(p_.parseClass());
+      for (const auto& method_def : class_def.defs()) {
+        definitions.emplace_back(method_def);
+        resolvers.emplace_back(resolver_);
+      }
+
+      auto cu = std::make_shared<CompilationUnit>();
+      const auto qualified_classname =
+          class_qualifier + "." + class_def.name().name();
+      auto class_type =
+          ClassType::create(c10::QualifiedName(qualified_classname), cu);
+      auto self = [&](Value* v) {
+        v->setType(class_type);
+        return std::make_shared<SimpleValue>(v);
+      };
+      cu->define(definitions, resolvers, self);
+    }
+  }
+
+  void importFunctions(CompilationUnit& cu, const Self& self) {
+    parseImportsAndDoCallback();
+
+    std::vector<Def> definitions;
+    std::vector<ResolverPtr> resolvers;
+    while (p_.lexer().cur().kind != TK_EOF) {
+      auto def = Def(p_.parseFunction(/*is_method=*/bool(self)));
+      definitions.emplace_back(def);
+      resolvers.emplace_back(resolver_);
+    }
+    cu.define(definitions, resolvers, self);
+  }
 
   size_t parseVersionNumber() {
-    auto& L = parser_.lexer();
+    auto& L = p_.lexer();
     auto range = L.cur().range;
     auto name = L.expect(TK_IDENT).text();
     L.expect('=');
@@ -151,45 +202,73 @@ struct SourceImporter {
           << "expected an integral version but found " << version.text();
     return size_t(version.asIntegral());
   }
+
+  void parseImportsAndDoCallback() {
+    // Gather all imports
+    auto& L = p_.lexer();
+    std::vector<std::string> imports;
+    while (L.nextIf(TK_IMPORT)) {
+      std::ostringstream s;
+      while (L.cur().kind != TK_NEWLINE) {
+        s << L.cur().text();
+        L.next();
+      }
+      L.expect(TK_NEWLINE);
+      const auto str = s.str();
+      AT_ASSERT(!str.empty());
+      imports.push_back(str);
+    }
+
+    // Call the callback to actually compile them
+    for (const auto& import : imports) {
+      if (import_callback_) {
+        import_callback_(import);
+      }
+    }
+  }
+
+ private:
+  Parser p_;
+  size_t version_;
+  const std::function<void(const std::string&)>& import_callback_;
+  const std::vector<at::Tensor>& constant_table_;
+  std::shared_ptr<SourceResolver> resolver_;
 };
+
+void import_functions(
+    CompilationUnit& cu,
+    const std::string& src,
+    const std::vector<at::Tensor>& constant_table,
+    const Self& self,
+    const std::function<void(const std::string&)>& import_callback) {
+  SourceImporter importer(src, constant_table, import_callback);
+  importer.importFunctions(cu, self);
+}
 
 void import_methods(
     const std::shared_ptr<Module>& mod,
     const std::string& src,
-    const std::vector<at::Tensor>& constant_table) {
-  SourceImporter importer(src, constant_table);
-  auto& p = importer.parser_;
-
-  std::vector<Def> definitions;
-  std::vector<Resolver> resolvers;
-  while (p.lexer().cur().kind != TK_EOF) {
-    auto def = Def(p.parseFunction(/*is_method=*/true));
-    definitions.emplace_back(def);
-    resolvers.emplace_back(importer.resolver_);
-  }
-  auto self = std::make_shared<ModuleAccessorValue>(mod);
-  defineMethodsInModule(mod, definitions, resolvers, Self(self));
+    const std::vector<at::Tensor>& constant_table,
+    const std::function<void(const std::string&)>& import_callback) {
+  auto self = [&](Value* v) {
+    v->setType(mod->module_object()->type());
+    return std::make_shared<SimpleValue>(v);
+  };
+  import_functions(
+      mod->module_object()->type()->compilation_unit(),
+      src,
+      constant_table,
+      self,
+      import_callback);
 }
 
 void import_libs(
+    const std::string& class_qualifier,
     const std::string& src,
-    const std::vector<at::Tensor>& constant_table) {
-  SourceImporter importer(src, constant_table);
-  auto& p = importer.parser_;
-
-  while (p.lexer().cur().kind != TK_EOF) {
-    std::vector<Def> definitions;
-    std::vector<Resolver> resolvers;
-    auto class_def = ClassDef(p.parseClass());
-    for (const auto& method_def : class_def.defs()) {
-      definitions.emplace_back(method_def);
-      resolvers.emplace_back(importer.resolver_);
-    }
-
-    auto mod = std::make_shared<Module>();
-    Self self(ClassType::create(class_def.name().name(), mod));
-    defineMethodsInModule(mod, definitions, resolvers, self);
-  }
+    const std::vector<at::Tensor>& constant_table,
+    const std::function<void(const std::string&)>& import_callback) {
+  SourceImporter importer(src, constant_table, import_callback);
+  importer.importLibs(class_qualifier);
 }
 
 } // namespace script

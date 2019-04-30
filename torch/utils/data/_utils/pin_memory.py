@@ -5,6 +5,7 @@ These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
 """
 
+import sys
 import torch
 from torch._six import queue, container_abcs, string_classes
 from . import MP_STATUS_CHECK_INTERVAL, ExceptionWrapper

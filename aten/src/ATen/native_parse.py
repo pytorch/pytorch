@@ -202,7 +202,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
             {'name': 'dtype', 'type': 'ScalarType', 'is_nullable': False, 'annotation': None},
             {'name': 'layout', 'type': 'Layout', 'is_nullable': False, 'annotation': None},
             {'name': 'device', 'type': 'Device', 'is_nullable': False, 'annotation': None},
-            {'name': 'pin_memory', 'type': 'bool', 'is_nullable': False, 'annotation': None},
+            {'name': 'pin_memory', 'type': 'bool', 'is_nullable': False, 'annotation': None, 'default': False},
         ]
     ]
     supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[0]))
@@ -211,6 +211,19 @@ def parse_arguments(args, func_variants, declaration, func_return):
     supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[1]))
     for arg in supported_topt_arguments[2]:
         arg.update({'default': 'c10::nullopt', 'is_nullable': True})
+    # add explicit support for what is needed for tril_indices / triu_indices
+    supported_topt_arguments.append(
+        [
+            {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True,
+             'default': 'long', 'is_nullable': True},
+            {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+        ]
+    )
 
     corresponding_topts = [
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None},
@@ -219,12 +232,13 @@ def parse_arguments(args, func_variants, declaration, func_return):
     corresponding_topts[1]['kwarg_only'] = True
     corresponding_topts.append(corresponding_topts[1].copy())
     corresponding_topts[2]['default'] = '{}'
+    corresponding_topts.append(
+        {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
+         'kwarg_only': True, 'default': 'at::kLong'})
 
     def check_topt_representation(topt_representation):
         for idx, supported_topt in enumerate(supported_topt_arguments):
-            matches = True
-            for i, topt in enumerate(supported_topt):
-                matches = matches and topt_representation[i] == topt
+            matches = all(topt_representation[i] == topt for i, topt in enumerate(supported_topt))
             if matches:
                 return corresponding_topts[idx]
         return None
@@ -337,13 +351,6 @@ def parse_return_arguments(return_decl, inplace, func_decl):
     return arguments
 
 
-def has_sparse_dispatches(dispatches):
-    for dispatch in dispatches:
-        if 'Sparse' in dispatch:
-            return True
-    return False
-
-
 def parse_native_yaml(path):
     with open(path, 'r') as f:
         return yaml.load(f, Loader=Loader)
@@ -379,7 +386,7 @@ def run(paths):
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['function'])
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
-                declaration['matches_jit_signature'] = func.get('matches_jit_signature', False)
+                declaration['matches_jit_signature'] = func.get('matches_jit_signature', True)
                 declaration['cpu_half'] = func.get('cpu_half', False)
                 declaration['cpu_bool'] = func.get('cpu_bool', False)
                 declaration['cuda_bool'] = func.get('cuda_bool', False)
