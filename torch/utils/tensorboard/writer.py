@@ -453,14 +453,13 @@ class SummaryWriter(object):
 
         Args:
             tag (string): Data identifier
-            vid_tensor (torch.Tensor): Video data. The value should in [0, 255] for type `uint8` or
-              [0, 1] for type `float`.
+            vid_tensor (torch.Tensor): Video data
             global_step (int): Global step value to record
             fps (float or int): Frames per second
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
         Shape:
-            vid_tensor: :math:`(N, T, C, H, W)`.
+            vid_tensor: :math:`(N, T, C, H, W)`. The values should lie in [0, 255] for type `uint8` or [0, 1] for type `float`.
         """
         self._get_file_writer().add_summary(
             video(tag, vid_tensor, fps), global_step, walltime)
