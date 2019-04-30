@@ -590,6 +590,134 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
 
 }
 
+std::tuple<Tensor, Tensor, Tensor> miopen_rnn_backward_input(
+	    const Tensor& input_r, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
+	    const Tensor& output_r, const Tensor& grad_output_r, const Tensor& grad_hy,
+	    const Tensor& grad_cy,
+	    int64_t fn_mode, int64_t fn_hidden_size,
+	    int64_t fn_num_layers, bool batch_first, double fn_dropout,
+	    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
+	    const Tensor& fn_dropout_state, const Tensor& fn_reserve,
+	    std::array<bool, 3> output_mask
+	    ) {
+	AT_ERROR("miopen_rnn_backward_input: not implemented yet.");
+
+	auto input = input_r;
+	auto grad_output = grad_output_r;
+	auto output = output_r;
+
+	RNNParams fn;
+	auto datatype = getMiopenDataType(input);
+	fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, datatype, miopenRNNwithBias);	// AF TODO: Check the bias bool
+	fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
+
+	auto handle = getMiopenHandle();
+
+	if(fn.rnn.mode != miopenLSTM) {
+		AT_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
+	}
+
+	auto is_input_packed = fn_batch_sizes.size() != 0;
+	if (batch_first && !is_input_packed) {
+		input = input.transpose(0, 1);
+		grad_output = grad_output.transpose(0, 1);
+		output = output.transpose(0, 1);
+	}
+
+	auto input_size = _input_size(fn.tensors);
+	auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
+	auto output_size = _output_size(fn.rnn, fn.tensors);
+
+	AT_CHECK(hx.is_contiguous(), "rnn: hx is not contiguous");
+	AT_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
+
+	auto x = input.contiguous();
+    auto dy = grad_output.contiguous();
+    auto y = output;
+    auto w = weight_buf;
+    auto dx = at::empty(input.sizes(), input.options());
+    auto dhy = grad_hy.contiguous().view(hidden_size);
+    auto dcy = grad_cy.defined() ? grad_cy.contiguous().view(hidden_size) : Tensor();
+    auto dhx = at::empty(hidden_size, hx.options());
+    AT_ASSERTM(cx.defined() || !output_mask[2], "illegally required grad of cx for non-LSTM RNN");
+    auto dcx = cx.defined() ? at::empty(hidden_size, cx.options()) : Tensor();
+
+    AT_CHECK(fn_train, "miopen RNN backward can only be called in training mode");
+
+    AT_CHECK(input.sizes().equals(input_size),
+		"Expected input size ", IntArrayRef{input_size}, ", got ", input.sizes());
+	AT_CHECK(output.sizes().equals(output_size),
+        "Expected output size ", IntArrayRef{output_size}, ", got ", output.sizes());
+
+	AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
+        "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
+	AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
+        "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
+	AT_CHECK(!dhy.defined() || dhy.sizes().equals(hidden_size),
+        "Expected d_hidden size ", IntArrayRef{hidden_size}, ", got ", dhy.sizes());
+	AT_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
+        "Expected d_cell size ", IntArrayRef{hidden_size}, ", got ", dcy.sizes());
+
+	AT_CHECK(dhy.is_hip() && dy.is_hip() && (!dcy.defined() || dcy.is_hip()),
+        "Gradients aren't HIP tensors");
+
+	miopenRNNAlgo_t algo = miopenRNNdefault;
+	fn.rnn.set_algo(algo);
+	RNNDescriptors descs(fn, handle, x, y, hx, cx);
+
+	FilterDescriptor w_desc;
+	w_desc.set(weight_buf, 3);
+
+	size_t workspace_size;
+	auto x_descs_arr = descs.get_x_descs();
+	auto y_descs_arr = descs.get_y_descs();
+
+	MIOPEN_CHECK(miopenGetRNNWorkspaceSize(
+        handle,
+        descs.rnn_desc.desc(),
+        fn.tensors.seq_length,
+        x_descs_arr.data(),
+        &workspace_size
+        ));
+	auto workspace = at::empty(workspace_size, input.options().dtype(kByte));
+
+	MIOPEN_CHECK(miopenRNNBackwardData(
+        handle,
+        descs.rnn_desc.desc(),
+        fn.tensors.seq_length,
+        y_descs_arr.data(), y.data_ptr(),
+        y_descs_arr.data(), dy.data_ptr(),
+        descs.hy_desc.desc(), dhy.data_ptr(),
+        descs.cy_desc.desc(), cx.defined() ? dcy.data_ptr() : nullptr,
+        w_desc.desc(), w.data_ptr(),
+        descs.hx_desc.desc(), hx.data_ptr(),
+        descs.cx_desc.desc(), cx.defined() ? cx.data_ptr() : nullptr,
+        x_descs_arr.data(), dx.data_ptr(),
+        descs.hx_desc.desc(), dhx.data_ptr(),
+        descs.cx_desc.desc(), cx.defined() ? dcx.data_ptr() : nullptr,
+        workspace.data_ptr(), workspace.size(0),
+        fn_reserve.data_ptr(), fn_reserve.size(0)
+        ));
+
+	if(batch_first && !is_input_packed) {
+		dx = dx.transpose_(0, 1);
+	}
+
+	return std::make_tuple(dx, dhx, dcx);
+}
+
+std::vector<Tensor> miopen_rnn_backward_weight(
+	    const Tensor& input_r, TensorList weight_arr, int64_t weight_stride0,
+	    const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
+	    const Tensor& output_r,
+	    int64_t fn_mode, int64_t fn_hidden_size,
+	    int64_t fn_num_layers, bool batch_first, double fn_dropout,
+	    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
+	    const Tensor& fn_dropout_state, const Tensor& fn_reserve
+	    ) {
+	AT_ERROR("miopen_rnn_backward_weight: not implemented yet.");
+}
+
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
         const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
         const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
