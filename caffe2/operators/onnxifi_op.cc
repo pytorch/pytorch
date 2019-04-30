@@ -204,7 +204,13 @@ std::vector<int> OnnxifiOp<CPUContext>::extractOutputBatchSizes() const {
           adjusted_output_batch.push_back(0);
           continue;
         } else {
-          CAFFE_THROW("Unknow output max batch size: ", max_output_batch_size);
+          if (permit_unknown_output_batch_size_) {
+            adjusted_output_batch.push_back(0);
+            continue;
+          } else {
+            CAFFE_THROW(
+                "Unknow output max batch size: ", max_output_batch_size);
+          }
         }
       }
       auto idx = it->second;
