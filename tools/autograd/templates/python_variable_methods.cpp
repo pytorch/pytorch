@@ -660,7 +660,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
 
 ${py_methods}
 
-static PyObject * THPVariable_tensor_to_python_bool_var(PyObject* self, PyObject* args) {
+static PyObject * THPVariable_bool_scalar(PyObject* self, PyObject* args) {
   jit::tracer::warn("Converting a tensor to a Python boolean", jit::tracer::WARN_PYTHON_DATAFLOW);
   return THPVariable_is_nonzero(self, args);
 }
@@ -678,12 +678,12 @@ PyMethodDef variable_methods[] = {
   {"__truediv__", (PyCFunction)THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__idiv__", (PyCFunction)THPVariable_div_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", (PyCFunction)THPVariable_remainder, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__bool__", (PyCFunction)THPVariable_tensor_to_python_bool_var, METH_NOARGS, NULL},
+  {"__bool__", (PyCFunction)THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__index__", (PyCFunction)THPVariable_index_scalar, METH_NOARGS, NULL},
-  {"__nonzero__", (PyCFunction)THPVariable_tensor_to_python_bool_var, METH_NOARGS, NULL},
+  {"__nonzero__", (PyCFunction)THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__invert__", (PyCFunction)THPVariable_invert, METH_NOARGS, NULL},
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
   {"_is_view", (PyCFunction)THPVariable__is_view, METH_NOARGS, NULL},
