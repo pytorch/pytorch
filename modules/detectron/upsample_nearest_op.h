@@ -175,8 +175,7 @@ public:
       Y_dims = {d0, d1, d2, d3};
     }
 
-    auto block_dims = X_.get_block_dims();
-    int c_blocking = X_.is_nhwc_format() ? Y_dims[1] : (block_dims ? block_dims[1] : 1);
+    int c_blocking = X_.is_nhwc_format() ? Y_dims[1] : X_.get_block_dims()[1];
     int nc_num = d0 * ceil(float(d1) / c_blocking);
    
     auto* Y = Output(OUTPUT);
