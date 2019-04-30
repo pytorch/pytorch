@@ -163,6 +163,9 @@
 #include <THNN/generic/SpatialUpSamplingBilinear.c>
 #include <TH/THGenerateFloatTypes.h>
 
+#include <THNN/generic/VolumetricAveragePooling.c>
+#include <TH/THGenerateFloatTypes.h>
+
 #include <THNN/generic/SpatialUpSamplingBicubic.c>
 #include <TH/THGenerateFloatTypes.h>
 
@@ -173,9 +176,6 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricDilatedConvolution.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricAdaptiveAveragePooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricDilatedMaxPooling.c>
