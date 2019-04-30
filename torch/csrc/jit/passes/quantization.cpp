@@ -66,7 +66,7 @@ Node* createDeQuantNode(Value* v, Node* n) {
 // Insert Quant-Dequant node pair for quantizable node outputs
 void addQuantDeQuantNodes(
     Value* v,
-    std::tuple<std::string, float, int>& qparam) {
+    const std::tuple<std::string, float, int>& qparam) {
   AT_ASSERT(v != nullptr);
   Node* n = v->node();
   Node* quant = createQuantNode(v, n);
