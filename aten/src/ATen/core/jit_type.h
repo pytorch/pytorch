@@ -1,10 +1,10 @@
 #pragma once
 
-#include <ATen/core/TensorMethods.h>
-#include <ATen/core/Type.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
 #include <caffe2/core/common.h>
 
@@ -226,6 +226,10 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 // with a particular type: v: Optional[int] = None()
 struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType, OptionalType> {
   static OptionalTypePtr create(TypePtr element) {
+    // Optional is a union of [None, T], so Optional[[Optional[T]]] -> Optional[T]
+    if (auto opt_ptr = element->cast<OptionalType>()) {
+      return opt_ptr;
+    }
     return OptionalTypePtr(new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(OptionalType);
@@ -1308,22 +1312,22 @@ using ::torch::jit::script::Function;
 struct CAFFE2_API ClassType : public Type {
   // Create a user type and register it globally.
   static ClassTypePtr create(
-      const std::string& name,
-      std::shared_ptr<CompilationUnit> module);
+      QualifiedName qualifiedName,
+      std::shared_ptr<CompilationUnit> cu);
 
   // Create a type representing a Module,
   // These do not have methods, and are not globally registered
   static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
 
   // returns nullptr if there is no type with that name
-  static ClassTypePtr get(const std::string& name);
+  static ClassTypePtr get(const QualifiedName& qualifiedName);
   // For testing: delete all registered types
   static void clearRegistry();
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
-      return typename_ == user_rhs->typename_;
+      return name_ == user_rhs->name_;
     }
     return false;
   }
@@ -1333,12 +1337,25 @@ struct CAFFE2_API ClassType : public Type {
     // same can subtype from each other.
     return *this == *rhs;
   }
+
   std::string str() const override {
-    return std::string("ClassType<") + typename_ + ">";
+    return std::string("ClassType<") + name_.name() + ">";
   }
 
   std::string python_str() const override {
-    return typename_;
+    return name_.qualifiedName();
+  }
+
+  std::string qualname() const {
+    return name_.qualifiedName();
+  }
+
+  std::string qualifier() const {
+    return name_.prefix();
+  }
+
+  std::string basename() const {
+    return name_.name();
   }
 
   TypePtr getAttribute(const std::string& name) const {
@@ -1374,10 +1391,6 @@ struct CAFFE2_API ClassType : public Type {
   const CompilationUnit& compilation_unit() const;
   std::vector<Function*> methods() const;
 
-
-  const std::string& name() const {
-    return typename_;
-  }
 
   size_t numAttributes() const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
@@ -1430,13 +1443,11 @@ struct CAFFE2_API ClassType : public Type {
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(std::string name, std::shared_ptr<CompilationUnit> cu)
-      : Type(TypeKind::ClassType),
-        typename_(std::move(name)),
-        compilation_unit_(std::move(cu)) {}
+  ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu);
 
-  // Name of type (note that this has to be globally unique).
-  std::string typename_;
+  // Fully qualified name of type (note that this has to be globally unique).
+  // Looks like: "foo.bar.Baz".
+  QualifiedName name_;
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
