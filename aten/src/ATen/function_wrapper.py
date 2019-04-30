@@ -234,6 +234,7 @@ TYPE_FORMAL_GENERIC = {
     'THSTensor*': 'SparseTensorRef',
     'THByteTensor*': 'Tensor &',
     'THIndexTensor*': 'Tensor &',
+    'THBoolTensor*': 'Tensor &',
     'THIntegerTensor*': 'Tensor &',
     'THDenseTensor*': 'Tensor &',
     'THDenseIndexTensor*': 'Tensor &',
@@ -248,7 +249,8 @@ TYPE_FORMAL_GENERIC = {
 DYNAMIC_TYPE = {
     'THTensor*': 'Tensor',
     'THSTensor*': 'SparseTensorRef',
-    'THByteTensor*': 'BoolTensor',
+    'THByteTensor*': 'ByteTensor',
+    'THBoolTensor*': 'BoolTensor',
     'THIndexTensor*': 'IndexTensor',
     'THIntegerTensor*': 'IntegerTensor',
     'THDenseTensor*': 'Tensor',
@@ -270,6 +272,7 @@ TYPE_RETURN = {
     'THTensor*': 'Tensor',
     'THIndexTensor*': 'Tensor',
     'THByteTensor*': 'Tensor',
+    'THBoolTensor*': 'Tensor',
     'THIntegerTensor*': 'Tensor',
     'THSTensor*': 'Tensor',
     'THDenseTensor*': 'Tensor',
@@ -295,6 +298,11 @@ CHECKED_CAST = {
             'checked_tensor_unwrap('
             '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${Backend}, ScalarType::Byte)'),
+    'THBoolTensor*':
+        CodeTemplate(
+            'checked_tensor_unwrap('
+            '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::Bool)'),
     'THIndexTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
@@ -340,6 +348,7 @@ CHECKED_USE = {
     'THSTensor*': '{}_',
     'THIndexTensor*': '{}_',
     'THByteTensor*': '{}_',
+    'THBoolTensor*': '{}_',
     'THIntegerTensor*': '{}_',
     'THDenseTensor*': '{}_',
     'THDenseIndexTensor*': '{}_',
@@ -357,6 +366,9 @@ ALLOC_NOARGS_WRAP = {
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
                      '${Backend}TensorId()).release()',
+    'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
+                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
+                     '${Backend}TensorId()).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
                      '${Backend}TensorId()).release()',
@@ -368,6 +380,7 @@ ALLOC_NOARGS_WRAP = {
 ALLOC_WRAP = {
     'THTensor*': '${arguments}',
     'THByteTensor*': '${arguments}',
+    'THBoolTensor*': '${arguments}',
     'THIndexTensor*': '${arguments}',
     'THIntegerTensor*': '${arguments}',
     'THDenseTensor*': '${arguments}',
@@ -773,8 +786,8 @@ def create_generic(top_env, declarations):
         # type: (List[AtFormal]) -> Optional[str]
         # dispatch to self if it's a parameter
         def is_any_tensor_type(formal):
-            return (formal['dynamic_type'] == 'Tensor' or formal['dynamic_type'] == 'BoolTensor'
-                    or formal['dynamic_type'] == 'IndexTensor')
+            return (formal['dynamic_type'] == 'Tensor' or formal['dynamic_type'] == 'ByteTensor'
+                    or formal['dynamic_type'] == 'IndexTensor' or formal['dynamic_type'] == 'BoolTensor')
 
         for formal in formals:
             if formal['name'] == 'self' and is_any_tensor_type(formal) and not formal.get('is_nullable', False):

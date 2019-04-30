@@ -33,11 +33,11 @@ class LeftRight final {
 public:
     LeftRight()
     : _writeMutex()
-    , _foregroundCounterIndex{0}
-    , _foregroundDataIndex{0}
+    , _foregroundCounterIndex(0)
+    , _foregroundDataIndex(0)
     , _counters{{{0}, {0}}}
     , _data{{{}, {}}}
-    , _inDestruction{false}
+    , _inDestruction(false)
     {}
 
     // Copying and moving would not be threadsafe.
