@@ -93,6 +93,21 @@ __global__ void indexing_backward_kernel(
 
 namespace at { namespace native {
 
+static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size, bool check_range=true) {
+//we don't need to check range in backward - if there were out of bounds indices forward should already have errored out 
+  if (index.numel() != 0 && check_range) {
+    auto max_idx = index.max().item<int64_t>();
+    auto min_idx = index.min().item<int64_t>();
+    if (max_idx >= dim_size) {
+      AT_INDEX_ERROR("index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+    }
+    if (min_idx < -dim_size) {
+      AT_INDEX_ERROR("index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+    }
+  }
+  return index.remainder(dim_size);
+}
+
 static std::tuple<Tensor, int64_t, int64_t, int64_t> 
 computeLinearIndex(const Tensor & src, TensorList indices) {
   auto strides = computeLinearStride(src);
@@ -152,12 +167,11 @@ static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t
 }
 
 
-    
-Tensor & index_put_cuda_(Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
+namespace {
+void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & value) {
   if (indices.size() > (size_t)self.dim()) {
     AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
-  if (accumulate) {
     auto value_ = value.contiguous();
     Tensor linearIndex, expandedValue, src;
     int64_t nElemBefore, strideBefore, sliceSize;
@@ -205,19 +219,13 @@ Tensor & index_put_cuda_(Tensor & self, TensorList indices, const Tensor & value
       strideBefore);
   });
   THCudaCheck(cudaGetLastError());
-  if (permuted) {
-     return self.copy_(src_.permute(inversePerm));
-  } else 
-     return self; 
-  } else {
-    return self;
-  }
-/*  auto info = make_info(self, indices);
-  auto iter = make_index_put_iterator(info, value);
-  index_put_stub(iter->device_type(), *iter, info.indexed_sizes, info.indexed_strides, accumulate);
-  return self;*/
+  if (permuted)
+     self.copy_(src_.permute(inversePerm));
 }
-}
-}
+
+REGISTER_CUDA_DISPATCH(index_put_accum_stub, &index_put_accum_kernel);
+} //anonymous
+} //at
+} //native
 
 

@@ -932,9 +932,6 @@
 
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
   variants: function, method
-  dispatch:
-    CPU: index_put_cpu_ 
-    CUDA: index_put_cuda_
 
 - func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
   variants: function, method

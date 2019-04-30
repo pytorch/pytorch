@@ -64,6 +64,8 @@ namespace at { namespace native {
 
 DEFINE_DISPATCH(index_stub);
 DEFINE_DISPATCH(index_put_stub);
+DEFINE_DISPATCH(index_put_accum_stub);
+REGISTER_NO_CPU_DISPATCH(index_put_accum_stub, index_put_accum_fn);
 
 static bool all_strides_match(TensorList tensors) {
   AT_ASSERT(tensors.size() >= 1);
@@ -154,6 +156,51 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   }
 }
 
+static AdvancedIndex make_info(Tensor self, TensorList orig) {
+  checkIndexTensorTypes(orig);
+  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
+  auto indices = expandTensors(self, orig);
+  // next broadcast all index tensors together
+  try {
+    indices = expand_outplace(indices);
+  } catch (std::exception& e) {
+    AT_INDEX_ERROR("shape mismatch: indexing tensors could not be broadcast together"
+                   " with shapes ", shapes_as_str(indices));
+  }
+  // add missing null Tensors so that it matches self.dim()
+  while (indices.size() < (size_t)self.dim()) {
+    indices.emplace_back();
+  }
+  // if the non-null indices are not all adjacent, transpose self and indices
+  // together so that they're adjacent at the front
+  if (!hasContiguousSubspace(indices)) {
+    std::tie(self, indices) = transposeToFront(self, indices);
+  }
+  // Ensure indices are on the same device as self
+  for (size_t i = 0; i < indices.size(); i++) {
+    if (indices[i].defined() && indices[i].device() != self.device()) {
+      indices[i] = indices[i].to(self.device());
+    }
+  }
+  return AdvancedIndex(self, indices);
+}
+
+static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
+  if (!is_expandable_to(value.sizes(), info.src.sizes())) {
+    AT_ERROR("shape mismatch: value tensor of shape ", value.sizes(),
+             " cannot be broadcast to indexing result of shape ", info.src.sizes());
+  }
+  auto builder = TensorIterator::Builder();
+  builder.dont_compute_common_dtype();
+  builder.dont_resize_outputs();
+  builder.add_output(info.src);
+  builder.add_input(value, info.src.type().backend(), info.src.scalar_type());
+  for (auto& index : info.indices) {
+    builder.add_input(index);
+  }
+  return builder.build();
+}
+
 static std::unique_ptr<TensorIterator> make_index_iterator(const AdvancedIndex& info) {
   auto builder = TensorIterator::Builder();
   builder.dont_compute_common_dtype();
@@ -180,10 +227,14 @@ Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, 
   return self.clone().index_put_(indices, value, accumulate);
 }
 
-Tensor & index_put_cpu_(Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
+Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
   if (indices.size() > (size_t)self.dim()) {
     AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
+  if (accumulate && self.type().device_type() == kCUDA) {
+      index_put_accum_stub(self.type().device_type(), self, indices, value);
+      return self;
+  } 
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
   index_put_stub(iter->device_type(), *iter, info.indexed_sizes, info.indexed_strides, accumulate);
