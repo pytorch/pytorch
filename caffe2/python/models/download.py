@@ -181,18 +181,28 @@ class ModelDownloader:
         debug_str = "get_c2_model debug:\n"
         model_dir = self._model_dir(model_name)
         if not os.path.exists(model_dir):
+            debug_str += "_download called on " + model_name + "\n"
             self._download(model_name)
 
         c2_predict_pb = os.path.join(model_dir, 'predict_net.pb')
+        # Log extra data to see why ParseFromString sometimes returns size = 0.
         debug_str += "c2_predict_pb path: " + c2_predict_pb + "\n"
+        if os.path.isfile(c2_predict_pb):
+            debug_str += "Exists with size = " + str(os.path.getsize(c2_predict_pb)) + "\n"
         c2_predict_net = caffe2_pb2.NetDef()
         with open(c2_predict_pb, 'rb') as f:
-            len_read = c2_predict_net.ParseFromString(f.read())
-            debug_str += "c2_predict_pb ParseFromString = " + str(len_read) + "\n"
+            read_data = f.read()
+            len_read = c2_predict_net.ParseFromString(read_data)
+            debug_str += "c2_predict_pb ParseFromString = " + str(len_read) + \
+                " file_bytes_len = " + str(len(read_data)) + "\n"
+            if len_read == 0:
+                debug_str += "file bytes data: " + str(read_data) + "\n"
         c2_predict_net.name = model_name
 
         c2_init_pb = os.path.join(model_dir, 'init_net.pb')
         debug_str += "c2_init_pb path: " + c2_init_pb + "\n"
+        if os.path.isfile(c2_init_pb):
+            debug_str += "Exists with size = " + str(os.path.getsize(c2_init_pb)) + "\n"
         c2_init_net = caffe2_pb2.NetDef()
         with open(c2_init_pb, 'rb') as f:
             len_read = c2_init_net.ParseFromString(f.read())
