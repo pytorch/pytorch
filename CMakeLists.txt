@@ -164,6 +164,8 @@ if (MSVC)
   endforeach(flag_var)
 endif(MSVC)
 
+# Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
+# applicable to mobile are disabled by this variable.
 if (ANDROID OR IOS)
   set(INTERN_BUILD_MOBILE ON)
 endif()
