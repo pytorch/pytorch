@@ -699,32 +699,34 @@ def trace(mod,
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
 
     import types
-    if (isinstance(inputs, dict) and
-        len(inputs.keys()) > 0 and
-            isinstance(inputs.keys()[0], types.MethodType)):
+    if (isinstance(inputs, dict)):
 
-        if not isinstance(mod, torch.nn.Module):
-            raise AttributeError("expected torch.nn.Module as the first argument")
+        inputs_keys = list(inputs.keys())
+        if (len(inputs_keys) > 0 and
+                isinstance(inputs_keys[0], types.MethodType)):
 
-        module = make_module(mod, _module_class, executor_options)
+            if not isinstance(mod, torch.nn.Module):
+                raise AttributeError("expected torch.nn.Module as the first argument")
 
-        for func, example_inputs in inputs.items():
+            module = make_module(mod, _module_class, executor_options)
 
-            if func.__self__ is not mod:
-                raise AttributeError("function's __self__ should be equal to module")
-            method_name = func.__name__
-            example_inputs = make_tuple(example_inputs)
-            module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
-            check_trace_method = module._c._get_method(method_name)
+            for func, example_inputs in inputs.items():
 
-            # Check the trace against new traces created from user-specified inputs
-            if check_trace:
-                if check_inputs is not None:
-                    _check_trace(check_inputs, func, executor_options, check_trace_method, check_tolerance, _force_outplace)
-                else:
-                    _check_trace([example_inputs], func, executor_options, check_trace_method, check_tolerance, _force_outplace)
+                if func.__self__ is not mod:
+                    raise AttributeError("function's __self__ should be equal to module")
+                method_name = func.__name__
+                example_inputs = make_tuple(example_inputs)
+                module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+                check_trace_method = module._c._get_method(method_name)
 
-            return module
+                # Check the trace against new traces created from user-specified inputs
+                if check_trace:
+                    if check_inputs is not None:
+                        _check_trace(check_inputs, func, executor_options, check_trace_method, check_tolerance, _force_outplace)
+                    else:
+                        _check_trace([example_inputs], func, executor_options, check_trace_method, check_tolerance, _force_outplace)
+
+                return module
 
     method_name = getattr(mod, '__name__', 'forward')
     func = mod
