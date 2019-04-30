@@ -165,6 +165,8 @@ if (MSVC)
   endforeach(flag_var)
 endif(MSVC)
 
+# Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
+# applicable to mobile are disabled by this variable.
 if (ANDROID OR IOS)
   set(INTERN_BUILD_MOBILE ON)
 endif()
@@ -180,7 +182,7 @@ if (BUILD_TORCH_MOBILE)
   set(BUILD_TORCH ON)
   set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
-  set(TORCH_MOBILE ON)
+  set(FEATURE_TORCH_MOBILE ON)
 endif()
 
 if (BUILD_ATEN_ONLY)
