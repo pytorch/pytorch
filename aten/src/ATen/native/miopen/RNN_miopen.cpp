@@ -816,6 +816,18 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
         const Tensor& reserve, std::array<bool, 4> output_mask
         ) {
     AT_ERROR("miopen_rnn_backward: not implemented yet.");
+
+    auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output);
+    auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx);
+    auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx)) : grad_cy_r;
+
+    Tensor dx, dhx, dcx;
+    std::tie(dx, dhx, dcx) = at::native::miopen_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});
+    std::vector<Tensor> dw;
+    if (output_mask[3]) {
+		dw = at::native::miopen_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve);
+    }
+    return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{dx, dhx, dcx, dw};
 }
 
 }} //namespace native.
