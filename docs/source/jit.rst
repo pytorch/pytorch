@@ -239,7 +239,7 @@ Example::
     return x
 
 
-User Defined Types
+Classes
 ^^^^^^^^^^^^^^^^^^^^^^^^
 Python classes can be used in TorchScript if they are annotated with ``@torch.jit.script``,
 similar to how you would declare a TorchScript function: ::
