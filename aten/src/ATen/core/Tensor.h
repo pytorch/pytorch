@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/Type.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/Scalar.h>
@@ -240,6 +241,9 @@ class CAFFE2_API Tensor {
 
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
+
+  /// Returns if a `Tensor` is mkldnn tensor.
+  bool is_mkldnn() const;
 
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;

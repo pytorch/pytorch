@@ -34,11 +34,11 @@ public:
     template<class... Args>
     explicit LeftRight(const Args& ...args)
     : _writeMutex()
-    , _foregroundCounterIndex{0}
-    , _foregroundDataIndex{0}
+    , _foregroundCounterIndex(0)
+    , _foregroundDataIndex(0)
     , _counters{{{0}, {0}}}
     , _data{{{T{args...}}, {T{args...}}}}
-    , _inDestruction{false}
+    , _inDestruction(false)
     {}
 
     // Copying and moving would not be threadsafe.
