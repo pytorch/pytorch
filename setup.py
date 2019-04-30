@@ -583,10 +583,16 @@ main_sources = ["torch/csrc/stub.cpp"]
 # before libcaffe2.so in the linker command.
 main_link_args.extend(CAFFE2_LIBS)
 
+install_requires=[]
+
+if sys.version_info[0] == 2:
+    install_requires += ['future']
+
 try:
     import numpy as np
     NUMPY_INCLUDE_DIR = np.get_include()
     USE_NUMPY = True
+    install_requires += ['numpy']
 except ImportError:
     USE_NUMPY = False
 
@@ -726,6 +732,7 @@ if __name__ == '__main__':
         cmdclass=cmdclass,
         packages=packages,
         entry_points=entry_points,
+        install_requires=install_requires,
         package_data={
             'torch': [
                 'py.typed',
