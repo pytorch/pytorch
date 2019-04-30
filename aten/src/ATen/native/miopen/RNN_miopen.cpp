@@ -716,6 +716,96 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 	    const Tensor& fn_dropout_state, const Tensor& fn_reserve
 	    ) {
 	AT_ERROR("miopen_rnn_backward_weight: not implemented yet.");
+
+	MatrixRef<Tensor> weight{ weight_arr, static_cast<size_t>(weight_stride0) };
+
+	auto input = input_r;
+	auto output = output_r;
+
+	RNNParams fn;
+	auto datatype = getMiopenDataType(input);
+	miopenRNNBiasMode_t bias_mode = (weight_stride0 == 4) ? miopenRNNwithBias : miopenRNNNoBias;
+	fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, datatype, bias_mode);
+	fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
+
+	auto handle = getMiopenHandle();
+
+	if (fn.rnn.mode != CUDNN_LSTM) {
+		AT_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
+	}
+
+	auto is_input_packed = fn_batch_sizes.size() != 0;
+	if (batch_first && !is_input_packed) {
+		input = input.transpose(0, 1);
+		output = output.transpose(0, 1);
+	}
+
+	auto input_size = _input_size(fn.tensors);
+	auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
+
+	AT_CHECK(fn_train, "miopen RNN backward can only be called in training mode");
+
+	AT_CHECK(input.sizes().equals(input_size),
+		"Expected input size ", IntArrayRef{input_size}, ", got ", input.sizes());
+	AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
+		"Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
+
+	AT_CHECK(hx.is_contiguous(), "rnn: hx is not contiguous");
+	AT_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
+
+	auto x = input.contiguous();
+	const auto& y = output;
+	auto dw = at::zeros(weight_buf.sizes(), weight_buf.options());
+
+	miopenRNNAlgo_t algo = miopenRNNdefault;
+	fn.rnn.set_algo(algo);
+	RNNDescriptors descs(fn, handle, x, y, hx, cx);
+
+	FilterDescriptor w_desc;
+	w_desc.set(weight_buf, 3);
+
+	size_t workspace_size;
+	auto x_descs_arr = descs.get_x_descs();
+	auto y_descs_arr = descs.get_y_descs();
+
+	MIOPEN_CHECK(miopenGetRNNWorkspaceSize(
+		handle,
+		descs.rnn_desc.desc(),
+		fn.tensors.seq_length,
+		x_descs_arr.data(),
+		&workspace_size
+		));
+	auto workspace = at::empty(workspace_size, input.options().dtype(kByte));
+
+	MIOPEN_CHECK(miopenRNNBackwardWeights(
+		handle,
+		descs.rnn_desc.desc(),
+		fn.tensors.seq_length,
+		x_descs_arr.data(), x.data_ptr(),
+		descs.hx_desc.desc(), hx.data_ptr(),
+		y_descs_arr.data(), y.data_ptr(),
+		w_desc.desc(), dw.data_ptr(),
+		workspace.data_ptr(), workspace.size(0),
+		n_reserve.data_ptr(), fn_reserve.size(0)
+		));
+
+	std::vector<Tensor> grad_params_arr;
+	size_t grad_params_stride0;
+	std::tie(grad_params_arr, grad_params_stride0) = get_parameters(handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, dw);
+	if (grad_params_stride0 == static_cast<size_t>(weight_stride0)) {
+		_viewParams(MatrixRef<Tensor>{grad_params_arr, grad_params_stride0},
+			MatrixRef<Tensor>{weight_arr, static_cast<size_t>(weight_stride0)});
+		return grad_params_arr;
+	} else {
+		std::vector<Tensor> grad_weight_arr;
+		grad_weight_arr.reserve( weight.numel() );
+		for (const auto& w : weight_arr) {
+			grad_weight_arr.emplace_back(at::empty(w.sizes(), w.options()));
+		}
+		_copyParams(MatrixRef<Tensor>{grad_params_arr, grad_params_stride0},
+			MatrixRef<Tensor>{grad_weight_arr, static_cast<size_t>(weight_stride0)});
+		return grad_weight_arr;
+	}
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
