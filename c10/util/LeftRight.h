@@ -31,6 +31,22 @@ private:
 template <class T>
 class LeftRight final {
 public:
+    LeftRight()
+    : _writeMutex()
+    , _foregroundCounterIndex(0)
+    , _foregroundDataIndex(0)
+    , _counters{{{0}, {0}}}
+    , _data{{T{}, T{}}}
+    , _inDestruction(false)
+    {}
+
+    // Copying and moving would not be threadsafe.
+    // Needs more thought and careful design to make that work.
+    LeftRight(const LeftRight&) = delete;
+    LeftRight(LeftRight&&) noexcept = delete;
+    LeftRight& operator=(const LeftRight&) = delete;
+    LeftRight& operator=(LeftRight&&) noexcept= delete;
+
     ~LeftRight() {
         // from now on, no new readers/writers will be accepted (see asserts in read()/write())
         _inDestruction = true;
@@ -64,7 +80,7 @@ public:
         std::unique_lock<std::mutex> lock(_writeMutex);
 
         if(_inDestruction.load()) {
-            throw std::logic_error("Issued LeftRight::read() after the destructor started running");
+            throw std::logic_error("Issued LeftRight::write() after the destructor started running");
         }
 
         return _write(writeFunc);
@@ -150,11 +166,11 @@ private:
     }
 
     std::mutex _writeMutex;
-    std::atomic<uint8_t> _foregroundCounterIndex = {0};
-    std::atomic<uint8_t> _foregroundDataIndex = {0};
-    mutable std::array<std::atomic<int32_t>, 2> _counters = {{{0}, {0}}};
-    std::array<T, 2> _data = {{{}, {}}};
-    std::atomic<bool> _inDestruction = {false};
+    std::atomic<uint8_t> _foregroundCounterIndex;
+    std::atomic<uint8_t> _foregroundDataIndex;
+    mutable std::array<std::atomic<int32_t>, 2> _counters;
+    std::array<T, 2> _data;
+    std::atomic<bool> _inDestruction;
 };
 
 }
