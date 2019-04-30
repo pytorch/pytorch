@@ -1558,6 +1558,40 @@ class TestCaffe2Backend(unittest.TestCase):
 
         self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3)
 
+    def test_floor(self):
+        class FloorModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.floor(input)
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_model_test(FloorModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_ceil(self):
+        class CeilModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.ceil(input)
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_model_test(CeilModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_log2(self):
+        class Log2Model(torch.nn.Module):
+            def forward(self, input):
+                return torch.log2(input)
+
+        x = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
+        self.run_model_test(Log2Model(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_prim_shape(self):
+        x = torch.randn(4, 5, requires_grad=True)
+        @torch.jit.script
+        def view_by_prim_shape(x):
+            return x.view(x.shape)
+
+        class PrimShapeModel(torch.nn.Module):
+            def forward(self, input):
+                return view_by_prim_shape(input)
+        self.run_model_test(PrimShapeModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
 # a bit of metaprogramming to set up all the rnn tests
 
