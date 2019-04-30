@@ -1455,7 +1455,13 @@ jobs:
       PYTHON_VERSION: "2"
     <<: *caffe2_macos_build_defaults
 
-# update_s3_htmls job
+  # update_s3_htmls job
+  # These jobs create html files for every cpu/cu## folder in s3. The html
+  # files just store the names of all the files in that folder (which are
+  # binary files (.whl files)). This is to allow pip installs of the latest
+  # version in a folder without having to know the latest date. Pip has a flag
+  # -f that you can pass an html file listing a bunch of packages, and pip will
+  # then install the one with the most recent version.
   update_s3_htmls: &update_s3_htmls
     machine:
       image: ubuntu-1604:201903-01
@@ -1502,6 +1508,43 @@ jobs:
     environment:
       PIP_UPLOAD_FOLDER: "nightly/devtoolset7/"
     <<: *update_s3_htmls
+
+
+  # upload_binary_logs job
+  # The builder hud at pytorch.org/builder shows the sizes of all the binaries
+  # over time. It gets this info from html files stored in S3, which this job
+  # populates every day.
+  upload_binary_sizes: &upload_binary_sizes
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    - run:
+        <<: *setup_linux_system_environment
+    - run:
+        <<: *binary_checkout
+    # N.B. This sources binary_populate_env so that it takes the Pytorch
+    # version listed there. The only variables it needs are the date and the
+    # version string.
+    - run:
+        <<: *binary_populate_env
+    - run:
+        <<: *binary_install_miniconda
+    - run:
+        name: Upload binary sizes
+        no_output_timeout: "1h"
+        command: |
+          echo "declare -x \"AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}\"" >> /home/circleci/project/env
+          echo "declare -x \"AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}\"" >> /home/circleci/project/env
+          source /home/circleci/project/env
+          set -ex
+
+          # Not any awscli will work. Most won't. This one will work
+          export PATH="$MINICONDA_ROOT/bin:$PATH"
+          retry conda create -qyn aws36 python=3.6
+          source activate aws36
+          pip install awscli==1.16.46
+
+          "/home/circleci/project/builder/cron/upload_binary_sizes.sh"
 ##############################################################################
 # Binary build specs individual job specifications
 ##############################################################################
@@ -4390,6 +4433,11 @@ workflows:
             - binary_macos_libtorch_2.7_cpu_build
 
   # Scheduled to run 4 hours after the binary jobs start
+  # These jobs need to run after all the binary jobs run, regardless of if the
+  # jobs failed or not. There's no way to do this in CircleCI right now, so we
+  # just schedule this to run after all the binary jobs should've finished.
+  # These jobs are all idempotent and very lightweight; they just upload html
+  # files that track what binaries are available and what their sizes are.
   update_s3_htmls:
     triggers:
       - schedule:
@@ -4402,4 +4450,6 @@ workflows:
       - update_s3_htmls_for_nightlies:
           context: org-member
       - update_s3_htmls_for_nightlies_devtoolset7:
+          context: org-member
+      - upload_binary_sizes:
           context: org-member
