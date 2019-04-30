@@ -564,9 +564,9 @@ For loops over constant ``torch.nn.ModuleList``
                   return v
 
       .. note::
-          To use a module list inside a ``@script_method`` it must be marked
+          To use a ``nn.ModuleList`` inside a ``@script_method`` it must be marked
           constant by adding the name of the attribute to the ``__constants__``
-          list for the type. For loops over a ModuleList will unroll the body of the
+          list for the type. For loops over a ``nn.ModuleList`` will unroll the body of the
           loop at compile time, with each member of the constant module list.
 
 Return
@@ -609,7 +609,7 @@ To make writing TorchScript more convenient, we allow script code to refer
 to Python values in the surrounding scope. For instance, any time there is a
 reference to ``torch``, the TorchScript compiler is actually resolving it to the
 ``torch`` Python module when the function is declared.  These Python values are
-not a first class part of TorchScript. Instead they are desugared at compile-time
+not a first class part of TorchScript. Instead they are de-sugared at compile-time
 into the primitive types that TorchScript supports. This depends
 on the dynamic type of the Python valued referenced when compilation occurs.
 This section describes the rules that are used when accessing Python values in TorchScript.
@@ -633,10 +633,37 @@ Functions
       def bar(x)
         return foo(x + 1)
 
-  .. note::
-    Attempting to call ``save`` on a ScriptModule that contains calls to Python
-    functions will fail. The intention is that this pathway is used for debugging
-    and the calls removed or turned into script functions before saving.
+  Attempting to call ``save`` on a ScriptModule that contains calls to Python
+  functions will fail. The intention is that this pathway is used for debugging
+  and the calls removed or turned into script functions before saving. If you
+  want to export a module with a Python function, add the ``@torch.jit.ignore``
+  decorator to the function which will replace these function calls with an
+  exception when the model is saved: ::
+
+      class M(torch.jit.ScriptModule):
+        def __init__(self):
+          super(M, self).__init__()
+
+        @torch.jit.script_method
+        def forward(self, x):
+          self.ignored_code(x)
+          return x + 2
+
+        @torch.jit.ignore
+        def ignored_code(self, x):
+          # non-TorchScript code
+          import pdb; pdb.set_trace()
+
+      m = M()
+      # Runs, makes upcall to Python to run `ignored_code`
+      m(torch.ones(2, 2))
+
+      # Replaces all calls to `ignored_code` with a `raise`
+      m.save("m.pt")
+      loaded = torch.jit.load("m.pt")
+
+      # This runs `ignored_code` after saving which will raise an Exception!
+      loaded(torch.ones(2, 2))
 
 
 Attribute Lookup On Python Modules
