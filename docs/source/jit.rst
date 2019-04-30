@@ -525,11 +525,6 @@ For loops with ``range``
         for i in range(10):
             x *= i
 
-    .. note::
-      Script currently does not support iterating over generic iterable
-      objects like lists or tensors. Script currently does not support start or
-      increment parameters to range. These will be added in a future version.
-
 For loops over tuples:
 
     ::
