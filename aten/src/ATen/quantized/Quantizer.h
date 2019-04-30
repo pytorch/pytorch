@@ -104,7 +104,7 @@ struct CAFFE2_API NonUniformQuantizer : public Quantizer {
  * AffineQuantizer uses affine transformation to do quantization.
  *
  * For quantize:
- * Y = clamp((X / scale + zero_point, min, max)
+ * Y = clamp(round(X / scale + zero_point), min, max)
  * For dequantize:
  * X = (Y - zero_point) * scale
  */
@@ -117,7 +117,7 @@ struct CAFFE2_API AffineQuantizer : public UniformQuantizer {
  * does not have zero_point
  *
  * For quantize:
- * Y = clamp(X / scale, min, max)
+ * Y = clamp(round(X / scale), min, max)
  * For dequantize:
  * X = Y * scale
  */
@@ -192,7 +192,8 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
 
  private:
   const float scale_;
-  const uint32_t zero_point_;
+  // We use int32_t to support both uint8_t and int32_t data types
+  const int32_t zero_point_;
 };
 
 /**
@@ -204,7 +205,7 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
   explicit PerChannelAffineQuantizer(
       ScalarType scalar_type,
       const std::vector<float>& scales,
-      const std::vector<uint32_t>& zero_points,
+      const std::vector<int32_t>& zero_points,
       const std::vector<int64_t>& axis)
     : AffineQuantizer(kPerChannelAffine, scalar_type),
     scales_(scales),
@@ -219,7 +220,7 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
     return scales_;
   }
 
-  std::vector<uint32_t> zero_points() const {
+  std::vector<int32_t> zero_points() const {
     return zero_points_;
   }
 
@@ -229,7 +230,7 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
 
  private:
   const std::vector<float> scales_;
-  const std::vector<uint32_t> zero_points_;
+  const std::vector<int32_t> zero_points_;
   const std::vector<int64_t> axis_;
 };
 
@@ -265,6 +266,7 @@ T quantize_uint(float scale, int32_t zero_point, float value) {
   return static_cast<T>(qvalue);
 }
 
+#ifdef USE_FBGEMM
 template <typename T>
 Tensor quantize_fbgemm(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point) {
   const float* rd = rtensor.data<float>();
@@ -277,16 +279,6 @@ Tensor quantize_fbgemm(Tensor rtensor, Tensor qtensor, float scale, int32_t zero
                              /*dst=*/qd,
                              /*len=*/rtensor.numel(),
                              /*qparams=*/qparams);
-  return qtensor;
-}
-
-template <typename T>
-Tensor quantize_naive(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point) {
-  const float* rdata = rtensor.data<float>();
-  auto qdata = qtensor.data<T>();
-  for (int i = 0; i < rtensor.numel(); ++i) {
-    qdata[i] = quantize_uint<T>(scale, zero_point, rdata[i]);
-  }
   return qtensor;
 }
 
@@ -305,6 +297,17 @@ Tensor dequantize_fbgemm(Tensor qtensor, Tensor rtensor, float scale, int32_t ze
   return rtensor;
 }
 
+#else
+template <typename T>
+Tensor quantize_naive(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point) {
+  const float* rdata = rtensor.data<float>();
+  auto qdata = qtensor.data<T>();
+  for (int i = 0; i < rtensor.numel(); ++i) {
+    qdata[i] = quantize_uint<T>(scale, zero_point, rdata[i]);
+  }
+  return qtensor;
+}
+
 template <typename T>
 Tensor dequantize_naive(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point) {
   const auto* qd = qtensor.data<typename T::underlying>();
@@ -316,6 +319,8 @@ Tensor dequantize_naive(Tensor qtensor, Tensor rtensor, float scale, int32_t zer
   }
   return rtensor;
 }
+
+#endif
 
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
