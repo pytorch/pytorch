@@ -310,7 +310,7 @@ Tensor dequantize_naive(Tensor qtensor, Tensor rtensor, float scale, int32_t zer
   const auto* qd = qtensor.data<typename T::underlying>();
   float* rd = rtensor.data<float>();
   for (auto i = 0; i < qtensor.numel(); ++i) {
-    // We need to convert the qint8 value to float to ensure the subtraction
+    // We need to convert the quantized value to float to ensure the subtraction
     // subexpression returns a float
     rd[i] = (static_cast<float>(qd[i].val_) - zero_point) * scale;
   }

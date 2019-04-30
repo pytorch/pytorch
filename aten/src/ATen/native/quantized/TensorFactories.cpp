@@ -12,9 +12,9 @@ namespace native {
 // that is ready, we'll change to use quantizer
 Tensor empty_affine_quantized_cpu(IntArrayRef size, const TensorOptions& options, double scale, int64_t zero_point) {
   TensorOptions opts = options;
-  // default scalar_type to kQInt8
+  // default scalar_type to kQUInt8
   if (!opts.has_dtype()) {
-    opts = opts.dtype(kQInt8);
+    opts = opts.dtype(kQUInt8);
   }
   return new_qtensor_cpu(size, options, make_per_tensor_affine_quantizer(scale, zero_point, typeMetaToScalarType(opts.dtype())));
 }

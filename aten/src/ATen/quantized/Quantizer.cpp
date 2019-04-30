@@ -15,7 +15,7 @@ QuantizerPtr make_per_tensor_affine_quantizer(
     optional<ScalarType> scalar_type_opt = c10::nullopt) {
   auto scalar_type = scalar_type_opt;
   if (scalar_type == c10::nullopt) {
-    scalar_type = c10::kQInt8;
+    scalar_type = c10::kQUInt8;
   }
   return c10::make_intrusive<PerTensorAffineQuantizer>(scalar_type.value(),
       static_cast<float>(scale), static_cast<int32_t>(zero_point));

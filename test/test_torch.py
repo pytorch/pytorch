@@ -2705,6 +2705,19 @@ class _TestTorchMixin(object):
         q = torch._empty_affine_quantized(numel, dtype=torch.quint8, scale=scale, zero_point=zero_point)
         # TODO: check dequantized values?
 
+    def test_qtensor_dtypes(self):
+        r = np.random.rand(3, 2) * 2 - 4
+        r = torch.from_numpy(r).float()
+        scale = 2
+        zero_point = 2
+        qr = r.quantize_linear(scale, zero_point, torch.quint8)
+        rqr = qr.dequantize()
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+        qr = r.quantize_linear(scale, zero_point, torch.qint32)
+        rqr = qr.dequantize()
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+
+
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
         # verify that all operators with `device_guard: False` behave properly with multiple devices.
