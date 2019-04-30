@@ -12,6 +12,7 @@ import re
 from torch._six import container_abcs
 import contextlib
 import numbers
+import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
@@ -203,8 +204,6 @@ def _trace(func, args, operator_export_type, return_outs=False):
         args = (args, )
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     _set_opset_version(_default_onnx_opset_version)
-    import torch.onnx.symbolic_registry as sym_registry
-    sym_registry.register_version('', _default_onnx_opset_version)
     trace, torch_out = torch.jit.get_trace_graph(func, args, _force_outplace=True)
     trace.set_graph(_optimize_graph(trace.graph(), operator_export_type))
     if return_outs:
@@ -332,8 +331,6 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
-    import torch.onnx.symbolic_registry as sym_registry
-    sym_registry.register_version('', opset_version)
     graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                     training, input_names,
                                                     output_names, operator_export_type,
@@ -360,8 +357,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         if opset_version is None:
             opset_version = _default_onnx_opset_version
         _set_opset_version(opset_version)
-        import torch.onnx.symbolic_registry as sym_registry
-        sym_registry.register_version('', opset_version)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                         training, input_names,
                                                         output_names, operator_export_type,
@@ -562,6 +557,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
         import torch.onnx.symbolic_registry as sym_registry
 
+        sym_registry.register_version('', opset_version)
+
         # See Note [Export inplace]
         # TODO: I think this is not necessary anymore
         if n.kind().endswith('_'):
@@ -706,7 +703,7 @@ def _node_getitem(self, k):
 
 
 def register_custom_op_symbolic(symbolic_name, symbolic_fn):
-    if not bool(re.match(r"^[a-zA-Z]+[a-zA-Z0-9-_]*::[a-zA-Z]+[a-zA-Z0-9-_]*$", symbolic_name)):
+    if not bool(re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z]+[a-zA-Z0-9-_]*$", symbolic_name)):
         raise RuntimeError("Failed to register operator {}. \
                            The symbolic name must match the format Domain::Name, \
                            and sould start with a letter and contain only \
