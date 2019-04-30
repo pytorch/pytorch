@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/jit_type.h>
+#include <ATen/core/qualified_name.h>
 #include <torch/csrc/jit/script/sugared_value.h>
 
 namespace torch {
@@ -52,7 +53,7 @@ struct NativeResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name) const override {
-    return ClassType::get(name);
+    return ClassType::get(c10::QualifiedName(name));
   }
 };
 

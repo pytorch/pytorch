@@ -189,8 +189,6 @@ public:
       return std::move(*this);
     }
 
-   // TODO allow input schema to be just the operator name + overload name, in that case use schema generated from kernel function
-
 private:
   template<class... ConfigParameters>
   void op_(FunctionSchema&& schema, ConfigParameters&&... configParameters) {

@@ -507,7 +507,7 @@ void testContainerAliasing() {
         &*graph);
 
     auto node_iter = graph->block()->nodes().begin();
-    node_iter++; // string
+    auto str_node = node_iter++; // string
     Node* ten_node = *node_iter++;
     AliasDb aliasDb(graph);
 
@@ -515,6 +515,8 @@ void testContainerAliasing() {
     for (auto out : graph->outputs()) {
       AT_ASSERT(aliasDb.mayContainAlias(ten_node->output(), out));
     }
+    AT_ASSERT(aliasDb.mayContainAlias({ten_node->output()}, graph->outputs()));
+    AT_ASSERT(!aliasDb.mayContainAlias(str_node->output(), graph->outputs()));
   }
 
   {
@@ -533,13 +535,13 @@ void testContainerAliasing() {
 
     auto node_iter = graph->block()->nodes().begin();
     node_iter++; // string
-    Node* ten_node = *node_iter++;
+    Node* int_node = *node_iter++;
     AliasDb aliasDb(graph);
 
     AT_ASSERT(graph->outputs().size() == 3);
     // primitive values don't need to alias container
     for (auto out : graph->outputs()) {
-      AT_ASSERT(!aliasDb.mayContainAlias(ten_node->output(), out));
+      AT_ASSERT(!aliasDb.mayContainAlias(int_node->output(), out));
     }
   }
 
@@ -561,6 +563,7 @@ void testContainerAliasing() {
     for (auto input : graph->inputs()) {
       AT_ASSERT(aliasDb.mayContainAlias(input, tuple_node->output()));
     }
+    AT_ASSERT(aliasDb.mayContainAlias(graph->inputs(), graph->outputs()));
   }
 
   // Test tuple that doesn't come from construct
@@ -604,9 +607,10 @@ graph():
   %4 : Device? = prim::Constant()
   %2 : int? = prim::Constant()
   %0 : float = prim::Constant[value=1]()
-  %a : Tensor = aten::tensor(%0, %2, %4)
+  %20 : bool = prim::Constant[value=0]()
+  %a : Tensor = aten::tensor(%0, %2, %4, %20)
   %a_list : Tensor[] = prim::ListConstruct(%a)
-  %b : Tensor = aten::tensor(%0, %2, %4)
+  %b : Tensor = aten::tensor(%0, %2, %4, %20)
   %b_list : Tensor[] = prim::ListConstruct(%b)
   %13 : (Tensor[], Tensor[]) = prim::TupleConstruct(%a_list, %b_list)
   return (%13)
@@ -647,6 +651,13 @@ graph():
     AT_ASSERT(aliasDb.mayContainAlias(first_ten->output(), tup_node->output()));
     AT_ASSERT(
         !aliasDb.mayContainAlias(second_ten->output(), tup_node->output()));
+
+    std::vector<Value*> first_st = {first_ten->output()};
+    std::vector<Value*> second_st = {second_ten->output()};
+    std::vector<Value*> tup_st = {tup_node->output()};
+    AT_ASSERT(aliasDb.mayContainAlias(first_st, tup_st));
+    AT_ASSERT(!aliasDb.mayContainAlias(first_st, second_st));
+    AT_ASSERT(!aliasDb.mayContainAlias(second_st, tup_st));
   }
 }
 

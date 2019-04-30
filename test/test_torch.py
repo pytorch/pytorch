@@ -2680,9 +2680,13 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.item(), 1)
         self.assertEqual(qr[0].item(), 1)
         # assignment
-        # This calls _th_fill_
-        # qr[0] = 8 # float asignment
-        # self.assertEqual(qr.item(), 8)
+        self.assertTrue(qr[0].is_quantized)
+        qr[0] = 11.3  # float asignment
+        self.assertEqual(qr.item(), 11)
+        x = torch.ones(1, dtype=torch.float) * 15.3
+        # Copying from a float Tensor
+        qr[:] = x
+        self.assertEqual(qr.item(), 15)
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
@@ -2691,8 +2695,6 @@ class _TestTorchMixin(object):
         zero_point = 2
         qr = r.quantize_linear(scale, zero_point)
         rqr = qr.dequantize()
-        print(r.numpy())
-        print(rqr.numpy())
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
     def test_qtensor_creation(self):
@@ -2701,12 +2703,7 @@ class _TestTorchMixin(object):
         val = 100
         numel = 10
         q = torch._empty_affine_quantized(numel, dtype=torch.qint8, scale=scale, zero_point=zero_point)
-        # for i in range(numel):
-        #     # wait for th_fill
-        #     q[i] = val
-        # r = q.dequantize()
-        # for i in range(numel):
-        #     self.assertEqual(r[i], (val - zero_point) * scale)
+        # TODO: check dequantized values?
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
@@ -3070,6 +3067,7 @@ class _TestTorchMixin(object):
             self.assertEqual(a > False, torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
             self.assertEqual(a == torch.tensor(True, dtype=torch.bool), torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
             self.assertEqual(a == torch.tensor(0, dtype=torch.bool), torch.tensor([0, 1, 0, 1, 0, 1], dtype=torch.uint8))
+            self.assertFalse(a.equal(b))
 
     def test_bool_tensor_value_change(self):
         for device in torch.testing.get_all_device_types():
@@ -4772,6 +4770,10 @@ class _TestTorchMixin(object):
         self.assertEqual(res1, res2, 0)
         self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, -1))
         self.assertEqual(torch.logspace(0, 1, 1), torch.ones(1), 0)
+
+        # Check non-default base=2
+        self.assertEqual(torch.logspace(1, 1, 1, 2), torch.ones(1) * 2)
+        self.assertEqual(torch.logspace(0, 2, 3, 2), torch.Tensor((1, 2, 4)))
 
         # Check logspace_ for generating with start > end.
         self.assertEqual(torch.logspace(1, 0, 2), torch.Tensor((10, 1)), 0)
@@ -7578,57 +7580,60 @@ class _TestTorchMixin(object):
         self._test_scatter_base(self, lambda t: t, 'scatter_', True)
 
     def test_masked_scatter(self):
-        num_copy, num_dest = 3, 10
-        dest = torch.randn(num_dest)
-        src = torch.randn(num_copy)
-        mask = torch.ByteTensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0))
-        dest2 = dest.clone()
-        dest.masked_scatter_(mask, src)
-        j = 0
-        for i in range(num_dest):
-            if mask[i]:
-                dest2[i] = src[j]
-                j += 1
-        self.assertEqual(dest, dest2, 0)
+        for dtype in [torch.uint8, torch.bool]:
+            num_copy, num_dest = 3, 10
+            dest = torch.randn(num_dest)
+            src = torch.randn(num_copy)
+            mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=dtype)
+            dest2 = dest.clone()
+            dest.masked_scatter_(mask, src)
+            j = 0
+            for i in range(num_dest):
+                if mask[i]:
+                    dest2[i] = src[j]
+                    j += 1
+            self.assertEqual(dest, dest2, 0)
 
-        # make source bigger than number of 1s in mask
-        src = torch.randn(num_dest)
-        dest.masked_scatter_(mask, src)
-
-        # make src smaller. this should fail
-        src = torch.randn(num_copy - 1)
-        with self.assertRaises(RuntimeError):
+            # make source bigger than number of 1s in mask
+            src = torch.randn(num_dest)
             dest.masked_scatter_(mask, src)
 
+            # make src smaller. this should fail
+            src = torch.randn(num_copy - 1)
+            with self.assertRaises(RuntimeError):
+                dest.masked_scatter_(mask, src)
+
     def test_masked_select(self):
-        num_src = 10
-        src = torch.randn(num_src)
-        mask = torch.rand(num_src).clamp(0, 1).mul(2).floor().byte()
-        dst = src.masked_select(mask)
-        dst2 = []
-        for i in range(num_src):
-            if mask[i]:
-                dst2 += [src[i]]
-        self.assertEqual(dst, torch.Tensor(dst2), 0)
+        for dtype in [torch.uint8, torch.bool]:
+            num_src = 10
+            src = torch.randn(num_src)
+            mask = torch.rand(num_src).clamp(0, 1).mul(2).floor().to(dtype)
+            dst = src.masked_select(mask)
+            dst2 = []
+            for i in range(num_src):
+                if mask[i]:
+                    dst2 += [src[i]]
+            self.assertEqual(dst, torch.Tensor(dst2), 0)
 
     def test_masked_fill(self):
-        num_dest = 10
-        dst = torch.randn(num_dest)
-        mask = torch.rand(num_dest).mul(2).floor().byte()
-        val = random.random()
-        dst2 = dst.clone()
-        dst.masked_fill_(mask, val)
-        for i in range(num_dest):
-            if mask[i]:
-                dst2[i] = val
-        self.assertEqual(dst, dst2, 0)
+        for dtype in [torch.uint8, torch.bool]:
+            num_dest = 10
+            dst = torch.randn(num_dest)
+            mask = torch.rand(num_dest).mul(2).floor().to(dtype)
+            val = random.random()
+            dst2 = dst.clone()
+            dst.masked_fill_(mask, val)
+            for i in range(num_dest):
+                if mask[i]:
+                    dst2[i] = val
+            self.assertEqual(dst, dst2, 0)
 
-        # test non-contiguous case
-        dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
-        dst2 = dst.clone()
-        dst.masked_fill_(dst > 0, val)
-        dst2.masked_fill_(dst2 > 0, val)
-        self.assertEqual(dst, dst2, 0)
+            # test non-contiguous case
+            dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
+            dst2 = dst.clone()
+            dst.masked_fill_((dst > 0).to(dtype), val)
+            dst2.masked_fill_((dst2 > 0).to(dtype), val)
+            self.assertEqual(dst, dst2, 0)
 
     def test_abs(self):
         def _test_abs(tensors_dict):
@@ -8718,7 +8723,10 @@ class _TestTorchMixin(object):
         self.assertEqual(v.storage()[14], v.data[2][4])
 
     def test_nonzero(self):
-        num_src = 12
+        devices = torch.testing.get_all_device_types()
+        num_srcs = [
+            12, 12, 12, 12, 12, 125,
+        ]
 
         types = [
             'torch.ByteTensor',
@@ -8736,38 +8744,59 @@ class _TestTorchMixin(object):
             torch.Size((1, 12)),
             torch.Size((6, 2)),
             torch.Size((3, 2, 2)),
+            torch.Size((5, 5, 5)),
         ]
 
-        for t in types:
-            while True:
-                tensor = torch.rand(num_src).mul(2).floor().type(t)
-                if tensor.sum() > 0:
-                    break
-            for shape in shapes:
-                tensor = tensor.clone().resize_(shape)
-                dst1 = torch.nonzero(tensor)
-                dst2 = tensor.nonzero()
-                dst3 = torch.LongTensor()
-                torch.nonzero(tensor, out=dst3)
-                if len(shape) == 1:
-                    dst = []
-                    for i in range(num_src):
-                        if tensor[i] != 0:
-                            dst += [i]
+        def is_lexicographically_sorted(inds):
+            """Check sorted ascending with
+            i -> j -> k changing slowest to fastest"""
+            assert inds.size(1) == 3
+            if inds.size(0) > 1:
+                i0, j0, k0 = inds[:-1].t()
+                i1, j1, k1 = inds[+1:].t()
+                i_ok = (i1 >= i0)
+                j_ok = (j1 >= j0) | (i1 > i0)
+                k_ok = (k1 >= k0) | (j1 > j0) | (i1 > i0)
+                lex = torch.stack((i_ok, j_ok, k_ok), dim=1)
+                return lex
+            return torch.full_like(inds, 1)
 
-                    self.assertEqual(dst1.select(1, 0), torch.LongTensor(dst), 0)
-                    self.assertEqual(dst2.select(1, 0), torch.LongTensor(dst), 0)
-                    self.assertEqual(dst3.select(1, 0), torch.LongTensor(dst), 0)
-                elif len(shape) == 2:
-                    # This test will allow through some False positives. It only checks
-                    # that the elements flagged positive are indeed non-zero.
-                    for i in range(dst1.size(0)):
-                        self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1]].item(), 0)
-                elif len(shape) == 3:
-                    # This test will allow through some False positives. It only checks
-                    # that the elements flagged positive are indeed non-zero.
-                    for i in range(dst1.size(0)):
-                        self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]].item(), 0)
+        def gen_nontrivial_input(num_src, dtype, device):
+            while True:
+                tensor = torch.rand(num_src).mul(2).floor().type(dtype).to(device)
+                if tensor.sum() > 0:
+                    return tensor
+
+        for device in devices:
+            for dtype in types:
+                for shape, num_src in zip(shapes, num_srcs):
+                    tensor = gen_nontrivial_input(num_src, dtype, device)
+                    tensor = tensor.clone().resize_(shape)
+                    dst1 = torch.nonzero(tensor)
+                    dst2 = tensor.nonzero()
+                    dst3 = torch.LongTensor().to(device)
+                    torch.nonzero(tensor, out=dst3)
+                    if len(shape) == 1:
+                        dst = []
+                        for i in range(num_src):
+                            if tensor[i] != 0:
+                                dst += [i]
+                        dst = torch.LongTensor(dst).to(device)
+                        self.assertEqual(dst1.select(1, 0), dst, 0)
+                        self.assertEqual(dst2.select(1, 0), dst, 0)
+                        self.assertEqual(dst3.select(1, 0), dst, 0)
+                    elif len(shape) == 2:
+                        # This test will allow through some False positives. It only checks
+                        # that the elements flagged positive are indeed non-zero.
+                        for i in range(dst1.size(0)):
+                            self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1]].item(), 0)
+                    elif len(shape) == 3:
+                        # This test will allow through some False positives. It only checks
+                        # that the elements flagged positive are indeed non-zero.
+                        for i in range(dst1.size(0)):
+                            self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]].item(), 0)
+                        lex = is_lexicographically_sorted(dst1)
+                        self.assertEqual(torch.ones_like(lex), lex)
 
     def test_nonzero_empty(self):
         for device in torch.testing.get_all_device_types():
@@ -9714,6 +9743,28 @@ class _TestTorchMixin(object):
 
             # check mapping
             s2 = torch.FloatStorage.from_file(f.name, True, size)
+            t2 = torch.FloatTensor(s2)
+            self.assertEqual(t1, t2, 0)
+
+            # check changes to t1 from t2
+            rnum = random.uniform(-1, 1)
+            t1.fill_(rnum)
+            self.assertEqual(t1, t2, 0)
+
+            # check changes to t2 from t1
+            rnum = random.uniform(-1, 1)
+            t2.fill_(rnum)
+            self.assertEqual(t1, t2, 0)
+
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
+    def test_torch_from_file(self):
+        size = 10000
+        with tempfile.NamedTemporaryFile() as f:
+            s1 = torch.from_file(f.name, True, size, dtype=torch.float)
+            t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
+
+            # check mapping
+            s2 = torch.from_file(f.name, True, size, dtype=torch.float)
             t2 = torch.FloatTensor(s2)
             self.assertEqual(t1, t2, 0)
 
@@ -11240,11 +11291,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_c10_layer_norm(self):
         # test that we can call c10 ops and they return a reasonable result
         X = torch.rand(5, 5, dtype=torch.float)
+        weight = torch.rand(*X.size()[1:], dtype=torch.float)
+        bias = torch.rand(*X.size()[1:], dtype=torch.float)
         epsilon = 1e-4
 
-        expected_norm = torch.nn.functional.layer_norm(X, X.size()[1:], eps=epsilon)
+        expected_norm = torch.nn.functional.layer_norm(
+            X, X.size()[1:], weight=weight, bias=bias, eps=epsilon)
         actual_norm, actual_mean, actual_stdev = \
-            torch.ops._caffe2.LayerNorm(torch.tensor(X), 1, epsilon)
+            torch.ops._caffe2.LayerNorm(torch.tensor(X), torch.tensor(
+                weight), torch.tensor(bias), 1, epsilon, True)
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
 # Functions to test negative dimension wrapping

@@ -283,7 +283,13 @@ void BoundShapeInferencer::InferConcatInputs(const OperatorDef& op) {
     const auto it = shape_info_.find(i);
     if (it != shape_info_.end()) {
       const auto& current_input_shape = it->second;
-      channel_acc += current_input_shape.shape.dims(axis);
+      if (axis < current_input_shape.shape.dims_size()) {
+        channel_acc += current_input_shape.shape.dims(axis);
+      } else {
+        LOG(INFO) << "Mismatched input dim along axis " << axis
+                  << ". We cannot infer missing input shape for Concat";
+        return;
+      }
     } else if (missing_shape_infos) {
       LOG(INFO) << "More than one missing shapes, previous one: "
                 << input_to_infer;
