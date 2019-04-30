@@ -239,6 +239,66 @@ Example::
     return x
 
 
+User Defined Types
+^^^^^^^^^^^^^^^^^^^^^^^^
+Python classes can be used in TorchScript if they are annotated with ``@torch.jit.script``,
+similar to how you would declare a TorchScript function: ::
+
+    @torch.jit.script
+    class Foo:
+      def __init__(self, x, y)
+        self.x = x
+
+      def aug_add_x(self, inc):
+        self.x += inc
+
+
+This subset is restricted:
+
+* All functions must be valid TorchScript functions (including ``__init__()``)
+* Classes must be new-style classes, as we use ``__new__()`` to construct them with pybind11
+* TorchScript classes are statically typed. Members are declared by assigning to
+  self in the ``__init__()`` method
+
+    For example, assigning outside of the ``__init__()`` method: ::
+
+        @torch.jit.script
+        class Foo:
+          def assign_x(self):
+            self.x = torch.rand(2, 3)
+
+    Will result in: ::
+
+        RuntimeError:
+        Tried to set nonexistent attribute: x. Did you forget to initialize it in __init__()?:
+        def assign_x(self):
+          self.x = torch.rand(2, 3)
+          ~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+
+* No expressions except method definitions are allowed in the body of the class
+* No support for inheritance or any other polymorphism strategy, except for inheriting
+  from object to specify a new-style class
+
+After a class is defined, it can be used in both TorchScript and Python interchangeably
+like any other TorchScript type:
+
+::
+
+    @torch.jit.script
+    class Pair:
+      def __init__(self, first, second)
+        self.first = first
+        self.second = second
+
+    @torch.jit.script
+    def sum_pair(p):
+      # type : (Pair) -> Tensor
+      return p.first + p.second
+
+    p = Pair(torch.rand(2, 3), torch.rand(2, 3)
+    print(sum_pair(p))
+
+
 Expressions
 ~~~~~~~~~~~
 
