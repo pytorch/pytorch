@@ -453,7 +453,8 @@ class SummaryWriter(object):
 
         Args:
             tag (string): Data identifier
-            vid_tensor (torch.Tensor): Video data
+            vid_tensor (torch.Tensor): Video data. The value should in [0, 255] for type `uint8` or
+              [0, 1] for type `float`.
             global_step (int): Global step value to record
             fps (float or int): Frames per second
             walltime (float): Optional override default walltime (time.time())
