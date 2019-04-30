@@ -703,26 +703,26 @@ def trace(mod,
         len(inputs.keys()) > 0 and
             isinstance(inputs.keys()[0], types.MethodType)):
 
-            if not isinstance(mod, torch.nn.Module):
-                raise AttributeError("expected torch.nn.Module as the first argument")
+        if not isinstance(mod, torch.nn.Module):
+            raise AttributeError("expected torch.nn.Module as the first argument")
 
-            module = make_module(mod, _module_class, executor_options)
+        module = make_module(mod, _module_class, executor_options)
 
-            for func, example_inputs in inputs.items():
+        for func, example_inputs in inputs.items():
 
-                if func.__self__ is not mod:
-                    raise AttributeError("function's __self__ should be equal to module")
-                method_name = func.__name__
-                example_inputs = make_tuple(example_inputs)
-                module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
-                check_trace_method = module._c._get_method(method_name)
+            if func.__self__ is not mod:
+                raise AttributeError("function's __self__ should be equal to module")
+            method_name = func.__name__
+            example_inputs = make_tuple(example_inputs)
+            module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+            check_trace_method = module._c._get_method(method_name)
 
-                # Check the trace against new traces created from user-specified inputs
-                if check_trace:
-                    if check_inputs is not None:
-                        _check_trace(check_inputs, func, executor_options, check_trace_method, check_tolerance, _force_outplace)
-                    else:
-                        _check_trace([example_inputs], func, executor_options, check_trace_method, check_tolerance, _force_outplace)
+            # Check the trace against new traces created from user-specified inputs
+            if check_trace:
+                if check_inputs is not None:
+                    _check_trace(check_inputs, func, executor_options, check_trace_method, check_tolerance, _force_outplace)
+                else:
+                    _check_trace([example_inputs], func, executor_options, check_trace_method, check_tolerance, _force_outplace)
 
             return module
 
