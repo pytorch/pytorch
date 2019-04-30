@@ -1754,3 +1754,12 @@ def argmin(g, input, dim, keepdim):
         dim = _parse_arg(dim, 'i')
         keepdim = _parse_arg(keepdim, 'i')
         return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
+
+
+def log2(g, self):
+    _ln2 = 0.693147180559945309
+    return g.op('Div', log(g, self), g.op('Constant', value_t=torch.Tensor([_ln2])))
+
+
+def prim_shape(g, self):
+    return g.op('Shape', self)

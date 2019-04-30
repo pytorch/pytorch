@@ -63,7 +63,7 @@ Build + CI
 -  Jesse Hellemn (`pjh5 <https://github.com/pjh5>`__)
 -  Soumith Chintala (`soumith <https://github.com/soumith>`__)
 -  (sunsetting) Orion Reblitz-Richardson
-(`orionr <https://github.com/orionr>`__)
+   (`orionr <https://github.com/orionr>`__)
 
 Distributions & RNG
 ~~~~~~~~~~~~~~~~~~~
