@@ -30,7 +30,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   ideep::tensor& dtensor = itensor_from_mkldnn(mkldnn_tensor);
   dtensor.reorder_from(dtensor.get_dims(),
                        ideep::tensor::data_type::f32,
-                       (cpu_tensor_cont.template data<float>()));
+                    (cpu_tensor_cont.template data<float>()));
   return mkldnn_tensor;
 }
 
@@ -46,26 +46,35 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
+  AT_ASSERTM(self.scalar_type() == ScalarType::Float,
+             "mkldnn_reorder_conv2d_weight expects float tensor input");
 
   auto stride_vec = expand_param_if_needed(stride, "stride", 2);
   auto padding_vec = expand_param_if_needed(padding, "padding", 2);
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", 2);
 
-  ideep::tensor w = itensor_from_mkldnn(self).as_weights();
-  w.make_group(groups);
   ideep::tensor::descriptor desc =
-      ideep::convolution_forward::expected_weights_descriptor(
-          w.get_dims(),
-          w.get_data_type(),
-          {stride_vec.cbegin(), stride_vec.cend()},
-          {padding_vec.cbegin(), padding_vec.cend()},
-          {padding_vec.cbegin(), padding_vec.cend()},
-          {dilation_vec.cbegin(), dilation_vec.cend()},
-          groups,
-          ideep::algorithm::convolution_direct);
+    ideep::convolution_forward::expected_weights_descriptor(
+        {self.sizes().cbegin(), self.sizes().cend()},
+        ideep::tensor::data_type::f32,
+        {stride_vec.cbegin(), stride_vec.cend()},
+        {padding_vec.cbegin(), padding_vec.cend()},
+        {padding_vec.cbegin(), padding_vec.cend()},
+        {dilation_vec.cbegin(), dilation_vec.cend()},
+        groups,
+        ideep::algorithm::convolution_direct);
   ideep::tensor result(desc);
-  ideep::reorder::compute(w, result);
 
+  if (self.is_mkldnn()) {
+    ideep::tensor w = itensor_from_mkldnn(self).as_weights();
+    w.make_group(groups);
+    ideep::reorder::compute(w, result);
+  } else {
+    result.reorder_from(
+        result.get_dims(),
+        result.get_data_type(),
+        self.template data<float>());
+  }
   return new_with_itensor_mkldnn(std::move(result), self.options());
 }
 

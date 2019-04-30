@@ -2543,6 +2543,7 @@
   variants: function
   python_module: nn
   dispatch:
+    CPU: mkldnn_reorder_conv2d_weight
     MkldnnCPU: mkldnn_reorder_conv2d_weight
 
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
