@@ -143,7 +143,7 @@ install_doc_push_script: &install_doc_push_script
     if [ "\$is_master_doc" = true ]; then
       find "\$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>\1 \&#x25BC</a>@g"
     else
-      find "\$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>\$version \&#x25BC</a>@g"
+      find "\$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.\S+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>\$version \&#x25BC</a>@g"
     fi
 
     git add "\$install_path" || true
