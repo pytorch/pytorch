@@ -37,7 +37,7 @@ public:
     , _foregroundCounterIndex(0)
     , _foregroundDataIndex(0)
     , _counters{{{0}, {0}}}
-    , _data{{{T{args...}}, {T{args...}}}}
+    , _data{{T{args...}, T{args...}}}
     , _inDestruction(false)
     {}
 
