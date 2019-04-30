@@ -8,21 +8,6 @@
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
-void THCTensor_(uniform)(THCState* state, THCTensor *self_, double a, double b)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  ptrdiff_t size = THCTensor_(nElement)(state, self_);
-  if (size == 0) return;
-  THCGenerator* gen = THCRandom_getGenerator(state);
-  THCTensor *self = THCTensor_(newContiguous)(state, self_);
-  scalar_t *data = THCTensor_(data)(state, self);
-
-  generate_uniform<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, a, b);
-
-  THCTensor_(freeCopyTo)(state, self, self_);
-};
-
 void THCTensor_(normal)(THCState* state, THCTensor *self_, double mean, double stdv)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
@@ -191,7 +176,9 @@ void THCTensor_(multinomial)(struct THCState *state,
     // Uniform random samples in a separate kernel launch, into
     // temporarily allocated memory. The device RNG is thread-limited
     THCTensor *sampled = THCTensor_(newWithSize2d)(state, numDist, n_sample);
-    THCTensor_(uniform)(state, sampled, 0.0, 1.0);
+    c10::raw::intrusive_ptr::incref(sampled);
+    auto out = at::Tensor(c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(sampled));
+    at::native::uniform_cuda_(out, 0.0, 1.0);
 
     dim3 block(numCategories < maxThreads ? numCategories : maxThreads);
     dim3 grid(numDist < numSM * 4 ? numDist : numSM * 4);
@@ -380,8 +367,12 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
   THCTensor *uniform = THCTensor_(newWithSize1d)(state, n_sample);
   THCTensor *bernoulli = THCTensor_(newWithSize1d)(state, n_sample);
 
-  THCTensor_(uniform)(state, uniform, 0, K);
-  THCTensor_(uniform)(state, bernoulli, 0, 1);
+  c10::raw::intrusive_ptr::incref(uniform);
+  c10::raw::intrusive_ptr::incref(bernoulli);
+  auto out_uniform = at::Tensor(c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(uniform));
+  auto out_bernoulli = at::Tensor(c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(bernoulli));
+  at::native::uniform_cuda_(out_uniform, 0, K);
+  at::native::uniform_cuda_(out_bernoulli, 0, 1);
 
   multinomialAliasDrawKernel
     <<<THCCeilDiv((int)n_sample+BLOCK_SIZE-1, BLOCK_SIZE), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
