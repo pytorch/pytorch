@@ -31,12 +31,13 @@ private:
 template <class T>
 class LeftRight final {
 public:
-    LeftRight()
+    template<class... Args>
+    explicit LeftRight(const Args& ...args)
     : _writeMutex()
     , _foregroundCounterIndex(0)
     , _foregroundDataIndex(0)
     , _counters{{{0}, {0}}}
-    , _data{{T{}, T{}}}
+    , _data{{T{args...}, T{args...}}}
     , _inDestruction(false)
     {}
 
