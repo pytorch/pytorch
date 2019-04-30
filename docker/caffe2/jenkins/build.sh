@@ -77,6 +77,10 @@ if [[ "$image" == *-devtoolset* ]]; then
   DEVTOOLSET_VERSION="$(echo "${image}" | perl -n -e'/devtoolset(\d+(\.\d+)?)/ && print $1')"
 fi
 
+if [[ "$image" == *-glibc* ]]; then
+  GLIBC_VERSION="$(echo "${image}" | perl -n -e'/glibc(\d+(\.\d+)?)/ && print $1')"
+fi
+
 # Copy over common scripts to directory containing the Dockerfile to build
 cp -a common/* "$(dirname ${DOCKERFILE})"
 
@@ -96,6 +100,7 @@ docker build \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
        --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
        --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
+       --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
        --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
        --build-arg "ANACONDA_VERSION=${ANACONDA_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \

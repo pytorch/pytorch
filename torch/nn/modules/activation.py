@@ -60,7 +60,7 @@ class Threshold(Module):
 
 
 @weak_module
-class ReLU(Threshold):
+class ReLU(Module):
     r"""Applies the rectified linear unit function element-wise:
 
     :math:`\text{ReLU}(x)= \max(0, x)`
@@ -88,9 +88,15 @@ class ReLU(Threshold):
         >>> input = torch.randn(2).unsqueeze(0)
         >>> output = torch.cat((m(input),m(-input)))
     """
+    __constants__ = ['inplace']
 
     def __init__(self, inplace=False):
-        super(ReLU, self).__init__(0., 0., inplace)
+        super(ReLU, self).__init__()
+        self.inplace = inplace
+
+    @weak_script_method
+    def forward(self, input):
+        return F.relu(input, inplace=self.inplace)
 
     def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''
