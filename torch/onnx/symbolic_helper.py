@@ -208,7 +208,7 @@ def _try_get_scalar_type(*args):
 
 _default_onnx_opset_version = 9
 _onnx_master_opset = 10
-_onnx_stable_opsets = [9]
+_onnx_stable_opsets = [9, 10]
 _export_onnx_opset_version = _default_onnx_opset_version
 
 

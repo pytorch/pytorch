@@ -92,7 +92,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             output nodes of the graph, in order
         aten (bool, default False): [DEPRECATED. use operator_export_type] export the
             model in aten mode. If using aten mode, all the ops original exported
-            by the functions in symbolic_opset9.py are exported as ATen ops.
+            by the functions in symbolic_opset<version>.py are exported as ATen ops.
         export_raw_ir (bool, default False): [DEPRECATED. use operator_export_type]
             export the internal IR directly instead of converting it to ONNX ops.
         operator_export_type (enum, default OperatorExportTypes.ONNX):
@@ -589,9 +589,9 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 # Export it regularly
                 attrs = {k: n[k] for k in n.attributeNames()}
                 if not is_exportable_aten_op:
-                    raise RuntimeError("ONNX export failed on ATen operator {} because "
-                                       "torch.onnx.symbolic_opset{}.{} does not exist"
-                                       .format(op_name, opset_version, op_name))
+                    warnings.warn("ONNX export failed on ATen operator {} because "
+                                  "torch.onnx.symbolic_opset{}.{} does not exist"
+                                  .format(op_name, opset_version, op_name))
                 op_fn = sym_registry.get_registered_op(op_name, '', opset_version)
                 return op_fn(g, *inputs, **attrs)
 
@@ -624,7 +624,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 symbolic_name = 'prim_' + op_name
                 is_exportable = sym_registry.is_registered_op(symbolic_name, '', opset_version)
                 if not is_exportable:
-                    raise RuntimeError("ONNX export failed on primitive operator {}; please report a bug".format(op_name))
+                    warnings.warn("ONNX export failed on primitive operator {}; please report a bug".format(op_name))
                 symbolic_fn = sym_registry.get_registered_op(symbolic_name, '', opset_version)
                 attrs = {k: n[k] for k in n.attributeNames()}
                 return symbolic_fn(g, *inputs, **attrs)
@@ -632,18 +632,18 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         # custom ops
         elif sym_registry.is_registered_version(ns, 0):
             if not sym_registry.is_registered_op(op_name, ns, 0):
-                raise RuntimeError("ONNX export failed on custom operator {}::{} because "
-                                   "torch.onnx.symbolic_opset{}.{} does not exist. "
-                                   "Have you registered your symbolic function with "
-                                   "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
-                                   .format(ns, op_name, opset_version, op_name))
+                warnings.warn("ONNX export failed on custom operator {}::{} because "
+                              "torch.onnx.symbolic_opset{}.{} does not exist. "
+                              "Have you registered your symbolic function with "
+                              "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
+                              .format(ns, op_name, opset_version, op_name))
             symbolic_fn = sym_registry.get_registered_op(symbolic_name, ns, 0)
             attrs = {k: n[k] for k in n.attributeNames()}
             return symbolic_fn(g, *inputs, **attrs)
 
         else:
-            raise RuntimeError("ONNX export failed on an operator with unrecognized namespace {}::{}; "
-                               "please report a bug".format(ns, op_name))
+            warnings.warn("ONNX export failed on an operator with unrecognized namespace {}::{}; "
+                          "please report a bug".format(ns, op_name))
             return None
 
     except TypeError as e:

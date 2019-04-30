@@ -1,16 +1,13 @@
-import torch
-import torch.onnx
-
-import torch.onnx.symbolic_opset9
-import torch.onnx.symbolic_opset10
+import warnings
+import importlib
 
 _registry = {}
 
-_symbolic_versions = {
-    9 : torch.onnx.symbolic_opset9,
-    10 : torch.onnx.symbolic_opset10
-}
-
+_symbolic_versions = {}
+from torch.onnx.symbolic_helper import _onnx_stable_opsets
+for opset_version in _onnx_stable_opsets:
+    module = importlib.import_module('torch.onnx.symbolic_opset{}'.format(opset_version))
+    _symbolic_versions[opset_version] = module
 
 def register_version(domain, version):
     if not is_registered_version(domain, version):
@@ -44,7 +41,7 @@ def is_registered_version(domain, version):
 
 def register_op(opname, op, domain, version):
     if domain is None or version is None:
-        raise RuntimeError("ONNX export failed. The ONNX domain and/or version to register are None.")
+        warnings.warn("ONNX export failed. The ONNX domain and/or version to register are None.")
     global _registry
     if not is_registered_version(domain, version):
         _registry[(domain, version)] = {}
@@ -53,13 +50,13 @@ def register_op(opname, op, domain, version):
 
 def is_registered_op(opname, domain, version):
     if domain is None or version is None:
-        raise RuntimeError("ONNX export failed. The ONNX domain and/or version are None.")
+        warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
     global _registry
     return (domain, version) in _registry and opname in _registry[(domain, version)]
 
 
 def get_registered_op(opname, domain, version):
     if domain is None or version is None:
-        raise RuntimeError("ONNX export failed. The ONNX domain and/or version are None.")
+        warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
     global _registry
     return _registry[(domain, version)][opname]
