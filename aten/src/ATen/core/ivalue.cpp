@@ -109,8 +109,8 @@ void IValue::dump() const {
 }
 
 
-const std::string& ivalue::Object::name() const {
-  return this->type_->name();
+std::string ivalue::Object::name() const {
+  return this->type_->qualname();
 }
 
 void ivalue::Object::resizeObject(size_t slot) {

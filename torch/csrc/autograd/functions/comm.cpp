@@ -28,6 +28,8 @@ Scatter::Scatter(
       streams_(streams),
       unsqueeze_scalars_(unsqueeze_scalars) {}
 
+Scatter::~Scatter() {}
+
 variable_list Scatter::apply(variable_list&& inputs) {
   AT_ASSERT(inputs.size() == 1);
   auto& input = inputs.front();
@@ -64,6 +66,8 @@ variable_list Scatter::apply(variable_list&& inputs) {
 
 Gather::Gather(const at::Device& destination_device, int64_t dim)
     : destination_device_(destination_device), dim_(dim) {}
+
+Gather::~Gather() {}
 
 variable_list Gather::apply(variable_list&& inputs) {
   bool all_are_zero_dim = true;

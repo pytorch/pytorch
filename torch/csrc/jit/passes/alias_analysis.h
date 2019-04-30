@@ -42,7 +42,7 @@ class AliasDb {
 
   // Does `n` write to an alias of one of the values in `vs`?
   // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
-  bool writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks = false)
+  TORCH_API bool writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks = false)
       const;
 
   // Does `a` and `b` potentially share a memory location or do either
@@ -56,7 +56,7 @@ class AliasDb {
       const at::ArrayRef<Value*>& b) const;
 
   // Do `a` and `b` potentially share a memory location?
-  bool mayAlias(const Value* a, const Value* b) const;
+  TORCH_API bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`? i.e. may they overlap?
   //
@@ -104,7 +104,7 @@ class AliasDb {
   }
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
-  bool hasWriters(const Node* n) const;
+  TORCH_API bool hasWriters(const Node* n) const;
 
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
@@ -115,8 +115,8 @@ class AliasDb {
   //
   // Returns `false` if it's impossible to move `n` after `MovePoint` without
   // violating dependencies, otherwise executes the move and returns `true`
-  bool moveAfterTopologicallyValid(Node* n, Node* movePoint);
-  bool moveBeforeTopologicallyValid(Node* n, Node* movePoint);
+  TORCH_API bool moveAfterTopologicallyValid(Node* n, Node* movePoint);
+  TORCH_API bool moveBeforeTopologicallyValid(Node* n, Node* movePoint);
 
   bool couldMoveAfterTopologically(Node* n, Node* movePoint);
   bool couldMoveBeforeTopologically(Node* n, Node* movePoint);
@@ -146,7 +146,7 @@ class AliasDb {
   void getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks = false) const;
   void getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
   // Do any nodes write to `v`s memory location?
-  bool hasWriters(const Value* v) const;
+  TORCH_API bool hasWriters(const Value* v) const;
   // Register the fact that `n` writes to `v`.
   void registerWrite(const Value* v, Node* n);
   // Get all the values that `n` reads from.
@@ -163,7 +163,7 @@ class AliasDb {
    * Wildcard methods
    */
   // is `v` a wildcard?
-  bool isWildcard(const Value* v) const;
+  TORCH_API bool isWildcard(const Value* v) const;
   // Register `v` as a wildcard value.
   void setWildcard(const Value* v);
   // Get all nodes that write to a wildcard value.

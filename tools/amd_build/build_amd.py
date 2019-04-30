@@ -26,7 +26,15 @@ parser.add_argument(
     '--output-directory',
     type=str,
     default='',
-    help="The Directory to Store the Hipified Project",
+    help="The directory to store the hipified project",
+    required=False)
+
+parser.add_argument(
+    '--extra-include-dir',
+    type=str,
+    default=[],
+    nargs='+',
+    help="The list of extra directories in caffe2 to hipify",
     required=False)
 
 # Hipify using HIP-Clang launch.
@@ -80,6 +88,12 @@ includes = [
     "torch/*",
     "tools/autograd/templates/python_variable_methods.cpp",
 ]
+
+for new_dir in args.extra_include_dir:
+    abs_new_dir = os.path.join(proj_dir, new_dir)
+    if os.path.exists(abs_new_dir):
+        new_dir = os.path.join(new_dir, '*')
+        includes.append(new_dir)
 
 ignores = [
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
