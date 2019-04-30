@@ -140,7 +140,7 @@ void adaptive_avg_pool3d_out_cpu_template(
 #pragma omp parallel for private(b)
     for (b = 0; b < input.size(0); b++) {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-          input.scalar_t(), "adaptive_avg_pool3d_cpu", [&] {
+          input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
             auto input_data = input.data<scalar_t>();
             auto output_data = output.data<scalar_t>();
             adaptive_avg_pool3d_out_frame<scalar_t>(
