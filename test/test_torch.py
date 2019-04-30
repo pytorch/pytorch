@@ -901,6 +901,18 @@ class _TestTorchMixin(object):
     def test_max(self):
         self._testSelection(torch.max, max)
 
+    def test_log_normal(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.tensor([10], dtype=torch.float, device=device).log_normal_()
+            self.assertEqual(a.dtype, torch.float)
+            self.assertEqual(a.size(), torch.Size([1]))
+
+    def test_geometric(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.tensor([10], dtype=torch.float, device=device).geometric_(0.5)
+            self.assertEqual(a.dtype, torch.float)
+            self.assertEqual(a.size(), torch.Size([1]))
+
     @staticmethod
     def _test_max_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):
         for dtype in dtypes:
