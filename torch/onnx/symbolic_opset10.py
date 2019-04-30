@@ -8,6 +8,10 @@ from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
 
 
+# EDITING THIS FILE? READ THIS FIRST!
+# see Note [Edit Symbolic Files]
+
+
 # Add new operator here
 @parse_args('v', 'i', 'i', 'i', 'i')
 def topk(g, self, k, dim, largest, sorted, out=None):

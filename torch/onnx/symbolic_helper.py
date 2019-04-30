@@ -10,9 +10,10 @@ import torch.onnx.utils
 from functools import wraps
 
 
-# EDITING THIS FILE? READ THIS FIRST!
+# Note [Edit Symbolic Files]
+# EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
 #
-# - This file is ONLY for ATen operators (e.g., operators that show up in the
+# - These files is ONLY for ATen operators (e.g., operators that show up in the
 #   trace as aten::blah).  If you need to special case a primitive operator,
 #   look at _run_symbolic_function
 # - Parameter ordering does NOT necessarily match what is in VariableType.cpp;

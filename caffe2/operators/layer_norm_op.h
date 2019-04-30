@@ -6,6 +6,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/c10_operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
 
