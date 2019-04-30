@@ -69,4 +69,4 @@ def is_pytorch_enabled(framework_arg):
     return 'PyTorch' in framework_arg
 
 def get_requested_frameworks(framework_arg):
-    return framework_arg.split(',')
+    return [fr.strip() for fr in framework_arg.split(',') if len(fr.strip()) > 0]
