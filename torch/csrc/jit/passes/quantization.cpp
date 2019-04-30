@@ -147,16 +147,19 @@ void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
-static Node* addObserverFor(Value* v, Node* original_observer_node, Node* def) {
-  AT_ASSERT(def != nullptr);
-  WithInsertPoint ins(def);
+static Node* addObserverFor(
+    Value* v,
+    Node* original_observer_node,
+    Node* insert_point) {
+  AT_ASSERT(insert_point != nullptr);
+  WithInsertPoint ins(insert_point);
 
   // We need to pass the value name to observer function - create a constant
   // holding this name.
-  Value* vname = def->owningGraph()->insertConstant(v->uniqueName());
+  Value* vname = insert_point->owningGraph()->insertConstant(v->uniqueName());
 
   // Create a new observer node. We just need to clone the original one.
-  Node* observerNode = def->owningGraph()->createClone(
+  Node* observerNode = insert_point->owningGraph()->createClone(
       &*original_observer_node, [&](Value* v) { return v; }, false);
 
   // Set the type and the name of the output of the new observer node. It will
@@ -178,7 +181,7 @@ static bool outputsNeedToBeObserved(Node* n) {
 void InsertObserverNodes(
     const std::shared_ptr<Graph>& graph,
     Node* observer_node,
-    ssize_t num_activation_inputs) {
+    size_t num_activation_inputs) {
   AT_ASSERT(graph != nullptr);
   // num_activation_inputs is the number of activations or external data
   // excluding the parameters
