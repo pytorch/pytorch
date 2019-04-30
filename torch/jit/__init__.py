@@ -610,20 +610,18 @@ class TracerWarning(Warning):
 TracerWarning.ignore_lib_warnings()
 torch._C._tracer_warn_use_python()
 
+def make_tuple(example_inputs):
+    if isinstance(example_inputs, (torch.Tensor, dict)):
+        return (example_inputs,)
+    # done primarily so that weird iterables fail here and not pybind11 code
+    if not isinstance(example_inputs, tuple):
+        return tuple(example_inputs)
+    return example_inputs
 
-class trace_dict(dict):
-    """
-    A tagging interface to differentiate when inputs to trace is a dictionary
-    of methods-inputs pairs or dictionary of regular inputs
-    """
-    def __init__(self, methods_inputs):
-        super(trace_dict, self).__init__()
-        if not isinstance(methods_inputs, dict):
-            raise RuntimeError("trace_dict only accepts one dict parameter")
-
-        for method_name, example_inputs in methods_inputs.items():
-            self[method_name] = example_inputs
-
+def make_module(mod, _module_class, executor_options):
+    if _module_class is None:
+        _module_class = TopLevelTracedModule
+    return _module_class(mod, **executor_options)
 
 def trace(mod,
           inputs,
@@ -696,52 +694,63 @@ def trace(mod,
     """
     if not _enabled:
         return mod
-    methods_inputs = {}
-    if isinstance(inputs, trace_dict):
-        for method_name, example_inputs in inputs.items():
-            methods_inputs[getattr(mod, method_name)] = (method_name, example_inputs)
-    else:
-        methods_inputs[mod] = (getattr(mod, '__name__', 'forward'), inputs)
-        if hasattr(mod, '__self__') and isinstance(mod.__self__, torch.nn.Module):
-            mod = mod.__self__
 
     executor_options = {'optimize': bool(optimize)}
-
-    module = None
-    if isinstance(mod, torch.nn.Module):
-        if _module_class is None:
-            _module_class = TopLevelTracedModule
-        module = _module_class(mod, **executor_options)
-
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
 
-    for func, name_inputs in methods_inputs.items():
-        method_name = name_inputs[0]
-        example_inputs = name_inputs[1]
-        if isinstance(example_inputs, (torch.Tensor, dict)):
-            example_inputs = (example_inputs,)
-        # done primarily so that weird iterables fail here and not pybind11 code
-        elif not isinstance(example_inputs, tuple):
-            example_inputs = tuple(example_inputs)
+    import types
+    if (isinstance(inputs, dict) and
+        len(inputs.keys()) > 0 and
+            isinstance(inputs.keys()[0], types.MethodType)):
 
-        if module:
-            module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
-            check_trace_method = module._c._get_method(method_name)
+            if not isinstance(mod, torch.nn.Module):
+                raise AttributeError("expected torch.nn.Module as the first argument")
+
+            module = make_module(mod, _module_class, executor_options)
+
+            for func, example_inputs in inputs.items():
+
+                if func.__self__ is not mod:
+                    raise AttributeError("function's __self__ should be equal to module")
+                method_name = func.__name__
+                example_inputs = make_tuple(example_inputs)
+                module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+                check_trace_method = module._c._get_method(method_name)
+
+                # Check the trace against new traces created from user-specified inputs
+                if check_trace:
+                    if check_inputs is not None:
+                        _check_trace(check_inputs, func, executor_options, check_trace_method, check_tolerance, _force_outplace)
+                    else:
+                        _check_trace([example_inputs], func, executor_options, check_trace_method, check_tolerance, _force_outplace)
+
+            return module
+
+    method_name = getattr(mod, '__name__', 'forward')
+    func = mod
+    if hasattr(mod, '__self__') and isinstance(mod.__self__, torch.nn.Module):
+        mod = mod.__self__
+    example_inputs = make_tuple(inputs)
+
+    if isinstance(mod, torch.nn.Module):
+        module = make_module(mod, _module_class, executor_options)
+        module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+        check_trace_method = module._c._get_method(method_name)
+        return_value = module
+    else:
+        if method_name == '<lambda>':
+            method_name = '_lambda'  # make name a valid identifier
+        check_trace_method = torch._C._create_function_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
+        return_value = check_trace_method
+
+    # Check the trace against new traces created from user-specified inputs
+    if check_trace:
+        if check_inputs is not None:
+            _check_trace(check_inputs, mod, executor_options, check_trace_method, check_tolerance, _force_outplace)
         else:
-            if method_name == '<lambda>':
-                method_name = '_lambda'  # make name a valid identifier
-            traced = torch._C._create_function_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
-            module = traced
-            check_trace_method = traced
+            _check_trace([example_inputs], mod, executor_options, check_trace_method, check_tolerance, _force_outplace)
 
-        # Check the trace against new traces created from user-specified inputs
-        if check_trace:
-            if check_inputs is not None:
-                _check_trace(check_inputs, func, executor_options, check_trace_method, check_tolerance, _force_outplace)
-            else:
-                _check_trace([example_inputs], func, executor_options, check_trace_method, check_tolerance, _force_outplace)
-
-    return module
+    return return_value
 
 
 class CompilationUnit(object):
