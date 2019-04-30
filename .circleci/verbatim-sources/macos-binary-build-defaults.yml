@@ -56,6 +56,6 @@ binary_mac_upload: &binary_mac_upload
       name: Upload
       no_output_timeout: "10m"
       command: |
-        script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_test.sh"
+        script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_upload.sh"
         cat "$script"
         source "$script"
