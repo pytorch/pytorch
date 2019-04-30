@@ -69,7 +69,7 @@ qint8 quantize_uint8(float scale, uint8_t zero_point, float value) {
 #else
   constexpr int32_t qmin = std::numeric_limits<uint8_t>::min();
   constexpr int32_t qmax = std::numeric_limits<uint8_t>::max();
-  qvalue = zero_point + static_cast<int32_t>(std::nearbyint(value / scale));
+  qvalue = static_cast<int32_t>(std::nearbyint(value / scale + zero_point));
   qvalue = std::max(qvalue, qmin);
   qvalue = std::min(qvalue, qmax);
 #endif

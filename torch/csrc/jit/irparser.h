@@ -2,6 +2,8 @@
 #include <string>
 #include <unordered_map>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 namespace torch {
 namespace jit {
 
