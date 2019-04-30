@@ -18,6 +18,7 @@ type_map = {
         'Bool',
     ],
     'quantized': [
+        'QInt8',
         'QUInt8',
         'QInt32',
     ]
