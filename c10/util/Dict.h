@@ -20,19 +20,18 @@ class DictEntryRef final {
 private:
   using Key = typename Iterator::value_type::first_type;
   using Value = typename Iterator::value_type::second_type;
+
+  static constexpr bool is_const_ref() { return std::is_const<typename Iterator::value_type>::value; }
+
 public:
   explicit DictEntryRef(Iterator iterator)
   : iterator_(std::move(iterator)) {}
 
-  const typename Iterator::value_type::first_type& key() const {
+  const Key& key() const {
     return iterator_->first;
   }
 
-  c10::guts::conditional_t<
-    std::is_const<typename Iterator::value_type>::value,
-    const typename Iterator::value_type::second_type&,
-    typename Iterator::value_type::second_type&
-  > value() const {
+  c10::guts::conditional_t<is_const_ref(), const Value&, Value&> value() const {
     return iterator_->second;
   }
 
