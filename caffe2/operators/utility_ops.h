@@ -803,7 +803,7 @@ class ScatterOp : public Operator<Context> {
     int64_t i = 0;
     for (int64_t batch = 0; batch < outer_dims_product; ++batch) {
       int64_t i_max = i + N;
-      for (i; i < i_max && i < indices.numel(); ++i) {
+      for (; i < i_max && i < indices.numel(); ++i) {
         auto idx = idxs[i];
 
         auto src = src_base + batch * src_batch_bytesize + idx * block_bytesize;
