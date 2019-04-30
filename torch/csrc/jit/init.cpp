@@ -26,6 +26,7 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
+#include <torch/csrc/jit/passes/pattern_fusion.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -142,6 +143,23 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
+      .def(
+          "_jit_pass_pattern_based_fusion",
+          [](std::shared_ptr<script::Module> m) {
+            return PatternBasedFusion(m);
+          })
+      .def(
+          "_jit_pass_custom_pattern_based_fusion",
+          [](const std::string& pattern,
+             const std::string& fused_node_name,
+             std::vector<std::string> inputs,
+             std::vector<std::string> outputs,
+             std::shared_ptr<script::Module> m) {
+            PatternFuser pattern_fuser;
+            pattern_fuser.RegisterFusionPattern(
+                pattern, fused_node_name, inputs, outputs);
+            pattern_fuser.runOnModule(m);
+          })
       .def(
           "_jit_pass_fold_quant_inputs",
           [](std::shared_ptr<Graph>& g) {
