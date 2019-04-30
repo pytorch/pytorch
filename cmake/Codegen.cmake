@@ -43,7 +43,7 @@ configure_file(
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../caffe2
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
-if (INTERN_BUILD_MOBILE AND NOT BUILD_TORCH_MOBILE)
+if (NOT INTERN_BUILD_ATEN_OPS)
   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
           DESTINATION include/ATen
           FILES_MATCHING PATTERN "*.h")
