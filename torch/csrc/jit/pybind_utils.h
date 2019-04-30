@@ -161,7 +161,7 @@ inline TypedIValue toTypedIValue(py::handle input) {
 }
 
 inline IValue toIValue(py::handle input) {
-    return toTypedIValue(input).ivalue();
+  return toTypedIValue(input).ivalue();
 }
 
 inline Stack toStack(const py::tuple& inputs) {
@@ -170,7 +170,8 @@ inline Stack toStack(const py::tuple& inputs) {
 
 inline TypedStack toTypedStack(const py::tuple& inputs) {
   auto info = toTypedIValue(inputs);
-  return TypedStack(info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
+  return TypedStack(
+      info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
 }
 
 inline IValue toIValue(
@@ -412,7 +413,8 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = ivalue.toObject();
-    const auto classType = ClassType::get(obj->name());
+    const auto classType =
+        ClassType::get(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
         py::module::import("torch.jit").attr("_get_script_class")(obj->name());

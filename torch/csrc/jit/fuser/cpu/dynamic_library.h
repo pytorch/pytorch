@@ -1,8 +1,7 @@
 #pragma once
 
-#include <c10/util/Exception.h>
-#include <torch/csrc/utils/disallow_copy.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {
 namespace jit {

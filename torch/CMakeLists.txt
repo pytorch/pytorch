@@ -134,6 +134,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import_source.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/import_export_helpers.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
@@ -162,6 +163,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/pattern_fusion.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_inplace_ops.cpp

@@ -67,8 +67,8 @@ class TestQuantizedOps(unittest.TestCase):
         scale = 2.0
         zero_point = 1
         qX = X.quantize_linear(scale=scale, zero_point=zero_point)
-        print("X:\n{}".format(X))
-        print("\nQuantized:\n{}\nFake:\n{}".format(qX.int_repr(), _quantize(X.numpy(), scale, zero_point)))
+        # print("X:\n{}".format(X))
+        # print("\nQuantized:\n{}\nFake:\n{}".format(qX.int_repr(), _quantize(X.numpy(), scale, zero_point)))
 
         Y = X.numpy().copy()
         Y[Y < 0] = 0
