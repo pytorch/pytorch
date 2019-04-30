@@ -586,13 +586,13 @@ main_link_args.extend(CAFFE2_LIBS)
 install_requires=[]
 
 if sys.version_info[0] == 2:
-    install_requires += ['future']
+    install_requires.append('future')
 
 try:
     import numpy as np
     NUMPY_INCLUDE_DIR = np.get_include()
     USE_NUMPY = True
-    install_requires += ['numpy']
+    install_requires.append('numpy')
 except ImportError:
     USE_NUMPY = False
 
