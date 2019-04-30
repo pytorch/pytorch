@@ -27,6 +27,7 @@
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
 #include <test/cpp/jit/test_peephole_optimize.h>
+#include <test/cpp/jit/test_qualified_name.h>
 #include <test/cpp/jit/test_subgraph_matcher.h>
 #include <test/cpp/jit/test_subgraph_utils.h>
 
@@ -74,7 +75,8 @@ namespace jit {
   _(PeepholeOptimize)              \
   _(RecordFunction)                \
   _(SubgraphMatching)              \
-  _(ModuleDefine)
+  _(ModuleDefine)                  \
+  _(QualifiedName)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
