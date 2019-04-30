@@ -92,7 +92,12 @@ class C10OperatorWrapper final : public Operator<Context> {
             InputSize(),
             "), operator schema expected more.");
         stack_.emplace_back(at::Tensor(Input(input_tensor_index++)));
-
+      } else if (argument.type()->isSubtypeOf(OptionalType::ofTensor())) {
+        if (input_tensor_index < InputSize()) {
+          stack_.emplace_back(at::Tensor(Input(input_tensor_index++)));
+        } else {
+          stack_.emplace_back(IValue());
+        }
       } else if (argument.type()->isSubtypeOf(ListType::ofTensors())) {
         AT_ASSERTM(
             input_tensor_index == 0,
@@ -103,15 +108,14 @@ class C10OperatorWrapper final : public Operator<Context> {
       } else {
         stack_.emplace_back(get_nontensor_argument_(argument));
       }
-
-      AT_ASSERTM(
-          input_tensor_index == InputSize(),
-          "Error in caffe2->c10 wrapper: Number of caffe2 operator inputs (",
-          InputSize(),
-          ") doesn't match number of tensor arguments (",
-          input_tensor_index,
-          ") in the c10 operator schema.");
     }
+    AT_ASSERTM(
+        input_tensor_index == InputSize(),
+        "Error in caffe2->c10 wrapper: Number of caffe2 operator inputs (",
+        InputSize(),
+        ") doesn't match number of tensor arguments (",
+        input_tensor_index,
+        ") in the c10 operator schema.");
   }
 
   void callKernel_() {

@@ -1265,7 +1265,7 @@ c10::optional<const Node*> AliasDb::getLastWildcard() const {
   }
 }
 
-TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
+bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
   // WARNING: by adding a case to this list, you are asserting that you have
   // added a case for the unschematized node in AliasDb::analyze
   const static std::unordered_set<Symbol> handled = {

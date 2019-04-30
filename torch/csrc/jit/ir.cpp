@@ -33,10 +33,6 @@ static constexpr topo_position_t kMidPoint = 0;
 //   - 2^(64-n) is the maximum number of appends to the end without reindex
 static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
-// Sigh, see
-// https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
-constexpr Symbol PythonOp::Kind;
-
 static void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->uniqueName();
 }
