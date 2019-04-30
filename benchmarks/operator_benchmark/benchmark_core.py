@@ -140,8 +140,10 @@ class BenchmarkRunner(object):
             # Currently, this is a sub-string matching.
             if self.args.operator and (self.args.operator not in full_test_id):
                 continue
-            if self.args.framework and (self.args.framework not in full_test_id):
-                continue
+            if self.args.framework:
+                frameworks = benchmark_utils.get_requested_frameworks(self.args.framework)
+                if all([fr not in full_test_id for fr in frameworks]):
+                    continue
 
             # To reduce variance, fix a numpy randseed to the test case,
             # so that the randomly generated input tensors remain the
