@@ -1169,11 +1169,11 @@ jobs:
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/master master") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           # stable release docs push. Due to some circleci limitations, we keep
-          # an eternal PR open (#16502) for merging v1.0.1 -> master for this job.
-          # XXX: The following code is only run on the v1.0.1 branch, which might
+          # an eternal PR open for merging v1.1.0 -> master for this job.
+          # XXX: The following code is only run on the v1.1.0 branch, which might
           # not be exactly the same as what you see here.
-          elif [[ "${CIRCLE_BRANCH}" == "v1.0.1" ]]; then
-            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/stable 1.0.1") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          elif [[ "${CIRCLE_BRANCH}" == "v1.1.0" ]]; then
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./doc_push_script.sh docs/stable 1.1.0") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           # For open PRs: Do a dry_run of the docs build, don't push build
           else
