@@ -67,8 +67,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 #define AT_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...)                          \
   [&] {                                                                      \
     const auto& the_type = TYPE;                                             \
-    (void)the_type;                                                          \
-    at::ScalarType _st = ::detail::scalar_type(TYPE);                        \
+    /* don't use TYPE again in case it is an expensive or side-effect op */  \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
     switch (_st) {                                                           \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)      \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)        \
@@ -80,8 +80,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 #define AT_DISPATCH_FLOATING_TYPES_AND_HALF(TYPE, NAME, ...)                 \
   [&] {                                                                      \
     const auto& the_type = TYPE;                                             \
-    (void)the_type;                                                          \
-    at::ScalarType _st = ::detail::scalar_type(TYPE);                        \
+    /* don't use TYPE again in case it is an expensive or side-effect op */  \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
     switch (_st) {                                                           \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)      \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)        \
@@ -94,8 +94,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 #define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(TYPE, NAME, ...)              \
   [&] {                                                                      \
     const auto& the_type = TYPE;                                             \
-    (void)the_type;                                                          \
-    at::ScalarType _st = ::detail::scalar_type(TYPE);                        \
+    /* don't use TYPE again in case it is an expensive or side-effect op */  \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
     switch (_st) {                                                           \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)      \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)        \
@@ -114,8 +114,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 #define AT_DISPATCH_INTEGRAL_TYPES(TYPE, NAME, ...)                          \
   [&] {                                                                      \
     const auto& the_type = TYPE;                                             \
-    (void)the_type;                                                          \
-    at::ScalarType _st = ::detail::scalar_type(TYPE);                        \
+    /* don't use TYPE again in case it is an expensive or side-effect op */  \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
     switch (_st) {                                                           \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)       \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, int8_t, __VA_ARGS__)        \
@@ -131,8 +131,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
   [&] {                                                                      \
     detail::deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF();                     \
     const auto& the_type = TYPE;                                             \
-    (void)the_type;                                                          \
-    at::ScalarType _st = ::detail::scalar_type(TYPE);                        \
+    /* don't use TYPE again in case it is an expensive or side-effect op */  \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
     switch (_st) {                                                           \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)       \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, int8_t, __VA_ARGS__)        \
@@ -150,8 +150,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 #define AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                               \
   [&] {                                                                      \
     const auto& the_type = TYPE;                                             \
-    (void)the_type;                                                          \
-    at::ScalarType _st = ::detail::scalar_type(TYPE);                        \
+    /* don't use TYPE again in case it is an expensive or side-effect op  */ \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
     switch (_st) {                                                           \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)       \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, int8_t, __VA_ARGS__)        \
@@ -168,8 +168,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 #define AT_DISPATCH_COMPLEX_TYPES(TYPE, NAME, ...)                           \
   [&] {                                                                      \
     const auto& the_type = TYPE;                                             \
-    (void)the_type;                                                          \
-    at::ScalarType _st = ::detail::scalar_type(TYPE);                        \
+    /* don't use TYPE again in case it is an expensive or side-effect op */  \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
     switch (_st) {                                                           \
       AT_PRIVATE_CASE_TYPE(                                                  \
           at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)    \
@@ -183,8 +183,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 #define AT_DISPATCH_ALL_TYPES_AND_COMPLEX(TYPE, NAME, ...)                   \
   [&] {                                                                      \
     const auto& the_type = TYPE;                                             \
-    (void)the_type;                                                          \
-    at::ScalarType _st = ::detail::scalar_type(TYPE);                        \
+    /* don't use TYPE again in case it is an expensive or side-effect op*/   \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
     switch (_st) {                                                           \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)       \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, int8_t, __VA_ARGS__)        \
@@ -206,8 +206,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
   [&] {                                                                      \
     detail::deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX()          \
     const auto& the_type = TYPE;                                             \
-    (void)the_type;                                                          \
-    at::ScalarType _st = ::detail::scalar_type(TYPE);                        \
+    /* don't use TYPE again in case it is an expensive or side-effect op */  \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
     switch (_st) {                                                           \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)       \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, int8_t, __VA_ARGS__)        \
