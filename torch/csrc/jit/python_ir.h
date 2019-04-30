@@ -11,6 +11,8 @@ void initPythonIRBindings(PyObject* module);
 // execute a Python function, used for Ops we can't optimize but that we want to
 // optimize around
 struct ConcretePythonOp : public PythonOp {
+  static Symbol Kind;
+
   ConcretePythonOp(Graph* graph) : PythonOp(graph, ::c10::prim::PythonOp) {}
   ConcretePythonOp* init(
       THPObjectPtr&& pyobj,
