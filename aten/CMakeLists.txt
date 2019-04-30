@@ -1,9 +1,9 @@
-if (BUILD_ATEN_MOBILE AND NOT BUILD_TORCH_MOBILE)
+if (NOT INTERN_BUILD_ATEN_OPS)
   return()
 endif()
 
 # Find modules
-if (NOT BUILD_TORCH_MOBILE)
+if (NOT INTERN_BUILD_MOBILE)
   list(APPEND CMAKE_MODULE_PATH /usr/lib/x86_64-linux-gnu/)
   list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ /usr/lib/aarch64-linux-gnu/)
 endif()
