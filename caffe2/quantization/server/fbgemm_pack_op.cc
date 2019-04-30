@@ -326,6 +326,8 @@ ConvDNNLowPPackWeightOp::ConvDNNLowPPackWeightOp(
     const OperatorDef& operator_def,
     Workspace* ws)
     : ConvPoolDNNLowPOpBase<uint8_t, ConvFp32Op>(operator_def, ws),
+      save_unpacked_weights_(
+          this->GetSingleArgument<bool>("save_unpacked_weights", false)),
       quantize_groupwise_(
           this->GetSingleArgument<bool>("quantize_groupwise", false)) {
   if (this->debug_def().engine() == "DNNLOWP_ACC16") {
@@ -419,6 +421,13 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
       Y->qparams,
       W_quantized,
       qfactory_.get());
+  if (save_unpacked_weights_) {
+        ReinitializeTensor(&Y->original_tensor, filter.sizes(), at::dtype<int8_t>().device(CPU));
+    auto* buffer =
+        Y->original_tensor.template mutable_data<int8_t>();
+    CAFFE_ENFORCE_EQ(Y->original_tensor.numel(), W_quantized.size());
+    memcpy(buffer, W_quantized.data(), W_quantized.size() * sizeof(int8_t));
+  }
 
   if (this->InputIsType<int8::Int8TensorCPU>(FILTER) && quantize_groupwise_) {
     static int log_occurences = 0;
