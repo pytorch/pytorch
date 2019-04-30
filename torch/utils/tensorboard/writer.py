@@ -715,7 +715,7 @@ class SummaryWriter(object):
     def add_custom_scalars(self, layout):
         """Create special chart by collecting charts tags in 'scalars'. Note that this function can only be called once
         for each SummaryWriter() object. Because it only provides metadata to tensorboard, the function can be called
-        before or after the training loop. See ``examples/demo_custom_scalars.py`` for more.
+        before or after the training loop.
 
         Args:
             layout (dict): {categoryName: *charts*}, where *charts* is also a dictionary
