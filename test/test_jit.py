@@ -1439,6 +1439,58 @@ graph(%x : Tensor,
                    .check_next("int_repr").check("dequantize_linear") \
                    .run(str(trace.graph))
 
+    def test_pattern_based_fusion(self):
+        class testModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y, z):
+                t = x * y
+                p = t * z
+                u = p * x
+                o = u * y
+                return o
+        m = testModule()
+        torch._C._jit_pass_custom_pattern_based_fusion("""
+graph(%a, %b, %c):
+  %q = aten::mul(%a, %b)
+  %r = aten::mul(%q, %c)
+  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], m._c)
+        FileCheck().check_not("aten::mul").check("my::fused_mulmul") \
+                   .check_next("my::fused_mulmul").run(str(m.graph))
+
+        # Check that overlapping matches are handled correctly
+        class testModule2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y, z):
+                t = x * y
+                p = t * z
+                u = p * x
+                return u
+        m = testModule2()
+        torch._C._jit_pass_custom_pattern_based_fusion("""
+graph(%a, %b, %c):
+  %q = aten::mul(%a, %b)
+  %r = aten::mul(%q, %c)
+  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], m._c)
+
+        FileCheck().check_not("aten::mul").check("my::fused_mulmul") \
+                   .check_next("aten::mul").run(str(m.graph))
+
+        class testModule3(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y, z):
+                t = x * y
+                p = t + z
+                return p
+        m = testModule3()
+        torch._C._jit_pass_custom_pattern_based_fusion("""
+graph(%a, %b, %c, %d):
+  %q = aten::mul(%a, %b)
+  %r = aten::add(%q, %c, %d)
+  return (%r)""", "my::muladd", ["a", "b", "c", "d"], ["r"], m._c)
+        FileCheck().check_not("aten::add").check_not("aten::mul") \
+                   .check("my::muladd").check_next("return")      \
+                   .run(str(m.graph))
+
     def test_expand_quantlint(self):
         pass
 
@@ -3694,20 +3746,14 @@ a")
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
 
     def test_tensor_item(self):
-        def test_scalar_to_float_coercion(x):
-            return x.item() == 1
-
-        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
-        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
-
         def test_scalar_cast(x):
             scalar = x.item()
             return int(scalar), float(scalar)
 
         graph = torch.jit.script(test_scalar_cast).graph
         FileCheck().check("(int, float) = prim::TupleConstruct").run(graph)
-        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
-        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
+        self.checkScript(test_scalar_cast, (torch.tensor(1.0),))
+        self.checkScript(test_scalar_cast, (torch.tensor(1),))
 
         expected_str = r"Use int\(tensor\) or float\(tensor\) to retrieve"
         with self.assertRaisesRegex(RuntimeError, expected_str):
@@ -11776,6 +11822,8 @@ a")
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_attribute_unpickling(self):
+        tensor = torch.randn(2, 2)
+
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__()
@@ -11784,37 +11832,24 @@ a")
                 self.int = torch.jit.Attribute(99, int)
                 self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
                 self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
-                self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.tensor = torch.jit.Attribute(tensor, torch.Tensor)
                 self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
 
             @torch.jit.script_method
             def forward(self):
                 return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
 
-        class TensorID(object):
-            def __setstate__(self, id):
-                self.id = id
-
-        class IntList(object):
-            def __setstate__(self, data):
-                self.data = data
-
-        class JitUnpickler(pickle.Unpickler):
-            def find_class(self, module, name):
-                if not module == '__main__':
-                    return None
-
-                if name == 'TensorID':
-                    return TensorID
-                elif name == 'IntList':
-                    return IntList
-
         with TemporaryFileName() as fname:
             M().save(fname)
             archive_name = os.path.basename(os.path.normpath(fname))
             archive = zipfile.ZipFile(fname, 'r')
             pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
-            JitUnpickler(io.BytesIO(pickled_data)).load()
+            out = pickle.load(io.BytesIO(pickled_data))
+
+            self.assertEqual(out[0], {"I": "am", "a test": "test"})
+            self.assertEqual(out[1], 2.3)
+            self.assertEqual(out[2], 99)
+            self.assertEqual(out[6], [1, 2, 3, 4])
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):
@@ -14489,6 +14524,36 @@ class TestClassType(JitTestCase):
         sfoo = self.checkScript(use_foo, input)
         graphstr = str(sfoo.graph_for(*input))
         FileCheck().check_count("Double(*, *) = prim::GetAttr", 4).run(graphstr)
+
+    @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
+    def test_imported_classes(self):
+        import jit.foo
+        import jit.bar
+        import jit.very.very.nested
+
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                foo = jit.foo.FooSameName(a)
+                bar = jit.bar.FooSameName(a)
+                three = jit.very.very.nested.FooUniqueName(a)
+                return foo.x + bar.y + three.y
+
+        m = MyMod()
+
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+
+        # classes are globally registered for now, so we need to clear the JIT
+        # registry to simulate loading a new model
+        torch._C._jit_clear_class_registry()
+
+        buffer.seek(0)
+        m_loaded = torch.jit.load(buffer)
+
+        input = torch.rand(2, 3)
+        output = m_loaded(input)
+        self.assertEqual(3 * input, output)
 
 
 class TestLogging(JitTestCase):

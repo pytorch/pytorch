@@ -43,6 +43,16 @@ std::vector<Value*> insertQuantParamNodes(
   return qparam_vals;
 }
 
+Value* insertScalarType(Node* ins_node, at::ScalarType t) {
+  AT_ASSERT(t != at::ScalarType::Undefined);
+  WithInsertPoint ins(ins_node);
+  // ScalarType inserted before ins_node node which is
+  // beginning of the quant-dequant pattern
+  Value* scalartype_v =
+      ins_node->owningGraph()->insertConstant(IValue(static_cast<int>(t)));
+  return scalartype_v;
+}
+
 // Create Quant Node
 Node* createQuantNode(Value* v, Node* n) {
   Node* quant = n->owningGraph()->create(
@@ -76,7 +86,8 @@ Node* createIntReprNode(Value* v, Node* n) {
 // Insert Quant-Dequant node pattern for quantizable node outputs
 void addQuantDeQuantNodes(
     Value* v,
-    std::tuple<std::string, float, int>& qparam) {
+    const std::tuple<std::string, float, int>& qparam,
+    at::ScalarType t = at::ScalarType::Undefined) {
   AT_ASSERT(v != nullptr);
   Node* n = v->node();
   Node* quant = createQuantNode(v, n);
@@ -99,13 +110,22 @@ void addQuantDeQuantNodes(
     quant->addInput(qparam_value);
     dequant->addInput(qparam_value);
   }
+  // optional argument required only for quantization
+  // of specific attributes eg: bias.
+  if (t != at::ScalarType::Undefined) {
+    Value* scalartype_v = insertScalarType(quant, t);
+    AT_ASSERT(scalartype_v != nullptr);
+    quant->addInput(scalartype_v);
+    dequant->addInput(scalartype_v);
+  }
 }
 
 // Insert Quant-Dequant node pattern for specific input to node n
 void addQuantDeQuantNodesForInput(
     Value* v,
     Node* n,
-    const std::tuple<std::string, float, int>& qparam) {
+    const std::tuple<std::string, float, int>& qparam,
+    at::ScalarType t = at::ScalarType::Undefined) {
   AT_ASSERT(v != nullptr);
   AT_ASSERT(n != nullptr);
   Node* quant = createQuantNode(v, n);
@@ -129,6 +149,12 @@ void addQuantDeQuantNodesForInput(
   for (Value* qparam_value : qparam_values) {
     quant->addInput(qparam_value);
     dequant->addInput(qparam_value);
+  }
+  if (t != at::ScalarType::Undefined) {
+    Value* scalartype_v = insertScalarType(quant, t);
+    AT_ASSERT(scalartype_v != nullptr);
+    quant->addInput(scalartype_v);
+    dequant->addInput(scalartype_v);
   }
 }
 
@@ -165,16 +191,19 @@ void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
-static Node* addObserverFor(Value* v, Node* original_observer_node, Node* def) {
-  AT_ASSERT(def != nullptr);
-  WithInsertPoint ins(def);
+static Node* addObserverFor(
+    Value* v,
+    Node* original_observer_node,
+    Node* insert_point) {
+  AT_ASSERT(insert_point != nullptr);
+  WithInsertPoint ins(insert_point);
 
   // We need to pass the value name to observer function - create a constant
   // holding this name.
-  Value* vname = def->owningGraph()->insertConstant(v->uniqueName());
+  Value* vname = insert_point->owningGraph()->insertConstant(v->uniqueName());
 
   // Create a new observer node. We just need to clone the original one.
-  Node* observerNode = def->owningGraph()->createClone(
+  Node* observerNode = insert_point->owningGraph()->createClone(
       &*original_observer_node, [&](Value* v) { return v; }, false);
 
   // Set the type and the name of the output of the new observer node. It will
@@ -196,7 +225,7 @@ static bool outputsNeedToBeObserved(Node* n) {
 void InsertObserverNodes(
     const std::shared_ptr<Graph>& graph,
     Node* observer_node,
-    ssize_t num_activation_inputs) {
+    size_t num_activation_inputs) {
   AT_ASSERT(graph != nullptr);
   // num_activation_inputs is the number of activations or external data
   // excluding the parameters

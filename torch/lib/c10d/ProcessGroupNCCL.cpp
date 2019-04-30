@@ -548,7 +548,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
         for (size_t j = 0; j < outputTensors[0].size(); ++j) {
           // See [Sync Streams].
           c10::cuda::CUDACachingAllocator::recordStream(
-            outputTensors[i][i].storage().data(), ncclStreams[i]);
+            outputTensors[i][j].storage().data(), ncclStreams[i]);
 
           outputTensors[i][j].copy_(outputFlattened[i][j], true);
         }
@@ -591,7 +591,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
         for (size_t j = 0; j < inputTensors[0].size(); ++j) {
           // See [Sync Streams].
           c10::cuda::CUDACachingAllocator::recordStream(
-            inputTensors[i][i].storage().data(), ncclStreams[i]);
+            inputTensors[i][j].storage().data(), ncclStreams[i]);
 
           inputFlattened[i][j].copy_(inputTensors[i][j], true);
         }
