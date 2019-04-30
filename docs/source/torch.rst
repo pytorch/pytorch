@@ -343,3 +343,4 @@ BLAS and LAPACK Operations
 Utilities
 ----------------------------------
 .. autofunction:: compiled_with_cxx11_abi
+.. autofunction:: parallel_info
