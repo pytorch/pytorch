@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 #endif
 
+#include <c10/macros/Export.h>
+
 // To add a new test file:
 // 1. Add a test_foo.h file in this directory
 // 2. include test_base.h
@@ -25,6 +27,7 @@
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
 #include <test/cpp/jit/test_peephole_optimize.h>
+#include <test/cpp/jit/test_qualified_name.h>
 #include <test/cpp/jit/test_subgraph_matcher.h>
 #include <test/cpp/jit/test_subgraph_utils.h>
 
@@ -72,12 +75,14 @@ namespace jit {
   _(PeepholeOptimize)              \
   _(RecordFunction)                \
   _(SubgraphMatching)              \
-  _(ModuleDefine)
+  _(ModuleDefine)                  \
+  _(QualifiedName)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
   _(Fusion)                     \
   _(GraphExecutor)              \
+  _(ModuleConversion)           \
   _(Interp)
 
 #if defined(USE_GTEST)
