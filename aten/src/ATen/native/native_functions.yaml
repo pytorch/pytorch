@@ -127,11 +127,29 @@
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: add
+    CUDA: add
+    SparseCPU: add
+    SparseCUDA: add
+    MkldnnCPU: mkldnn_add
 
 - func: add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: add_
+    CUDA: add_
+    SparseCPU: add_
+    SparseCUDA: add_
+    MkldnnCPU: mkldnn_add_
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: add_out
+    CUDA: add_out
+    SparseCPU: add_out
+    SparseCUDA: add_out
+    MkldnnCPU: mkldnn_add_out
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: add(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
@@ -1004,6 +1022,12 @@
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+  python_module: nn
+
+- func: mkldnn_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+  python_module: nn
+  dispatch:
+    MkldnnCPU: mkldnn_linear
 
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
@@ -1140,6 +1164,11 @@
 - func: max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
 
 - func: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+
+- func: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+  requires_tensor: True
+  dispatch:
+    MkldnnCPU: mkldnn_max_pool2d
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
@@ -1302,6 +1331,7 @@
   dispatch:
     CPU: batch_norm_cpu
     CUDA: batch_norm_cuda
+    MkldnnCPU: mkldnn_batch_norm
 
 - func: batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)
   dispatch:
@@ -1498,6 +1528,12 @@
   variants: function, method
   device_guard: False
 
+- func: mkldnn_reshape(Tensor self, int[] shape) -> Tensor
+  device_guard: False
+  requires_tensor: True
+  dispatch:
+    MkldnnCPU: mkldnn_reshape
+
 - func: reshape_as(Tensor self, Tensor other) -> Tensor
   variants: method
   device_guard: False
@@ -1522,9 +1558,17 @@
 
 - func: relu(Tensor self) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: relu
+    CUDA: relu
+    MkldnnCPU: mkldnn_relu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
+  dispatch:
+    CPU: relu_
+    CUDA: relu_
+    MkldnnCPU: mkldnn_relu_
 
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
@@ -2092,6 +2136,7 @@
     CUDA: clone
     SparseCPU: clone_sparse
     SparseCUDA: clone_sparse
+    MkldnnCPU: mkldnn_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   cpu_bool: True
@@ -2493,6 +2538,12 @@
   variants: method
   dispatch:
     CPU: dense_to_mkldnn
+
+- func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1) -> Tensor
+  variants: function
+  python_module: nn
+  dispatch:
+    MkldnnCPU: mkldnn_reorder_conv2d_weight
 
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
 
@@ -3664,9 +3715,17 @@
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: avg_pool2d_out
+    CUDA: avg_pool2d_out
+    MkldnnCPU: mkldnn_avg_pool2d_out
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: avg_pool2d
+    CUDA: avg_pool2d
+    MkldnnCPU: mkldnn_avg_pool2d
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
