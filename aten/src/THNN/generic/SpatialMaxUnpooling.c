@@ -38,7 +38,7 @@ static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(scalar_t *input_p, sca
         }
       }
     }
-  }
+  });
   if (has_error) {
     THError("found an invalid max index %ld (output volumes are of size %dx%d)",
         error_index, oheight, owidth);
