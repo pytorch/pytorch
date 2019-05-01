@@ -3045,16 +3045,6 @@ graph(%a, %b, %c, %d):
             with self.assertRaisesRegex(RuntimeError, "is a zip"):
                 torch.load(f.name)
 
-    def test_legacy_constructors(self):
-        def fn(x):
-            return x.new_zeros(5, 5, requires_grad=False)
-
-        with warnings.catch_warnings(record=True) as warns:
-            torch.jit.trace(fn, (torch.ones(2, 2)))
-        warns = [str(w.message) for w in warns]
-        self.assertEqual(len(warns), 1)
-        self.assertEqual(warns[0], "new_zeros is a legacy constructor and is not supported in the JIT.")
-
     def test_python_bindings(self):
         lstm_cell = torch.jit.script(LSTMCellS)
 
