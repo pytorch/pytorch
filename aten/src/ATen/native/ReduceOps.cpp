@@ -38,12 +38,12 @@ static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dty
 
 using DimMask = TensorIterator::DimMask;
 
-static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
+static DimMask make_dim_mask(c10::optional<IntArrayRef> dims, int64_t ndim) {
   auto mask = DimMask();
-  if (dims.empty()) {
+  if (!dims.has_value() || dims.value().empty()) {
     mask.flip();
   } else {
-    for (int64_t dim : dims) {
+    for (int64_t dim : dims.value()) {
       mask.set(maybe_wrap_dim(dim, ndim));
     }
   }
@@ -87,7 +87,7 @@ static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask,
 }
 
 static std::unique_ptr<TensorIterator> make_reduction(
-    const char* name, Tensor& result, const Tensor& self, IntArrayRef dim,
+    const char* name, Tensor& result, const Tensor& self, c10::optional<IntArrayRef> dim,
     bool keepdim, ScalarType dtype)
 {
   // check that result type and dtype match if provided
@@ -136,13 +136,7 @@ static std::unique_ptr<TensorIterator> make_reduction(
       ".");
 
   int64_t ndim = self.dim();
-  DimMask mask;
-  if (dim.has_value()) {
-    mask = make_dim_mask(dim.value(), ndim);
-  } else {
-    mask = DimMask();
-    mask.set();
-  }
+  DimMask mask = make_dim_mask(dim, ndim);
   allocate_reduction_result(result1, self, mask, keepdim, dtype);
   auto viewed_result1 = review_reduce_result(result1, ndim, mask, keepdim);
 
