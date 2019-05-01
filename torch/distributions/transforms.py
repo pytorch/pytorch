@@ -386,7 +386,9 @@ class TanhTransform(Transform):
         return self.atanh(y.clamp(min=-1. + eps, max=1. - eps))
 
     def log_abs_det_jacobian(self, x, y):
-        return 2. * (np.log(2.) - x - softplus(-2. * x))
+        # We use a formula that is more numerically stable, see details in the following link
+        # https://github.com/tensorflow/probability/commit/ef6bb176e0ebd1cf6e25c6b5cecdd2428c22963f#diff-e120f70e92e6741bca649f04fcd907b7
+        return 2. * (math.log(2.) - x - softplus(-2. * x))
 
 
 class AbsTransform(Transform):
