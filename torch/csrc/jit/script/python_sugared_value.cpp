@@ -430,14 +430,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
   }
 
-  if (py::isinstance<py::function>(obj)) {
-    auto compiled_fn =
-        py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
-    if (auto callee = as_function(compiled_fn)) {
-      return std::make_shared<MethodValue>(c10::nullopt, callee);
-    }
-  }
-
   py::object dispatched_fn =
       py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
   if (!dispatched_fn.is_none()) {
@@ -450,6 +442,14 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         py::module::import("torch.jit").attr("_qualified_name")(obj);
     if (auto classType = ClassType::get(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
+    }
+  }
+
+  if (py::isinstance<py::function>(obj)) {
+    auto compiled_fn =
+        py::module::import("torch.jit").attr("_try_compile_fn")(obj);
+    if (auto callee = as_function(compiled_fn)) {
+      return std::make_shared<MethodValue>(c10::nullopt, callee);
     }
   }
 
