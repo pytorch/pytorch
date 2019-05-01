@@ -11996,15 +11996,15 @@ a")
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
 
-    def test_pickle_checkpoint(self):
+    def _test_pickle_checkpoint(self, device):
         with TemporaryFileName() as fname:
             class M(torch.jit.ScriptModule):
                 __constants__ = ['fname']
 
-                def __init__(self):
+                def __init__(self, tensor):
                     super(M, self).__init__()
                     self.fname = fname
-                    self.tensor = torch.nn.Parameter(torch.ones(2, 2))
+                    self.tensor = torch.nn.Parameter(tensor)
 
                 @torch.jit.script_method
                 def forward(self, x):
@@ -12012,11 +12012,20 @@ a")
                     torch.save(y, self.fname)
                     return y
 
-            m = M()
-            m(torch.ones(2, 2))
+            param = torch.randn(2, 2).to(device)
+            input = torch.randn(2, 2).to(device)
+            m = M(param)
+            m(input)
+            import pickletools
             with open(fname, "rb") as handle:
                 loaded_tensor = torch.load(fname)
-                self.assertEqual(loaded_tensor, torch.ones(2, 2) * 2)
+                self.assertEqual(loaded_tensor, input + param)
+                
+    def test_pickle_checkpoint_cuda(self):
+        self._test_pickle_checkpoint('cuda')
+        
+    def test_pickle_checkpoint(self):
+        self._test_pickle_checkpoint('cpu')
 
     def test_split(self):
         def split_two(tensor):

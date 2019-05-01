@@ -99,9 +99,9 @@ void Pickler::pushTensorData(const at::Tensor& tensor) {
   stack_.insert(stack_.end(), numel_ptr, numel_ptr + sizeof(numel));
 
   uint64_t record_size;
-  void* storage_ptr;
-  std::tie(storage_ptr, record_size) = getWriteableTensor(tensor);
-  auto storage_byte_ptr = reinterpret_cast<uint8_t*>(storage_ptr);
+  at::Tensor storage_tensor;
+  std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
+  auto storage_byte_ptr = reinterpret_cast<uint8_t*>(storage_tensor.storage().data());
   stack_.insert(stack_.end(), storage_byte_ptr, storage_byte_ptr + record_size);
 }
 
@@ -282,8 +282,6 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   // view_metadata
   push<OpCode>(OpCode::NONE);
   push<OpCode>(OpCode::TUPLE);
-
-
   push<OpCode>(OpCode::BINPERSID);
 
   // storage offset
@@ -291,20 +289,18 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   pushInt(storage_offset);
 
   // size
-  std::vector<IValue> size_ivalues;
+  push<OpCode>(OpCode::MARK);
   for (auto size : tensor.sizes()) {
-    size_ivalues.emplace_back(size);
+    pushInt(size);
   }
-  auto sizes = c10::ivalue::Tuple::create(size_ivalues);
-  addIValue(sizes);
+  push<OpCode>(OpCode::TUPLE);
 
   // stride
-  std::vector<IValue> stride_ivalues;
+  push<OpCode>(OpCode::MARK);
   for (auto stride : tensor.strides()) {
-    stride_ivalues.emplace_back(stride);
+    pushInt(stride);
   }
-  auto strides = c10::ivalue::Tuple::create(stride_ivalues);
-  addIValue(strides);
+  push<OpCode>(OpCode::TUPLE);
 
   // requires_grad
   addIValue(tensor.requires_grad());
@@ -750,7 +746,7 @@ OpCode Unpickler::readOpCode() {
   return static_cast<OpCode>(read<uint8_t>());
 }
 
-std::pair<void*, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
+std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
   at::Tensor storage_tensor = tensor;
   uint64_t record_size = tensor.element_size() * tensor.storage().size();
   // TODO HIP support
@@ -771,8 +767,8 @@ std::pair<void*, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
             record_size,
         "Storage tensor size did not match record size");
   }
-
-  return std::make_pair(storage_tensor.storage().data(), record_size);
+  
+  return std::make_pair(storage_tensor, record_size);
 }
 
 uint64_t getTensorKey(const at::Tensor& tensor) {

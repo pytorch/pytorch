@@ -702,15 +702,13 @@ void ScriptModuleSerializer::convertAndWriteTensor(
   tensor_proto->set_requires_grad(tensor.requires_grad());
 
   auto* key = tensor.storage().unsafeGetStorageImpl();
-
   auto storage_it = storageMap.find(key);
   if (storage_it == storageMap.end()) {
     uint64_t record_size;
-    void* storage_ptr;
-    std::tie(storage_ptr, record_size) = getWriteableTensor(tensor);
-
+    at::Tensor storage_tensor;
+    std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
     std::string name = "tensors/" + std::to_string(tensor_id);
-    writer_.writeRecord(name, storage_ptr, record_size);
+    writer_.writeRecord(name, storage_tensor.storage().data(), record_size);
     storage_it = storageMap.insert({key, name}).first;
   }
 
