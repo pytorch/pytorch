@@ -448,7 +448,6 @@ def add_torch_libs():
             ":torch-cpp-cuda",
             ":thnn",
             "//caffe2/torch/fb/init:init",
-            "//caffe2/torch/lib/THD:THD",
             "//caffe2/torch/lib/c10d:c10d",
             "//caffe2/torch/lib/libshm:libshm",
         ],
