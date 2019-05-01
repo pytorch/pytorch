@@ -1,13 +1,11 @@
 #include <torch/csrc/jit/script/init.h>
 
 #include <torch/csrc/Device.h>
-#include <torch/csrc/Dtype.h>
-#include <torch/csrc/Layout.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/module_python.h>
-#include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
