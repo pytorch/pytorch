@@ -6614,12 +6614,18 @@ a")
             ifs = g.findAllNodes("prim::If")
             loops = g.findAllNodes("prim::Loop")
             for node in ifs + loops:
-                out_name = list(map(lambda x: x.uniqueName(), node.outputs()))
+                outs = list(node.outputs())
+                out_name = list(map(lambda x: x.uniqueName(), outs))
                 if len(out_name) == 0:
                     continue
                 fc = FileCheck()
                 # find the last output, then all subsequent uses
-                fc.check(out_name[-1])
+                fc.check(out_name[-1] + " : ")
+                # skip past node body
+                if (node.kind() == "prim::If"):
+                    fc.check("->").check("->").check("\n")
+                else:
+                    fc.check("->").check("\n")
                 # the canonical order is the same order as the first use
                 # appears in text
                 for name in out_name:
@@ -6628,7 +6634,7 @@ a")
 
         @torch.jit.script
         def test(x):
-            # type: (bool)
+            # type: (bool) -> Tuple[int, int]
             b = 2
             a = 1
             if x:
@@ -6645,7 +6651,7 @@ a")
 
         @torch.jit.script
         def test2(x):
-            # type: (bool)
+            # type: (bool) -> Tuple[int, int]
             b = 2
             a = 1
             if x:
@@ -6663,7 +6669,7 @@ a")
 
         @torch.jit.script
         def test_loop(x, iter):
-            # type: (bool, int)
+            # type: (bool, int) -> (None)
             a = 1
             b = 2
             c = 3
@@ -6679,7 +6685,7 @@ a")
 
         @torch.jit.script
         def loop_unused(iter):
-            # type: (int)
+            # type: (int) -> (None)
             a = 1
             b = 2
             c = 3
