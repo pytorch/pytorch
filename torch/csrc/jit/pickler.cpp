@@ -7,11 +7,10 @@ namespace jit {
 
 using ::c10::IValue;
 
-static std::string module_name = "__main__\n";
-
 // Protocol 2 is the highest that can be decoded by Python 2
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
 constexpr static uint8_t PROTOCOL_VERSION = 2;
+
 PicklerClass getClass(const std::string& str) {
   if (str == "build_tensor_from_id") {
     return PicklerClass::TENSOR;
@@ -55,8 +54,8 @@ void Pickler::start() {
   push<uint8_t>(PROTOCOL_VERSION);
 }
 
-void Pickler::pushTuple() {
-  // All attributes get pushed into a list and their indices saved in the
+void Pickler::startTuple() {
+  // All attributes get pushed into a tuple and their indices saved in the
   // module def
   push<OpCode>(OpCode::MARK);
 }
@@ -68,6 +67,7 @@ void Pickler::endTuple() {
 void Pickler::finish() {
   push<OpCode>(OpCode::STOP);
 
+
   // Add the binary data for all the tensors to be included in the same binary
   // TODO: The pickler should be refactored to stream out to a stream directly
   // instead of staging in the stack_ array
@@ -75,14 +75,14 @@ void Pickler::finish() {
     // As another pickle program in the same binary archive, add a list of
     // keys for each tensor (see torch/serialization.py)
     start();
-    pushTuple();
+    push<OpCode>(OpCode::MARK);
     for (const auto& tensor : literal_tensors_) {
       std::string key = std::to_string(getTensorKey(tensor));
       push<OpCode>(OpCode::BINUNICODE);
       push<uint32_t>(key.size());
       pushString(key);
     }
-    endTuple();
+    push<OpCode>(OpCode::TUPLE);
     push<OpCode>(OpCode::STOP);
 
     // Now dump the tensor binary data
@@ -126,7 +126,6 @@ void Pickler::pushMetadata() {
   // one empty
   start();
   push<OpCode>(OpCode::EMPTY_DICT);
-  push<OpCode>(OpCode::TUPLE);
   push<OpCode>(OpCode::STOP);
 }
 
@@ -243,13 +242,6 @@ void Pickler::pushGlobal(const std::string& name) {
   }
 }
 
-void Pickler::pushClass(PicklerClass cls) {
-  pushGlobal(module_name + getClassName(cls));
-
-  push<OpCode>(OpCode::EMPTY_TUPLE);
-  push<OpCode>(OpCode::NEWOBJ);
-}
-
 void Pickler::pushTensor(const IValue& ivalue) {
   if (tensor_table_ == nullptr) {
     pushLiteralTensor(ivalue);
@@ -332,6 +324,9 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   literal_tensors_.push_back(ivalue.toTensor());
 }
 
+void Pickler::pushClass(PicklerClass cls) {
+  pushGlobal(getModuleName() + getClassName(cls));
+}
 
 void Pickler::pushTensorReference(const IValue& ivalue) {
   pushClass(PicklerClass::TENSOR);

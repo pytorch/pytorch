@@ -116,10 +116,7 @@ class Pickler {
   // individual pickle programs
   void pushMetadata();
 
-  // If more than 1 value is being added to this pickle archive, then this
-  // must be called before adding any values in order to mark that they should
-  // be wrapped in a tuple
-  void pushTuple();
+  void startTuple();
   void endTuple();
 
  private:
@@ -171,8 +168,6 @@ class Pickler {
   // TODO: only use this if necessary (add a pass to find all shared ivalues,
   // and only memoize those)
   uint32_t memo_id = 0;
-
-  bool wrap_in_list_ = true;
 };
 
 // An item in the unpickler stack. There needs to be a way to differentiate

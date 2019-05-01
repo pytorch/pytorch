@@ -11860,7 +11860,7 @@ a")
                   _2 = torch.add(torch.add(result, result2, alpha=1), result3, alpha=1)
                   return _2
                 ''',
-            'archive/attributes.pkl': b'\x80\x02(t.',
+            'archive/attributes.pkl': b'\x80\x02](e.',
             'archive/libs.py': b'op_version_set = 0\n',
             'archive/model.json':
                 b'''
