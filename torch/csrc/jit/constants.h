@@ -21,10 +21,7 @@ struct TORCH_API constant_not_supported_error : public std::runtime_error {
   using runtime_error::runtime_error;
 };
 
-// note: prefer g.insertConsant(val, loc) which does exactly the same thing
-// this function is only declared/defined here because its implementation is
-// closely related to the implementation of prim::Constant that is also in
-// constants.cpp
+
 TORCH_API Value* insertConstant(
     Graph& g,
     const IValue& val,
@@ -32,14 +29,23 @@ TORCH_API Value* insertConstant(
     c10::optional<SourceRange> loc = c10::nullopt,
     c10::optional<ScopePtr> scope = c10::nullopt);
 
+// note: prefer g.insertConsant(val, loc) which does exactly the same thing
+// this function is only declared/defined here because its implementation is
+// closely related to the implementation of prim::Constant that is also in
+// constants.cpp.
+//
+// returns a c10::nullopt if the IValue kind cannot be inserted as a constant
+TORCH_API c10::optional<Value*> tryInsertConstant(
+    Graph& g,
+    const IValue& val,
+    const c10::TypePtr& result_type = nullptr,
+    c10::optional<SourceRange> loc = c10::nullopt,
+    c10::optional<ScopePtr> scope = c10::nullopt);
 
-// Test if this IValue can be inserted into a graph as a constant
-TORCH_API bool canInsertConstant(const IValue& val);
 
-
-//////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 // Helper for retrieving constants
-//////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 
 // attempt to convert a (possibly constant) Value* into an intepreter value
 // (IValue). returns c10::nullopt if the Value* was not constant

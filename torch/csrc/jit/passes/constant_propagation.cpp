@@ -63,12 +63,14 @@ void propagateNode(Node* n) {
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
-    if (canInsertConstant(outputs[i])) {
-      auto new_output = graph->insertConstant(outputs[i]);
+
+    auto new_output = tryInsertConstant(*graph, outputs[i]);
+    if (new_output) {
+      // auto new_output = tryInsertConstant(graph, outputs[i]);
       if (outputs[i].isNone()) {
-        new_output->setType(n->outputs()[i]->type());
+        (*new_output)->setType(n->outputs()[i]->type());
       }
-      n->outputs()[i]->replaceAllUsesWith(new_output);
+      n->outputs()[i]->replaceAllUsesWith(*new_output);
     }
     // If we cannot insert the IValue as a constant, give up replacing the node
     // and let DCE remove it
