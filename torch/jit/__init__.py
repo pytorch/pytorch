@@ -7,7 +7,7 @@ import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
 from torch._six import with_metaclass, get_function_from_type, \
-    string_classes
+    string_classes, builtins
 from torch._jit_internal import ignore  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
@@ -741,18 +741,49 @@ def _try_get_overloaded_fn(mod, field):
     return mod._overloads.get(field, None) if isinstance(mod, ScriptModule) else None
 
 
-def _try_compile_weak_script(fn):
-    entry = _jit_internal.compiled_weak_fns.get(fn)
-    if entry is None:
+class ScriptWarning(Warning):
+    pass
+
+
+def make_rcb(fn):
+    # TODO: a getclosurevars polyfill for < Python 3.3
+    closure = inspect.getclosurevars(fn)
+    f_globals = closure.globals
+    f_unbound = closure.unbound
+    f_builtins = closure.builtins
+
+    def env(key):
+        if key in f_globals:
+            return f_globals[key]
+        elif key in f_builtins:
+            return f_builtins[key]
+        elif key in unbound:
+            raise RuntimeError("Cannot resolve unbound variable", key)
+        elif hasattr(builtins, key):
+            return getattr(builtins, key)
+        else:
+            return None
+
+    return env
+
+
+def _try_compile_fn(fn):
+    return None
+    if inspect.ismethod(fn) or _is_ignored_function(fn):
+        # Skip methods
         return None
-    if entry["status"] == _jit_internal.COMPILATION_PENDING:
-        compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
-        del entry["rcb"]
-        _jit_internal.compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
-        entry["status"] = _jit_internal.COMPILED
-        return compiled_fn
-    else:
-        return entry["compiled_fn"]
+    try:
+        rcb = make_rcb(fn)
+        return torch.jit.script(fn, _rcb=rcb)
+    except Exception as e:
+        if hasattr(fn, '__qualname__'):
+            name = fn.__qualname__
+        elif hasattr(fn, '__name__'):
+            name = fn.__name__
+        else:
+            name = '<unknown>'
+        message = "Inserting a call to Python for '{}' since it could not be compiled:\n{}".format(name, e)
+        warnings.warn(message, category=ScriptWarning, stacklevel=3)
 
 
 # ScriptClasses must be new-style classes because we construct them using their
@@ -862,7 +893,7 @@ def _try_get_weak_module(mod):
     return _jit_internal.weak_modules.get(mod)
 
 
-def _try_get_ignored_op(fn):
+def _is_ignored_function(fn):
     if not callable(fn):
         return False
     if hasattr(fn, '__func__'):

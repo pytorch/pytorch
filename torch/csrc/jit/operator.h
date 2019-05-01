@@ -133,6 +133,7 @@ const Operator& getOperatorFor(const Node* node);
 inline Operation getOperation(const Node* node) {
   // note: getOperatorFor ensures that getOperatorFor(node).matches(node) ==
   // true so the call to selectVariant is always valid.
+  std::cout << "GETTING OPERATOR FOR " << *node << "\n";
   return getOperatorFor(node).getOperation(node);
 }
 

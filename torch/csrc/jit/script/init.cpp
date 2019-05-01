@@ -153,12 +153,15 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     Node* new_node = m.graph()->insertNode(m.graph()->createPythonOp(
         THPObjectPtr(func.release().ptr()), cconv, {}));
 
+        std::cout << "node : " << new_node << "\n";
+
     // Mark if function is ignored on export
     if (py::cast<bool>(py::module::import("torch.jit")
-                           .attr("_try_get_ignored_op")(self))) {
-      auto python_op = static_cast<PythonOp*>(new_node);
+                           .attr("_is_ignored_function")(self))) {
+      auto python_op = dynamic_cast<PythonOp*>(new_node);
       python_op->ignore_on_export = true;
     }
+    std::cout << "node2: " << new_node << "\n\n";
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
     for (auto& i : matched_schema->inputs)
       new_node->addInput(i);
@@ -577,14 +580,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
   }
 
-  if (py::isinstance<py::function>(obj)) {
-    auto compiled_fn =
-        py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
-    if (auto callee = as_function(compiled_fn)) {
-      return std::make_shared<MethodValue>(c10::nullopt, callee);
-    }
-  }
-
   py::object dispatched_fn =
       py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
   if (!dispatched_fn.is_none()) {
@@ -597,6 +592,14 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         py::module::import("torch.jit").attr("_qualified_name")(obj);
     if (auto classType = ClassType::get(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
+    }
+  }
+
+  if (py::isinstance<py::function>(obj)) {
+    auto compiled_fn =
+        py::module::import("torch.jit").attr("_try_compile_fn")(obj);
+    if (auto callee = as_function(compiled_fn)) {
+      return std::make_shared<MethodValue>(c10::nullopt, callee);
     }
   }
 

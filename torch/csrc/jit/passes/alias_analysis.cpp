@@ -398,6 +398,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ChunkSizes:
     case prim::Function:
     case prim::CreateObject:
+    case prim::IgnoredPythonOp:
       return analyzeCreator(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
@@ -1295,6 +1296,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::BroadcastingChunk,
       prim::fork,
       prim::CreateObject,
+      prim::IgnoredPythonOp,
       prim::AutogradAdd,
       prim::GetAttr,
       prim::SetAttr,
