@@ -114,9 +114,11 @@ class BenchmarkRunner(object):
                 }
             ))
         else:
-            print("# Input Shape: {}\n"
-                  "Execution Time (us) : {:.3f} \n"
-                  .format(input_shapes, reported_run_time))
+            print("# Input Shape: {}".format(input_shapes))
+            if len(args) > 0:
+                print("Args: {}".format(args))
+            print("Execution Time (us) : {:.3f}\n".format(reported_run_time))
+
 
     def _predict_num_iter_needed(self, i):
         return (i * self.multiplier)

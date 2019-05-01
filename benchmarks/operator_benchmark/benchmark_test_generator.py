@@ -60,8 +60,8 @@ def map_c2_config_add(M, N, K):
 map_pt_config_add = map_c2_config_add
 
 
-def map_c2_config_matmul(M, N, K, trans_a, trans_b, contig):
-    if not config:
+def map_c2_config_matmul(M, N, K, trans_a, trans_b, contig, dtype):
+    if not contig or dtype != torch.float32:
         return None
     input_one = (N, M) if trans_a else (M, N)
     input_two = (K, N) if trans_b else (N, K)
@@ -70,11 +70,11 @@ def map_c2_config_matmul(M, N, K, trans_a, trans_b, contig):
     return (input_shapes, args)
 
 
-def map_pt_config_matmul(M, N, K, trans_a, trans_b, contig):
+def map_pt_config_matmul(M, N, K, trans_a, trans_b, contig, dtype):
+    if trans_a or trans_b:
+        return None
     input_one = (N, M) if trans_a else (M, N)
     input_two = (K, N) if trans_b else (N, K)
     input_shapes = [input_one, input_two]
-    args = {'contig': contig}
-    if not trans_a and not trans_b:
-        return (input_shapes, args)
-    return None
+    args = {'contig': contig, 'dtype': dtype}
+    return (input_shapes, args)
