@@ -613,7 +613,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_rnn_backward_input(
 
 	auto handle = getMiopenHandle();
 
-	if(fn.rnn.mode != miopenLSTM) {
+	if(fn.rnn.rnn_mode != miopenLSTM) {
 		AT_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
 	}
 
@@ -730,7 +730,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 
 	auto handle = getMiopenHandle();
 
-	if (fn.rnn.mode != CUDNN_LSTM) {
+	if (fn.rnn.rnn_mode != miopenLSTM) {
 		AT_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
 	}
 
@@ -786,7 +786,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 		y_descs_arr.data(), y.data_ptr(),
 		w_desc.desc(), dw.data_ptr(),
 		workspace.data_ptr(), workspace.size(0),
-		n_reserve.data_ptr(), fn_reserve.size(0)
+		fn_reserve.data_ptr(), fn_reserve.size(0)
 		));
 
 	std::vector<Tensor> grad_params_arr;
