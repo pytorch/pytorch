@@ -294,20 +294,6 @@ Tensor adaptive_avg_pool3d_cpu(
   return output;
 }
 
-Tensor adaptive_avg_pool3d(at::Tensor const& input, IntArrayRef output_size) {
-  if (output_size[0] == 1 && output_size[1] == 1 && output_size[2] == 1) {
-    // In this case, adaptive pooling is just computing mean over thw
-    // dimensions, which can be done more efficiently.
-    int64_t mean_size = input.size(-1) * input.size(-2) * input.size(-3);
-    Tensor out = input.contiguous().view({-1, mean_size}).mean(-1);
-    return input.ndimension() == 4
-        ? out.view({input.size(0), 1, 1, 1})
-        : out.view({input.size(0), input.size(1), 1, 1, 1});
-  } else {
-    return _adaptive_avg_pool3d(input, output_size);
-  }
-}
-
 Tensor& adaptive_avg_pool3d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput,
