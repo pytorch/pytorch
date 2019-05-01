@@ -45,7 +45,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
 
     int32_t weight_zero_point_int32 = static_cast<int32_t>(weight_zero_point);
 
-    // TODO: contiguous is called for further jit optimizations.
+    // TODO: contiguous is called for further JIT optimizations.
     auto weight_contig = weight.contiguous();
     auto weight_ptr_int8 = weight_contig.data<int8_t>();
 
