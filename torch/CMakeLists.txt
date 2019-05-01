@@ -104,6 +104,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/function_hook.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/accumulate_grad.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/basic_ops.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
@@ -133,6 +134,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import_source.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/import_export_helpers.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
@@ -161,6 +163,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/pattern_fusion.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_inplace_ops.cpp
@@ -190,6 +193,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/jit_exception.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
@@ -229,6 +233,14 @@ if (USE_CUDA)
     ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   )
 endif()
+
+
+if (USE_ROCM)
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
+  )
+endif()
+
 
 if (NOT NO_API)
   list(APPEND TORCH_SRCS
@@ -529,6 +541,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/init.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/python_sugared_value.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
     ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
     ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp
@@ -543,7 +556,6 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/utils/structseq.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_apply.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_layouts.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_list.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
@@ -615,7 +627,6 @@ if (BUILD_PYTHON)
       ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
       ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp
@@ -662,7 +673,6 @@ if (BUILD_PYTHON)
       ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
       ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp
