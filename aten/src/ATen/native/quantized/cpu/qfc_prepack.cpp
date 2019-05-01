@@ -22,7 +22,7 @@ namespace {
 class QFCPackWeightInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
-  // Calculate the column offsets
+  // Calculate the column offsets.
   // Note this includes the sum of the columns as well as the scalar term
   // B_zero_point * K, whereas the row_offsets created by
   // PackAWithQuantRowOffset is only the sum of the A rows.
@@ -41,29 +41,19 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     }
   }
 
-  // Convert the weight from uint8 to int8.
-  void convert_uint8_int8(int K, int N, const uint8_t* Buint8, int8_t* Bint8) {
-    for (size_t i = 0; i < N; ++i) {
-      for (size_t j = 0; j < K; ++j) {
-        Bint8[i * K + j] =
-            static_cast<int8_t>(static_cast<int32_t>(Buint8[i * K + j]) - 128);
-      }
-    }
-  }
-
   at::Tensor operator()(at::Tensor weight) {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
     int32_t weight_zero_point_int32 = weight.q_zero_point().toInt() - 128;
 
-    // TODO: contiguous is called for further jit optimizations.
+    // TODO: contiguous is called for further JIT optimizations.
     auto weight_contig = weight.contiguous();
 
     std::vector<int8_t> weight_int8(K * N);
     int8_t* weight_ptr_int8 = weight_int8.data();
     uint8_t* weight_ptr_uint8 =
-        reinterpret_cast<uint8_t*>(weight.data<c10::qint8>());
+        reinterpret_cast<uint8_t*>(weight_contig.data<c10::qint8>());
     convert_uint8_int8(K, N, weight_ptr_uint8, weight_ptr_int8);
 
     std::vector<int32_t> col_offsets(N);

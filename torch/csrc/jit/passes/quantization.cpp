@@ -101,20 +101,20 @@ void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
-static void addObserverFor(Value* v, Node* original_observer_node) {
-  Node* def = v->node();
-  WithInsertPoint ins(def);
+static Node* addObserverFor(
+    Value* v,
+    Node* original_observer_node,
+    Node* insert_point) {
+  AT_ASSERT(insert_point != nullptr);
+  WithInsertPoint ins(insert_point);
 
   // We need to pass the value name to observer function - create a constant
   // holding this name.
-  Value* vname = def->owningGraph()->insertConstant(v->uniqueName());
+  Value* vname = insert_point->owningGraph()->insertConstant(v->uniqueName());
 
   // Create a new observer node. We just need to clone the original one.
-  Node* observerNode =
-      def->owningGraph()
-          ->createClone(
-              &*original_observer_node, [&](Value* v) { return v; }, false)
-          ->insertAfter(def);
+  Node* observerNode = insert_point->owningGraph()->createClone(
+      &*original_observer_node, [&](Value* v) { return v; }, false);
 
   // Set the type and the name of the output of the new observer node. It will
   // be used instead of the original value v.
@@ -125,26 +125,56 @@ static void addObserverFor(Value* v, Node* original_observer_node) {
   // Now we can add the inputs.
   observerNode->addInput(v);
   observerNode->addInput(vname);
+  return observerNode;
 }
 
 static bool outputsNeedToBeObserved(Node* n) {
   return n->kind() != prim::Constant;
 }
 
-void InsertObserverNodes(std::shared_ptr<Graph>& graph, Node* observer_node) {
+void InsertObserverNodes(
+    const std::shared_ptr<Graph>& graph,
+    Node* observer_node,
+    size_t num_activation_inputs) {
+  AT_ASSERT(graph != nullptr);
+  // num_activation_inputs is the number of activations or external data
+  // excluding the parameters
+  AT_ASSERT(num_activation_inputs <= graph->inputs().size());
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
   // For traversing all blocks in the graph including subblocks.
   std::stack<Block*> blocks_to_visit;
 
+  // Mark observer nodes for inputs so we dont add observers
+  // for observers while traversing graph
+  std::unordered_set<Node*> observer_for_input;
+
+  // Add observer for external input nodes excluding parameters
+  // These are treated as activation as they vary across batches
+  // and need to be observed.
+
+  // prim::Param nodes do not belong to the graph. Hence the Insert
+  // point is the beginning of graph node. This also safe guards against
+  // observing a potentially mutated value due to some in-place operation
+  Node* insert_node = *graph->nodes().begin();
+  for (size_t idx = 0; idx < num_activation_inputs; ++idx) {
+    auto& v = graph->inputs()[idx];
+    if (v->type()->isSubtypeOf(TensorType::get())) {
+      Node* new_observer_node = addObserverFor(v, observer_node, insert_node);
+      new_observer_node->insertBefore(insert_node);
+      observer_for_input.emplace(new_observer_node);
+    }
+  }
+
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      // Skip nodes that we don't need to observe, e.g. 'prim::Constant'.
-      if (!outputsNeedToBeObserved(n)) {
+      // Skip nodes that we don't need to observe, e.g. 'prim::Constant' or
+      // observer nodes
+      if (!outputsNeedToBeObserved(n) || observer_for_input.count(n) != 0) {
         continue;
       }
 
@@ -164,9 +194,25 @@ void InsertObserverNodes(std::shared_ptr<Graph>& graph, Node* observer_node) {
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      addObserverFor(v, observer_node);
+      Node* clone_observer_node = addObserverFor(v, observer_node, v->node());
+      clone_observer_node->insertAfter(v->node());
     }
   }
+}
+
+void InsertObserverNodes(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    Node* observer_node) {
+  const auto& method = moduleObj->get_method(method_name);
+  InsertObserverNodes(method.graph(), observer_node, method.num_inputs());
+}
+
+void InsertObserverNodes(
+    std::shared_ptr<script::Function>& function_var,
+    Node* observer_node) {
+  InsertObserverNodes(
+      function_var->graph(), observer_node, function_var->num_inputs());
 }
 
 void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
