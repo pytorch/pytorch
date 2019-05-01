@@ -42,11 +42,21 @@ class AliasDb {
 
   // Does `n` write to an alias of one of the values in `vs`?
   // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
-  bool writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks = false)
+  TORCH_API bool writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks = false)
       const;
 
+  // Does `a` and `b` potentially share a memory location or do either
+  // hold in memory any element that exists in the other
+  bool mayContainAlias(Value* a, Value* b) const;
+
+  // Do any values in group `a` share a memory location or hold in memory
+  // any element that exists in group `b`
+  bool mayContainAlias(
+      const at::ArrayRef<Value*>& a,
+      const at::ArrayRef<Value*>& b) const;
+
   // Do `a` and `b` potentially share a memory location?
-  bool mayAlias(const Value* a, const Value* b) const;
+  TORCH_API bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`? i.e. may they overlap?
   //
@@ -94,7 +104,7 @@ class AliasDb {
   }
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
-  bool hasWriters(const Node* n) const;
+  TORCH_API bool hasWriters(const Node* n) const;
 
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
@@ -105,8 +115,8 @@ class AliasDb {
   //
   // Returns `false` if it's impossible to move `n` after `MovePoint` without
   // violating dependencies, otherwise executes the move and returns `true`
-  bool moveAfterTopologicallyValid(Node* n, Node* movePoint);
-  bool moveBeforeTopologicallyValid(Node* n, Node* movePoint);
+  TORCH_API bool moveAfterTopologicallyValid(Node* n, Node* movePoint);
+  TORCH_API bool moveBeforeTopologicallyValid(Node* n, Node* movePoint);
 
   bool couldMoveAfterTopologically(Node* n, Node* movePoint);
   bool couldMoveBeforeTopologically(Node* n, Node* movePoint);
@@ -136,7 +146,7 @@ class AliasDb {
   void getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks = false) const;
   void getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
   // Do any nodes write to `v`s memory location?
-  bool hasWriters(const Value* v) const;
+  TORCH_API bool hasWriters(const Value* v) const;
   // Register the fact that `n` writes to `v`.
   void registerWrite(const Value* v, Node* n);
   // Get all the values that `n` reads from.
@@ -153,7 +163,7 @@ class AliasDb {
    * Wildcard methods
    */
   // is `v` a wildcard?
-  bool isWildcard(const Value* v) const;
+  TORCH_API bool isWildcard(const Value* v) const;
   // Register `v` as a wildcard value.
   void setWildcard(const Value* v);
   // Get all nodes that write to a wildcard value.
@@ -164,6 +174,10 @@ class AliasDb {
   bool hasWildcard(const Node* n) const;
   // Returns nullopt if there are no wildcard nodes
   c10::optional<const Node*> getLastWildcard() const;
+
+  // Is the element a wildcard or an unhandled container type,
+  // or does the element contain an element for which that's true
+  bool cannotCheckAliasContainment(const Value* elem) const;
 
   /**
    * Special analysis methods
@@ -181,7 +195,9 @@ class AliasDb {
   void analyzeBroadcastingChunk(Node* node);
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
+  void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
+  void analyzeTupleConstruct(Node* node);
   void analyzeCustomOp(Node* node);
 
   /**
@@ -189,11 +205,16 @@ class AliasDb {
    */
   void makeAllAlias(const std::vector<Value*>& values);
   void makePointerTo(const Value* value, const Value* to);
+  void addToContainedElements(const Value* element, const Value* container);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
   void giveFreshAlias(const Value* value);
+  Element* getOrCreateElement(const Value* value);
 
   static bool shouldAnnotate(const Value* v);
   static bool shouldAnnotate(const TypePtr& type);
+
+  static bool isContainerType(const TypePtr& type);
+
   bool hasUsesAfter(Symbol alias, const Node* n) const;
   bool isBeforeSameGraph(const Node* lhs, const Node* rhs) const;
 

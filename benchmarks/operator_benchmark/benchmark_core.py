@@ -8,7 +8,7 @@ import numpy as np
 import timeit
 import json
 
-from caffe2.benchmarks.operator_benchmark import benchmark_utils
+from operator_benchmark import benchmark_utils
 
 """Performance microbenchmarks.
 
@@ -40,7 +40,7 @@ def add_benchmark_tester(framework, op_name, input_shapes, op_args, run_mode, fu
         BENCHMARK_TESTER[mode][func_name] = func
 
 
-def benchmark_test_group(func):
+def register_test(func):
     """Decorator to register a benchmark test group.
     A benchmark test group is a function that returns a list of benchmark test
     case objects to be run.
@@ -114,9 +114,11 @@ class BenchmarkRunner(object):
                 }
             ))
         else:
-            print("# Input Shape: {}\n"
-                  "Execution Time (us) : {:.3f} \n"
-                  .format(input_shapes, reported_run_time))
+            print("# Input Shape: {}".format(input_shapes))
+            if len(args) > 0:
+                print("Args: {}".format(args))
+            print("Execution Time (us) : {:.3f}\n".format(reported_run_time))
+
 
     def _predict_num_iter_needed(self, i):
         return (i * self.multiplier)
@@ -140,8 +142,10 @@ class BenchmarkRunner(object):
             # Currently, this is a sub-string matching.
             if self.args.operator and (self.args.operator not in full_test_id):
                 continue
-            if self.args.framework and (self.args.framework not in full_test_id):
-                continue
+            if self.args.framework:
+                frameworks = benchmark_utils.get_requested_frameworks(self.args.framework)
+                if all([fr not in full_test_id for fr in frameworks]):
+                    continue
 
             # To reduce variance, fix a numpy randseed to the test case,
             # so that the randomly generated input tensors remain the

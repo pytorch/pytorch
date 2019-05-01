@@ -17,28 +17,6 @@
 
 namespace at {
 
-Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
-  Tensor b_src;
-  if (is_sparse()) {
-    b_src = src;
-  } else {
-    std::tie(b_src) = expand_inplace(self, src, "copy");
-  }
-  return s_copy_(self, b_src, non_blocking);
-}
-
-Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device> to_device) const {
-  AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
-  Tensor r;
-  if (is_sparse()) {
-    r = at::empty({0}, this->options(to_device));
-  } else {
-    r = at::empty(src.sizes(), this->options(to_device));
-  }
-  r.copy_(src, non_blocking);
-  return r;
-}
-
 void TypeDefault::backward(
     Tensor& self,
     c10::optional<Tensor> gradient,
@@ -52,7 +30,7 @@ void TypeDefault::set_data(Tensor & self, Tensor new_data) const {
 }
 
 Type & TypeDefault::toBackend(Backend b) const {
-  return at::globalContext().getNonVariableType(b,scalarType());
+  return at::globalContext().getNonVariableType(b, ScalarType::Undefined);
 }
 Type & TypeDefault::toScalarType(ScalarType s) const {
   return at::globalContext().getNonVariableType(backend(),s);

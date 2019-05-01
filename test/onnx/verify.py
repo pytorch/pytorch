@@ -243,7 +243,8 @@ def set_training(model, mode):
             model.train(old_mode)
 
 
-def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=1e-7, test_args=2):
+def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=1e-7,
+           test_args=2, do_constant_folding=False):
     """
     Export a model into ONNX, import it into a specified ONNX backend, and then
     on a few random inputs verify that PyTorch and the backend produced the same
@@ -356,13 +357,15 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
 
     with set_training(model, training):
         proto_bytes = io.BytesIO()
-        torch_out = torch.onnx._export(model, args, proto_bytes, verbose=verbose)
+        torch_out = torch.onnx._export(model, args, proto_bytes, verbose=verbose,
+                                       do_constant_folding=do_constant_folding)
         proto = load_bytes(proto_bytes)
         prepared = backend.prepare(proto)
 
         def run(args):
             alt_proto_bytes = io.BytesIO()
-            torch_out = torch.onnx._export(model, args, alt_proto_bytes, verbose=verbose)
+            torch_out = torch.onnx._export(model, args, alt_proto_bytes, verbose=verbose,
+                                           do_constant_folding=do_constant_folding)
             alt_proto = load_bytes(alt_proto_bytes)
             if proto.SerializeToString() != alt_proto.SerializeToString():
                 # OK, let's try to figure out what happened.
@@ -434,6 +437,7 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
             backend_out = prepared.run(backend_args(args))
             if isinstance(torch_out, torch.Tensor):
                 torch_out = (torch_out,)
+            torch_out, _ = torch._C._jit_flatten(torch_out)
             # NB: onnx backend NEVER returns bare numpy array
             msg = "ONNX backend returned different results from PyTorch"
             result_hint = ("If you are not using trained parameters, a difference in results\n"

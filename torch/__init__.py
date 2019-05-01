@@ -309,6 +309,10 @@ def compiled_with_cxx11_abi():
     r"""Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1"""
     return _C._GLIBCXX_USE_CXX11_ABI
 
+def parallel_info():
+    r"""Returns detailed string with parallelization settings"""
+    return _C._parallel_info()
+
 
 # Import the ops "namespace"
 from torch._ops import ops  # noqa: F401
