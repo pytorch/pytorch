@@ -5,8 +5,8 @@
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
 
-#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
 using namespace c10d::test;
@@ -268,8 +268,7 @@ struct ReduceScatterNCCLTest : NCCLTest {
       deviceGuard.set_index(i);
       for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
         inputs_[i][j].fill_(
-          pg_->getRank() * numDevices_ * worldSize_ + i * worldSize_ + j
-        );
+            pg_->getRank() * numDevices_ * worldSize_ + i * worldSize_ + j);
       }
     }
 

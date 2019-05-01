@@ -128,10 +128,9 @@ at::Tensor pinnedLike(at::Tensor& tensor) {
       tensor.dtype(),
       at::detail::computeStorageSize(tensor.sizes(), tensor.strides()),
       allocator,
-      /*resizable=*/false
-  );
-  return at::empty({0}, tensor.options().device(at::kCPU)).set_(
-      storage, 0, tensor.sizes(), tensor.strides());
+      /*resizable=*/false);
+  return at::empty({0}, tensor.options().device(at::kCPU))
+      .set_(storage, 0, tensor.sizes(), tensor.strides());
 }
 
 // This function initializes a vector of CUDA streams, one for every
@@ -161,7 +160,7 @@ void initializeStreamsEvents(
     // `tensors` are created on a different stream. Hence, they must record
     // new streams in this Work to prevent being freed before the Work finishes.
     c10::cuda::CUDACachingAllocator::recordStream(
-      tensors[i].storage().data(), streams[i]);
+        tensors[i].storage().data(), streams[i]);
   }
 }
 
@@ -205,7 +204,7 @@ void initializeStreamsEvents(
       // new streams in this Work to prevent being freed before the Work
       // finishes.
       c10::cuda::CUDACachingAllocator::recordStream(
-        tensor.storage().data(), streams[i]);
+          tensor.storage().data(), streams[i]);
     }
   }
 }
@@ -258,8 +257,7 @@ void ProcessGroupGloo::RecvWork::wait() {
 }
 
 ProcessGroupGloo::Options::Options()
-    : timeout(std::chrono::milliseconds(10 * 1000)),
-      threads(2) {}
+    : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,

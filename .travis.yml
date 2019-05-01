@@ -51,6 +51,9 @@ matrix:
       - name: "clang tidy"
         python: "3.6"
         script: tools/run-clang-tidy-in-ci.sh
+      - name: "clang format"
+        python: "3.6"
+        script: tools/run-clang-format-in-ci.sh
 
 branches:
   only:

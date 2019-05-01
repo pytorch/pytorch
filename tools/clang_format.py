@@ -18,7 +18,12 @@ import re
 
 # Whitelist of directories to check. All files that in that directory
 # (recursively) will be checked.
-CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/", "test/cpp/jit/"]
+CLANG_FORMAT_WHITELIST = [
+    "torch/csrc/distributed/",
+    "torch/csrc/jit/",
+    "torch/lib/c10d/",
+    "test/cpp/jit/",
+]
 
 CPP_FILE_REGEX = re.compile("^.*\\.(h|cpp|cc|c|hpp)$")
 
