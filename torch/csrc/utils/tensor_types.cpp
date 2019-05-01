@@ -86,7 +86,7 @@ std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
   for (auto& backend : backends) {
     for (auto& scalar_type : scalar_types) {
       // there are no sparse half or bool types.
-      if ((scalar_type == ScalarType::Half || scalar_type == ScalarType::Bool) && (backend == Backend::SparseCUDA || backend == Backend::SparseCPU)) {
+      if (scalar_type == ScalarType::Bool && (backend == Backend::SparseCUDA || backend == Backend::SparseCPU)) {
         continue;
       }
       ret.emplace_back(std::make_pair(backend, scalar_type));
