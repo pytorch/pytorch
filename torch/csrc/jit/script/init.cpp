@@ -277,12 +277,12 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   Value* the_list_;
 };
 
-struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
-  OverloadedFunctionValue(Value* module, std::vector<std::string> method_names)
+struct VISIBILITY_HIDDEN OverloadedMethodValue : public SugaredValue {
+  OverloadedMethodValue(Value* module, std::vector<std::string> method_names)
       : module_(module), method_names_(std::move(method_names)) {}
 
   std::string kind() const override {
-    return "overloaded function";
+    return "overloaded method";
   }
 
   std::shared_ptr<SugaredValue> call(
@@ -383,7 +383,7 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
     py::object overloads =
         py_module_.attr("_overloads").attr("get")(field, py::none());
     if (!overloads.is_none()) {
-      return std::make_shared<OverloadedFunctionValue>(
+      return std::make_shared<OverloadedMethodValue>(
           self_, py::cast<std::vector<std::string>>(overloads));
     }
 
@@ -557,7 +557,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     obj = weak_obj;
   }
   if (auto callee = as_function(obj)) {
-    return std::make_shared<MethodValue>(c10::nullopt, callee);
+    return std::make_shared<FunctionValue>(callee);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
@@ -581,7 +581,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
     if (auto callee = as_function(compiled_fn)) {
-      return std::make_shared<MethodValue>(c10::nullopt, callee);
+      return std::make_shared<FunctionValue>(callee);
     }
   }
 

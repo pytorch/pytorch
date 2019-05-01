@@ -2799,8 +2799,8 @@ struct to_ir {
   }
 };
 
-struct MethodResolver : public Resolver {
-  explicit MethodResolver(
+struct FunctionResolver : public Resolver {
+  explicit FunctionResolver(
       const Resolver* otherResolver,
       const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
@@ -2811,7 +2811,7 @@ struct MethodResolver : public Resolver {
       const SourceRange& loc) const override {
     auto it = functionTable_.find(name);
     if (it != functionTable_.end()) {
-      return std::make_shared<MethodValue>(c10::nullopt, it->second);
+      return std::make_shared<FunctionValue>(it->second);
     }
     return otherResolver_->resolveValue(name, m, loc);
   }
@@ -2842,7 +2842,7 @@ void CompilationUnit::define(
       // global namespace otherwise, they get defined together so we add them to
       // the function table so the methods can see each other
       resolver =
-          std::make_shared<MethodResolver>(resolver.get(), function_table);
+          std::make_shared<FunctionResolver>(resolver.get(), function_table);
     }
     auto creator = [def, resolver, self](Function& method) {
       AT_ASSERT(resolver);
