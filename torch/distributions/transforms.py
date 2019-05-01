@@ -7,6 +7,7 @@ from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        lazy_property)
 from torch.nn.functional import pad
+from torch.nn.functional import softplus
 
 __all__ = [
     'AbsTransform',
@@ -366,7 +367,7 @@ class TanhTransform(Transform):
     Transform via the mapping :math:`y = \tanh(x)`.
     """
     domain = constraints.real
-    codomain = constraints.open_interval(-1.0, 1.0)
+    codomain = constraints.interval(-1.0, 1.0)
     bijective = True
     sign = +1
 
@@ -384,7 +385,7 @@ class TanhTransform(Transform):
         return self.atanh(y)
 
     def log_abs_det_jacobian(self, x, y):
-        return torch.log(1 - y**2)
+        return 2. * (np.log(2.) - x - softplus(-2. * x))
 
 
 class AbsTransform(Transform):
