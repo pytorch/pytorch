@@ -2071,57 +2071,45 @@ class TestNN(NNTestCase):
         self._test_embedding_dense_grad("cuda")
 
     def test_embedding_sparse_backward(self):
-        embedding = nn.Embedding(10, 3, sparse=True)
-        embedding.zero_grad()
-        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3]]))
-        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(3, 3))
-
-        embedding.zero_grad()
-        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3, 7, 1, 3]]))
-        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(6, 3))
-
-        embedding.zero_grad()
-        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        embedding(torch.LongTensor([8, 1, 3])).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3, 8, 1, 3]]))
-        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(6, 3))
+        self._test_embedding_backward(False)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_embedding_sparse_half_backward(self):
         # same as test_embedding_sparse_backward above but testing half types in
-        # cuda. cpu sum not supported.
-        embedding = nn.Embedding(10, 3, sparse=True).half()
-        longTensor = torch.LongTensor([[7, 1, 3]])
+        # cuda. cpu sum not supported for half types.
+        self._test_embedding_backward(True)
+
+    def _test_embedding_backward(self, half_cuda=True):
+        embedding = nn.Embedding(10, 3, sparse=True)
+        tensor = torch.tensor([[7, 1, 3]])
         ones = torch.tensor(1.).expand(3, 3).half()
-        longTwice = torch.LongTensor([[7, 1, 3, 7, 1, 3]])
+        tensorTwice = torch.tensor([[7, 1, 3, 7, 1, 3]])
         onesTwice = torch.tensor(1.).expand(6, 3)
 
-        embedding = embedding.cuda()
-        longTensor = longTensor.cuda()
-        ones = ones.cuda()
-        longTwice = longTwice.cuda()
-        onesTwice = onesTwice.cuda()
+        if half_cuda:
+            embedding = embedding.half().cuda()
+            tensor = tensor.cuda()
+            ones = ones.cuda()
+            tensorTwice = tensorTwice.cuda()
+            onesTwice = onesTwice.cuda()
 
         embedding.zero_grad()
-        embedding(longTensor).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), longTensor)
+        embedding(tensor).sum().backward()
+        self.assertEqual(embedding.weight.grad._indices(), tensor)
         self.assertEqual(embedding.weight.grad._values(), ones)
 
         embedding.zero_grad()
-        embedding(longTensor).sum().backward()
-        embedding(longTensor).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), longTwice)
+        embedding(tensor).sum().backward()
+        embedding(tensor).sum().backward()
+        self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
         self.assertEqual(embedding.weight.grad._values(), onesTwice)
 
         embedding.zero_grad()
-        embedding(longTensor[0]).sum().backward()
-        longTensor[0, 0] = 8
-        embedding(longTensor).sum().backward()
-        longTwice[0, 3] = 8
-        self.assertEqual(embedding.weight.grad._indices(), longTwice)
+        embedding(tensor[0]).sum().backward()
+        tensor[0, 0] = 8
+        embedding(tensor).sum().backward()
+        tensorTwice[0, 3] = 8
+        self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
         self.assertEqual(embedding.weight.grad._values(), onesTwice)
 
     def test_embedding_padding_idx(self):
@@ -2771,7 +2759,7 @@ class TestNN(NNTestCase):
         self._test_EmbeddingBag(True, 'mean', False, dtype)
         self._test_EmbeddingBag(True, 'max', False, dtype)
 
-        # see test_embedding_bag
+        # see 'todo' in test_embedding_bag.
         test_backward = dtype is not torch.float16
         self._test_EmbeddingBag(True, 'sum', True, dtype, test_backward=test_backward)
         self._test_EmbeddingBag(True, 'mean', True, dtype, test_backward=test_backward)
