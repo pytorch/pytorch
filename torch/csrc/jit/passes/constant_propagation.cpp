@@ -38,6 +38,7 @@ std::vector<IValue> runNode(Node* n) {
       auto t = std::move(v).toTensor();
       if (t.defined()) {
         if (t.requires_grad()) {
+          // error gets caught within propagateNode()
           throw c10::Error("Can't insert requires grad as constant", "");
         }
         return IValue(autograd::as_variable_ref(t).data());
@@ -66,7 +67,6 @@ void propagateNode(Node* n) {
 
     auto new_output = tryInsertConstant(*graph, outputs[i]);
     if (new_output) {
-      // auto new_output = tryInsertConstant(graph, outputs[i]);
       if (outputs[i].isNone()) {
         (*new_output)->setType(n->outputs()[i]->type());
       }
