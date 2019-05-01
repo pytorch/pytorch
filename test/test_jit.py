@@ -14463,6 +14463,31 @@ class TestClassType(JitTestCase):
         output = m_loaded(input)
         self.assertEqual(3 * input, output)
 
+    def test_overloaded_fn(self):
+        @torch.jit.script
+        class Foo(object):
+            def __init__(self, x):
+                self.x = x
+
+            def __len__(self):
+                # type: () -> int
+                return len(self.x)
+
+            def __mul__(self, other):
+                # type: (Tensor) -> Tensor
+                return self.x * other
+
+        def test_overload():
+            a = Foo(torch.ones([3, 3]))
+            return len(a), a * torch.zeros([3, 3])
+
+        self.checkScript(test_overload, ())
+
+        with self.assertRaisesRegex(RuntimeError, "because it does not  define a __add__"):
+            @torch.jit.script
+            def test():
+                return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
+
 
 class TestLogging(JitTestCase):
     def test_bump_numeric_counter(self):

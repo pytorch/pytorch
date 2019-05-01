@@ -396,7 +396,7 @@ struct Environment {
           // or we have implicit conversion that can convert numbers to tensors
           {"_to_tensor",
            std::make_shared<CastValue>(TensorType::get(), prim::NumToTensor)},
-          {"len", std::make_shared<BuiltinFunction>(aten::len, at::nullopt)},
+          {"len", std::make_shared<OperatorOverload>(aten::len, "__len__")},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
@@ -1312,8 +1312,7 @@ struct to_ir {
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
     WithInsertPoint guard(n);
 
-    if (!max_trip_count_val)
-    {
+    if (!max_trip_count_val) {
       max_trip_count_val = materializeConstant(
           std::numeric_limits<int64_t>::max(),
           *graph,
@@ -1335,8 +1334,7 @@ struct to_ir {
 
       // current_element_assigner uses an induction variable
       // to set a current element
-      if (current_element_assigner)
-      {
+      if (current_element_assigner) {
         current_element_assigner(trip_count, environment_stack);
       }
 
@@ -1384,7 +1382,8 @@ struct to_ir {
     }
     auto max_trip_count_val = ensureInt(range, emitExpr(args[0]));
     const auto& ident_name = target.name();
-    auto assigner = [ident_name, range](Value* index, std::shared_ptr<Environment> env) {
+    auto assigner = [ident_name, range](
+                        Value* index, std::shared_ptr<Environment> env) {
       env->setVar(range, ident_name, index);
     };
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
@@ -1963,6 +1962,45 @@ struct to_ir {
     }
   }
 
+  std::string getOperatorOverload(int kind, int ninputs) {
+    switch (kind) {
+      case '+':
+        return "__add__";
+      case '-':
+        return "__sub__";
+      case TK_UNARY_MINUS:
+        return "__neg__";
+      case '*':
+        return "__mul__";
+      case TK_POW:
+        return "__pow__";
+      case '/':
+        return "__truediv__";
+      case '%':
+        return "__mod__";
+      case TK_NE:
+        return "__ne__";
+      case TK_EQ:
+        return "__eq__";
+      case '<':
+        return "__lt__";
+      case '>':
+        return "__gt__";
+      case TK_LE:
+        return "__le__";
+      case TK_GE:
+        return "__ge__";
+      case '&':
+        return "__and__";
+      case '|':
+        return "__or__";
+      case '^':
+        return "__xor__";
+      default:
+        throw std::runtime_error("unknown kind " + std::to_string(kind));
+    }
+  }
+
   std::vector<NamedValue> getNamedValues(
       const TreeList& trees,
       bool maybe_unpack) {
@@ -2285,10 +2323,23 @@ struct to_ir {
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr) {
     switch (tree->kind()) {
-      case '@':
-      case TK_POW:
       case TK_IS:
       case TK_ISNOT:
+      case TK_FLOOR_DIV:
+      case '@': {
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+        return emitBuiltinCall(
+            tree->range(),
+            *method.graph(),
+            kind,
+            c10::nullopt,
+            named_values,
+            {},
+            /*required=*/true);
+      }
+      case TK_POW:
       case TK_NE:
       case TK_EQ:
       case '<':
@@ -2302,19 +2353,13 @@ struct to_ir {
       case '%':
       case '&':
       case '|':
-      case '^':
-      case TK_FLOOR_DIV: {
+      case '^': {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto overload = getOperatorOverload(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-        return emitBuiltinCall(
-            tree->range(),
-            *method.graph(),
-            kind,
-            c10::nullopt,
-            named_values,
-            {},
-            /*required=*/true);
+        return asSimple(OperatorOverload(kind, overload)
+                            .call(tree->range(), method, named_values, {}, 0));
       }
       case TK_NOT: {
         Value* input = emitCond(Expr(tree->trees()[0]));
@@ -2802,7 +2847,8 @@ struct to_ir {
 struct MethodResolver : public Resolver {
   explicit MethodResolver(
       const Resolver* otherResolver,
-      const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable)
+      const std::unordered_map<std::string, std::shared_ptr<Function>>&
+          functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
   std::shared_ptr<SugaredValue> resolveValue(
@@ -2822,7 +2868,8 @@ struct MethodResolver : public Resolver {
 
  private:
   const Resolver* otherResolver_;
-  const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable_;
+  const std::unordered_map<std::string, std::shared_ptr<Function>>&
+      functionTable_;
 };
 
 void CompilationUnit::define(
@@ -2885,8 +2932,7 @@ void lambdaLiftFork(Node* fork_node) {
   auto env = [&](Value* v) -> Value* {
     if (!uncaptures_map.count(v)) {
       // Capture values for both graphs
-      uncaptures_map[v] =
-          forked_graph->addInput()->copyMetadata(v);
+      uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
       fork_node->addInput(v);
     }
     return uncaptures_map[v];
