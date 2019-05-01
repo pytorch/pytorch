@@ -2099,13 +2099,13 @@ class TestNN(NNTestCase):
         tensor = torch.tensor([[7, 1, 3]])
         ones = torch.tensor(1.).expand(3, 3)
         tensorTwice = tensor.repeat(1, 2)
-        onesTwice = torch.tensor(1.).expand(6, 3)
+        onesTwice = torch.cat((ones, ones))
 
         embedding = embedding.to(dtype=dtype).to(device)
         tensor = tensor.to(device)
         ones = ones.to(device)
         tensorTwice = tensorTwice.to(device)
-        onesTwice = torch.cat((ones, ones))
+        onesTwice = onesTwice.to(device)
 
         embedding.zero_grad()
         embedding(tensor).sum().backward()
