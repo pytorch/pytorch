@@ -2070,6 +2070,21 @@ class TestNN(NNTestCase):
     def test_embedding_dense_grad_cuda(self):
         self._test_embedding_dense_grad("cuda")
 
+    def test_move_sparse_half_embedding(self):
+        embedding = nn.Embedding(10, 3, sparse=True)
+        self.assertEqual(embedding.weight.device.type, 'cpu')
+        self.assertEqual(embedding.weight.dtype, torch.float64)
+        embedding.half()
+        self.assertEqual(embedding.weight.dtype, torch.float16)
+        self.assertEqual(embedding.embedding_dim, 3)
+        self.assertEqual(embedding.num_embeddings, 10)
+
+        if torch.cuda.is_available():
+            embedding.cuda()
+            self.assertEqual(embedding.weight.device.type, 'cuda')
+            embedding.cpu()
+            self.assertEqual(embedding.weight.device.type, 'cpu')
+
     def test_embedding_sparse_backward(self):
         self._test_embedding_backward(False)
 
@@ -2082,14 +2097,14 @@ class TestNN(NNTestCase):
     def _test_embedding_backward(self, half_cuda=True):
         embedding = nn.Embedding(10, 3, sparse=True)
         tensor = torch.tensor([[7, 1, 3]])
-        ones = torch.tensor(1.).expand(3, 3).half()
+        ones = torch.tensor(1.).expand(3, 3)
         tensorTwice = torch.tensor([[7, 1, 3, 7, 1, 3]])
         onesTwice = torch.tensor(1.).expand(6, 3)
 
         if half_cuda:
             embedding = embedding.half().cuda()
             tensor = tensor.cuda()
-            ones = ones.cuda()
+            ones = ones.cuda().half()
             tensorTwice = tensorTwice.cuda()
             onesTwice = onesTwice.cuda()
 
