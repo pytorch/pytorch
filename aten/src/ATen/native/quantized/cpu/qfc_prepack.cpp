@@ -41,15 +41,30 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     }
   }
 
+  // Convert the weight from uint8 to int8.
+  void convert_uint8_int8(int K, int N, const uint8_t* Buint8, int8_t* Bint8) {
+    for (size_t i = 0; i < N; ++i) {
+      for (size_t j = 0; j < K; ++j) {
+        Bint8[i * K + j] =
+            static_cast<int8_t>(static_cast<int32_t>(Buint8[i * K + j]) - 128);
+      }
+    }
+  }
+
   at::Tensor operator()(at::Tensor weight) {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
-    int32_t weight_zero_point_int32 = weight.q_zero_point().toInt();
+    int32_t weight_zero_point_int32 = weight.q_zero_point().toInt() - 128;
 
     // TODO: contiguous is called for further jit optimizations.
     auto weight_contig = weight.contiguous();
-    auto weight_ptr_int8 = reinterpret_cast<int8_t*>(weight.data<c10::qint8>());
+
+    std::vector<int8_t> weight_int8(K * N);
+    int8_t* weight_ptr_int8 = weight_int8.data();
+    uint8_t* weight_ptr_uint8 =
+        reinterpret_cast<uint8_t*>(weight.data<c10::qint8>());
+    convert_uint8_int8(K, N, weight_ptr_uint8, weight_ptr_int8);
 
     std::vector<int32_t> col_offsets(N);
     calc_col_offsets_transpose(
@@ -70,7 +85,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
             /*groups=*/1),
         col_offsets,
         weight.q_scale().toFloat(),
-        weight.q_zero_point().toInt()});
+        weight_zero_point_int32});
 
     // TODO: we will need to replace this with torchscript classes at a later
     // point.
