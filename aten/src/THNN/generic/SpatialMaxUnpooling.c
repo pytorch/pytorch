@@ -14,7 +14,7 @@ static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(scalar_t *input_p, sca
   int has_error = 0;
   THIndex_t error_index = 0;
   std::mutex mutex;
-  at::parallel(0, nslices, 0, [&](int64_t start, int64_t end) {
+  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++)
     {
       scalar_t *output_p_k = output_p + k*owidth*oheight;
