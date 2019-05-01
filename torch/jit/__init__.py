@@ -768,7 +768,6 @@ def make_rcb(fn):
 
 
 def _try_compile_fn(fn):
-    return None
     if inspect.ismethod(fn) or _is_ignored_function(fn):
         # Skip methods
         return None

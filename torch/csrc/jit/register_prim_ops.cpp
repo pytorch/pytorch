@@ -512,7 +512,7 @@ RegisterOperators reg(
          }),
 
      Operator(
-         "prim::IgnoredPythonOp(...) -> ()",
+         "prim::IgnoredPythonOp(...) -> None",
          [](Stack& stack) {
            throw JITException(
                "This Python function is annotated to be ignored"

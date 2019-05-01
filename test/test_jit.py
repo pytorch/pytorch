@@ -6477,6 +6477,7 @@ a")
             return y
         self.assertEqual(with_docstring.__doc__, 'test str')
 
+    @suppress_warnings
     def test_script_method_docstring(self):
         class A(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -6955,6 +6956,7 @@ a")
         m = M()
         self.assertEqual(m(), 10)
 
+    @suppress_warnings
     def test_script_module_for2(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
@@ -7162,6 +7164,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
             a = M(nn.ModuleList([nn.ReLU()]))
 
+    @suppress_warnings
     def test_attr_module_constants_error(self):
         class M2(torch.jit.ScriptModule):
             def __init__(self, mod_list):
@@ -7605,6 +7608,7 @@ a")
             f = io.BytesIO()
             torch.onnx._export(m, (x, seq_lens), f, verbose=False)
 
+    @suppress_warnings
     def test_python_call_non_tensor(self):
         def foo(a, b, c):
             # type: (Tensor, int, Tuple[Tensor, int]) -> Tuple[int, Tensor]
@@ -7761,6 +7765,7 @@ a")
         # testing that tensor type of lists is unified
         self.getExportImportCopy(m)
 
+    @suppress_warnings
     def test_type_annotations_repeated_list(self):
         @torch.jit.script
         def float_fn(x, y):
@@ -9038,6 +9043,7 @@ a")
         # and shape analysis dtype is the same.
         FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(randint.graph_for())
 
+    @suppress_warnings
     def test_erase_number_types(self):
         def func(a):
             b = 7 + 1 + 3
@@ -9413,6 +9419,7 @@ a")
             wrong_return_type()
 
     # Tests for calling between different front-end modes
+    @suppress_warnings
     def test_call_python_fn_from_tracing_fn(self):
         def python_fn(x):
             return torch.neg(x)
@@ -9737,8 +9744,11 @@ a")
         self.assertTrue(len(list(tm.graph.inputs())) == 3)
         FileCheck().check_count("aten::mm", 2).check("aten::add").run(str(tm.graph))
 
+    @suppress_warnings
     def test_call_python_fn_from_script_fn(self):
         def python_fn(x):
+            # an unsupported statement to force this to compile as Python
+            import pdb  # noqa: F401
             return torch.neg(x)
 
         @torch.jit.script
@@ -9751,6 +9761,7 @@ a")
         self.assertEqual(script_fn(a), torch.tensor(0))
         FileCheck().check("python_fn").run(str(script_fn.graph))
 
+    @suppress_warnings
     def test_call_python_mod_from_script_fn(self):
         class PythonModule(torch.nn.Module):
             def __init__(self):
@@ -9827,8 +9838,11 @@ a")
             def script_fn(x):
                 return sm(x) + 1
 
+    @suppress_warnings
     def test_call_python_fn_from_script_module(self):
         def python_fn(x):
+            # an unsupported statement to force this to compile as Python
+            import pdb  # noqa: F401
             return torch.neg(x)
 
         class ScriptMod(torch.jit.ScriptModule):
@@ -10590,6 +10604,7 @@ a")
                 torch.set_grad_enabled(True)
                 return x
 
+    @suppress_warnings
     def test_exceptions(self):
         cu = torch.jit.CompilationUnit('''
             def foo(cond):
@@ -10641,6 +10656,7 @@ a")
                     raise Exception("Hi")
                 return a
 
+    @suppress_warnings
     def test_assertions(self):
         cu = torch.jit.CompilationUnit('''
             def foo(cond):
@@ -10698,8 +10714,11 @@ a")
         input = torch.randn(3, 4, 5)
         self.checkScript(fn, (input,))
 
+    @suppress_warnings
     def test_python_op_exception(self):
         def python_op(x):
+            # an unsupported statement to force this to compile as Python
+            import pdb  # noqa: F401
             raise Exception("bad!")
 
         @torch.jit.script
@@ -10735,6 +10754,7 @@ a")
         traced = torch.jit.trace(foo, (x,))
         FileCheck().check("aten::contiguous").run(str(traced.graph))
 
+    @suppress_warnings
     def test_weak_module(self):
 
         @torch._jit_internal.weak_module
@@ -10929,6 +10949,7 @@ a")
             + F.linear(inp, 2 * torch.ones(10, 10), 2 * torch.ones(10))
         self.assertEqual(result, expected_result)
 
+    @suppress_warnings
     def test_weak_module_submodule(self):
         @torch._jit_internal.weak_module
         class Weak(torch.nn.Module):

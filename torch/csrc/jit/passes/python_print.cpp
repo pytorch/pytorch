@@ -841,7 +841,7 @@ struct PythonPrintPass {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
-        if (enforce_importable_) {
+        if (enforce_importable_ && !value->ignore_on_export) {
           throw script::ErrorReport(node->getSourceLocation())
               << "could not export python function call " << value->name()
               << ". Remove calls to Python functions before export. "
