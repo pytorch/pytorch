@@ -292,7 +292,6 @@ def _save(obj, f, pickle_module, pickle_protocol):
     pickle_module.dump(MAGIC_NUMBER, f, protocol=pickle_protocol)
     pickle_module.dump(PROTOCOL_VERSION, f, protocol=pickle_protocol)
     pickle_module.dump(sys_info, f, protocol=pickle_protocol)
-
     pickler = pickle_module.Pickler(f, protocol=pickle_protocol)
     pickler.persistent_id = persistent_id
     pickler.dump(obj)
@@ -568,8 +567,8 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
     protocol_version = pickle_module.load(f, **pickle_load_args)
     if protocol_version != PROTOCOL_VERSION:
         raise RuntimeError("Invalid protocol version: %s" % protocol_version)
-    _sys_info = pickle_module.load(f, **pickle_load_args)
 
+    _sys_info = pickle_module.load(f, **pickle_load_args)
     unpickler = pickle_module.Unpickler(f, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()

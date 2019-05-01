@@ -12016,7 +12016,6 @@ a")
             input = torch.randn(2, 2).to(device)
             m = M(param)
             m(input)
-            import pickletools
             with open(fname, "rb") as handle:
                 loaded_tensor = torch.load(fname)
                 self.assertEqual(loaded_tensor, input + param)
