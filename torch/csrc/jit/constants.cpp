@@ -8,9 +8,12 @@ namespace torch {
 namespace jit {
 
 bool canInsertConstant(const IValue& val) {
-  return val.isTensor() || val.isInt() || val.isDouble() || val.isBool() ||
+  bool can_insert = val.isInt() || val.isDouble() || val.isBool() ||
       val.isBoolList() || val.isIntList() || val.isTensorList() ||
       val.isString() || val.isDevice() || val.isNone();
+  can_insert =
+      can_insert || (val.isTensor() && !val.toTensor().requires_grad());
+  return can_insert;
 }
 
 // IValue -> Constant node

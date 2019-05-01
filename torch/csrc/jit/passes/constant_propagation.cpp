@@ -69,10 +69,9 @@ void propagateNode(Node* n) {
         new_output->setType(n->outputs()[i]->type());
       }
       n->outputs()[i]->replaceAllUsesWith(new_output);
-    } else {
-      // If we cannot insert the IValue as a
-      // constant, give up replacing it and let DCE remove it.
     }
+    // If we cannot insert the IValue as a constant, give up replacing the node
+    // and let DCE remove it
   }
 }
 
