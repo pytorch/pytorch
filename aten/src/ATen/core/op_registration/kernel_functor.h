@@ -58,6 +58,7 @@ namespace detail {
       //        returned ArrayRef is non-owning, so the call site needs to keep ownership
       // TODO Do we want to support ArrayRef<optional<T>> ?
       static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported argument type: c10::ArrayRef<T> and T is not one of the supported primitive types.");
+      static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported argument type: c10::ArrayRef<Scalar>. Please use c10::ArrayRef<int64_t>, c10::ArrayRef<double> or Tensor instead.");
       return v.to<intrusive_ptr<ivalue::List<T>>>()->elements();
     }
   };
@@ -134,6 +135,7 @@ namespace detail {
   struct return_type_to_ivalue_<std::vector<T>> {
     static IValue call(std::vector<T>&& v) {
       static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported return type: vector<T> and T is not one of the supported primitive types.");
+      static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
       return IValue(std::move(v));
     }
   };

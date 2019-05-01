@@ -6,6 +6,7 @@
 #pragma once
 
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/module.h>
 
 namespace torch {
 namespace jit {
@@ -22,12 +23,27 @@ TORCH_API void PropagateQuantInfo(std::shared_ptr<Graph>& graph);
  * a tensor.
  *
  * The distribution can then be used for computing qparams for quantization.
- * \param graph is the graph that would be instrumented.
+ * \param moduleObj is the module object whose containing methods are modified.
+ * \param methodName is module method whose containing graph is instrumented.
  * \param observer_node is a Node representing a call to observer function. It
  * will be cloned into all the places where we need to add instrumentation.
  */
 TORCH_API void InsertObserverNodes(
-    std::shared_ptr<Graph>& graph,
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& methodName,
+    Node* observer_node);
+
+/** \brief Inserts observer nodes for collecting distribution of values taken by
+ * a tensor. This is overloaded InsertObserverNodes which takes in different
+ * arguments and operates on pure functions not associated with module.
+ *
+ * The distribution can then be used for computing qparams for quantization.
+ * \param function_var is a pure script function whose graph is instrumented
+ * \param observer_node is a Node representing a call to observer function. It
+ * will be cloned into all the places where we need to add instrumentation.
+ */
+TORCH_API void InsertObserverNodes(
+    std::shared_ptr<script::Function>& function_var,
     Node* observer_node);
 
 /** \brief Inserts quant-dequant nodes.
@@ -37,10 +53,14 @@ TORCH_API void InsertObserverNodes(
  * performs quantization of the model by inserting quant-dequant node pairs for
  * quantizatable tensors - later passes only cleanup the IR and
  * make sure the model runs faster/consumes less memory.
+ * \param graph which is instrumented for quant-dequant nodes.
+ * \param qparam_dict dictionary of tensor unique names to qparams.
  *
- * TODO: This should also take a qparam-map as an input.
  */
-TORCH_API void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph);
+TORCH_API void InsertQuantDequantNodes(
+    std::shared_ptr<Graph>& graph,
+    const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
+        qparam_dict);
 
 /** \brief Check that all expected optimizations after quant-dequant nodes
  * insertion actually happened.

@@ -84,7 +84,7 @@ struct Graph;
 
 // We special case Graph attributes like this because we want to ensure that
 // Graph::copy() is called when we clone() these attributes.
-struct GraphAttr : public AttributeValue {
+struct TORCH_API GraphAttr : public AttributeValue {
   using ConstructorType = std::shared_ptr<Graph>;
   using ValueType = std::shared_ptr<Graph>;
   GraphAttr(Symbol name, ConstructorType value_)
@@ -92,7 +92,7 @@ struct GraphAttr : public AttributeValue {
   ValueType& value() {
     return value_;
   }
-  TORCH_API Ptr clone() const override;
+  Ptr clone() const override;
   AttributeKind kind() const override {
     return AttributeKind::g;
   }
@@ -101,7 +101,7 @@ struct GraphAttr : public AttributeValue {
   std::shared_ptr<Graph> value_;
 };
 
-struct GraphsAttr : public AttributeValue {
+struct TORCH_API GraphsAttr : public AttributeValue {
   using ConstructorType = std::vector<std::shared_ptr<Graph>>;
   using ValueType = std::vector<std::shared_ptr<Graph>>;
   GraphsAttr(Symbol name, ConstructorType value_)
@@ -112,7 +112,7 @@ struct GraphsAttr : public AttributeValue {
   AttributeKind kind() const override {
     return AttributeKind::gs;
   }
-  TORCH_API std::unique_ptr<AttributeValue> clone() const override;
+  std::unique_ptr<AttributeValue> clone() const override;
 
  private:
   ValueType value_;

@@ -337,7 +337,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding_bag", indices_arg, kLong);
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
-  checkScalarType("embedding_bag", indices_arg, kLong);
+  checkScalarType("embedding_bag", offsets_arg, kLong);
   auto weight_arg = TensorArg(weight, "weight", 1);
   checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble});
 
