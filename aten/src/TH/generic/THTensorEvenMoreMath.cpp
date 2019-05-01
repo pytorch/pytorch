@@ -124,7 +124,7 @@ void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t va
   int tensor_contig = THTensor_(isContiguous)(tensor);
   int mask_contig = THTensor_(isContiguous)(mask);
   if (!omp_in_parallel() && tensor_contig && mask_contig) {
-    TH_TENSOR_APPLY2_OMP(tensor_size, tensor_contig, mask_contig,
+    TH_TENSOR_APPLY2_PARALLEL(tensor_size, tensor_contig, mask_contig,
       scalar_t, tensor, bool, mask,
       if (*mask_data) {
         *tensor_data = value;
