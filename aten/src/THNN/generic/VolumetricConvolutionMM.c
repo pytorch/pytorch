@@ -232,7 +232,7 @@ static void THNN_(unfolded_acc_vol)(
         else w++;
       }
     }
-  }
+  });
 }
 
 /*
