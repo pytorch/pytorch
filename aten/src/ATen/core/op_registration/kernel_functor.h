@@ -41,20 +41,21 @@ namespace detail {
   // cast it to the type that should be passed to the kernel function.
   // Examples: If the IValue contains a plain type like an int, return that.
   //           If the IValue contains an IntList, return it as ArrayRef<int>.
-  // TODO Should we move the IValue so we can avoid bumping the Tensor refcount?
   template<class T, class Enable = void> struct ivalue_to_arg_type {
     // This base case is hit whenever a type does not have a specialisation below.
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
   };
   template<class T>
   struct ivalue_to_arg_type<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    static T call(const IValue& v) {
+    static T call(IValue&& v) {
       return std::move(v).to<T>();
     }
   };
   template<class T>
   struct ivalue_to_arg_type<ArrayRef<T>> {
     static ArrayRef<T> call(const IValue& v) {
+      // Note: This takes a `const IValue&` argument and not `IValue&&`, because the
+      //        returned ArrayRef is non-owning, so the call site needs to keep ownership
       // TODO Do we want to support ArrayRef<optional<T>> ?
       static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported argument type: c10::ArrayRef<T> and T is not one of the supported primitive types.");
       static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported argument type: c10::ArrayRef<Scalar>. Please use c10::ArrayRef<int64_t>, c10::ArrayRef<double> or Tensor instead.");
@@ -63,11 +64,11 @@ namespace detail {
   };
   template<class T>
   struct ivalue_to_arg_type<optional<T>> {
-    static optional<T> call(const IValue& v) {
+    static optional<T> call(IValue&& v) {
       if (v.isNone()) {
         return nullopt;
       }
-      return ivalue_to_arg_type<T>::call(v);
+      return ivalue_to_arg_type<T>::call(std::move(v));
     }
   };
   // The following specialisations of ivalue_to_arg_type are technically not
@@ -117,7 +118,6 @@ namespace detail {
   template<class T>
   struct return_type_to_ivalue_<std::vector<T>> {
     static IValue call(std::vector<T>&& v) {
-      // TODO Do we want to support vector<optional<T>> ?
       static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported return type: vector<T> and T is not one of the supported primitive types.");
       static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
       return IValue(std::move(v));
@@ -150,17 +150,21 @@ namespace detail {
   }
 
   template<class Functor, size_t... ivalue_arg_indices>
-  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_ivalue_args_(Functor* functor, ArrayRef<IValue> ivalue_args, guts::index_sequence<ivalue_arg_indices...>) {
-    (void)(ivalue_args); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
+  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack_(Functor* functor, Stack* stack, guts::index_sequence<ivalue_arg_indices...>) {
+    (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
+
+    constexpr size_t num_ivalue_args = sizeof...(ivalue_arg_indices);
+
     using IValueArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
-    return (*functor)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(ivalue_args[ivalue_arg_indices])...);
+    return (*functor)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(
+      std::move(torch::jit::peek(*stack, ivalue_arg_indices, num_ivalue_args))
+    )...);
   }
 
   template<class Functor>
-  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_ivalue_args(Functor* functor, ArrayRef<IValue> ivalue_args) {
+  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack(Functor* functor, Stack* stack) {
     constexpr size_t num_ivalue_args = guts::infer_function_traits_t<Functor>::number_of_parameters;
-    AT_ASSERTM(num_ivalue_args == ivalue_args.size(), "Wrong number of ivalue arguments");
-    return call_functor_with_ivalue_args_<Functor>(functor, ivalue_args, guts::make_index_sequence<num_ivalue_args>());
+    return call_functor_with_args_from_stack_<Functor>(functor, stack, guts::make_index_sequence<num_ivalue_args>());
   }
 
   template<class OutputType>
@@ -178,11 +182,7 @@ namespace detail {
   private:
     template<size_t... indices>
     static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, guts::index_sequence<indices...>) {
-      (void)(stack); // when sizeof...(indices) == 0, this argument would be unused and we have to silence the compiler warning.
-      // iterate over all outputs and push them
-      (void)std::initializer_list<int>{(
-        torch::jit::push(*stack, return_type_to_ivalue(std::move(std::get<indices>(output))))
-      , 0)...};
+      torch::jit::push(*stack, return_type_to_ivalue(std::move(std::get<indices>(output)))...);
     }
   };
 
@@ -196,7 +196,7 @@ namespace detail {
     static void call(Stack* stack, KernelCache* cache) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
-      auto output = call_functor_with_ivalue_args<KernelFunctor>(functor, torch::jit::last(*stack, num_inputs));
+      auto output = call_functor_with_args_from_stack<KernelFunctor>(functor, stack);
       torch::jit::drop(*stack, num_inputs);
       push_outputs<typename guts::infer_function_traits_t<KernelFunctor>::return_type>::call(std::move(output), stack);
     }
@@ -210,7 +210,7 @@ namespace detail {
     static void call(Stack* stack, KernelCache* cache) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
-      call_functor_with_ivalue_args<KernelFunctor>(functor, torch::jit::last(*stack, num_inputs));
+      call_functor_with_args_from_stack<KernelFunctor>(functor, stack);
       torch::jit::pop(*stack, num_inputs);
     }
   };
