@@ -122,7 +122,7 @@ void THNN_(IndexLinear_updateOutput)(
       if (keysSize * outDim > THNN_SPARSE_OMP_THRESHOLD) {
         at::parallel_for(0, batchSize, 1, loop);
       } else {
-        loop(0, batchSize)
+        loop(0, batchSize);
       }
     }
     else
