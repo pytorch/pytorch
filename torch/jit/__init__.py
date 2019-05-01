@@ -469,7 +469,7 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, executor_options, traced_func, check_tolerance, force_outplace):
+def _check_trace(check_inputs, func, executor_options, traced_func, check_tolerance, force_outplace, is_trace_module):
     # Note: tracing is independent of optimizations, which consume the trace
     executor_options['optimize'] = False
     func_name = traced_func.name
@@ -477,16 +477,22 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
         if isinstance(inputs, torch.Tensor):
             inputs = (inputs,)
 
-        check_mod = torch.jit.trace(
-            func,
-            _clone_inputs(inputs),
-            check_trace=False,
-            _force_outplace=force_outplace,
-            **executor_options)
-
-        check_mod_func = check_mod
-        if isinstance(check_mod, TracedModule):
+        if is_trace_module:
+            check_mod = torch.jit.trace_module(
+                func.__self__,
+                {func.__name__ : _clone_inputs(inputs)},
+                check_trace=False,
+                _force_outplace=force_outplace,
+                **executor_options)
             check_mod_func = check_mod._c._get_method(traced_func.name)
+        else:
+            check_mod = torch.jit.trace(
+                func,
+                _clone_inputs(inputs),
+                check_trace=False,
+                _force_outplace=force_outplace,
+                **executor_options)
+            check_mod_func = check_mod
 
         def graph_diagnostic_info():
             mod_canonicalized = torch._C._jit_pass_canonicalize(traced_func.graph)
@@ -623,8 +629,8 @@ def make_module(mod, _module_class, executor_options):
         _module_class = TopLevelTracedModule
     return _module_class(mod, **executor_options)
 
-def trace(mod,
-          inputs,
+def trace(func,
+          example_inputs,
           optimize=True,
           check_trace=True,
           check_inputs=None,
@@ -646,18 +652,121 @@ def trace(mod,
         incorrect trace to be produced.
 
     Arguments:
-        mod (callable or torch.nn.Module):   a python function or ``torch.nn.Module``
-                                             that will be run with example_inputs.
+        func (callable or torch.nn.Module):  a Python function or ``torch.nn.Module``
+                                             that will be run with ``example_inputs``.
                                              arguments and returns to ``func`` must be tensors
                                              or (possibly nested) tuples that
                                              contain tensors.
-        example_inputs (tuple or dict):  a tuple of example inputs that will be passed to the function
-                                         while tracing. The resulting trace can be run with
-                                         inputs of different types and shapes assuming the traced operations
-                                         support those types and shapes. example_inputs may also be a single
-                                         Tensor in which case it is automatically wrapped in a tuple
+        example_inputs (tuple):  a tuple of example inputs that will be passed to the function
+                                 while tracing. The resulting trace can be run with
+                                 inputs of different types and shapes assuming the traced operations
+                                 support those types and shapes. ``example_inputs`` may also be a single
+                                 Tensor in which case it is automatically wrapped in a tuple
 
-                                         a dict containing sample inputs indexed by method names in ``mod``
+    Keyword arguments:
+        optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
+        check_trace (bool, optional): check if the same inputs run through
+                                      traced code produce the same outputs. Default: ``True``. You might want
+                                      to disable this if, for example, your network contains non-
+                                      deterministic ops or if you are sure that the network is correct despite
+                                      a checker failure.
+
+        check_inputs (list of tuples, optional): A list of tuples of input arguments that should be used
+                                                 to check the trace against what is expected. Each tuple
+                                                 is equivalent to a set of input arguments that would
+                                                 be specified in ``example_inputs``. For best results, pass in a
+                                                 set of checking inputs representative of the space of
+                                                 shapes and types of inputs you expect the network to see.
+                                                 If not specified, the original ``example_inputs`` are used for checking
+        check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
+                                           This can be used to relax the checker strictness in the event that
+                                           results diverge numerically for a known reason, such as operator fusion.
+
+    Returns:
+        A ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
+        When ``func`` is a ``torch.nn.Module``, the returned ``ScriptModule`` will have the same set of
+        sub-modules and parameters as ``func``.
+
+    Example::
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.conv = nn.Conv2d(1, 1, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+            def weighted_kernel_sum(self, weight):
+                return weight * self.conv.weight
+
+        example_weight = torch.rand(1, 1, 3, 3)
+        example_forward_input = torch.rand(1, 1, 3, 3)
+        n = Net()
+        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+        module = torch.jit.trace_module(n, inputs)
+
+    """
+    if not _enabled:
+        return func
+    executor_options = {'optimize': bool(optimize)}
+    # Special case for common case of passing a single Tensor
+    if isinstance(example_inputs, (torch.Tensor, dict)):
+        example_inputs = (example_inputs,)
+    # done primarily so that weird iterables fail here and not pybind11 code
+    elif not isinstance(example_inputs, tuple):
+        example_inputs = tuple(example_inputs)
+    var_lookup_fn = _create_interpreter_name_lookup_fn(0)
+
+    if isinstance(func, torch.nn.Module):
+        if _module_class is None:
+            _module_class = TopLevelTracedModule
+        traced = _module_class(func, **executor_options)
+        traced._c._create_method_from_trace('forward', func, example_inputs,
+                                            var_lookup_fn, _force_outplace)
+    else:
+        name = getattr(func, '__name__', 'forward')
+        if name == '<lambda>':
+            name = '_lambda'  # make name a valid identifier
+        traced = torch._C._create_function_from_trace(name, func, example_inputs,
+                                                      var_lookup_fn,
+                                                      _force_outplace)
+
+    # Check the trace against new traces created from user-specified inputs
+    if check_trace:
+        if check_inputs is not None:
+            _check_trace(check_inputs, func, executor_options, traced, check_tolerance, _force_outplace, False)
+        else:
+            _check_trace([example_inputs], func, executor_options, traced, check_tolerance, _force_outplace, False)
+
+    return traced
+
+def trace_module(mod,
+                 inputs,
+                 optimize=True,
+                 check_trace=True,
+                 check_inputs=None,
+                 check_tolerance=1e-5,
+                 _force_outplace=False,
+                 _module_class=None):
+    """
+    Trace a function and return an executable ``ScriptModule`` that will be optimized
+    using just-in-time compilation.
+
+    .. warning::
+
+        Tracing only correctly records functions and modules which are not data
+        dependent (e.g., do not have conditionals on data in tensors) and do not have
+        any untracked external dependencies (e.g., perform input/output or
+        access global variables). If you trace such models, you may silently get
+        incorrect results on subsequent invocations of the model. The tracer
+        will try to emit warnings when doing something that may cause an
+        incorrect trace to be produced.
+
+    Arguments:
+        mod (torch.nn.Module):           a ``torch.nn.Module`` containing methods whose names are
+                                         specified in ``example_inputs``. The given methods will be compiled
+                                         as a part of a single `ScriptModule`
+        example_inputs (dict):           a dict containing sample inputs indexed by method names in ``mod``
                                          The inputs will be passed to methods whose names correspond to inputs'
                                          keys while tracing.
                                          ``{ 'forward' : example_forward_input, 'method2': example_method2_input}``
@@ -698,62 +807,29 @@ def trace(mod,
     executor_options = {'optimize': bool(optimize)}
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
 
-    import types
-    if (isinstance(inputs, dict)):
+    if not isinstance(mod, torch.nn.Module):
+        raise AttributeError("expected torch.nn.Module as the first argument")
 
-        inputs_keys = list(inputs.keys())
-        if (len(inputs_keys) > 0 and
-                isinstance(inputs_keys[0], types.MethodType)):
+    if not isinstance(inputs, dict):
+        raise AttributeError("expected a dictionary of (method_name, input) pairs")
 
-            if not isinstance(mod, torch.nn.Module):
-                raise AttributeError("expected torch.nn.Module as the first argument")
+    module = make_module(mod, _module_class, executor_options)
 
-            module = make_module(mod, _module_class, executor_options)
+    for method_name, example_inputs in inputs.items():
 
-            for func, example_inputs in inputs.items():
-
-                if func.__self__ is not mod:
-                    raise AttributeError("function's __self__ should be equal to module")
-                method_name = func.__name__
-                example_inputs = make_tuple(example_inputs)
-                module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
-                check_trace_method = module._c._get_method(method_name)
-
-                # Check the trace against new traces created from user-specified inputs
-                if check_trace:
-                    if check_inputs is not None:
-                        _check_trace(check_inputs, func, executor_options, check_trace_method, check_tolerance, _force_outplace)
-                    else:
-                        _check_trace([example_inputs], func, executor_options, check_trace_method, check_tolerance, _force_outplace)
-
-                return module
-
-    method_name = getattr(mod, '__name__', 'forward')
-    func = mod
-    if hasattr(mod, '__self__') and isinstance(mod.__self__, torch.nn.Module):
-        mod = mod.__self__
-    example_inputs = make_tuple(inputs)
-
-    if isinstance(mod, torch.nn.Module):
-        module = make_module(mod, _module_class, executor_options)
+        func = getattr(mod, method_name)
+        example_inputs = make_tuple(example_inputs)
         module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
         check_trace_method = module._c._get_method(method_name)
-        return_value = module
-    else:
-        if method_name == '<lambda>':
-            method_name = '_lambda'  # make name a valid identifier
-        check_trace_method = torch._C._create_function_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
-        return_value = check_trace_method
 
-    # Check the trace against new traces created from user-specified inputs
-    if check_trace:
-        if check_inputs is not None:
-            _check_trace(check_inputs, mod, executor_options, check_trace_method, check_tolerance, _force_outplace)
-        else:
-            _check_trace([example_inputs], mod, executor_options, check_trace_method, check_tolerance, _force_outplace)
+        # Check the trace against new traces created from user-specified inputs
+        if check_trace:
+            if check_inputs is not None:
+                _check_trace(check_inputs, func, executor_options, check_trace_method, check_tolerance, _force_outplace, True)
+            else:
+                _check_trace([example_inputs], func, executor_options, check_trace_method, check_tolerance, _force_outplace, True)
 
-    return return_value
-
+        return module
 
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True, _frames_up=0):

@@ -3157,7 +3157,6 @@ class TestScript(JitTestCase):
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
-                print ("running Net")
                 self.conv = nn.Conv2d(1, 1, 3)
 
             def forward(self, x):
@@ -3169,8 +3168,8 @@ class TestScript(JitTestCase):
         example_weight = torch.rand(1, 1, 3, 3)
         example_forward_input = torch.rand(1, 1, 3, 3)
         n = Net()
-        inputs = {n.forward : example_forward_input, n.weighted_kernel_sum : example_weight}
-        module = torch.jit.trace(n, inputs)
+        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+        module = torch.jit.trace_module(n, inputs)
 
     def test_submodule_twice(self):
 
