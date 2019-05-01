@@ -411,7 +411,6 @@ if TEST_TENSORBOARD:
                     model = getattr(torchvision.models, model_name)()
                     w.add_graph(model, torch.zeros(input_size))
 
-
     class TestTensorBoardFigure(BaseTestCase):
         @skipIfNoMatplotlib
         def test_figure(self):
