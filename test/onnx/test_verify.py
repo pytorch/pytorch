@@ -30,7 +30,6 @@ class TestVerify(TestCase):
         self.assertTrue(False, msg="verify() did not fail when expected to")
 
     def test_result_different(self):
-        import torch.onnx.symbolic_registry
 
         class BrokenAdd(Function):
             @staticmethod
@@ -47,7 +46,6 @@ class TestVerify(TestCase):
 
         x = torch.tensor([1, 2])
         y = torch.tensor([3, 4])
-        torch.onnx.symbolic_registry.register_op('BrokenAdd', BrokenAdd.symbolic, '', 9)
         self.assertVerifyExpectFail(MyModel(), (x, y), backend)
 
     def test_jumbled_params(self):

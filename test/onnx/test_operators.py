@@ -214,7 +214,6 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), x, params=(y, ))
 
     def test_symbolic_mismatch(self):
-        import torch.onnx.symbolic_registry
 
         class MyFun(Function):
             @staticmethod
@@ -231,7 +230,6 @@ class TestOperators(TestCase):
         y = torch.ones(2, 2)
         # NB: Don't use expect test here, the type error wobbles depending
         # on Python version
-        torch.onnx.symbolic_registry.register_op('MyFun', MyFun.symbolic, '', 9)
         with self.assertRaisesRegex(TypeError, "occurred when translating MyFun"):
             export_to_pbtxt(FuncModule(MyFun().apply), (x, y))
 
@@ -270,7 +268,6 @@ class TestOperators(TestCase):
         self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
 
     def test_at_op(self):
-        import torch.onnx.symbolic_registry
         x = torch.randn(3, 4)
 
         class MyFun(Function):
@@ -287,7 +284,6 @@ class TestOperators(TestCase):
             def forward(self, x):
                 return MyFun.apply(x)
 
-        torch.onnx.symbolic_registry.register_op('MyFun', MyFun.symbolic, '', 9)
         self.assertONNX(MyModule(), x)
 
     def test_clip(self):
