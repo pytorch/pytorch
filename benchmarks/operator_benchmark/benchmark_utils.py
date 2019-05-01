@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import numpy as np
 import itertools
 import random
-
+import torch
 
 """Performance microbenchmarks's utils.
 
@@ -62,11 +62,22 @@ def generate_configs(**configs):
     results = configs['sample_func'](*result)
     return results
 
+
 def is_caffe2_enabled(framework_arg):
     return 'Caffe2' in framework_arg
+
 
 def is_pytorch_enabled(framework_arg):
     return 'PyTorch' in framework_arg
 
+
 def get_requested_frameworks(framework_arg):
     return [fr.strip() for fr in framework_arg.split(',') if len(fr.strip()) > 0]
+
+
+def is_integer_dtype(dtype):
+    return dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
+
+
+def is_float_dtype(dtype):
+    return dtype in [torch.float16, torch.float32, torch.float64]

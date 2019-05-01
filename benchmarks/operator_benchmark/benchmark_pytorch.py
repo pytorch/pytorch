@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from operator_benchmark import benchmark_core
+from operator_benchmark import benchmark_core, benchmark_utils
 
 import torch
 
@@ -26,7 +26,7 @@ def PyTorchOperatorTestCase(test_name, op_type, input_shapes, op_args, run_mode)
             tensor_shape = [s * 2 for s in tensor_shape]
         if dtype in [torch.float32, torch.float64]:
             input = torch.rand(tensor_shape, dtype=dtype)
-        elif dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+        elif benchmark_utils.is_integer_dtype(dtype):
             input = torch.randint(low=0, high=100, size=tensor_shape, dtype=dtype)
         else:
             input = torch.ones(tensor_shape, dtype=dtype)
