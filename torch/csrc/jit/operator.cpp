@@ -222,12 +222,10 @@ bool Operator::matches(const Node* node) const {
 }
 
 std::shared_ptr<Operator> findOperatorFor(const Node* node) {
-  std::cout << "FIND OPERATOR FOR " << *node << "\n";
 
   const auto& candidates = getAllOperatorsFor(node->kind());
   for (const auto& candidate : candidates) {
     if (candidate->matches(node)) {
-      std::cout << "Candidate found is " << candidate->schema() << "\n";
       return candidate;
     }
   }
@@ -235,7 +233,6 @@ std::shared_ptr<Operator> findOperatorFor(const Node* node) {
 }
 
 const Operator& getOperatorFor(const Node* node) {
-  std::cout << "REF OPERATOR FOR " << *node << "\n";
   auto op = findOperatorFor(node);
   if (op)
     return *op;

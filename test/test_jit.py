@@ -333,11 +333,9 @@ class JitTestCase(TestCase):
         with self.disableEmitHook():
             try:
                 src, constants = _jit_python_print(func)
-                print(src)
                 cu = torch.jit.CompilationUnit()._import(src, constants)
                 func2 = getattr(cu, func.name)
                 src2, constants2 = _jit_python_print(func2)
-                print(src)
                 self.assertMultiLineEqual(src, src2)
             except RuntimeError as e:
                 se = str(e)
@@ -7467,7 +7465,6 @@ a")
                     ''')
 
             m = M2()
-            print(m.graph)
             m(torch.zeros(4, 3))
 
     def test_script_module_star_assign_fail_builtin(self):
@@ -10702,8 +10699,6 @@ a")
         self.checkScript(fn, (input,))
 
     def test_python_op_exception(self):
-        # with self.disableEmitHook():
-        @torch.jit.ignore
         def python_op(x):
             raise Exception("bad!")
 
@@ -10712,7 +10707,7 @@ a")
             return python_op(x)
 
         print(fn.graph)
-        # FileCheck().check("python_op").run(fn.graph)
+        FileCheck().check("python_op").run(fn.graph)
 
         with self.assertRaisesRegex(RuntimeError, "operation failed in interpreter"):
             fn(torch.tensor(4))
