@@ -153,7 +153,8 @@ static void THNN_(SpatialMaxUnpooling_updateGradInput_frame)(scalar_t *gradInput
           gradInput_p_k[i*iwidth + j] = gradOutput_p_k[maxp]; /* update gradient */
         }
       }
-    });
+    }
+  });
 }
 
 void THNN_(SpatialMaxUnpooling_updateGradInput)(
