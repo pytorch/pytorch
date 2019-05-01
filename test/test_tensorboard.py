@@ -27,6 +27,7 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
+import torchvision
 from common_utils import TestCase, run_tests
 
 
@@ -396,6 +397,20 @@ if TEST_TENSORBOARD:
                 model = torch.nn.Linear(3, 5)
                 with SummaryWriter(comment='expect_error') as w:
                     w.add_graph(model, dummy_input)  # error
+
+        def test_torchvision_smoke(self):
+            model_name_input = {
+                'alexnet': (2, 3, 224, 224),
+                'resnet34': (2, 3, 224, 224),
+                'densenet121': (2, 3, 224, 224),
+                'vgg19': (2, 3, 224, 224),
+                # 'mobilenet_v2': (2, 3, 224, 224),  # will fail onnx
+            }
+            for model_name, input_size in model_name_input.items():
+                with SummaryWriter(comment=model_name) as w:
+                    model = getattr(torchvision.models, model_name)()
+                    w.add_graph(model, torch.zeros(input_size))
+
 
     class TestTensorBoardFigure(BaseTestCase):
         @skipIfNoMatplotlib
