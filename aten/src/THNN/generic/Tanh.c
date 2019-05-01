@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/Tanh.c"
+#define TH_GENERIC_FILE "THNN/generic/Tanh.c"
 #else
 
 void THNN_(Tanh_updateOutput)(

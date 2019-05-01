@@ -1,3 +1,20 @@
+# RPATH stuff
+# see https://cmake.org/Wiki/CMake_RPATH_handling
+if (APPLE)
+  set(CMAKE_MACOSX_RPATH ON)
+  set(_rpath_portable_origin "@loader_path")
+else()
+  set(_rpath_portable_origin $ORIGIN)
+endif(APPLE)
+# Use separate rpaths during build and install phases
+set(CMAKE_SKIP_BUILD_RPATH  FALSE)
+# Don't use the install-rpath during the build phase
+set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+set(CMAKE_INSTALL_RPATH "${_rpath_portable_origin}")
+# Automatically add all linked folders that are NOT in the build directory to
+# the rpath (per library?)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
  # UBSAN triggers when compiling protobuf, so we need to disable it.
 set(UBSAN_FLAG "-fsanitize=undefined")
 
@@ -25,6 +42,28 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 endif()
 
+# For MSVC,
+# 1. Replace /Zi and /ZI with /Z7
+# 2. Switch off incremental linking in debug builds
+if (MSVC)
+  if(MSVC_Z7_OVERRIDE)
+    foreach(flag_var
+        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      if(${flag_var} MATCHES "/Z[iI]")
+        string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
+      endif(${flag_var} MATCHES "/Z[iI]")
+    endforeach(flag_var)
+  endif(MSVC_Z7_OVERRIDE)
+  foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
+      CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
+    if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
+      string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
+endif(MSVC)
+
 # ---[ Threads
 include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
 if (TARGET Threads::Threads)
@@ -42,13 +81,13 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # ---[ BLAS
-if(NOT BUILD_ATEN_MOBILE)
+if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
 else()
   set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
 endif()
 set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib")
-message(STATUS "The BLAS backend of choice:" ${BLAS})
+message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 
 if(BLAS STREQUAL "Eigen")
   # Eigen is header-only and we do not have any dependent libraries
@@ -70,7 +109,11 @@ elseif(BLAS STREQUAL "MKL")
   endif()
   include(${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake)
   if(MKL_FOUND)
-    include_directories(SYSTEM ${MKL_INCLUDE_DIR})
+    message(STATUS "MKL libraries: ${MKL_LIBRARIES}")
+    message(STATUS "MKL include directory: ${MKL_INCLUDE_DIR}")
+    message(STATUS "MKL OpenMP type: ${MKL_OPENMP_TYPE}")
+    message(STATUS "MKL OpenMP library: ${MKL_OPENMP_LIBRARY}")
+    include_directories(AFTER SYSTEM ${MKL_INCLUDE_DIR})
     list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
     set(CAFFE2_USE_MKL ON)
   else()
@@ -84,31 +127,27 @@ elseif(BLAS STREQUAL "vecLib")
   include_directories(SYSTEM ${vecLib_INCLUDE_DIR})
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
 else()
-  message(FATAL_ERROR "Unrecognized blas option:" ${BLAS})
+  message(FATAL_ERROR "Unrecognized BLAS option: " ${BLAS})
 endif()
 
 
-if (NOT BUILD_ATEN_MOBILE)
+if (NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_ENABLED 0)
   set(AT_MKL_MT 0)
   set(USE_BLAS 1)
-  if(NOT (ATLAS_FOUND OR OPENBLAS_FOUND OR MKL_FOUND OR VECLIB_FOUND))
+  if(NOT (ATLAS_FOUND OR OpenBLAS_FOUND OR MKL_FOUND OR VECLIB_FOUND))
+    message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
     find_package(BLAS)
     if (NOT BLAS_FOUND)
       set(USE_BLAS 0)
+      set(BLAS "" CACHE STRING "Selected BLAS library")
+    else()
+      set(BLAS BLAS_INFO CACHE STRING "Selected BLAS library")
     endif()
   endif()
 
   if (MKL_FOUND)
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
-    if(NOT MKL_INCLUDE_DIR)
-      MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
-        You can get them by `conda install mkl-include` if using conda (if \
-        it is missing, run `conda upgrade -n root conda` first), and \
-        `pip install mkl-devel` if using pip. If build fails with header files \
-        available in the system, please make sure that CMake will search the \
-        directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
-	endif()
     if (MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
       ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
       set(AT_MKL_MT 1)
@@ -187,6 +226,7 @@ if(USE_QNNPACK)
       set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
       set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
       set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+      set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
       add_subdirectory(
         "${QNNPACK_SOURCE_DIR}"
         "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
@@ -236,6 +276,7 @@ if (NOT TARGET cpuinfo)
   set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
   set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
   set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+  set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
   if(MSVC)
     if (CAFFE2_USE_MSVC_STATIC_RUNTIME)
       set(CPUINFO_RUNTIME_TYPE "static" CACHE STRING "")
@@ -291,16 +332,43 @@ if(BUILD_TEST)
 
   # For gtest, we will simply embed it into our test binaries, so we won't
   # need to install it.
-  set(BUILD_GTEST ON CACHE BOOL "Build gtest" FORCE)
   set(INSTALL_GTEST OFF CACHE BOOL "Install gtest." FORCE)
-  # We currently don't need gmock right now.
-  set(BUILD_GMOCK OFF CACHE BOOL "Build gmock." FORCE)
+  set(BUILD_GMOCK ON CACHE BOOL "Build gmock." FORCE)
   # For Windows, we will check the runtime used is correctly passed in.
   if (NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
       set(gtest_force_shared_crt ON CACHE BOOL "force shared crt on gtest" FORCE)
   endif()
+  # We need to replace googletest cmake scripts too.
+  # Otherwise, it will sometimes break the build.
+  # To make the git clean after the build, we make a backup first.
+  if (MSVC AND MSVC_Z7_OVERRIDE)
+    execute_process(
+      COMMAND ${CMAKE_COMMAND}
+              "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
+              "-DBACKUP=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake.bak"
+              "-DREVERT=0"
+              "-P"
+              "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
+      RESULT_VARIABLE _exitcode)
+    if(NOT ${_exitcode} EQUAL 0)
+      message(WARNING "Patching failed for Google Test. The build may fail.")
+    endif()
+  endif()
+
+  # Add googletest subdirectory but make sure our INCLUDE_DIRECTORIES
+  # don't bleed into it. This is because libraries installed into the root conda
+  # env (e.g. MKL) add a global /opt/conda/include directory, and if there's
+  # gtest installed in conda, the third_party/googletest/**.cc source files
+  # would try to include headers from /opt/conda/include/gtest/**.h instead of
+  # its own. Once we have proper target-based include directories,
+  # this shouldn't be necessary anymore.
+  get_property(INC_DIR_temp DIRECTORY PROPERTY INCLUDE_DIRECTORIES)
+  set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES "")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
-  include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
+  set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES ${INC_DIR_temp})
+
+  include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
+  include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googlemock/include)
 
   # We will not need to test benchmark lib itself.
   set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Disable benchmark testing as we don't need it.")
@@ -311,6 +379,21 @@ if(BUILD_TEST)
 
   # Recover build options.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+
+  # To make the git clean after the build, we revert the changes here.
+  if (MSVC AND MSVC_Z7_OVERRIDE)
+    execute_process(
+      COMMAND ${CMAKE_COMMAND}
+              "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
+              "-DBACKUP=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake.bak"
+              "-DREVERT=1"
+              "-P"
+              "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
+      RESULT_VARIABLE _exitcode)
+    if(NOT ${_exitcode} EQUAL 0)
+      message(WARNING "Reverting changes failed for Google Test. The build may fail.")
+    endif()
+  endif()
 endif()
 
 # ---[ FBGEMM
@@ -319,7 +402,7 @@ if(USE_FBGEMM)
   if(NOT DEFINED FBGEMM_SOURCE_DIR)
     set(FBGEMM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fbgemm" CACHE STRING "FBGEMM source directory")
   endif()
-  if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
+  if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
     message(WARNING
       "A compiler with AVX512 support is required for FBGEMM. "
       "Not compiling with FBGEMM. "
@@ -334,6 +417,7 @@ if(USE_FBGEMM)
     set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
     add_subdirectory("${FBGEMM_SOURCE_DIR}")
+    set_property(TARGET fbgemm_generic PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -347,6 +431,9 @@ endif()
 if(USE_FBGEMM)
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
   include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}")
+  caffe2_update_option(USE_FBGEMM ON)
+else()
+  caffe2_update_option(USE_FBGEMM OFF)
 endif()
 
 
@@ -430,11 +517,15 @@ endif()
 
 # ---[ OpenCV
 if(USE_OPENCV)
-  # OpenCV 3
-  find_package(OpenCV 3 QUIET COMPONENTS core highgui imgproc imgcodecs videoio video)
+  # OpenCV 4
+  find_package(OpenCV 4 QUIET COMPONENTS core highgui imgproc imgcodecs optflow videoio video)
   if(NOT OpenCV_FOUND)
-    # OpenCV 2
-    find_package(OpenCV QUIET COMPONENTS core highgui imgproc)
+    # OpenCV 3
+    find_package(OpenCV 3 QUIET COMPONENTS core highgui imgproc imgcodecs videoio video)
+    if(NOT OpenCV_FOUND)
+      # OpenCV 2
+      find_package(OpenCV QUIET COMPONENTS core highgui imgproc)
+    endif()
   endif()
   if(OpenCV_FOUND)
     include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
@@ -627,35 +718,43 @@ endif()
 
 # ---[ OpenMP
 if(USE_OPENMP)
-  set(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
-  if(APPLE AND CMAKE_COMPILER_IS_GNUCC)
-    exec_program(uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
-    string(REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
-    message(STATUS "MAC OS Darwin Version: ${DARWIN_VERSION}")
-    if(DARWIN_VERSION GREATER 9)
-      set(APPLE_OPENMP_SUCKS 1)
-    endif(DARWIN_VERSION GREATER 9)
-    execute_process(COMMAND ${CMAKE_C_COMPILER} -dumpversion
-      OUTPUT_VARIABLE GCC_VERSION)
-    if(APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
-      message(STATUS "Warning: Disabling OpenMP (unstable with this version of GCC)")
-      message(STATUS " Install GCC >= 4.6.2 or change your OS to enable OpenMP")
-      add_compile_options(-Wno-unknown-pragmas)
-      set(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
-    endif()
-  endif()
+  # OpenMP support?
+  SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
 
-  if(WITH_OPENMP AND NOT CHECKED_OPENMP)
-    find_package(OpenMP)
-    set(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
+  # macOS + GCC
+  IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
+    EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
+    STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
+    MESSAGE (STATUS "macOS Darwin version: ${DARWIN_VERSION}")
+    IF (DARWIN_VERSION GREATER 9)
+      SET(APPLE_OPENMP_SUCKS 1)
+    ENDIF (DARWIN_VERSION GREATER 9)
+    EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
+      OUTPUT_VARIABLE GCC_VERSION)
+    IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
+      MESSAGE(WARNING "Disabling OpenMP (unstable with this version of GCC). "
+        "Install GCC >= 4.6.2 or change your OS to enable OpenMP.")
+      add_compile_options(-Wno-unknown-pragmas)
+      SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
+    ENDIF()
+  ENDIF()
+
+  IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
+    FIND_PACKAGE(OpenMP QUIET)
+    SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
 
     # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
     # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
-    set(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
-  endif()
+    SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
+  ENDIF()
 
   if(OPENMP_FOUND)
-    message(STATUS "Adding " ${OpenMP_CXX_FLAGS})
+    message(STATUS "Adding OpenMP CXX_FLAGS: " ${OpenMP_CXX_FLAGS})
+    IF("${OpenMP_CXX_LIBRARIES}" STREQUAL "")
+        message(STATUS "No OpenMP library needs to be linked against")
+    ELSE()
+        message(STATUS "Will link against OpenMP libraries: ${OpenMP_CXX_LIBRARIES}")
+    ENDIF()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
   else()
@@ -689,7 +788,12 @@ if(USE_CUDA)
       caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUDNN)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+      IF(CUDNN_STATIC_LINKAGE)
+        LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+          caffe2::cudnn "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" "dl")
+      ELSE()
+        list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
+      ENDIF()
     else()
       caffe2_update_option(USE_CUDNN OFF)
     endif()
@@ -721,7 +825,7 @@ if(USE_CUDA)
 endif()
 
 # ---[ HIP
-if(NOT BUILD_ATEN_MOBILE)
+if(USE_ROCM)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
@@ -741,51 +845,46 @@ if(NOT BUILD_ATEN_MOBILE)
     list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
     list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
-    list(APPEND HIP_CXX_FLAGS -DROCBLAS_FP16=0)
+
+    if(CMAKE_BUILD_TYPE MATCHES Debug)
+       list(APPEND HIP_CXX_FLAGS -g)
+       list(APPEND HIP_CXX_FLAGS -O0)
+    endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
     set(HIP_HCC_FLAGS ${HIP_CXX_FLAGS})
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
     list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
-    list(APPEND HIP_HCC_FLAGS -amdgpu-target=${HCC_AMDGPU_TARGET})
+    foreach(pytorch_rocm_arch ${PYTORCH_ROCM_ARCH})
+      list(APPEND HIP_HCC_FLAGS --amdgpu-target=${pytorch_rocm_arch})
+    endforeach()
 
-    set(Caffe2_HIP_INCLUDES
-      ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
+    set(Caffe2_HIP_INCLUDE
+      ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
 
     # This is needed for library added by hip_add_library (same for hip_add_executable)
-    hip_include_directories(${Caffe2_HIP_INCLUDES})
+    hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
-    # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
-    if(NOT BUILD_ATEN_MOBILE)
-      set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES})
-    endif()
-    # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
-    list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-      roc::rocblas)
+      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${hipsparse_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
 
-    # TODO: Currently pytorch hipify script uses a feature called
-    # "disabled_modules" that effectively ifdef out a file, but
-    # without doing extra processing in the callers, which results in
-    # some unresolved symbols in the shared lib
-    # (libcaffe2_hip.so). Remove this when all disabled_modules are
-    # eliminated.
-    set(CMAKE_EXE_LINKER_FLAGS "-Wl,--unresolved-symbols=ignore-in-shared-libs ${CMAKE_EXE_LINKER_FLAGS}")
+    # Note [rocblas & rocfft cmake bug]
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
+    # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
+    list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
+      roc::rocblas roc::rocfft)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
-endif()
 
-# ---[ ROCm
-if(USE_ROCM)
- include_directories(SYSTEM ${HIP_PATH}/include)
- include_directories(SYSTEM ${ROCBLAS_PATH}/include)
- include_directories(SYSTEM ${ROCFFT_PATH}/include)
- include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
- include_directories(SYSTEM ${HIPRAND_PATH}/include)
- include_directories(SYSTEM ${ROCRAND_PATH}/include)
- include_directories(SYSTEM ${THRUST_PATH})
+  include_directories(SYSTEM ${HIP_PATH}/include)
+  include_directories(SYSTEM ${ROCBLAS_PATH}/include)
+  include_directories(SYSTEM ${ROCFFT_PATH}/include)
+  include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
+  include_directories(SYSTEM ${HIPRAND_PATH}/include)
+  include_directories(SYSTEM ${ROCRAND_PATH}/include)
+  include_directories(SYSTEM ${THRUST_PATH})
 endif()
 
 # ---[ NCCL
@@ -850,6 +949,7 @@ if(USE_GLOO)
     if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS gloo_cuda)
     endif()
+    add_compile_options(-DCAFFE2_USE_GLOO)
   endif()
 endif()
 
@@ -861,73 +961,6 @@ if(USE_PROF)
   else()
     message(WARNING "htrace not found. Caffe2 will build without htrace prof")
   endif()
-endif()
-
-if (USE_MOBILE_OPENGL)
-  if (ANDROID)
-    list(APPEND Caffe2_DEPENDENCY_LIBS EGL GLESv2)
-  elseif (IOS)
-    message(STATUS "TODO item for adding ios opengl dependency")
-  else()
-    message(WARNING "mobile opengl is only used in android or ios builds.")
-    caffe2_update_option(USE_MOBILE_OPENGL OFF)
-  endif()
-endif()
-
-# ---[ ARM Compute Library: check compatibility.
-if (USE_ACL)
-  if (NOT ANDROID)
-    message(WARNING "ARM Compute Library is only supported for Android builds.")
-    caffe2_update_option(USE_ACL OFF)
-  else()
-    if (CMAKE_SYSTEM_PROCESSOR MATCHES "^armv")
-      # 32-bit ARM (armv7, armv7-a, armv7l, etc)
-      set(ACL_ARCH "armv7a")
-    elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
-      # 64-bit ARM
-      set(ACL_ARCH "arm64-v8a")
-    else()
-      message(WARNING "ARM Compute Library is only supported for ARM/ARM64 builds.")
-      caffe2_update_option(USE_ACL OFF)
-    endif()
-  endif()
-endif()
-
-# ---[ ARM Compute Library: build the target.
-if (USE_ACL)
-  list(APPEND ARM_COMPUTE_INCLUDE_DIRS "third_party/ComputeLibrary/")
-  list(APPEND ARM_COMPUTE_INCLUDE_DIRS "third_party/ComputeLibrary/include")
-  include_directories(SYSTEM ${ARM_COMPUTE_INCLUDE_DIRS})
-  string (REPLACE ";" " -I" ANDROID_STL_INCLUDE_FLAGS "-I${ANDROID_STL_INCLUDE_DIRS}")
-  set (ARM_COMPUTE_SRC_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/ComputeLibrary/")
-  set (ARM_COMPUTE_LIB "${CMAKE_CURRENT_BINARY_DIR}/libarm_compute.a")
-  set (ARM_COMPUTE_CORE_LIB "${CMAKE_CURRENT_BINARY_DIR}/libarm_compute_core.a")
-  set (ARM_COMPUTE_LIBS ${ARM_COMPUTE_LIB} ${ARM_COMPUTE_CORE_LIB})
-
-  add_custom_command(
-      OUTPUT ${ARM_COMPUTE_LIBS}
-      COMMAND
-        /bin/sh -c "export PATH=\"$PATH:$(dirname ${CMAKE_CXX_COMPILER})\" && \
-        scons -C \"${ARM_COMPUTE_SRC_DIR}\" -Q \
-          examples=no validation_tests=no benchmark_tests=no standalone=yes \
-          embed_kernels=yes opencl=no gles_compute=yes \
-          os=android arch=${ACL_ARCH} \
-          extra_cxx_flags=\"${ANDROID_CXX_FLAGS} ${ANDROID_STL_INCLUDE_FLAGS}\"" &&
-        /bin/sh -c "cp ${ARM_COMPUTE_SRC_DIR}/build/libarm_compute-static.a ${CMAKE_CURRENT_BINARY_DIR}/libarm_compute.a" &&
-        /bin/sh -c "cp ${ARM_COMPUTE_SRC_DIR}/build/libarm_compute_core-static.a ${CMAKE_CURRENT_BINARY_DIR}/libarm_compute_core.a" &&
-        /bin/sh -c "rm -r ${ARM_COMPUTE_SRC_DIR}/build"
-      COMMENT "Building ARM compute library" VERBATIM)
-  add_custom_target(arm_compute_build ALL DEPENDS ${ARM_COMPUTE_LIBS})
-
-  add_library(arm_compute_core STATIC IMPORTED)
-  add_dependencies(arm_compute_core arm_compute_build)
-  set_property(TARGET arm_compute_core PROPERTY IMPORTED_LOCATION ${ARM_COMPUTE_CORE_LIB})
-
-  add_library(arm_compute STATIC IMPORTED)
-  add_dependencies(arm_compute arm_compute_build)
-  set_property(TARGET arm_compute PROPERTY IMPORTED_LOCATION ${ARM_COMPUTE_LIB})
-
-  list(APPEND Caffe2_DEPENDENCY_LIBS arm_compute arm_compute_core)
 endif()
 
 if (USE_SNPE AND ANDROID)
@@ -955,7 +988,7 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-if (NOT BUILD_ATEN_MOBILE AND BUILD_CAFFE2_OPS)
+if (NOT INTERN_BUILD_MOBILE AND BUILD_CAFFE2_OPS)
   if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
     if (USE_CUDA)
@@ -988,11 +1021,22 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if (CAFFE2_LINK_LOCAL_PROTOBUF)
     set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
   endif()
+  # Set the ONNX_ML flag for ONNX submodule
+  if (DEFINED ENV{ONNX_ML})
+    set(ONNX_ML $ENV{ONNX_ML})
+    if (ONNX_ML)
+      add_definitions(-DONNX_ML=1)
+    endif()
+  else()
+    set(ONNX_ML OFF)
+  endif()
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/foxi)
 
   include_directories(${ONNX_INCLUDE_DIRS})
+  include_directories(${FOXI_INCLUDE_DIRS})
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
   # In mobile build we care about code size, and so we need drop
   # everything (e.g. checker, optimizer) in onnx but the pb definition.
@@ -1002,7 +1046,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     caffe2_interface_library(onnx onnx_library)
   endif()
   list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
-  list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
+  list(APPEND Caffe2_DEPENDENCY_LIBS foxi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
@@ -1012,7 +1056,7 @@ endif()
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if (USE_TENSORRT)
     set(CMAKE_CUDA_COMPILER ${CUDA_NVCC_EXECUTABLE})
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt EXCLUDE_FROM_ALL)
     include_directories("${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt")
     caffe2_interface_library(nvonnxparser_static onnx_trt_library)
     list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_trt_library)
@@ -1021,26 +1065,9 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # --[ ATen checks
-if (NOT BUILD_ATEN_MOBILE)
+if (NOT INTERN_BUILD_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
-
-  # RPATH stuff
-  # see https://cmake.org/Wiki/CMake_RPATH_handling
-  if (APPLE)
-    set(CMAKE_MACOSX_RPATH ON)
-    set(_rpath_portable_origin "@loader_path")
-  else()
-    set(_rpath_portable_origin $ORIGIN)
-  endif(APPLE)
-  # Use separate rpaths during build and install phases
-  set(CMAKE_SKIP_BUILD_RPATH  FALSE)
-  # Don't use the install-rpath during the build phase
-  set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
-  set(CMAKE_INSTALL_RPATH "${_rpath_portable_origin}")
-  # Automatically add all linked folders that are NOT in the build directory to
-  # the rpath (per library?)
-  set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
   # Top-level build config
@@ -1103,13 +1130,14 @@ if (NOT BUILD_ATEN_MOBILE)
   OPTION(NDEBUG "disable asserts (WARNING: this may result in silent UB e.g. with out-of-bound indices)")
   IF (NOT NDEBUG)
     MESSAGE(STATUS "Removing -DNDEBUG from compile flags")
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
-    STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
+    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
   ENDIF()
+
   SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
   FIND_PACKAGE(MAGMA)
@@ -1169,7 +1197,7 @@ if (NOT BUILD_ATEN_MOBILE)
 
   CHECK_C_SOURCE_COMPILES("#include <stdint.h>
       static inline void cpuid(uint32_t *eax, uint32_t *ebx,
-      			 uint32_t *ecx, uint32_t *edx)
+                               uint32_t *ecx, uint32_t *edx)
       {
         uint32_t a = *eax, b, c = *ecx, d;
         asm volatile ( \"cpuid\" : \"+a\"(a), \"=b\"(b), \"+c\"(c), \"=d\"(d) );
@@ -1261,7 +1289,6 @@ if (NOT BUILD_ATEN_MOBILE)
     FIND_PACKAGE(Threads)
     IF(THREADS_FOUND)
       ADD_DEFINITIONS(-DUSE_PTHREAD_ATOMICS=1)
-      TARGET_LINK_LIBRARIES(TH ${CMAKE_THREAD_LIBS_INIT})
       MESSAGE(STATUS "Atomics: using pthread")
     ENDIF()
   ENDIF()
@@ -1281,7 +1308,6 @@ if (NOT BUILD_ATEN_MOBILE)
     SET(AT_CUDA_ENABLED 0)
   else()
     SET(AT_CUDA_ENABLED 1)
-    find_package(CUDA 5.5 REQUIRED)
   endif()
 
   IF (NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
@@ -1304,11 +1330,10 @@ if (NOT BUILD_ATEN_MOBILE)
   SET(AT_MKLDNN_ENABLED 0)
   SET(CAFFE2_USE_MKLDNN OFF)
   IF (USE_MKLDNN)
-    FIND_PACKAGE(MKLDNN)
     INCLUDE(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
     IF(MKLDNN_FOUND)
       SET(AT_MKLDNN_ENABLED 1)
-      INCLUDE_DIRECTORIES(SYSTEM ${MKLDNN_INCLUDE_DIR})
+      INCLUDE_DIRECTORIES(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
       IF(BUILD_CAFFE2_OPS)
         SET(CAFFE2_USE_MKLDNN ON)
         LIST(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkldnn)

@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/IndexLinear.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/IndexLinear.cu"
 #else
 
 static bool THNN_(checkKeysValues)(THCState *state, THCudaLongTensor* keys,

@@ -1,4 +1,4 @@
-#include "CUDATest.hpp"
+#include <c10d/test/CUDATest.hpp>
 #include <ATen/cuda/Exceptions.h>
 
 namespace c10d {

@@ -1,6 +1,9 @@
 #pragma once
 
+#include <c10/util/Optional.h>
+#include <c10/core/Device.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/types.h>
 
 #include <iosfwd>
 #include <memory>
@@ -41,10 +44,21 @@ class TORCH_API InputArchive final {
 
   ~InputArchive() = default;
 
+  /// Reads a `tensor` associated with a given `key`. If there is no `tensor`
+  /// associated with the `key`, this returns false, otherwise it returns true.
+  /// If the tensor is expected to be a buffer (not differentiable), `is_buffer`
+  /// must be `true`.
+  bool try_read(const std::string& key, Tensor& tensor, bool is_buffer = false);
+
   /// Reads a `tensor` associated with a given `key`.
   /// If the tensor is expected to be a buffer (not differentiable), `is_buffer`
   /// must be `true`.
   void read(const std::string& key, Tensor& tensor, bool is_buffer = false);
+
+  /// Reads a `InputArchive` associated with a given `key`. If there is no
+  /// `InputArchive` associated with the `key`, this returns false, otherwise
+  /// it returns true.
+  bool try_read(const std::string& key, InputArchive& archive);
 
   /// Reads an `InputArchive` associated with a given `key`.
   /// The archive can thereafter be used for further deserialization of the
@@ -52,12 +66,16 @@ class TORCH_API InputArchive final {
   void read(const std::string& key, InputArchive& archive);
 
   /// Loads the `InputArchive` from a serialized representation stored in the
-  /// file at `filename`.
-  void load_from(const std::string& filename);
+  /// file at `filename`. Storage are remapped using device option. If device
+  /// is not specified, the module is loaded to the original device.
+  void load_from(const std::string& filename,
+      c10::optional<torch::Device> device = c10::nullopt);
 
   /// Loads the `InputArchive` from a serialized representation stored in the
-  /// given `stream`.
-  void load_from(std::istream& stream);
+  /// given `stream`. Storage are remapped using device option. If device
+  /// is not specified, the module is loaded to the original device.
+  void load_from(std::istream& stream,
+      c10::optional<torch::Device> device = c10::nullopt);
 
   /// Forwards all arguments to `read()`.
   /// Useful for generic code that can be re-used for both `InputArchive` and

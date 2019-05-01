@@ -1,6 +1,6 @@
-#include "THFile.h"
-#include "THStorageFunctions.hpp"
-#include "THFilePrivate.h"
+#include <TH/THFile.h>
+#include <TH/THStorageFunctions.hpp>
+#include <TH/THFilePrivate.h>
 
 #define IMPLEMENT_THFILE_RW(TYPEC, TYPE)                          \
   size_t THFile_read##TYPEC##Raw(THFile *self, TYPE *data, size_t n)  \

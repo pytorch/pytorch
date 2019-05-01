@@ -5,7 +5,7 @@
 #include <THD/base/data_channels/DataChannelMPI.hpp>
 #endif // WITH_MPI
 #include <THD/base/data_channels/DataChannelTCP.hpp>
-#include "TestUtils.hpp"
+#include <THD/test/TestUtils.hpp>
 
 #include <THPP/tensors/THTensor.hpp>
 

@@ -1,60 +1,23 @@
 #pragma once
 
-#include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
+#include <ATen/core/op_registration/infer_schema.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
+#include <ATen/core/function_schema.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 namespace detail {
-template <typename... Ts, size_t... Is>
-std::vector<Argument> createArgumentVectorFromTypes(Indices<Is...> indices) {
-  // Arguments are named "_<index>"
-  return {Argument("_" + std::to_string(Is), getTypePtr<decay_t<Ts>>())...};
-}
 
-template <typename... Ts, size_t... Is>
-std::vector<Argument> createReturns(Indices<Is...> indices) {
-  return createArgumentVectorFromTypes<Ts..., Is...>();
-}
+using ::c10::Argument;
+using ::c10::FunctionSchema;
 
-/// Unpack a tuple return type into a vector of return types, one per tuple
-/// element.
-template <typename... Ts>
-std::vector<Argument> createReturns(std::tuple<Ts...>* tuple) {
-  // Create an index pack so we can call `get<Indices>` on the tuple next.
-  return createReturns<Ts...>(typename MakeIndices<sizeof...(Ts)>::indices{});
-}
 
-/// Create a single-element `vector` for simple (non-tuple) return types.
-template <typename ReturnType>
-std::vector<Argument> createReturns(ReturnType*) {
-  return {Argument("_1", getTypePtr<decay_t<ReturnType>>())};
-}
-
-/// Creates a vector of `Argument` from `FunctionTraits` and a pack of indices
-/// into the argument list.
-template <typename FunctionTraits, size_t... Is>
-std::vector<Argument> createArgumentVectorFromTraits(Indices<Is...> indices) {
-  using ArgumentTypes = typename FunctionTraits::parameter_types;
-  return createArgumentVectorFromTypes<
-      c10::guts::typelist::element_t<Is, ArgumentTypes>...>(indices);
-}
-
-/// Creates a `FunctionSchema` object from a `FunctionTraits` type for a
-/// function.
-template <typename FunctionTraits>
-FunctionSchema createFunctionSchemaFromTraits(const std::string& name) {
-  using ReturnType = typename FunctionTraits::return_type;
-  auto arguments = createArgumentVectorFromTraits<FunctionTraits>(
-      typename MakeIndices<FunctionTraits::number_of_parameters>::indices{});
-  auto returns = createReturns(static_cast<ReturnType*>(nullptr));
-  return {name, arguments, returns};
-}
 
 /// Adds the elements of the `tuple` as input nodes to the traced graph.
 template <size_t... Is, typename... Types>
@@ -63,7 +26,7 @@ Node* getTracedNode(
     const std::tuple<Types...>& tuple) {
   auto symbol = Symbol::fromQualString(schema.name());
   const auto& graph = tracer::getTracingState()->graph;
-  Node* node = graph->create(std::move(symbol), /*num_outputs=*/0);
+  Node* node = graph->create(symbol, /*num_outputs=*/0);
   tracer::recordSourceLocation(node);
 
   // Hack to call addInputs for the parameter pack in a sequenced fashion.
@@ -74,7 +37,7 @@ Node* getTracedNode(
        0)...};
   (void)_; // ignore
 
-  graph->appendNode(node);
+  graph->insertNode(node);
 
   return node;
 }
@@ -150,8 +113,8 @@ FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
   const auto bracketIndex = schemaOrName.find('(');
   if (bracketIndex == std::string::npos) {
     // Infer the full schema and we're good.
-    return torch::jit::detail::createFunctionSchemaFromTraits<Traits>(
-        /*name=*/schemaOrName);
+    return c10::detail::createFunctionSchemaFromTraits<Traits>(
+        /*name=*/schemaOrName, "");
   }
 
   // If the user provided her own schema, we need to infer it nevertheless and
@@ -161,8 +124,8 @@ FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
   auto providedSchema = parseSchema(schemaOrName);
 
   const auto inferredSchema =
-      torch::jit::detail::createFunctionSchemaFromTraits<Traits>(
-          providedSchema.name());
+      c10::detail::createFunctionSchemaFromTraits<Traits>(
+          providedSchema.name(), providedSchema.overload_name());
   checkArgumentVector(
       "argument",
       inferredSchema.arguments(),
@@ -217,6 +180,26 @@ Operator createOperator(
       std::tuple_size<ArgumentTuple>::value;
 
   auto schema = torch::jit::detail::inferAndCheckSchema<Traits>(schemaOrName);
+
+  // [custom operator aliasing] Currently, we have no way for the user to
+  // specify the alias annotations for a custom op. Therefore, we have to:
+  //   1. Assume that custom ops will mutate all inputs, have side effects, and
+  //      produce wildcard outputs.
+  //   2. Have some way of distinguishing between a custom op and a builtin op
+  //      so that we can apply the above rule.
+  // We do this by manually whitelisting "aten" and "prim" namespaces as
+  // builtins.
+  //
+  // We don't want to preserve this distinction between custom/builtin ops, as
+  // it is fragile and hard to maintain. When we provide a way for op
+  // registration to specify alias annotations, we should fix up builtins to
+  // use that and remove all references to this note.
+  Symbol name = Symbol::fromQualString(schema.name());
+  if (name.is_aten() || name.is_prim() || name.is_onnx()) {
+    AT_ERROR(
+        "Tried to register a custom operator to a reserved namespace: ",
+        name.ns().toUnqualString());
+  }
 
   return Operator(schema, [implementation, schema](Stack& stack) {
     ArgumentTuple tuple;

@@ -42,7 +42,7 @@ struct ModulesTest : torch::test::SeedingFixture {};
 TEST_F(ModulesTest, Conv1d) {
   Conv1d model(Conv1dOptions(3, 2, 3).stride(2));
   auto x = torch::randn({2, 3, 5}, torch::requires_grad());
-  auto y = model->forward(x);
+  auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
@@ -58,7 +58,7 @@ TEST_F(ModulesTest, Conv1d) {
 TEST_F(ModulesTest, Conv2dEven) {
   Conv2d model(Conv2dOptions(3, 2, 3).stride(2));
   auto x = torch::randn({2, 3, 5, 5}, torch::requires_grad());
-  auto y = model->forward(x);
+  auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
@@ -74,7 +74,7 @@ TEST_F(ModulesTest, Conv2dEven) {
 TEST_F(ModulesTest, Conv2dUneven) {
   Conv2d model(Conv2dOptions(3, 2, {3, 2}).stride({2, 2}));
   auto x = torch::randn({2, 3, 5, 4}, torch::requires_grad());
-  auto y = model->forward(x);
+  auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
@@ -90,7 +90,7 @@ TEST_F(ModulesTest, Conv2dUneven) {
 TEST_F(ModulesTest, Conv3d) {
   Conv3d model(Conv3dOptions(3, 2, 3).stride(2));
   auto x = torch::randn({2, 3, 5, 5, 5}, torch::requires_grad());
-  auto y = model->forward(x);
+  auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
@@ -106,7 +106,7 @@ TEST_F(ModulesTest, Conv3d) {
 TEST_F(ModulesTest, Linear) {
   Linear model(5, 2);
   auto x = torch::randn({10, 5}, torch::requires_grad());
-  auto y = model->forward(x);
+  auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
@@ -125,9 +125,9 @@ TEST_F(ModulesTest, SimpleContainer) {
   auto l3 = model->add(Linear(5, 100), "l3");
 
   auto x = torch::randn({1000, 10}, torch::requires_grad());
-  x = l1->forward(x).clamp_min(0);
-  x = l2->forward(x).clamp_min(0);
-  x = l3->forward(x).clamp_min(0);
+  x = l1(x).clamp_min(0);
+  x = l2(x).clamp_min(0);
+  x = l3(x).clamp_min(0);
 
   x.backward();
   ASSERT_EQ(x.ndimension(), 2);
@@ -147,7 +147,7 @@ TEST_F(ModulesTest, EmbeddingBasic) {
   // Cannot get gradients to change indices (input) - only for embedding
   // params
   auto x = torch::full({10}, dict_size - 1, torch::kInt64);
-  auto y = model->forward(x);
+  auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
@@ -162,7 +162,7 @@ TEST_F(ModulesTest, EmbeddingBasic) {
 TEST_F(ModulesTest, EmbeddingList) {
   Embedding model(6, 4);
   auto x = torch::full({2, 3}, 5, torch::kInt64);
-  auto y = model->forward(x);
+  auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
@@ -175,7 +175,7 @@ TEST_F(ModulesTest, EmbeddingList) {
 TEST_F(ModulesTest, Dropout) {
   Dropout dropout(0.5);
   torch::Tensor x = torch::ones(100, torch::requires_grad());
-  torch::Tensor y = dropout->forward(x);
+  torch::Tensor y = dropout(x);
 
   y.backward();
   ASSERT_EQ(y.ndimension(), 1);
@@ -184,7 +184,7 @@ TEST_F(ModulesTest, Dropout) {
   ASSERT_GT(y.sum().item<float>(), 70); // Probably
 
   dropout->eval();
-  y = dropout->forward(x);
+  y = dropout(x);
   ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
@@ -214,7 +214,7 @@ TEST_F(ModulesTest, FunctionalCallsSuppliedFunction) {
     was_called = true;
     return input;
   });
-  auto output = functional->forward(torch::ones(5, torch::requires_grad()));
+  auto output = functional(torch::ones(5, torch::requires_grad()));
   ASSERT_TRUE(was_called);
   ASSERT_TRUE(output.equal(torch::ones(5, torch::requires_grad())));
 
@@ -248,9 +248,9 @@ TEST_F(ModulesTest, BatchNormStateful) {
   ASSERT_EQ(bn->running_mean.dim(), 1);
   ASSERT_EQ(bn->running_mean.size(0), 5);
 
-  ASSERT_TRUE(bn->running_variance.defined());
-  ASSERT_EQ(bn->running_variance.dim(), 1);
-  ASSERT_EQ(bn->running_variance.size(0), 5);
+  ASSERT_TRUE(bn->running_var.defined());
+  ASSERT_EQ(bn->running_var.dim(), 1);
+  ASSERT_EQ(bn->running_var.size(0), 5);
 
   // Is affine by default.
   ASSERT_TRUE(bn->options.affine());
@@ -267,12 +267,12 @@ TEST_F(ModulesTest, BatchNormStateless) {
   BatchNorm bn(BatchNormOptions(5).stateful(false).affine(false));
 
   ASSERT_FALSE(bn->running_mean.defined());
-  ASSERT_FALSE(bn->running_variance.defined());
+  ASSERT_FALSE(bn->running_var.defined());
   ASSERT_FALSE(bn->weight.defined());
   ASSERT_FALSE(bn->bias.defined());
 
   ASSERT_THROWS_WITH(
-      bn->forward(torch::ones({2, 5})),
+      bn(torch::ones({2, 5})),
       "Calling BatchNorm::forward is only permitted "
       "when the 'stateful' option is true (was false). "
       "Use BatchNorm::pure_forward instead.");
@@ -297,7 +297,7 @@ TEST_F(ModulesTest, Linear_CUDA) {
   model->to(torch::kCUDA);
   auto x =
       torch::randn({10, 5}, torch::device(torch::kCUDA).requires_grad(true));
-  auto y = model->forward(x);
+  auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
@@ -314,7 +314,7 @@ TEST_F(ModulesTest, Linear2_CUDA) {
   model->to(torch::kCUDA);
   model->to(torch::kCPU);
   auto x = torch::randn({10, 5}, torch::requires_grad());
-  auto y = model->forward(x);
+  auto y = model(x);
   torch::Tensor s = y.sum();
 
   s.backward();
@@ -324,4 +324,86 @@ TEST_F(ModulesTest, Linear2_CUDA) {
   ASSERT_EQ(y.size(1), 2);
 
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
+}
+
+TEST_F(ModulesTest, PrettyPrintLinear) {
+  ASSERT_EQ(
+      c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintConv) {
+  ASSERT_EQ(
+      c10::str(Conv1d(3, 4, 5)),
+      "torch::nn::Conv1d(input_channels=3, output_channels=4, kernel_size=5, stride=1)");
+  ASSERT_EQ(
+      c10::str(Conv2d(3, 4, 5)),
+      "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 5], stride=[1, 1])");
+  ASSERT_EQ(
+      c10::str(Conv2d(Conv2dOptions(3, 4, 5).stride(2))),
+      "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 5], stride=[2, 2])");
+
+  const auto options = Conv2dOptions(3, 4, torch::IntArrayRef{5, 6}).stride({1, 2});
+  ASSERT_EQ(
+      c10::str(Conv2d(options)),
+      "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
+}
+
+TEST_F(ModulesTest, PrettyPrintDropout) {
+  ASSERT_EQ(c10::str(Dropout(0.5)), "torch::nn::Dropout(rate=0.5)");
+  ASSERT_EQ(
+      c10::str(FeatureDropout(0.5)), "torch::nn::FeatureDropout(rate=0.5)");
+}
+
+TEST_F(ModulesTest, PrettyPrintFunctional) {
+  ASSERT_EQ(c10::str(Functional(torch::relu)), "torch::nn::Functional()");
+}
+
+TEST_F(ModulesTest, PrettyPrintBatchNorm) {
+  ASSERT_EQ(
+      c10::str(BatchNorm(
+          BatchNormOptions(4).eps(0.5).momentum(0.1).affine(false).stateful(
+              true))),
+      "torch::nn::BatchNorm(features=4, eps=0.5, momentum=0.1, affine=false, stateful=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintEmbedding) {
+  ASSERT_EQ(
+      c10::str(Embedding(10, 2)),
+      "torch::nn::Embedding(count=10, dimension=2)");
+}
+
+TEST_F(ModulesTest, PrettyPrintNestedModel) {
+  struct InnerTestModule : torch::nn::Module {
+    InnerTestModule()
+        : torch::nn::Module("InnerTestModule"),
+          fc(register_module("fc", torch::nn::Linear(3, 4))),
+          table(register_module("table", torch::nn::Embedding(10, 2))) {}
+
+    torch::nn::Linear fc;
+    torch::nn::Embedding table;
+  };
+
+  struct TestModule : torch::nn::Module {
+    TestModule()
+        : torch::nn::Module("TestModule"),
+          fc(register_module("fc", torch::nn::Linear(4, 5))),
+          table(register_module("table", torch::nn::Embedding(10, 2))),
+          inner(register_module("inner", std::make_shared<InnerTestModule>())) {
+    }
+
+    torch::nn::Linear fc;
+    torch::nn::Embedding table;
+    std::shared_ptr<InnerTestModule> inner;
+  };
+
+  ASSERT_EQ(
+      c10::str(TestModule{}),
+      "TestModule(\n"
+      "  (fc): torch::nn::Linear(in=4, out=5, with_bias=true)\n"
+      "  (table): torch::nn::Embedding(count=10, dimension=2)\n"
+      "  (inner): InnerTestModule(\n"
+      "    (fc): torch::nn::Linear(in=3, out=4, with_bias=true)\n"
+      "    (table): torch::nn::Embedding(count=10, dimension=2)\n"
+      "  )\n"
+      ")");
 }

@@ -15,9 +15,8 @@ namespace int8 {
 template <Activation Ac>
 class Int8AddOp final : public Operator<CPUContext> {
  public:
-  Int8AddOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
-        ws_(ws) {}
+  explicit Int8AddOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
   ~Int8AddOp() {
     if (this->qnnpackOperator_ != nullptr) {
@@ -31,6 +30,11 @@ class Int8AddOp final : public Operator<CPUContext> {
     const auto& A = Inputs()[0]->template Get<Int8TensorCPU>();
     const auto& B = Inputs()[1]->template Get<Int8TensorCPU>();
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
+
+    CAFFE_ENFORCE_EQ(
+        A.t.sizes(),
+        B.t.sizes(),
+        "inputs must have the same shape (broadcast semantics is not supported)");
 
     /*
      * Record quantization parameters for A and B inputs, because if the op is
@@ -63,6 +67,7 @@ class Int8AddOp final : public Operator<CPUContext> {
         static_cast<uint8_t>(Y_zero_point), Y_scale,
         activationLimits(Y_scale, Y_zero_point, Ac).first,
         activationLimits(Y_scale, Y_zero_point, Ac).second,
+        0 /* flags */,
         &qnnpackOperator_);
       CAFFE_ENFORCE(
           createStatus == qnnp_status_success,

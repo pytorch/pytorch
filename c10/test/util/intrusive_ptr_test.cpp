@@ -11,9 +11,11 @@ using c10::intrusive_ptr_target;
 using c10::make_intrusive;
 using c10::weak_intrusive_ptr;
 
+#ifndef _MSC_VER
 #pragma GCC diagnostic ignored "-Wpragmas"
 #pragma GCC diagnostic ignored "-Wunknown-warning-option"
 #pragma GCC diagnostic ignored "-Wself-move"
+#endif
 
 namespace {
 class SomeClass0Parameters : public intrusive_ptr_target {};
@@ -43,7 +45,7 @@ class DestructableMock : public intrusive_ptr_target {
   DestructableMock(bool* resourcesReleased, bool* wasDestructed)
       : resourcesReleased_(resourcesReleased), wasDestructed_(wasDestructed) {}
 
-  ~DestructableMock() {
+  ~DestructableMock() override {
     *wasDestructed_ = true;
   }
 
@@ -1537,6 +1539,7 @@ TEST(IntrusivePtrTest, givenCopyAssignedPtr_whenReassigningCopy_thenIsUnique) {
 TEST(IntrusivePtrTest, givenPtr_whenReleasedAndReclaimed_thenDoesntCrash) {
   intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
   SomeClass* ptr = obj.release();
+  EXPECT_FALSE(obj.defined());
   intrusive_ptr<SomeClass> reclaimed = intrusive_ptr<SomeClass>::reclaim(ptr);
 }
 
@@ -1570,6 +1573,39 @@ TEST(IntrusivePtrTest, givenStackObject_whenReclaimed_thenCrashes) {
   SomeClass obj;
   intrusive_ptr<SomeClass> ptr;
   EXPECT_ANY_THROW(ptr = intrusive_ptr<SomeClass>::reclaim(&obj));
+}
+
+TEST(IntrusivePtrTest, givenPtr_whenNonOwningReclaimed_thenDoesntCrash) {
+  intrusive_ptr<SomeClass> obj = make_intrusive<SomeClass>();
+  SomeClass* raw_ptr = obj.get();
+  EXPECT_TRUE(obj.defined());
+  intrusive_ptr<SomeClass> reclaimed =
+      intrusive_ptr<SomeClass>::unsafe_reclaim_from_nonowning(raw_ptr);
+  EXPECT_TRUE(reclaimed.defined());
+  EXPECT_EQ(reclaimed.get(), obj.get());
+}
+
+TEST(
+    IntrusivePtrTest,
+    givenPtr_whenNonOwningReclaimed_thenIsDestructedAtEnd) {
+  bool resourcesReleased = false;
+  bool wasDestructed = false;
+  {
+    intrusive_ptr<DestructableMock> outer;
+    {
+      intrusive_ptr<DestructableMock> inner =
+          make_intrusive<DestructableMock>(&resourcesReleased, &wasDestructed);
+      DestructableMock* raw_ptr = inner.get();
+      outer = intrusive_ptr<DestructableMock>::unsafe_reclaim_from_nonowning(
+          raw_ptr);
+    }
+    // inner is destructed
+    EXPECT_FALSE(resourcesReleased);
+    EXPECT_FALSE(wasDestructed);
+  }
+  // outer is destructed
+  EXPECT_TRUE(resourcesReleased);
+  EXPECT_TRUE(wasDestructed);
 }
 
 namespace {

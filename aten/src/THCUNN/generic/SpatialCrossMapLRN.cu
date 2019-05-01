@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialCrossMapLRN.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialCrossMapLRN.cu"
 #else
 
 void THNN_(LRNforward)(THCState* state, THCTensor* input, THCTensor* output,

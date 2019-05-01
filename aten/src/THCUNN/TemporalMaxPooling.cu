@@ -1,10 +1,10 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
-#include "THCTensor.hpp"
-#include "THCStorage.hpp"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
+#include <THC/THCTensor.hpp>
+#include <THC/THCStorage.hpp>
 
 #define TEMPORAL_MAX_POOLING_THREADS 1024
 
@@ -82,5 +82,5 @@ __global__ void cunn_TemporalMaxPooling_updateGradInputKernelAtomic(Dtype *gradI
   }
 }
 
-#include "generic/TemporalMaxPooling.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/TemporalMaxPooling.cu>
+#include <THC/THCGenerateFloatTypes.h>

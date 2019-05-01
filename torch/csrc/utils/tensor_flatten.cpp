@@ -1,4 +1,4 @@
-#include "torch/csrc/utils/tensor_flatten.h"
+#include <torch/csrc/utils/tensor_flatten.h>
 
 #include <map>
 #include <unordered_map>
@@ -14,22 +14,21 @@ std::vector<TensorGroup> take_tensors(
   std::vector<TensorGroup> results;
   // an overapproximation, but at least we won't have to copy stuff around
   results.reserve(tensors.size());
-  std::map<TypeID, TensorGroup> groups;
+  std::map<int64_t, TensorGroup> groups;
   size_t cur_group_size = 0;
 
   for (const auto & tensor : tensors) {
-    auto& type = tensor.type();
     size_t tensor_size;
-    if (type.is_sparse()) {
+    if (tensor.is_sparse()) {
       const auto& indices = tensor._indices();
       const auto& values = tensor._values();
-      tensor_size = indices.numel() * indices.type().elementSizeInBytes() +
-                    values.numel() * indices.type().elementSizeInBytes();
+      tensor_size = indices.numel() * indices.element_size() +
+                    values.numel() * indices.element_size();
     } else {
-      tensor_size = tensor.numel() * type.elementSizeInBytes();
+      tensor_size = tensor.numel() * tensor.element_size();
     }
 
-    auto& type_group = groups[type.ID()];
+    auto& type_group = groups[tensor.type().id()];
     type_group.tensors.push_back(tensor);
 
     if (fine_grained) {
@@ -65,11 +64,11 @@ std::vector<TensorGroup> take_tensors(
 
 void reorder_tensors_like(std::vector<Tensor>& tensors, TensorList order) {
   AT_ASSERT(tensors.size() == order.size());
-  std::unordered_map<at::Type*, std::vector<size_t>> type_indices;
+  std::unordered_map<at::DeprecatedTypeProperties*, std::vector<size_t>> type_indices;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i)
     type_indices[&tensors[i].type()].push_back(i);
 
-  std::unordered_map<at::Type*, size_t> type_used;
+  std::unordered_map<at::DeprecatedTypeProperties*, size_t> type_used;
   std::vector<Tensor> ordered_tensors;
   ordered_tensors.reserve(tensors.size());
   for (auto & tmpl_tensor : order) {

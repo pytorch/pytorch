@@ -1,8 +1,8 @@
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 
 namespace at { namespace native {
 
-Tensor constant_pad_nd(const Tensor& self, IntList pad, Scalar value) {
+Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, Scalar value) {
     AT_CHECK(pad.size() % 2 == 0, "Length of pad must be even but instead it equals ",
              pad.size());
 

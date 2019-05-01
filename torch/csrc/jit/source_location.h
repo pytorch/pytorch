@@ -5,7 +5,8 @@
 #include <stdexcept>
 #include <string>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 // SourceLocation represents source code-level debug information for a node.
 // It contains information about where a node got generated.
 // In the case of tracing this will be a python stack trace.
@@ -13,21 +14,24 @@ namespace torch { namespace jit {
 // by a SourceRange object
 struct SourceLocation {
   virtual ~SourceLocation() = default;
-  virtual void highlight(std::ostream & out) const = 0;
+  virtual void highlight(std::ostream& out) const = 0;
 
-  std::string wrapException(const std::exception & e, const std::string & additional = "") {
+  std::string wrapException(
+      const std::exception& e,
+      const std::string& additional = "") {
     std::stringstream msg;
     msg << "\n" << e.what() << ":\n";
-    if(!additional.empty()) {
+    if (!additional.empty()) {
       msg << additional << ":\n";
     }
     highlight(msg);
     return msg.str();
   }
-  void wrapAndRethrowException(const std::exception & e, const std::string & additional = "") {
+  void wrapAndRethrowException(
+      const std::exception& e,
+      const std::string& additional = "") {
     throw std::runtime_error(wrapException(e, additional));
   }
-
 };
 
 inline std::ostream& operator<<(std::ostream& out, const SourceLocation& sl) {
@@ -35,16 +39,16 @@ inline std::ostream& operator<<(std::ostream& out, const SourceLocation& sl) {
   return out;
 }
 
-
 // normally a python stack trace
 struct StringSourceLocation : public SourceLocation {
-  StringSourceLocation(std::string context)
-  : context(std::move(context)) {}
-  void highlight(std::ostream & out) const override {
+  StringSourceLocation(std::string context) : context(std::move(context)) {}
+  void highlight(std::ostream& out) const override {
     out << context;
   }
-private:
+
+ private:
   std::string context;
 };
 
-}}
+} // namespace jit
+} // namespace torch

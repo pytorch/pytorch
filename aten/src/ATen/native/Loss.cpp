@@ -1,7 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Dispatch.h"
-#include "ATen/CPUApplyUtils.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
+#include <ATen/CPUApplyUtils.h>
 
 #define EPSILON 1e-12
 
@@ -70,7 +70,7 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction) {
 Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
   auto grad_input = at::zeros_like(input);
   auto grad_expand = grad.expand_as(input);
-  AT_DISPATCH_FLOATING_TYPES(input.type(), "kl_div_backward", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "kl_div_backward_cpu", [&]() {
     at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
         grad_input,
         target,

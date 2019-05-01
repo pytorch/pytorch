@@ -13,7 +13,6 @@ import shutil
 import torch
 import traceback
 
-import test_pytorch_common
 import test_onnx_common
 from common_nn import module_tests
 from test_nn import new_module_tests
@@ -33,6 +32,8 @@ def get_test_name(testcase):
 # Take a test case (a dict) as input, return the input for the module.
 def gen_input(testcase):
     if "input_size" in testcase:
+        if testcase["input_size"] == () and "desc" in testcase and testcase["desc"][-6:] == "scalar":
+            testcase["input_size"] = (1,)
         return Variable(torch.randn(*testcase["input_size"]))
     elif "input_fn" in testcase:
         input = testcase["input_fn"]()
@@ -99,7 +100,8 @@ def convert_tests(testcases, sets=1):
         try:
             input = gen_input(t)
             f = io.BytesIO()
-            torch.onnx._export(module, input, f)
+            torch.onnx._export(module, input, f,
+                               operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
             onnx_model = onnx.load_from_string(f.getvalue())
             onnx.checker.check_model(onnx_model)
             onnx.helper.strip_doc_string(onnx_model)

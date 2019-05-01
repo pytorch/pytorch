@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/IndexLinear.c"
+#define TH_GENERIC_FILE "THNN/generic/IndexLinear.c"
 #else
 
 #ifdef _OPENMP

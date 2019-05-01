@@ -6,6 +6,7 @@ list(APPEND Caffe2_CPU_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/int8_channel_shuffle_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/int8_concat_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/int8_conv_op.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/int8_conv_op_relu.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/int8_conv_transpose_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/int8_dequantize_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/int8_fc_op.cc"

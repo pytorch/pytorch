@@ -49,7 +49,6 @@ set(C10D_SRCS
   PrefixStore.cpp
   TCPStore.cpp
   Utils.cpp
-  ProcessGroupGloo.cpp
   )
 
 if(C10D_USE_CUDA)
@@ -71,6 +70,10 @@ endif()
 if(USE_C10D_MPI)
   list(APPEND C10D_SRCS ProcessGroupMPI.cpp)
   list(APPEND C10D_LIBS ${MPI_LIBRARIES})
+endif()
+
+if (USE_GLOO)
+  list(APPEND C10D_SRCS ProcessGroupGloo.cpp)
 endif()
 
 add_library(c10d STATIC ${C10D_SRCS})
@@ -97,16 +100,13 @@ if (USE_GLOO)
 endif()
 
 target_include_directories(c10d PUBLIC
-  ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
-  ${CMAKE_SOURCE_DIR}/aten/src/THC # provides "THC.h" to ProcessGroupGloo.cpp
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
-  ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC # provides "THCGeneral.h" to THC.h
   )
 
 # For <c10d/...>
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
-# For torch/csrc/utils/hash.h and torch/csrc/utils/functional.h
+# For torch/csrc/utils/hash.h
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
 
 if(USE_C10D_NCCL)
@@ -124,7 +124,9 @@ copy_header(Store.hpp)
 copy_header(TCPStore.hpp)
 copy_header(Types.hpp)
 copy_header(Utils.hpp)
-copy_header(ProcessGroupGloo.hpp)
+if(USE_GLOO)
+  copy_header(ProcessGroupGloo.hpp)
+endif()
 
 if(USE_C10D_NCCL)
   copy_header(ProcessGroupNCCL.hpp)
@@ -138,10 +140,7 @@ endif()
 
 target_link_libraries(c10d PUBLIC ${C10D_LIBS})
 
-install(TARGETS c10d
-  RUNTIME DESTINATION bin
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib)
+install(TARGETS c10d DESTINATION lib)
 
 option(BUILD_EXAMPLES "Build examples" OFF)
 if(BUILD_EXAMPLES)

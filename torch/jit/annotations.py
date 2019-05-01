@@ -1,54 +1,15 @@
-import re
 import sys
 import ast
 import inspect
 import torch
-from torch._C import DynamicType, TupleType, FloatType, IntType
+from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
+    BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict
+from torch._C import TensorType, TupleType, FloatType, IntType, \
+    ListType, StringType, DictType, BoolType
 from textwrap import dedent
 
 
 PY35 = sys.version_info >= (3, 5)
-
-
-try:
-    import typing
-    from typing import Tuple
-
-    def is_tuple(ann):
-        # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
-        return ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.Tuple or
-             getattr(ann, '__origin__', None) is tuple)
-except ImportError:
-    # A minimal polyfill for versions of Python that don't have typing.
-    # Note that this means that they also don't support the fancy annotation syntax, so
-    # those instances will only be used in our tiny `type: ` comment interpreter.
-
-    # The __getitem__ in typing is implemented using metaclasses, but I'm too lazy for that.
-    class TupleCls(object):
-        def __getitem__(self, types):
-            return TupleInstance(types)
-
-    class TupleInstance(object):
-        def __init__(self, types):
-            setattr(self, '__args__', types)
-
-    Tuple = TupleCls()
-
-    def is_tuple(ann):
-        return isinstance(ann, TupleInstance)
-
-
-# allows BroadcastingList instance to be subscriptable
-class BroadcastingListCls(object):
-    def __getitem__(self, types):
-        return
-
-# mypy doesn't support parameters on types, so we have to explicitly type each
-# list size
-BroadcastingList1 = BroadcastingListCls()
-for i in range(2, 7):
-    globals()["BroadcastingList{}".format(i)] = BroadcastingList1
 
 
 class Module(object):
@@ -68,6 +29,8 @@ _eval_env = {
     'Tensor': torch.Tensor,
     'typing': Module('typing', {'Tuple': Tuple}),
     'Tuple': Tuple,
+    'List': List,
+    'Dict': Dict,
 }
 
 
@@ -103,6 +66,8 @@ def get_num_params(fn):
     if source is None:
         return None
     py_ast = ast.parse(source)
+    if len(py_ast.body) == 1 and isinstance(py_ast.body[0], ast.ClassDef):
+        raise RuntimeError("cannot instantiate class object ({}) inside jit.script".format(py_ast.body[0].name))
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
     py_def = py_ast.body[0]
@@ -128,16 +93,16 @@ def parse_type_line(type_line):
 
     try:
         arg_ann = eval(arg_ann_str, _eval_env)
-    except SyntaxError:
-        raise RuntimeError("Failed to parse the argument list of a type annotation")
+    except (NameError, SyntaxError) as e:
+        raise RuntimeError("Failed to parse the argument list of a type annotation: {}".format(str(e)))
 
     if not isinstance(arg_ann, tuple):
         arg_ann = (arg_ann,)
 
     try:
         ret_ann = eval(ret_ann_str, _eval_env)
-    except SyntaxError:
-        raise RuntimeError("Failed to parse the return type of a type annotation")
+    except (NameError, SyntaxError) as e:
+        raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))
 
     arg_types = [ann_to_type(ann) for ann in arg_ann]
     return arg_types, ann_to_type(ret_ann)
@@ -197,13 +162,53 @@ def try_real_annotations(fn):
 
 def ann_to_type(ann):
     if ann is None:
-        return DynamicType.get()
+        return TensorType.get()
     elif ann is torch.Tensor:
-        return DynamicType.get()
+        return TensorType.get()
     elif is_tuple(ann):
         return TupleType([ann_to_type(a) for a in ann.__args__])
+    elif is_list(ann):
+        return ListType(ann_to_type(ann.__args__[0]))
+    elif is_dict(ann):
+        key = ann_to_type(ann.__args__[0])
+        value = ann_to_type(ann.__args__[1])
+        return DictType(key, value)
     elif ann is float:
         return FloatType.get()
     elif ann is int:
         return IntType.get()
-    raise ValueError("The only supported annotations kinds are Tensor and Tuple[...]")
+    elif ann is str:
+        return StringType.get()
+    elif ann is bool:
+        return BoolType.get()
+    raise ValueError("Unknown type annotation: '{}'".format(ann.__name__))
+
+
+__all__ = [
+    'List',
+    'BroadcastingList1',
+    'BroadcastingList2',
+    'BroadcastingList3',
+    'Tuple',
+    'is_tuple',
+    'is_list',
+    'Dict',
+    'is_dict',
+    'TensorType',
+    'TupleType',
+    'FloatType',
+    'IntType',
+    'ListType',
+    'StringType',
+    'DictType',
+    'Module',
+    # TODO: Consider not exporting these during wildcard import (reserve
+    # that for the types; for idiomatic typing code.)
+    'get_signature',
+    'get_num_params',
+    'parse_type_line',
+    'get_type_line',
+    'split_type_line',
+    'try_real_annotations',
+    'ann_to_type',
+]

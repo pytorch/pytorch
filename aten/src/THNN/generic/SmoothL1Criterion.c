@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SmoothL1Criterion.c"
+#define TH_GENERIC_FILE "THNN/generic/SmoothL1Criterion.c"
 #else
 
 void THNN_(SmoothL1Criterion_updateOutput)(

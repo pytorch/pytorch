@@ -1,3 +1,0 @@
-graph(%x : int?) {
-  return (%x);
-}

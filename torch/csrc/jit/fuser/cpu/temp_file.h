@@ -1,18 +1,19 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
-#if USE_CPU_FUSER
 
-#include "ATen/ATen.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/utils/disallow_copy.h"
-#include "torch/csrc/jit/assertions.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/utils/disallow_copy.h>
 
-#include "unistd.h"
+#include <unistd.h>
 
 #include <string>
 #include <vector>
 
-namespace torch { namespace jit { namespace fuser { namespace cpu {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cpu {
 
 struct TempFile {
   TH_DISALLOW_COPY_AND_ASSIGN(TempFile);
@@ -22,7 +23,7 @@ struct TempFile {
     // so we make a copy of the string here, including null terminator
     std::vector<char> tt(t.c_str(), t.c_str() + t.size() + 1);
     int fd = mkstemps(tt.data(), suffix);
-    JIT_ASSERT(fd != -1);
+    AT_ASSERT(fd != -1);
     file_ = fdopen(fd, "r+");
 
     // - 1 becuase tt.size() includes the null terminator,
@@ -38,12 +39,12 @@ struct TempFile {
     fflush(file_);
   }
 
-  void write(const std::string & str) {
+  void write(const std::string& str) {
     size_t result = fwrite(str.c_str(), 1, str.size(), file_);
-    JIT_ASSERT(str.size() == result);
+    AT_ASSERT(str.size() == result);
   }
 
-  FILE* file()  {
+  FILE* file() {
     return file_;
   }
 
@@ -55,14 +56,13 @@ struct TempFile {
       fclose(file_);
     }
   }
-private:
+
+ private:
   FILE* file_ = nullptr;
   std::string name_;
 };
 
 } // namespace cpu
 } // namespace fuser
-} // namespace jit 
+} // namespace jit
 } // namespace torch
-
-#endif // USE_CPU_FUSER

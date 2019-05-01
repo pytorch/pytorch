@@ -204,7 +204,7 @@ class ModelHelper(object):
             param_name = parameter_sharing_context.get_parameter_name(
                 param_name)
         else:
-            raise "Unsupported type for param_name"
+            raise TypeError("Unsupported type for param_name")
 
         if param_name in self._parameters_info:
             assert self._parameters_info[param_name].shape == shape
@@ -288,11 +288,6 @@ class ModelHelper(object):
 
         if namescope == '':
             return self.params[:]
-        elif top_scope:
-            return [
-                p for p in self.params
-                if p.GetNameScope().startswith(namescope)
-            ]
         else:
             return [p for p in self.params if
                     p.GetNameScope().startswith(namescope)]

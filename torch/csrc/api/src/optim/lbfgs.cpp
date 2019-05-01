@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/serialize/archive.h>
+#include <torch/utils.h>
 
 #include <ATen/ATen.h>
 
@@ -25,6 +26,7 @@ Tensor LBFGS::gather_flat_grad() {
 }
 
 void LBFGS::add_grad(const torch::Tensor& step_size, const Tensor& update) {
+  NoGradGuard guard;
   int64_t offset = 0;
   for (auto& parameter : parameters_) {
     int64_t numel = parameter.numel();
@@ -90,7 +92,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
       Tensor q = flat_grad.neg();
       for (int64_t i = num_old - 1; i >= 0; i--) {
         al.at(i) = old_stps.at(i).dot(q) * ro.at(i);
-        q.add_(old_dirs.at(i), -al.at(i).item<float>());
+        q.add_(old_dirs.at(i), -al.at(i).item());
       }
 
       // Multiply by initial Hessian
@@ -100,7 +102,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
 
       for (int64_t i = 0; i < num_old; i++) {
         Tensor be_i = old_dirs.at(i).dot(r) * ro.at(i);
-        r.add_(old_stps.at(i), (al.at(i) - be_i).item<float>());
+        r.add_(old_stps.at(i), (al.at(i) - be_i).item());
       }
       prev_flat_grad.copy_(flat_grad);
     }

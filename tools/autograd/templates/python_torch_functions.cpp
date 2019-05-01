@@ -21,6 +21,7 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
+#include "torch/csrc/utils/structseq.h"
 
 #include <ATen/ATen.h>
 
@@ -49,11 +50,16 @@ static void check_out_type_matches(Tensor result,
   if (scalarType_is_none && layout_is_none && device_is_none) {  // common case
     return;
   }
-  auto scalarType_arg = scalarType_is_none ? result.type().scalarType() : scalarType;
+  if (!scalarType_is_none && result.scalar_type() != scalarType) {
+    AT_ERROR(
+        "dtype ", scalarType,
+        " does not match dtype of out parameter (", result.scalar_type(), ")");
+  }
+  auto scalarType_arg = scalarType_is_none ? result.scalar_type() : scalarType;
   auto layout_arg = layout_is_none ? *torch::getLayout(result.type().backend()) : layout;
-  auto device_type_arg = device_is_none ? torch::getDeviceType(result.type()) : device.type();
+  auto device_type_arg = device_is_none ? result.device().type() : device.type();
   const auto& type = torch::getVariableType(scalarType_arg, layout_arg, device_type_arg);
-  if (result.type() != type) {
+  if (result.dispatch_type() != type) {
     AT_ERROR(
         "type corresponding to ", type.toString(),
         " does not match type of out parameter (", result.type().toString(), ")");
@@ -95,11 +101,11 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "arange(Scalar end, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "arange(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "arange(Scalar end, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "arange(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   });
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<9> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if (r.idx == 0) {
@@ -111,12 +117,14 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
           .dtype(scalarType)
           .device(r.device(4))
           .layout(r.layout(3).layout)
-          .requires_grad(r.toBool(5));
+          .requires_grad(r.toBool(6))
+          .pinned_memory(r.toBool(5));
       return wrap(dispatch_arange(end, options));
     } else {
+      AT_CHECK(!r.toBool(5), " `pin_memory` and `out` parameters are incompatible");
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2), r.layout(3), r.isNone(3),
                              r.device(4), r.isNone(4));
-      return wrap(dispatch_arange(r.scalar(0), r.tensor(1)).set_requires_grad(r.toBool(5)));
+      return wrap(dispatch_arange(r.scalar(0), r.tensor(1)).set_requires_grad(r.toBool(6)));
     }
   } else if (r.idx == 1) {
     if (r.isNone(3)) {
@@ -129,12 +137,14 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
           .dtype(scalarType)
           .device(r.device(6))
           .layout(r.layout(5).layout)
-          .requires_grad(r.toBool(7));
+          .requires_grad(r.toBool(8))
+          .pinned_memory(r.toBool(7));
       return wrap(dispatch_arange(start, end, step, options));
     } else {
+      AT_CHECK(!r.toBool(7), " `pin_memory` and `out` parameters are incompatible");
       check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4), r.layout(5), r.isNone(5),
                                r.device(6), r.isNone(6));
-      return wrap(dispatch_arange(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
+      return wrap(dispatch_arange(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(8)));
     }
   }
   Py_RETURN_NONE;
@@ -185,38 +195,38 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
-inline Tensor dispatch_randint(int64_t high, IntList size, Generator * generator, Tensor result) {
+inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator * generator, Tensor result) {
   AutoNoGIL no_gil;
   return at::randint_out(result, high, size, generator);
 }
-inline Tensor dispatch_randint(int64_t high, IntList size, Generator * generator, const TensorOptions & options) {
+inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
   maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::randint(high, size, generator, options);
 }
-inline Tensor dispatch_randint(int64_t high, IntList size, Tensor result) {
+inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Tensor result) {
   AutoNoGIL no_gil;
   return at::randint_out(result, high, size);
 }
-inline Tensor dispatch_randint(int64_t high, IntList size, const TensorOptions & options) {
+inline Tensor dispatch_randint(int64_t high, IntArrayRef size, const TensorOptions & options) {
   maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::randint(high, size, options);
 }
-inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, Generator * generator, Tensor result) {
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, Tensor result) {
   AutoNoGIL no_gil;
   return at::randint_out(result, low, high, size, generator);
 }
-inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, Generator * generator, const TensorOptions & options) {
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
   maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::randint(low, high, size, generator, options);
 }
-inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, Tensor result) {
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Tensor result) {
   AutoNoGIL no_gil;
   return at::randint_out(result, low, high, size);
 }
-inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, const TensorOptions & options) {
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, const TensorOptions & options) {
   maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::randint(low, high, size, options);
@@ -226,10 +236,10 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "randint(int64_t high, IntList size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t high, IntList size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntList size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntList size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t high, IntArrayRef size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t high, IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t low, int64_t high, IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
   }, /*traceable=*/false);
 
   ParsedArgs<9> parsed_args;
@@ -323,7 +333,7 @@ static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.as_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::as_tensor(default_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::as_tensor(default_type(), default_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -356,7 +366,7 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.sparse_coo_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(default_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(default_type(), default_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -364,7 +374,7 @@ static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::tensor_ctor(default_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::tensor_ctor(default_type(), default_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 

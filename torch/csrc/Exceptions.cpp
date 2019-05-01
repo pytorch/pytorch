@@ -1,11 +1,11 @@
-#include "Exceptions.h"
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/python_headers.h>
 
 #include <utility>
 #include <vector>
 #include <cstdarg>
 
-#include "THP.h"
+#include <torch/csrc/THP.h>
 
 PyObject *THPException_FatalError;
 

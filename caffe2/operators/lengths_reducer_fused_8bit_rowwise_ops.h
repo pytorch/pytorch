@@ -31,7 +31,6 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
     const auto& data = Input(DATA);
     const auto& indices = Input(INDICES);
     const auto& lengths = Input(LENGTHS);
-    auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(indices.dim(), 1, "INDICES must be a vector");
     CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS must be a vector");
@@ -51,7 +50,7 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
     // Subtract 8 from the #columns of data for the 4 bytes for scale and 4
     // bytes for bias that we use in the fused representation (per row).
     const std::vector<int64_t> shape = {lengths.size(0), data.size(1) - 8};
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype<float>());
 
     Fused8BitRowwiseEmbeddingLookup(
         /*block_size=*/output->size(1),

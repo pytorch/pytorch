@@ -151,7 +151,7 @@ TaskThreadPoolBase* AsyncNetBase::poolGetter(
   std::unique_lock<std::mutex> pools_lock(pools_mutex_);
   auto pool = pools[device_id][pool_size];
   if (!pool) {
-    pool = ThreadPoolRegistry()->Create(
+    pool = c10::ThreadPoolRegistry()->Create(
         DeviceTypeName(device_type),
         device_id,
         pool_size,
@@ -159,6 +159,13 @@ TaskThreadPoolBase* AsyncNetBase::poolGetter(
     pools[device_id][pool_size] = pool;
   }
   return pool.get();
+}
+
+TaskThreadPoolBase* AsyncNetBase::pool() {
+  // By default using a non-pinned CPU option
+  DeviceOption dev;
+  dev.set_device_type(PROTO_CPU);
+  return pool(dev);
 }
 
 TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
@@ -362,7 +369,7 @@ void AsyncNetBase::handleChainError(
     int task_id,
     OperatorBase* op,
     const char* err_str,
-    bool save_exception) {
+    bool save_exception) noexcept {
   std::string err_msg = err_str;
   if (op) {
     err_msg += ",  op " + (op->has_debug_def() ? op->type() : " unknown");
@@ -378,7 +385,7 @@ void AsyncNetBase::handleChainError(
   }
 }
 
-bool AsyncNetBase::run(int task_id, int stream_id) {
+bool AsyncNetBase::run(int task_id, int stream_id) noexcept {
   OperatorBase* op = nullptr;
   try {
     // Optionally insert async wait ops,
@@ -454,38 +461,22 @@ void AsyncNetBase::finalizeEvents() {
 }
 
 ProfDAGProtos AsyncNetBase::GetOperatorStats() const {
-  return counters_.GetOperatorStats();
+  return counters_.GetReport().GetOperatorStats();
 }
 
 ProfDAGProtos AsyncNetBase::GetPerOperatorCost() const {
-  return counters_.GetPerOperatorCost();
+  return counters_.GetReport().GetPerOperatorCost();
+}
+
+ProfDAGReport AsyncNetBase::GetProfReport() const {
+  return counters_.GetReport();
 }
 
 AsyncNetBase::~AsyncNetBase() {
   if (options_.report_stats_) {
-    counters_.PrintStats();
+    counters_.GetReport().PrintStats();
   }
 }
-
-C10_DEFINE_SHARED_REGISTRY(
-    ThreadPoolRegistry,
-    TaskThreadPoolBase,
-    int,
-    int,
-    bool);
-
-C10_REGISTER_CREATOR(
-    ThreadPoolRegistry,
-    CPU,
-    GetAsyncNetThreadPool<TaskThreadPool, PROTO_CPU>);
-C10_REGISTER_CREATOR(
-    ThreadPoolRegistry,
-    CUDA,
-    GetAsyncNetThreadPool<TaskThreadPool, PROTO_CUDA>);
-C10_REGISTER_CREATOR(
-    ThreadPoolRegistry,
-    HIP,
-    GetAsyncNetThreadPool<TaskThreadPool, PROTO_HIP>);
 
 ExecutionOptions::ExecutionOptions(
     const std::shared_ptr<const NetDef>& net_def) {
@@ -547,3 +538,20 @@ ExecutionOptions::ExecutionOptions(
 }
 
 } // namespace caffe2
+
+namespace c10 {
+
+C10_REGISTER_CREATOR(
+    ThreadPoolRegistry,
+    CPU,
+    caffe2::GetAsyncNetThreadPool<TaskThreadPool, caffe2::PROTO_CPU>);
+C10_REGISTER_CREATOR(
+    ThreadPoolRegistry,
+    CUDA,
+    caffe2::GetAsyncNetThreadPool<TaskThreadPool, caffe2::PROTO_CUDA>);
+C10_REGISTER_CREATOR(
+    ThreadPoolRegistry,
+    HIP,
+    caffe2::GetAsyncNetThreadPool<TaskThreadPool, caffe2::PROTO_HIP>);
+
+} // namespace c10

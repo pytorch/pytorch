@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/MarginCriterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/MarginCriterion.cu"
 #else
 
 void THNN_(MarginCriterion_updateOutput)(

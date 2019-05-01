@@ -27,7 +27,7 @@ Argument `broadcast=1` needs to be passed to enable broadcasting.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_op_schema.cc
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_ops_schema.cc
 
 )DOC";
 
@@ -823,12 +823,13 @@ Both input operands should be of type `bool`.
 }
 
 #define CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(name, symbol, onnx_schema, extra) \
-  OPERATOR_SCHEMA(name)                                                \
-      .NumInputs(2)                                                    \
-      .NumOutputs(1)                                                   \
-      .AllowInplace({{0, 0}})                                          \
-      .FillUsing(LogicalDocGenerator(symbol, extra))                   \
-      .InheritOnnxSchema(onnx_schema);                                 \
+  OPERATOR_SCHEMA(name)                                                       \
+      .NumInputs(2)                                                           \
+      .NumOutputs(1)                                                          \
+      .AllowInplace({{0, 0}})                                                 \
+      .FillUsing(LogicalDocGenerator(symbol, extra))                          \
+      .TensorInferenceFunction(ElementwiseOpShapeInference)                   \
+      .InheritOnnxSchema(onnx_schema);                                        \
   SHOULD_NOT_DO_GRADIENT(name)
 
 CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Or, "or", "Or", kOrExample);
@@ -882,7 +883,7 @@ Performs element-wise negation on input tensor `X`.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_op_schema.cc
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_ops_schema.cc
 
 <details>
 
@@ -937,7 +938,7 @@ OPERATOR_SCHEMA(Sign)
 Computes sign for each element of the input: -1, 0 or 1.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_op_schema.cc
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_ops_schema.cc
 
 <details>
 

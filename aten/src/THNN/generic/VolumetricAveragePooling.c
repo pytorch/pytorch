@@ -1,8 +1,8 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricAveragePooling.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricAveragePooling.c"
 #else
 
-#include "pooling_shape.h"
+#include <THNN/generic/pooling_shape.h>
 #include <algorithm>
 
 static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
@@ -75,7 +75,7 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
 
   if (otime < 1 || owidth < 1 || oheight < 1)
     THError("Given input size: (%dx%dx%dx%d). "
-	    "Calculated output size: (%dx%dx%dx%d). Output size is too small",
+            "Calculated output size: (%dx%dx%dx%d). Output size is too small",
             nslices,itime,iheight,iwidth,nslices,otime,oheight,owidth);
 
   if (gradOutput != NULL) {

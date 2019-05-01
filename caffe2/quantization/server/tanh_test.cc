@@ -27,8 +27,8 @@ TEST(Tanh, TanhUnitTest) {
       uint8_t x_q = fbgemm::Quantize<uint8_t>(
           x, tanh_approx.GetInputQuantizationParams());
       uint8_t y_q = tanh_approx.Compute(x_q);
-      float y =
-          fbgemm::Dequantize(y_q, tanh_approx.GetOutputQuantizationParams());
+      float y = fbgemm::Dequantize<uint8_t>(
+          y_q, tanh_approx.GetOutputQuantizationParams());
       float err = fabs(tanh(x) - y);
       sq_err_sum += err * err;
       max_err = std::max(err, max_err);

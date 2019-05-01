@@ -61,22 +61,21 @@ TYPED_TEST(TensorGPUTest, TensorInitializedNonEmpty) {
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
 }
 
-TYPED_TEST(TensorGPUTest, TensorShareData) {
+TYPED_TEST(TensorGPUTest, TensorAlias) {
   if (!HasCudaGPU()) return;
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
   Tensor tensor(dims, CUDA);
-  Tensor other_tensor(dims, CUDA);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
-  other_tensor.ShareData(tensor);
+  Tensor other_tensor = tensor.Alias();
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
   EXPECT_TRUE(other_tensor.data<TypeParam>() != nullptr);
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
 }
 
-TYPED_TEST(TensorGPUTest, TensorShareDataCanUseDifferentShapes) {
+TYPED_TEST(TensorGPUTest, TensorAliasCanUseDifferentShapes) {
   if (!HasCudaGPU()) return;
   vector<int> dims(3);
   dims[0] = 2;
@@ -85,9 +84,9 @@ TYPED_TEST(TensorGPUTest, TensorShareDataCanUseDifferentShapes) {
   vector<int> alternate_dims(1);
   alternate_dims[0] = 2 * 3 * 5;
   Tensor tensor(dims, CUDA);
-  Tensor other_tensor(alternate_dims, CUDA);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
-  other_tensor.ShareData(tensor);
+  Tensor other_tensor = tensor.Alias();
+  other_tensor.Resize(alternate_dims);
   EXPECT_EQ(other_tensor.dim(), 1);
   EXPECT_EQ(other_tensor.dim32(0), alternate_dims[0]);
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
@@ -95,16 +94,15 @@ TYPED_TEST(TensorGPUTest, TensorShareDataCanUseDifferentShapes) {
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
 }
 
-TYPED_TEST(TensorGPUTest, NoLongerSharesAfterResize) {
+TYPED_TEST(TensorGPUTest, NoLongerAliasAfterNumelChanges) {
   if (!HasCudaGPU()) return;
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
   Tensor tensor(dims, CUDA);
-  Tensor other_tensor(dims, CUDA);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
-  other_tensor.ShareData(tensor);
+  Tensor other_tensor = tensor.Alias();
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
   auto* old_pointer = other_tensor.data<TypeParam>();
 
@@ -173,6 +171,17 @@ TEST_SERIALIZATION_GPU_WITH_TYPE(uint8_t, int32_data)
 TEST_SERIALIZATION_GPU_WITH_TYPE(uint16_t, int32_data)
 TEST_SERIALIZATION_GPU_WITH_TYPE(int64_t, int64_data)
 
+TEST(TensorConstruction, ReinitializeTensorTest) {
+  if (!HasCudaGPU()) return;
+  Tensor x = caffe2::empty({1}, at::dtype<float>().device(CUDA, 0));
+  auto* data_before = x.template mutable_data<float>();
+  // We'll only compare device_type in ReinitializeTensor,
+  // so no tensor reallocation will happen here
+  ReinitializeTensor(&x, {1}, at::dtype<float>().device(CUDA));
+  auto* data_after = x.template mutable_data<float>();
+  EXPECT_EQ(data_before, data_after);
+}
+
 TEST(TensorTest, TensorSerializationMultiDevices) {
   Blob blob;
   Tensor tensor(CPU);
@@ -181,7 +190,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     tensor.mutable_data<float>()[i] = i;
   }
   for (int gpu_id = 0; gpu_id < NumCudaDevices(); ++gpu_id) {
-    DeviceGuard guard(gpu_id);
+    CUDAGuard guard(gpu_id);
     CUDAContext context(gpu_id); // switch to the current gpu
     blob.Reset(new Tensor(tensor, CUDA));
     string serialized = SerializeBlob(blob, "test");

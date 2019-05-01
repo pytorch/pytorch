@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core
+from caffe2.python import core, workspace
 from hypothesis import assume, given
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -67,9 +67,9 @@ class TestReductionOps(serial.SerializedTestCase):
            **hu.gcs)
     def test_elementwise_sqrsum(self, n, dtype, gc, dc):
         if dtype == np.float16:
-            # fp16 is only supported with CUDA
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
+            # fp16 is only supported with CUDA/HIP
+            assume(gc.device_type == workspace.GpuDeviceType)
+            dc = [d for d in dc if d.device_type == workspace.GpuDeviceType]
 
         X = np.random.rand(n).astype(dtype)
 

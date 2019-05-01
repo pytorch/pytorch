@@ -22,14 +22,14 @@ __global__ void HalfToFloatKernel(const int N, const half* X, float* Y) {
 template <>
 bool FloatToHalfOp<CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+
+  auto* Y = Output(0, X.sizes(), at::dtype<at::Half>());
   FloatToHalfKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(X.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(),
+      X.numel(),
       X.data<float>(),
       reinterpret_cast<half*>(Y->template mutable_data<at::Half>()));
   return true;
@@ -38,14 +38,14 @@ bool FloatToHalfOp<CUDAContext>::RunOnDevice() {
 template <>
 bool HalfToFloatOp<CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   HalfToFloatKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(X.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(),
+      X.numel(),
       reinterpret_cast<const half*>(X.data<at::Half>()),
       Y->template mutable_data<float>());
   return true;

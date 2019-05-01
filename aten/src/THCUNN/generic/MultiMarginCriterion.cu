@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/MultiMarginCriterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/MultiMarginCriterion.cu"
 #else
 
 // TODO: improve error messages

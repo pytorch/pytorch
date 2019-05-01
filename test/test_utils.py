@@ -2,22 +2,20 @@ from __future__ import print_function
 import sys
 import os
 import re
-import math
 import shutil
 import random
 import tempfile
 import unittest
-import traceback
+import contextlib
 import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.cuda
-import warnings
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common_utils import IS_WINDOWS, IS_PPC, skipIfRocm, load_tests
+from common_utils import skipIfRocm, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -34,7 +32,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common_utils import TestCase, run_tests, download_file
+from common_utils import TestCase, run_tests
 
 
 class RandomDatasetMock(object):
@@ -47,6 +45,52 @@ class RandomDatasetMock(object):
 
 
 class TestCheckpoint(TestCase):
+
+    # This runs checkpoint_sequential on each of the nets in
+    # module_lists_to_compare, and compares them against the uncheckpointed model.
+    # To compare, it checks outputs as well as input gradients and parameter gradients
+    def _check_checkpoint_sequential(
+        self,
+        model,
+        module_lists_to_compare,
+        num_chunks,
+        *inputs
+    ):
+
+        # not checkpointed
+        if not isinstance(inputs, tuple):
+            inputs = (inputs,)
+        out = model(*inputs)
+        out_not_checkpointed = out.data.clone()
+        model.zero_grad()
+        out.sum().backward()
+        grad_not_checkpointed = {
+            name: param.grad.data.clone()
+            for name, param in model.named_parameters()
+        }
+        input_grad_not_checkpointed = [i.grad.data.clone() for i in inputs]
+        for model_to_compare in module_lists_to_compare:
+            # checkpointed model by passing list of modules
+            detached_inputs = [i.detach() for i in inputs]
+            for detached in detached_inputs:
+                detached.requires_grad = True
+
+            # pass list of modules to checkpoint
+            out = checkpoint_sequential(model_to_compare, num_chunks, *detached_inputs)
+            out_checkpointed = out.data.clone()
+            model.zero_grad()
+            out.sum().backward()
+            grad_checkpointed = {
+                name: param.grad.data.clone()
+                for name, param in model.named_parameters()
+            }
+            input_grad_checkpointed = [d.grad.data.clone() for d in detached_inputs]
+            # compare outputs as well as the gradients of input and parameters
+            self.assertEqual(out_checkpointed, out_not_checkpointed)
+            for i, j in zip(input_grad_not_checkpointed, input_grad_checkpointed):
+                self.assertEqual(i, j)
+            for name in grad_checkpointed:
+                self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
 
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
@@ -107,58 +151,55 @@ class TestCheckpoint(TestCase):
             nn.ReLU()
         )
 
-        x = torch.randn(1, 100, requires_grad=True)
+        # Compare uncheckpointed model with its checkpointed counterparts
+        # In addition to running checkpoint_sequential on the nn.Sequential
+        # instance, we also run the function on the list of functions within
+        # the module.
+        self._check_checkpoint_sequential(
+            model,
+            [list(model.children()), model],
+            2,
+            torch.randn(1, 100, requires_grad=True)
+        )
 
-        # not checkpointed
-        out = model(x)
-        out_not_checkpointed = out.data.clone()
-        model.zero_grad()
-        out.sum().backward()
-        grad_not_checkpointed = {}
-        for name, param in model.named_parameters():
-            grad_not_checkpointed[name] = param.grad.data.clone()
-        input_grad = x.grad.data.clone()
+    def test_checkpoint_module_list_multiple_args(self):
+        class ModuleListNet(nn.Module):
+            def __init__(self):
+                super(ModuleListNet, self).__init__()
+                module_list = [
+                    nn.Bilinear(100, 60, 50),
+                    nn.ReLU(),
+                    nn.Linear(50, 20),
+                    nn.ReLU(),
+                    nn.Linear(20, 5),
+                    nn.ReLU(),
+                ]
+                self.module_list = nn.ModuleList(module_list)
 
-        # checkpointed model by passing list of modules
-        chunks = 2
-        modules = list(model.children())
-        input_var = x.detach()
-        input_var.requires_grad = True
-        # pass list of modules to checkpoint
-        out = checkpoint_sequential(modules, chunks, input_var)
-        out_checkpointed = out.data.clone()
-        model.zero_grad()
-        out.sum().backward()
-        grad_checkpointed = {}
-        for name, param in model.named_parameters():
-            grad_checkpointed[name] = param.grad.data.clone()
-        checkpoint_input_grad = input_var.grad.data.clone()
-        # compare the output, input and parameters gradients
-        self.assertEqual(out_checkpointed, out_not_checkpointed)
-        self.assertEqual(input_grad, checkpoint_input_grad)
-        for name in grad_checkpointed:
-            self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
+            def forward(self, *inputs):
+                for layer in self.module_list:
+                    if isinstance(inputs, tuple):
+                        inputs = layer(*inputs)
+                    else:
+                        inputs = layer(inputs)
+                return inputs
 
-        # checkpointed by passing sequential directly
-        input_var1 = x.detach()
-        input_var1.requires_grad = True
-        # pass the sequential itself
-        out = checkpoint_sequential(model, 2, input_var1)
-        out_checkpointed = out.data.clone()
-        model.zero_grad()
-        out.sum().backward()
-        grad_checkpointed = {}
-        for name, param in model.named_parameters():
-            grad_checkpointed[name] = param.grad.data.clone()
-        checkpoint_input_grad = input_var1.grad.data.clone()
-        # compare the output, input and parameters gradients
-        self.assertEqual(out_checkpointed, out_not_checkpointed)
-        self.assertEqual(input_grad, checkpoint_input_grad)
-        for name in grad_checkpointed:
-            self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
+        model = ModuleListNet()
+
+        # Compare uncheckpointed model with its checkpointed counterparts
+        # In addition to running checkpoint_sequential on the nn.ModuleList
+        # instance, we also run the function on the list of functions within
+        # the ModuleList.
+        self._check_checkpoint_sequential(
+            model,
+            [list(model.module_list.children()), model.module_list],
+            2,
+            torch.randn(1, 100, requires_grad=True),
+            torch.randn(1, 60, requires_grad=True)
+        )
 
     def test_checkpoint_rng_cpu(self):
-        for i in range(5):
+        for _ in range(5):
             inp = torch.randn(20000, device='cpu').requires_grad_()
             phase1 = torch.nn.Dropout()
             phase2 = torch.nn.Dropout()
@@ -185,9 +226,8 @@ class TestCheckpoint(TestCase):
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
-    @skipIfRocm
     def test_checkpoint_rng_cuda(self):
-        for i in range(5):
+        for _ in range(5):
             inp = torch.randn(20000, device='cuda').requires_grad_()
             phase1 = torch.nn.Dropout()
             phase2 = torch.nn.Dropout()
@@ -212,6 +252,17 @@ class TestCheckpoint(TestCase):
             grad_no_checkpointing = inp.grad
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    def test_checkpoint_non_tensor(self):
+
+        def run_fn(tensor1, tensor2):
+            if tensor2 is None:
+                return tensor1
+            return tensor1 + tensor2
+
+        input_var = torch.randn(1, 100, requires_grad=True)
+        out = checkpoint(run_fn, input_var, None)
+        out.sum().backward()
 
 
 class TestDataLoader(TestCase):
@@ -273,7 +324,7 @@ test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 class TestFFI(TestCase):
     def test_deprecated(self):
         with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension
+            from torch.utils.ffi import create_extension  # noqa: F401
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
@@ -283,7 +334,7 @@ class TestBottleneck(TestCase):
         import subprocess
         from common_utils import PY3
 
-        p = subprocess.Popen(command, stdout=subprocess.PIPE,
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
                              stderr=subprocess.PIPE, shell=True)
         output, err = p.communicate()
         rc = p.returncode
@@ -442,11 +493,26 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
+# Errors will still be raised and reported
+@contextlib.contextmanager
+def suppress_stderr():
+    original = sys.stderr
+    sys.stderr = open(os.devnull, 'w')
+    yield
+    sys.stderr = original
+
+
 class TestHub(TestCase):
     @classmethod
     @skipIfNoTorchVision
     def setUpClass(cls):
-        cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
+        # The current torchvision code does not provide a way to disable tqdm
+        # progress bar, leading this download printing a huge number of lines
+        # in CI.
+        # TODO: remove this context manager when torchvision provides a way.
+        #       See pytorch/torchvision#862
+        with suppress_stderr():
+            cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
 
     @skipIfNoTorchVision
     def test_load_from_github(self):
@@ -465,9 +531,12 @@ class TestHub(TestCase):
             'resnet18',
             pretrained=True)
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
-        assert os.path.exists(temp_dir + '/vision_master')
-        shutil.rmtree(temp_dir + '/vision_master')
+        assert os.path.exists(temp_dir + '/pytorch_vision_master')
+        shutil.rmtree(temp_dir + '/pytorch_vision_master')
 
+    def test_list_entrypoints(self):
+        entry_lists = hub.list('pytorch/vision', force_reload=True)
+        self.assertObjectIn('resnet18', entry_lists)
 
 if __name__ == '__main__':
     run_tests()

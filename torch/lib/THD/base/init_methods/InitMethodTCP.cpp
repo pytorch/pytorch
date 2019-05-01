@@ -1,5 +1,5 @@
-#include "InitMethod.hpp"
-#include "InitMethodUtils.hpp"
+#include <THD/base/init_methods/InitMethod.hpp>
+#include <THD/base/init_methods/InitMethodUtils.hpp>
 
 #include <arpa/inet.h>
 #include <fcntl.h>

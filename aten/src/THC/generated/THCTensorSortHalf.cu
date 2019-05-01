@@ -1,5 +1,5 @@
-#include "../THCTensorSort.cuh"
-#include "THCTensor.hpp"
+#include <THC/THCTensorSort.cuh>
+#include <THC/THCTensor.hpp>
 
-#include "../generic/THCTensorSort.cu"
+#include <THC/generic/THCTensorSort.cu>
 #include <THC/THCGenerateHalfType.h>

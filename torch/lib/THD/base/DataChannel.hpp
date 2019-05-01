@@ -1,10 +1,10 @@
 #pragma once
 
-#include "ChannelType.h"
-#include "ChannelUtils.hpp"
-#include "DataChannel.h"
-#include "Scalar.hpp"
-#include "init_methods/InitMethod.hpp"
+#include <THD/base/ChannelType.h>
+#include <THD/base/ChannelUtils.hpp>
+#include <THD/base/DataChannel.h>
+#include <THD/base/Scalar.hpp>
+#include <THD/base/init_methods/InitMethod.hpp>
 
 #include <ATen/ATen.h>
 

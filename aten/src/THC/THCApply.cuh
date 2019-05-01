@@ -1,10 +1,11 @@
 #ifndef THC_APPLY_INC
 #define THC_APPLY_INC
 
-#include "THCTensorCopy.h"
-#include "THCReduceApplyUtils.cuh"
-#include "THCTensorTypeUtils.cuh"
-#include "THCTensorCopy.hpp"
+#include <THC/THCTensorCopy.h>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCTensorTypeUtils.cuh>
+#include <THC/THCTensorCopy.hpp>
+#include <ATen/cuda/CUDAContext.h>
 
 //
 // This file contains pointwise operation functions and kernels that
@@ -116,6 +117,9 @@ template <typename Op,
           typename Ta,
           typename IndexType,
           int ADims>
+#if defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_2(THC_APPLY_THREADS_PER_BLOCK, THC_APPLY_BLOCKS_PER_SM)
+#endif
 __global__ void
 kernelPointwiseApply1(const OffsetInfo<Ta, IndexType, ADims> a,
                       IndexType totalElements,
@@ -133,6 +137,9 @@ template <typename Op,
           typename Ta, typename Tb,
           typename IndexType,
           int ADims, int BDims>
+#if defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_2(THC_APPLY_THREADS_PER_BLOCK, THC_APPLY_BLOCKS_PER_SM)
+#endif
 __global__ void
 kernelPointwiseApply2(const OffsetInfo<Ta, IndexType, ADims> a,
                       const OffsetInfo<Tb, IndexType, BDims> b,
@@ -149,6 +156,9 @@ template <typename Op,
           typename Ta, typename Tb, typename Tc,
           typename IndexType,
           int ADims, int BDims, int CDims>
+#if defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_2(THC_APPLY_THREADS_PER_BLOCK, THC_APPLY_BLOCKS_PER_SM)
+#endif
 __global__ void
 kernelPointwiseApply3(const OffsetInfo<Ta, IndexType, ADims> a,
                       const OffsetInfo<Tb, IndexType, BDims> b,
@@ -170,7 +180,7 @@ inline bool getApplyGrid(THCState* state, uint64_t totalElements, dim3& grid, in
   if (curDevice == -1) return false;
 
   uint64_t numBlocks = THCCeilDiv(totalElements, static_cast<uint64_t>(THC_APPLY_THREADS_PER_BLOCK));
-  uint64_t maxGridX = THCState_getDeviceProperties(state, curDevice)->maxGridSize[0];
+  uint64_t maxGridX = at::cuda::getDeviceProperties(curDevice)->maxGridSize[0];
   if (numBlocks > maxGridX)
       numBlocks = maxGridX;
 
@@ -266,7 +276,7 @@ bool THC_pointwiseApply1(THCState* state,
     aInfo.collapseDims();
 #if CUDA_VERSION < 9000
     if (!aInfo.isContiguous()) {
-        grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+        grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
     }
 #endif
     HANDLE_A_CASE(unsigned int, aInfo.dims);
@@ -291,7 +301,7 @@ bool THC_pointwiseApply1(THCState* state,
     } else {
 
 #if CUDA_VERSION < 9000
-        grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+        grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
       OffsetInfo<ScalarTypeA, uint64_t, -1>
         aOffset(aInfo);
@@ -434,7 +444,7 @@ bool THC_pointwiseApply2(THCState* state,
     bInfo.collapseDims();
 #if CUDA_VERSION < 9000
     if (!(aInfo.isContiguous() && bInfo.isContiguous()))
-        grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+        grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims);
@@ -466,7 +476,7 @@ bool THC_pointwiseApply2(THCState* state,
           aOffset, bOffset, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
-      grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+      grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
       OffsetInfo<ScalarTypeA, uint64_t, -1>
         aOffset(aInfo);
@@ -651,7 +661,7 @@ bool THC_pointwiseApply3(THCState* state,
 
 #if CUDA_VERSION < 9000
       if (!(aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous()))
-          grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+          grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims);
   } else {
@@ -689,7 +699,7 @@ bool THC_pointwiseApply3(THCState* state,
           aOffset, bOffset, cOffset, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
-      grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+      grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
       OffsetInfo<ScalarTypeA, uint64_t, -1>

@@ -17,7 +17,6 @@ GetOrCreateFbgemmPackBMatrix(
     std::int32_t n,
     const void* orig_data,
     const std::int8_t* quantized_data,
-    std::int32_t ld,
-    std::int32_t zero_point);
+    std::int32_t ld);
 
 } // namespace caffe2

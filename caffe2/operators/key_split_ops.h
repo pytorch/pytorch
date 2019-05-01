@@ -12,8 +12,9 @@ class KeySplitOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  KeySplitOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit KeySplitOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         categorical_limit_(
             this->template GetSingleArgument<int>("categorical_limit", 0)) {
     CAFFE_ENFORCE_GT(categorical_limit_, 0);
@@ -35,8 +36,7 @@ class KeySplitOp : public Operator<Context> {
       counts[k]++;
     }
     for (int k = 0; k < categorical_limit_; k++) {
-      auto* eid = Output(k);
-      eid->Resize(counts[k]);
+      auto* eid = Output(k, {counts[k]}, at::dtype<int>());
       eids[k] = eid->template mutable_data<int>();
       counts[k] = 0;
     }

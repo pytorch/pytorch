@@ -352,10 +352,7 @@ def add_quantization_param_args_(op, q_param):
     )
 
 
-def add_quantization_param_args(op, tensor, preserve_sparsity=False):
-    tensor_min = 0 if tensor.size == 0 else tensor.min()
-    tensor_max = 0 if tensor.size == 0 else tensor.max()
-
+def choose_quantization_params(tensor_min, tensor_max, preserve_sparsity=False):
     if tensor_min < 0 and tensor_max > 0 and preserve_sparsity:
         symmetric_qmin = -(255 // 2 + 1)
         symmetric_qmax = 255 // 2
@@ -369,6 +366,15 @@ def add_quantization_param_args(op, tensor, preserve_sparsity=False):
 
     if tensor_min < 0 and tensor_max > 0 and preserve_sparsity:
         q_param = hardcode_scale_zp.QuantizationParam(q_param.scale, 128)
+
+    return q_param
+
+
+def add_quantization_param_args(op, tensor, preserve_sparsity=False):
+    tensor_min = 0 if tensor.size == 0 else tensor.min()
+    tensor_max = 0 if tensor.size == 0 else tensor.max()
+
+    q_param = choose_quantization_params(tensor_min, tensor_max, preserve_sparsity)
 
     add_quantization_param_args_(op, q_param)
     return q_param

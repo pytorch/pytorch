@@ -4,7 +4,7 @@
 #include <functional>
 
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 

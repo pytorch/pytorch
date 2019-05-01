@@ -308,6 +308,11 @@ Non-linear activations (weighted sum, nonlinearity)
 .. autoclass:: LogSigmoid
     :members:
 
+:hidden:`MultiheadAttention`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autoclass:: MultiheadAttention
+    :members:
+
 :hidden:`PReLU`
 ~~~~~~~~~~~~~~~
 
@@ -446,6 +451,12 @@ Normalization layers
 .. autoclass:: GroupNorm
     :members:
 
+:hidden:`SyncBatchNorm`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: SyncBatchNorm
+    :members:
+
 :hidden:`InstanceNorm1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -517,6 +528,12 @@ Recurrent layers
 
 Linear layers
 ----------------------------------
+
+:hidden:`Identity`
+~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Identity
+    :members:
 
 :hidden:`Linear`
 ~~~~~~~~~~~~~~~~
@@ -1165,6 +1182,11 @@ Sparse functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: embedding_bag
+
+:hidden:`one_hot`
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: one_hot
 
 Distance functions
 ----------------------------------

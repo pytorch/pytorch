@@ -18,6 +18,7 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Deprecated.h>
 
 #include <array>
 #include <iterator>
@@ -79,9 +80,13 @@ class ArrayRef final {
       : Data(Vec.data()), Length(Vec.size()) {}
 
   /// Construct an ArrayRef from a std::vector.
+  // The enable_if stuff here makes sure that this isn't used for std::vector<bool>,
+  // because ArrayRef can't work on a std::vector<bool> bitfield.
   template <typename A>
   /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
-      : Data(Vec.data()), Length(Vec.size()) {}
+      : Data(Vec.data()), Length(Vec.size()) {
+    static_assert(!std::is_same<T, bool>::value, "ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
+  }
 
   /// Construct an ArrayRef from a std::array
   template <size_t N>
@@ -265,6 +270,10 @@ bool operator!=(c10::ArrayRef<T> a1, std::vector<T> a2) {
   return !a1.equals(c10::ArrayRef<T>(a2));
 }
 
-using IntList = ArrayRef<int64_t>;
+using IntArrayRef = ArrayRef<int64_t>;
+
+// This alias is deprecated because it doesn't make ownership
+// semantics obvious.  Use IntArrayRef instead!
+using IntList C10_DEPRECATED_USING = ArrayRef<int64_t>;
 
 } // namespace c10

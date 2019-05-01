@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ATen/cuda/Exceptions.h"
+#include <ATen/cuda/Exceptions.h>
 
-#include "cuda.h"
+#include <cuda.h>
 
 namespace at {
 namespace cuda {

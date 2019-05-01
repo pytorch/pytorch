@@ -1,6 +1,0 @@
-graph(%x : Dynamic) {
-  %1 : int = prim::Constant[value=1]()
-  %2 : Dynamic = aten::neg(%x)
-  %3 : Dynamic = aten::add(%2, %1, %1)
-  return (%3);
-}

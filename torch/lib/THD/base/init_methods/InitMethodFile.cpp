@@ -1,5 +1,5 @@
-#include "InitMethod.hpp"
-#include "InitMethodUtils.hpp"
+#include <THD/base/init_methods/InitMethod.hpp>
+#include <THD/base/init_methods/InitMethodUtils.hpp>
 
 #include <fcntl.h>
 #include <sys/stat.h>

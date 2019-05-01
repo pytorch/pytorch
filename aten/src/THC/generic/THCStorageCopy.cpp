@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCStorageCopy.cpp"
+#define THC_GENERIC_FILE "THC/generic/THCStorageCopy.cpp"
 #else
 
 void THCStorage_(copyCPU)(THCState *state, THCStorage *self, struct THStorage *src)
@@ -21,7 +21,7 @@ void THCStorage_(copy##TYPEC)(THCState *state, THCStorage *self, struct TH##TYPE
       THCTensor_(newWithStorage1d)(state, self, 0, self->numel(), 1);     \
   struct TH##TYPEC##Tensor* srcTensor =                                \
       TH##TYPEC##Tensor_newWithStorage1d(src, 0, src->numel(), 1);        \
-  THCTensor_(copy##TYPEC)(state, selfTensor, srcTensor);               \
+  THCTensor_(copy)(state, selfTensor, srcTensor);               \
   TH##TYPEC##Tensor_free(srcTensor);                                   \
   THCTensor_(free)(state, selfTensor);                                 \
 }
@@ -33,6 +33,7 @@ TH_CUDA_STORAGE_IMPLEMENT_COPY(Long)
 TH_CUDA_STORAGE_IMPLEMENT_COPY(Float)
 TH_CUDA_STORAGE_IMPLEMENT_COPY(Half)
 TH_CUDA_STORAGE_IMPLEMENT_COPY(Double)
+TH_CUDA_STORAGE_IMPLEMENT_COPY(Bool)
 
 void THStorage_(copyCuda)(THCState *state, THStorage *self, struct THCStorage *src)
 {
@@ -53,7 +54,7 @@ void TH_CONCAT_4(TH,TYPEC,Storage_copyCuda,Real)(THCState *state, TH##TYPEC##Sto
       TH##TYPEC##Tensor_newWithStorage1d(self, 0, self->numel(), 1);           \
   struct THCTensor* srcTensor =                                             \
       THCTensor_(newWithStorage1d)(state, src, 0, src->numel(), 1);            \
-  TH_CONCAT_4(TH,TYPEC,Tensor_copyCuda,Real)(state, selfTensor, srcTensor); \
+  THCTensor_(copy)(state, selfTensor, srcTensor);                           \
   THCTensor_(free)(state, srcTensor);                                       \
   TH##TYPEC##Tensor_free(selfTensor);                                   \
 }
@@ -65,6 +66,7 @@ TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Long)
 TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Float)
 TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Half)
 TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Double)
+TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Bool)
 
 #undef TH_CUDA_STORAGE_IMPLEMENT_COPY
 #undef TH_CUDA_STORAGE_IMPLEMENT_COPYTO

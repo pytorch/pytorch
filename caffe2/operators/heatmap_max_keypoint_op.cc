@@ -25,7 +25,6 @@ template <>
 bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
   const auto& heatmaps_in = Input(0);
   const auto& bboxes_in = Input(1);
-  auto* keypoints_out = Output(0);
 
   CAFFE_ENFORCE_EQ(heatmaps_in.dim(), 4);
   const int N = heatmaps_in.dim32(0);
@@ -61,7 +60,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
   } /* otherwise not initialized */
 
   // Resize and wrap outputs in Eigen
-  keypoints_out->Resize(N, 4, keypoint_count);
+  auto* keypoints_out = Output(0, {N, 4, keypoint_count}, at::dtype<float>());
   Eigen::Map<ERArrXXf> keypoints(
       keypoints_out->mutable_data<float>(), N, 4 * keypoint_count);
 

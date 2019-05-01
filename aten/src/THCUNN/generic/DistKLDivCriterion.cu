@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/DistKLDivCriterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/DistKLDivCriterion.cu"
 #else
 
 void THNN_(DistKLDivCriterion_updateOutput)(

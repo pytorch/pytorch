@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorTopK.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorTopK.cu"
 #else
 
 void THCTensor_(topk)(THCState* state,
@@ -140,12 +140,20 @@ void THCTensor_(topk)(THCState* state,
   if (sorted) {
     // FIXME: the k/v inplace sort along slice only works for size <=
     // 2048 at the moment
-#ifdef __HIP_PLATFORM_HCC__
-    // TODO bitonicSortKVInPlace hangs on ROCm currently.
-    if (0) {
+    // Workaround:
+    // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,
+    // and so for the double word types,
+    // we get "too many resources requested for launch" in the 2048 case
+#if CUDA_VERSION >= 8000
+#if defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_LONG)
+    int maxSliceSize = 1024;
 #else
-    if (sliceSize <= 2048) {
+    int maxSliceSize = 2048;
 #endif
+#else
+    int maxSliceSize = 2048;
+#endif
+    if (sliceSize <= maxSliceSize) {
       // This avoids any memory allocations and performs all sorting
       // work inplace along the slice
       THCTensor_(sortKeyValueInplace)(state, topK, indices, dim, dir);

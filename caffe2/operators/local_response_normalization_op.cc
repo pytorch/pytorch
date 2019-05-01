@@ -6,7 +6,7 @@ template<>
 bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   // Note(Yangqing): this one is copied from my Caffe implementation.
   auto& X = Input(0);
-  auto* Y = Output(0);
+
   DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
@@ -14,7 +14,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const int W = X.dim32(3);
   const int image_size = C * H * W;
   const float* Xdata = X.data<float>();
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   float* Ydata = Y->template mutable_data<float>();
 
   if (OutputSize() > 1) {
@@ -40,9 +40,12 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
                                  &context_);
     // Create the first channel scale
     for (int c = 0; c < size_; ++c) {
-      math::Axpy<float, CPUContext>(
-          H * W, alpha_over_size, padded_square_data + c * H * W,
-          scale_data + image_size * n, &context_);
+      math::Axpy<float, float, CPUContext>(
+          H * W,
+          alpha_over_size,
+          padded_square_data + c * H * W,
+          scale_data + image_size * n,
+          &context_);
     }
     for (int c = 1; c < C; ++c) {
       float* this_scale_slice = scale_data + n * image_size + c * H * W;
@@ -50,13 +53,19 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
       context_.CopyFromCPU<float>(
           H * W, this_scale_slice - H * W, this_scale_slice);
       // add head
-      math::Axpy<float, CPUContext>(
-          H * W, alpha_over_size, padded_square_data + (c + size_ - 1) * H * W,
-          this_scale_slice, &context_);
+      math::Axpy<float, float, CPUContext>(
+          H * W,
+          alpha_over_size,
+          padded_square_data + (c + size_ - 1) * H * W,
+          this_scale_slice,
+          &context_);
       // subtract tail
-      math::Axpy<float, CPUContext>(
-          H * W, -alpha_over_size, padded_square_data + (c - 1) * H * W,
-          this_scale_slice, &context_);
+      math::Axpy<float, float, CPUContext>(
+          H * W,
+          -alpha_over_size,
+          padded_square_data + (c - 1) * H * W,
+          this_scale_slice,
+          &context_);
     }
   }
   math::Powx<float, CPUContext>(
@@ -70,7 +79,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   // Note(Yangqing): This one is copied from my Decaf implementation. How many
   // variants have I written...?
   auto& X = Input(0);
-  auto* Y = Output(0);
+
   DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
@@ -78,7 +87,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const int C = X.dim32(3);
   const int num_rows = N * H * W;
   const float* Xdata = X.data<float>();
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   float* Ydata = Y->template mutable_data<float>();
 
   if (OutputSize() > 1) {
@@ -123,7 +132,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
+
   DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
@@ -134,7 +143,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   // long as the sizes check out.
   DCHECK_EQ(X.numel(), Y.numel());
   DCHECK_EQ(X.numel(), dY.numel());
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
 
   const float* Xdata = X.data<float>();
   const float* Ydata = Y.data<float>();
@@ -161,9 +170,12 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
                                  &context_);
     // Create the first channel scale
     for (int c = 0; c < size_; ++c) {
-      math::Axpy<float, CPUContext>(
-          H * W, alpha_over_size, padded_ratio_data + c * H * W,
-          scale_data + image_size * n, &context_);
+      math::Axpy<float, float, CPUContext>(
+          H * W,
+          alpha_over_size,
+          padded_ratio_data + c * H * W,
+          scale_data + image_size * n,
+          &context_);
     }
     for (int c = 1; c < C; ++c) {
       float* this_scale_slice = scale_data + n * image_size + c * H * W;
@@ -171,13 +183,19 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
       context_.CopyFromCPU<float>(
           H * W, this_scale_slice - H * W, this_scale_slice);
       // add head
-      math::Axpy<float, CPUContext>(
-          H * W, alpha_over_size, padded_ratio_data + (c + size_ - 1) * H * W,
-          this_scale_slice, &context_);
+      math::Axpy<float, float, CPUContext>(
+          H * W,
+          alpha_over_size,
+          padded_ratio_data + (c + size_ - 1) * H * W,
+          this_scale_slice,
+          &context_);
       // subtract tail
-      math::Axpy<float, CPUContext>(
-          H * W, -alpha_over_size, padded_ratio_data + (c - 1) * H * W,
-          this_scale_slice, &context_);
+      math::Axpy<float, float, CPUContext>(
+          H * W,
+          -alpha_over_size,
+          padded_ratio_data + (c - 1) * H * W,
+          this_scale_slice,
+          &context_);
     }
   }
 
@@ -203,9 +221,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     math::Set<float, CPUContext>(
         accum_ratio.numel(), 0., accum_ratio_data, &context_);
     for (int c = 0; c < size_ - 1; ++c) {
-      math::Axpy<float, CPUContext>(H * W, 1,
-                                    padded_ratio_data + c * H * W,
-                                    accum_ratio_data, &context_);
+      math::Axpy<float, float, CPUContext>(
+          H * W, 1, padded_ratio_data + c * H * W, accum_ratio_data, &context_);
     }
     for (int c = 0; c < C; ++c) {
       for (int hw = 0; hw < H * W; ++hw) {
@@ -226,7 +243,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
+
   DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
@@ -238,7 +255,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   // long as the sizes check out.
   DCHECK_EQ(X.numel(), Y.numel());
   DCHECK_EQ(X.numel(), dY.numel());
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   if (!scale_) {
     scale_ = &local_scale_tensor_;
   }

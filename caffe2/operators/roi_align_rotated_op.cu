@@ -157,25 +157,23 @@ template <>
 bool RoIAlignRotatedOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
-  auto* Y = Output(0); // RoI pooled data
 
   CAFFE_ENFORCE_EQ(order_, StorageOrder::NCHW, "RoIAlign CUDA impl needs NCHW");
 
-  if (R.size() == 0) {
+  if (R.numel() == 0) {
     // Handle empty rois
-    Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
-    // The following mutable_data calls are needed to allocate the tensors
-    Y->mutable_data<float>();
+    Output(0, {0, X.dim32(1), pooled_height_, pooled_width_}, at::dtype<float>()); // RoI pooled data
     return true;
   }
 
-  CAFFE_ENFORCE_EQ(R.ndim(), 2);
+  CAFFE_ENFORCE_EQ(R.dim(), 2);
   CAFFE_ENFORCE_EQ(R.dim32(1), 6);
 
   assert(sampling_ratio_ >= 0);
 
-  Y->Resize(R.dim32(0), X.dim32(1), pooled_height_, pooled_width_);
-  int output_size = Y->size();
+  auto* Y = Output(0, {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_}, at::dtype<float>()); // RoI pooled data
+
+  int output_size = Y->numel();
   RoIAlignRotatedForward<float>
       <<<CAFFE_GET_BLOCKS(output_size),
          CAFFE_CUDA_NUM_THREADS,

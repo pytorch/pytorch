@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SoftShrink.c"
+#define TH_GENERIC_FILE "THNN/generic/SoftShrink.c"
 #else
 
 void THNN_(SoftShrink_updateOutput)(

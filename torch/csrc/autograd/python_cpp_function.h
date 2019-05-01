@@ -1,12 +1,12 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <memory>
 #include <typeinfo>
 
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/Exceptions.h"
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/Exceptions.h>
 
 namespace torch { namespace autograd {
 
@@ -61,6 +61,6 @@ PyTypeObject* createForwardFunctionPyTypeObject(PyTypeObject& type, const char* 
 }
 
 void registerCppFunction(const std::type_info& type, PyTypeObject* pytype);
-PyObject* functionToPyObject(std::shared_ptr<Function> cdata);
+PyObject* functionToPyObject(const std::shared_ptr<Function>& cdata);
 
 }} // namespace torch::autograd

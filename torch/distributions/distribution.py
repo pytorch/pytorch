@@ -34,6 +34,7 @@ class Distribution(object):
                     continue  # skip checking lazily-constructed args
                 if not constraint.check(getattr(self, param)).all():
                     raise ValueError("The parameter {} has invalid values".format(param))
+        super(Distribution, self).__init__()
 
     def expand(self, batch_shape, _instance=None):
         """
@@ -261,6 +262,6 @@ class Distribution(object):
     def __repr__(self):
         param_names = [k for k, _ in self.arg_constraints.items() if k in self.__dict__]
         args_string = ', '.join(['{}: {}'.format(p, self.__dict__[p]
-                                if self.__dict__[p].dim() == 0
+                                if self.__dict__[p].numel() == 1
                                 else self.__dict__[p].size()) for p in param_names])
         return self.__class__.__name__ + '(' + args_string + ')'

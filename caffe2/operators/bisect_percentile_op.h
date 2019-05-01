@@ -13,8 +13,9 @@ template <class Context>
 class BisectPercentileOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  BisectPercentileOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit BisectPercentileOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         pct_raw_(OperatorBase::GetRepeatedArgument<float>(
             "percentile_raw",
             vector<float>{})),
@@ -64,8 +65,8 @@ class BisectPercentileOp final : public Operator<Context> {
     const float* raw_data = raw.template data<float>();
 
     // Output
-    auto* pct = Output(PCT);
-    pct->ResizeLike(raw);
+
+    auto* pct = Output(PCT, raw.sizes(), at::dtype<float>());
     float* pct_output = pct->template mutable_data<float>();
 
     // Compute percentile for each raw feature value

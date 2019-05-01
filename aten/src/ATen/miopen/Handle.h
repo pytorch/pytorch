@@ -1,6 +1,6 @@
 #pragma once
 
-#include "miopen-wrapper.h"
+#include <ATen/miopen/miopen-wrapper.h>
 
 namespace at { namespace native {
 

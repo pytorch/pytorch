@@ -1,2 +1,2 @@
 #pragma once
-#include <ATen/core/Layout.h>
+#include <c10/core/Layout.h>

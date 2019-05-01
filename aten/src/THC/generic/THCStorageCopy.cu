@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCStorageCopy.cu"
+#define THC_GENERIC_FILE "THC/generic/THCStorageCopy.cu"
 #else
 
 void THCStorage_(rawCopy)(THCState *state, THCStorage *self, scalar_t *src)
@@ -15,7 +15,7 @@ void THCStorage_(copyCuda##TYPEC)(THCState *state, THCStorage *self, struct THCu
   THCTensor* selfTensor = THCTensor_(newWithStorage1d)(state, self, 0, self->numel(), 1);  \
   struct THCuda##TYPECUDA##Tensor* srcTensor =                                          \
       THCuda##TYPECUDA##Tensor_newWithStorage1d(state, src, 0, src->numel(), 1);           \
-  THCTensor_(copyCuda##TYPEC)(state, selfTensor, srcTensor);                            \
+  THCTensor_(copy)(state, selfTensor, srcTensor);                            \
   THCuda##TYPECUDA##Tensor_free(state, srcTensor);                                      \
   THCTensor_(free)(state, selfTensor);                                                  \
 }
@@ -28,6 +28,7 @@ THC_CUDA_STORAGE_IMPLEMENT_COPY(Long,Long)
 THC_CUDA_STORAGE_IMPLEMENT_COPY(Float,)  // i.e. float
 THC_CUDA_STORAGE_IMPLEMENT_COPY(Double,Double)
 THC_CUDA_STORAGE_IMPLEMENT_COPY(Half,Half)
+THC_CUDA_STORAGE_IMPLEMENT_COPY(Bool,Bool)
 
 #undef THC_CUDA_STORAGE_IMPLEMENT_COPY
 

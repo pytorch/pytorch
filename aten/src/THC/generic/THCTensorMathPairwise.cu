@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathPairwise.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathPairwise.cu"
 #else
 
 void THCTensor_(add)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
@@ -161,35 +161,6 @@ void THCTensor_(remainder)(THCState *state, THCTensor *self_, THCTensor *src_, s
     THCTensor_(resizeAs)(state, self_, src_);
 
     if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorRemainderOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(tril)(THCState *state, THCTensor *self_, THCTensor *src_, int64_t k)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  THArgCheck(!src_->is_empty() && src_->dim() == 2, 1, "expected a matrix");
-
-  if (self_ != src_)
-    THCTensor_(resizeAs)(state, self_, src_);
-
-  int64_t stride0 = self_->stride(0);
-  int64_t stride1 = self_->stride(1);
-  scalar_t *start = THCTensor_(data)(state, self_);
-
-  TensorTriOp<scalar_t, 0> op(start, stride0, stride1, k);
-
-  if (self_ == src_) {
-    if (!THC_pointwiseApply1<scalar_t>(state, src_, op)) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src_);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, op)) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   }

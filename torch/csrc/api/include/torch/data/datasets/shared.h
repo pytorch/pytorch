@@ -18,10 +18,10 @@ namespace datasets {
 /// Use `torch::data::datasets::make_shared_dataset()` to create a new
 /// `SharedBatchDataset` like you would a `std::shared_ptr`.
 template <typename UnderlyingDataset>
-class SharedBatchDataset : BatchDataset<
-                          SharedBatchDataset<UnderlyingDataset>,
-                          typename UnderlyingDataset::BatchType,
-                          typename UnderlyingDataset::BatchRequestType> {
+class SharedBatchDataset : public BatchDataset<
+                               SharedBatchDataset<UnderlyingDataset>,
+                               typename UnderlyingDataset::BatchType,
+                               typename UnderlyingDataset::BatchRequestType> {
  public:
   using BatchType = typename UnderlyingDataset::BatchType;
   using BatchRequestType = typename UnderlyingDataset::BatchRequestType;
@@ -60,6 +60,11 @@ class SharedBatchDataset : BatchDataset<
   /// Accesses the underlying dataset.
   const UnderlyingDataset* operator->() const {
     return dataset_.get();
+  }
+
+  /// Calls `reset()` on the underlying dataset.
+  void reset() {
+    dataset_->reset();
   }
 
  private:

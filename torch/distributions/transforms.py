@@ -83,6 +83,7 @@ class Transform(object):
             self._cached_x_y = None, None
         else:
             raise ValueError('cache_size must be 0 or 1')
+        super(Transform, self).__init__()
 
     @property
     def inv(self):

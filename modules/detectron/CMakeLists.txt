@@ -1,14 +1,10 @@
 file(GLOB Detectron_CPU_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/*.cc)
 file(GLOB Detectron_GPU_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/*.cu)
+file(GLOB_RECURSE Detectron_HIP_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/*.hip)
 
 if (BUILD_CAFFE2_OPS)
-  #cmake only check for separate OpenMP library on AppleClang 7+
-  #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
-  if (WITH_OPENMP AND CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "7.0" OR
-        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "7.0")
-      Set(OpenMP_link ${OpenMP_libomp_LIBRARY})
-    endif()
+  if (USE_OPENMP AND OPENMP_FOUND)
+    Set(OpenMP_link ${OpenMP_CXX_LIBRARIES})
   endif()
 
   # Note(ilijar): Since Detectron ops currently have no
@@ -21,9 +17,25 @@ if (BUILD_CAFFE2_OPS)
 
     target_link_libraries(caffe2_detectron_ops_gpu caffe2_gpu ${OpenMP_link})
     install(TARGETS caffe2_detectron_ops_gpu DESTINATION lib)
+    if (MSVC)
+      install(FILES $<TARGET_PDB_FILE:caffe2_detectron_ops_gpu> DESTINATION lib OPTIONAL)
+    endif()
+  elseif(USE_ROCM)
+    hip_include_directories(${Caffe2_HIP_INCLUDES})
+    set_source_files_properties(${Detectron_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+    HIP_ADD_LIBRARY(
+        caffe2_detectron_ops_hip SHARED
+        ${Detectron_CPU_SRCS}
+        ${Detectron_HIP_SRCS})
+    target_compile_options(caffe2_detectron_ops_hip PRIVATE ${HIP_CXX_FLAGS})
+    target_link_libraries(caffe2_detectron_ops_hip caffe2_hip)
+    install(TARGETS caffe2_detectron_ops_hip DESTINATION lib)
   elseif(NOT IOS_PLATFORM)
     add_library(caffe2_detectron_ops SHARED ${Detectron_CPU_SRCS})
     target_link_libraries(caffe2_detectron_ops caffe2 ${OpenMP_link})
     install(TARGETS caffe2_detectron_ops DESTINATION lib)
+    if (MSVC)
+      install(FILES $<TARGET_PDB_FILE:caffe2_detectron_ops> DESTINATION lib OPTIONAL)
+    endif()
   endif()
 endif()

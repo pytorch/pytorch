@@ -458,7 +458,7 @@ class TestYellowFin(OptimizerTestBase, TestCase):
     def test_caffe2_gpu_vs_numpy(self):
         n_dim = 1000000
         n_iter = 50
-        gpu_device_opt = core.DeviceOption(caffe2_pb2.CUDA, 0)
+        gpu_device_opt = core.DeviceOption(workspace.GpuDeviceType, 0)
         with core.DeviceScope(gpu_device_opt):
             for zero_debias in [False, True]:
                 for grad_coef in [1.0, 0.1, 0.01]:

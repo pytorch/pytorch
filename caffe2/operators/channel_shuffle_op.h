@@ -12,8 +12,9 @@ class ChannelShuffleOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  ChannelShuffleOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ChannelShuffleOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<std::string>("order", "NCHW"))),
         OP_SINGLE_ARG(int, "group", group_, 1) {
@@ -39,8 +40,9 @@ class ChannelShuffleGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  ChannelShuffleGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ChannelShuffleGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<std::string>("order", "NCHW"))),
         OP_SINGLE_ARG(int, "group", group_, 1) {

@@ -1,6 +1,6 @@
 #include <TH/THGeneral.h>
-#include "THDiskFile.h"
-#include "THFilePrivate.h"
+#include <TH/THDiskFile.h>
+#include <TH/THFilePrivate.h>
 
 #ifndef _WIN32
 #include <sys/types.h>

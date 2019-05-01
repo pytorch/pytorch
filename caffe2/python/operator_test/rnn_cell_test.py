@@ -1565,9 +1565,9 @@ class RNNCellTest(hu.HypothesisTestCase):
             self, seed, n, d, t, dtype, dc, use_sequence_lengths, gc):
         np.random.seed(seed)
         if dtype == np.float16:
-            # only supported with CUDA
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [do for do in dc if do.device_type == caffe2_pb2.CUDA]
+            # only supported with CUDA/HIP
+            assume(gc.device_type == workspace.GpuDeviceType)
+            dc = [do for do in dc if do.device_type == workspace.GpuDeviceType]
 
         if use_sequence_lengths:
             op_inputs = ['hidden_t_prev', 'cell_t_prev', 'gates_t',

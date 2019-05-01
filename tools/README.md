@@ -54,10 +54,8 @@ Important if you want to run on AMD GPU:
   into AMD HIP.  Right now, PyTorch and Caffe2 share logic for how to
   do this transpilation, but have separate entry-points for transpiling
   either PyTorch or Caffe2 code.
-  * [build_caffe2_amd.py](amd_build/build_caffe2_amd.py) - Script
-    for HIPifying the Caffe2 codebase.
-  * [build_pytorch_amd.py](amd_build/build_pytorch_amd.py) - Script
-    for HIPifying the PyTorch codebase.
+  * [build_amd.py](amd_build/build_amd.py) - Top-level entry
+    point for HIPifying our codebase.
 
 Tools which are only situationally useful:
 

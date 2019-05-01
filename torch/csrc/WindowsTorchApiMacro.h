@@ -1,10 +1,14 @@
 #pragma once
 
 #ifdef _WIN32
+#if !defined(TORCH_BUILD_STATIC_LIBS)
 #if defined(torch_EXPORTS)
 #define TORCH_API __declspec(dllexport)
 #else
 #define TORCH_API __declspec(dllimport)
+#endif
+#else
+#define TORCH_API
 #endif
 #elif defined(__GNUC__)
 #if defined(torch_EXPORTS)

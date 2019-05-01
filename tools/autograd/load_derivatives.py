@@ -19,34 +19,45 @@ def load_derivatives(path, declarations):
     for declaration in declarations:
         declarations_by_signature[get_signature(declaration)].append(declaration)
 
-    autograd_functions = [
+    differentiability_infos = [
         process_definition(defn, declarations_by_signature)
         for defn in definitions]
+
+    autograd_functions = [d['autograd_fn'] for d in differentiability_infos if d['autograd_fn'] is not None]
     ensure_unique_names(autograd_functions)
-    match_declarations_with_autograd_functions(declarations, autograd_functions)
+    match_declarations_with_differentiability_info(declarations, differentiability_infos)
 
     return autograd_functions
 
 
+def create_differentiability_info(signature, non_differentiable_arg_names,
+                                  output_differentiability,
+                                  autograd_fn):
+    return {
+        'signature': signature,
+        'non_differentiable_arg_names': non_differentiable_arg_names,
+        'output_differentiability': output_differentiability,
+        'autograd_fn': autograd_fn,
+    }
+
+
 # How do you feel about pasting declaration inside autograd function...
-def create_autograd_function(name, derivatives, args_with_gradients, signature,
-                             declaration, output_differentiability):
+def create_autograd_function(name, derivatives, args_with_derivatives,
+                             declaration):
     op = to_camel_case(name) + 'Backward'
     op = op.replace('ForwardBackward', 'Backward')
     return {
         'name': name,
         'op': op,
         'declaration': declaration,
-        'args_with_gradients': args_with_gradients,
-        'signature': signature,
+        'args_with_derivatives': args_with_derivatives,
         'derivatives': derivatives,
         'saved_inputs': all_saved_variables(derivatives, 'saved_inputs'),
         'saved_outputs': all_saved_variables(derivatives, 'saved_outputs'),
-        'output_differentiability': output_differentiability,
     }
 
 
-def create_derivative(declaration, formula, var_names):
+def create_derivative(arguments, returns, name, formula, var_names):
     def transform_return(r):
         # In-place functions take in and return self. Call the modified version
         # "output" so that it can be referred to in derivative definitions.
@@ -55,18 +66,17 @@ def create_derivative(declaration, formula, var_names):
             r['name'] = 'result'
         return r
 
-    returns = [transform_return(r) for r in declaration['returns']]
-    arguments = declaration['arguments']
+    returns = [transform_return(r) for r in returns]
     formula, saved_inputs = saved_variables(formula, arguments)
     formula, saved_outputs = saved_variables(formula, returns)
 
-    # Check that the referenced gradients in the formula are in bounds
+    # Check that the referenced derivatives in the formula are in bounds
     for i in used_gradient_indices(formula):
-        if i >= len(declaration['returns']):
+        if i >= len(returns):
             raise RuntimeError(
                 "Out of bounds grads access: derivative formula for {} "
                 "used grads[{}], but the forward only returns {} outputs."
-                .format(declaration['name'], i, len(declaration['returns'])))
+                .format(name, i, len(returns)))
 
     return {
         'formula': formula,
@@ -97,7 +107,7 @@ def process_definition(defn, declarations_by_signature):
 
     def check_grad_usage(defn_name, declaration, derivatives):
         """
-        Check for some subtle mistakes one might make when writing gradients.
+        Check for some subtle mistakes one might make when writing derivatives.
         These mistakes will compile, but will be latent until a function is
         used with double backwards.
         """
@@ -130,29 +140,40 @@ def process_definition(defn, declarations_by_signature):
                                "declaration.".format(defn_name))
 
     def set_up_derivatives(defn_name, defn, declaration):
-        # Determine the set of inputs which have gradients
-        args_with_gradients_set = set()
+        # Determine the set of inputs which have derivatives
+        args_with_derivatives_set = set()
         for raw_names in defn:
-            args_with_gradients_set |= set(split_names(raw_names))
+            args_with_derivatives_set |= set(split_names(raw_names))
 
         # Next, let us determine the list of inputs in order.
-        args_with_gradients = []
+        args_with_derivatives = []
         for arg in declaration['arguments']:
-            if arg['name'] not in args_with_gradients_set:
+            if arg['name'] not in args_with_derivatives_set:
                 continue
-            args_with_gradients.append(arg)
+            args_with_derivatives.append(arg)
 
         # Set up the derivative information
         derivatives = []
+        non_differentiable_arg_names = []
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
-            derivatives.append(create_derivative(declaration, formula, names))
+            derivative = create_derivative(declaration['arguments'], declaration['returns'],
+                                           declaration['name'], formula, names)
+            if formula.lower().strip() == 'non_differentiable':
+                assert not sum([type(var_name) == list
+                                for var_name in derivative['var_names']]), \
+                    "Variable names associated to a formula should be a flat list"
+                non_differentiable_arg_names += derivative['var_names']
+            else:
+                derivatives.append(derivative)
+        args_with_derivatives = list(filter(lambda x: x['name'] not in non_differentiable_arg_names,
+                                            args_with_derivatives))
 
         # Test to see if the use of 'grads' makes sense.
         check_grad_usage(defn_name, declaration, derivatives)
 
-        return derivatives, args_with_gradients
+        return derivatives, args_with_derivatives, non_differentiable_arg_names
 
     def unzip(xs):
         return zip(*xs)
@@ -195,9 +216,16 @@ def process_definition(defn, declarations_by_signature):
                                'Declarations.yaml ({})'
                                .format(i, defn_name, x, y))
 
-    derivatives, args_with_gradients = set_up_derivatives(defn_name, defn, canonical)
-    return create_autograd_function(defn_name, derivatives, args_with_gradients,
-                                    signature, canonical, output_differentiability)
+    derivatives, args_with_derivatives, non_differentiable_arg_names = set_up_derivatives(defn_name, defn, canonical)
+    autograd_fn = None
+
+    # only create an autograd function if we are actually going to calculate a derivative
+    if len(args_with_derivatives) > 0:
+        autograd_fn = create_autograd_function(defn_name, derivatives, args_with_derivatives,
+                                               canonical)
+
+    return create_differentiability_info(signature, non_differentiable_arg_names,
+                                         output_differentiability, autograd_fn)
 
 
 def ensure_unique_names(autograd_functions):
@@ -251,7 +279,7 @@ def saved_variables(formula, args):
         # replace self.sizes() with self_sizes
         (r'{}.sizes\(\)', {
             'suffix': '_sizes',
-            'type': 'IntList',
+            'type': 'IntArrayRef',
         }),
         # replace zeros_like(self) with self_info
         (r'zeros_like\({}\)', {
@@ -332,24 +360,28 @@ def to_camel_case(name):
     return ''.join([p.title() for p in name.split('_')])
 
 
-def match_declarations_with_autograd_functions(declarations, autograd_functions):
-    """Sets the "derivative" key on declarations to matching autograd functions
+def match_declarations_with_differentiability_info(declarations, differentiability_infos):
+    """Sets the "derivative" and "output_differentiability" key on declarations
+    to matching differentiability info
 
     In-place functions will use the out-of-place derivative definition if there
     is no in-place specific derivative.
     """
 
-    functions_by_signature = {f['signature']: f for f in autograd_functions}
+    infos_by_signature = {f['signature']: f for f in differentiability_infos}
 
-    def find_function(declaration):
+    def find_info(declaration):
         signature = get_signature(declaration)
-        if signature in functions_by_signature:
-            return functions_by_signature[signature]
+        if signature in infos_by_signature:
+            return infos_by_signature[signature]
 
         # if there is no exact match look for the out-of-place signature.
         # i.e mul() for mul_() or mul_out()
         signature = get_signature(declaration, use_base_variant=True)
-        return functions_by_signature.get(signature)
+        return infos_by_signature.get(signature)
 
     for declaration in declarations:
-        declaration['derivative'] = find_function(declaration)
+        info = find_info(declaration)
+        declaration['derivative'] = info['autograd_fn'] if info else None
+        declaration['non_differentiable_arg_names'] = info['non_differentiable_arg_names'] if info else []
+        declaration['output_differentiability'] = info['output_differentiability'] if info else None

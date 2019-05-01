@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorConv.cpp"
+#define TH_GENERIC_FILE "TH/generic/THTensorConv.cpp"
 #else
 
 /*

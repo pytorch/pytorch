@@ -1,19 +1,19 @@
-#include "torch/csrc/autograd/python_cpp_function.h"
+#include <torch/csrc/autograd/python_cpp_function.h>
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <memory>
-#include <stdio.h>
+#include <cstdio>
 #include <typeindex>
 #include <unordered_map>
 
-#include "torch/csrc/autograd/python_function.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/autograd/python_hook.h"
-#include "torch/csrc/autograd/python_anomaly_mode.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
+#include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/python_anomaly_mode.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
 
 using namespace torch::autograd;
 
@@ -190,7 +190,7 @@ PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
 static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
 
 struct DefaultFunctionType {
-  DefaultFunctionType() {
+  DefaultFunctionType() : type() {
     _initFunctionPyTypeObject(type, "CppFunction", nullptr, nullptr);
     Py_INCREF(&type);
   }
@@ -198,7 +198,7 @@ struct DefaultFunctionType {
   PyTypeObject type;
 };
 
-PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
+PyObject* functionToPyObject(const std::shared_ptr<Function>& cdata)
 {
   static DefaultFunctionType default_type;
 

@@ -17,7 +17,7 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 #include <c10d/ProcessGroup.hpp>
@@ -107,15 +107,16 @@ class ProcessGroupGloo : public ProcessGroup {
    public:
     explicit RecvWork(
         at::Tensor& tensor,
-        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
-        int* srcRank);
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
+
+    int sourceRank() const override;
 
     void wait() override;
 
    protected:
     at::Tensor tensor_;
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
-    int* srcRank_;
+    int srcRank_;
   };
 
   struct Options {
@@ -124,13 +125,6 @@ class ProcessGroupGloo : public ProcessGroup {
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     std::chrono::milliseconds timeout;
     int threads;
-
-    // This controls how many Gloo algorithm instances are created for
-    // a single identifying key. If you have many identical calls with
-    // tensors of identical size and need to parallelize, this should
-    // be greater than 1. More cache entries means more memory usage.
-    // The default value is 1.
-    int cacheNumAlgorithmEntries;
   };
 
   explicit ProcessGroupGloo(
@@ -168,6 +162,11 @@ class ProcessGroupGloo : public ProcessGroup {
       std::vector<std::vector<at::Tensor>>& inputs,
       const ScatterOptions& opts = ScatterOptions()) override;
 
+  std::shared_ptr<ProcessGroup::Work> reduce_scatter(
+      std::vector<at::Tensor>& outputs,
+      std::vector<std::vector<at::Tensor>>& inputs,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
   std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
@@ -180,13 +179,10 @@ class ProcessGroupGloo : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
-      int* srcRank,
       int tag) override;
 
   std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
-
-  std::unordered_map<int, int> getGroupRank() override;
 
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;

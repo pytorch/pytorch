@@ -508,6 +508,6 @@ THCDeviceTensor<T, Dim, IndexT, PtrTraits>::operator[](IndexT index) const {
       const_cast<TensorType&>(*this), data_)[index]);
 }
 
-#include "THCDeviceTensor-inl.cuh"
+#include <THC/THCDeviceTensor-inl.cuh>
 
 #endif // THC_DEVICE_TENSOR_INC

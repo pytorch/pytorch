@@ -1,15 +1,15 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/saved_variable.h"
-#include "torch/csrc/utils/object_ptr.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/utils/object_ptr.h>
 
-#include "c10/util/Optional.h"
-#include "c10/DeviceGuard.h"
+#include <c10/util/Optional.h>
+#include <c10/core/DeviceGuard.h>
 
 #include <vector>
 #include <utility>
@@ -25,6 +25,7 @@ struct VariableInfo {
 
   at::Type* type;
   at::Device device = at::kCPU;
+  at::ScalarType scalar_type = at::kFloat;
   std::vector<int64_t> size;
   bool requires_grad;
 };
@@ -34,13 +35,13 @@ struct VariableInfo {
 struct PyFunction : public Function {
   PyFunction(PyObject* obj) : obj(obj) {}
 
-  virtual variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs) override;
   variable_list legacy_apply(const variable_list& inputs);
 
-  virtual void release_variables() override;
-  virtual std::string name() const override;
-  virtual std::shared_ptr<Function> get_shared_ptr() override;
-  virtual bool is_traceable() override;
+  void release_variables() override;
+  std::string name() const override;
+  std::shared_ptr<Function> get_shared_ptr() override;
+  bool is_traceable() override;
 
   // THPFunction this Function is wrapping.
   PyObject* obj;

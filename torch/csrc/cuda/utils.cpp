@@ -1,12 +1,15 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <stdarg.h>
 #include <string>
-#include "THCP.h"
+#include <torch/csrc/cuda/THCP.h>
 
-#include "override_macros.h"
+#include <torch/csrc/cuda/override_macros.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.cpp"
 #include <THC/THCGenerateAllTypes.h>
+
+#define THC_GENERIC_FILE "torch/csrc/generic/utils.cpp"
+#include <THC/THCGenerateBoolType.h>
 
 #ifdef USE_CUDA
 // NB: It's a list of *optional* CUDAStream; when nullopt, that means to use

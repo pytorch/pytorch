@@ -5,7 +5,7 @@
 #include <intrin.h>
 #include <immintrin.h>
 #endif
-#include "AVX2.h"
+#include <TH/vector/AVX2.h>
 #include <ATen/native/cpu/avx_mathfun.h>
 #include <TH/THRandom.h>
 

@@ -1,4 +1,4 @@
-#include "General.hpp"
+#include <THD/process_group/General.hpp>
 #include <THD/base/Exceptions.hpp>
 
 namespace thd {

@@ -1,8 +1,8 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricDilatedMaxPooling.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricDilatedMaxPooling.c"
 #else
 
-#include "pooling_shape.h"
+#include <THNN/generic/pooling_shape.h>
 #include <algorithm>
 
 static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
@@ -163,7 +163,7 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
           }
 
           // store location of max
-          *indzp = maxindex + TH_INDEX_BASE;
+          *indzp = maxindex;
 
           /* set output to local max */
           *op = maxval;
@@ -336,7 +336,7 @@ static void THNN_(VolumetricDilatedMaxPooling_updateGradInput_frame)(
         {
           /* retrieve position of max */
           int64_t index = ti * oheight * owidth + i * owidth + j;
-          int64_t maxp = indz_p_k[index] - TH_INDEX_BASE;
+          int64_t maxp = indz_p_k[index];
 
           if (maxp != -1) {
             /* update gradient */

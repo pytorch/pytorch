@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/Backend.h>
+#include <c10/core/Backend.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <type_traits>
@@ -119,7 +119,8 @@ struct RegisterCUDADispatch {
 template <typename FnPtr, typename T>
 struct RegisterHIPDispatch {
   RegisterHIPDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
-    stub.hip_dispatch_ptr = value;
+    // TODO: make this point at hip_dispatch_ptr
+    stub.cuda_dispatch_ptr = value;
   }
 };
 } // anonymous namespace
@@ -166,7 +167,10 @@ struct RegisterHIPDispatch {
 #if defined(__CUDACC__)
 #define REGISTER_DISPATCH(name, fn) REGISTER_CUDA_DISPATCH(name, fn)
 #elif defined(__HIPCC__)
-#define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
+// TODO: cut this over to HIP dispatch once we stop pretending that CUDA
+// is HIP in the PyTorch HIPify build.
+#define REGISTER_DISPATCH(name, fn) REGISTER_CUDA_DISPATCH(name, fn)
+// #define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif

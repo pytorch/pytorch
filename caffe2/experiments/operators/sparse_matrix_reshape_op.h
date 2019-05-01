@@ -101,10 +101,9 @@ class SparseMatrixReshapeOp : public Operator<Context> {
     CAFFE_ENFORCE(
         old_row.numel() == nnz,
         "Column and row tensors must have the same size.");
-    auto* new_col = Output(0);
-    auto* new_row = Output(1);
-    new_col->Resize(nnz);
-    new_row->Resize(nnz);
+
+    auto* new_col = Output(0, {nnz}, at::dtype<int64_t>());
+    auto* new_row = Output(1, {nnz}, at::dtype<int>());
 
     const auto* old_col_data = old_col.template data<int64_t>();
     const auto* old_row_data = old_row.template data<int>();

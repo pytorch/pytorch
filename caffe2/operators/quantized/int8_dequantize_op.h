@@ -31,8 +31,8 @@ class Int8DequantizeOp final : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     const auto& X = Inputs()[0]->template Get<Int8TensorCPU>();
-    auto* Y = Output(0);
-    Y->ResizeLike(X.t);
+
+    auto* Y = Output(0, X.t.sizes(), at::dtype<float>());
     int32_t X_offset = X.zero_point;
     auto X_scale = X.scale;
     Int8Dequantize(

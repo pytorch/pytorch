@@ -1,11 +1,11 @@
-#include "torch/csrc/jit/ir.h"
+#include <torch/csrc/jit/ir.h>
 
 namespace torch {
 namespace jit {
 
 struct IfView {
   explicit IfView(Node* node) : node_(node) {
-    JIT_ASSERT(node->kind() == prim::If);
+    AT_ASSERT(node->kind() == ::c10::prim::If);
   }
   Value* cond() const {
     return node_->input(0);
@@ -38,7 +38,8 @@ struct IfView {
 
 struct LoopView {
   explicit LoopView(Node* node) : node_(node) {
-    JIT_ASSERT(node->kind() == prim::Loop);
+    AT_ASSERT(
+        node->kind() == ::c10::prim::Loop || node->kind() == ::c10::onnx::Loop);
   }
   Block* bodyBlock() const {
     return node_->blocks().at(0);

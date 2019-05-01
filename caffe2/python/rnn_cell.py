@@ -1314,7 +1314,7 @@ class AttentionCell(RNNCell):
         )
         if (
             scope.CurrentDeviceScope() is not None and
-            scope.CurrentDeviceScope().device_type == caffe2_pb2.CUDA
+            core.IsGPUDeviceType(scope.CurrentDeviceScope().device_type)
         ):
             encoder_length = model.net.CopyGPUToCPU(
                 encoder_length,

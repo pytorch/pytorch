@@ -51,13 +51,29 @@ def _list_supported_ops():
                     if not hidden(elem):
                         functions.append(emit_schema(name, elem, schema))
 
+    mod = torch.nn.functional
+    name = mod.__name__
+    for elem in dir(torch.nn.functional):
+        # weak script functions
+        attr = getattr(mod, elem)
+        if not callable(attr) or elem[0] == '_':
+            # ignore non-functions and internal methods
+            continue
+
+        # compile weak script fn, get schema
+        scripted = torch.jit._try_compile_weak_script(attr)
+        if scripted is None:
+            continue
+        schema = scripted.forward.schema
+        functions.append(emit_schema(name, elem, schema))
+
     def is_tensor_method(schema):
         if len(schema.arguments) == 0:
             return False
         self = schema.arguments[0]
         if self.name != 'self':
             return False
-        if not self.type.isSubtypeOf(torch._C.DynamicType.get()):
+        if not self.type.isSubtypeOf(torch._C.TensorType.get()):
             return False
         return True
 

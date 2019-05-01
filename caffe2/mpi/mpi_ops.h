@@ -70,8 +70,7 @@ class MPIReduceOp final : public Operator<Context> {
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     auto& input = Input(1);
-    auto* output = Output(0);
-    output->ResizeLike(input);
+    auto* output = Output(0, input.sizes(), at::dtype<T>());
     MPI_CHECK(MPI_Reduce(
         const_cast<T*>(input.template data<T>()),
         output->template mutable_data<T>(),
@@ -123,8 +122,7 @@ class MPIAllreduceOp final : public Operator<Context> {
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     auto& input = Input(1);
-    auto* output = Output(0);
-    output->ResizeLike(input);
+    auto* output = Output(0, input.sizes(), at::dtype<T>());
     void* source;
     if (output->template mutable_data<T>() == input.template data<T>()) {
       // We are doing in-place call. Special case handling.

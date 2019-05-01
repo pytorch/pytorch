@@ -1,4 +1,4 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
 #include <iostream>
@@ -6,8 +6,7 @@
 #include <sstream>
 #include <cmath>
 #include <type_traits>
-#include "test_seed.h"
-#include "test_assert.h"
+#include <ATen/test/test_assert.h>
 
 using namespace at;
 

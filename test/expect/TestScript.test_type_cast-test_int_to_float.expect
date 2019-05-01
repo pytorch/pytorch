@@ -1,7 +1,0 @@
-graph() {
-  %0 : int = prim::Constant[value=2]()
-  %1 : float = prim::Constant[value=1]()
-  %b : float = prim::IntToFloat(%0)
-  %3 : float = aten::add(%b, %1)
-  return (%3);
-}

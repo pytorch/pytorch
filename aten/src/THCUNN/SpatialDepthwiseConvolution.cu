@@ -1,16 +1,16 @@
 // updateOutput, updateGradInput Kernels ported from Sergey Zagoruyko's pyinn, which itself was a
 // port from Caffe
 
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCNumerics.cuh"
-#include "THCReduceApplyUtils.cuh"
-#include "THCSortUtils.cuh"
-#include "THCTensorMathReduce.cuh"
-#include "SharedMem.cuh"
-#include "common.h"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCSortUtils.cuh>
+#include <THC/THCTensorMathReduce.cuh>
+#include <THCUNN/SharedMem.cuh>
+#include <THCUNN/common.h>
 #include <algorithm>
 
 
@@ -76,9 +76,13 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
 
     AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
     const IndexType offset0 = (n * inputChannels + inputChannel) * inputHeight * inputWidth;
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
     for (int kH = 0; kH < KH_LIMIT; ++kH) {
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
       for (int kW = 0; kW < KW_LIMIT; ++kW) {
         const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
         const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
@@ -134,13 +138,19 @@ __global__ void spatialDepthwiseConvolutionUpdateGradInput(
 
     AccT value = ScalarConvert<int, AccT>::to(0);
 
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
     for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
       int och = (c * depthwiseMultiplier) + multiplier;
       int weightOffset = och * kernelHeight * kernelWidth;
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
       for (int kh = 0; kh < KH_LIMIT; ++kh) {
+#ifdef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
         for (int kw = 0; kw < KW_LIMIT; ++kw) {
           int h_out = h + padHeight - kh * dilationHeight;
           int w_out = w + padWidth - kw * dilationWidth;
@@ -254,5 +264,5 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
   }
 }
 
-#include "generic/SpatialDepthwiseConvolution.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SpatialDepthwiseConvolution.cu>
+#include <THC/THCGenerateFloatTypes.h>

@@ -157,7 +157,7 @@ unique_ptr<NetBase> CreateNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws) {
   std::string net_type;
-  if (net_def->has_type()) {
+  if (net_def->has_type() && !net_def->type().empty()) {
     net_type = net_def->type();
   } else {
     // By default, we will return a simple network that just runs all operators
@@ -179,6 +179,14 @@ unique_ptr<NetBase> CreateNet(
 
 TaskThreadPoolBase* ExecutorHelper::GetPool(
     const DeviceOption& /* unused */) const {
+  CAFFE_THROW("Not implemented");
+}
+
+std::vector<OperatorBase*> ExecutorHelper::GetOperators() const {
+  CAFFE_THROW("Not implemented");
+}
+
+int ExecutorHelper::GetNumWorkers() const {
   CAFFE_THROW("Not implemented");
 }
 

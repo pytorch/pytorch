@@ -16,6 +16,6 @@ Major functionality lives in `serialized_test_util.py`
 
 If we'd like to extend the test framework beyond that for operator tests, we can create a new subfolder for them inside `caffe2/python/serialized_test/data`.
 
-Note, we currently don't support using other hypothesis decorators on top of `given_and_seeded`. Hypothis has some handling to explicitly check that `@given` is on the bottom of the decorator stack.
+Note, we currently don't support using other hypothesis decorators on top of `given_and_seeded`. Hypothesis has some handling to explicitly check that `@given` is on the bottom of the decorator stack.
 
 If there are multiple calls to assertReferenceChecks in a test function, we'll serialize and write the last one. The actual input checked may then differ if we refactor a test function that calls this multiple times, though the serialized test should still pass since we then use the serialized input to generate a dynamic output.

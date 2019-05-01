@@ -12,8 +12,9 @@ namespace caffe2 {
 template <typename T, class Context>
 class RoIAlignRotatedOp final : public Operator<Context> {
  public:
-  RoIAlignRotatedOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit RoIAlignRotatedOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),
         spatial_scale_(

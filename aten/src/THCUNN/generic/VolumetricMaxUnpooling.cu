@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricMaxUnpooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricMaxUnpooling.cu"
 #else
 
 static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(

@@ -1,6 +1,6 @@
 #include "caffe2/utils/proto_utils.h"
 
-#include <c10/DeviceType.h>
+#include <c10/core/DeviceType.h>
 
 #include <fcntl.h>
 #include <cerrno>
@@ -120,7 +120,13 @@ class IfstreamInputStream : public ::google::protobuf::io::CopyingInputStream {
 }  // namespace
 
 C10_EXPORT string ProtoDebugString(const MessageLite& proto) {
-  return proto.SerializeAsString();
+  string serialized = proto.SerializeAsString();
+  for (char& c : serialized) {
+    if (c < 0x20 || c >= 0x7f) {
+      c = '?';
+    }
+  }
+  return serialized;
 }
 
 C10_EXPORT bool ParseProtoFromLargeString(
@@ -298,7 +304,14 @@ bool SupportsLosslessConversion(const InputType& value) {
   return static_cast<InputType>(static_cast<TargetType>(value)) == value;
 }
 }
+bool operator==(const TensorProto& l, const TensorProto& r) {
+  return l.SerializeAsString() == r.SerializeAsString();
+}
 
+std::ostream& operator<<(std::ostream& output, const TensorProto& n) {
+  output << n.SerializeAsString();
+  return output;
+}
 bool operator==(const NetDef& l, const NetDef& r) {
   return l.SerializeAsString() == r.SerializeAsString();
 }
@@ -398,6 +411,7 @@ INSTANTIATE_GET_REPEATED_ARGUMENT(uint16_t, ints, true)
 INSTANTIATE_GET_REPEATED_ARGUMENT(size_t, ints, true)
 INSTANTIATE_GET_REPEATED_ARGUMENT(string, strings, false)
 INSTANTIATE_GET_REPEATED_ARGUMENT(NetDef, nets, false)
+INSTANTIATE_GET_REPEATED_ARGUMENT(TensorProto, tensors, false)
 #undef INSTANTIATE_GET_REPEATED_ARGUMENT
 
 #define CAFFE2_MAKE_SINGULAR_ARGUMENT(T, fieldname)                      \
@@ -552,4 +566,56 @@ C10_EXPORT Argument* GetMutableArgument(
   }
 }
 
-}  // namespace caffe2
+C10_EXPORT void cleanupExternalInputsAndOutputs(NetDef* net) {
+  std::vector<std::string> oldExternalInputs;
+  for (const auto& input : net->external_input()) {
+    oldExternalInputs.emplace_back(input);
+  }
+  std::vector<std::string> oldExternalOutputs;
+  for (const auto& output : net->external_output()) {
+    oldExternalOutputs.emplace_back(output);
+  }
+
+  net->clear_external_input();
+  net->clear_external_output();
+
+  std::set<std::string> inputSet;
+  for (const auto& input : oldExternalInputs) {
+    if (inputSet.count(input)) {
+      // Prevent duplicate external inputs.
+      continue;
+    }
+    inputSet.insert(input);
+    net->add_external_input(input);
+  }
+
+  // Set of blobs that are external inputs or outputs of some operators.
+  std::set<std::string> allOutputs(inputSet.begin(), inputSet.end());
+  for (const auto& op : net->op()) {
+    for (const auto& input : op.input()) {
+      if (inputSet.count(input) || allOutputs.count(input)) {
+        continue;
+      }
+      // Add missing external inputs.
+      inputSet.insert(input);
+      net->add_external_input(input);
+    }
+    for (const auto& output : op.output()) {
+      allOutputs.insert(output);
+    }
+  }
+
+  std::set<std::string> outputSet;
+  for (const auto& output : oldExternalOutputs) {
+    if (!allOutputs.count(output)) {
+      continue;
+    }
+    if (outputSet.count(output)) {
+      continue;
+    }
+    outputSet.insert(output);
+    net->add_external_output(output);
+  }
+}
+
+} // namespace caffe2

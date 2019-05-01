@@ -53,7 +53,10 @@ class TORCH_API OptimizerBase {
   /// Returns the number of parameters referenced by the optimizer.
   size_t size() const noexcept;
 
+  /// Serializes the optimizer state into the given `archive`.
   virtual void save(serialize::OutputArchive& archive) const;
+
+  /// Deserializes the optimizer state from the given `archive`.
   virtual void load(serialize::InputArchive& archive);
 
  protected:

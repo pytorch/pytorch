@@ -1,4 +1,4 @@
-#include "RPCType.hpp"
+#include <THD/base/RPCType.hpp>
 
 namespace thd {
 

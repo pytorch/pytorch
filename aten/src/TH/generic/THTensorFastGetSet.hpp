@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorFastGetSet.hpp"
+#define TH_GENERIC_FILE "TH/generic/THTensorFastGetSet.hpp"
 #else
 
 static inline scalar_t THTensor_(fastGetLegacy1dNoScalars)(THTensor *self, int64_t x0) {

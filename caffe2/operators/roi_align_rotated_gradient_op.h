@@ -12,8 +12,9 @@ namespace caffe2 {
 template <typename T, class Context>
 class RoIAlignRotatedGradientOp final : public Operator<Context> {
  public:
-  RoIAlignRotatedGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit RoIAlignRotatedGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         spatial_scale_(
             this->template GetSingleArgument<float>("spatial_scale", 1.)),
         pooled_height_(this->template GetSingleArgument<int>("pooled_h", 1)),

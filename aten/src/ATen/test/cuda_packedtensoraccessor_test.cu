@@ -1,9 +1,8 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "test_seed.h"
-#include "ATen/core/TensorAccessor.h"
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/ATen.h>
+#include <ATen/core/TensorAccessor.h>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <assert.h>
 
@@ -24,8 +23,8 @@ __global__ void test_tensor_packed_accessor_kernel(
 
 // test PackedTensorAccessor and Tensor.packed_accessor
 TEST(PackedtensoraccessorTest, PackedtensoraccessorTestCUDA) {
-  manual_seed(123, at::kCPU);
-  manual_seed(123, at::kCUDA);
+  if (!at::cuda::is_available()) return;
+  manual_seed(123);
 
   Tensor t1 = rand({4, 4}, CUDA(kFloat));
   Tensor t2 = rand({4}, CUDA(kFloat));

@@ -12,7 +12,7 @@ ChannelShuffleDNNLowPOp<T>::ChannelShuffleDNNLowPOp(
     Workspace* ws)
     : BaseType(operator_def, ws),
       order_(StringToStorageOrder(
-          OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))),
+          this->template GetSingleArgument<std::string>("order", "NCHW"))),
       OP_SINGLE_ARG(int, "group", group_, 1) {
   CAFFE_ENFORCE_NE(order_, StorageOrder::UNKNOWN);
 }
@@ -49,13 +49,11 @@ bool ChannelShuffleDNNLowPOp<T>::RunOnDeviceWithOrderNCHW() {
 #pragma omp parallel for
 #endif
   for (int i = 0; i < N; ++i) {
-    ConstEigenMatrixMap<T> X_mat(X_data, K * HxW, G);
+    ConstEigenMatrixMap<T> X_mat(X_data + i * stride, K * HxW, G);
     for (int j = 0; j < K; ++j) {
-      EigenMatrixMap<T>(Y_data + j * G * HxW, HxW, G) =
+      EigenMatrixMap<T>(Y_data + i * stride + j * G * HxW, HxW, G) =
           X_mat.block(j * HxW, 0, HxW, G);
     }
-    X_data += stride;
-    Y_data += stride;
   }
 
   // Even if there is a pre-chosen quantization parameters for the output,
@@ -95,7 +93,9 @@ bool ChannelShuffleDNNLowPOp<T>::RunOnDeviceWithOrderNHWC() {
     for (auto i = 0; i < X.numel(); i += C) {
       // Transpose each C = GxK matrix
       fbgemm::transpose_4rows(
-          K, (const std::uint8_t*)(X_data + i), (std::uint8_t*)(Y_data + i));
+          K,
+          reinterpret_cast<const std::uint8_t*>(X_data + i),
+          reinterpret_cast<std::uint8_t*>(Y_data + i));
     }
   } else {
 #ifdef _OPENMP

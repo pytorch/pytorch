@@ -1,12 +1,15 @@
-#include "THCStorage.hpp"
-#include "THCGeneral.h"
+#include <THC/THCStorage.hpp>
+#include <THC/THCGeneral.h>
 
-#include "TH/THHalf.h"
+#include <TH/THHalf.h>
 
 #include <new>
 
-#include "generic/THCStorage.cpp"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCStorage.cpp>
+#include <THC/THCGenerateAllTypes.h>
+
+#include <THC/generic/THCStorage.cpp>
+#include <THC/THCGenerateBoolType.h>
 
 #include <c10/util/intrusive_ptr.h>
 

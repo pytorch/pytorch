@@ -27,14 +27,65 @@ a ``spawn`` or ``forkserver`` start methods. :mod:`python:multiprocessing` in
 Python 2 can only create subprocesses using ``fork``, and it's not supported
 by the CUDA runtime.
 
-.. warning::
+Unlike CPU tensors, the sending process is required to keep the original tensor
+as long as the receiving process retains a copy of the tensor. It is implemented
+under the hood but requires users to follow the next best practices.
 
-    CUDA API requires that the allocation exported to other processes remains
-    valid as long as it's used by them. You should be careful and ensure that
-    CUDA tensors you shared don't go out of scope as long as it's necessary.
-    This shouldn't be a problem for sharing model parameters, but passing other
-    kinds of data should be done with care. Note that this restriction doesn't
-    apply to shared CPU memory.
+1. Release memory ASAP in the consumer.
+
+::
+
+    ## Good
+    x = queue.get()
+    # do somethings with x
+    del x
+
+::
+
+    ## Bad
+    x = queue.get()
+    # do somethings with x
+    # do everything else (producer have to keep x in memory)
+
+2. Keep producer process running until all consumers exits. This will prevent
+the situation when the producer process releasing memory which is still in use
+by the consumer.
+
+::
+
+    ## producer
+    # send tensors, do something
+    event.wait()
+
+
+::
+
+    ## consumer
+    # receive tensors and use them
+    event.set()
+
+3. Don't pass received tensors.
+
+::
+
+    # not going to work
+    x = queue.get()
+    queue_2.put(x)
+
+
+::
+
+    # you need to create a process-local copy
+    x = queue.get()
+    x_clone = x.clone()
+    queue_2.put(x_clone)
+
+
+::
+
+    # putting and getting from the same queue in the same process will likely end up with segfault
+    queue.put(tensor)
+    x = queue.get()
 
 
 Sharing strategies

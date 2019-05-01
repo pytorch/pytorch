@@ -1,21 +1,22 @@
 #pragma once
 
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/TensorGeometry.h>
-#include "ATen/Type.h"
-#include "c10/util/Optional.h"
+#include <ATen/core/DeprecatedTypeProperties.h>
+#include <c10/util/Optional.h>
 
 #include <cstdint>
 #include <memory>
 
 namespace torch { namespace autograd {
 
-struct CopyBackwards : public Function {
+struct TORCH_API CopyBackwards : public Function {
   variable_list apply(variable_list&& grads) override;
 
-  at::Type *src_type = nullptr; // initialized for safety.
+  at::DeprecatedTypeProperties *src_type = nullptr; // initialized for safety.
   at::Device src_device = at::kCPU;
 };
 
@@ -26,7 +27,7 @@ struct CopyBackwards : public Function {
 // grad_fn is updated to become a `CopySlice` wrapping the backward of the
 // in-place operation.
 // See NOTE [ Autograd View Variables ].
-struct CopySlices : public Function {
+struct TORCH_API CopySlices : public Function {
   CopySlices(
       const Variable& base_var,
       at::TensorGeometry view_,

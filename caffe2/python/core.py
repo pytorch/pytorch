@@ -14,7 +14,7 @@ from six import binary_type, string_types, text_type
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils, workspace
 from caffe2.python.control_ops_grad import \
-    gen_do_gradient, gen_if_gradient, gen_while_gradient
+    gen_do_gradient, gen_if_gradient, gen_while_gradient, disambiguate_grad_if_op_output
 
 import caffe2.python._import_c_extension as C
 
@@ -80,6 +80,10 @@ def IsOperator(op_type):
 
 def IsOperatorWithEngine(op_type, engine):
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
+
+
+def IsGPUDeviceType(device_type):
+    return device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP}
 
 
 def DeviceOption(
@@ -234,6 +238,9 @@ class BlobReference(object):
 
     def GetNameScope(self):
         return self._name[:self._name.rfind(scope._NAMESCOPE_SEPARATOR) + 1]
+
+    def GetUnscopedName(self):
+        return self._name[self._name.rfind(scope._NAMESCOPE_SEPARATOR) + 1:]
 
     def _CreateAndAddToNet(self, op_type, inputs=None, *args, **kwargs):
         """Internal function that routes the operator generation to the
@@ -707,6 +714,8 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
 
         return input_name + '_grad'
 
+    IS_AUTO_GEN_SUM_OPS_TAG = "is_auto_gen_sum_ops"
+
     def _SetSumOpsDeviceOption(self, sum_ops, generators):
         # we already checked that device options are consistent so we can just
         # use the first one we find
@@ -717,12 +726,18 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                 if grad_op.HasField('device_option'):
                     for op in sum_ops:
                         op.device_option.CopyFrom(grad_op.device_option)
-                        del op.device_option.extra_info[:]
+                        op.device_option.extra_info.extend([
+                            "{}:1".format(IR.IS_AUTO_GEN_SUM_OPS_TAG)
+                        ])
                 break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
-        grad_op.output[idx] = (
+        new_grad_output = (
             '_' + grad_op.output[idx] + '_autosplit_{}'.format(cnt))
+        if grad_op.type == "If":
+            disambiguate_grad_if_op_output(grad_op, idx, new_grad_output)
+        else:
+            grad_op.output[idx] = new_grad_output
         return grad_op.output[idx], cnt + 1
 
     def _CheckSumOpsConflict(self, out_base_name, g):
@@ -2107,15 +2122,28 @@ class Net(object):
             raise ValueError('{} is not supported'.format(aggregator))
         return GradientSlice(indices=unique, values=new_g)
 
+    @staticmethod
+    def _RunAllOnGPU(net, gpu_id=0, use_cudnn=False):
+        device_option = caffe2_pb2.DeviceOption()
+        device_option.device_type = workspace.GpuDeviceType
+        device_option.device_id = gpu_id
+        net.device_option.CopyFrom(device_option)
+        if use_cudnn:
+            for op in net.op:
+                op.engine = "CUDNN"
+        # Move RecurrentNetwork operators on GPU as well
+        for op in net.op:
+            if op.type != "RecurrentNetwork":
+                continue
+            for arg in op.arg:
+                if arg.name == "step_net":
+                    Net._RunAllOnGPU(arg.n, gpu_id, use_cudnn)
+
     def RunAllOnGPU(self, gpu_id=0, use_cudnn=False):
         """A convenient function to run everything on the GPU."""
-        device_option = caffe2_pb2.DeviceOption()
-        device_option.device_type = caffe2_pb2.CUDA
-        device_option.device_id = gpu_id
-        self._net.device_option.CopyFrom(device_option)
-        if use_cudnn:
-            for op in self._net.op:
-                op.engine = "CUDNN"
+        self._RunAllOnGPU(self._net, gpu_id, use_cudnn)
+
+
 
     def RunAllOnMKL(self):
         """A convenient function to run everything using MKLDNN."""
@@ -2280,12 +2308,13 @@ def remap_input(op, blob_name_remapping):
 
 def copy_func_between_devices(src, dst):
     CPU = caffe2_pb2.CPU
-    CUDA = caffe2_pb2.CUDA
+    is_src_gpu = IsGPUDeviceType(src.device_type)
+    is_dst_gpu = IsGPUDeviceType(dst.device_type)
 
     if src.device_type == CPU and dst.device_type == CPU:
         return None
 
-    if src.device_type == CUDA and dst.device_type == CUDA:
+    if is_src_gpu and is_dst_gpu:
         if src.device_id == dst.device_id:
             return None
         else:
@@ -2294,13 +2323,13 @@ def copy_func_between_devices(src, dst):
                     return net.Copy(*args, **kw)
             return fun
 
-    if src.device_type == CUDA and dst.device_type == CPU:
+    if is_src_gpu and dst.device_type == CPU:
         def fun(net, *args, **kw):
             with DeviceScope(src):
                 return net.CopyGPUToCPU(*args, **kw)
         return fun
 
-    if src.device_type == CPU and dst.device_type == CUDA:
+    if src.device_type == CPU and is_dst_gpu:
         def fun(net, *args, **kw):
             with DeviceScope(dst):
                 return net.CopyCPUToGPU(*args, **kw)
@@ -2425,11 +2454,10 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
 
                     def _gen_new_name(blob, device_option):
                         CPU = caffe2_pb2.CPU
-                        CUDA = caffe2_pb2.CUDA
                         if device_option.device_type == CPU:
                             suffix = '_cpu'
-                        elif device_option.device_type == CUDA:
-                            suffix = '_cuda_' + str(device_option.device_id)
+                        elif IsGPUDeviceType(device_option.device_type):
+                            suffix = '_gpu_' + str(device_option.device_id)
                         else:
                             raise RuntimeError(
                                 "Unknown device type: {}".

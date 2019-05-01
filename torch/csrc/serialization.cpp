@@ -1,8 +1,8 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <system_error>
 
-#include "THP.h"
-#include "serialization.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/serialization.h>
 
 template <class io>
 ssize_t doPartialRead(io fildes, void* buf, size_t nbytes);
@@ -45,7 +45,7 @@ static inline bool isUnsupportedOperation() {
   THPObjectPtr io(PyImport_ImportModule("io"));
   if (!io) throw python_error();
   THPObjectPtr exception(PyObject_GetAttrString(io, "UnsupportedOperation"));
-  if (!exception) python_error();
+  if (!exception) throw python_error();
   return PyErr_ExceptionMatches(exception.get());
 }
 
@@ -177,8 +177,11 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
   }
 }
 
-#include "generic/serialization.cpp"
+#include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateAllTypes.h>
 
-#include "generic/serialization.cpp"
+#include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateHalfType.h>
+
+#include <torch/csrc/generic/serialization.cpp>
+#include <TH/THGenerateBoolType.h>

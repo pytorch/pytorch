@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/BCECriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/BCECriterion.c"
 #else
 
 #define EPS 1e-12
@@ -29,16 +29,16 @@ void THNN_(BCECriterion_updateOutput)(
         scalar_t y = *target_data;
         THAssertMsg(x >= 0. && x <= 1.,
           "input value should be between 0~1, but got %f",
-		      (double) x);
-		    *output_data = -(safe_log(x) * y + safe_log(1. - x) * (1. - y));
+                      (double) x);
+                    *output_data = -(safe_log(x) * y + safe_log(1. - x) * (1. - y));
     );
-		if (weights) {
+                if (weights) {
       THTensor_(cmul)(output, output, weights);
     }
     return;
   }
 
-	THTensor_(resize0d)(output);
+        THTensor_(resize0d)(output);
   scalar_t sum = 0;
 
   if (weights) {
@@ -48,7 +48,7 @@ void THNN_(BCECriterion_updateOutput)(
       scalar_t w = *weights_data;
       THAssertMsg(x >= 0. && x <= 1.,
         "input value should be between 0~1, but got %f",
-		  (double) x);
+                  (double) x);
       sum -= (safe_log(x) * y + safe_log(1. - x) * (1. - y)) * w;
     );
   } else {
@@ -57,7 +57,7 @@ void THNN_(BCECriterion_updateOutput)(
       scalar_t y = *target_data;
       THAssertMsg(x >= 0. && x <= 1.,
         "input value should be between 0~1, but got %f",
-		  (double) x);
+                  (double) x);
       sum -= safe_log(x) * y + safe_log(1. - x) * (1. - y);
     );
   }

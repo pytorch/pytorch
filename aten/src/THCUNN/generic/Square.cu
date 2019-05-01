@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/Square.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/Square.cu"
 #else
 
 #include <THCUNN/common.h>

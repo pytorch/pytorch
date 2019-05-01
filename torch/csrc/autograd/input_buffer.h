@@ -10,7 +10,7 @@
 #include <memory>
 #include <ATen/ATen.h>
 
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/autograd/variable.h>
 
 namespace torch { namespace autograd {
 
@@ -24,7 +24,7 @@ struct InputBuffer {
   // Accumulates the variable at a specified index.
   void add(size_t pos, Variable var);
 
-  int device() const;
+  at::Device device() const;
 
   Variable operator[](size_t pos) { return buffer[pos]; }
 

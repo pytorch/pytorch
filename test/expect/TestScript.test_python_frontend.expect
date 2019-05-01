@@ -5,15 +5,18 @@
       (param
         (ident x)
         (variable (ident Tensor))
-        (option))
+        (option)
+        (False))
       (param
         (ident y)
         (variable (ident Tensor))
-        (option))
+        (option)
+        (False))
       (param
         (ident z)
         (variable (ident Tensor))
-        (option)))
+        (option)
+        (False)))
     (option))
   (list
     (assign
@@ -69,5 +72,4 @@
     (assert
       (eq (const 1) (const 1))
       (option (string_literal hello)))
-    (return
-      (list (variable (ident x))))))
+    (return (variable (ident x)))))

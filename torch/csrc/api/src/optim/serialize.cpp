@@ -11,12 +11,12 @@
 
 namespace torch {
 namespace optim {
-namespace detail {
 void serialize(
     serialize::OutputArchive& archive,
     const std::string& key,
     const std::vector<int64_t>& steps) {
   std::vector<torch::Tensor> tensors;
+  tensors.reserve(steps.size());
   for (const auto& step : steps) {
     tensors.push_back(torch::tensor(static_cast<int64_t>(step)));
   }
@@ -27,13 +27,12 @@ void serialize(
     serialize::InputArchive& archive,
     const std::string& key,
     std::vector<int64_t>& steps) {
+  steps.clear();
   std::vector<torch::Tensor> tensors;
   serialize(archive, key, tensors);
-  steps.clear();
   for (const auto& step : tensors) {
     steps.push_back(step.item<int64_t>());
   }
 }
-} // namespace detail
 } // namespace optim
 } // namespace torch

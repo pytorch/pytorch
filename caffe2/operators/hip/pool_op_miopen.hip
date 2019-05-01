@@ -61,7 +61,6 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
   template <typename T, typename M>
   bool DoRunWithType() {
     auto& X = Input(0);
-    auto* Y = Output(0);
     int N = 0, C = 0, H = 0, W = 0, D = 0;
     int N_out = 0, C_out = 0, H_out = 0, W_out = 0;
     CAFFE_ENFORCE(X.ndim() >= 4 && X.ndim() <= 5);
@@ -69,7 +68,8 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     C = X.dim32(1);
     H = X.dim32(2);
     W = X.ndim() > 3 ? X.dim32(3) : 1;
-    ConvPoolOpBase::SetOutputSize(X, Y, C);
+    auto sizes = ConvPoolOpBase::GetOutputSize(X, C);
+    auto* Y = Output(0, sizes, at::dtype<T>());
 
     N_out = Y->dim32(0);
     C_out = Y->dim32(1);
@@ -117,6 +117,8 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     // TODO enable fp16
     if (X.IsType<float>()) {
       return DoRunWithType<float, float>();
+    } else if (X.IsType<at::Half>()){
+      return DoRunWithType<at::Half, float>();
     } else {
       LOG(FATAL) << "Unsupported input types";
     }
@@ -289,6 +291,8 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
 
     if (X.IsType<float>()) {
       return DoRunWithType<float, float>();
+    } else if (X.IsType<at::Half>()) {
+      return DoRunWithType<at::Half, float>();
     } else {
       LOG(FATAL) << "Unsupported input types";
     }

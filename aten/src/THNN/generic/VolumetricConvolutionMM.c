@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricConvolutionMM.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricConvolutionMM.c"
 #else
 
 #include <ATen/div_rtn.h>
@@ -119,7 +119,7 @@ static THTensor* THNN_(newViewWeight)(THTensor *weight)
     int64_t s2 = weight->size(1) * weight->size(2) * weight->size(3) * weight->size(4);
     THTensor *old_weight = weight;
     weight = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(weight), weight->storage_offset(),
-					 s1, -1, s2, -1);
+                                         s1, -1, s2, -1);
     c10::raw::intrusive_ptr::decref(old_weight);
   }
   return weight;

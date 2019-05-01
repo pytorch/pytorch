@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/Backend.h>
+#include <c10/core/Backend.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Registry.h>
 
@@ -29,7 +29,7 @@ struct CAFFE2_API VariableHooksInterface {
     AT_ERROR("cannot getVariableTypeFromBaseType without libtorch");
   }
 
-  virtual void registerVariableTypeFor(LegacyTypeDispatch*, Backend backend, ScalarType scalar_type) const {
+  virtual void registerVariableTypeFor(LegacyTypeDispatch*, Backend backend) const {
     // no-op if Variable not available; it'll get handled (if at all) when
     // libtorch.so gets loaded
   }

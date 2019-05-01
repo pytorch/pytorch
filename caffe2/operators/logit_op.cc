@@ -24,8 +24,8 @@ template <>
 bool LogitGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& dY = Input(1);
-  auto* dX = Output(0);
-  dX->ResizeLike(X);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   int channels = X.dim32(X.dim() - 1);
   ConstEigenArrayMap<float> Xmat(
       X.template data<float>(), channels, X.numel() / channels);

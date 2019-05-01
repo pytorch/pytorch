@@ -1,7 +1,9 @@
 #pragma once
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
-void initJITBindings(PyObject *module);
+void initJITBindings(PyObject* module);
 
-}}
+}
+} // namespace torch

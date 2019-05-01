@@ -82,6 +82,7 @@ class ConstraintRegistry(object):
     """
     def __init__(self):
         self._registry = {}
+        super(ConstraintRegistry, self).__init__()
 
     def register(self, constraint, factory=None):
         """

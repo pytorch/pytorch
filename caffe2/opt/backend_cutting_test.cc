@@ -1,46 +1,46 @@
 #include "caffe2/core/common.h"
-#include "caffe2/opt/backend_cutting.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/opt/backend_cutting.h"
 #include "caffe2/utils/string_utils.h"
 
 #include <gtest/gtest.h>
 
 namespace {
-  using caffe2::StartsWith;
+using caffe2::StartsWith;
 
-  void AddConv(caffe2::NetDef* net, int tick) {
-    auto* op = net->add_op();
-    op->set_type("MyConv");
-    op->add_input("N" + c10::to_string(tick));
-    op->add_input("W" + c10::to_string(tick));
-    op->add_input("b" + c10::to_string(tick));
-    op->add_output("N" + c10::to_string(tick + 1));
-  }
-
-  bool Supports(const caffe2::OperatorDef& op) {
-    return StartsWith(op.type(), "MyConv") || StartsWith(op.type(), "MyRelu") ||
-        StartsWith(op.type(), "Concat");
-  }
-
-  caffe2::NetDef Transform(const caffe2::NetDef& net) {
-    caffe2::NetDef net_opt;
-    auto * op = net_opt.add_op();
-    op->set_type("BigOpt");
-
-    for (const auto& i: net.external_input()) {
-      // Absorb the weights and bias
-      if (!StartsWith(i, "W") && !StartsWith(i, "b")) {
-        net_opt.add_external_input(i);
-        op->add_input(i);
-      }
-    }
-    for (const auto& i: net.external_output()) {
-      net_opt.add_external_output(i);
-      op->add_output(i);
-    }
-    return net_opt;
-  }
+void AddConv(caffe2::NetDef* net, int tick) {
+  auto* op = net->add_op();
+  op->set_type("MyConv");
+  op->add_input("N" + c10::to_string(tick));
+  op->add_input("W" + c10::to_string(tick));
+  op->add_input("b" + c10::to_string(tick));
+  op->add_output("N" + c10::to_string(tick + 1));
 }
+
+bool Supports(const caffe2::OperatorDef& op) {
+  return StartsWith(op.type(), "MyConv") || StartsWith(op.type(), "MyRelu") ||
+      StartsWith(op.type(), "Concat");
+}
+
+caffe2::NetDef Transform(const caffe2::NetDef& net) {
+  caffe2::NetDef net_opt;
+  auto* op = net_opt.add_op();
+  op->set_type("BigOpt");
+
+  for (const auto& i : net.external_input()) {
+    // Absorb the weights and bias
+    if (!StartsWith(i, "W") && !StartsWith(i, "b")) {
+      net_opt.add_external_input(i);
+      op->add_input(i);
+    }
+  }
+  for (const auto& i : net.external_output()) {
+    net_opt.add_external_output(i);
+    op->add_output(i);
+  }
+  return net_opt;
+}
+} // namespace
 
 // N0 -> MyConv -> N1
 TEST(BackendCuttingTest, unit) {
@@ -55,7 +55,6 @@ TEST(BackendCuttingTest, unit) {
   EXPECT_EQ(1, net_opt.external_input_size());
   EXPECT_EQ(1, net_opt.external_output_size());
 }
-
 
 // X -> CopyIn -> MyConv -> MyConv -> CopyOut -> Y
 TEST(BackendCuttingTest, line) {

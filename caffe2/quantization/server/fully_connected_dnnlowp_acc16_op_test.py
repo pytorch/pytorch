@@ -5,12 +5,14 @@ import collections
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep
-from dnnlowp_test_utils import check_quantized_results_close
+from caffe2.python import core, dyndep, workspace
+from caffe2.quantization.server import utils as dnnlowp_utils
+from dnnlowp_test_utils import check_quantized_results_close, run_conv_or_fc
 from hypothesis import given
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
@@ -102,12 +104,8 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(net)
-            outputs.append(
-                Output(Y=self.ws.blobs["Y"].fetch(), op_type=op_type, engine=engine)
+            run_conv_or_fc(
+                self, None, net, X, W, b, op_type, engine, None, gc, outputs
             )
 
         check_quantized_results_close(outputs)
@@ -119,6 +117,7 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
         nbits_in_non_outlier=st.sampled_from((0, 6)),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
+        prepack_weight=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_dnnlowp_fully_connected_acc16_outlier(
@@ -129,6 +128,7 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
         nbits_in_non_outlier,
         in_quantized,
         out_quantized,
+        prepack_weight,
         gc,
         dc,
     ):
@@ -171,10 +171,12 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
         ]
 
         for op_type, engine in op_engine_list:
+            init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
             do_quantize = "DNNLOWP" in engine and in_quantized
             do_dequantize = "DNNLOWP" in engine and out_quantized
+            do_prepack_weight = engine == "DNNLOWP" and prepack_weight
 
             if do_quantize:
                 quantize = core.CreateOperator(
@@ -182,9 +184,28 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([quantize])
 
+            x_q_param = dnnlowp_utils.choose_quantization_params(X.min(), X.max())
+
+            if do_prepack_weight:
+                inputs = ["W"]
+                if do_dequantize:
+                    inputs += ["b"]
+                pack = core.CreateOperator(
+                    "Int8FCPackWeight",
+                    inputs,
+                    ["W_packed"],
+                    in_scale=x_q_param.scale,
+                    engine=engine,
+                )
+                init_net.Proto().op.extend([pack])
+
             fc = core.CreateOperator(
                 op_type,
-                ["X_q" if do_quantize else "X", "W", "b"],
+                [
+                    "X_q" if do_quantize else "X",
+                    "W_packed" if do_prepack_weight else "W",
+                    "b",
+                ],
                 ["Y_q" if do_dequantize else "Y"],
                 dequantize_output=(0 if do_dequantize else 1),
                 engine=engine,
@@ -199,12 +220,8 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(net)
-            outputs.append(
-                Output(Y=self.ws.blobs["Y"].fetch(), op_type=op_type, engine=engine)
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, None, gc, outputs
             )
 
         check_quantized_results_close(outputs)

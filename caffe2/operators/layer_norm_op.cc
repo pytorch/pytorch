@@ -1,28 +1,29 @@
 #include "caffe2/operators/layer_norm_op.h"
-#include "caffe2/operators/experimental/c10/schemas/layer_norm.h"
+
+#include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/utils/eigen_utils.h"
-#include <c10/core/dispatch/KernelRegistration.h>
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
 template <>
 template <typename T>
-void LayerNormOp<CPUContext>::ComputeStdDevAndFusedParams(
+void LayerNormOp<CPUContext>::ComputeSigmaAndFusedParams(
     const int N,
+    const float eps,
     const T* mean,
     const T* var,
-    T* stddev,
+    T* sigma,
     T* scale,
     T* bias,
-    float epsilon,
-    CPUContext* /*context*/) {
+    CPUContext* context) {
   ConstEigenVectorArrayMap<T> var_arr(var, N);
-  EigenVectorArrayMap<T> stddev_arr(stddev, N);
-  EigenVectorArrayMap<T> scale_arr(scale, N);
-  scale_arr = (var_arr + static_cast<T>(epsilon)).rsqrt();
-  stddev_arr = scale_arr * (var_arr + static_cast<T>(epsilon));
-  EigenVectorArrayMap<T>(bias, N) =
-      -scale_arr * ConstEigenVectorArrayMap<T>(mean, N);
+  EigenVectorArrayMap<T> sigma_arr(sigma, N);
+  sigma_arr = var_arr + static_cast<T>(eps);
+  math::Rsqrt<T>(N, sigma, scale, context);
+  math::Mul<T>(N, scale, sigma, sigma, context);
+  EigenVectorArrayMap<T>(bias, N) = -ConstEigenVectorArrayMap<T>(scale, N) *
+      ConstEigenVectorArrayMap<T>(mean, N);
 }
 
 template <>
@@ -33,13 +34,29 @@ void LayerNormOp<CPUContext>::LayerNormForward(
     const T* X,
     const T* scale,
     const T* bias,
+    const T* gamma,
+    const T* beta,
     T* Y,
-    CPUContext* context) {
-  EigenArrayMap<T>(Y, N, M) =
-      (ConstEigenArrayMap<T>(X, N, M).rowwise() *
-       ConstEigenVectorArrayMap<T>(scale, M).transpose())
-          .rowwise() +
-      ConstEigenVectorArrayMap<T>(bias, M).transpose();
+    CPUContext* /* context */) {
+  ConstEigenArrayMap<T> X_arr(X, N, M);
+  ConstEigenVectorArrayMap<T> scale_arr(scale, M);
+  ConstEigenVectorArrayMap<T> bias_arr(bias, M);
+  EigenArrayMap<T> Y_arr(Y, N, M);
+  if (gamma != nullptr && beta != nullptr) {
+    ConstEigenVectorArrayMap<T> gamma_arr(gamma, N);
+    ConstEigenVectorArrayMap<T> beta_arr(beta, N);
+    Y_arr = (((X_arr.rowwise() * scale_arr.transpose()).rowwise() +
+              bias_arr.transpose())
+                 .colwise() *
+             gamma_arr)
+                .colwise() +
+        beta_arr;
+  } else {
+    CAFFE_ENFORCE(gamma == nullptr);
+    CAFFE_ENFORCE(beta == nullptr);
+    Y_arr = (X_arr.rowwise() * scale_arr.transpose()).rowwise() +
+        bias_arr.transpose();
+  }
 }
 
 REGISTER_CPU_OPERATOR(LayerNorm, LayerNormOp<CPUContext>);
@@ -54,9 +71,11 @@ void LayerNormGradientOp<CPUContext>::ComputeInternalGradients(
     T* ds,
     T* db) {
   ConstEigenArrayMap<T> dY_arr(dY, N, M);
-  EigenVectorArrayMap<T>(ds, M) =
-      (dY_arr * ConstEigenArrayMap<T>(X, N, M)).colwise().sum();
-  EigenVectorArrayMap<T>(db, M) = dY_arr.colwise().sum();
+  ConstEigenArrayMap<T> X_arr(X, N, M);
+  for (int i = 0; i < M; ++i) {
+    ds[i] = (dY_arr.col(i) * X_arr.col(i)).sum();
+    db[i] = dY_arr.col(i).sum();
+  }
 }
 
 template <>
@@ -125,7 +144,7 @@ class GetLayerNormGradient : public GradientMakerBase {
 REGISTER_GRADIENT(LayerNorm, GetLayerNormGradient);
 
 OPERATOR_SCHEMA(LayerNorm)
-    .NumInputs(1)
+    .NumInputs({1, 3})
     .NumOutputs(3)
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
@@ -172,45 +191,46 @@ to the end.)
         "epsilon",
         "(float) default to 0.001. Small value to be added to the stdev when"
         " dividing out by that value. This prevents division by zero.")
+    .Arg(
+        "elementwise_affine",
+        "(bool) default to False; If true, this op will do affine "
+        "transformation after normalization.")
     .Input(
         0,
         "input",
         "Input tensor which layer normalization will be applied to")
+    .Input(
+        1,
+        "gamma",
+        "scale tensor for elementwise_affine, the shape should be the same as "
+        "the dimensions of X begin from axis")
+    .Input(
+        2,
+        "beta",
+        "bias tensor for elementwise_affine, the shape should be the same as "
+        "the dimensions of X begin from axis")
     .Output(0, "output", "Normalized values")
     .Output(1, "mean", "Mean values for each feature vector")
     .Output(2, "stddev", "Standard deviations for each feature vector");
 
 } // namespace caffe2
 
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    LayerNorm,
+    "_caffe2::LayerNorm("
+    "    Tensor X,"
+    "    Tensor? gamma,"
+    "    Tensor? beta,"
+    "    int axis = 1,"
+    "    float epsilon = 1e-5,"
+    "    bool elementwise_affine = False"
+    ") -> (Tensor Y, Tensor mean, Tensor std)",
+    caffe2::LayerNormOp<caffe2::CPUContext>)
 
-// Register layer norm with c10
-namespace {
-template <class DataType>
-void layer_norm_c10(
-    const caffe2::Tensor& X,
-    caffe2::Tensor* Y,
-    caffe2::Tensor* mean,
-    caffe2::Tensor* sig,
-    int axis,
-    float epsilon,
-    caffe2::ops::LayerNorm::Cache* cache,
-    caffe2::BaseContext* context) {
-  const int canonical_axis = X.canonical_axis_index(axis);
-  std::vector<int64_t> moments_dims(
-      X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
-  moments_dims.push_back(1);
-  mean->Resize(moments_dims);
-  sig->Resize(moments_dims);
-  caffe2::LayerNormOp<caffe2::CPUContext>::runLayerNorm<DataType>(
-    X, Y, mean, sig, canonical_axis, epsilon, &cache->scale, &cache->bias, static_cast<caffe2::CPUContext*>(context)
-  );
-}
-}
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::LayerNorm)
-    .kernel(&layer_norm_c10<float>)
-    .dispatchKey(c10::DispatchKey<1>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()}});
-} // namespace c10
+namespace caffe2 {
+
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_caffe2::LayerNorm",
+    C10LayerNorm_DontUseThisOpYet);
+
+} // namespace caffe2

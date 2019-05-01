@@ -4,9 +4,13 @@ if (NOT __NCCL_INCLUDED)
   if (USE_SYSTEM_NCCL)
     # if we have explicit paths passed from setup.py, use those
     if (NCCL_INCLUDE_DIR)
+      # used by gloo cmake among others
+      SET(NCCL_INCLUDE_DIRS ${NCCL_INCLUDE_DIR})
+      SET(NCCL_LIBRARIES ${NCCL_SYSTEM_LIB})
+      set(NCCL_FOUND TRUE)
       add_library(__caffe2_nccl INTERFACE)
-      target_link_libraries(__caffe2_nccl INTERFACE ${NCCL_SYSTEM_LIB})
-      target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIR})
+      target_link_libraries(__caffe2_nccl INTERFACE ${NCCL_LIBRARIES})
+      target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIRS})
     else()
       find_package(NCCL)
       if (NCCL_FOUND)
@@ -16,12 +20,10 @@ if (NOT __NCCL_INCLUDED)
       endif()
     endif()
   else()
-    if (TORCH_CUDA_ARCH_LIST)
-      torch_cuda_get_nvcc_gencode_flag(NVCC_GENCODE)
-      string(REPLACE "-gencode;" "-gencode=" NVCC_GENCODE "${NVCC_GENCODE}")
-      # this second replacement is needed when there are multiple archs
-      string(REPLACE ";-gencode" " -gencode" NVCC_GENCODE "${NVCC_GENCODE}")
-    endif()
+    torch_cuda_get_nvcc_gencode_flag(NVCC_GENCODE)
+    string(REPLACE "-gencode;" "-gencode=" NVCC_GENCODE "${NVCC_GENCODE}")
+    # this second replacement is needed when there are multiple archs
+    string(REPLACE ";-gencode" " -gencode" NVCC_GENCODE "${NVCC_GENCODE}")
 
     ExternalProject_Add(nccl_external
       SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl/nccl

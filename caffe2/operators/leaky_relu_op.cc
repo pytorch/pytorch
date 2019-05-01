@@ -8,8 +8,8 @@ namespace caffe2 {
 template <>
 bool LeakyReluOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   ConstEigenVectorMap<float> Xvec(X.template data<float>(), X.numel());
   EigenVectorMap<float> Yvec(Y->template mutable_data<float>(), Y->numel());
   Yvec = Xvec.cwiseMax(0.f) + Xvec.cwiseMin(0.f) * alpha_;
@@ -20,8 +20,8 @@ template <>
 bool LeakyReluGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& Y = Input(0);
   const auto& dY = Input(1);
-  auto* dX = Output(0);
-  dX->ResizeLike(Y);
+
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   CAFFE_ENFORCE_EQ(Y.numel(), dY.numel());
   ConstEigenVectorMap<float> Yvec(Y.template data<float>(), Y.numel());
   ConstEigenVectorMap<float> dYvec(dY.template data<float>(), dY.numel());

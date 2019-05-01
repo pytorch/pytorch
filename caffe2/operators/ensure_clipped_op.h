@@ -11,8 +11,9 @@ class EnsureClippedOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  EnsureClippedOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit EnsureClippedOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         min_(std::numeric_limits<T>::lowest()),
         max_(std::numeric_limits<T>::max()) {
     if (HasArgument("min")) {
@@ -33,8 +34,8 @@ class EnsureClippedOp final : public Operator<Context> {
           this, Input(INDICES));
     } else {
       auto& X = Input(PARAM);
-      auto* Y = Output(OUTPUT_PARAM);
-      Y->ResizeLike(X);
+
+      auto* Y = Output(OUTPUT_PARAM, X.sizes(), at::dtype<float>());
       EigenVectorMap<float>(Y->template mutable_data<float>(), Y->numel()) =
           ConstEigenVectorMap<float>(X.template data<float>(), X.numel())
               .cwiseMax(min_)

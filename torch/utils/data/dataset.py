@@ -73,6 +73,10 @@ class ConcatDataset(Dataset):
         return self.cumulative_sizes[-1]
 
     def __getitem__(self, idx):
+        if idx < 0:
+            if -idx > len(self):
+                raise ValueError("absolute value of index should not exceed dataset length")
+            idx = len(self) + idx
         dataset_idx = bisect.bisect_right(self.cumulative_sizes, idx)
         if dataset_idx == 0:
             sample_idx = idx
@@ -117,5 +121,5 @@ def random_split(dataset, lengths):
     if sum(lengths) != len(dataset):
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
-    indices = randperm(sum(lengths))
+    indices = randperm(sum(lengths)).tolist()
     return [Subset(dataset, indices[offset - length:offset]) for offset, length in zip(_accumulate(lengths), lengths)]

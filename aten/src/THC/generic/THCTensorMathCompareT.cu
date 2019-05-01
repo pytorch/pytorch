@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathCompareT.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathCompareT.cu"
 #else
 
 void THCTensor_(ltTensor)(THCState *state, THCudaByteTensor *self_, THCTensor *src1, THCTensor *src2)

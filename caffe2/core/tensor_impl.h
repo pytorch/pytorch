@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/DimVector.h>
-#include <ATen/core/TensorImpl.h>
+#include <c10/core/TensorImpl.h>
 #include <ATen/core/context_base.h>
 #include <ATen/core/context_base.h>
 

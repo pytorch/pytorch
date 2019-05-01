@@ -7,7 +7,6 @@
 #define THPTensorClass              TH_CONCAT_3(THP,Real,TensorClass)
 #define THPTensor_(NAME)            TH_CONCAT_4(THP,Real,Tensor_,NAME)
 
-#define THPStorage TH_CONCAT_3(THP,Real,Storage)
 #define THPStorageStr TH_CONCAT_STRING_3(torch.,Real,Storage)
 #define THPStorageClass TH_CONCAT_3(THP,Real,StorageClass)
 #define THPStorage_(NAME) TH_CONCAT_4(THP,Real,Storage_,NAME)

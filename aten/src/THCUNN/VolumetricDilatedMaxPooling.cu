@@ -1,12 +1,12 @@
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "common.h"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCDeviceUtils.cuh"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <THCUNN/common.h>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
 
 template <typename Dtype>
 __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
@@ -65,7 +65,7 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
     }
 
     output[slice][oFrame][oRow][oColumn] = max;
-    indices[slice][oFrame][oRow][oColumn] = maxIndex + TH_INDEX_BASE;
+    indices[slice][oFrame][oRow][oColumn] = maxIndex;
   }
 }
 
@@ -125,7 +125,7 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
     }
 
     output[slice][oFrame][oRow][oColumn] = max;
-    indices[slice][oFrame][oRow][oColumn] = maxIndex + TH_INDEX_BASE;
+    indices[slice][oFrame][oRow][oColumn] = maxIndex;
   }
 }
 
@@ -147,7 +147,7 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateGradInput(
 
   if (oRow < gradOutput.getSize(2) && oColumn < gradOutput.getSize(3))
   {
-    int maxIndex = indices[slice][oFrame][oRow][oColumn] - TH_INDEX_BASE;
+    int maxIndex = indices[slice][oFrame][oRow][oColumn];
     if (maxIndex != -1) {
       atomicAdd(&gradInputData[slice * inputT * inputH * inputW + maxIndex],
                 gradOutput[slice][oFrame][oRow][oColumn]);
@@ -155,5 +155,5 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateGradInput(
   }
 }
 
-#include "generic/VolumetricDilatedMaxPooling.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/VolumetricDilatedMaxPooling.cu>
+#include <THC/THCGenerateFloatTypes.h>

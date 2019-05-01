@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/ELU.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/ELU.cu"
 #else
 
 #include <THCUNN/common.h>

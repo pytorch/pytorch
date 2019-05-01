@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/Tensor.h"
-#include "c10/util/Exception.h"
+#include <ATen/Tensor.h>
+#include <c10/util/Exception.h>
 
 #include <functional>
 #include <sstream>
@@ -9,12 +9,12 @@
 
 namespace at {
 
-CAFFE2_API std::vector<int64_t> infer_size(IntList a, IntList b);
+CAFFE2_API std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b);
 CAFFE2_API std::tuple<std::vector<int64_t>, std::vector<int64_t>>
 inferExpandGeometry(
-    IntList tensor_sizes,
-    IntList tensor_strides,
-    IntList sizes);
+    IntArrayRef tensor_sizes,
+    IntArrayRef tensor_strides,
+    IntArrayRef sizes);
 
 // avoid copy-construction of Tensor by using a reference_wrapper.
 inline void check_defined(std::initializer_list<std::reference_wrapper<const Tensor>> tensors, const char *api_name) {
@@ -93,7 +93,7 @@ inline std::tuple<Tensor, Tensor, Tensor> expand_outplace(const Tensor &to_expan
   return expand_outplace(to_expand1, to_expand2, to_expand3);
 }
 
-inline std::tuple<Tensor> expand_size(const Tensor &to_expand, IntList sizes) {
+inline std::tuple<Tensor> expand_size(const Tensor &to_expand, IntArrayRef sizes) {
   if(to_expand.sizes().equals(sizes)) {
     return std::make_tuple(to_expand);
   }
@@ -101,7 +101,7 @@ inline std::tuple<Tensor> expand_size(const Tensor &to_expand, IntList sizes) {
   return std::make_tuple(to_expand.expand(sizes, /*implicit=*/true)); // see [expand implicit]
 }
 
-inline std::tuple<Tensor> expand_size(const Tensor &to_expand, IntList sizes, const char *api_name) {
+inline std::tuple<Tensor> expand_size(const Tensor &to_expand, IntArrayRef sizes, const char *api_name) {
   check_defined({to_expand}, api_name);
   return expand_size(to_expand, sizes);
 }
@@ -136,30 +136,35 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
 
 // Sums `tensor` repeatedly to produce a tensor of shape `shape`.
 // Precondition: is_expandable_to(shape, tensor.sizes()) must be true
-static inline Tensor sum_to(Tensor tensor, IntList shape) {
+static inline Tensor sum_to(Tensor tensor, const IntArrayRef shape) {
   if (shape.size() == 0) {
     return tensor.sum();
   }
-  Tensor result = tensor;
-  while (result.dim() > (int64_t)shape.size()) {
-    result = result.sum(0, false);
+  c10::SmallVector<int64_t, 8> reduce_dims;
+  const at::IntArrayRef sizes = tensor.sizes();
+  const int64_t leading_dims = sizes.size() - shape.size();
+  for (int64_t i = 0; i < leading_dims; ++i) {
+    reduce_dims.push_back(i);
   }
-  for (int64_t i = 0; i < result.dim(); ++i) {
-    if (shape[i] == 1 && result.sizes()[i] > 1) {
-      result = result.sum(i, true);
+  for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
+    if (shape[i - leading_dims] == 1 && sizes[i] != 1) {
+      reduce_dims.push_back(i);
     }
   }
-  return result;
+  if (!reduce_dims.empty()) {
+    tensor = tensor.sum(reduce_dims, /*keepdim=*/true);
+  }
+  return leading_dims > 0 ? tensor.view(shape) : tensor;
 }
 
 // True if `shape` can be broadcasted to `desired`
-static inline bool is_expandable_to(IntList shape, IntList desired) {
-  int ndim = shape.size();
-  int target_dim = desired.size();
+static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
+  size_t ndim = shape.size();
+  size_t target_dim = desired.size();
   if (ndim > target_dim) {
     return false;
   }
-  for (int i = 0; i < ndim; i++) {
+  for (size_t i = 0; i < ndim; i++) {
     int64_t size = shape[ndim - i - 1];
     int64_t target = desired[target_dim - i - 1];
     if (size != target && size != 1) {

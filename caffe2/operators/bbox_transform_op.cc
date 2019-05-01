@@ -22,12 +22,6 @@ Transform proposal bounding boxes to target bounding box using bounding box
         "Set to false to match the detectron code, set to true for keypoint"
         " models and for backward compatibility")
     .Arg(
-        "correct_transform_coords",
-        "bool (default false), Correct bounding box transform coordates,"
-        " see bbox_transform() in boxes.py "
-        "Set to true to match the detectron code, set to false for backward"
-        " compatibility")
-    .Arg(
         "rotated",
         "bool (default false). If true, then boxes (rois and deltas) include "
         "angle info to handle rotation. The format will be "
@@ -91,7 +85,6 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   const auto& roi_in = Input(0);
   const auto& delta_in = Input(1);
   const auto& iminfo_in = Input(2);
-  auto* box_out = Output(0);
 
   const int box_dim = rotated_ ? 5 : 4;
   const int N = roi_in.dim32(0);
@@ -128,11 +121,11 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
     }
   }
 
-  CAFFE_ENFORCE_EQ(iminfo_in.sizes(), (at::IntList{batch_size, 3}));
+  CAFFE_ENFORCE_EQ(iminfo_in.sizes(), (at::IntArrayRef{batch_size, 3}));
   Eigen::Map<const ERArrXXf> iminfo(
       iminfo_in.data<float>(), iminfo_in.size(0), iminfo_in.size(1));
 
-  box_out->ResizeLike(delta_in);
+  auto* box_out = Output(0, delta_in.sizes(), at::dtype<float>());
   Eigen::Map<ERArrXXf> new_boxes(
       box_out->template mutable_data<float>(),
       box_out->dim32(0),
@@ -161,7 +154,6 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
           cur_deltas,
           weights_,
           utils::BBOX_XFORM_CLIP_DEFAULT,
-          correct_transform_coords_,
           angle_bound_on_,
           angle_bound_lo_,
           angle_bound_hi_);
@@ -188,3 +180,25 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
 }
 
 } // namespace caffe2
+
+using BBoxTransformOpFloatCPU =
+    caffe2::BBoxTransformOp<float, caffe2::CPUContext>;
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    BBoxTransform,
+    "_caffe2::BBoxTransform("
+      "Tensor rois, "
+      "Tensor deltas, "
+      "Tensor im_info, "
+      "float[] weights, "
+      "bool apply_scale, "
+      "bool rotated, "
+      "bool angle_bound_on, "
+      "int angle_bound_lo, "
+      "int angle_bound_hi, "
+      "float clip_angle_thresh"
+    ") -> ("
+      "Tensor output_0, "
+      "Tensor output_1"
+    ")",
+    BBoxTransformOpFloatCPU);

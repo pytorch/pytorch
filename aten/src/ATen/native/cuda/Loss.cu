@@ -1,7 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Dispatch.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 
 namespace {
@@ -28,7 +28,7 @@ namespace at { namespace native {
 Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
   auto grad_input = at::zeros_like(input);
   Tensor grad_expand = grad.expand_as(input);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "kl_div_backward", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "kl_div_backward_cuda", [&]() {
     kl_div_backward_kernel<scalar_t>(grad_input, target, grad_expand);
   });
   if (reduction == Reduction::Mean) {

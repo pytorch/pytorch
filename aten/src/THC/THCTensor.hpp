@@ -3,10 +3,10 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THCTensor.h"
-#include "THTensor.hpp"
-#include "THCStorage.hpp"
-#include "THCGeneral.hpp"
+#include <THC/THCTensor.h>
+#include <TH/THTensor.hpp>
+#include <THC/THCStorage.hpp>
+#include <THC/THCGeneral.hpp>
 
 #include <atomic>
 #include <ATen/ATen.h>
@@ -23,12 +23,12 @@ THC_API int64_t THCTensor_strideLegacyNoScalars(THCState *state, const THCTensor
 
 THC_API THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta);
 
-THC_API void THCTensor_resize(THCState *state, THCTensor *tensor, at::IntList size, at::IntList stride);
+THC_API void THCTensor_resize(THCState *state, THCTensor *tensor, at::IntArrayRef size, at::IntArrayRef stride);
 THC_API void THCTensor_resizeNd(THCState *state, THCTensor *tensor, int nDimension, const int64_t *size, const int64_t *stride);
 THC_API void THCTensor_resizeAs(THCState *state, THCTensor *tensor, THCTensor *src);
 
 THC_API void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src);
-THC_API void THCTensor_setStorage(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_);
+THC_API void THCTensor_setStorage(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_);
 THC_API void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride);
 
 THC_API void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int dimension_);
@@ -54,5 +54,8 @@ THC_API void THCTensor_preserveReduceDimSemantics(THCState *state, THCTensor *te
 /* true otherwise.                                             */
 THC_API bool THCTensor_maybeOverlappingIndices(THCState* state, const THCTensor* t);
 
-#include "generic/THCTensor.hpp"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensor.hpp>
+#include <THC/THCGenerateAllTypes.h>
+
+#include <THC/generic/THCTensor.hpp>
+#include <THC/THCGenerateBoolType.h>

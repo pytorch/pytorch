@@ -1,4 +1,4 @@
-#include "THCCachingHostAllocator.h"
+#include <THC/THCCachingHostAllocator.h>
 
 
 #include <cuda_runtime_api.h>

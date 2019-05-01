@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ATen/ATen.h"
-#include "THC/THCTensor.hpp"
+#include <ATen/ATen.h>
+#include <THC/THCTensor.hpp>
 
-#include "ATen/cuda/CUDAGuard.h"
+#include <c10/cuda/CUDAGuard.h>
 
 namespace at { namespace native {
 
@@ -27,8 +27,8 @@ static inline void maybe_resize_storage_cuda(TensorImpl* self, int64_t new_size)
 
 inline TensorImpl* resize_impl_cuda_(
     TensorImpl* self,
-    IntList size,
-    c10::optional<IntList> stride,
+    IntArrayRef size,
+    c10::optional<IntArrayRef> stride,
     bool device_guard = true) {
   if (self->sizes() == size && (!stride || self->strides() == stride)) {
     return self;
@@ -47,6 +47,10 @@ inline TensorImpl* resize_impl_cuda_(
     for (size_t dim = 0; dim < size.size(); ++dim) {
       // FIXME: Don't rely on storage_size being negative because this
       // may not be true for some edge cases.
+      if (size[dim] == 0) {
+        storage_size = 0;
+        break;
+      }
       storage_size += (size[dim] - 1) * stride.value()[dim];
     }
   } else {

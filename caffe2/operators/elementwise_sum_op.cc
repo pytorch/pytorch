@@ -2,17 +2,6 @@
 
 namespace caffe2 {
 
-namespace {
-OpSchema::Cost CostInferenceForSum(
-    const OperatorDef& def,
-    const vector<TensorShape>& in) {
-  struct OpSchema::Cost cost = PointwiseCostInference<1>(def, in);
-  cost.flops *= (in.size() - 1);
-  cost.params_bytes = 0;
-  return cost;
-}
-} // namespace
-
 REGISTER_CPU_OPERATOR(Sum, SumOp<CPUContext>);
 
 OPERATOR_SCHEMA(Sum)

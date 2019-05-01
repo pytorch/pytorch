@@ -49,6 +49,9 @@ class ProcessGroup {
     // Returns exception if isSuccess() returned false.
     virtual std::exception_ptr exception() const;
 
+    // Returns source rank if this objects represents a recv-from-any.
+    virtual int sourceRank() const;
+
     // Ensures that operations on the output tensors that are invoked
     // after this function returns are correctly sequenced after the
     // asynchronous completion of this work.
@@ -124,6 +127,11 @@ class ProcessGroup {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) = 0;
 
+  virtual std::shared_ptr<ProcessGroup::Work> reduce_scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) = 0;
+
   virtual std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
@@ -136,13 +144,10 @@ class ProcessGroup {
 
   virtual std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
-      int* srcRank,
       int tag) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) = 0;
-
-  virtual std::unordered_map<int, int> getGroupRank() = 0;
 
  protected:
   const int rank_;

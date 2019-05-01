@@ -2,11 +2,11 @@
 
 // Provides conversions between Python tensor objects and at::Tensor.
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
 #include <ATen/Device.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/Backend.h>
+#include <c10/core/Backend.h>
 
 #include <memory>
 #include <string>
@@ -38,5 +38,4 @@ bool isStorage(PyObject* obj);
 THPDtype* getDtype(at::ScalarType scalarType);
 THPLayout* getLayout(at::Backend backend);
 at::Type& getVariableType(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device);
-at::Device::Type getDeviceType(const at::Type& type);
 }  // namespace torch

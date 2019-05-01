@@ -13,7 +13,6 @@
 #include <c10/util/typeid.h>
 #include "caffe2/proto/caffe2_pb.h"
 
-#include <ATen/core/ATenCoreTest.h>
 #include <c10/util/ArrayRef.h>
 
 C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
@@ -105,7 +104,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
           static_cast<const void*>(src),
           static_cast<void*>(dst));
     } else {
-      for (int i = 0; i < n; ++i) {
+      for (size_t i = 0; i < n; ++i) {
         dst[i] = src[i];
       }
     }

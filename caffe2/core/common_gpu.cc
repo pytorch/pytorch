@@ -10,18 +10,6 @@
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 
-C10_DEFINE_bool(
-    caffe2_cuda_full_device_control,
-    false,
-    "If true, assume all the cudaSetDevice and cudaGetDevice calls will be "
-    "controlled by Caffe2, and non-Caffe2 code will ensure that the entry and "
-    "exit point has the same cuda device. Under the hood, Caffe2 will use "
-    "thread local variables to cache the device, in order to speed up set and "
-    "get device calls. This is an experimental feature that may have non "
-    "trivial side effects, so use it with care and only enable it if you are "
-    "absolutely sure. Also, this flag should not be changed after the program "
-    "initializes.");
-
 namespace caffe2 {
 
 int NumCudaDevices() {
@@ -89,8 +77,6 @@ int NumCudaDevices() {
 
 namespace {
 int gDefaultGPUID = 0;
-// Only used when FLAGS_caffe2_cuda_full_device_control is set true.
-thread_local int gCurrentDevice = -1;
 }  // namespace
 
 void SetDefaultGPUID(const int deviceid) {
@@ -108,27 +94,13 @@ void SetDefaultGPUID(const int deviceid) {
 int GetDefaultGPUID() { return gDefaultGPUID; }
 
 int CaffeCudaGetDevice() {
-  if (FLAGS_caffe2_cuda_full_device_control) {
-    if (gCurrentDevice < 0) {
-      CUDA_ENFORCE(cudaGetDevice(&gCurrentDevice));
-    }
-    return gCurrentDevice;
-  } else {
-    int gpu_id = 0;
-    CUDA_ENFORCE(cudaGetDevice(&gpu_id));
-    return gpu_id;
-  }
+  int gpu_id = 0;
+  CUDA_ENFORCE(cudaGetDevice(&gpu_id));
+  return gpu_id;
 }
 
 void CaffeCudaSetDevice(const int id) {
-  if (FLAGS_caffe2_cuda_full_device_control) {
-    if (gCurrentDevice != id) {
-      CUDA_ENFORCE(cudaSetDevice(id));
-    }
-    gCurrentDevice = id;
-  } else {
-    CUDA_ENFORCE(cudaSetDevice(id));
-  }
+  CUDA_ENFORCE(cudaSetDevice(id));
 }
 
 int GetGPUIDForPointer(const void* ptr) {

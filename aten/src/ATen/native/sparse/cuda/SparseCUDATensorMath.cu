@@ -5,8 +5,9 @@
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include "ATen/WrapDimUtilsMulti.h"
+#include <ATen/WrapDimUtilsMulti.h>
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
@@ -55,7 +56,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   AT_CHECK(sparse_.is_cuda(), "addmm: expected 'mat1' to be CUDA, but got CPU");
   AT_CHECK(dense.is_cuda(), "addmm: expected 'mat2' to be CUDA, but got CPU");
 
-  AT_CHECK(check_device({sparse_, r_, t, dense}));
+  AT_CHECK(cuda::check_device({sparse_, r_, t, dense}));
 
   AT_CHECK(dense.dim() == 2, "addmm: 2D tensor expected, got ", dense.dim(), "D tensor");
   AT_CHECK(sparse_.sparse_dim() == 2, "addmm: expected first two dims to be sparse (indices has size 2 at first dim), but got ", sparse_.sparse_dim(), " spase dims");
@@ -90,7 +91,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   // No half support, so we don't have to use CUDATypeConversion
   Tensor r__;
   AT_DISPATCH_FLOATING_TYPES(
-      values.type(), "addmm_sparse_cuda", [&] {
+      values.scalar_type(), "addmm_sparse_cuda", [&] {
         scalar_t cast_beta = beta.to<scalar_t>();
         scalar_t cast_alpha = alpha.to<scalar_t>();
         if (cast_beta == 0) {
@@ -183,7 +184,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
   AT_CHECK(r_.is_cuda(), "hspmm: expected 'out' to be CUDA, but got CPU");
   AT_CHECK(dense.is_cuda(), "hspmm: expected 'mat2' to be CUDA, but got CPU");
 
-  AT_CHECK(check_device({r_, sparse_, dense}));
+  AT_CHECK(cuda::check_device({r_, sparse_, dense}));
 
   AT_CHECK(sparse_.sparse_dim() == 2,
       "hspmm: Argument #2: 2D tensor expected, got ", sparse_.sparse_dim(), "D tensor");
@@ -254,7 +255,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
   AT_CHECK(sparse.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
   AT_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
 
-  AT_CHECK(check_device({sparse, r_, dense}));
+  AT_CHECK(cuda::check_device({sparse, r_, dense}));
 
   AT_CHECK(dense.sizes().equals(sparse.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
     dense.sizes(), " while other has size ", sparse.sizes(), " (FYI: dense-sparse addition does not currently support broadcasting)");
@@ -294,8 +295,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     if (sparse.dense_dim() == 0) {
       AT_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
-      AT_DISPATCH_ALL_TYPES_AND_HALF(
-          values.type(), "add_out_dense_sparse_cuda", [&] {
+      AT_DISPATCH_ALL_TYPES_AND(
+        at::ScalarType::Half, values.scalar_type(), "add_out_dense_sparse_cuda", [&] {
             apply::sparseElementwiseKernelScalar<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
               <<<grid, block, 0, stream>>>(
                 TensorCAddOp<scalar_t>(value.to<scalar_t>()),
@@ -308,8 +309,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
       // sparseElementwiseKernel needs values to be contiguous too
       values = values.contiguous();
 
-      AT_DISPATCH_ALL_TYPES_AND_HALF(
-          values.type(), "add_out_dense_sparse_cuda", [&] {
+      AT_DISPATCH_ALL_TYPES_AND(
+        at::ScalarType::Half, values.scalar_type(), "add_out_dense_sparse_cuda", [&] {
             apply::sparseElementwiseKernel<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
               <<<grid, block, 0, stream>>>(
                 TensorCAddOp<scalar_t>(value.to<scalar_t>()),
@@ -322,8 +323,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
 
     // FIXME: at some point we can wrap the scale into indexAdd
     // NB: Purposely not inplace!
-    AT_DISPATCH_ALL_TYPES_AND_HALF(
-        values.type(), "add_out_dense_sparse_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(
+      at::ScalarType::Half, values.scalar_type(), "add_out_dense_sparse_cuda", [&] {
           if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
             values = values.mul(value);
           }
@@ -356,7 +357,7 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   AT_CHECK(src.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
   AT_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
 
-  AT_CHECK(check_device({r_, t, src}));
+  AT_CHECK(cuda::check_device({r_, t, src}));
   AT_CHECK(t.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but ", t.sizes(), " != ", src.sizes());
 
   if (src._nnz() == 0) {
@@ -377,8 +378,8 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   LongTensor s_indices_ = src._indices();
   Tensor s_values_ = src._values();
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
-      s_values_.type(), "add_out_sparse_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(
+    at::ScalarType::Half, s_values_.scalar_type(), "add_out_sparse_cuda", [&] {
         if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
           s_values_ = s_values_.mul(value);
         }
@@ -414,7 +415,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   AT_ASSERT(t_.is_cuda()); // dispatch argument
   AT_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
   AT_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
-  AT_CHECK(check_device({r_, t_, src_}));
+  AT_CHECK(cuda::check_device({r_, t_, src_}));
   AT_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
 
   SparseTensor t = t_.coalesce();
@@ -447,8 +448,8 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   AT_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
 
   LongTensor resultNnz = at::empty({1}, CUDA(kLong));
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
-      t_values_.type(), "mul_out_sparse_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(
+    at::ScalarType::Half, t_values_.scalar_type(), "mul_out_sparse_cuda", [&] {
         apply::valueSparseIntersectionKernel<TensorMulOp<scalar_t>, uint64_t, scalar_t>
           <<<grid, block, 0, stream>>>(
             TensorMulOp<scalar_t>(),
@@ -480,6 +481,9 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
 // see NOTE [ sparse.sum() backward ]
 // --------------------------------------------------------------------
 template <typename scalar_t>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__ void _sparse_sum_backward_cuda_kernel(
   int64_t total_threads,
   const TensorInfo<int64_t, int64_t> grad_indices_ti,
@@ -514,7 +518,7 @@ __global__ void _sparse_sum_backward_cuda_kernel(
   }
 }
 
-Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_, IntList dims_to_sum) {
+Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_, IntArrayRef dims_to_sum) {
   AT_CHECK(grad_.is_cuda(), "_sparse_sum_backward_cuda: expected 'grad_' to be CUDA tensor, but got CPU tensor");
   AT_CHECK(input_.is_cuda(), "_sparse_sum_backward_cuda: expected 'input_' to be CUDA tensor, but got CPU tensor");
 
@@ -526,7 +530,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
 
   LongTensor input_indices = input._indices();
   Tensor input_values = input._values();
-  IntList input_sizes = input.sizes();
+  IntArrayRef input_sizes = input.sizes();
   const int64_t input_sparse_dim = input.sparse_dim();
   const int64_t input_dense_dim = input.dense_dim();
   const int64_t input_nnz = input._nnz();
@@ -619,7 +623,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       auto input_indices_ti = getTensorInfo<int64_t, int64_t>(input_indices_1D);
       auto input_indices_pos_ti = getTensorInfo<int64_t, int64_t>(input_indices_pos);
 
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_values.type(), "_sparse_sum_backward_cuda", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_values.scalar_type(), "_sparse_sum_backward_cuda", [&] {
         auto grad_values_expand_ti = getTensorInfo<scalar_t, int64_t>(grad_values_expand);
         auto grad_input_values_ti = getTensorInfo<scalar_t, int64_t>(grad_input_values);
 
