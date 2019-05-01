@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/script/final_returns.h>
@@ -574,6 +575,8 @@ struct to_ir {
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(to_clean);
     ConstantPooling(to_clean);
+    // For jitter
+    CanonicalizeOutputs(to_clean);
   }
 
   FunctionSchema emitDef(const Def& def, const Self& self, Block* block) {
@@ -1312,8 +1315,7 @@ struct to_ir {
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
     WithInsertPoint guard(n);
 
-    if (!max_trip_count_val)
-    {
+    if (!max_trip_count_val) {
       max_trip_count_val = materializeConstant(
           std::numeric_limits<int64_t>::max(),
           *graph,
@@ -1335,8 +1337,7 @@ struct to_ir {
 
       // current_element_assigner uses an induction variable
       // to set a current element
-      if (current_element_assigner)
-      {
+      if (current_element_assigner) {
         current_element_assigner(trip_count, environment_stack);
       }
 
@@ -1384,7 +1385,8 @@ struct to_ir {
     }
     auto max_trip_count_val = ensureInt(range, emitExpr(args[0]));
     const auto& ident_name = target.name();
-    auto assigner = [ident_name, range](Value* index, std::shared_ptr<Environment> env) {
+    auto assigner = [ident_name, range](
+                        Value* index, std::shared_ptr<Environment> env) {
       env->setVar(range, ident_name, index);
     };
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
@@ -2802,7 +2804,8 @@ struct to_ir {
 struct MethodResolver : public Resolver {
   explicit MethodResolver(
       const Resolver* otherResolver,
-      const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable)
+      const std::unordered_map<std::string, std::shared_ptr<Function>>&
+          functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
   std::shared_ptr<SugaredValue> resolveValue(
@@ -2822,7 +2825,8 @@ struct MethodResolver : public Resolver {
 
  private:
   const Resolver* otherResolver_;
-  const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable_;
+  const std::unordered_map<std::string, std::shared_ptr<Function>>&
+      functionTable_;
 };
 
 void CompilationUnit::define(
@@ -2885,8 +2889,7 @@ void lambdaLiftFork(Node* fork_node) {
   auto env = [&](Value* v) -> Value* {
     if (!uncaptures_map.count(v)) {
       // Capture values for both graphs
-      uncaptures_map[v] =
-          forked_graph->addInput()->copyMetadata(v);
+      uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
       fork_node->addInput(v);
     }
     return uncaptures_map[v];
@@ -2898,7 +2901,6 @@ void lambdaLiftFork(Node* fork_node) {
   fork_node->g_(attr::Subgraph, forked_graph);
   fork_node->eraseBlock(0);
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch
