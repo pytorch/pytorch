@@ -36,6 +36,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
 
 #include <ATen/mkldnn/Runtime.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/MKLDNNConversions.h>
 #include <ATen/native/mkldnn/Utils.h>
 
 using namespace mkldnn;
@@ -119,9 +120,10 @@ at::Tensor mkldnn_convolution(
       mkldnn_bias = bias;
     }
   } else {
-    mkldnn_input = dense_to_mkldnn(input);
+    mkldnn_input = at::native::mkldnn_reorder_conv2d_input(
+        input.contiguous(), weight, padding, stride, dilation, groups);
     mkldnn_weight = at::native::mkldnn_reorder_conv2d_weight(
-        weight, padding, stride, dilation, groups);
+        weight.contiguous(), padding, stride, dilation, groups);
     if (bias.defined()) {
       mkldnn_bias = dense_to_mkldnn(bias);
     }

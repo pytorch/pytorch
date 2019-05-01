@@ -1,8 +1,6 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Config.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <ATen/native/mkldnn/MKLDNNConversions.h>
 
 namespace at { namespace native {
 
@@ -34,12 +32,45 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   return mkldnn_tensor;
 }
 
-// Mkldnn tensor has special non-public format for conv2d weights
-// (dense_to_mkldnn only converts dense tensor to mkldnn tensor with
-// public format). Ideep conv kernel will do implicit reorder if the
-// weight is not already in this optimized format. By the time I'm
-// writing this note, we are seeing ~20% perf cost of doing the
-// on-the-fly reorder.
+Tensor mkldnn_reorder_conv2d_input(
+    const Tensor& self,
+    const Tensor& weight,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+  AT_ASSERTM(self.type_id() == CPUTensorId(),
+             "dense_to_mkldnn expects dense CPU tensor input");
+  AT_ASSERTM(self.scalar_type() == ScalarType::Float,
+             "mkldnn_reorder_conv2d_input expects float tensor input");
+
+  auto stride_vec = expand_param_if_needed(stride, "stride", 2);
+  auto padding_vec = expand_param_if_needed(padding, "padding", 2);
+  auto dilation_vec = expand_param_if_needed(dilation, "dilation", 2);
+
+  ideep::tensor::descriptor desc =
+    ideep::convolution_forward::expected_src_descriptor(
+        {weight.sizes().cbegin(), weight.sizes().cend()},
+        ideep::tensor::data_type::f32,
+        {stride_vec.cbegin(), stride_vec.cend()},
+        {padding_vec.cbegin(), padding_vec.cend()},
+        {padding_vec.cbegin(), padding_vec.cend()},
+        {dilation_vec.cbegin(), dilation_vec.cend()},
+        groups,
+        ideep::algorithm::convolution_direct,
+        ideep::prop_kind::forward,
+        ideep::tensor::data_type::f32,
+        {self.sizes().cbegin(), self.sizes().cend()});
+  ideep::tensor result(desc);
+
+  result.reorder_from(
+      result.get_dims(),
+      result.get_data_type(),
+      self.template data<float>());
+
+  return new_with_itensor_mkldnn(std::move(result), self.options());
+}
+
 Tensor mkldnn_reorder_conv2d_weight(
     const Tensor& self,
     IntArrayRef padding,
@@ -62,7 +93,8 @@ Tensor mkldnn_reorder_conv2d_weight(
         {padding_vec.cbegin(), padding_vec.cend()},
         {dilation_vec.cbegin(), dilation_vec.cend()},
         groups,
-        ideep::algorithm::convolution_direct);
+        ideep::algorithm::convolution_direct,
+        ideep::prop_kind::forward);
   ideep::tensor result(desc);
 
   if (self.is_mkldnn()) {

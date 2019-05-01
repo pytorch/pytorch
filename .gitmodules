@@ -63,7 +63,7 @@
 	url = https://github.com/zdevito/sleef
 [submodule "third_party/ideep"]
 	path = third_party/ideep
-	url = https://github.com/intel/ideep
+	url = https://github.com/bddppq/ideep
 [submodule "third_party/nccl/nccl"]
 	path = third_party/nccl/nccl
 	url = https://github.com/NVIDIA/nccl
