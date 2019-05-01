@@ -2108,13 +2108,13 @@ class TestNN(NNTestCase):
         onesTwice = onesTwice.to(device)
 
         embedding.zero_grad()
-        embedding(tensor).sum().backward()
+        embedding(tensor[0]).sum().backward()
         self.assertEqual(embedding.weight.grad._indices(), tensor)
         self.assertEqual(embedding.weight.grad._values(), ones)
 
         embedding.zero_grad()
-        embedding(tensor).sum().backward()
-        embedding(tensor).sum().backward()
+        embedding(tensor[0]).sum().backward()
+        embedding(tensor[0]).sum().backward()
         self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
         self.assertEqual(embedding.weight.grad._values(), onesTwice)
 
