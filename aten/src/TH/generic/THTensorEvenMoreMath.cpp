@@ -119,7 +119,7 @@ void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 
 void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value)
 {
-#ifdef _OPENMP
+#ifdef INTRA_OP_PARALLEL
   int64_t tensor_size = THTensor_(nElement)(tensor);
   int tensor_contig = THTensor_(isContiguous)(tensor);
   int mask_contig = THTensor_(isContiguous)(mask);
