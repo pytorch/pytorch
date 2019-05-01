@@ -172,55 +172,57 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
   if (indices.size() > (size_t)self.dim()) {
     AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
-    auto value_ = value.contiguous();
-    Tensor linearIndex, expandedValue, src;
-    int64_t nElemBefore, strideBefore, sliceSize;
-    std::vector<int64_t> inversePerm;
-    std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices);
-    bool permuted = !src.is_contiguous();
-    auto src_ = permuted ? src.contiguous() : src;
-    linearIndex = linearIndex.view(-1);
-    auto sorted_indices = at::empty_like(linearIndex);
-    auto orig_indices = at::empty_like(linearIndex);
-    using device_ptr = thrust::device_ptr<int64_t>;
-    int64_t num_indices = linearIndex.numel();
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
-  // Sort the inputs into sorted with the corresponding indices; we
-  // don't need a stable or multidimensional sort, so just use Thrust
-  // directly
-    linearIndex.div_(sliceSize);
-    {
-    sorted_indices.copy_(linearIndex);
-    auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-    auto policy = thrust::cuda::par(allocator).on(stream);
-
-    // Fill sortedOrigIndices with sequential indices
-    auto count_iter = thrust::counting_iterator<int64_t>(0);
-    auto orig_data = device_ptr(orig_indices.data<int64_t>());
-    thrust::copy(policy, count_iter, count_iter + num_indices, orig_data);
-
-    // Sort; a stable sort is not required
-    auto sorted_data = device_ptr(sorted_indices.data<int64_t>());
-    thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
-    }
-    AT_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel());
-    dim3 grid(THCCeilDiv(num_indices, (int64_t) 4), THCCeilDiv(sliceSize, (int64_t) 128), std::max<int>(1,nElemBefore));
-    dim3 block(32, 4);
-
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(value_.scalar_type(), "embedding_backward", [&] {
-    indexing_backward_kernel<<<grid, block, 0, stream>>>(
-      sorted_indices.data<int64_t>(),
-      orig_indices.data<int64_t>(),
-      value_.data<scalar_t>(),
-      src_.data<scalar_t>(),
-      num_indices,
-      sliceSize,
-      strideBefore);
-  });
-  THCudaCheck(cudaGetLastError());
-  if (permuted)
-     self.copy_(src_.permute(inversePerm));
+  auto value_ = value.contiguous();
+  Tensor linearIndex, expandedValue, src;
+  int64_t nElemBefore, strideBefore, sliceSize;
+  std::vector<int64_t> inversePerm;
+  std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices);
+  int64_t num_indices = linearIndex.numel();
+  if (num_indices > 0 && sliceSize > 0) {
+      bool permuted = !src.is_contiguous();
+      auto src_ = permuted ? src.contiguous() : src;
+      linearIndex = linearIndex.view(-1);
+      auto sorted_indices = at::empty_like(linearIndex);
+      auto orig_indices = at::empty_like(linearIndex);
+      using device_ptr = thrust::device_ptr<int64_t>;
+      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    
+    // Sort the inputs into sorted with the corresponding indices; we
+    // don't need a stable or multidimensional sort, so just use Thrust
+    // directly
+      linearIndex.div_(sliceSize);
+      {
+      sorted_indices.copy_(linearIndex);
+      auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+      auto policy = thrust::cuda::par(allocator).on(stream);
+    
+      // Fill sortedOrigIndices with sequential indices
+      auto count_iter = thrust::counting_iterator<int64_t>(0);
+      auto orig_data = device_ptr(orig_indices.data<int64_t>());
+      thrust::copy(policy, count_iter, count_iter + num_indices, orig_data);
+    
+      // Sort; a stable sort is not required
+      auto sorted_data = device_ptr(sorted_indices.data<int64_t>());
+      thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
+      }
+      AT_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel());
+      dim3 grid(THCCeilDiv(num_indices, (int64_t) 4), THCCeilDiv(sliceSize, (int64_t) 128), std::max<int>(1,nElemBefore));
+      dim3 block(32, 4);
+  
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(value_.scalar_type(), "embedding_backward", [&] {
+      indexing_backward_kernel<<<grid, block, 0, stream>>>(
+        sorted_indices.data<int64_t>(),
+        orig_indices.data<int64_t>(),
+        value_.data<scalar_t>(),
+        src_.data<scalar_t>(),
+        num_indices,
+        sliceSize,
+        strideBefore);
+      });
+      THCudaCheck(cudaGetLastError());
+      if (permuted)
+          self.copy_(src_.permute(inversePerm));
+  }
 }
 
 REGISTER_CUDA_DISPATCH(index_put_accum_stub, &index_put_accum_kernel);
