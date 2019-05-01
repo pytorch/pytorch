@@ -7,7 +7,7 @@
 #include <limits>
 #include <sstream>
 #include <type_traits>
-// For quantize_uint8
+// For quantize_val
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/ScalarType.h>
 
@@ -36,7 +36,7 @@ TEST(TestQTensor, QuantDequantAPIs) {
   auto qr_data = qr.data<qint8>();
   for (auto i = 0; i < num_elements; ++i) {
     ASSERT_EQ(
-        quantize_uint8(scale, zero_point, r_data[i]).val_, qr_data[i].val_);
+        quantize_val<qint8>(scale, zero_point, r_data[i]).val_, qr_data[i].val_);
   }
 
   // Check for correct dequantization

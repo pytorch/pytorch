@@ -243,7 +243,7 @@ CAFFE2_API QTensorImpl* get_qtensorimpl(const Tensor& self);
 
 // Quantize a float value into a uint value given scale and zero_point
 template <typename T>
-T quantize_uint(float scale, int32_t zero_point, float value) {
+T quantize_val(float scale, int32_t zero_point, float value) {
   // Internally, fbgemm::Quantize uses std::nearbyint.
   // std::nearbyint results in nearest integer value according to the current
   // rounding mode and the default rounding mode is rounds to even in half-way
@@ -303,14 +303,14 @@ Tensor quantize_naive(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_
   const float* rdata = rtensor.data<float>();
   auto qdata = qtensor.data<T>();
   for (int i = 0; i < rtensor.numel(); ++i) {
-    qdata[i] = quantize_uint<T>(scale, zero_point, rdata[i]);
+    qdata[i] = quantize_val<T>(scale, zero_point, rdata[i]);
   }
   return qtensor;
 }
 
 template <typename T>
 Tensor dequantize_naive(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point) {
-  const auto* qd = qtensor.data<typename T::underlying>();
+  const auto* qd = qtensor.data<T>();
   float* rd = rtensor.data<float>();
   for (auto i = 0; i < qtensor.numel(); ++i) {
     // We need to convert the qint8 value to float to ensure the subtraction
