@@ -472,7 +472,6 @@ class TracingCheckError(Exception):
 def _check_trace(check_inputs, func, executor_options, traced_func, check_tolerance, force_outplace, is_trace_module):
     # Note: tracing is independent of optimizations, which consume the trace
     executor_options['optimize'] = False
-    func_name = traced_func.name
     for inputs in check_inputs:
         if isinstance(inputs, torch.Tensor):
             inputs = (inputs,)
