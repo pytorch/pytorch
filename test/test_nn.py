@@ -2074,39 +2074,38 @@ class TestNN(NNTestCase):
         embedding = nn.Embedding(10, 3, sparse=True)
         self.assertEqual(embedding.weight.device.type, 'cpu')
         self.assertEqual(embedding.weight.dtype, torch.float64)
-        embedding.half()
+        embedding.to(torch.float16)
         self.assertEqual(embedding.weight.dtype, torch.float16)
         self.assertEqual(embedding.embedding_dim, 3)
         self.assertEqual(embedding.num_embeddings, 10)
 
         if torch.cuda.is_available():
-            embedding.cuda()
+            embedding.to('cuda')
             self.assertEqual(embedding.weight.device.type, 'cuda')
-            embedding.cpu()
+            embedding.to('cpu')
             self.assertEqual(embedding.weight.device.type, 'cpu')
 
     def test_embedding_sparse_backward(self):
-        self._test_embedding_backward(False)
+        self._test_embedding_backward()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_embedding_sparse_half_backward(self):
         # same as test_embedding_sparse_backward above but testing half types in
         # cuda. cpu sum not supported for half types.
-        self._test_embedding_backward(True)
+        self._test_embedding_backward('cuda', torch.float16)
 
-    def _test_embedding_backward(self, half_cuda=True):
+    def _test_embedding_backward(self, device='cpu', dtype=torch.float64):
         embedding = nn.Embedding(10, 3, sparse=True)
         tensor = torch.tensor([[7, 1, 3]])
         ones = torch.tensor(1.).expand(3, 3)
-        tensorTwice = torch.tensor([[7, 1, 3, 7, 1, 3]])
+        tensorTwice = tensor.repeat(1, 2)
         onesTwice = torch.tensor(1.).expand(6, 3)
 
-        if half_cuda:
-            embedding = embedding.half().cuda()
-            tensor = tensor.cuda()
-            ones = ones.cuda().half()
-            tensorTwice = tensorTwice.cuda()
-            onesTwice = onesTwice.cuda()
+        embedding = embedding.to(dtype=dtype).to(device)
+        tensor = tensor.to(device)
+        ones = ones.to(device)
+        tensorTwice = tensorTwice.to(device)
+        onesTwice = torch.cat((ones, ones))
 
         embedding.zero_grad()
         embedding(tensor).sum().backward()
@@ -2122,7 +2121,7 @@ class TestNN(NNTestCase):
         embedding.zero_grad()
         embedding(tensor[0]).sum().backward()
         tensor[0, 0] = 8
-        embedding(tensor).sum().backward()
+        embedding(tensor[0]).sum().backward()
         tensorTwice[0, 3] = 8
         self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
         self.assertEqual(embedding.weight.grad._values(), onesTwice)
