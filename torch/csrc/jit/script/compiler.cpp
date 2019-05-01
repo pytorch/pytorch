@@ -413,7 +413,8 @@ struct Environment {
     }
 
     if (!retval) {
-      if (auto class_type = ClassType::get(ident)) {
+      if (auto type = resolver->resolveType(ident)) {
+        const auto class_type = type->expect<ClassType>();
         retval = std::make_shared<script::ClassValue>(class_type);
       }
     }
@@ -2112,8 +2113,21 @@ struct to_ir {
       if (apply.inputs().size() != 1) {
         throw ErrorReport(loc) << "Only one argument to __new__ allowed";
       }
-      return classNew->createObject(
-          apply.range(), method, Var(apply.inputs()[0]).name().name());
+      auto arg = emitSugaredExpr(apply.inputs()[0], 1);
+      auto class_arg = dynamic_cast<ClassValue*>(arg.get());
+      if (!class_arg) {
+        throw ErrorReport(loc)
+            << "Expected class value as argument to __new__, got "
+            << arg->kind() << " instead";
+      }
+      if (class_arg->type_ != classNew->type_) {
+        throw ErrorReport(loc) << "Argument to __new__() must match the class "
+                               << "you are calling __new__() on. "
+                               << "Got: " << class_arg->type_->str()
+                               << ", expected: " << classNew->type_->str();
+      }
+
+      return classNew->createObject(apply.range(), method);
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());

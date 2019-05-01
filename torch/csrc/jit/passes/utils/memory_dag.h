@@ -6,6 +6,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 namespace torch {
 namespace jit {
 
@@ -30,17 +32,17 @@ struct Value;
 class MemoryDAG {
  public:
   // Make `from` point at `to`.
-  void makePointerTo(Element* from, Element* to);
+  TORCH_API void makePointerTo(Element* from, Element* to);
 
   void addToContainedElements(Element* contained, Element* container);
 
   // Make a fresh element (i.e. an element that doesn't point to anything) and
   // return it.
-  Element* makeFreshValue(const Value* v);
+  TORCH_API Element* makeFreshValue(const Value* v);
 
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Element* a, const Element* b) const;
-  bool mayAlias(Element* a, Element* b) const;
+  TORCH_API bool mayAlias(Element* a, Element* b) const;
 
   // Does a hold reference to any memory that is stored in elem, or vice versa?
   bool mayContainAlias(const Element* a, const Element* b) const;
@@ -124,7 +126,7 @@ struct Element {
   std::unordered_set<Element*> contained_elements;
 
   // Return the unique memory locations that `Element` might represent.
-  std::unordered_set<const Element*> getMemoryLocations() const;
+  TORCH_API std::unordered_set<const Element*> getMemoryLocations() const;
   // We do path compression to make repeated memory location queries faster.
   // An empty cache means it is invalidated (it can never be empty otherwise,
   // since every element must point to at least one memory location).
