@@ -520,6 +520,15 @@ class TestOperators(TestCase):
         x = torch.randn(6, 10, requires_grad=True)
         self.assertONNX(lambda x: torch.ones_like(x), x)
 
+    def test_arange(self):
+        class MyModule(Module):
+            def forward(self, x):
+                result = torch.arange(x.shape[-1])
+                return result
+
+        x = torch.ones(3, 4)
+        self.assertONNX(MyModule(), x)
+
     def test_expand(self):
         x = torch.randn(6, 1, requires_grad=True)
         self.assertONNX(lambda x: x.expand(4, 6, 2), x)
