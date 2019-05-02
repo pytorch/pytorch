@@ -6,6 +6,18 @@
 #include <exception>
 
 namespace at {
+namespace internal {
+// This parameter is heuristically chosen to determine the minimum number of
+// work that warrants paralellism. For example, when summing an array, it is
+// deemed inefficient to parallelise over arrays shorter than 32768. Further,
+// no parallel algorithm (such as parallel_reduce) should split work into
+// smaller than GRAIN_SIZE chunks.
+constexpr int64_t GRAIN_SIZE = 32768;
+} // namespace internal
+
+inline int64_t divup(int64_t x, int64_t y) {
+  return (x + y - 1) / y;
+}
 
 // Called during new thread initialization
 CAFFE2_API void init_num_threads();
