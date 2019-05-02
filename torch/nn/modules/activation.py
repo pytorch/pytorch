@@ -691,6 +691,9 @@ class MultiheadAttention(Module):
     Args:
         embed_dim: total dimension of the model
         num_heads: parallel attention layers, or heads
+        add_bias_kv: add bias to the key and value sequences at dim=0.
+        add_zero_attn: add a new batch of zeros to the key and 
+                       value sequences at dim=1.
 
     Examples::
 
@@ -750,10 +753,11 @@ class MultiheadAttention(Module):
             incremental_state: if provided, previous time steps are cashed
             need_weights: output attn_output_weights
             static_kv: key and value are static
-            attn_mask: if provided, the values are added to attn_output_weights.         
-                 For exampel, adding -inf and passing softmax function later 
-                 will filter out the original attn_output_weights values.    
-                 Adding zeros to attn_output_weights changes nothing.
+            attn_mask: mask to avoid attn to learn from certain positions.
+            if provided, the values are added to attn_output_weights.         
+            For exampel, adding -inf and passing softmax function later 
+            will filter out the original attn_output_weights values. Adding 
+            zeros to attn_output_weights changes nothing.
 
         Outputs of forward function
             attn_output: [target length, batch size, embed dim]
