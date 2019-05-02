@@ -151,7 +151,7 @@ net models. In particular, TorchScript supports:
 Unlike Python, each variable in TorchScript function must have a single static type.
 This makes it easier to optimize TorchScript functions.
 
-Example::
+Example (a type mismatch)::
 
     @torch.jit.script
     def an_error(x):
@@ -201,35 +201,34 @@ Example::
 
         @torch.jit.script_method
         def forward(self, x):
-            # type: (Tensor) -> Tuple[List[Tuple[Tensor, Tensor]], Dict[int, Tensor]]
+            # type: (Tensor) -> Tuple[List[Tuple[int, float]], Dict[str, int]]
 
-            # This annotates the list to be a `List[Tuple[Tensor, Tensor]]`
-            list_of_tuple = torch.jit.annotate(List[Tuple[Tensor, Tensor]], [])
+            # This annotates the list to be a `List[Tuple[int, float]]`
+            my_list = torch.jit.annotate(List[Tuple[int, float]], [])
             for i in range(10):
-                list_of_tuple.append((x, x))
+                my_list.append((x, x))
 
-            # This annotates the list to be a `Dict[int, Tensor]`
-            int_tensor_dict = torch.jit.annotate(Dict[int, Tensor], {})
-            return list_of_tuple, int_tensor_dict
+            my_dict = torch.jit.annotate(Dict[str, int], {})
+            return my_list, my_dict
 
 
 Optional Type Refinement
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-TorchScript will refine the type of a variable of type Optional[T] when
-a comparison to None is made inside the conditional of an if statement.
-The compiler can reason about multiple None checks that are combined with
-AND, OR, or NOT. Refinement will also occur for else blocks of if statements
+TorchScript will refine the type of a variable of type ``Optional[T]`` when
+a comparison to ``None`` is made inside the conditional of an if-statement.
+The compiler can reason about multiple ``None`` checks that are combined with
+``and``, ``or``, and ``not``. Refinement will also occur for else blocks of if-statements
 that are not explicitly written.
 
 The expression must be emitted within the conditional; assigning
-a None check to a variable and using it in the conditional will not refine types.
+a ``None`` check to a variable and using it in the conditional will not refine types.
 
 
 Example::
 
   @torch.jit.script
-  def opt_unwrap(x, y, z):
+  def optional_unwrap(x, y, z):
     # type: (Optional[int], Optional[int], Optional[int]) -> int
     if x is None:
       x = 1
@@ -238,6 +237,66 @@ Example::
     if y is not None and z is not None:
       x = y + z
     return x
+
+
+User Defined Types
+^^^^^^^^^^^^^^^^^^^^^^^^
+Python classes can be used in TorchScript if they are annotated with ``@torch.jit.script``,
+similar to how you would declare a TorchScript function: ::
+
+    @torch.jit.script
+    class Foo:
+      def __init__(self, x, y)
+        self.x = x
+
+      def aug_add_x(self, inc):
+        self.x += inc
+
+
+This subset is restricted:
+
+* All functions must be valid TorchScript functions (including ``__init__()``)
+* Classes must be new-style classes, as we use ``__new__()`` to construct them with pybind11
+* TorchScript classes are statically typed. Members are declared by assigning to
+  self in the ``__init__()`` method
+
+    For example, assigning outside of the ``__init__()`` method: ::
+
+        @torch.jit.script
+        class Foo:
+          def assign_x(self):
+            self.x = torch.rand(2, 3)
+
+    Will result in: ::
+
+        RuntimeError:
+        Tried to set nonexistent attribute: x. Did you forget to initialize it in __init__()?:
+        def assign_x(self):
+          self.x = torch.rand(2, 3)
+          ~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+
+* No expressions except method definitions are allowed in the body of the class
+* No support for inheritance or any other polymorphism strategy, except for inheriting
+  from object to specify a new-style class
+
+After a class is defined, it can be used in both TorchScript and Python interchangeably
+like any other TorchScript type:
+
+::
+
+    @torch.jit.script
+    class Pair:
+      def __init__(self, first, second)
+        self.first = first
+        self.second = second
+
+    @torch.jit.script
+    def sum_pair(p):
+      # type : (Pair) -> Tensor
+      return p.first + p.second
+
+    p = Pair(torch.rand(2, 3), torch.rand(2, 3)
+    print(sum_pair(p))
 
 
 Expressions
@@ -255,8 +314,9 @@ List Construction
     ``[3, 4]``, ``[]``, ``[torch.rand(3), torch.rand(4)]``
 
     .. note::
-        an empty list is assumed have type ``List[Tensor]``.
+        An empty list is assumed have type ``List[Tensor]``.
         The types of other list literals are derived from the type of the members.
+        To denote an empty list of another type, use ``torch.jit.annotate``.
 
 Tuple Construction
 """"""""""""""""""
@@ -268,8 +328,9 @@ Dict Construction
     ``{'hello': 3}``, ``{}``, ``{'a': torch.rand(3), 'b': torch.rand(4)}``
 
     .. note::
-        an empty dict is assumed have type ``Dict[str, Tensor]``.
+        An empty dict is assumed have type ``Dict[str, Tensor]``.
         The types of other dict literals are derived from the type of the members.
+        To denote an empty dict of another type, use ``torch.jit.annotate``.
 
 Variables
 ^^^^^^^^^
@@ -340,10 +401,6 @@ Subscripts
   ``t[1:, -1, 0]``
 
   ``t[i:j, i]``
-
-  .. note::
-    TorchScript currently does not support mutating tensors in place, so any
-    tensor indexing can only appear on the right-hand size of an expression.
 
 Function Calls
 ^^^^^^^^^^^^^^
@@ -468,11 +525,6 @@ For loops with ``range``
         for i in range(10):
             x *= i
 
-    .. note::
-      Script currently does not support iterating over generic iterable
-      objects like lists or tensors. Script currently does not support start or
-      increment parameters to range. These will be added in a future version.
-
 For loops over tuples:
 
     ::
@@ -512,9 +564,9 @@ For loops over constant ``torch.nn.ModuleList``
                   return v
 
       .. note::
-          To use a module list inside a ``@script_method`` it must be marked
+          To use a ``nn.ModuleList`` inside a ``@script_method`` it must be marked
           constant by adding the name of the attribute to the ``__constants__``
-          list for the type. For loops over a ModuleList will unroll the body of the
+          list for the type. For loops over a ``nn.ModuleList`` will unroll the body of the
           loop at compile time, with each member of the constant module list.
 
 Return
@@ -557,17 +609,17 @@ To make writing TorchScript more convenient, we allow script code to refer
 to Python values in the surrounding scope. For instance, any time there is a
 reference to ``torch``, the TorchScript compiler is actually resolving it to the
 ``torch`` Python module when the function is declared.  These Python values are
-not a first class part of TorchScript. Instead they are desugared at compile-time
-into the primitive types that TorchScript supports. This section describes the
-rules that are used when accessing Python values in TorchScript. They depend
-on the dynamic type of the python valued referenced.
+not a first class part of TorchScript. Instead they are de-sugared at compile-time
+into the primitive types that TorchScript supports. This depends
+on the dynamic type of the Python valued referenced when compilation occurs.
+This section describes the rules that are used when accessing Python values in TorchScript.
 
 Functions
 ^^^^^^^^^
 
   TorchScript can call Python functions. This functionality is very useful when
-  incrementally converting a model into script. The model can be moved function-by-function
-  to script, leaving calls to Python functions in place. This way you can incrementally
+  incrementally converting a model to TorchScript. The model can be moved function-by-function
+  to TorchScript, leaving calls to Python functions in place. This way you can incrementally
   check the correctness of the model as you go.
 
   Example::
@@ -581,10 +633,37 @@ Functions
       def bar(x)
         return foo(x + 1)
 
-  .. note::
-    Attempting to call ``save`` on a ScriptModule that contains calls to Python
-    functions will fail. The intention is that this pathway is used for debugging
-    and the calls removed or turned into script functions before saving.
+  Attempting to call ``save`` on a ScriptModule that contains calls to Python
+  functions will fail. The intention is that this pathway is used for debugging
+  and the calls removed or turned into script functions before saving. If you
+  want to export a module with a Python function, add the ``@torch.jit.ignore``
+  decorator to the function which will replace these function calls with an
+  exception when the model is saved: ::
+
+      class M(torch.jit.ScriptModule):
+        def __init__(self):
+          super(M, self).__init__()
+
+        @torch.jit.script_method
+        def forward(self, x):
+          self.ignored_code(x)
+          return x + 2
+
+        @torch.jit.ignore
+        def ignored_code(self, x):
+          # non-TorchScript code
+          import pdb; pdb.set_trace()
+
+      m = M()
+      # Runs, makes upcall to Python to run `ignored_code`
+      m(torch.ones(2, 2))
+
+      # Replaces all calls to `ignored_code` with a `raise`
+      m.save("m.pt")
+      loaded = torch.jit.load("m.pt")
+
+      # This runs `ignored_code` after saving which will raise an Exception!
+      loaded(torch.ones(2, 2))
 
 
 Attribute Lookup On Python Modules
@@ -621,12 +700,38 @@ Python-defined Constants
     Supported constant Python Values are
 
     * ``int``
+    * ``float``
     * ``bool``
     * ``torch.device``
     * ``torch.layout``
     * ``torch.dtype``
     * tuples containing supported types
     * ``torch.nn.ModuleList`` which can be used in a TorchScript for loop
+
+
+Module Attributes
+^^^^^^^^^^^^^^^^^
+
+The ``torch.nn.Parameter`` wrapper and ``register_buffer`` can be used to assign
+tensors to a ``ScriptModule``. In a similar vein, attributes of any type can be
+assign on a ``ScriptModule`` by wrapping them with ``torch.jit.Attribute`` and
+specifying the type. All types available in TorchScript are supported. These
+attributes are mutable and are saved in a separate archive in the serialized
+model binary. Tensor attributes are semantically the same as buffers.
+
+Example::
+
+    class Foo(torch.jit.ScriptModule):
+      def __init__(self, a_dict):
+        super(Foo, self).__init__(False)
+        self.words = torch.jit.Attribute([], List[str])
+        self.some_dict = torch.jit.Attribute(a_dict, Dict[str, int])
+
+      @torch.jit.script_method
+      def forward(self, input):
+        # type: (str) -> int
+        self.words.append(input)
+        return self.some_dict[input]
 
 
 Debugging
@@ -655,21 +760,21 @@ Disable JIT for Debugging
 
         traced_fn(torch.rand(3, 4))
 
-    Debugging this script with PDB works except for when we invoke the @script
-    function. We can globally disable JIT, so that we can call the @script
+    Debugging this script with PDB works except for when we invoke the ``@torch.jit.script``
+    function. We can globally disable JIT, so that we can call the ``@torch.jit.script``
     function as a normal python function and not compile it. If the above script
     is called ``disable_jit_example.py``, we can invoke it like so::
 
         $ PYTORCH_JIT=0 python disable_jit_example.py
 
-    and we will be able to step into the @script function as a normal Python
+    and we will be able to step into the ``@torch.jit.script`` function as a normal Python
     function.
 
 
 Inspecting Code
 ^^^^^^^^^^^^^^^
 
-    TorchScript provides a code pretty-printer for all ScriptModule instances. This
+    TorchScript provides a code pretty-printer for all ``ScriptModule`` instances. This
     pretty-printer gives an interpretation of the script method's code as valid
     Python syntax. For example::
 
@@ -688,11 +793,11 @@ Inspecting Code
 
     A ``ScriptModule`` with a single ``forward`` method will have an attribute
     ``code``, which you can use to inspect the ``ScriptModule``'s code.
-    If the ScriptModule has more than one method, you will need to access
+    If the ``ScriptModule`` has more than one method, you will need to access
     ``.code`` on the method itself and not the module. We can inspect the
     code of a method named ``bar`` on a ScriptModule by accessing ``.bar.code``.
 
-    The example script abouve produces the code::
+    The example script above produces the code::
 
         def forward(self,
                     len: int) -> Tensor:
@@ -706,7 +811,7 @@ Inspecting Code
                 rv0 = rv1
             return rv0
 
-    This is TorchScript's interpretation of the code for the ``forward`` method.
+    This is TorchScript's compilation of the code for the ``forward`` method.
     You can use this to ensure TorchScript (tracing or scripting) has captured
     your model code correctly.
 
@@ -734,7 +839,7 @@ Interpreting Graphs
 
         print(foo.graph)
 
-    ``.graph`` follows the same rules described in the Inspecting Code section
+    ``.graph`` follows the same rules described in the `Inspecting Code`_ section
     with regard to ``forward`` method lookup.
 
     The example script above produces the graph::
@@ -949,9 +1054,9 @@ best practices?
       # ... later, when using the model:
 
       if use_gpu:
-         model = torch.jit.load("gpu.pth")
+        model = torch.jit.load("gpu.pth")
       else:
-         model = torch.jit.load("cpu.pth")
+        model = torch.jit.load("cpu.pth")
 
       model(input)
 
@@ -959,6 +1064,40 @@ best practices?
    specific device, so casting an already-loaded model may have unexpected
    effects. Casting the model *before* saving it ensures that the tracer has
    the correct device information.
+
+
+Q: How do I store attributes on a ``ScriptModule``?
+
+    Say we have a model like: ::
+
+      class Model(torch.jit.ScriptModule):
+        def __init__(self):
+          super(Model, self).__init__()
+          self.x = 2
+
+        @torch.jit.script_method
+        def forward(self):
+          return self.x
+
+    If ``Model`` is instantiated it will result in a compilation error
+    since the compiler doesn't know about ``x``. There are 4 ways to inform the
+    compiler of attributes on ``ScriptModule``:
+
+    1. ``nn.Parameter`` - values wrapped in ``nn.Parameter`` will work as they
+    do on ``nn.Module``\s
+
+    2. ``register_buffer`` - values wrapped in ``register_buffer`` will work as
+    they do on ``nn.Module``\s
+
+    3. ``__constants__`` - adding a list called ``__constants__`` at the
+    class definition level will mark the contained names as constants. Constants
+    are saved directly in the code of the model. See
+    `Python-defined Constants`_.
+
+    4. ``torch.jit.Attribute`` - values wrapped in ``torch.jit.Attribute`` can
+    be any ``TorchScript`` type, be mutated and are saved outside of the code of
+    the model. See `Module Attributes`_.
+
 
 
 Builtin Functions
