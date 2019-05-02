@@ -1,5 +1,6 @@
-#ifdef AT_PARALLEL_OPENMP
+#if AT_PARALLEL_OPENMP
 #include <ATen/Parallel.h>
+#include <ATen/PTThreadPool.h>
 
 #include <atomic>
 #include <thread>
@@ -46,16 +47,6 @@ std::shared_ptr<TaskThreadPoolBase> createC10ThreadPool(
 }
 
 } // namespace
-
-PTThreadPool::PTThreadPool(
-    std::size_t pool_size,
-    int numa_node_id)
-    : c10::ThreadPool(pool_size, numa_node_id) {}
-
-void PTThreadPool::init_thread() {
-  c10::setThreadName("PTThreadPool");
-  at::init_num_threads();
-}
 
 C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, createC10ThreadPool);
 

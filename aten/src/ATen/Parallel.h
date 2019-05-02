@@ -1,6 +1,5 @@
 #pragma once
 #include <ATen/ATen.h>
-#include <c10/core/thread_pool.h>
 
 #include <atomic>
 #include <cstddef>
@@ -76,15 +75,6 @@ scalar_t parallel_reduce(
 // Returns a detailed string describing parallelization settings
 CAFFE2_API std::string get_parallel_info();
 
-class CAFFE2_API PTThreadPool : public c10::ThreadPool {
- public:
-  explicit PTThreadPool(
-      std::size_t pool_size,
-      int numa_node_id = -1);
-
-  void init_thread() override;
-};
-
 // Sets number of threads used for inter-op parallelism
 CAFFE2_API void set_num_interop_threads(size_t);
 
@@ -96,6 +86,6 @@ CAFFE2_API void launch(const std::function<void()>& func);
 
 } // namespace at
 
-#ifdef AT_PARALLEL_OPENMP
+#if AT_PARALLEL_OPENMP
 #include <ATen/Parallel_openmp.h>
 #endif
