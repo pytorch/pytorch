@@ -40,6 +40,8 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
+#if !defined(TH_REAL_IS_HALF) // baddbmm not implemented for half.
+
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
 {
   int64_t batch;
@@ -86,6 +88,8 @@ void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t a
   c10::raw::intrusive_ptr::decref(matrix2);
   c10::raw::intrusive_ptr::decref(result_matrix);
 }
+
+#endif // !defined(TH_REAL_IS_HALF)
 
 ptrdiff_t THTensor_(numel)(THTensor *t)
 {

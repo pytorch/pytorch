@@ -2088,11 +2088,11 @@ class TestNN(NNTestCase):
     def test_embedding_sparse_backward(self):
         self._test_embedding_backward()
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_embedding_sparse_half_backward(self):
-        # same as test_embedding_sparse_backward above but testing half types in
-        # cuda. cpu sum not supported for half types.
-        self._test_embedding_backward('cuda', torch.float16)
+        # cpu support for sparse half embedding is minimal.
+        self._test_embedding_backward('cpu', torch.float16)
+
+        if torch.cuda.is_available():
+            self._test_embedding_backward('cuda', torch.float16)
 
     def _test_embedding_backward(self, device='cpu', dtype=torch.float64):
         embedding = nn.Embedding(10, 3, sparse=True)

@@ -167,6 +167,7 @@
   cname: indexSelect
   variants:
     - function
+  cpu_half: True
   return: argument 0
   arguments:
     - arg: THTensor* result

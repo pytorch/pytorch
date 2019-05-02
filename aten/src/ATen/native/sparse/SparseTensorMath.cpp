@@ -213,7 +213,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
   Tensor s_values = src._values();
   r.resize_as_(src);
 
-  if (s_values.is_contiguous() && t_values.is_contiguous()) {
+  if (s_values.is_contiguous() && t_values.is_contiguous() && t_values.scalar_type() != ScalarType::Half) {
     LongTensor r_indices = at::empty({sparse_dim, max_nnz}, t_indices.options());
     Tensor r_values = new_values_with_size_of(s_values, max_nnz).zero_();
     get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
@@ -287,8 +287,9 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
   } else {
     // If `t` or `src` contains non-contiguous `values`, `THBlas_axpy` doesn't work
     // and we concat the indices and values tensors instead.
-    AT_DISPATCH_ALL_TYPES(
-      s_values.scalar_type(), "add_out_sparse_cuda", [&] {
+    // Also THBlas_axpy isn't implemnented for Half types.
+    AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half,
+      s_values.scalar_type(), "add_out_sparse_cpu", [&] {
           if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
             s_values = s_values.mul(value);
           }

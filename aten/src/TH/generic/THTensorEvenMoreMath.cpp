@@ -4,6 +4,11 @@
 
 #include <TH/generic/THTensorApply.hpp>
 
+
+#ifdef TH_REAL_IS_HALF
+#include "c10/util/Half.h"
+#endif
+
 // Finds non-zero elements of a tensor and returns their subscripts
 void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 {
@@ -11,7 +16,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   int64_t *subscript_data;
   int64_t i = 0;
 #ifdef TH_REAL_IS_HALF
-#define IS_NONZERO(val) ((val.x & 0x7fff) != 0)
+#define IS_NONZERO(val) (c10::Half(0)!=val)
 #else
 #define IS_NONZERO(val) ((val)!=0)
 #endif
@@ -65,6 +70,9 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                 );
   delete [] sizes;
   delete [] idx;
+
+#undef IS_NONZERO
+
 }
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
@@ -361,6 +369,8 @@ void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int ac
   THLongTensor_free(index);
 }
 
+#if !defined(TH_REAL_IS_HALF) // skipping because we don't have blas to define cadd
+
 void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   ptrdiff_t i, numel;
@@ -401,6 +411,7 @@ void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTenso
   }
   THLongTensor_free(index);
 }
+#endif
 
 void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
 {
@@ -523,6 +534,8 @@ void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTen
                        })
 }
 
+#if ! defined(TH_REAL_IS_HALF) /* blas not implemented for half */
+
 void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
 {
   int64_t elems_per_row, i, idx;
@@ -565,6 +578,8 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
                    break;);
   return sum;
 }
+
+#endif /* end ! half section */
 
 scalar_t THTensor_(minall)(THTensor *tensor)
 {
@@ -835,7 +850,7 @@ void THTensor_(fmod)(THTensor *r_, THTensor *t, scalar_t value)
     int64_t i;
     #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
     for (i=0; i<r_Size; i++) {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
       rp[i] = fmod(tp[i], value);
 #else
       rp[i] = tp[i] % value;
@@ -847,7 +862,7 @@ void THTensor_(fmod)(THTensor *r_, THTensor *t, scalar_t value)
     if (inOMP) {
       serial_path = 1;
     } else {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = fmod(*t_data, value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (*t_data % value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
@@ -858,7 +873,7 @@ void THTensor_(fmod)(THTensor *r_, THTensor *t, scalar_t value)
 #endif
   }
   if (serial_path) {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
     TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = fmod(*t_data, value););
 #else
     TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = (*t_data % value););
@@ -884,7 +899,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, scalar_t value)
     int64_t i;
     #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
     for (i=0; i<r_Size; i++) {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
       rp[i] = (value == 0)? NAN : tp[i] - value * floor(tp[i] / value);
 #else
       // There is no NAN for integers
@@ -899,7 +914,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, scalar_t value)
     if (inOMP) {
       serial_path = 1;
     } else {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
       // There is no NAN for integers
@@ -912,7 +927,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, scalar_t value)
 #endif
   }
   if (serial_path) {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
     TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value););
 #else
     // There is no NAN for integers

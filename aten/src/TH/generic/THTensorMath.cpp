@@ -138,6 +138,7 @@ void THTensor_(clamp)(THTensor *r_, THTensor *t, scalar_t min_value, scalar_t ma
   }
 }
 
+#if ! defined(TH_REAL_IS_HALF) // we don't have half blas functions so skipping these
 void THTensor_(cadd)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
 {
   THTensor_(resizeAs)(r_, t);
@@ -178,6 +179,8 @@ void THTensor_(csub)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
 {
   THTensor_(cadd)(r_, t, -value, src);
 }
+
+#endif // ! Half
 
 void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
 {
@@ -344,11 +347,11 @@ void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
   }
 }
 
+#if !defined(TH_REAL_IS_HALF)
+//  return THError("clshift is not supported for torch.HalfTensor");
+
 void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src)
 {
-#if defined(TH_REAL_IS_HALF)
-  return THError("clshift is not supported for torch.HalfTensor");
-#endif
   THTensor_(resizeAs)(r_, t);
   int64_t r_Size = THTensor_(nElement)(r_);
   int64_t srcSize = THTensor_(nElement)(src);
@@ -412,9 +415,6 @@ void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src)
 
 void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src)
 {
-#if defined(TH_REAL_IS_HALF)
-  return THError("crshift is not supported for torch.HalfTensor");
-#endif
   THTensor_(resizeAs)(r_, t);
   int64_t r_Size = THTensor_(nElement)(r_);
   int64_t srcSize = THTensor_(nElement)(src);
@@ -1197,6 +1197,7 @@ void THTensor_(addbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t al
   c10::raw::intrusive_ptr::decref(matrix1);
   c10::raw::intrusive_ptr::decref(matrix2);
 }
+#endif // ! Half
 
 #endif /* !defined(TH_REAL_IS_BOOL) */
 

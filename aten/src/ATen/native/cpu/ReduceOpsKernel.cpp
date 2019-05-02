@@ -15,12 +15,18 @@ namespace at { namespace native { namespace {
 using namespace vec256;
 
 static void sum_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "sum_cpu", [&] {
-    binary_kernel_reduce_vec(
-      iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a + b; });
-  });
+  if( iter.dtype() == ScalarType::Half ) {
+      binary_kernel(iter, [](Half a, Half b) -> Half {
+        return a + b;
+      });
+  } else {
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "sum_cpu", [&] {
+      binary_kernel_reduce_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a + b; });
+    });
+  }
 }
 
 static void mean_kernel_impl(TensorIterator& iter) {
