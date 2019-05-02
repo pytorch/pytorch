@@ -48,6 +48,10 @@ class TORCH_API SubgraphRewriter {
   std::shared_ptr<script::Module> runOnModule(
       std::shared_ptr<script::Module> module);
 
+  // \brief Run pattern-based subgraph rewrite pass on the graph (used in
+  // testing).
+  void runOnGraph(std::shared_ptr<Graph>& graph);
+
   // \brief Register standard rewrite patterns.
   void RegisterDefaultPatterns();
 
@@ -74,7 +78,6 @@ class TORCH_API SubgraphRewriter {
   std::vector<RewritePatternDescr> patterns_;
   std::unordered_set<Node*> nodes_to_delete_;
 
-  void runOnGraph(std::shared_ptr<Graph>& graph);
   void rewriteSinglePatternOnGraph(
       std::shared_ptr<Graph>& graph,
       RewritePatternDescr pattern);
