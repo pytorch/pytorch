@@ -7704,19 +7704,20 @@ class TestNN(NNTestCase):
     def test_transformer_number_match(self):
         # Train the simple copy task.
         V = 11
-        num_encoder_layers=1
-        num_decoder_layers=1
-        d_model=16 # embedding
-        nhead=2 # number of heads
-        dropout=0.20
-        d_ff=64
+        num_encoder_layers = 1
+        num_decoder_layers = 1
+        d_model = 16  # embedding
+        nhead = 2  # number of heads
+        dropout = 0.20
+        d_ff = 64
         batch_size = 400
         milliseconds = int(round(time.time() * 1000))
         torch.manual_seed(milliseconds)
 
-        model = Transformer(V, V, d_model=d_model, nhead=nhead, num_encoder_layers=num_encoder_layers, num_decoder_layers=num_decoder_layers, d_ff=d_ff)
+        model = Transformer(V, V, d_model=d_model, nhead=nhead, num_encoder_layers=num_encoder_layers, 
+                            num_decoder_layers=num_decoder_layers, d_ff=d_ff)
         model_opt = NoamOpt(model.encoder.src_embed.d_model, 1, 400,
-                torch.optim.Adam(model.parameters(), lr=2.5, betas=(0.9, 0.98), eps=1e-9))
+                            torch.optim.Adam(model.parameters(), lr=2.5, betas=(0.9, 0.98), eps=1e-9))
         criterion = LabelSmoothingLoss(size=V, padding_idx=0, smoothing=0.0)
 
         print("Training the model...")
@@ -7727,12 +7728,11 @@ class TestNN(NNTestCase):
             valid_epoch(data_gen(V, batch_size, 6), model, criterion) 
 
         model.eval()
-        
+
         for _ in range(3):    
             src = Variable(torch.randint(1, V, (10, 1)))
             src[0][0] = 1
             tgt = generate_test(model, src, max_len=10, start_symbol=1)
-            #print(_, src.transpose(0,1), tgt.transpose(0,1))
             assert np.allclose(src, tgt, atol=1e-5) 
 
 class TestNNInit(TestCase):
@@ -8627,23 +8627,20 @@ class NoamOpt:
         self.factor = factor
         self.model_size = model_size
         self._rate = 0
-        
+
     def step(self):
-        "Update parameters and rate"
         self._step += 1
         rate = self.rate()
         for p in self.optimizer.param_groups:
             p['lr'] = rate
         self._rate = rate
         self.optimizer.step()
-        
-    def rate(self, step = None):
-        "Implement `lrate` above"
+
+    def rate(self, step=None):
         if step is None:
             step = self._step
-        return self.factor * \
-            (self.model_size ** (-0.5) *
-            min(step ** (-0.5), step * self.warmup ** (-1.5)))
+        return self.factor * (self.model_size ** (-0.5) * 
+                              min(step ** (-0.5), step * self.warmup ** (-1.5)))
 
 class LabelSmoothingLoss(nn.Module):
     "Implement label smoothing."
@@ -8655,7 +8652,7 @@ class LabelSmoothingLoss(nn.Module):
         self.smoothing = smoothing
         self.size = size
         self.true_dist = None
-        
+
     def forward(self, x, target):
         assert x.size(1) == self.size
         true_dist = x.data.clone()
@@ -8706,10 +8703,10 @@ def data_gen(V, batch, nbatches):
 def generate_test(model, src, max_len, start_symbol):
     memory = model.encode(src)
     ys = torch.ones(1, 1).fill_(start_symbol).type_as(src.data)
-    for i in range(max_len-1):
+    for i in range(max_len - 1):
         out = model.decode(Variable(ys), memory) 
         prob = model.generator(out[-1, :].unsqueeze(0))
-        _, next_word = torch.max(prob, dim = 2)
+        _, next_word = torch.max(prob, dim=2)
         ys = torch.cat([ys, torch.ones(1, 1).type_as(src.data).fill_(next_word.item())], dim=0)
     return ys
 # end TestNN.test_transformer_number_match
