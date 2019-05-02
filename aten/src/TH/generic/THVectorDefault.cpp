@@ -215,7 +215,7 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
   } \
 
 #if defined(TH_REAL_IS_LONG)
-VECTOR_IMPLEMENT_FUNCTION(abs,labs)
+VECTOR_IMPLEMENT_FUNCTION(abs,std::abs)
 #endif /* long only part */
 
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_CHAR)

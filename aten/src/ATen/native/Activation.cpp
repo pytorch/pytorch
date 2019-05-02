@@ -121,7 +121,7 @@ void inline prelu_cpu_kernel_multi_weights(
   scalar_t* weight_data = weight.data<scalar_t>();
 
   auto loop = [&](int64_t start, int64_t end) {
-    for (auto i = 0; i < end; ++i) {
+    for (auto i = start; i < end; ++i) {
       int64_t offset = i * channel_size * input_stride1;
       scalar_t* n_input_data = input_data + offset;
       scalar_t* n_result_data = result_data + offset;
@@ -212,7 +212,7 @@ void inline prelu_cpu_backward_kernel_share_weights(
   scalar_t sum = at::parallel_reduce(0, input_numel, 1000, scalar_t(0),
       [&](int64_t start, int64_t end, scalar_t ident) -> scalar_t {
     scalar_t partial_sum = ident;
-    for (auto i = 0; i < input_numel; i++) {
+    for (auto i = start; i < end; i++) {
       scalar_t input_data_val = input_data[i];
       scalar_t grad_out_data_val = grad_out_data[i];
       // to allow for compiler optimization, here splitting into two lines:
@@ -220,7 +220,7 @@ void inline prelu_cpu_backward_kernel_share_weights(
       input_grad_data[i] = w * grad_out_data_val;
       // to allow for compiler optimization, here splitting into two lines:
       scalar_t mask = (input_data_val > 0) ? scalar_t(0) : scalar_t(1);
-      sum += mask * input_data_val * grad_out_data_val;
+      partial_sum += mask * input_data_val * grad_out_data_val;
     }
     return partial_sum;
   }, std::plus<scalar_t>());
