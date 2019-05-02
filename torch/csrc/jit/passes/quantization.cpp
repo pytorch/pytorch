@@ -32,19 +32,19 @@ int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"};
 }
 
 // Look for index of particular param in op schema
-int getParamIndexinOpArgs(Node* n, const std::string& param_name) {
+size_t getParamIndexinOpArgs(Node* n, const std::string& param_name) {
   AT_ASSERT(n != nullptr);
   Operator* optr = checkIfNodeQuantizable(n);
   if (optr == nullptr) {
-    return -1;
+    return static_cast<size_t>(-1);
   }
   auto& opargs = optr->schema().arguments();
-  for(int idx = 0; idx < opargs.size(); idx++) {
+  for(size_t idx = 0; idx < opargs.size(); idx++) {
     if (opargs[idx].name() == param_name) {
       return idx;
     }
   }
-  return -1;
+  return static_cast<size_t>(-1);
 }
 
 float getScaleforNode(Node* n) {
@@ -66,7 +66,7 @@ std::vector<param_info_t> getQuantizableParamsofType(script::Method& method,
   size_t param_input_len = method.initial_ivalues().size();
   // External inputs to this method
   size_t ext_input_len = method.num_inputs();
-  std::unordered_map<Node*, int> node_paramidx_map;
+  std::unordered_map<Node*, size_t> node_paramidx_map;
 
   for (size_t idx = 0; idx < param_input_len; idx++) {
     auto& v = graph->inputs()[idx+ext_input_len];
@@ -79,7 +79,7 @@ std::vector<param_info_t> getQuantizableParamsofType(script::Method& method,
     // find its position. if the param is present we store it in vector so
     // later we can insert quant-dequant nodes. Caching the param index helps
     // faster lookup for same kind of node visited multiple timees.
-    int param_idx = -1;
+    size_t param_idx = static_cast<size_t>(-1);
     auto it = node_paramidx_map.find(n);
     if (it != node_paramidx_map.end()) {
       param_idx = it->second;
@@ -87,8 +87,7 @@ std::vector<param_info_t> getQuantizableParamsofType(script::Method& method,
       param_idx = getParamIndexinOpArgs(n, param_name);
       node_paramidx_map.emplace(n, param_idx);
     }
-    if (param_idx < 0 || param_idx >= n->inputs().size() ||
-      n->inputs()[param_idx] != v) {
+    if (param_idx >= n->inputs().size() || n->inputs()[param_idx] != v) {
       // Either node does not contain param or this Value
       // is not of type param_name
       continue;
@@ -508,8 +507,8 @@ void InsertQuantDequantNodesForParam(
 
   for (auto& param_info : params_to_insert_qdq) {
     auto& param_slot = method.initial_ivalues()[param_info.idx];
-    auto itensor = param_slot.value();
-    auto tensor_var = itensor.toTensor().detach();
+    const auto& itensor = param_slot.value();
+    at::Tensor tensor_var = itensor.toTensor().detach();
     auto qparam = getQParamFunc(tensor_var);
     addQuantDeQuantNodesForInput(param_info.v, param_info.n, qparam);
   }
@@ -526,20 +525,20 @@ void InsertQuantDequantNodesForParam(
    auto params_to_insert_qdq = getQuantizableParamsofType(method, param_name);
 
    for (auto& param_info : params_to_insert_qdq) {
-     // Fetch scale for input activation to the quantizable
+     // Fetch scale for input activation and weight to the quantizable
      // node for which bias need to be quantized
      Node* n = param_info.n;
      // Check if this node has weight attr as input
-     int param_index = getParamIndexinOpArgs(n, std::string("weight"));
-     if (param_index < 0) {
+     size_t param_index = getParamIndexinOpArgs(n, std::string("weight"));
+     if (param_index >= n->inputs().size()) {
        // No attribute by name weight
        continue;
      }
-     std::vector<int> node_inputs_idx(0, param_index);
-     float scale_factors[2];
+     std::vector<size_t> node_inputs_idx(0, param_index);
+     std::array<float, 2> scale_factors;
      bool skip_node = false;
-     for (int idx = 0; idx < node_inputs_idx.size(); idx++) {
-       int input_index = node_inputs_idx[idx];
+     for (size_t idx = 0; idx < node_inputs_idx.size(); idx++) {
+       size_t input_index = node_inputs_idx[idx];
        Value* input_value = n->inputs()[input_index];
        Node* n_input_value = input_value->node();
        if (n_input_value->kind().toQualString() != std::string(
@@ -562,8 +561,8 @@ void InsertQuantDequantNodesForParam(
  }
 
  // We can have same param name apply different getQParamFunc or different
- // oaram share same function. Exposing the template api helps decouple the
- // param name to qpramfunc binding.
+ // param share same function. Exposing the template api helps reuse the
+ // qparamfunc for different param.
  template <typename Fn>
  void InsertQuantDequantNodesForParam(
    std::shared_ptr<script::Module>& moduleObj,
@@ -571,9 +570,9 @@ void InsertQuantDequantNodesForParam(
    const std::string& param_name,
    const Fn& getQParamFunc) {
 
-  auto& method = moduleObj->get_method(method_name);
-  InsertQuantDequantNodesForParam(method, param_name,
-    getQParamFunc);
+   auto& method = moduleObj->get_method(method_name);
+   InsertQuantDequantNodesForParam(method, param_name,
+     getQParamFunc);
 }
 
 // Explicit Supported Template specialization for getQParamFunc.
