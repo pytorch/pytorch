@@ -485,7 +485,7 @@ def emit_body(declaration):
             return False
         if 'Tensor' not in arg['type']:
             return False
-        if arg['dynamic_type'] in {'IndexTensor', 'BoolTensor'}:
+        if arg['dynamic_type'] in {'IndexTensor', 'ByteTensor', 'BoolTensor'}:
             # These are necessary for legacy code and should be
             # used by legacy code only!
             assert declaration['mode'] == 'TH' or declaration['mode'] == 'NN', \
@@ -633,7 +633,7 @@ def emit_body(declaration):
                 # Double-backwards definitions sometimes take in 'input' and
                 # 'output', but only define the derivative for input.
                 continue
-            if arg['dynamic_type'] in {'IndexTensor', 'BoolTensor'}:
+            if arg['dynamic_type'] in {'IndexTensor', 'ByteTensor', 'BoolTensor'}:
                 continue
             body.append('check_no_requires_grad({}, "{}");'.format(name, name))
         return body

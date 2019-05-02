@@ -647,7 +647,9 @@ struct GraphExecutorImpl {
     // decomposition pass, decompose certain ops that will be used in the following
     // passes (like batchmm and jit fusion)
     DecomposeOps(graph);
-    PropagateInputShapes(graph);
+    // Autodiff and decompositon pass will replace some parts of graph with new graph
+    // these new graphs usually miss shape information on nodes, so we propagate shapes
+    // PropagateInputShapes(graph);
 
     // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
