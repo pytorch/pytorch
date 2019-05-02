@@ -102,10 +102,6 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
   void main_loop(std::size_t index);
 };
 
-C10_API void setNumThreads(size_t v);
-
-C10_API TaskThreadPoolBase& global_work_queue();
-
 class C10_API TaskThreadPool : public c10::ThreadPool {
  public:
   explicit TaskThreadPool(

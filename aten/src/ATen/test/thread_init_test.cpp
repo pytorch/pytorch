@@ -38,5 +38,17 @@ int main() {
   at::set_num_threads(5);
   test(at::get_num_threads());
 
+  // test inter-op settings
+  ASSERT(at::get_num_interop_threads() == std::thread::hardware_concurrency());
+  at::set_num_interop_threads(5);
+  ASSERT(at::get_num_interop_threads() == 5);
+  bool exception_thrown = false;
+  try {
+    at::set_num_interop_threads(6);
+  } catch (const std::runtime_error&) {
+    exception_thrown = true;
+  }
+  ASSERT(exception_thrown);
+
   return 0;
 }

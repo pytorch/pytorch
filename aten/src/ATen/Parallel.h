@@ -157,4 +157,13 @@ class CAFFE2_API PTThreadPool : public c10::ThreadPool {
   void init_thread() override;
 };
 
+// Sets number of threads used for inter-op parallelism
+CAFFE2_API void set_num_interop_threads(size_t);
+
+// Returns the number of threads used for inter-op parallelism
+CAFFE2_API size_t get_num_interop_threads();
+
+// Launches inter-op parallel task
+CAFFE2_API void launch(const std::function<void()>& func);
+
 } // namespace at

@@ -120,20 +120,6 @@ void ThreadPool::main_loop(std::size_t index) {
   } // while running_
 }
 
-// constexpr initialization guaranteed to be before any static initialization
-std::atomic<int> num_threads{1};
-void setNumThreads(size_t v) {
-  if(-1  == num_threads.exchange(v)) {
-   throw std::runtime_error("Error: cannot set num threads after pool has started");
-  }
-}
-
-TaskThreadPoolBase& global_work_queue() {
-  static std::shared_ptr<TaskThreadPoolBase> pool =
-      ThreadPoolRegistry()->Create("C10", 0, num_threads.exchange(-1), false);
-  return *pool;
-}
-
 C10_DEFINE_SHARED_REGISTRY(
     ThreadPoolRegistry,
     TaskThreadPoolBase,

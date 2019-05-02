@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/interpreter.h>
 
 #include <ATen/core/ivalue.h>
+#include <ATen/Parallel.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
@@ -702,7 +703,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         // the current thread will continue running before it suspends.
         InterpreterState state(intrusive_from_this());
         e.future->addCallback([state]() {
-          c10::global_work_queue().run(InterpreterContinuation(state, Stack(),
+          at::launch(InterpreterContinuation(state, Stack(),
               autograd::GradMode::is_enabled()));
         });
 
