@@ -271,7 +271,8 @@ def _str(self):
         if not has_default_dtype:
             suffixes.append('dtype=' + str(self.dtype))
         # TODO: change to a call to self.q_scheme() when we add q_scheme method
-        suffixes.append('quantization_scheme=' + 'per_tensor_affine')
+        # and uncomment this
+        # suffixes.append('quantization_scheme=' + 'per_tensor_affine')
         suffixes.append('scale=' + str(self.q_scale().item()))
         suffixes.append('zero_point=' + str(self.q_zero_point().item()))
         tensor_str = _tensor_str(self.dequantize(), indent)

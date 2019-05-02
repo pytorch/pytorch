@@ -2711,15 +2711,13 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.item(), 15)
         # we can also print a qtensor
         self.assertEqual(str(qr),
-                         "tensor([15.], size=(1,), dtype=torch.qint8,\n" +
-                         " " * 7 + "quantization_scheme=per_tensor_affine, scale=" +
-                         "1.0, zero_point=2)")
+                         "tensor([15.], size=(1,), dtype=torch.qint8, " +
+                         "scale=1.0, zero_point=2)")
         empty_r = torch.ones((0, 1), dtype=torch.float)
         empty_qr = empty_r.quantize_linear(scale, zero_point)
         self.assertEqual(str(empty_qr),
-                         "tensor([], size=(0, 1), dtype=torch.qint8,\n" +
-                         " " * 7 + "quantization_scheme=per_tensor_affine, scale=" +
-                         "1.0, zero_point=2)")
+                         "tensor([], size=(0, 1), dtype=torch.qint8, " +
+                         "scale=1.0, zero_point=2)")
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
