@@ -2687,6 +2687,7 @@ C10_EXPORT void BiasCHW<float, CPUContext>(
     }                                                               \
   }
 CAFFE2_SPECIALIZED_COPYVECTOR(float)
+CAFFE2_SPECIALIZED_COPYVECTOR(int32_t)
 #undef CAFFE2_SPECIALIZED_COPYVECTOR
 
 } // namespace math

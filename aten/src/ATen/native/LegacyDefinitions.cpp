@@ -53,15 +53,33 @@ Tensor& zero_(Tensor& self) {
 }
 
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, Scalar value) {
-  return at::legacy::th::_th_masked_fill_(self, mask, value);
+  // As we dispatch on self and TH is type-checked, we need different definitions.
+  // This can be fixed by moving to ATen.
+  if (mask.dtype() == at::ScalarType::Byte) {
+    return at::legacy::th::_th_masked_fill_(self, mask, value);
+  } else {
+    return at::legacy::th::_th_masked_fill_bool_(self, mask, value);
+  }
 }
 
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, const Tensor & value) {
-  return at::legacy::th::_th_masked_fill_(self, mask, value);
+  // As we dispatch on self and TH is type-checked, we need different definitions.
+  // This can be fixed by moving to ATen.
+  if (mask.dtype() == at::ScalarType::Byte) {
+    return at::legacy::th::_th_masked_fill_(self, mask, value);
+  } else {
+    return at::legacy::th::_th_masked_fill_bool_(self, mask, value);
+  }
 }
 
 Tensor & masked_scatter_(Tensor& self, const Tensor & mask, const Tensor & source) {
-  return at::legacy::th::_th_masked_scatter_(self, mask, source);
+  // As we dispatch on self and TH is type-checked, we need different definitions.
+  // This can be fixed by moving to ATen.
+  if (mask.dtype() == at::ScalarType::Byte) {
+    return at::legacy::th::_th_masked_scatter_(self, mask, source);
+  } else {
+    return at::legacy::th::_th_masked_scatter_bool_(self, mask, source);
+  }
 }
 
 Tensor view(const Tensor& self, IntArrayRef size) {
@@ -386,7 +404,11 @@ Tensor & masked_select_out(Tensor & result, const Tensor & self, const Tensor & 
 }
 
 Tensor masked_select(const Tensor & self, const Tensor & mask) {
+  if (mask.dtype() == at::ScalarType::Byte) {
   return at::legacy::th::_th_masked_select(self, mask);
+} else {
+  return at::legacy::th::_th_masked_select_bool(self, mask);
+}
 }
 
 Tensor & nonzero_out(Tensor & result, const Tensor & self) {
