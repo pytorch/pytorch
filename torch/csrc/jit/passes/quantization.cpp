@@ -76,8 +76,7 @@ std::vector<param_info_t> getQuantizableParamsofType(script::Method& method,
       param_idx = getParamIndexinOpArgs(n, param_name);
       node_paramidx_map.emplace(n, param_idx);
     }
-    if (param_idx >= n->inputs().size() ||
-      n->inputs()[param_idx] != v) {
+    if (param_idx >= n->inputs().size() || n->inputs()[param_idx] != v) {
       // Either node does not contain param or this Value
       // is not of type param_name
       continue;
