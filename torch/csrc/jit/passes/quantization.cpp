@@ -497,7 +497,7 @@ void InsertQuantDequantNodesForParam(
 
   for (auto& param_info : params_to_insert_qdq) {
     auto& param_slot = method.initial_ivalues()[param_info.idx];
-    auto itensor = param_slot.value();
+    const auto& itensor = param_slot.value();
     at::Tensor tensor_var = itensor.toTensor().detach();
     auto qparam = getQParamFunc(tensor_var);
     addQuantDeQuantNodesForInput(param_info.v, param_info.n, qparam);
