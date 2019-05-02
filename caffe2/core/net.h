@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "c10/core/thread_pool.h"
 #include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
@@ -19,7 +20,6 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/simple_queue.h"
-#include "caffe2/utils/thread_pool.h"
 
 C10_DECLARE_string(caffe2_override_executor);
 

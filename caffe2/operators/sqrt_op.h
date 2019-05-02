@@ -10,7 +10,7 @@ template <class Context>
 struct SqrtFunctor {
   template <typename T>
   bool operator()(const int N, const T* X, T* Y, Context* context) const {
-    math::Sqrt(N, X, Y, context);
+    math::Sqrt<T, Context>(N, X, Y, context);
     return true;
   }
 };

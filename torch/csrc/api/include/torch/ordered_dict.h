@@ -159,25 +159,25 @@ class OrderedDict {
 
   /// Returns a newly allocated vector and copies all keys from this
   /// `OrderedDict` into the vector.
-  std::vector<Key> keys() const;
+  ::std::vector<Key> keys() const;
 
   /// Returns a newly allocated vector and copies all values from this
   /// `OrderedDict` into the vector.
-  std::vector<Value> values() const;
+  ::std::vector<Value> values() const;
 
   /// Returns a newly allocated vector and copies all keys and values from this
   /// `OrderedDict` into a vector of `std::pair<Key, Value>`.
-  std::vector<std::pair<Key, Value>> pairs() const;
+  ::std::vector<std::pair<Key, Value>> pairs() const;
 
  private:
   /// A mapping from a key to an index into the `items_` vector.
-  std::unordered_map<Key, size_t> index_;
+  ::std::unordered_map<Key, size_t> index_;
 
   /// The items stored in the `OrderedDict`.
-  std::vector<Item> items_;
+  ::std::vector<Item> items_;
 
   /// A description of the keys stored in the `OrderedDict`.
-  std::string key_description_{"Key"};
+  ::std::string key_description_{"Key"};
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ OrderedDict::Item ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -231,7 +231,7 @@ class OrderedDict<Key, Value>::Item {
  private:
   /// This is stored as an std::pair because it will make Python binding a lot,
   /// lot easier.
-  std::pair<const Key, Value> pair_;
+  ::std::pair<const Key, Value> pair_;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ OrderedDict ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -438,7 +438,7 @@ const std::vector<typename OrderedDict<Key, Value>::Item>& OrderedDict<
 }
 
 template <typename Key, typename Value>
-std::vector<Key> OrderedDict<Key, Value>::keys() const {
+::std::vector<Key> OrderedDict<Key, Value>::keys() const {
   std::vector<Key> keys;
   keys.reserve(size());
   for (const auto& item : items_) {
@@ -448,7 +448,7 @@ std::vector<Key> OrderedDict<Key, Value>::keys() const {
 }
 
 template <typename Key, typename Value>
-std::vector<Value> OrderedDict<Key, Value>::values() const {
+::std::vector<Value> OrderedDict<Key, Value>::values() const {
   std::vector<Value> values;
   values.reserve(size());
   for (const auto& item : items_) {
@@ -458,7 +458,7 @@ std::vector<Value> OrderedDict<Key, Value>::values() const {
 }
 
 template <typename Key, typename Value>
-std::vector<std::pair<Key, Value>> OrderedDict<Key, Value>::pairs() const {
+::std::vector<std::pair<Key, Value>> OrderedDict<Key, Value>::pairs() const {
   std::vector<std::pair<Key, Value>> values;
   values.reserve(size());
   for (const auto& item : items_) {

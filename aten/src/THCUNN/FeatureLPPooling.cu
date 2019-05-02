@@ -5,6 +5,7 @@
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCNumerics.cuh>
 #include <THC/THCTensorTypeUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
 
 #define OUTPUT_FEATURES_PER_THREAD 32
 #define MAX_WARPS_PER_RUN 4
@@ -397,7 +398,7 @@ runFeatureLPPoolingUpdateOutput(THCState* state,
   cudaStream_t stream =
     THCState_getCurrentStream(state);
   const cudaDeviceProp* deviceProperties =
-    THCState_getCurrentDeviceProperties(state);
+    at::cuda::getCurrentDeviceProperties();
 
   int outputFeatures = ((input.getSize(1) - width) / stride) + 1;
 
@@ -526,7 +527,7 @@ runFeatureLPPoolingUpdateGradInput(THCState* state,
   cudaStream_t stream =
     THCState_getCurrentStream(state);
   const cudaDeviceProp* deviceProperties =
-    THCState_getCurrentDeviceProperties(state);
+    at::cuda::getCurrentDeviceProperties();
 
   for (int i = 0; i < 4; ++i) {
     THAssert(gradOutput.getSize(i) == output.getSize(i));

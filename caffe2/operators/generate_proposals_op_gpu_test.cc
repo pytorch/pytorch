@@ -8,10 +8,6 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
 
-#ifdef CAFFE2_USE_OPENCV
-#include <opencv2/opencv.hpp>
-#endif // CAFFE2_USE_OPENCV
-
 namespace caffe2 {
 
 static void AddLinSpacedInput(
@@ -26,7 +22,7 @@ static void AddLinSpacedInput(
   auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->template mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->numel());
   tensor_vec.setLinSpaced(min_val, max_val);
 
   return;
@@ -64,7 +60,7 @@ void AddInput<CPUContext>(
   auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->template mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->numel());
   tensor_vec.array() = utils::AsEArrXt(values);
 }
 
@@ -75,7 +71,7 @@ void AddInput<CUDAContext>(
     const string& name,
     Workspace* ws) {
   Tensor tmp(shape, CPU);
-  EigenVectorMap<float> tmp_vec(tmp.mutable_data<float>(), tmp.size());
+  EigenVectorMap<float> tmp_vec(tmp.mutable_data<float>(), tmp.numel());
   tmp_vec.array() = utils::AsEArrXt(values);
 
   Blob* blob = ws->CreateBlob(name);
@@ -215,7 +211,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledGPU) {
   Tensor rois{CPU};
   rois.CopyFrom(rois_gpu);
 
-  EXPECT_EQ(rois.dims(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
+  EXPECT_EQ(rois.sizes(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.dim(0), rois.dim(1));
   EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-4);
@@ -227,7 +223,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledGPU) {
   Tensor rois_probs{CPU};
   rois_probs.CopyFrom(rois_probs_gpu);
   EXPECT_EQ(
-      rois_probs.dims(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
+      rois_probs.sizes(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
       ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.dim(0));
   EXPECT_NEAR(
@@ -414,7 +410,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
   Tensor rois{CPU};
   rois.CopyFrom(rois_gpu);
 
-  EXPECT_EQ(rois.dims(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
+  EXPECT_EQ(rois.sizes(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.dim(0), rois.dim(1));
   EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-4);
@@ -426,7 +422,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
   Tensor rois_probs{CPU};
   rois_probs.CopyFrom(rois_probs_gpu);
   EXPECT_EQ(
-      rois_probs.dims(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
+      rois_probs.sizes(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
       ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.dim(0));
   EXPECT_NEAR(
@@ -619,7 +615,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedGPU) {
   auto& rois_gpu = rois_blob->Get<TensorCUDA>();
   Tensor rois{CPU};
   rois.CopyFrom(rois_gpu);
-  EXPECT_EQ(rois.dims(), (vector<int64_t>{26, 6}));
+  EXPECT_EQ(rois.sizes(), (vector<int64_t>{26, 6}));
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.size(0), rois.size(1));
   EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-3);
@@ -631,7 +627,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedGPU) {
   Tensor rois_probs{CPU};
   rois_probs.CopyFrom(rois_probs_gpu);
   EXPECT_EQ(
-      rois_probs.dims(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
+      rois_probs.sizes(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
       ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.size(0));
   EXPECT_NEAR(

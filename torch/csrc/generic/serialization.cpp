@@ -2,9 +2,17 @@
 #define TH_GENERIC_FILE "torch/csrc/generic/serialization.cpp"
 #else
 
+#ifdef THC_GENERIC_FILE
+#include <c10/cuda/CUDAGuard.h>
+#endif
+
 template <class io>
 void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
 {
+#ifdef THC_GENERIC_FILE
+  c10::cuda::CUDAGuard guard(self->device());
+#endif
+
   scalar_t *data;
   int64_t size = THWStorage_(size)(LIBRARY_STATE self);
 #ifndef THC_GENERIC_FILE
@@ -50,6 +58,13 @@ template void THPStorage_(writeFileRaw<PyObject*>)(THWStorage *self, PyObject* f
 template <class io>
 THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
 {
+#ifdef THC_GENERIC_FILE
+  c10::cuda::OptionalCUDAGuard guard;
+  if (_storage != nullptr) {
+    guard.set_device(_storage->device());
+  }
+#endif
+
   scalar_t *data;
   int64_t size;
   doRead(file, &size, sizeof(int64_t));

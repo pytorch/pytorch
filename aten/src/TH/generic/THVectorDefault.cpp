@@ -4,21 +4,6 @@
 
 #include <TH/THRandom.h>
 
-void THVector_(copy_DEFAULT)(scalar_t *x, const scalar_t *y, const ptrdiff_t n) {
-  ptrdiff_t i = 0;
-
-  for(; i <n-4; i+=4)
-  {
-    x[i] = y[i];
-    x[i+1] = y[i+1];
-    x[i+2] = y[i+2];
-    x[i+3] = y[i+3];
-  }
-
-  for(; i < n; i++)
-    x[i] = y[i];
-}
-
 void THVector_(fill_DEFAULT)(scalar_t *x, const scalar_t c, const ptrdiff_t n) {
   ptrdiff_t i = 0;
 
@@ -32,6 +17,23 @@ void THVector_(fill_DEFAULT)(scalar_t *x, const scalar_t c, const ptrdiff_t n) {
 
   for(; i < n; i++)
     x[i] = c;
+}
+
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+
+void THVector_(copy_DEFAULT)(scalar_t *x, const scalar_t *y, const ptrdiff_t n) {
+  ptrdiff_t i = 0;
+
+  for(; i <n-4; i+=4)
+  {
+    x[i] = y[i];
+    x[i+1] = y[i+1];
+    x[i+2] = y[i+2];
+    x[i+3] = y[i+3];
+  }
+
+  for(; i < n; i++)
+    x[i] = y[i];
 }
 
 void THVector_(cadd_DEFAULT)(scalar_t *z, const scalar_t *x, const scalar_t *y, const scalar_t c, const ptrdiff_t n)
@@ -213,12 +215,16 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
   } \
 
 #if defined(TH_REAL_IS_LONG)
-VECTOR_IMPLEMENT_FUNCTION(abs,labs)
+VECTOR_IMPLEMENT_FUNCTION(abs,std::abs)
 #endif /* long only part */
 
-#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
+#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_CHAR)
 VECTOR_IMPLEMENT_FUNCTION(abs,abs)
 #endif /* int only part */
+
+#if defined(TH_REAL_IS_BYTE)
+VECTOR_IMPLEMENT_FUNCTION(abs,)
+#endif /* unsigned, so identity */
 
 
 /* floating point only now */
@@ -257,7 +263,7 @@ VECTOR_IMPLEMENT_FUNCTION(sqrt,TH_MATH_NAME(sqrt))
 VECTOR_IMPLEMENT_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt))
 VECTOR_IMPLEMENT_FUNCTION(ceil,TH_MATH_NAME(ceil))
 VECTOR_IMPLEMENT_FUNCTION(floor,TH_MATH_NAME(floor))
-VECTOR_IMPLEMENT_FUNCTION(round,TH_MATH_NAME(round))
+VECTOR_IMPLEMENT_FUNCTION(round,TH_MATH_NAME(nearbyint))
 VECTOR_IMPLEMENT_FUNCTION(abs,TH_MATH_NAME(fabs))
 VECTOR_IMPLEMENT_FUNCTION(trunc,TH_MATH_NAME(trunc))
 VECTOR_IMPLEMENT_FUNCTION(frac,TH_MATH_NAME(TH_frac))
@@ -267,5 +273,7 @@ VECTOR_IMPLEMENT_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 #endif /* floating point only part */
 
 VECTOR_IMPLEMENT_FUNCTION(neg,-)
+
+#endif /* non bool only part */
 
 #endif

@@ -13,14 +13,33 @@
 #include <TH/generic/THTensor.h>
 #include <TH/THGenerateHalfType.h>
 
+#include <TH/generic/THTensor.h>
+#include <TH/THGenerateBoolType.h>
+
 /* random numbers */
 #include <TH/THRandom.h>
 #include <TH/generic/THTensorRandom.h>
 #include <TH/THGenerateAllTypes.h>
 
+#include <TH/generic/THTensorRandom.h>
+#include <TH/THGenerateBoolType.h>
+
 /* maths */
 #include <TH/generic/THTensorMath.h>
 #include <TH/THGenerateAllTypes.h>
+
+#include <TH/generic/THTensorMath.h>
+#include <TH/THGenerateBoolType.h>
+
+/* fill and zero*/
+#include <TH/generic/THTensorFill.h>
+#include <TH/THGenerateAllTypes.h>
+
+#include <TH/generic/THTensorFill.h>
+#include <TH/THGenerateHalfType.h>
+
+#include <TH/generic/THTensorFill.h>
+#include <TH/THGenerateBoolType.h>
 
 /* convolutions */
 #include <TH/generic/THTensorConv.h>

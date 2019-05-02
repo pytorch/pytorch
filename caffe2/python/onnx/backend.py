@@ -392,7 +392,7 @@ class Caffe2Backend(Backend):
         direction = force_unicode(attrs.pop('direction', 'forward'))
 
         if n.op_type == 'RNN':
-            activation = force_unicode(attrs.pop('activations', ('tanh',))[0])
+            activation = force_unicode(attrs.pop('activations', ('tanh',))[0].lower())
         elif n.op_type == 'GRU':
             linear_before_reset = attrs.pop('linear_before_reset', 0)
 
@@ -644,7 +644,10 @@ class Caffe2Backend(Backend):
             if value_info.name in initialized:
                 continue
             shape = list(d.dim_value for d in value_info.type.tensor_type.shape.dim)
-            ws.FeedBlob(value_info.name, np.ones(shape), device_option)
+            ws.FeedBlob(
+                value_info.name,
+                np.ones(shape, dtype=onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[value_info.type.tensor_type.elem_type]),
+                device_option)
 
     @staticmethod
     def optimize_onnx(input, init=False, predict=False):
@@ -916,7 +919,7 @@ class Caffe2Backend(Backend):
         if device.type == DeviceType.CPU:
             return True
         elif core.IsGPUDeviceType(device.type):
-            return workspace.has_gpu_support or workspace.has_hip_support
+            return workspace.has_gpu_support
         return False
 
     @classmethod

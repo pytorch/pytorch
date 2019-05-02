@@ -12,7 +12,7 @@ class NormalizePlanarYUVOp : public Operator<CPUContext> {
   USE_OPERATOR_FUNCTIONS(CPUContext);
   using Operator<CPUContext>::Operator;
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& M = Input(1); // mean
     const auto& S = Input(2); // standard deviation

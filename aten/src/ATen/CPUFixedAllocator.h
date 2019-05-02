@@ -25,7 +25,7 @@ static cpu_fixed_free(void * state, void * allocation) {
     delete on_release;
 }
 
-static THAllocator CPU_fixed_allocator =
+static Allocator CPU_fixed_allocator =
   { cpu_fixed_malloc, cpu_fixed_realloc, cpu_fixed_free };
 
 }

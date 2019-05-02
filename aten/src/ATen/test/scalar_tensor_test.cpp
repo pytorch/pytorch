@@ -26,7 +26,7 @@ void require_equal_size_dim(const Tensor &lhs, const Tensor &rhs) {
   ASSERT_TRUE(lhs.sizes().equals(rhs.sizes()));
 }
 
-bool should_expand(const IntList &from_size, const IntList &to_size) {
+bool should_expand(const IntArrayRef &from_size, const IntArrayRef &to_size) {
   if (from_size.size() > to_size.size()) {
     return false;
   }
@@ -42,7 +42,7 @@ bool should_expand(const IntList &from_size, const IntList &to_size) {
   return true;
 }
 
-void test(Type &T) {
+void test(DeprecatedTypeProperties &T) {
   std::vector<std::vector<int64_t>> sizes = {{}, {0}, {1}, {1, 1}, {2}};
 
   // single-tensor/size tests

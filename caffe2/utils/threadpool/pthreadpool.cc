@@ -5,9 +5,13 @@
 #include <string.h>
 #include <assert.h>
 
+#ifdef _MSC_VER
+#include <cstdio>
+#undef min
+#else
 /* POSIX headers */
-#include <pthread.h>
 #include <unistd.h>
+#endif
 
 /* Library header */
 #include "caffe2/core/logging.h"
@@ -34,7 +38,8 @@ struct compute_1d_tiled_context {
   size_t tile;
 };
 
-static void compute_1d_tiled(const struct compute_1d_tiled_context* context, size_t linear_index) {
+static void compute_1d_tiled(void* context_, size_t linear_index) {
+  const struct compute_1d_tiled_context* context = (compute_1d_tiled_context*) context_;
   const size_t tile_index = linear_index;
   const size_t index = tile_index * context->tile;
   const size_t tile = min(context->tile, context->range - index);
@@ -56,12 +61,10 @@ void pthreadpool_compute_1d_tiled(
   } else {
     /* Execute in parallel on the thread pool using linearized index */
     const size_t tile_range = divide_round_up(range, tile);
-    struct compute_1d_tiled_context context = {
-      .function = function,
-      .argument = argument,
-      .range = range,
-      .tile = tile
-    };
+    struct compute_1d_tiled_context context = {/*.function = */ function,
+                                               /*.argument = */ argument,
+                                               /*.range = */ range,
+                                               /*.tile = */ tile};
     pthreadpool_compute_1d(threadpool, (pthreadpool_function_1d_t) compute_1d_tiled, &context, tile_range);
   }
 }
@@ -72,9 +75,10 @@ struct compute_2d_context {
   caffe2::FixedDivisor<int32_t> range_j;
 };
 
-static void compute_2d(const struct compute_2d_context* context, size_t linear_index) {
+static void compute_2d(void* context_, size_t linear_index) {
   DCHECK_LE(linear_index, std::numeric_limits<int32_t>::max());
 
+  const struct compute_2d_context* context = static_cast<compute_2d_context*>(context_);
   int32_t q;
   int32_t r;
   context->range_j.DivMod(static_cast<int32_t>(linear_index), &q, &r);
@@ -99,9 +103,9 @@ void pthreadpool_compute_2d(
     DCHECK_LE(range_i * range_j, (size_t)std::numeric_limits<int32_t>::max());
     /* Execute in parallel on the thread pool using linearized index */
     struct compute_2d_context context = {
-        .function = function,
-        .argument = argument,
-        .range_j = caffe2::FixedDivisor<int32_t>(range_j)};
+        /*.function = */ function,
+        /*.argument = */ argument,
+        /*.range_j = */ caffe2::FixedDivisor<int32_t>(range_j)};
     pthreadpool_compute_1d(threadpool, (pthreadpool_function_1d_t) compute_2d, &context, range_i * range_j);
   }
 }
@@ -116,10 +120,11 @@ struct compute_2d_tiled_context {
   size_t tile_j;
 };
 
-static void compute_2d_tiled(const struct compute_2d_tiled_context* context, size_t linear_index) {
+static void compute_2d_tiled(void* context_, size_t linear_index) {
   int32_t q;
   int32_t r;
 
+  const struct compute_2d_tiled_context* context = static_cast<compute_2d_tiled_context*>(context_);
   context->tile_range_j.DivMod(linear_index, &q, &r);
   const size_t max_tile_i = context->tile_i;
   const size_t max_tile_j = context->tile_j;
@@ -154,13 +159,13 @@ void pthreadpool_compute_2d_tiled(
         tile_range_i * tile_range_j,
         (size_t)std::numeric_limits<int32_t>::max());
     struct compute_2d_tiled_context context = {
-        .function = function,
-        .argument = argument,
-        .tile_range_j = caffe2::FixedDivisor<int32_t>(tile_range_j),
-        .range_i = range_i,
-        .range_j = range_j,
-        .tile_i = tile_i,
-        .tile_j = tile_j};
+        /*.function = */ function,
+        /*.argument = */ argument,
+        /*.tile_range_j = */ caffe2::FixedDivisor<int32_t>(tile_range_j),
+        /*.range_i = */ range_i,
+        /*.range_j = */ range_j,
+        /*.tile_i = */ tile_i,
+        /*.tile_j = */ tile_j};
     pthreadpool_compute_1d(threadpool, (pthreadpool_function_1d_t) compute_2d_tiled, &context, tile_range_i * tile_range_j);
   }
 }
@@ -179,9 +184,10 @@ struct compute_3d_tiled_context {
 };
 
 static void compute_3d_tiled(
-    const struct compute_3d_tiled_context* context,
+    void* context_,
     size_t linear_index) {
   int32_t tile_index_ij, tile_index_k;
+  const struct compute_3d_tiled_context* context = static_cast<compute_3d_tiled_context*>(context_);
   context->tile_range_k.DivMod(
       static_cast<int32_t>(linear_index), &tile_index_ij, &tile_index_k);
   int32_t tile_index_i, tile_index_j;
@@ -235,16 +241,16 @@ void pthreadpool_compute_3d_tiled(
         tile_range_i * tile_range_j * tile_range_k,
         (size_t)std::numeric_limits<int>::max());
     struct compute_3d_tiled_context context = {
-        .function = function,
-        .argument = argument,
-        .tile_range_j = caffe2::FixedDivisor<int>(tile_range_j),
-        .tile_range_k = caffe2::FixedDivisor<int>(tile_range_k),
-        .range_i = range_i,
-        .range_j = range_j,
-        .range_k = range_k,
-        .tile_i = tile_i,
-        .tile_j = tile_j,
-        .tile_k = tile_k};
+        /*.function = */ function,
+        /*.argument = */ argument,
+        /*.tile_range_j = */ caffe2::FixedDivisor<int>(tile_range_j),
+        /*.tile_range_k = */ caffe2::FixedDivisor<int>(tile_range_k),
+        /*.range_i = */ range_i,
+        /*.range_j = */ range_j,
+        /*.range_k = */ range_k,
+        /*.tile_i = */ tile_i,
+        /*.tile_j = */ tile_j,
+        /*.tile_k = */ tile_k};
     pthreadpool_compute_1d(
         threadpool,
         (pthreadpool_function_1d_t)compute_3d_tiled,
@@ -270,9 +276,10 @@ struct compute_4d_tiled_context {
 };
 
 static void compute_4d_tiled(
-    const struct compute_4d_tiled_context* context,
+    void* context_,
     size_t linear_index) {
   int32_t tile_index_ij, tile_index_kl;
+  const struct compute_4d_tiled_context* context = static_cast<compute_4d_tiled_context*>(context_);
   context->tile_range_kl.DivMod(
       static_cast<int32_t>(linear_index), &tile_index_ij, &tile_index_kl);
   int32_t tile_index_i, tile_index_j;
@@ -346,19 +353,20 @@ void pthreadpool_compute_4d_tiled(
         tile_range_i * tile_range_j * tile_range_k * tile_range_l,
         (size_t)std::numeric_limits<int>::max());
     struct compute_4d_tiled_context context = {
-        .function = function,
-        .argument = argument,
-        .tile_range_kl = caffe2::FixedDivisor<int>(tile_range_k * tile_range_l),
-        .tile_range_j = caffe2::FixedDivisor<int>(tile_range_j),
-        .tile_range_l = caffe2::FixedDivisor<int>(tile_range_l),
-        .range_i = range_i,
-        .range_j = range_j,
-        .range_k = range_k,
-        .range_l = range_l,
-        .tile_i = tile_i,
-        .tile_j = tile_j,
-        .tile_k = tile_k,
-        .tile_l = tile_l};
+        /*.function = */ function,
+        /*.argument = */ argument,
+        /*.tile_range_kl = */
+        caffe2::FixedDivisor<int>(tile_range_k * tile_range_l),
+        /*.tile_range_j = */ caffe2::FixedDivisor<int>(tile_range_j),
+        /*.tile_range_l = */ caffe2::FixedDivisor<int>(tile_range_l),
+        /*.range_i = */ range_i,
+        /*.range_j = */ range_j,
+        /*.range_k = */ range_k,
+        /*.range_l = */ range_l,
+        /*.tile_i = */ tile_i,
+        /*.tile_j = */ tile_j,
+        /*.tile_k = */ tile_k,
+        /*.tile_l = */ tile_l};
     pthreadpool_compute_1d(
         threadpool,
         (pthreadpool_function_1d_t)compute_4d_tiled,

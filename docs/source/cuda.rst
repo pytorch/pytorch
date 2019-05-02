@@ -46,8 +46,10 @@ Memory management
 .. autofunction:: empty_cache
 .. autofunction:: memory_allocated
 .. autofunction:: max_memory_allocated
+.. autofunction:: reset_max_memory_allocated
 .. autofunction:: memory_cached
 .. autofunction:: max_memory_cached
+.. autofunction:: reset_max_memory_cached
 
 NVIDIA Tools Extension (NVTX)
 -----------------------------

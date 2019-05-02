@@ -7,7 +7,11 @@ import hypothesis.strategies as st
 from caffe2.python import core, dyndep, workspace
 from caffe2.python.fb import hardcode_scale_zp
 from caffe2.quantization.server import utils as dnnlowp_utils
-from dnnlowp_test_utils import check_quantized_results_close, generate_conv_inputs
+from dnnlowp_test_utils import (
+    check_quantized_results_close,
+    generate_conv_inputs,
+    run_conv_or_fc,
+)
 from hypothesis import assume, given
 
 
@@ -28,8 +32,6 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         output_channels_per_group=st.integers(2, 16),
         batch_size=st.integers(1, 3),
         order=st.sampled_from(["NCHW", "NHWC"]),
-        in_quantized=st.booleans(),
-        out_quantized=st.booleans(),
         prepack_weight=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
@@ -47,8 +49,6 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         output_channels_per_group,
         batch_size,
         order,
-        in_quantized,
-        out_quantized,
         prepack_weight,
         preserve_activation_sparsity,
         preserve_weight_sparsity,
@@ -88,8 +88,8 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
             init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
-            do_quantize = "DNNLOWP" in engine and in_quantized
-            do_dequantize = "DNNLOWP" in engine and out_quantized
+            do_quantize = "DNNLOWP" in engine
+            do_dequantize = "DNNLOWP" in engine
             do_prepack_weight = engine == "DNNLOWP" and prepack_weight
 
             if do_quantize:
@@ -124,14 +124,17 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
 
             conv = core.CreateOperator(
                 op_type,
-                ["X_q" if do_quantize else "X", "W", "b"],
+                [
+                    "X_q" if do_quantize else "X",
+                    "W_packed" if do_prepack_weight else "W",
+                    "b",
+                ],
                 ["Y_q" if do_dequantize else "Y"],
                 stride=stride,
                 kernel=kernel,
                 dilation=dilation,
                 pad=pad,
                 order=order,
-                dequantize_output=not do_dequantize,
                 preserve_activation_sparsity=preserve_activation_sparsity,
                 preserve_weight_sparsity=preserve_weight_sparsity,
                 engine=engine,
@@ -158,13 +161,9 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(init_net)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, order, gc, outputs
+            )
 
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)
 
@@ -276,11 +275,8 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([relu])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
+            run_conv_or_fc(
+                self, None, net, X, W, b, op_type, engine, order, gc, outputs
+            )
 
         check_quantized_results_close(outputs)

@@ -17,6 +17,8 @@ VALGRIND=${VALGRIND:=ON}
 ./scalar_tensor_test
 ./tensor_interop_test
 ./undefined_tensor_test
+./extension_backend_test
+./xla_tensor_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi
@@ -34,6 +36,9 @@ if [[ -x ./cuda_half_test ]]; then
 fi
 if [[ -x ./cuda_optional_test ]]; then
   ./cuda_optional_test
+fi
+if [[ -x ./cuda_tensor_interop_test ]]; then
+  ./cuda_tensor_interop_test
 fi
 if [ "$VALGRIND" == "ON" ]
 then

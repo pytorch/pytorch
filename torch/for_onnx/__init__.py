@@ -1,1 +1,1 @@
-from .onnx import *
+from .onnx import *  # noqa: F401

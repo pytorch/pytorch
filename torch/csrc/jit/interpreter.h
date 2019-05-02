@@ -4,7 +4,7 @@
 #include <vector>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ivalue.h>
+#include <ATen/core/ivalue.h>
 
 namespace at {
 class Tensor;
@@ -26,6 +26,8 @@ struct InterpreterStateImpl;
 struct Graph;
 struct Node;
 using Stack = std::vector<c10::IValue>;
+using c10::ivalue::Future;
+using c10::ivalue::Tuple;
 
 struct TORCH_API Code {
   Code() : pImpl(nullptr) {}
@@ -45,11 +47,11 @@ struct TORCH_API Code {
 };
 
 struct InterpreterState {
-  InterpreterState(const Code& code);
-  void run(Stack& stack);
+  TORCH_API InterpreterState(const Code& code);
+  TORCH_API void run(Stack& stack);
   c10::intrusive_ptr<Future> runAsync(Stack& stack);
   c10::intrusive_ptr<Future> getFuture();
-  ~InterpreterState();
+  TORCH_API ~InterpreterState();
 
  private:
   InterpreterState(c10::intrusive_ptr<c10::intrusive_ptr_target> pImpl);
@@ -73,16 +75,15 @@ struct Suspend : public std::exception {
 };
 
 struct InterpreterContinuation {
-  InterpreterContinuation(InterpreterState state_, Stack stack_)
-      : state(state_), stack(std::move(stack_)) {}
+  InterpreterContinuation(InterpreterState state_, Stack stack_, bool grad_mode_enabled_)
+      : state(state_), stack(std::move(stack_)), grad_mode_enabled(grad_mode_enabled_) {}
 
-  void operator()() {
-    state.runAsync(stack);
-  }
+  void operator()();
 
  private:
   InterpreterState state;
   Stack stack;
+  bool grad_mode_enabled;
 };
 } // namespace jit
 } // namespace torch

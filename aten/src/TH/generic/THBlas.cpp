@@ -195,7 +195,18 @@ scalar_t THBlas_(dot)(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t
   }
 }
 
-void THBlas_(gemv)(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy)
+void THBlas_(gemv)(
+  char trans,
+  int64_t m,
+  int64_t n,
+  scalar_t alpha,
+  scalar_t *a,
+  int64_t lda,
+  scalar_t *x,
+  int64_t incx,
+  scalar_t beta,
+  scalar_t *y,
+  int64_t incy)
 {
   if(n == 1)
     lda = m;
@@ -232,10 +243,10 @@ void THBlas_(gemv)(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a
         scalar_t *row_ = a+lda*i;
         for(j = 0; j < m; j++)
           sum += x[j*incx]*row_[j];
-	if (beta == 0)
-	  y[i*incy] = alpha*sum;
-	else
-	  y[i*incy] = beta*y[i*incy] + alpha*sum;
+          if (beta == 0)
+            y[i*incy] = alpha*sum;
+          else
+            y[i*incy] = beta*y[i*incy] + alpha*sum;
       }
     }
     else
@@ -254,7 +265,16 @@ void THBlas_(gemv)(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a
   }
 }
 
-void THBlas_(ger)(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy, scalar_t *a, int64_t lda)
+void THBlas_(ger)(
+  int64_t m,
+  int64_t n,
+  scalar_t alpha,
+  scalar_t *x,
+  int64_t incx,
+  scalar_t *y,
+  int64_t incy,
+  scalar_t *a,
+  int64_t lda)
 {
   if(n == 1)
     lda = m;
@@ -292,7 +312,20 @@ void THBlas_(ger)(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t inc
   }
 }
 
-void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *b, int64_t ldb, scalar_t beta, scalar_t *c, int64_t ldc)
+void THBlas_(gemm)(
+  char transa,
+  char transb,
+  int64_t m,
+  int64_t n,
+  int64_t k,
+  scalar_t alpha,
+  scalar_t *a,
+  int64_t lda,
+  scalar_t *b,
+  int64_t ldb,
+  scalar_t beta,
+  scalar_t *c,
+  int64_t ldc)
 {
   int transa_ = ((transa == 't') || (transa == 'T'));
   int transb_ = ((transb == 't') || (transb == 'T'));
@@ -348,29 +381,41 @@ void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, sc
   }
 #endif
   {
-    int64_t i, j, l;
     if(!transa_ && !transb_)
     {
-      scalar_t *a_ = a;
-      for(i = 0; i < m; i++)
-      {
-        scalar_t *b_ = b;
-        for(j = 0; j < n; j++)
-        {
-          scalar_t sum = 0;
-          for(l = 0; l < k; l++)
-            sum += a_[l*lda]*b_[l];
-          b_ += ldb;
-	  if (beta == 0)
-	    c[j*ldc+i] = alpha*sum;
-	  else
-	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+      if (beta == 0) {
+        for (int64_t j = 0; j < n; j++) {
+          for (int64_t i = 0; i < m; i++) {
+            c[j * ldc + i] = 0;
+          }
         }
-        a_++;
+      }
+      else {
+        for (int64_t j = 0; j < n; j++) {
+          for (int64_t i = 0; i < m; i++) {
+            c[j * ldc + i] *= beta;
+          }
+        }
+      }
+      for (int64_t l = 0; l < k; l++) {
+        for (int64_t j = 0; j < n; j++) {
+          scalar_t val = b[l + j * ldb] * alpha;
+          int64_t i_m = m / 4;
+          for (int64_t i_i = 0; i_i < i_m; i_i++) {
+              c[j * ldc + i_i * 4 + 0] += a[i_i * 4 + 0 + l * lda] * val;
+              c[j * ldc + i_i * 4 + 1] += a[i_i * 4 + 1 + l * lda] * val;
+              c[j * ldc + i_i * 4 + 2] += a[i_i * 4 + 2 + l * lda] * val;
+              c[j * ldc + i_i * 4 + 3] += a[i_i * 4 + 3 + l * lda] * val;
+          }
+          int64_t i = i_m * 4;
+          for (; i < m; i++)
+              c[j * ldc + i] += a[i + l * lda] * val;
+        }
       }
     }
     else if(transa_ && !transb_)
     {
+      int64_t i, j, l;
       scalar_t *a_ = a;
       for(i = 0; i < m; i++)
       {
@@ -381,52 +426,73 @@ void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, sc
           for(l = 0; l < k; l++)
             sum += a_[l]*b_[l];
           b_ += ldb;
-	  if (beta == 0)
-	    c[j*ldc+i] = alpha*sum;
-	  else
-	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+          if (beta == 0)
+            c[j*ldc+i] = alpha*sum;
+          else
+            c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
         }
         a_ += lda;
       }
     }
     else if(!transa_ && transb_)
     {
-      scalar_t *a_ = a;
-      for(i = 0; i < m; i++)
-      {
-        scalar_t *b_ = b;
-        for(j = 0; j < n; j++)
-        {
-          scalar_t sum = 0;
-          for(l = 0; l < k; l++)
-            sum += a_[l*lda]*b_[l*ldb];
-          b_++;
-	  if (beta == 0)
-	    c[j*ldc+i] = alpha*sum;
-	  else
-	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+      if (beta == 0) {
+        for (int64_t j = 0; j < n; j++) {
+          for (int64_t i = 0; i < m; i++) {
+            c[j * ldc + i] = 0;
+          }
         }
-        a_++;
+      }
+      else {
+        for (int64_t j = 0; j < n; j++) {
+          for (int64_t i = 0; i < m; i++) {
+            c[j * ldc + i] *= beta;
+          }
+        }
+      }
+      for (int64_t l = 0; l < k; l++) {
+        for (int64_t j = 0; j < n; j++) {
+          scalar_t val = b[j + l * ldb] * alpha;
+          int64_t i_m = m / 4;
+          for (int64_t i_i = 0; i_i < i_m; i_i++) {
+            c[j * ldc + i_i * 4 + 0] += a[i_i * 4 + 0 + l * lda] * val;
+            c[j * ldc + i_i * 4 + 1] += a[i_i * 4 + 1 + l * lda] * val;
+            c[j * ldc + i_i * 4 + 2] += a[i_i * 4 + 2 + l * lda] * val;
+            c[j * ldc + i_i * 4 + 3] += a[i_i * 4 + 3 + l * lda] * val;
+          }
+          int64_t i = i_m * 4;
+          for (; i < m; i++)
+            c[j * ldc + i] += a[i + l * lda] * val;
+        }
       }
     }
     else
     {
-      scalar_t *a_ = a;
-      for(i = 0; i < m; i++)
-      {
-        scalar_t *b_ = b;
-        for(j = 0; j < n; j++)
-        {
-          scalar_t sum = 0;
-          for(l = 0; l < k; l++)
-            sum += a_[l]*b_[l*ldb];
-          b_++;
-	  if (beta == 0)
-	    c[j*ldc+i] = alpha*sum;
-	  else
-	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+      for (int64_t i = 0; i < m; i++) {
+        for (int64_t j = 0; j < n; j++) {
+          if (beta == 0)
+            c[j * ldc + i] = 0;
+          else
+            c[j * ldc + i] *= beta;
         }
-        a_ += lda;
+      }
+      for (int64_t i = 0; i < m; i++) {
+        for (int64_t j = 0; j < n; j++) {
+          int64_t l_k = k / 4;
+          for (int64_t l_l = 0; l_l < l_k; l_l++) {
+              c[j * ldc + i] += a[i * lda + l_l * 4 + 0] //
+                          * b[(l_l * 4 + 0) * ldb + j] * alpha;
+              c[j * ldc + i] += a[i * lda + l_l * 4 + 1] //
+                          * b[(l_l * 4 + 1) * ldb + j] * alpha;
+              c[j * ldc + i] += a[i * lda + l_l * 4 + 2] //
+                          * b[(l_l * 4 + 2) * ldb + j] * alpha;
+              c[j * ldc + i] += a[i * lda + l_l * 4 + 3] //
+                          * b[(l_l * 4 + 3) * ldb + j] * alpha;
+          }
+          int64_t l = l_k * 4;
+          for (; l < k; l++)
+              c[j * ldc + i] += a[i * lda + l] * b[l * ldb + j] * alpha;
+        }
       }
     }
   }

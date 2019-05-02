@@ -84,7 +84,7 @@ static void THNN_(VolumetricMaxUnpooling_updateOutput_frame)(
         for (j = 0; j < iW; j++)
         {
           index = t * iH * iW + i * iW + j;
-          maxp = ind_p_k[index] - TH_INDEX_BASE;  /* retrieve position of max */
+          maxp = ind_p_k[index];  /* retrieve position of max */
           if (maxp < 0 || maxp >= oT * oW * oH)
           {
 #pragma omp critical
@@ -232,7 +232,7 @@ static void THNN_(VolumetricMaxUnpooling_updateGradInput_frame)(
         for (j = 0; j < iW; j++)
         {
           index = t * iH * iW + i * iW  + j;
-          maxp = ind_p_k[index] - TH_INDEX_BASE;  /* retrieve position of max */
+          maxp = ind_p_k[index];  /* retrieve position of max */
           if (maxp < 0 || maxp >= oT * oH * oW)
           {
             THError("invalid max index %ld, oT= %d, oW= %d, oH= %d", maxp, oT, oW, oH);

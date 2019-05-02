@@ -5,18 +5,14 @@ namespace at { namespace native {
 
 namespace {
 
-inline miopenDataType_t getDataType(const at::Type& t) {
-  auto scalar_type = t.scalarType();
+inline miopenDataType_t getDataType(const at::Tensor& t) {
+  auto scalar_type = t.scalar_type();
   if (scalar_type == at::kFloat) {
     return miopenFloat;
   } else if (scalar_type == at::kHalf) {
     return miopenHalf;
   }
   throw std::runtime_error("TensorDescriptor only supports float and half tensors");
-}
-
-inline miopenDataType_t getDataType(const at::Tensor& t) {
-  return getDataType(t.type());
 }
 
 } // anonymous namespace
@@ -28,7 +24,7 @@ void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
 
 static int MIOPEN_DIM_MAX = 4;
 
-void TensorDescriptor::set(miopenDataType_t datatype, IntList t_sizes, IntList t_strides, size_t pad) {
+void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
   size_t dim = t_sizes.size();
   if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
 #define _STR(X) #X

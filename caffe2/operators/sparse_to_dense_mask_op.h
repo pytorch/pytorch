@@ -15,8 +15,9 @@ template <class Context>
 class SparseToDenseMaskBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SparseToDenseMaskBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit SparseToDenseMaskBase(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     std::vector<int64_t> mask =
         this->template GetRepeatedArgument<int64_t>("mask");
     featuresCount_ = mask.size();
@@ -62,8 +63,9 @@ template <class Context>
 class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SparseToDenseMaskOp(const OperatorDef& operator_def, Workspace* ws)
-      : SparseToDenseMaskBase<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit SparseToDenseMaskOp(Args&&... args)
+      : SparseToDenseMaskBase<Context>(std::forward<Args>(args)...) {
     returnPresenceMask_ = this->template GetSingleArgument<bool>(
         "return_presence_mask", false);
     maxSkippedSparseIndices_ =
@@ -153,6 +155,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
         const auto sparse_index = sparse_indices_vec[offset + c];
         if (sparse_index < 0 ||
             sparse_index >= std::numeric_limits<TInd>::max()) {
+          LOG(WARNING) << "Skipping invalid sparse index: " << sparse_index;
           CAFFE_ENFORCE_LT(
               ++skippedSparseIndices_,
               maxSkippedSparseIndices_,
@@ -192,8 +195,9 @@ template <class Context>
 class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SparseToDenseMaskGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : SparseToDenseMaskBase<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit SparseToDenseMaskGradientOp(Args&&... args)
+      : SparseToDenseMaskBase<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(

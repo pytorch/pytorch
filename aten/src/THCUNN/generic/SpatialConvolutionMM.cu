@@ -88,7 +88,7 @@ static THCTensor* THNN_(newViewWeightMM2d)(THCState *state, THCTensor *weight) {
     int64_t s2 = weight->size(1) * weight->size(2) * weight->size(3);
     THCTensor *old_weight = weight;
     weight = THCTensor_(newWithStorage2d)(state, THTensor_getStoragePtr(weight), weight->storage_offset(),
-					  s1, -1, s2, -1);
+                                          s1, -1, s2, -1);
     THCTensor_(free)(state, old_weight);
   }
   return weight;

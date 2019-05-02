@@ -16,8 +16,8 @@ namespace {
 // CPU: t1, NN-API: t2
 void checkError(const TensorCPU& t1, const TensorCPU& t2, float error) {
   CAFFE_ENFORCE_EQ(
-      t1.dims(),
-      t2.dims(),
+      t1.sizes(),
+      t2.sizes(),
       "t1.size() = ",
       t1.size(),
       ", t2.size() = ",

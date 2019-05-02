@@ -8,86 +8,100 @@ Publishing models
 Pytorch Hub supports publishing pre-trained models(model definitions and pre-trained weights)
 to a github repository by adding a simple ``hubconf.py`` file;
 
-``hubconf.py`` can have multiple entrypoints. Each entrypoint is defined as a python function with
-the following signature.
+``hubconf.py`` can have multiple entrypoints. Each entrypoint is defined as a python function
+(example: a pre-trained model you want to publish).
 
 ::
 
-    def entrypoint_name(pretrained=False, *args, **kwargs):
+    def entrypoint_name(*args, **kwargs):
+        # args & kwargs are optional, for models which take positional/keyword arguments.
         ...
 
 How to implement an entrypoint?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Here is a code snipet from pytorch/vision repository, which specifies an entrypoint
-for ``resnet18`` model. You can see a full script in
+Here is a code snippet specifies an entrypoint for ``resnet18`` model if we expand
+the implementation in ``pytorch/vision/hubconf.conf``.
+In most case importing the right function in ``hubconf.conf`` is sufficient. Here we
+just want to use the expanded version as an example to show how it works.
+You can see the full script in
 `pytorch/vision repo <https://github.com/pytorch/vision/blob/master/hubconf.py>`_
 
 ::
 
-    dependencies = ['torch', 'math']
+    dependencies = ['torch']
+    from torchvision.models.resnet import resnet18 as _resnet18
 
-    def resnet18(pretrained=False, *args, **kwargs):
-        """
+    # resnet18 is the name of entrypoint
+    def resnet18(pretrained=False, **kwargs):
+        """ # This docstring shows up in hub.help()
         Resnet18 model
-        pretrained (bool): a recommended kwargs for all entrypoints
-        args & kwargs are arguments for the function
+        pretrained (bool): kwargs, load pretrained weights into the model
         """
-        ######## Call the model in the repo ###############
-        from torchvision.models.resnet import resnet18 as _resnet18
-        model = _resnet18(*args, **kwargs)
-        ######## End of call ##############################
-        # The following logic is REQUIRED
-        if pretrained:
-            # For weights saved in local repo
-			# model.load_state_dict(<path_to_saved_file>)
-
-			# For weights saved elsewhere
-			checkpoint = 'https://download.pytorch.org/models/resnet18-5c106cde.pth'
-            model.load_state_dict(model_zoo.load_url(checkpoint, progress=False))
+        # Call the model, load pretrained weights
+        model = _resnet18(pretrained=pretrained, **kwargs)
         return model
 
+
 - ``dependencies`` variable is a **list** of package names required to to run the model.
-- Pretrained weights can either be stored local in the github repo, or loadable by
-  ``model_zoo.load()``.
-- ``pretrained`` controls whether to load the pre-trained weights provided by repo owners.
 - ``args`` and ``kwargs`` are passed along to the real callable function.
-- Docstring of the function works as a help message, explaining what does the model do and what
-  are the allowed arguments.
+- Docstring of the function works as a help message. It explains what does the model do and what
+  are the allowed positional/keyword arguments. It's highly recommended to add a few examples here.
 - Entrypoint function should **ALWAYS** return a model(nn.module).
+- Pretrained weights can either be stored locally in the github repo, or loadable by
+  ``torch.hub.load_state_dict_from_url()``. In the example above ``torchvision.models.resnet.resnet18``
+  handles ``pretrained``, alternatively you can put the following logic in the entrypoint definition.
+
+::
+
+    if pretrained:
+        # For checkpoint saved in local repo
+        model.load_state_dict(<path_to_saved_checkpoint>)
+
+        # For checkpoint saved elsewhere
+        checkpoint = 'https://download.pytorch.org/models/resnet18-5c106cde.pth'
+        model.load_state_dict(torch.hub.load_state_dict_from_url(checkpoint, progress=False))
+
 
 Important Notice
 ^^^^^^^^^^^^^^^^
 
 - The published models should be at least in a branch/tag. It can't be a random commit.
 
+
 Loading models from Hub
 -----------------------
 
-Users can load the pre-trained models using ``torch.hub.load()`` API.
+Pytorch Hub provides convenient APIs to explore all available models in hub through ``torch.hub.list()``,
+show docstring and examples through ``torch.hub.help()`` and load the pre-trained models using ``torch.hub.load()``
 
 
 .. automodule:: torch.hub
+
+.. autofunction:: list
+
+.. autofunction:: help
+
 .. autofunction:: load
 
-Here's an example loading ``resnet18`` entrypoint from ``pytorch/vision`` repo.
+Running a loaded model:
+^^^^^^^^^^^^^^^^^^^^^^^
 
-::
+Note that ``*args, **kwargs`` in ``torch.load()`` are used to **instantiate** a model.
+After you loaded a model, how can you find out what you can do with the model?
+A suggested workflow is
 
-    hub_model = hub.load(
-        'pytorch/vision:master', # repo_owner/repo_name:branch
-        'resnet18', # entrypoint
-        1234, # args for callable [not applicable to resnet]
-        pretrained=True) # kwargs for callable
+- ``dir(model)`` to see all avaialble methods of the model.
+- ``help(model.foo)`` to check what arguments ``model.foo`` takes to run
 
-Where are my downloaded model & weights saved?
+Where are my downloaded models saved?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The locations are used in the order of
 
-- hub_dir: user specified path. It can be set in the following ways:
-  - Setting the environment variable ``TORCH_HUB_DIR``
-  - Calling ``hub.set_dir(<PATH_TO_HUB_DIR>)``
-- ``~/.torch/hub``
+- Calling ``hub.set_dir(<PATH_TO_HUB_DIR>)``
+- ``$TORCH_HOME/hub``, if environment variable ``TORCH_HOME`` is set.
+- ``$XDG_CACHE_HOME/torch/hub``, if environment variable ``XDG_CACHE_HOME`` is set.
+- ``~/.cache/torch/hub``
 
 .. autofunction:: set_dir
 
@@ -99,3 +113,15 @@ By default, we don't clean up files after loading it. Hub uses the cache by defa
 Users can force a reload by calling ``hub.load(..., force_reload=True)``. This will delete
 the existing github folder and downloaded weights, reinitialize a fresh download. This is useful
 when updates are published to the same branch, users can keep up with the latest release.
+
+
+Known limitations:
+^^^^^^^^^^^^^^^^^^
+Torch hub works by importing the package as if it was installed. There're some side effects
+introduced by importing in Python. For example, you can see new items in Python caches
+``sys.modules`` and ``sys.path_importer_cache`` which is normal Python behavior.
+
+A known limitation that worth mentioning here is user **CANNOT** load two different branches of
+the same repo in the **same python process**. It's just like installing two packages with the
+same name in Python, which is not good. Cache might join the party and give you surprises if you
+actually try that. Of course it's totally fine to load them in separate processes.

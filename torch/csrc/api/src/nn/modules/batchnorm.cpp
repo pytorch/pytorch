@@ -28,8 +28,8 @@ void BatchNormImpl::reset() {
   if (options.stateful_) {
     running_mean =
         register_buffer("running_mean", torch::zeros({options.features_}));
-    running_variance =
-        register_buffer("running_variance", torch::ones({options.features_}));
+    running_var =
+        register_buffer("running_var", torch::ones({options.features_}));
   }
 }
 
@@ -47,7 +47,7 @@ Tensor BatchNormImpl::forward(const Tensor& input) {
       "Calling BatchNorm::forward is only permitted when "
       "the 'stateful' option is true (was false). "
       "Use BatchNorm::pure_forward instead.");
-  return pure_forward(input, running_mean, running_variance);
+  return pure_forward(input, running_mean, running_var);
 }
 
 Tensor BatchNormImpl::pure_forward(

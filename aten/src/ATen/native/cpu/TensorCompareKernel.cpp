@@ -6,24 +6,10 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/NumericUtils.h>
 #include <c10/util/Optional.h>
 
 namespace at { namespace native { namespace {
-
-template <typename scalar_t>
-bool _isnan(scalar_t val) {
-  return false;
-}
-
-template <>
-bool _isnan(float val) {
-  return std::isnan(val);
-}
-
-template <>
-bool _isnan(double val) {
-  return std::isnan(val);
-}
 
 template <typename scalar_t, typename index_t>
 struct Reduction {
@@ -97,7 +83,7 @@ static void max_kernel_impl(
     Tensor& max_indices,
     const Tensor& self,
     c10::optional<int64_t> dim) {
-  AT_DISPATCH_ALL_TYPES(self.type(), "max", [&] {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "max", [&] {
     Reduction<scalar_t, int64_t>::apply(max, max_indices, self, dim, true);
   });
 }
@@ -107,7 +93,7 @@ static void min_kernel_impl(
     Tensor& min_indices,
     const Tensor& self,
     c10::optional<int64_t> dim) {
-  AT_DISPATCH_ALL_TYPES(self.type(), "min", [&] {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "min", [&] {
     Reduction<scalar_t, int64_t>::apply(min, min_indices, self, dim, false);
   });
 }

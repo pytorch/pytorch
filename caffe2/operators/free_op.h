@@ -12,7 +12,9 @@ namespace caffe2 {
 template <class Context>
 class FreeOp : public Operator<Context> {
  public:
-  FreeOp(const OperatorDef& def, Workspace* ws) : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit FreeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     for (Blob* output : OperatorBase::Outputs()) {

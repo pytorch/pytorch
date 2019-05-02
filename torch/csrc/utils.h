@@ -58,59 +58,51 @@
     (throw std::runtime_error("Could not parse real"), 0))
 #endif
 
+#define THPUtils_unpackReal_BOOL(object)                                       \
+    (PyBool_Check(object) ? object :                                           \
+    (throw std::runtime_error("Could not parse real"), Py_False))
+
+#define THPUtils_checkReal_BOOL(object)                                        \
+    PyBool_Check(object)
+
 #define THPUtils_newReal_FLOAT(value) PyFloat_FromDouble(value)
 // TODO: handle int overflows for py2
 #define THPUtils_newReal_INT(value) PyInt_FromLong(value)
 
+#define THPUtils_newReal_BOOL(value) PyBool_FromLong(value)
+
 #define THPDoubleUtils_checkReal(object)      THPUtils_checkReal_FLOAT(object)
 #define THPDoubleUtils_unpackReal(object)     (double)THPUtils_unpackReal_FLOAT(object)
 #define THPDoubleUtils_newReal(value)         THPUtils_newReal_FLOAT(value)
-#define THPDoubleUtils_checkAccreal(object)   THPUtils_checkReal_FLOAT(object)
-#define THPDoubleUtils_unpackAccreal(object)  (double)THPUtils_unpackReal_FLOAT(object)
-#define THPDoubleUtils_newAccreal(value)      THPUtils_newReal_FLOAT(value)
 #define THPFloatUtils_checkReal(object)       THPUtils_checkReal_FLOAT(object)
 #define THPFloatUtils_unpackReal(object)      (float)THPUtils_unpackReal_FLOAT(object)
 #define THPFloatUtils_newReal(value)          THPUtils_newReal_FLOAT(value)
-#define THPFloatUtils_checkAccreal(object)    THPUtils_checkReal_FLOAT(object)
-#define THPFloatUtils_unpackAccreal(object)   (double)THPUtils_unpackReal_FLOAT(object)
-#define THPFloatUtils_newAccreal(value)       THPUtils_newReal_FLOAT(value)
 #define THPHalfUtils_checkReal(object)        THPUtils_checkReal_FLOAT(object)
 #define THPHalfUtils_unpackReal(object)       (at::Half)THPUtils_unpackReal_FLOAT(object)
 #define THPHalfUtils_newReal(value)           PyFloat_FromDouble(value)
-#define THPHalfUtils_checkAccreal(object)     THPUtils_checkReal_FLOAT(object)
-#define THPHalfUtils_unpackAccreal(object)    (double)THPUtils_unpackReal_FLOAT(object)
 #define THPHalfUtils_newAccreal(value)        THPUtils_newReal_FLOAT(value)
 
+#define THPBoolUtils_checkReal(object)        THPUtils_checkReal_BOOL(object)
+#define THPBoolUtils_unpackReal(object)       THPUtils_unpackReal_BOOL(object)
+#define THPBoolUtils_newReal(value)           THPUtils_newReal_BOOL(value)
+#define THPBoolUtils_checkAccreal(object)     THPUtils_checkReal_BOOL(object)
+#define THPBoolUtils_unpackAccreal(object)    (int64_t)THPUtils_unpackReal_BOOL(object)
+#define THPBoolUtils_newAccreal(value)        THPUtils_newReal_BOOL(value)
 #define THPLongUtils_checkReal(object)        THPUtils_checkReal_INT(object)
 #define THPLongUtils_unpackReal(object)       (int64_t)THPUtils_unpackReal_INT(object)
 #define THPLongUtils_newReal(value)           THPUtils_newReal_INT(value)
-#define THPLongUtils_checkAccreal(object)     THPUtils_checkReal_INT(object)
-#define THPLongUtils_unpackAccreal(object)    (int64_t)THPUtils_unpackReal_INT(object)
-#define THPLongUtils_newAccreal(value)        THPUtils_newReal_INT(value)
 #define THPIntUtils_checkReal(object)         THPUtils_checkReal_INT(object)
 #define THPIntUtils_unpackReal(object)        (int)THPUtils_unpackReal_INT(object)
 #define THPIntUtils_newReal(value)            THPUtils_newReal_INT(value)
-#define THPIntUtils_checkAccreal(object)      THPUtils_checkReal_INT(object)
-#define THPIntUtils_unpackAccreal(object)     (int64_t)THPUtils_unpackReal_INT(object)
-#define THPIntUtils_newAccreal(value)         THPUtils_newReal_INT(value)
 #define THPShortUtils_checkReal(object)       THPUtils_checkReal_INT(object)
 #define THPShortUtils_unpackReal(object)      (short)THPUtils_unpackReal_INT(object)
 #define THPShortUtils_newReal(value)          THPUtils_newReal_INT(value)
-#define THPShortUtils_checkAccreal(object)    THPUtils_checkReal_INT(object)
-#define THPShortUtils_unpackAccreal(object)   (int64_t)THPUtils_unpackReal_INT(object)
-#define THPShortUtils_newAccreal(value)       THPUtils_newReal_INT(value)
 #define THPCharUtils_checkReal(object)        THPUtils_checkReal_INT(object)
 #define THPCharUtils_unpackReal(object)       (char)THPUtils_unpackReal_INT(object)
 #define THPCharUtils_newReal(value)           THPUtils_newReal_INT(value)
-#define THPCharUtils_checkAccreal(object)     THPUtils_checkReal_INT(object)
-#define THPCharUtils_unpackAccreal(object)    (int64_t)THPUtils_unpackReal_INT(object)
-#define THPCharUtils_newAccreal(value)        THPUtils_newReal_INT(value)
 #define THPByteUtils_checkReal(object)        THPUtils_checkReal_INT(object)
 #define THPByteUtils_unpackReal(object)       (unsigned char)THPUtils_unpackReal_INT(object)
 #define THPByteUtils_newReal(value)           THPUtils_newReal_INT(value)
-#define THPByteUtils_checkAccreal(object)     THPUtils_checkReal_INT(object)
-#define THPByteUtils_unpackAccreal(object)    (int64_t)THPUtils_unpackReal_INT(object)
-#define THPByteUtils_newAccreal(value)        THPUtils_newReal_INT(value)
 
 #define THPUtils_assert(cond, ...) THPUtils_assertRet(nullptr, cond, __VA_ARGS__)
 #define THPUtils_assertRet(value, cond, ...)                                   \
@@ -145,6 +137,9 @@ struct THPUtils_typeTraits {};
 
 #include <torch/csrc/generic/utils.h>
 #include <TH/THGenerateHalfType.h>
+
+#include <torch/csrc/generic/utils.h>
+#include <TH/THGenerateBoolType.h>
 
 THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);

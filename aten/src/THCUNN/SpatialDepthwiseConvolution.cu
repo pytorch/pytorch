@@ -76,9 +76,13 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
 
     AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
     const IndexType offset0 = (n * inputChannels + inputChannel) * inputHeight * inputWidth;
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
     for (int kH = 0; kH < KH_LIMIT; ++kH) {
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
       for (int kW = 0; kW < KW_LIMIT; ++kW) {
         const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
         const int w_in = -padWidth + w * strideWidth + kW * dilationWidth;
@@ -134,13 +138,19 @@ __global__ void spatialDepthwiseConvolutionUpdateGradInput(
 
     AccT value = ScalarConvert<int, AccT>::to(0);
 
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
     for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
       int och = (c * depthwiseMultiplier) + multiplier;
       int weightOffset = och * kernelHeight * kernelWidth;
+#ifndef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
       for (int kh = 0; kh < KH_LIMIT; ++kh) {
+#ifdef __HIP_PLATFORM_HCC__
 #pragma unroll
+#endif
         for (int kw = 0; kw < KW_LIMIT; ++kw) {
           int h_out = h + padHeight - kh * dilationHeight;
           int w_out = w + padWidth - kw * dilationWidth;

@@ -10,6 +10,7 @@ from dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
     generate_convnd_inputs,
+    run_conv_or_fc,
 )
 from hypothesis import given
 
@@ -29,6 +30,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         share_col_buffer=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
+        quantize_groupwise=st.booleans(),
         relu=st.booleans(),
         **hu.gcs_cpu_only
     )
@@ -42,6 +44,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         share_col_buffer,
         preserve_activation_sparsity,
         preserve_weight_sparsity,
+        quantize_groupwise,
         relu,
         gc,
         dc,
@@ -64,6 +67,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
             output_channels_per_group,
             batch_size,
             order,
+            groupwise_quantization=quantize_groupwise,
             preserve_activation_sparsity=preserve_activation_sparsity,
             preserve_weight_sparsity=preserve_weight_sparsity,
         )
@@ -115,6 +119,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                     inputs,
                     ["W_packed"],
                     group=group,
+                    quantize_groupwise=quantize_groupwise,
                     preserve_weight_sparsity=preserve_weight_sparsity,
                     in_scale=x_q_param.scale,
                     engine=engine,
@@ -135,6 +140,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 preserve_weight_sparsity=preserve_weight_sparsity,
                 engine=engine,
                 group=group,
+                quantize_groupwise=quantize_groupwise,
                 device_option=gc,
             )
             if do_dequantize or do_prepack_weight:
@@ -154,19 +160,17 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([relu_op])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(init_net)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, order, gc, outputs
+            )
 
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)
 
     @given(
-        stride=st.integers(1, 2),
-        size=st.integers(4, 12),
+        stride_0=st.integers(1, 2),
+        stride_1=st.integers(1, 2),
+        stride_2=st.integers(1, 2),
+        size=st.integers(5, 12),
         # depthwise 3x3x3 fast path only works for a multiple of 8
         group=st.sampled_from([8, 24, 32]),
         batch_size=st.integers(1, 2),
@@ -175,11 +179,14 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         share_col_buffer=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
+        quantize_groupwise=st.just(True),
         **hu.gcs_cpu_only
     )
     def test_dnnlowp_depthwise_3x3x3_conv(
         self,
-        stride,
+        stride_0,
+        stride_1,
+        stride_2,
         size,
         group,
         batch_size,
@@ -188,6 +195,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         share_col_buffer,
         preserve_activation_sparsity,
         preserve_weight_sparsity,
+        quantize_groupwise,
         gc,
         dc,
     ):
@@ -199,7 +207,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         order = "NHWC"
 
         X, W, b = generate_convnd_inputs(
-            (stride,) * 3,
+            (stride_0, stride_1, stride_2),
             (pad,) * 3,
             (kernel,) * 3,
             (dilation,) * 3,
@@ -209,6 +217,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
             output_channels_per_group,
             batch_size,
             order,
+            groupwise_quantization=quantize_groupwise,
             preserve_activation_sparsity=preserve_activation_sparsity,
             preserve_weight_sparsity=preserve_weight_sparsity,
         )
@@ -250,6 +259,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                     inputs,
                     ["W_packed"],
                     group=group,
+                    quantize_groupwise=quantize_groupwise,
                     preserve_weight_sparsity=preserve_weight_sparsity,
                     in_scale=x_q_param.scale,
                     engine=engine,
@@ -260,7 +270,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 op_type,
                 ["X_q" if do_quantize else "X", "W", "b"],
                 ["Y_q" if do_dequantize else "Y"],
-                strides=[stride] * 3,
+                strides=[stride_0, stride_1, stride_2],
                 kernels=[kernel] * 3,
                 dilations=[dilation] * 3,
                 pads=[pad] * (3 * 2),
@@ -270,6 +280,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 preserve_weight_sparsity=preserve_weight_sparsity,
                 engine=engine,
                 group=group,
+                quantize_groupwise=quantize_groupwise,
                 device_option=gc,
             )
             if do_dequantize or do_prepack_weight:
@@ -284,12 +295,8 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(init_net)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, order, gc, outputs
+            )
 
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)

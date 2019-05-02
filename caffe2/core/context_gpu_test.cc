@@ -43,7 +43,7 @@ TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {
   const int nbytes = 1048576;
   for (int i = 0; i < NumCudaDevices(); ++i) {
     LOG(INFO) << "Device " << i << " of " << NumCudaDevices();
-    DeviceGuard guard(i);
+    CUDAGuard guard(i);
     auto allocated = CUDAContext::New(nbytes);
     EXPECT_NE(allocated, nullptr);
     cudaPointerAttributes attr;

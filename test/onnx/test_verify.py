@@ -19,7 +19,10 @@ class TestVerify(TestCase):
             if str(e):
                 # substring a small piece of string because the exact message
                 # depends on system's formatting settings
-                self.assertExpected(str(e)[:60])
+                # self.assertExpected(str(e)[:60])
+                # NB: why we comment out the above check? because numpy keeps
+                # changing the error format, and we have to keep updating the
+                # expect files let's relax this constraint
                 return
             else:
                 raise

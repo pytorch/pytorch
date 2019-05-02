@@ -20,7 +20,7 @@ public:
 
 protected:
   Socket() {
-    SYSCHECK(socket_fd = socket(AF_UNIX, SOCK_STREAM, 0));
+    SYSCHECK_ERR_RETURN_NEG1(socket_fd = socket(AF_UNIX, SOCK_STREAM, 0));
   }
   Socket(const Socket& other) = delete;
   Socket(Socket&& other) noexcept : socket_fd(other.socket_fd) { other.socket_fd = -1; };
@@ -50,9 +50,9 @@ protected:
     pfd.fd = socket_fd;
     pfd.events = POLLIN;
     while (bytes_received < num_bytes) {
-      SYSCHECK(poll(&pfd, 1, 1000));
+      SYSCHECK_ERR_RETURN_NEG1(poll(&pfd, 1, 1000));
       if (pfd.revents & POLLIN) {
-        SYSCHECK(step_received = ::read(socket_fd, buffer, num_bytes - bytes_received));
+        SYSCHECK_ERR_RETURN_NEG1(step_received = ::read(socket_fd, buffer, num_bytes - bytes_received));
         if (step_received == 0)
           throw std::runtime_error("Other end has closed the connection");
         bytes_received += step_received;
@@ -70,7 +70,7 @@ protected:
     size_t bytes_sent = 0;
     ssize_t step_sent;
     while (bytes_sent < num_bytes) {
-      SYSCHECK(step_sent = ::write(socket_fd, buffer, num_bytes));
+      SYSCHECK_ERR_RETURN_NEG1(step_sent = ::write(socket_fd, buffer, num_bytes));
       bytes_sent += step_sent;
       buffer += step_sent;
     }
@@ -103,10 +103,10 @@ public:
     try {
       struct sockaddr_un address = prepare_address(path.c_str());
       size_t len = address_length(address);
-      SYSCHECK(bind(socket_fd, (struct sockaddr *)&address, len));
-      SYSCHECK(listen(socket_fd, 10));
+      SYSCHECK_ERR_RETURN_NEG1(bind(socket_fd, (struct sockaddr *)&address, len));
+      SYSCHECK_ERR_RETURN_NEG1(listen(socket_fd, 10));
     } catch(std::exception &e) {
-      close(socket_fd);
+      SYSCHECK_ERR_RETURN_NEG1(close(socket_fd));
       throw;
     }
   }
@@ -119,7 +119,7 @@ public:
     int client_fd;
     struct sockaddr_un addr;
     socklen_t addr_len = sizeof(addr);
-    SYSCHECK(client_fd = ::accept(socket_fd, (struct sockaddr *)&addr, &addr_len));
+    SYSCHECK_ERR_RETURN_NEG1(client_fd = ::accept(socket_fd, (struct sockaddr *)&addr, &addr_len));
     return ManagerSocket(client_fd);
   }
 
@@ -132,9 +132,9 @@ public:
     try {
       struct sockaddr_un address = prepare_address(path.c_str());
       size_t len = address_length(address);
-      SYSCHECK(connect(socket_fd, (struct sockaddr *)&address, len));
+      SYSCHECK_ERR_RETURN_NEG1(connect(socket_fd, (struct sockaddr *)&address, len));
     } catch(std::exception &e) {
-      close(socket_fd);
+      SYSCHECK_ERR_RETURN_NEG1(close(socket_fd));
       throw;
     }
   }

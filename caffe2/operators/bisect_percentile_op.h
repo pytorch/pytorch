@@ -13,8 +13,9 @@ template <class Context>
 class BisectPercentileOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  BisectPercentileOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit BisectPercentileOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         pct_raw_(OperatorBase::GetRepeatedArgument<float>(
             "percentile_raw",
             vector<float>{})),

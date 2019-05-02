@@ -74,40 +74,55 @@ void ProfDAGCounters::ReportRunEnd() {
   }
 
   auto runtime = timer_.MilliSeconds();
-  report_.runtime_stats_ += ProfDAGStats(runtime);
 
-  CaffeMap<std::string, float> cum_per_type_time_run_;
-  CaffeMap<std::string, float> cum_per_type_invocations_run_;
+  CaffeMap<std::string, float> cum_per_type_time_run;
+  CaffeMap<std::string, float> cum_per_type_invocations_run;
+  std::vector<float> per_op_time_run(report_.op_types_.size(), 0.0);
   for (auto op_id = 0; op_id < report_.op_types_.size(); ++op_id) {
-    float op_time;
-    CAFFE_ENFORCE(op_start_times_run_[op_id] > 0);
-    if (op_async_end_times_run_[op_id] > 0) {
-      auto op_async_time =
-          op_async_end_times_run_[op_id] - op_start_times_run_[op_id];
-      CAFFE_ENFORCE_GE(op_async_time, 0.0);
-      op_time = op_async_time;
-    } else {
-      auto op_sync_time = op_end_times_run_[op_id] - op_start_times_run_[op_id];
-      CAFFE_ENFORCE_GE(op_sync_time, 0.0);
-      op_time = op_sync_time;
+    // check that we have valid times, otherwise return;
+    // times might not be valid if network execution ended prematurely
+    // because of operator errors
+    if (op_start_times_run_[op_id] < 0.0) {
+      return;
     }
 
-    report_.time_per_op_total_[op_id] += ProfDAGStats(op_time);
+    float op_time = 0.0;
+    if (op_async_end_times_run_[op_id] > 0.0) {
+      op_time = op_async_end_times_run_[op_id] - op_start_times_run_[op_id];
+    } else {
+      if (op_end_times_run_[op_id] < 0.0) {
+        return;
+      }
+      op_time = op_end_times_run_[op_id] - op_start_times_run_[op_id];
+    }
+
+    per_op_time_run[op_id] = op_time;
 
     const string& op_type = report_.op_types_[op_id];
-    cum_per_type_time_run_[op_type] += op_time;
-    cum_per_type_invocations_run_[op_type] += 1;
+    cum_per_type_time_run[op_type] += op_time;
+    cum_per_type_invocations_run[op_type] += 1;
   }
 
-  for (const auto& kv : cum_per_type_time_run_) {
+  // all operator times are valid, update report stats
+  report_.runtime_stats_ += ProfDAGStats(runtime);
+
+  for (auto op_id = 0; op_id < report_.op_types_.size(); ++op_id) {
+    report_.time_per_op_total_[op_id] += ProfDAGStats(per_op_time_run[op_id]);
+  }
+
+  for (const auto& kv : cum_per_type_time_run) {
     report_.time_per_op_type_total_[kv.first] += ProfDAGStats(kv.second);
     report_.times_per_run_per_type_total_[kv.first] +=
-        ProfDAGStats(cum_per_type_invocations_run_[kv.first]);
+        ProfDAGStats(cum_per_type_invocations_run[kv.first]);
   }
 }
 
 ProfDAGReport ProfDAGCounters::GetReport() const {
   return report_;
+}
+
+bool ProfDAGReport::hasStats() const {
+  return runtime_stats_.cnt() > 0;
 }
 
 ProfDAGProto ProfDAGReport::statsProto(
@@ -128,7 +143,7 @@ ProfDAGProto ProfDAGReport::statsProto(
 ProfDAGProtos ProfDAGReport::GetOperatorStats() const {
   ProfDAGProtos prof_dag_protos;
   prof_dag_protos.set_net_name(net_name_);
-  if (num_runs_ > 1) {
+  if (hasStats()) {
     for (auto& item : time_per_op_type_total_) {
       auto buf = prof_dag_protos.add_stats();
       buf->CopyFrom(statsProto(item.first, item.second, vector<std::string>()));
@@ -140,7 +155,7 @@ ProfDAGProtos ProfDAGReport::GetOperatorStats() const {
 ProfDAGProtos ProfDAGReport::GetPerOperatorCost() const {
   ProfDAGProtos prof_dag_protos;
   prof_dag_protos.set_net_name(net_name_);
-  if (num_runs_ > 1) {
+  if (hasStats()) {
     for (int op_id = 0; op_id < op_types_.size(); op_id++) {
       const string& op_type = op_types_[op_id];
       auto buf = prof_dag_protos.add_stats();
@@ -154,14 +169,15 @@ ProfDAGProtos ProfDAGReport::GetPerOperatorCost() const {
 }
 
 void ProfDAGReport::PrintStats() {
-  if (num_runs_ <= 1) {
+  if (!hasStats()) {
     LOG(INFO) << "Insufficient number of runs";
     return;
   }
 
   std::ostringstream debug_out;
-  debug_out << "Measured operators over " << num_runs_ << " net runs ("
-            << net_name_ << "), #ops: " << op_types_.size() << std::endl;
+  debug_out << "Measured operators over " << runtime_stats_.cnt()
+            << " net runs (" << net_name_ << "), #ops: " << op_types_.size()
+            << std::endl;
 
   debug_out << "Mean time in operator type per run (stddev):" << std::endl;
   for (const auto& item : time_per_op_type_total_) {
@@ -196,10 +212,10 @@ ProfDAGReport& ProfDAGReport::operator+=(const ProfDAGReport& rhs) {
         "Incompatible nets to add counters");
   }
 
-  if (rhs.num_runs_ <= 1) {
+  if (!rhs.hasStats()) {
     // rhs does not have valid profiling results, do nothing
     return *this;
-  } else if (num_runs_ <= 1) {
+  } else if (!hasStats()) {
     // "this" does not have valid profiling results, but rhs does. copy rhs
     time_per_op_total_ = rhs.time_per_op_total_;
     time_per_op_type_total_ = rhs.time_per_op_type_total_;

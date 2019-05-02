@@ -31,6 +31,7 @@ target_include_directories(shm PUBLIC
 
 ADD_EXECUTABLE(torch_shm_manager manager.cpp)
 target_link_libraries(torch_shm_manager shm)
+set_target_properties(torch_shm_manager PROPERTIES INSTALL_RPATH "${_rpath_portable_origin}/../lib")
 ### Torch packages supposes libraries prefix is "lib"
 SET_TARGET_PROPERTIES(shm PROPERTIES
   PREFIX "lib"
@@ -76,4 +77,4 @@ endif()
 
 INSTALL(TARGETS shm LIBRARY DESTINATION ${LIBSHM_INSTALL_LIB_SUBDIR})
 INSTALL(FILES libshm.h DESTINATION "include")
-INSTALL(TARGETS torch_shm_manager DESTINATION "lib")
+INSTALL(TARGETS torch_shm_manager DESTINATION "bin")

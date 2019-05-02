@@ -52,7 +52,7 @@ void THCTensor_copyIgnoringOverlaps<scalar_t>(THCState* state, THCTensor* dst, T
   // FIXME: really, overlapping writes should be illegal/an error in Torch
   THC_pointwiseApply2<scalar_t, scalar_t>(
     state, dst, src,
-    CopyOp<scalar_t, scalar_t>(),
+    CopyOp<scalar_t>(),
     ReadOnly, /* ignore overwrites */
     ReadOnly);
 }

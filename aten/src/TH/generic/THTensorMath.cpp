@@ -21,6 +21,7 @@
 // sense (rather than just having cut the file down the middle, which is
 // what I did when I split these up originally).
 
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 // Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
 static inline bool modulo_wrap(scalar_t a, scalar_t b) {
@@ -208,6 +209,26 @@ void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
   if (serial_path) {
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * *src_data;);
   }
+}
+
+scalar_t THTensor_(powOne)(scalar_t x, scalar_t y) {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_HALF)
+  return powf(x, y);
+#elif defined(TH_REAL_IS_DOUBLE)
+  return pow(x, y);
+#else
+  THArgCheck(y >= 0, 1,
+      "Integers to negative integer powers are not allowed");
+  scalar_t result = 1;
+  while (y) {
+    if (y & 1) {
+       result *= x;
+    }
+    y /= 2;
+    x *= x;
+  }
+  return result;
+#endif
 }
 
 void THTensor_(pow)(THTensor *r_, THTensor *t, scalar_t value)
@@ -1041,7 +1062,6 @@ void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
   int64_t ldm1_ = (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1)));
   int64_t ldm2_ = (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1)));
 
-#pragma omp critical(blasgemm)
   /* do the operation */
   THBlas_(gemm)(transpose_m1,
                 transpose_m2,
@@ -1177,5 +1197,7 @@ void THTensor_(addbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t al
   c10::raw::intrusive_ptr::decref(matrix1);
   c10::raw::intrusive_ptr::decref(matrix2);
 }
+
+#endif /* !defined(TH_REAL_IS_BOOL) */
 
 #endif /* TH_GENERIC_FILE */

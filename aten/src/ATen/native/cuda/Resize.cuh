@@ -27,8 +27,8 @@ static inline void maybe_resize_storage_cuda(TensorImpl* self, int64_t new_size)
 
 inline TensorImpl* resize_impl_cuda_(
     TensorImpl* self,
-    IntList size,
-    c10::optional<IntList> stride,
+    IntArrayRef size,
+    c10::optional<IntArrayRef> stride,
     bool device_guard = true) {
   if (self->sizes() == size && (!stride || self->strides() == stride)) {
     return self;

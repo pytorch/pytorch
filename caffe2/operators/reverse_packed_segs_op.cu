@@ -53,10 +53,10 @@ void ReversePackedSegsOp<CUDAContext>::DoRunWithLengthType() {
   const auto& lengths = Input(LENGTHS);
 
   CAFFE_ENFORCE(
-      data.ndim() == 3,
+      data.dim() == 3,
       "DATA should be 3-D tensor <lengths, "
       "segments, embeddings>");
-  CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE(lengths.dim() == 1, "LENGTH should be 1-D");
 
   auto* output = Output(0, data.sizes(), at::dtype<T>());
 

@@ -776,6 +776,16 @@ class TestLayers(LayersTestCase):
         loss = self.model.BatchLRLoss(input_record)
         self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
 
+    def testBatchLRLossWithUncertainty(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float64, (1,)))),
+            ('logit', schema.Scalar((np.float32, (2,)))),
+            ('weight', schema.Scalar((np.float64, (1,)))),
+            ('log_variance', schema.Scalar((np.float64, (1,)))),
+        ))
+        loss = self.model.BatchLRLoss(input_record)
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+
     def testMarginRankLoss(self):
         input_record = self.new_record(schema.Struct(
             ('pos_prediction', schema.Scalar((np.float32, (1,)))),
@@ -1278,7 +1288,6 @@ class TestLayers(LayersTestCase):
         assert len(ops[0].output) == 1
         assert ops[0].output[0] in ops[1].input
 
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     def testHalfToFloatTypeInference(self):
         input = self.new_record(schema.Scalar((np.float32, (32,))))
 
@@ -1376,11 +1385,15 @@ class TestLayers(LayersTestCase):
 
     @given(
         X=hu.arrays(dims=[5, 5]),  # Shape of X is irrelevant
+        dropout_for_eval=st.booleans(),
     )
-    def testDropout(self, X):
+    def testDropout(self, X, dropout_for_eval):
         input_record = self.new_record(schema.Scalar((np.float32, (1,))))
         schema.FeedRecord(input_record, [X])
-        d_output = self.model.Dropout(input_record)
+        d_output = self.model.Dropout(
+            input_record,
+            dropout_for_eval=dropout_for_eval
+        )
         self.assertEqual(schema.Scalar((np.float32, (1,))), d_output)
         self.model.output_schema = schema.Struct()
 
@@ -1389,14 +1402,14 @@ class TestLayers(LayersTestCase):
         input_blob = input_record.field_blobs()[0]
         output_blob = d_output.field_blobs()[0]
 
-        train_d_spec = OpSpec(
+        with_d_spec = OpSpec(
             "Dropout",
             [input_blob],
             [output_blob, None],
             {'is_test': 0, 'ratio': 0.5}
         )
 
-        test_d_spec = OpSpec(
+        without_d_spec = OpSpec(
             "Dropout",
             [input_blob],
             [output_blob, None],
@@ -1405,22 +1418,30 @@ class TestLayers(LayersTestCase):
 
         self.assertNetContainOps(
             train_net,
-            [train_d_spec]
+            [with_d_spec]
         )
 
         eval_net = self.get_eval_net()
-
-        self.assertNetContainOps(
-            eval_net,
-            [test_d_spec]
-        )
-
         predict_net = self.get_predict_net()
 
-        self.assertNetContainOps(
-            predict_net,
-            [test_d_spec]
-        )
+        if dropout_for_eval:
+            self.assertNetContainOps(
+                eval_net,
+                [with_d_spec]
+            )
+            self.assertNetContainOps(
+                predict_net,
+                [with_d_spec]
+            )
+        else:
+            self.assertNetContainOps(
+                eval_net,
+                [without_d_spec]
+            )
+            self.assertNetContainOps(
+                predict_net,
+                [without_d_spec]
+            )
 
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)

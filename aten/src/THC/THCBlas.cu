@@ -1,6 +1,7 @@
 #include <THC/THCBlas.h>
 #include <THC/THCGeneral.h>
 #include <TH/THHalf.h>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <algorithm>
 
@@ -304,15 +305,15 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int6
                                   a, CUDA_R_16F, i_lda, b, CUDA_R_16F,
                                   i_ldb, &fBeta, c, CUDA_R_16F, i_ldc));
 #else
-      cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
+      cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
       if (prop->major >= 5){
         THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
-	THCublasCheck(cublasGemmEx(handle, opa, opb,
+        THCublasCheck(cublasGemmEx(handle, opa, opb,
                                    i_m, i_n, i_k, &fAlpha,
                                    a, CUDA_R_16F, i_lda, b, CUDA_R_16F,
                                    i_ldb, &fBeta, c, CUDA_R_16F, i_ldc,
                                    CUDA_R_32F, CUBLAS_GEMM_DFALT_TENSOR_OP));
-	THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+        THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
       }else{
         THCublasCheck(cublasSgemmEx(handle, opa, opb,
                                     i_m, i_n, i_k, &fAlpha,

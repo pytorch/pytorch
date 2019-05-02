@@ -20,8 +20,6 @@ ParallelNet::ParallelNet(
       num_workers_, 0, "Expected positive number of worker threads");
 
   helper_ = caffe2::make_unique<ParallelNetExecutorHelper>(this);
-  task_graph_ = TaskGraphRegistry()->Create(
-      FLAGS_caffe2_task_graph_engine, helper_.get(), options_);
 
   // initialize operators
   operator_nodes_ = dag_utils::prepareOperatorNodes(net_def, ws);
@@ -31,6 +29,10 @@ ParallelNet::ParallelNet(
     op->SetExecutorHelper(helper_.get());
     operators_.push_back(op);
   }
+
+  task_graph_ = TaskGraphRegistry()->Create(
+      FLAGS_caffe2_task_graph_engine, helper_.get(), options_);
+  CAFFE_ENFORCE(task_graph_, "Couldn't initialize task graph");
 
   // compute chains
   // TODO: inference mode for chaining
@@ -130,7 +132,7 @@ TaskThreadPoolBase* ParallelNet::poolGetter(
   std::unique_lock<std::mutex> pools_lock(pools_mutex_);
   auto pool = pools[device_id][pool_size];
   if (!pool) {
-    pool = ThreadPoolRegistry()->Create(
+    pool = c10::ThreadPoolRegistry()->Create(
         DeviceTypeName(device_type),
         device_id,
         pool_size,

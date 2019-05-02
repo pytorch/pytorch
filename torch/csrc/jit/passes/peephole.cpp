@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/peephole.h>
-
+#include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -54,8 +54,8 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
     } else if (node->matches(
                    "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
       // x.type_as(y) == x iff x.type() == y.type()
-      auto self_type = node->input(0)->type()->cast<TensorType>();
-      auto other_type = node->input(1)->type()->cast<TensorType>();
+      auto self_type = node->input(0)->type()->cast<DimensionedTensorType>();
+      auto other_type = node->input(1)->type()->cast<DimensionedTensorType>();
       if (self_type && other_type &&
           self_type->scalarType() == other_type->scalarType() &&
           self_type->device() == other_type->device()) {
@@ -88,7 +88,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
           // type_as conditional on the tensor shape being a scalar, but that
           // might add overhead, and make analysis harder.
           auto add_mat_type =
-              node->input(1 - mm_side)->type()->cast<TensorType>();
+              node->input(1 - mm_side)->type()->cast<DimensionedTensorType>();
           if (!add_mat_type)
             continue;
 
@@ -101,9 +101,9 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             SymbolicVariable mat1(mm_node->input(0));
             SymbolicVariable mat2(mm_node->input(1));
 
-            auto mat_type = mat1.value()->type()->cast<TensorType>();
+            auto mat_type = mat1.value()->type()->cast<DimensionedTensorType>();
             if (!mat_type) {
-              mat_type = mat2.value()->type()->cast<TensorType>();
+              mat_type = mat2.value()->type()->cast<DimensionedTensorType>();
             }
             // We insert the type_as if we're sure that the added element is a
             // scalar, and we either don't know what is the type of the
@@ -157,13 +157,86 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       }
     } else if (
         node->matches(
-            "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
+            "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")) {
       auto uses = node->output()->uses();
       for (Use u : uses) {
         if (u.user->matches(
-                "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
+                "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")) {
           u.user->replaceInput(0, node->inputs().at(0));
         }
+      }
+    } else if (node->kind() == prim::If) {
+      IfView n(node);
+      // this handles redundant short circuits like "x and True" or "x or False"
+      for (size_t i = 0; i < n.outputs().size(); ++i) {
+        if (n.outputs().at(i)->type() != BoolType::get()) {
+          continue;
+        }
+        bool true_val =
+            constant_as<bool>(n.thenOutputs().at(i)).value_or(false);
+        bool false_val =
+            constant_as<bool>(n.elseOutputs().at(i)).value_or(true);
+        // if an if node's output equals its condition replace output with
+        // condition
+        if (true_val && !false_val) {
+          n.outputs().at(i)->replaceAllUsesWith(n.cond());
+        }
+      }
+    } else if (
+        node->kind() == aten::__is__ || node->kind() == aten::__isnot__) {
+      // if we are comparing a None value with a value that can't be None
+      // replace the output with true if node is __isnot__ or false if node is
+      // __is__
+      AT_ASSERT(node->inputs().size() == 2);
+      for (size_t check_none_index : {0, 1}) {
+        bool input_must_be_none =
+            node->inputs().at(check_none_index)->mustBeNone();
+        bool other_must_not_be_none =
+            node->inputs().at(1 - check_none_index)->mustNotBeNone();
+        if (input_must_be_none && other_must_not_be_none) {
+          WithInsertPoint guard(node);
+          auto output = node->owningGraph()->insertConstant(
+              node->kind() == aten::__isnot__);
+          node->output()->replaceAllUsesWith(output);
+        }
+      }
+    } else if (
+        node->kind() == prim::unchecked_unwrap_optional ||
+        node->kind() == aten::_unwrap_optional) {
+      // we are unwrapping an input that can't be None, remove the unwrap
+      auto input = node->input();
+      if (input->mustNotBeNone()) {
+        node->output()->replaceAllUsesWith(node->input());
+      }
+    } else if (node->matches("prim::dtype(Tensor a) -> int")) {
+      if (auto dim_tensor =
+              node->input()->type()->cast<DimensionedTensorType>()) {
+        WithInsertPoint guard(node);
+        auto output = node->owningGraph()->insertConstant(
+            static_cast<int64_t>(dim_tensor->scalarType()));
+        node->output()->replaceAllUsesWith(output);
+      }
+    } else if (node->matches("prim::device(Tensor a) -> Device")) {
+      if (auto dim_tensor =
+              node->input()->type()->cast<DimensionedTensorType>()) {
+        WithInsertPoint guard(node);
+        auto output = node->owningGraph()->insertConstant(dim_tensor->device());
+        node->output()->replaceAllUsesWith(output);
+      }
+    } else if (node->matches("aten::dim(Tensor self) -> int")) {
+      if (auto dim_tensor =
+              node->input()->type()->cast<DimensionedTensorType>()) {
+        WithInsertPoint guard(node);
+        auto output = node->owningGraph()->insertConstant(dim_tensor->dim());
+        node->output()->replaceAllUsesWith(output);
+      }
+    } else if (node->matches("prim::is_cuda(Tensor a) -> bool")) {
+      if (auto dim_tensor =
+              node->input()->type()->cast<DimensionedTensorType>()) {
+        WithInsertPoint guard(node);
+        auto output =
+            node->owningGraph()->insertConstant(dim_tensor->device().is_cuda());
+        node->output()->replaceAllUsesWith(output);
       }
     }
   }
@@ -180,6 +253,5 @@ void PeepholeOptimize(
     bool addmm_fusion_enabled) {
   PeepholeOptimize(graph->block(), addmm_fusion_enabled);
 }
-
 } // namespace jit
 } // namespace torch

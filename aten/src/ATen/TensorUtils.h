@@ -69,7 +69,7 @@ CAFFE2_API void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts);
 CAFFE2_API void checkSize(
     CheckedFrom c,
     const TensorGeometryArg& t,
-    IntList sizes);
+    IntArrayRef sizes);
 CAFFE2_API void checkSize(
     CheckedFrom c,
     const TensorGeometryArg& t,
@@ -115,6 +115,15 @@ CAFFE2_API void checkBackend(
     at::ArrayRef<Tensor> t,
     at::Backend backend);
 
+CAFFE2_API void checkDeviceType(
+    CheckedFrom c,
+    at::ArrayRef<Tensor> tensors,
+    at::DeviceType device_type);
+
+CAFFE2_API void checkLayout(CheckedFrom c, const Tensor& t, Layout layout);
+
+CAFFE2_API void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout);
+
 // Methods for getting data_ptr if tensor is defined
 CAFFE2_API void* maybe_data_ptr(const Tensor& tensor);
 CAFFE2_API void* maybe_data_ptr(const TensorArg& tensor);
@@ -124,5 +133,10 @@ CAFFE2_API void* maybe_data_ptr(const TensorArg& tensor);
 // allows checking if a particular geometry is contiguous without explicitly
 // constructing a tensor, e.g., when you want to choose a kernel strategy based
 // on whether a subgeometry is contiguous.
-CAFFE2_API bool geometry_is_contiguous(IntList sizes, IntList strides);
-}
+CAFFE2_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
+
+namespace detail {
+CAFFE2_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
+CAFFE2_API int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides);
+} // namespace detail
+} // namespace at

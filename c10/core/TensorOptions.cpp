@@ -1,6 +1,6 @@
 #include <c10/core/TensorOptions.h>
 
-#include <c10/Device.h>
+#include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>

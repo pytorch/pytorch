@@ -468,6 +468,11 @@ def _get_net_argument(op, net_name):
     return None
 
 
+def getNetArgument(op, net_name):
+    """A wrapper for external call"""
+    return _get_net_argument(op, net_name)
+
+
 def _gen_subgradient_pass(subnet, init_grad):
     from caffe2.python.core import IR
     subnet_ir = IR(subnet.op)

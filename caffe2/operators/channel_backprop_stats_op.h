@@ -11,8 +11,9 @@ template <class Context>
 class ChannelBackpropStatsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ChannelBackpropStatsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit ChannelBackpropStatsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~ChannelBackpropStatsOp() {}
 
   bool RunOnDevice() override {
@@ -23,8 +24,8 @@ class ChannelBackpropStatsOp : public Operator<Context> {
   INPUT_TAGS(INPUT, SAVED_MEAN, SAVED_INV_STDDEV, OUTPUT_GRAD);
   OUTPUT_TAGS(SCALE_GRAD, BIAS_GRAD);
 
-  Tensor dBiasScratch_{Context::GetDeviceType()};
-  Tensor dScaleScratch_{Context::GetDeviceType()};
+  Tensor dBiasScratch_;
+  Tensor dScaleScratch_;
 };
 
 } // namespace caffe2

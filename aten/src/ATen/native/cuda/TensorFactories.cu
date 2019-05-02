@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/cuda/Resize.cuh>
 #include <c10/util/Exception.h>
 
 #include <THC/THCGeneral.h>
@@ -42,9 +43,11 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
-Tensor empty_cuda(IntList size, const TensorOptions& options) {
+Tensor empty_cuda(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == at::Backend::CUDA);
-  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
+  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
+  AT_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
+  check_size_nonnegative(size);
 
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   int64_t nelements = prod_intlist(size);
@@ -56,12 +59,18 @@ Tensor empty_cuda(IntList size, const TensorOptions& options) {
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId(), false);
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId());
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
   return tensor;
+}
+
+Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
+  auto t = at::native::empty_cuda({0}, options);
+  at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
+  return t;
 }
 
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
@@ -71,7 +80,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
 
   result.resize_({n});
 
-  if (result.type().scalarType() == at::ScalarType::Half) {
+  if (result.scalar_type() == at::ScalarType::Half) {
     auto result_float = at::empty({n}, initialTensorOptions().device(Device(DeviceType::CUDA)));
     result.copy_(randperm_out_cuda(result_float, n, generator));
   } else {
@@ -82,7 +91,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
     } else {
       // Generate random values for the keys array
       AT_DISPATCH_ALL_TYPES(
-        result.type(), "randperm_out_cuda", [&] {
+        result.scalar_type(), "randperm_out_cuda", [&] {
           auto keys = at::empty(result.sizes(), result.options()).random_(generator);
 
           auto result_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
@@ -257,6 +266,9 @@ inline void get_coordinate_in_triu_trapezoid(
 
 template <typename scalar_t>
 __global__
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 void tril_indices_kernel(scalar_t * tensor,
                          int64_t row_offset,
                          int64_t m_first_row,
@@ -314,7 +326,7 @@ Tensor tril_indices_cuda(
       cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
       "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND_HALF(tensor.type(), "tril_indices_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
       tril_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
         tensor.data<scalar_t>(),
@@ -390,7 +402,7 @@ Tensor triu_indices_cuda(
       cuda::getApplyGrid(triu_size, dim_grid, tensor.get_device()),
       "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND_HALF(tensor.type(), "triu_indices_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
       triu_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
         tensor.data<scalar_t>(),

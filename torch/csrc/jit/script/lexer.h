@@ -1,9 +1,15 @@
 #pragma once
-#include <torch/csrc/jit/assertions.h>
+#include <ATen/core/Macros.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/jit/script/strtod.h>
 #include <torch/csrc/jit/source_range.h>
-#include <torch/csrc/utils/memory.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <ATen/core/Macros.h>
 #include <algorithm>
 #include <clocale>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -39,6 +45,7 @@ namespace script {
   _(TK_STRINGLITERAL, "string_literal", "")      \
   _(TK_CONST, "const", "")                       \
   _(TK_LIST, "list", "")                         \
+  _(TK_DICT, "dict", "")                         \
   _(TK_OPTION, "option", "")                     \
   _(TK_APPLY, "apply", "")                       \
   _(TK_COMPREHENSION, "comprehension", "")       \
@@ -79,6 +86,7 @@ namespace script {
   _(TK_SUBSCRIPT, "subscript", "")               \
   _(TK_VAR, "variable", "")                      \
   _(TK_NOTHING, "nothing", "")                   \
+  _(TK_DICT_LITERAL, "dict-literal", "")         \
   _(TK_LIST_LITERAL, "list-literal", "")         \
   _(TK_TUPLE_LITERAL, "tuple-literal", "")       \
   _(TK_FOR, "for", "for")                        \
@@ -93,7 +101,10 @@ namespace script {
   _(TK_RAISE, "raise", "raise")                  \
   _(TK_ASSERT, "assert", "assert")               \
   _(TK_DOTS, "dots", "...")                      \
-  _(TK_PASS, "pass", "pass")
+  _(TK_LIST_COMP, "list comprehension", "")      \
+  _(TK_PASS, "pass", "pass")                     \
+  _(TK_CLASS_DEF, "class", "class")              \
+  _(TK_IMPORT, "import", "import")
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|";
 
@@ -107,8 +118,8 @@ enum TokenKind {
 #undef DEFINE_TOKEN
 };
 
-std::string kindToString(int kind);
-int stringToKind(const std::string& str);
+CAFFE2_API std::string kindToString(int kind);
+CAFFE2_API int stringToKind(const std::string& str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;
@@ -117,7 +128,7 @@ struct TokenTrie {
   TokenTrie() : kind(0) {}
   void insert(const char* str, int tok) {
     if (*str == '\0') {
-      JIT_ASSERT(kind == 0);
+      AT_ASSERT(kind == 0);
       kind = tok;
       return;
     }
@@ -130,7 +141,7 @@ struct TokenTrie {
     }
 
     child_chars.emplace_back(*str);
-    child_tries.emplace_back(torch::make_unique<TokenTrie>());
+    child_tries.emplace_back(c10::guts::make_unique<TokenTrie>());
     child_tries.back()->insert(str + 1, tok);
   }
   int kind; // 0 == invalid token
@@ -141,7 +152,7 @@ struct TokenTrie {
 
 // stuff that is shared against all TC lexers/parsers and is initialized only
 // once.
-struct SharedParserData {
+struct CAFFE2_API SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
     std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
@@ -156,19 +167,7 @@ struct SharedParserData {
     TC_FORALL_TOKEN_KINDS(ADD_CASE)
 #undef ADD_CASE
   }
-#ifdef _WIN32
-  static double strtod_c(const char* str, char** end) {
-    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
-    static _locale_t loc = _create_locale(LC_ALL, "C");
-    return _strtod_l(str, end, loc);
-  }
-#else
-  static double strtod_c(const char* str, char** end) {
-    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
-    static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
-    return strtod_l(str, end, loc);
-  }
-#endif
+
   // 1. skip whitespace
   // 2. handle comment or newline
   //
@@ -182,7 +181,7 @@ struct SharedParserData {
       return false;
     const char* startptr = str.c_str() + start;
     char* endptr;
-    strtod_c(startptr, &endptr);
+    torch::jit::script::strtod_c(startptr, &endptr);
     *len = endptr - startptr;
     return *len > 0;
   }
@@ -357,7 +356,7 @@ struct SharedParserData {
   TokenTrieRef head;
 };
 
-SharedParserData& sharedParserData();
+CAFFE2_API SharedParserData& sharedParserData();
 
 struct Token {
   int kind;
@@ -474,7 +473,8 @@ struct Lexer {
             indent_stack.pop_back();
             next_tokens.emplace_back(TK_DEDENT, r.range);
             if (indent_stack.size() == 0) {
-              reportError("invalid indent level " + std::to_string(depth), r);
+              reportError(
+                  "invalid indent level " + c10::guts::to_string(depth), r);
             }
           }
           return; // We've already queued the tokens
@@ -489,7 +489,7 @@ struct Lexer {
     int kind;
     size_t start;
     size_t length;
-    JIT_ASSERT(file);
+    AT_ASSERT(file);
     if (!shared.match(
             *file,
             pos,

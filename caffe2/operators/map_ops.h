@@ -48,8 +48,9 @@ template <class Context>
 class CreateMapOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CreateMapOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit CreateMapOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~CreateMapOp() {}
 
   bool RunOnDevice() override {
@@ -89,7 +90,7 @@ class CreateMapOp final : public Operator<Context> {
     CAFFE_THROW(
         "CreateMap is not implemented on value tensor of type ",
         DataTypeToTypeMeta(value_dtype).name(),
-        "Consider adding it a type in the list DispatchHelper");
+        "consider adding it as a type in the DispatchHelper list");
   }
 
   OUTPUT_TAGS(MAP);
@@ -99,8 +100,9 @@ template <class Context>
 class KeyValueToMapOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  KeyValueToMapOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit KeyValueToMapOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~KeyValueToMapOp() {}
 
   bool RunOnDevice() override {
@@ -140,7 +142,7 @@ class KeyValueToMapOp final : public Operator<Context> {
     CAFFE_THROW(
         "KeyValueToMap is not implemented on value tensor of type ",
         Input(VALUES).dtype().name(),
-        "Consider adding it a type in the list DispatchHelper");
+        "consider adding it as a type in the DispatchHelper list");
   }
 
   INPUT_TAGS(KEYS, VALUES);
@@ -151,8 +153,9 @@ template <class Context>
 class MapToKeyValueOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  MapToKeyValueOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit MapToKeyValueOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~MapToKeyValueOp() {}
 
   bool RunOnDevice() override {

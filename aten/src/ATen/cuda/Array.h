@@ -7,11 +7,7 @@
 namespace at { namespace cuda {
 
 template <typename T, int size>
-#ifndef __HIP_PLATFORM_HCC__
 struct alignas(16) Array {
-#else
-struct Array {
-#endif
   T data[size];
 
   C10_HOST_DEVICE T operator[](int i) const {

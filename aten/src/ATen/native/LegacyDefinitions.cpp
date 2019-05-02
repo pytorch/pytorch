@@ -2,6 +2,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHFunctions.h>
 
+#include <ATen/native/mkldnn/TensorShape.h>
+
 namespace at { namespace native {
 
 // Methods
@@ -14,7 +16,7 @@ Tensor & set_(Tensor& self, Storage source) {
   return at::legacy::th::_th_set_(self, source);
 }
 
-Tensor & set_(Tensor& self, Storage source, int64_t storage_offset, IntList size, IntList stride) {
+Tensor & set_(Tensor& self, Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
   return at::legacy::th::_th_set_(self, source, storage_offset, size, stride);
 }
 
@@ -30,19 +32,60 @@ bool is_set_to(const Tensor& self, const Tensor & tensor) {
   return at::legacy::th::_th_is_set_to(self, tensor);
 }
 
+Tensor clone(const Tensor& self) {
+  return legacy::th::_th_clone(self);
+}
+
+Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
+  return legacy::th::_th_resize_as_(self, the_template);
+}
+
+Tensor& pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
+  return legacy::th::_th_pow_out(result, self, exponent);
+}
+
+Tensor pow(const Tensor& self, Scalar exponent) {
+  return legacy::th::_th_pow(self, exponent);
+}
+
+Tensor& zero_(Tensor& self) {
+  return legacy::th::_th_zero_(self);
+}
+
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, Scalar value) {
-  return at::legacy::th::_th_masked_fill_(self, mask, value);
+  // As we dispatch on self and TH is type-checked, we need different definitions.
+  // This can be fixed by moving to ATen.
+  if (mask.dtype() == at::ScalarType::Byte) {
+    return at::legacy::th::_th_masked_fill_(self, mask, value);
+  } else {
+    return at::legacy::th::_th_masked_fill_bool_(self, mask, value);
+  }
 }
 
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, const Tensor & value) {
-  return at::legacy::th::_th_masked_fill_(self, mask, value);
+  // As we dispatch on self and TH is type-checked, we need different definitions.
+  // This can be fixed by moving to ATen.
+  if (mask.dtype() == at::ScalarType::Byte) {
+    return at::legacy::th::_th_masked_fill_(self, mask, value);
+  } else {
+    return at::legacy::th::_th_masked_fill_bool_(self, mask, value);
+  }
 }
 
 Tensor & masked_scatter_(Tensor& self, const Tensor & mask, const Tensor & source) {
-  return at::legacy::th::_th_masked_scatter_(self, mask, source);
+  // As we dispatch on self and TH is type-checked, we need different definitions.
+  // This can be fixed by moving to ATen.
+  if (mask.dtype() == at::ScalarType::Byte) {
+    return at::legacy::th::_th_masked_scatter_(self, mask, source);
+  } else {
+    return at::legacy::th::_th_masked_scatter_bool_(self, mask, source);
+  }
 }
 
-Tensor view(const Tensor& self, IntList size) {
+Tensor view(const Tensor& self, IntArrayRef size) {
+  if (self.is_mkldnn()) {
+    return mkldnn_view(self, size);
+  }
   return at::legacy::th::_th_view(self, size);
 }
 
@@ -130,14 +173,6 @@ Tensor & atan2_(Tensor& self, const Tensor & other) {
   return at::legacy::th::_th_atan2_(self, other);
 }
 
-Tensor & tril_(Tensor& self, int64_t diagonal) {
-  return at::legacy::th::_th_tril_(self, diagonal);
-}
-
-Tensor & triu_(Tensor& self, int64_t diagonal) {
-  return at::legacy::th::_th_triu_(self, diagonal);
-}
-
 Tensor & digamma_(Tensor& self) {
   return at::legacy::th::_th_digamma_(self);
 }
@@ -150,20 +185,8 @@ Tensor & erfinv_(Tensor& self) {
   return at::legacy::th::_th_erfinv_(self);
 }
 
-Tensor & frac_(Tensor& self) {
-  return at::legacy::th::_th_frac_(self);
-}
-
 Tensor & renorm_(Tensor& self, Scalar p, int64_t dim, Scalar maxnorm) {
   return at::legacy::th::_th_renorm_(self, p, dim, maxnorm);
-}
-
-Tensor & reciprocal_(Tensor& self) {
-  return at::legacy::th::_th_reciprocal_(self);
-}
-
-Tensor & neg_(Tensor& self) {
-  return at::legacy::th::_th_neg_(self);
 }
 
 Tensor & pow_(Tensor& self, Scalar exponent) {
@@ -172,10 +195,6 @@ Tensor & pow_(Tensor& self, Scalar exponent) {
 
 Tensor & pow_(Tensor& self, const Tensor & exponent) {
   return at::legacy::th::_th_pow_(self, exponent);
-}
-
-Tensor & lerp_(Tensor& self, const Tensor & end, Scalar weight) {
-  return at::legacy::th::_th_lerp_(self, end, weight);
 }
 
 Tensor & sign_(Tensor& self) {
@@ -262,30 +281,6 @@ Tensor & diag_out(Tensor & result, const Tensor & self, int64_t diagonal) {
 
 Tensor diag(const Tensor & self, int64_t diagonal) {
   return at::legacy::th::_th_diag(self, diagonal);
-}
-
-Tensor & cross_out(Tensor & result, const Tensor & self, const Tensor & other, int64_t dim) {
-  return at::legacy::th::_th_cross_out(result, self, other, dim);
-}
-
-Tensor cross(const Tensor & self, const Tensor & other, int64_t dim) {
-  return at::legacy::th::_th_cross(self, other, dim);
-}
-
-Tensor & triu_out(Tensor & result, const Tensor & self, int64_t diagonal) {
-  return at::legacy::th::_th_triu_out(result, self, diagonal);
-}
-
-Tensor triu(const Tensor & self, int64_t diagonal) {
-  return at::legacy::th::_th_triu(self, diagonal);
-}
-
-Tensor & tril_out(Tensor & result, const Tensor & self, int64_t diagonal) {
-  return at::legacy::th::_th_tril_out(result, self, diagonal);
-}
-
-Tensor tril(const Tensor & self, int64_t diagonal) {
-  return at::legacy::th::_th_tril(self, diagonal);
 }
 
 Tensor trace(const Tensor & self) {
@@ -409,7 +404,11 @@ Tensor & masked_select_out(Tensor & result, const Tensor & self, const Tensor & 
 }
 
 Tensor masked_select(const Tensor & self, const Tensor & mask) {
+  if (mask.dtype() == at::ScalarType::Byte) {
   return at::legacy::th::_th_masked_select(self, mask);
+} else {
+  return at::legacy::th::_th_masked_select_bool(self, mask);
+}
 }
 
 Tensor & nonzero_out(Tensor & result, const Tensor & self) {
@@ -420,11 +419,11 @@ Tensor nonzero(const Tensor & self) {
   return at::legacy::th::_th_nonzero(self);
 }
 
-Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index) {
+Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   return at::legacy::th::_th_gather_out(result, self, dim, index);
 }
 
-Tensor gather(const Tensor & self, int64_t dim, const Tensor & index) {
+Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   return at::legacy::th::_th_gather(self, dim, index);
 }
 
@@ -452,14 +451,6 @@ std::tuple<Tensor,Tensor> gels(const Tensor & self, const Tensor & A) {
   return at::legacy::th::_th_gels(self, A);
 }
 
-std::tuple<Tensor &,Tensor &> trtrs_out(Tensor & X, Tensor & M, const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) {
-  return at::legacy::th::_th_trtrs_out(X, M, self, A, upper, transpose, unitriangular);
-}
-
-std::tuple<Tensor,Tensor> trtrs(const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) {
-  return at::legacy::th::_th_trtrs(self, A, upper, transpose, unitriangular);
-}
-
 std::tuple<Tensor &,Tensor &> symeig_out(Tensor & e, Tensor & V, const Tensor & self, bool eigenvectors, bool upper) {
   return at::legacy::th::_th_symeig_out(e, V, self, eigenvectors, upper);
 }
@@ -484,11 +475,11 @@ std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some, bool comput
   return at::legacy::th::_th_svd(self, some, compute_uv);
 }
 
-Tensor & potri_out(Tensor & result, const Tensor & self, bool upper) {
+Tensor & cholesky_inverse_out(Tensor & result, const Tensor & self, bool upper) {
   return at::legacy::th::_th_potri_out(result, self, upper);
 }
 
-Tensor potri(const Tensor & self, bool upper) {
+Tensor cholesky_inverse(const Tensor & self, bool upper) {
   return at::legacy::th::_th_potri(self, upper);
 }
 
@@ -509,7 +500,7 @@ std::tuple<Tensor,Tensor> qr(const Tensor & self) {
 }
 
 std::tuple<Tensor &,Tensor &> geqrf_out(Tensor & result0, Tensor & result1, const Tensor & self) {
-  return at::geqrf_out(result0, result1, self);
+  return at::legacy::th::_th_geqrf_out(result0, result1, self);
 }
 
 std::tuple<Tensor,Tensor> geqrf(const Tensor & self) {
@@ -525,35 +516,27 @@ Tensor orgqr(const Tensor & self, const Tensor & input2) {
 }
 
 Tensor & ormqr_out(Tensor & result, const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) {
-  return at::ormqr_out(result, self, input2, input3, left, transpose);
+  return at::legacy::th::_th_ormqr_out(result, self, input2, input3, left, transpose);
 }
 
 Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) {
   return at::legacy::th::_th_ormqr(self, input2, input3, left, transpose);
 }
 
-std::tuple<Tensor &,Tensor &> btrifact_out(Tensor & A_LU, Tensor & pivots, const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact_out(A_LU, pivots, self, pivot);
-}
-
-std::tuple<Tensor,Tensor> btrifact(const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact(self, pivot);
-}
-
-std::tuple<Tensor &,Tensor &,Tensor &> btrifact_with_info_out(Tensor & A_LU, Tensor & pivots, Tensor & info, const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact_with_info_out(A_LU, pivots, info, self, pivot);
-}
-
-std::tuple<Tensor,Tensor,Tensor> btrifact_with_info(const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact_with_info(self, pivot);
-}
-
-Tensor & btrisolve_out(Tensor & result, const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
+Tensor & lu_solve_out(Tensor & result, const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
   return at::legacy::th::_th_btrisolve_out(result, self, LU_data, LU_pivots);
 }
 
-Tensor btrisolve(const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
+Tensor lu_solve(const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
   return at::legacy::th::_th_btrisolve(self, LU_data, LU_pivots);
+}
+
+std::tuple<Tensor,Tensor> _multinomial_alias_setup(const Tensor & probs) {
+  return at::legacy::th::_th_multinomial_alias_setup(probs);
+}
+
+Tensor _multinomial_alias_draw(const Tensor & q, const Tensor & J, int64_t num_samples, Generator * generator) {
+  return at::legacy::th::_th_multinomial_alias_draw(q, J, num_samples, generator);
 }
 
 Tensor & multinomial_out(Tensor & result, const Tensor & self, int64_t num_samples, bool replacement, Generator * generator) {
@@ -595,32 +578,8 @@ Tensor erfinv(const Tensor & self) {
   return at::legacy::th::_th_erfinv(self);
 }
 
-Tensor & frac_out(Tensor & result, const Tensor & self) {
-  return at::legacy::th::_th_frac_out(result, self);
-}
-
-Tensor frac(const Tensor & self) {
-  return at::legacy::th::_th_frac(self);
-}
-
 Tensor dist(const Tensor & self, const Tensor & other, Scalar p) {
   return at::legacy::th::_th_dist(self, other, p);
-}
-
-Tensor & reciprocal_out(Tensor & result, const Tensor & self) {
-  return at::legacy::th::_th_reciprocal_out(result, self);
-}
-
-Tensor reciprocal(const Tensor & self) {
-  return at::legacy::th::_th_reciprocal(self);
-}
-
-Tensor & neg_out(Tensor & result, const Tensor & self) {
-  return at::legacy::th::_th_neg_out(result, self);
-}
-
-Tensor neg(const Tensor & self) {
-  return at::legacy::th::_th_neg(self);
 }
 
 Tensor & atan2_out(Tensor & result, const Tensor & self, const Tensor & other) {
@@ -631,19 +590,11 @@ Tensor atan2(const Tensor & self, const Tensor & other) {
   return at::legacy::th::_th_atan2(self, other);
 }
 
-Tensor & lerp_out(Tensor & result, const Tensor & self, const Tensor & end, Scalar weight) {
-  return at::legacy::th::_th_lerp_out(result, self, end, weight);
-}
-
-Tensor lerp(const Tensor & self, const Tensor & end, Scalar weight) {
-  return at::legacy::th::_th_lerp(self, end, weight);
-}
-
-Tensor & histc_out(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+Tensor & _histc_out_cpu(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
   return at::legacy::th::_th_histc_out(result, self, bins, min, max);
 }
 
-Tensor histc(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+Tensor _histc_cpu(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
   return at::legacy::th::_th_histc(self, bins, min, max);
 }
 
@@ -710,10 +661,6 @@ Tensor max(const Tensor & self) {
   return at::legacy::th::_th_max(self);
 }
 
-Tensor median(const Tensor & self) {
-  return at::legacy::th::_th_median(self);
-}
-
 std::tuple<Tensor &,Tensor &> sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
   return at::legacy::th::_th_sort_out(values, indices, self, dim, descending);
 }
@@ -721,20 +668,17 @@ std::tuple<Tensor &,Tensor &> sort_out(Tensor & values, Tensor & indices, const 
 std::tuple<Tensor,Tensor> sort(const Tensor & self, int64_t dim, bool descending) {
   return at::legacy::th::_th_sort(self, dim, descending);
 }
+
+Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
+  return std::get<1>(at::legacy::th::_th_sort(self, dim, descending));
+}
+
 std::tuple<Tensor &,Tensor &> topk_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
   return at::legacy::th::_th_topk_out(values, indices, self, k, dim, largest, sorted);
 }
 
 std::tuple<Tensor,Tensor> topk(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
   return at::legacy::th::_th_topk(self, k, dim, largest, sorted);
-}
-
-Tensor all(const Tensor & self) {
-  return at::legacy::th::_th_all(self);
-}
-
-Tensor any(const Tensor & self) {
-  return at::legacy::th::_th_any(self);
 }
 
 Tensor & renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {

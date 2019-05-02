@@ -38,8 +38,9 @@ void ColwiseMaxAndArg(
 
 class ViterbiPathOp : public Operator<CPUContext> {
  public:
-  ViterbiPathOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit ViterbiPathOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   void GatherRow(
       const TensorCPU& data,
@@ -146,8 +147,9 @@ class ViterbiPathOp : public Operator<CPUContext> {
 };
 class SwapBestPathOp : public Operator<CPUContext> {
  public:
-  SwapBestPathOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit SwapBestPathOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
   bool RunOnDevice() override {
     auto& data = Input(0);
     auto& newBestIdicies = Input(1);

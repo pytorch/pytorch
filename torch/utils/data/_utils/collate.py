@@ -61,6 +61,8 @@ def default_collate(batch):
         return batch
     elif isinstance(batch[0], container_abcs.Mapping):
         return {key: default_collate([d[key] for d in batch]) for key in batch[0]}
+    elif isinstance(batch[0], tuple) and hasattr(batch[0], '_fields'):  # namedtuple
+        return type(batch[0])(*(default_collate(samples) for samples in zip(*batch)))
     elif isinstance(batch[0], container_abcs.Sequence):
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]

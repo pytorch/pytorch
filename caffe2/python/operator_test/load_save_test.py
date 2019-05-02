@@ -116,6 +116,10 @@ class TestLoadSaveBase(test_util.TestCase):
             _LoadTest(0, dst_device_type, dst_gpu_id, [], 1)
             workspace.ResetWorkspace()
             _LoadTest(0, dst_device_type, dst_gpu_id, [], 1)
+            workspace.ResetWorkspace()
+            _LoadTest(1, src_device_type, src_gpu_id, blobs, 1)
+            workspace.ResetWorkspace()
+            _LoadTest(0, dst_device_type, dst_gpu_id, blobs, 1)
         finally:
             # clean up temp folder.
             try:
@@ -186,6 +190,26 @@ class TestLoadSave(TestLoadSaveBase):
             db=tmp_file, db_type=self._db_type,
             load_all=False)
         with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(op)
+
+        op = core.CreateOperator(
+            "Load",
+            [], [str(len(arrays) + i) for i in [-1, 0]],
+            absolute_path=1,
+            db=tmp_file, db_type=self._db_type,
+            load_all=True)
+        with self.assertRaises(RuntimeError):
+            workspace.ResetWorkspace()
+            workspace.RunOperatorOnce(op)
+
+        op = core.CreateOperator(
+            "Load",
+            [], [str(len(arrays) + i) for i in range(2)],
+            absolute_path=1,
+            db=tmp_file, db_type=self._db_type,
+            load_all=True)
+        with self.assertRaises(RuntimeError):
+            workspace.ResetWorkspace()
             workspace.RunOperatorOnce(op)
 
         try:

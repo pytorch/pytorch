@@ -1,7 +1,5 @@
 #include <torch/csrc/cuda/comm.h>
 
-#ifdef USE_CUDA
-
 #include <torch/csrc/cuda/device_set.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
@@ -18,6 +16,18 @@
 #include <cstddef>
 #include <vector>
 
+
+// The following code is used to ensure torch is linked against caffe2_gpu.
+#ifdef _MSC_VER
+namespace {
+#pragma optimize("", off)
+  int warp_size() {
+    return at::cuda::warp_size();
+  }
+#pragma optimize("", on)
+}
+#endif
+
 namespace torch { namespace cuda {
 using namespace at;
 using namespace torch::autograd;
@@ -26,44 +36,45 @@ using namespace torch::autograd;
 // of a single type only. Adding this logic directly in the loop makes it a bit
 // ugly, so here's a helper for it.
 struct unique_type_checker {
-  void show(const at::Type& t) {
+  void show(const at::DeprecatedTypeProperties& t) {
     if (!unique) return;
     if (!type) type = &t;
     unique = (type == &t);
   }
 
-  const at::Type *type = nullptr;
+  const at::DeprecatedTypeProperties *type = nullptr;
   bool unique = true;
 };
 
-std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
-  auto & type = tensor.type();
-  if (type.is_cuda() && tensor.get_device() != devices[0])
+std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
+  if (tensor.is_cuda() && tensor.get_device() != devices[0])
     throw std::runtime_error("device of broadcasted tensor must appear as the "
                              "first on devices list");
   std::vector<Tensor> tensors;
   tensors.reserve(devices.size());
-  at::cuda::OptionalCUDAGuard _device_guard;
 #ifdef USE_NCCL
   if (nccl::is_available({tensor})) {
     tensors.push_back(tensor);
     for (auto device : devices.slice(1)) {
-      _device_guard.set_index(device);
-      tensors.push_back(at::empty(tensor.sizes(), type.options()));
+      tensors.push_back(
+          at::empty(tensor.sizes(),
+          tensor.options().device(at::Device(kCUDA, device))));
     }
     nccl::broadcast(tensors);
   } else {
 #else
   {
 #endif
-    auto & gpu_type = type.toBackend(type.is_sparse() ? at::Backend::SparseCUDA : at::Backend::CUDA);
-    if (type.is_cuda()) {
+    if (tensor.is_cuda()) {
       tensors.push_back(tensor);
     }
-    IntList loop_devices = type.is_cuda() ? devices.slice(1) : devices;
+    IntArrayRef loop_devices = tensor.is_cuda() ? devices.slice(1) : devices;
     for (auto device : loop_devices) {
-      _device_guard.set_index(device);
-      tensors.push_back(gpu_type.copy(tensor, true));
+      tensors.push_back(tensor.to(
+          at::Device(kCUDA, device),
+          tensor.scalar_type(),
+          /*non_blocking=*/true,
+          /*copy=*/true));
     }
   }
   return tensors;
@@ -99,7 +110,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
 //
 // Similarly for reduce_add_coalesced, when the output are newly created
 // Variables.
-tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t buffer_size) {
+tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_t buffer_size) {
   if (!std::all_of(tensors.begin(), tensors.end(),
                    [&](const at::Tensor& t) { return t.get_device() == devices[0]; })) {
     throw std::runtime_error("all tensors must be on devices[0]");
@@ -162,7 +173,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
 
 std::vector<at::Tensor> scatter(
     const at::Tensor& tensor,
-    at::IntList devices,
+    at::IntArrayRef devices,
     const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
     const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams) {
@@ -224,7 +235,7 @@ at::Tensor gather(
       AT_CHECK(
           expected_size[dimension] == tensor.size(dimension),
           "Gather got an input of invalid size: got ",
-          tensor.sizes(), ", but expected ", at::IntList(expected_size));
+          tensor.sizes(), ", but expected ", at::IntArrayRef(expected_size));
     }
     total_size += tensor.size(dim);
   }
@@ -244,5 +255,3 @@ at::Tensor gather(
   return result;
 }
 }} // namespace torch::cuda
-
-#endif

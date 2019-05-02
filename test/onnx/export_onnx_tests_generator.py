@@ -13,7 +13,6 @@ import shutil
 import torch
 import traceback
 
-import test_pytorch_common
 import test_onnx_common
 from common_nn import module_tests
 from test_nn import new_module_tests
@@ -93,8 +92,6 @@ def convert_tests(testcases, sets=1):
         test_name = get_test_name(t)
         module = gen_module(t)
         module_name = str(module).split("(")[0]
-        if (module_name != "LogSoftmax"):
-            continue
         if (module_name == "FunctionalModule"):
             FunctionalModule_nums += 1
         else:

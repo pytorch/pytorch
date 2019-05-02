@@ -26,14 +26,14 @@ constexpr int LISTEN_QUEUE_SIZE = 64;
 void setSocketNoDelay(int socket) {
   int flag = 1;
   socklen_t optlen = sizeof(flag);
-  SYSCHECK(setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen));
+  SYSCHECK_ERR_RETURN_NEG1(setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, optlen));
 }
 
 PortType getSocketPort(int fd) {
   PortType listenPort;
   struct ::sockaddr_storage addrStorage;
   socklen_t addrLen = sizeof(addrStorage);
-  SYSCHECK(getsockname(
+  SYSCHECK_ERR_RETURN_NEG1(getsockname(
       fd, reinterpret_cast<struct ::sockaddr*>(&addrStorage), &addrLen));
 
   if (addrStorage.ss_family == AF_INET) {
@@ -58,11 +58,11 @@ std::string sockaddrToString(struct ::sockaddr* addr) {
   char address[INET6_ADDRSTRLEN + 1];
   if (addr->sa_family == AF_INET) {
     struct ::sockaddr_in* s = reinterpret_cast<struct ::sockaddr_in*>(addr);
-    SYSCHECK(::inet_ntop(AF_INET, &(s->sin_addr), address, INET_ADDRSTRLEN))
+    SYSCHECK(::inet_ntop(AF_INET, &(s->sin_addr), address, INET_ADDRSTRLEN), __output != nullptr)
     address[INET_ADDRSTRLEN] = '\0';
   } else if (addr->sa_family == AF_INET6) {
     struct ::sockaddr_in6* s = reinterpret_cast<struct ::sockaddr_in6*>(addr);
-    SYSCHECK(::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN))
+    SYSCHECK(::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN), __output != nullptr)
     address[INET6_ADDRSTRLEN] = '\0';
   } else {
     throw std::runtime_error("unsupported protocol");
@@ -94,18 +94,18 @@ std::pair<int, PortType> listen(PortType port) {
   int socket;
   while (true) {
     try {
-      SYSCHECK(
+      SYSCHECK_ERR_RETURN_NEG1(
           socket = ::socket(
               nextAddr->ai_family,
               nextAddr->ai_socktype,
               nextAddr->ai_protocol))
 
       int optval = 1;
-      SYSCHECK(
+      SYSCHECK_ERR_RETURN_NEG1(
           ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)))
 
-      SYSCHECK(::bind(socket, nextAddr->ai_addr, nextAddr->ai_addrlen))
-      SYSCHECK(::listen(socket, LISTEN_QUEUE_SIZE))
+      SYSCHECK_ERR_RETURN_NEG1(::bind(socket, nextAddr->ai_addr, nextAddr->ai_addrlen))
+      SYSCHECK_ERR_RETURN_NEG1(::listen(socket, LISTEN_QUEUE_SIZE))
       break;
 
     } catch (const std::system_error& e) {
@@ -155,7 +155,7 @@ int connect(
   bool anyRefused = false;
   while (true) {
     try {
-      SYSCHECK(
+      SYSCHECK_ERR_RETURN_NEG1(
           socket = ::socket(
               nextAddr->ai_family,
               nextAddr->ai_socktype,
@@ -164,7 +164,7 @@ int connect(
       ResourceGuard socketGuard([socket]() { ::close(socket); });
 
       // We need to connect in non-blocking mode, so we can use a timeout
-      SYSCHECK(::fcntl(socket, F_SETFL, O_NONBLOCK));
+      SYSCHECK_ERR_RETURN_NEG1(::fcntl(socket, F_SETFL, O_NONBLOCK));
 
       int ret = ::connect(socket, nextAddr->ai_addr, nextAddr->ai_addrlen);
 
@@ -198,8 +198,8 @@ int connect(
 
       // Disable non-blocking mode
       int flags;
-      SYSCHECK(flags = ::fcntl(socket, F_GETFL));
-      SYSCHECK(::fcntl(socket, F_SETFL, flags & (~O_NONBLOCK)));
+      SYSCHECK_ERR_RETURN_NEG1(flags = ::fcntl(socket, F_GETFL));
+      SYSCHECK_ERR_RETURN_NEG1(::fcntl(socket, F_SETFL, flags & (~O_NONBLOCK)));
       socketGuard.release();
       break;
 
@@ -255,12 +255,12 @@ std::tuple<int, std::string> accept(
   }
 
   int socket;
-  SYSCHECK(socket = ::accept(listenSocket, NULL, NULL))
+  SYSCHECK_ERR_RETURN_NEG1(socket = ::accept(listenSocket, NULL, NULL))
 
   // Get address of the connecting process
   struct ::sockaddr_storage addr;
   socklen_t addrLen = sizeof(addr);
-  SYSCHECK(::getpeername(
+  SYSCHECK_ERR_RETURN_NEG1(::getpeername(
       socket, reinterpret_cast<struct ::sockaddr*>(&addr), &addrLen))
 
   setSocketNoDelay(socket);

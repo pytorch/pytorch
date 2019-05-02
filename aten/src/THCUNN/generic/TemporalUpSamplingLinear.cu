@@ -3,6 +3,7 @@
 #else
 
 #include <THCUNN/upsampling.h>
+#include "ATen/cuda/CUDAContext.h"
 
 static inline void THNN_(TemporalUpSamplingLinear_shapeCheck)
                         (THCState *state,
@@ -50,10 +51,10 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
   THCDeviceTensor<scalar_t, 3> idata = toDeviceTensor<scalar_t, 3>(state, input);
   THCDeviceTensor<scalar_t, 3> odata = toDeviceTensor<scalar_t, 3>(state, output);
   THAssert(inputWidth > 0 && outputWidth > 0);
-  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const accreal rwidth = area_pixel_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputWidth;
   const int num_threads =
-    THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+    at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   caffe_gpu_interp2_kernel<scalar_t, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads ,
    0 , stream>>>(num_kernels, rwidth, align_corners, idata, odata);
@@ -81,10 +82,10 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
   THCTensor_(zero)(state, gradInput);
   THCDeviceTensor<scalar_t, 3> data1 = toDeviceTensor<scalar_t, 3>(state, gradInput);
   THCDeviceTensor<scalar_t, 3> data2 = toDeviceTensor<scalar_t, 3>(state, gradOutput);
-  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const accreal rwidth = area_pixel_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputWidth;
   const int num_threads =
-    THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+    at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   caffe_gpu_interp2_kernel_backward<scalar_t ,accreal> <<<THCCeilDiv(num_kernels, num_threads),
   num_threads, 0, stream>>>(num_kernels, rwidth, align_corners, data1, data2);

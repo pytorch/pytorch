@@ -125,7 +125,7 @@ class TransformedDistribution(Distribution):
         sign = 1
         for transform in self.transforms:
             sign = sign * transform.sign
-        if sign is 1:
+        if isinstance(sign, int) and sign == 1:
             return value
         return sign * (value - 0.5) + 0.5
 

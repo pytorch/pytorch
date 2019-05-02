@@ -9,7 +9,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <c10/util/Optional.h>
-#include <c10/DeviceGuard.h>
+#include <c10/core/DeviceGuard.h>
 
 #include <vector>
 #include <utility>
@@ -25,6 +25,7 @@ struct VariableInfo {
 
   at::Type* type;
   at::Device device = at::kCPU;
+  at::ScalarType scalar_type = at::kFloat;
   std::vector<int64_t> size;
   bool requires_grad;
 };

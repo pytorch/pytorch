@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 
@@ -15,9 +16,6 @@ DEFINE_DISPATCH(div_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
-    if (!result.defined()) {
-      result = at::empty({0}, self.options());
-    }
     if (self.is_sparse()) {
       at::_sparse_add_out(result, self, other, alpha);
     } else {
@@ -27,15 +25,21 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   } else if (self.is_sparse()) {
     AT_ERROR("add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
   }
+  at::assert_no_internal_overlap(result, "add");
   auto iter = TensorIterator::binary_op(result, self, other);
   add_stub(iter->device_type(), *iter, alpha);
-  result = iter->output();
   return result;
 }
 
 Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
   Tensor result;
-  return native::add_out(result, self, other, alpha);
+  if (other.is_sparse()) {
+    result = at::empty({0}, self.options());
+    return native::add_out(result, self, other, alpha);
+  }
+  auto iter = TensorIterator::binary_op(result, self, other);
+  add_stub(iter->device_type(), *iter, alpha);
+  return iter->output();
 }
 
 Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
@@ -44,24 +48,27 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (self.is_sparse()) {
-    if (!result.defined()) {
-      result = at::empty({0}, self.options());
-    }
     if (other.dim() != 0) {
       AT_ERROR("div(): sparse division only supports division by a scalar ",
         "(got shape ", other.sizes(), " for argument 'other')");
     }
     return at::_sparse_div_zerodim_out(result, self, other);
   }
+  at::assert_no_internal_overlap(result, "div");
   auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter->device_type(), *iter);
-  result = iter->output();
   return result;
 }
 
 Tensor div(const Tensor& self, const Tensor& other) {
   Tensor result;
-  return native::div_out(result, self, other);
+  if (self.is_sparse()) {
+    result = at::empty({0}, self.options());
+    return native::div_out(result, self, other);
+  }
+  auto iter = TensorIterator::binary_op(result, self, other);
+  div_stub(iter->device_type(), *iter);
+  return iter->output();
 }
 
 Tensor& div_(Tensor& self, const Tensor& other) {
@@ -70,20 +77,23 @@ Tensor& div_(Tensor& self, const Tensor& other) {
 
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (self.is_sparse() || other.is_sparse()) {
-    if (!result.defined()) {
-      result = at::empty({0}, self.options());
-    }
     return at::_sparse_mul_out(result, self, other);
   }
+  at::assert_no_internal_overlap(result, "mul");
   auto iter = TensorIterator::binary_op(result, self, other);
   mul_stub(iter->device_type(), *iter);
-  result = iter->output();
   return result;
 }
 
 Tensor mul(const Tensor& self, const Tensor& other) {
   Tensor result;
-  return native::mul_out(result, self, other);
+  if (self.is_sparse() || other.is_sparse()) {
+    result = at::empty({0}, self.options());
+    return native::mul_out(result, self, other);
+  }
+  auto iter = TensorIterator::binary_op(result, self, other);
+  mul_stub(iter->device_type(), *iter);
+  return iter->output();
 }
 
 Tensor& mul_(Tensor& self, const Tensor& other) {
@@ -92,9 +102,6 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
 
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
-    if (!result.defined()) {
-      result = at::empty({0}, self.options());
-    }
     if (!self.sizes().equals(other.sizes())) {
       AT_ERROR("sizes do not match");
     }
@@ -107,15 +114,21 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   } else if (self.is_sparse()) {
     AT_ERROR("sub(sparse, dense) is not supported. Use sub(dense, sparse) instead.");
   }
+  at::assert_no_internal_overlap(result, "sub");
   auto iter = TensorIterator::binary_op(result, self, other);
   sub_stub(iter->device_type(), *iter, alpha);
-  result = iter->output();
   return result;
 }
 
 Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
   Tensor result;
-  return native::sub_out(result, self, other, alpha);
+  if (other.is_sparse()) {
+    result = at::empty({0}, self.options());
+    return native::sub_out(result, self, other, alpha);
+  }
+  auto iter = TensorIterator::binary_op(result, self, other);
+  sub_stub(iter->device_type(), *iter, alpha);
+  return iter->output();
 }
 
 Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {

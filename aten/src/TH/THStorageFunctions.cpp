@@ -9,11 +9,17 @@
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateHalfType.h>
 
+#include <TH/generic/THStorage.cpp>
+#include <TH/THGenerateBoolType.h>
+
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateAllTypes.h>
 
 #include <TH/generic/THStorageCopy.cpp>
 #include <TH/THGenerateHalfType.h>
+
+#include <TH/generic/THStorageCopy.cpp>
+#include <TH/THGenerateBoolType.h>
 
 THStorage* THStorage_new(caffe2::TypeMeta data_type) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(

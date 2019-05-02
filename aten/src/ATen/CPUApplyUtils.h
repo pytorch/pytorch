@@ -127,7 +127,7 @@ inline std::pair<int64_t, int64_t> collapse_dims(
  */
 
 inline Tensor sort_strides(Tensor& tensor_) {
-  IntList strides = tensor_.strides();
+  IntArrayRef strides = tensor_.strides();
   std::vector<int64_t> indices;
   indices.reserve(tensor_.ndimension());
   for (int64_t i = 0; i < tensor_.ndimension(); i++) {
@@ -220,7 +220,8 @@ inline std::string _all_equal_numel_error(at::ArrayRef<Tensor> tensors) {
 }
 
 inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
-  checkBackend("CPU_tensor_apply", tensors, Backend::CPU);
+  checkDeviceType("CPU_tensor_apply", tensors, kCPU);
+  checkLayout("CPU_tensor_apply", tensors, kStrided);
   if (!_all_equal_numel(tensors))
     AT_ERROR(_all_equal_numel_error(tensors));
   // An empty tensor has no elements
@@ -495,74 +496,6 @@ inline void CPU_tensor_apply4(
         strided_tensor_iter<scalar2>(tensor2),
         strided_tensor_iter<scalar3>(tensor3),
         strided_tensor_iter<scalar4>(tensor4));
-  }
-}
-
-template <typename scalar1, typename Op>
-inline void CPU_tensor_parallel_apply1(
-    Tensor tensor1,
-    const Op op,
-    int64_t grain_size = internal::GRAIN_SIZE) {
-  if (!_apply_preamble({tensor1}))
-    return;
-  if (tensor1.ndimension() < 8) {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        grain_size,
-        [&tensor1, &op](int64_t begin, int64_t end) {
-          apply_op(
-              end - begin,
-              begin,
-              op,
-              strided_tensor_iter_fixed<scalar1, 8>(tensor1, true));
-        });
-  } else {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        grain_size,
-        [&tensor1, &op](int64_t begin, int64_t end) {
-          apply_op(
-              end - begin, begin, op, strided_tensor_iter<scalar1>(tensor1));
-        });
-  }
-}
-
-template <typename scalar1, typename scalar2, typename Op>
-inline void CPU_tensor_parallel_apply2(
-    Tensor tensor1,
-    Tensor tensor2,
-    const Op op,
-    int64_t grain_size = internal::GRAIN_SIZE) {
-  if (!_apply_preamble({tensor1, tensor2}))
-    return;
-  if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        grain_size,
-        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
-          apply_op(
-              end - begin,
-              begin,
-              op,
-              strided_tensor_iter_fixed<scalar1, 8>(tensor1),
-              strided_tensor_iter_fixed<scalar2, 8>(tensor2));
-        });
-  } else {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        grain_size,
-        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
-          apply_op(
-              end - begin,
-              begin,
-              op,
-              strided_tensor_iter<scalar1>(tensor1),
-              strided_tensor_iter<scalar2>(tensor2));
-        });
   }
 }
 

@@ -121,7 +121,7 @@ def adagrad_sparse_test_helper(
         return (param_out, momentum_out)
 
     ref_using_fp16_values = [False]
-    if dc == hu.gpu_do:
+    if gc == hu.gpu_do and not row_wise:
         ref_using_fp16_values.append(True)
 
     for ref_using_fp16 in ref_using_fp16_values:

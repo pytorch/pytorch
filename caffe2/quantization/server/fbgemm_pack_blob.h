@@ -39,6 +39,7 @@ struct Int8ConvDNNLowPPackedWeightBlob : public Int8FCDNNLowPPackedWeightBlob {
   // Only for 32-bit accumulation
   std::shared_ptr<fbgemm::Packed3x3ConvMatrix> W_depthwise_3x3;
   std::shared_ptr<fbgemm::Packed3x3x3ConvMatrix> W_depthwise_3x3x3;
+  std::shared_ptr<fbgemm::PackWeightMatrixForGConv<std::int8_t>> W_gconv;
 };
 
 } // namespace caffe2

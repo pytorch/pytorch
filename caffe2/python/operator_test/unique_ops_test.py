@@ -67,3 +67,7 @@ class TestUniqueOps(serial.SerializedTestCase):
             inputs=[X],
             reference=partial(_unique_ref, return_inverse=return_remapping),
         )
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()
