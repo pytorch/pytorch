@@ -45,6 +45,7 @@ Reducer::Reducer(
     : replicas_(std::move(replicas)),
       process_group_(std::move(process_group)),
       expect_autograd_hooks_(false),
+      require_finalize_(false),
       has_marked_unused_parameters_(false),
       next_bucket_(0),
       backward_stats_base_(0) {
@@ -159,6 +160,12 @@ void Reducer::mark_variable_ready(
       "Out of range variable index.");
   backward_stats_[replica_index][variable_index] =
       current_time_in_nanos() - backward_stats_base_;
+
+  // Any time we mark a variable ready (be it in line due to unused parameters,
+  // or via an autograd hook), we require a call to the finalize function. If
+  // this doesn't happen before the next iteration (or call to
+  // `prepare_for_backwards`), we know something is wrong.
+  require_finalize_ = true;
 
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
@@ -382,7 +389,7 @@ void Reducer::prepare_for_backward(
   // Check that any prior reduction has finished.
   // The variable `expect_autograd_hooks` is true until gradients for all
   // parameters have been received and all buckets are ready.
-  if (expect_autograd_hooks_) {
+  if (require_finalize_) {
     AT_ERROR(
         "Expected to have finished reduction in the prior iteration before ",
         "starting a new one. ",
@@ -462,6 +469,10 @@ void Reducer::finalize_backward() {
   // No longer expect autograd hooks to fire after this function returns.
   AT_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
+
+  // No longer require call to finalize after this function returns.
+  AT_ASSERT(require_finalize_);
+  require_finalize_ = false;
 
   // Check that all buckets were completed and had their work kicked off.
   AT_ASSERT(next_bucket_ == buckets_.size());

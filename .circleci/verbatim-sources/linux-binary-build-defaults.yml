@@ -23,8 +23,8 @@ binary_linux_build: &binary_linux_build
           source "/builder/upgrade_gcc_abi.sh"
 
           # Env variables are not persisted into the next step
-          echo "export PATH=$PATH" > /env
-          echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH" > /env
+          echo "export PATH=$PATH" >> /env
+          echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> /env
         else
           echo "Not upgrading gcc version"
         fi

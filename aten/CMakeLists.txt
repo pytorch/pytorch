@@ -1,4 +1,4 @@
-if (BUILD_ATEN_MOBILE)
+if (INTERN_BUILD_MOBILE)
   return()
 endif()
 
