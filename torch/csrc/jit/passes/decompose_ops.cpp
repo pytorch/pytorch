@@ -59,7 +59,7 @@ static void DecomposeOps(Block* block) {
       Graph* graph = it->owningGraph();
       int ndim = input->type()->cast<DimensionedTensorType>()->dim();
       Value* new_output = nullptr;
-      if (ndim == 2 && isDefined(bias).value_or(false)) {
+      if (ndim == 2 && bias->type()->isSubtypeOf(TensorType::get())) {
         // if ndim == 2 and bias is statically defined, dispatch to addmm decomposition
         Value* transposed_weight = graph->insert(aten::t, {weight});
         Value* one = graph->insertConstant(1);

@@ -1401,7 +1401,7 @@ def linear(input, weight, bias=None):
         - Bias: :math:`(out\_features)`
         - Output: :math:`(N, *, out\_features)`
     """
-    return torch.linear(input, weight, bias)
+    return torch._C._nn.linear(input, weight, bias)
 
 
 @weak_script
