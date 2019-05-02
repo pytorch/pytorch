@@ -126,8 +126,8 @@ Tensor embedding_dense_backward_cpu(
   } else {
     parallel_section(0, num_weights);
   }
-    return grad_weight;
-  }
+
+  return grad_weight;
 }
 
 Tensor & embedding_renorm_cpu_(
