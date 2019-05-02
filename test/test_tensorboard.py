@@ -7,7 +7,6 @@ import numpy as np
 import os
 import shutil
 import sys
-import tempfile
 import unittest
 
 TEST_TENSORBOARD = True
