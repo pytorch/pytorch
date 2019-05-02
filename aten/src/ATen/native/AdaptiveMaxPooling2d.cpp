@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include <ATen/Parallel.h>
 #include "ATen/NativeFunctions.h"
 #include <tuple>
 
@@ -35,54 +36,54 @@ static void adaptive_max_pool2d_single_out_frame(
         int64_t istrideH,
         int64_t istrideW)
 {
-  int64_t d;
-#pragma omp parallel for private(d)
-  for (d = 0; d < sizeD; d++)
-  {
-    /* loop over output */
-    int64_t oh, ow;
-    for(oh = 0; oh < osizeH; oh++)
+  at::parallel_for(0, sizeD, 0, [&](int64_t start, int64_t end) {
+    for (auto d = start; d < end; d++)
     {
-      int istartH = start_index(oh, osizeH, isizeH);
-      int iendH   = end_index(oh, osizeH, isizeH);
-      int kH = iendH - istartH;
-
-      for(ow = 0; ow < osizeW; ow++)
+      /* loop over output */
+      int64_t oh, ow;
+      for(oh = 0; oh < osizeH; oh++)
       {
-        int istartW = start_index(ow, osizeW, isizeW);
-        int iendW   = end_index(ow, osizeW, isizeW);
-        int kW = iendW - istartW;
+        int istartH = start_index(oh, osizeH, isizeH);
+        int iendH   = end_index(oh, osizeH, isizeH);
+        int kH = iendH - istartH;
 
-        /* local pointers */
-        scalar_t *ip = input_p   + d*istrideD + istartH*istrideH + istartW*istrideW;
-        scalar_t *op = output_p  + d*osizeH*osizeW + oh*osizeW + ow;
-        int64_t *indp = ind_p   + d*osizeH*osizeW + oh*osizeW + ow;
-
-        /* compute local max: */
-        int64_t maxindex = -1;
-        scalar_t maxval = -std::numeric_limits<float>::max();
-        int ih, iw;
-        for(ih = 0; ih < kH; ih++)
+        for(ow = 0; ow < osizeW; ow++)
         {
-          for(iw = 0; iw < kW; iw++)
+          int istartW = start_index(ow, osizeW, isizeW);
+          int iendW   = end_index(ow, osizeW, isizeW);
+          int kW = iendW - istartW;
+
+          /* local pointers */
+          scalar_t *ip = input_p   + d*istrideD + istartH*istrideH + istartW*istrideW;
+          scalar_t *op = output_p  + d*osizeH*osizeW + oh*osizeW + ow;
+          int64_t *indp = ind_p   + d*osizeH*osizeW + oh*osizeW + ow;
+
+          /* compute local max: */
+          int64_t maxindex = -1;
+          scalar_t maxval = -std::numeric_limits<float>::max();
+          int ih, iw;
+          for(ih = 0; ih < kH; ih++)
           {
-            scalar_t val = *(ip + ih*istrideH + iw*istrideW);
-            if ((val > maxval) || std::isnan(val))
+            for(iw = 0; iw < kW; iw++)
             {
-              maxval = val;
-              maxindex = (ih+istartH)*isizeW + (iw+istartW);
+              scalar_t val = *(ip + ih*istrideH + iw*istrideW);
+              if ((val > maxval) || std::isnan(val))
+              {
+                maxval = val;
+                maxindex = (ih+istartH)*isizeW + (iw+istartW);
+              }
             }
           }
+
+          /* set output to local max */
+          *op = maxval;
+
+          /* store location of max */
+          *indp = maxindex;
         }
-
-        /* set output to local max */
-        *op = maxval;
-
-        /* store location of max */
-        *indp = maxindex;
       }
     }
-  }
+  });
 }
 
 template <typename scalar_t>
@@ -101,17 +102,17 @@ static void adaptive_max_pool2d_out_frame(
   int64_t istrideH,
   int64_t istrideW)
 {
-  int64_t b;
-#pragma omp parallel for private(b)
-  for (b = 0; b < sizeB; b++) {
-    adaptive_max_pool2d_single_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeH*osizeW,
-                                                   indices_data+b*sizeD*osizeH*osizeW,
-                                                   sizeD,
-                                                   isizeH, isizeW,
-                                                   osizeH, osizeW,
-                                                   istrideD,
-                                                   istrideH, istrideW);
-  }
+  at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
+    for (auto b = start; b < end; b++) {
+      adaptive_max_pool2d_single_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeH*osizeW,
+                                                     indices_data+b*sizeD*osizeH*osizeW,
+                                                     sizeD,
+                                                     isizeH, isizeW,
+                                                     osizeH, osizeW,
+                                                     istrideD,
+                                                     istrideH, istrideW);
+    }
+  });
 }
 
 void adaptive_max_pool2d_out_cpu_template(
@@ -222,28 +223,28 @@ static void adaptive_max_pool2d_backward_single_out_frame(
           int64_t osizeH,
           int64_t osizeW)
 {
-  int64_t d;
-#pragma omp parallel for private(d)
-  for (d = 0; d < sizeD; d++)
-  {
-    scalar_t *gradInput_p_d = gradInput_p + d*isizeH*isizeW;
-    scalar_t *gradOutput_p_d = gradOutput_p + d*osizeH*osizeW;
-    int64_t *ind_p_d = indices + d*osizeH*osizeW;
-
-    /* calculate max points */
-    int64_t oh, ow;
-    for(oh = 0; oh < osizeH; oh++)
+  at::parallel_for(0, sizeD, 0, [&](int64_t start, int64_t end) {
+    for (auto d = start; d < end; d++)
     {
-      for(ow = 0; ow < osizeW; ow++)
-      {
-        /* retrieve position of max */
-        int64_t maxp = ind_p_d[oh*osizeW + ow];
+      scalar_t *gradInput_p_d = gradInput_p + d*isizeH*isizeW;
+      scalar_t *gradOutput_p_d = gradOutput_p + d*osizeH*osizeW;
+      int64_t *ind_p_d = indices + d*osizeH*osizeW;
 
-        /* update gradient */
-        gradInput_p_d[maxp] += gradOutput_p_d[oh*osizeW + ow];
+      /* calculate max points */
+      int64_t oh, ow;
+      for(oh = 0; oh < osizeH; oh++)
+      {
+        for(ow = 0; ow < osizeW; ow++)
+        {
+          /* retrieve position of max */
+          int64_t maxp = ind_p_d[oh*osizeW + ow];
+
+          /* update gradient */
+          gradInput_p_d[maxp] += gradOutput_p_d[oh*osizeW + ow];
+        }
       }
     }
-  }
+  });
 }
 
 template <typename scalar_t>
@@ -258,16 +259,16 @@ static void adaptive_max_pool2d_backward_out_frame(
           int64_t osizeH,
           int64_t osizeW)
 {
-  int64_t b;
-#pragma omp parallel for private(b)
-  for (b = 0; b < sizeB; b++) {
-    adaptive_max_pool2d_backward_single_out_frame<scalar_t>(gradInput_data+b*sizeD*isizeH*isizeW,
-                                                            gradOutput_data+b*sizeD*osizeH*osizeW,
-                                                            indices_data+b*sizeD*osizeH*osizeW,
-                                                            sizeD,
-                                                            isizeH, isizeW,
-                                                            osizeH, osizeW);
-  }
+  at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
+    for (auto b = start; b < end; b++) {
+      adaptive_max_pool2d_backward_single_out_frame<scalar_t>(gradInput_data+b*sizeD*isizeH*isizeW,
+                                                              gradOutput_data+b*sizeD*osizeH*osizeW,
+                                                              indices_data+b*sizeD*osizeH*osizeW,
+                                                              sizeD,
+                                                              isizeH, isizeW,
+                                                              osizeH, osizeW);
+    }
+  });
 }
 
 Tensor& adaptive_max_pool2d_backward_out_cpu_template(
