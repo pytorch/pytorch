@@ -1,5 +1,4 @@
-def graph(self,
-    y: Tensor) -> Tuple[Tensor, Tensor]:
+def loop_use_test(y: Tensor) -> Tuple[Tensor, Tensor]:
   x = torch.add(y, 1, 1)
   z = torch.add(x, 5, 1)
   y0, z0 = y, z

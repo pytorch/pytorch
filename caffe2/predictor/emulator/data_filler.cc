@@ -22,7 +22,7 @@ void DataNetFiller::fill_input_internal(TensorList_t* input_data) const {
   }
 }
 
-static void fill_with_type(
+void fill_with_type(
     const TensorFiller& filler,
     const std::string& type,
     TensorCPU* output) {

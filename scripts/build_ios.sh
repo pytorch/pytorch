@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -xe
 ##############################################################################
 # Example command to build the iOS target.
 ##############################################################################
@@ -6,8 +6,6 @@
 # This script shows how one can build a Caffe2 binary for the iOS platform
 # using ios-cmake. This is very similar to the android-cmake - see
 # build_android.sh for more details.
-
-set -e
 
 CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 
