@@ -1439,7 +1439,7 @@ graph(%x : Tensor,
                    .check_next("int_repr").check("dequantize_linear") \
                    .run(str(trace.graph))
 
-    def test_pattern_based_fusion(self):
+    def test_pattern_based_rewrite(self):
         class testModule(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x, y, z):
@@ -1449,7 +1449,7 @@ graph(%x : Tensor,
                 o = u * y
                 return o
         m = testModule()
-        torch._C._jit_pass_custom_pattern_based_fusion("""
+        torch._C._jit_pass_custom_pattern_based_rewrite("""
 graph(%a, %b, %c):
   %q = aten::mul(%a, %b)
   %r = aten::mul(%q, %c)
@@ -1466,7 +1466,7 @@ graph(%a, %b, %c):
                 u = p * x
                 return u
         m = testModule2()
-        torch._C._jit_pass_custom_pattern_based_fusion("""
+        torch._C._jit_pass_custom_pattern_based_rewrite("""
 graph(%a, %b, %c):
   %q = aten::mul(%a, %b)
   %r = aten::mul(%q, %c)
@@ -1482,7 +1482,7 @@ graph(%a, %b, %c):
                 p = t + z
                 return p
         m = testModule3()
-        torch._C._jit_pass_custom_pattern_based_fusion("""
+        torch._C._jit_pass_custom_pattern_based_rewrite("""
 graph(%a, %b, %c, %d):
   %q = aten::mul(%a, %b)
   %r = aten::add(%q, %c, %d)
