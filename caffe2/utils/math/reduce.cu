@@ -578,6 +578,7 @@ CAFFE2_SPECIALIZED_CUDA_REDUCE_MEAN(float)
     MomentsCUDA<T>(ndim, X_dims, Y_dims, X, mean, var, context); \
   }
 CAFFE2_SPECIALIZED_CUDA_MOMENTS(float)
+CAFFE2_SPECIALIZED_CUDA_MOMENTS(double)
 #undef CAFFE2_SPECIALIZED_CUDA_MOMENTS
 
 } // namespace math

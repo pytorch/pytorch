@@ -10,7 +10,7 @@
 
 namespace c10 {
 
-#ifndef C10_MOBILE
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 #define FORALL_NS_SYMBOLS(_)       \
   _(namespaces, prim)              \
   _(namespaces, aten)              \
@@ -115,6 +115,7 @@ namespace c10 {
   _(aten, transpose_)              \
   _(aten, unsqueeze_)              \
   _(aten, _set_item)               \
+  _(aten, manual_seed)             \
   _(aten, set_)                    \
   _(aten, index_put_)              \
   _(aten, device)                  \
@@ -154,6 +155,7 @@ namespace c10 {
   _(onnx, ATen)                    \
   _(onnx, Split)                   \
   _(onnx, ConstantOfShape)         \
+  _(onnx, Cast)         \
   FORALL_ATTR_BASE_SYMBOLS(_)      \
   _(attr, Subgraph)                \
   _(attr, ReverseSubgraph)         \
