@@ -178,7 +178,7 @@ const std::vector<std::string> functions = {
         #          sorted: bool = True):
         #     result0, result1 = torch.topk(self, k, dim, largest, sorted)
         #     self_size = self.size()
-        #     def backward(grad_output):
+        #     def backward(grad_output, grad_indice):
         #         grad_self = AD_index_select_backward(grad_output, dim, result1, self_size, True)
         #         return grad_self, None, None, None, None
 
@@ -190,7 +190,7 @@ const std::vector<std::string> functions = {
         #              keepdim: bool):
         #     result0, result1 = torch.kthvalue(self, k, dim, keepdim)
         #     self_size = self.size()
-        #     def backward(grad_output):
+        #     def backward(grad_output, grad_indice):
         #         grad_self = AD_index_select_backward(grad_output, dim, result1, self_size, keepdim)
         #         return grad_self, None, None, None
 
@@ -905,6 +905,7 @@ const std::vector<std::string> functions = {
             return torch._grad_sum_to_size(self, size), backward
 
         def add_0(self, other, *, alpha: number):
+            # self & other are not used in backward, so only passing sizes to it.
             self_size = self.size()
             other_size = other.size()
             def backward(grad_output):
@@ -1290,7 +1291,7 @@ const std::vector<std::string> functions = {
                                     dilation: List[int],
                                     ceil_mode: bool):
             result0, result1 = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
-            def backward(grad_output):
+            def backward(grad_output, grad_indices):
                 grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, result1)
                 return grad_self, None, None, None, None, None
             return result0, result1, backward
@@ -1306,7 +1307,8 @@ const std::vector<std::string> functions = {
             result, result1, result2 = torch.native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps)
             has_weight = weight is not None
             has_bias = bias is not None
-            def backward(grad_output):
+            def backward(grad_output, grad_savemean, grad_saveinvstd):
+                # test in test/cpp/jit/test_misc.h
                 grad_self, grad_weight, grad_bias = torch.native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, result1, result2, training, eps, [True, has_weight, has_bias])
                 return grad_self, grad_weight, grad_bias, None, None, None, None, None
 
@@ -1340,7 +1342,8 @@ const std::vector<std::string> functions = {
                                 stride: List[int],
                                 padding: List[int]):
             result0, result1, result2 = torch.thnn_conv2d_forward(self, weight, kernel_size, bias, stride, padding)
-            def backward(grad_output):
+            def backward(grad_output, grad_finput, grad_fgrad_input):
+                # test in test/cpp/jit/test_misc.h
                 grad_self, grad_weight, grad_bias = torch.thnn_conv2d_backward(grad_output, self, weight, kernel_size, stride, padding, result1, result2, [True, True, True])
                 return grad_self, grad_weight, None, grad_bias, None, None
             return result0, result1, result2, backward
@@ -1558,7 +1561,7 @@ c10::optional<GradientPair> gradientInfoForSchema(
   } else {
     auto schema_str = canonicalSchemaString(schema);
     // For debugging AD change:
-     std::cout << "Looking for " << schema_str << std::endl;
+    // std::cout << "Looking for " << schema_str << std::endl;
 
     auto sym_script_it = schema_to_graphs.find(schema_str);
 

@@ -12936,11 +12936,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             x1, x2 = torch.chunk(x, 2)
             return (x1, x2)
 
-        import pdb
         input = torch.rand(6, 10).requires_grad_()
         with disable_autodiff_subgraph_inlining():
             output = func(input)
-            pdb.set_trace()
             self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
 
     def test_simple_merge(self):
@@ -13279,6 +13277,7 @@ nn_functional_tests = [
     ('fractional_max_pool2d', (S, S, S, S), (3, [2, 3],)),
     ('max_pool1d', (S, S, S), (2, 1)),
     ('max_pool1d', (S, S, S), (2, 1, 1, 1, False, True), 'with_indices'),
+    ('max_pool2d', (S, S, S, S), (2, 1), '', (True, 'aten::max_pool2d_with_indices')),
     ('max_pool2d', (S, S, S, S), (2, 1, 1, 1, False, True), 'with_indices', (True, 'aten::max_pool2d_with_indices')),
     ('max_pool3d', (S, S, S, S, S), (2, 1)),
     ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),

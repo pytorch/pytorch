@@ -27,31 +27,7 @@ void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
   }
 }
 
-// need_trim_grad_ops contains functions that return multiple outputs in
-// forward, but only the first one requires grad.
-// Example:
-// kthvalue returns (kthvalue, index of kthvalue), currently autodiff only
-// supports at most one output that requires grad. Thus we need to remove
-// the grad for index that doesn't require grad.
-bool needTrimGrad(Node* n) {
-  static OperatorSet need_trim_grad_ops = {
-      "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
-      "aten::topk(Tensor self, int k, int dim, bool largest, bool sorted) -> (Tensor, Tensor)",
-      "aten::max_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
-  };
-  if (need_trim_grad_ops.find(n)) {
-    return true;
-  }
-  return false;
-}
-
 bool isDifferentiable(Node* n) {
-  // TODO: scalar-tensor ops should be canonicalized
-  static OperatorSet differentiable_ops = {
-      //"aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
-      "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
-  };
-
   // TODO: add support for the following fusible operators.
   // They're a little tricky to implement; max/min require mutability for best
   // perf "aten::atan2(Tensor self) -> Tensor", "aten::max(Tensor self) ->
@@ -59,8 +35,6 @@ bool isDifferentiable(Node* n) {
 
   if (n->kind() == prim::Constant || n->kind() == prim::AutogradZero ||
       n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk)
-    return true;
-  if (differentiable_ops.find(n))
     return true;
 
   if (n->matches(
@@ -160,9 +134,6 @@ static c10::optional<std::vector<Value*>> build_script_grad(
   // Use backward graph to construct reverse_block
   auto bw_graph = compiled_graphs->backward;
   auto grad_vec = grads.vec();
-  if (needTrimGrad(node)) {
-    grad_vec.erase(grad_vec.begin() + 1, grad_vec.end());
-  }
   auto it = grad_vec.begin();
   grad_vec.insert(it, new_outputs.back());
   ArrayRef<Value*> grad(grad_vec);
@@ -217,87 +188,6 @@ class GradientHelper {
       return {SymbolicVariable::cat(grads, node->i(attr::dim))};
 
     } else if (
-        node->matches(
-            "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)")) {
-      AT_ASSERT(grads.size() == 2);
-      auto graph = node->owningGraph();
-      auto backward_value = graph->insert(
-          aten::max_pool2d_with_indices_backward,
-          {grads.at(0).value(),
-           node->namedInput(attr::self),
-           node->namedInput(attr::kernel_size),
-           node->namedInput(attr::stride),
-           node->namedInput(attr::padding),
-           node->namedInput(attr::dilation),
-           node->namedInput(attr::ceil_mode),
-           outputs.at(1).value()});
-      return {backward_value->node()->output(0),
-              nullptr,
-              nullptr,
-              nullptr,
-              nullptr,
-              nullptr};
-
-    } else if (
-        node->matches(
-            "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)")) {
-      auto graph = node->owningGraph();
-      auto backward_value = graph->insert(
-          aten::thnn_conv2d_backward,
-          {grads.at(0).value(),
-           inputs.at(0).value(),
-           inputs.at(1).value(),
-           node->namedInput(attr::kernel_size),
-           node->namedInput(attr::stride),
-           node->namedInput(attr::padding),
-           outputs.at(1).value(),
-           outputs.at(2).value(),
-           graph->insertConstant(std::vector<bool>{true, true, true})});
-      // graph->insert returns a tuple automatically if multiple outputs are
-      // returned. So unpack them again.
-      Node* tuple_unpack_node =
-          graph->insertNode(graph->createTupleUnpack(backward_value));
-      auto tuple_outputs = tuple_unpack_node->outputs();
-      AT_ASSERT(tuple_outputs.size() == size_t(3));
-      return {tuple_outputs[0],
-              tuple_outputs[1],
-              nullptr,
-              tuple_outputs[2],
-              nullptr,
-              nullptr};
-
-    } else if (
-        node->matches(
-            "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)")) {
-      auto graph = node->owningGraph();
-      auto backward_value = graph->insert(
-          aten::native_batch_norm_backward,
-          {grads.at(0).value(),
-           inputs.at(0).value(),
-           inputs.at(1).value(),
-           inputs.at(3).value(),
-           inputs.at(4).value(),
-           outputs.at(1).value(),
-           outputs.at(2).value(),
-           inputs.at(5).value(),
-           inputs.at(7).value(),
-           graph->insertConstant(std::vector<bool>{true, true, true})});
-      // graph->insert returns a tuple automatically if multiple outputs are
-      // returned. So unpack them again.
-      Node* tuple_unpack_node =
-          graph->insertNode(graph->createTupleUnpack(backward_value));
-      auto tuple_outputs = tuple_unpack_node->outputs();
-      AT_ASSERT(tuple_outputs.size() == size_t(3));
-      return {tuple_outputs[0],
-              tuple_outputs[1],
-              tuple_outputs[2],
-              nullptr,
-              nullptr,
-              nullptr,
-              nullptr,
-              nullptr};
-
-    } else if (
         node->kind() == prim::Constant || node->kind() == prim::AutogradZero) {
       return {};
     }
@@ -327,10 +217,6 @@ static std::vector<Value*> linearGradientForNode(
     ArrayRef<Value*> grad_values) {
   auto& graph = *node->owningGraph();
 
-  // FIXME: In case forward has multi outputs, we only support one requires grad
-  if (needTrimGrad(node)) {
-    grad_values = grad_values.at(0);
-  }
   auto linear = graph.insertNode(graph.create(prim::GradOf, {grad_values}, 0));
   // to make reading gradient graphs easier, remember the name of the forward op
   linear->s_(attr::name, node->kind().toDisplayString());
