@@ -272,8 +272,8 @@ def _str(self):
             suffixes.append('dtype=' + str(self.dtype))
         # TODO: change to a call to self.q_scheme() when we add q_scheme method
         suffixes.append('quantization_scheme=' + 'per_tensor_affine')
-        suffixes.append('scale=' + str(float(self.q_scale())))
-        suffixes.append('zero_point=' + str(int(self.q_zero_point())))
+        suffixes.append('scale=' + str(self.q_scale().item()))
+        suffixes.append('zero_point=' + str(self.q_zero_point().item()))
         tensor_str = _tensor_str(self.dequantize(), indent)
     else:
         if self.numel() == 0 and not self.is_sparse:
