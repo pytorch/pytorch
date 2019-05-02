@@ -180,9 +180,6 @@ if TEST_TENSORBOARD:
                                         false_negative_counts,
                                         precision,
                                         recall, n_iter)
-                d = tempfile.mkdtemp()
-                writer.export_scalars_to_json(os.path.join(d, "all_scalars.json"))
-                shutil.rmtree(d)
 
     class TestTensorBoardSummaryWriter(BaseTestCase):
         def test_summary_writer_ctx(self):
