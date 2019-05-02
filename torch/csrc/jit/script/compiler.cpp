@@ -537,7 +537,6 @@ struct to_ir {
     }
 
     method.setSchema(emitDef(def, self, graph->block()));
-
     runCleanupPasses(graph);
   }
 
@@ -1424,12 +1423,78 @@ struct to_ir {
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
+  void emitForInTensorLoop(const For& stmt, Value* tensorArg) {
+    auto targets = stmt.targets();
+    auto target = Var(targets[0]).name();
+    auto itrs = stmt.itrs();
+    auto body = stmt.body();
+    auto& range = stmt.range();
+
+    auto outermost_dim_index = graph->insertConstant(0, IntType::get(), range);
+    auto num_dim = graph->insert(aten::dim, {tensorArg});
+    Value* cond_value = emitBuiltinCall(
+        range,
+        *method.graph(),
+        aten::eq,
+        c10::nullopt,
+        {num_dim, outermost_dim_index},
+        {},
+        /*required=*/true);
+
+    Node* n = graph->insertNode(create(prim::If, range, 0));
+    n->addInput(cond_value);
+    auto true_block = n->addBlock();
+    n->addBlock();
+    {
+      WithInsertPoint guard(true_block);
+      graph->insert(
+          prim::RaiseException,
+          {std::string("iteration over a 0-d tensor")},
+          {},
+          range);
+    }
+
+    auto sizes_tuple = emitBuiltinCall(
+        range,
+        *graph,
+        aten::size,
+        c10::nullopt,
+        {tensorArg},
+        {},
+        /*required=*/true);
+
+    auto max_trip_count_val = emitBuiltinCall(
+        range,
+        *graph,
+        aten::select,
+        c10::nullopt,
+        {sizes_tuple, outermost_dim_index},
+        {},
+        /*required=*/true);
+
+    const auto& ident_name = target.name();
+    auto assigner = [outermost_dim_index, ident_name, range, tensorArg, this](
+                        Value* index, std::shared_ptr<Environment> env) {
+      auto cur_elm = emitBuiltinCall(
+          range,
+          *this->graph,
+          aten::select,
+          c10::nullopt,
+          {tensorArg, outermost_dim_index, index},
+          {},
+          /*required=*/true);
+      env->setVar(range, ident_name, cur_elm);
+    };
+
+    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
+  }
+
   void emitFor(const For& stmt) {
     // For now, we only support range loops. e.g. for i in range(3): ...
+
     auto targets = stmt.targets();
     auto itrs = stmt.itrs();
     auto body = stmt.body();
-
     if (stmt.itrs().size() != 1) {
       throw ErrorReport(stmt)
           << "List of iterables is not supported currently.";
@@ -1461,13 +1526,22 @@ struct to_ir {
     // it isn't a range(<expr>) loop, treat it as a sugared value that maybe can
     // be unrolled
     auto sv = emitSugaredExpr(itrs[0], 1);
-    // check if a value is simple and list-like
-    if (auto siv = std::dynamic_pointer_cast<SimpleValue>(sv)) {
-      if (siv->getValue()->type()->kind() == TypeKind::ListType) {
-        emitForInListLoop(stmt, siv);
-        return;
-      }
+
+    auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
+
+    // for-in lists
+    if (siv && siv->getValue()->type()->kind() == TypeKind::ListType) {
+      emitForInListLoop(stmt, siv);
+      return;
     }
+
+    // for-in tensors
+    if (siv && siv->getValue()->type()->isSubclass(TypeKind::TensorType)) {
+      auto value = siv->asValue(stmt.range(), method);
+      emitForInTensorLoop(stmt, value);
+      return;
+    }
+
     auto instances = sv->asTuple(stmt.range(), method);
     const std::string& target_name = target.name();
     pushFrame(environment_stack->block());

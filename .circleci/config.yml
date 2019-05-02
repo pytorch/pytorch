@@ -12,8 +12,8 @@ docker_config_defaults: &docker_config_defaults
   user: jenkins
   aws_auth:
     # This IAM user only allows read-write access to ECR
-    aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V3}
-    aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V3}
+    aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
+    aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
 
 # This system setup script is meant to run before the CI-related scripts, e.g.,
 # installing Git client, checking out code, setting up CI env, and
@@ -256,19 +256,25 @@ setup_ci_environment: &setup_ci_environment
 
       if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
         # This IAM user allows write access to S3 bucket for sccache & bazels3cache
-        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V1}" >> /home/circleci/project/env
-        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V1}" >> /home/circleci/project/env
+        set +x
+        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2}" >> /home/circleci/project/env
+        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2}" >> /home/circleci/project/env
+        set -x
       else
         # This IAM user allows write access to S3 bucket for sccache
-        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}" >> /home/circleci/project/env
-        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}" >> /home/circleci/project/env
+        set +x
+        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}" >> /home/circleci/project/env
+        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}" >> /home/circleci/project/env
+        set -x
       fi
     fi
 
     # This IAM user only allows read-write access to ECR
-    export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V3}
-    export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V3}
+    set +x
+    export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
+    export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
     eval $(aws ecr get-login --region us-east-1 --no-include-email)
+    set -x
 
 macos_brew_update: &macos_brew_update
   name: Brew update and install moreutils, expect and libomp
@@ -528,8 +534,10 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
           export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
 
           # This IAM user allows write access to S3 bucket for sccache
-          export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}
-          export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}
+          set +x
+          export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+          export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+          set -x
 
           export SCCACHE_BIN=${PWD}/sccache_bin
           mkdir -p ${SCCACHE_BIN}
@@ -806,7 +814,7 @@ binary_mac_upload: &binary_mac_upload
       name: Upload
       no_output_timeout: "10m"
       command: |
-        script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_test.sh"
+        script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_upload.sh"
         cat "$script"
         source "$script"
 # Nighlty build smoke tests defaults
@@ -1131,8 +1139,10 @@ jobs:
 
           docker cp $id:/var/lib/jenkins/workspace/env /home/circleci/project/env
           # This IAM user allows write access to S3 bucket for perf test numbers
-          echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_PERF_TEST_S3_BUCKET_V3}" >> /home/circleci/project/env
-          echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_PERF_TEST_S3_BUCKET_V3}" >> /home/circleci/project/env
+          set +x
+          echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_PERF_TEST_S3_BUCKET_V4}" >> /home/circleci/project/env
+          echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_PERF_TEST_S3_BUCKET_V4}" >> /home/circleci/project/env
+          set -x
           docker cp /home/circleci/project/env $id:/var/lib/jenkins/workspace/env
 
           export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -1210,8 +1220,10 @@ jobs:
 
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
             # This IAM user allows write access to S3 bucket for sccache
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            set -x
 
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
@@ -1291,8 +1303,10 @@ jobs:
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
             # This IAM user allows write access to S3 bucket for sccache
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            set -x
 
             git submodule sync && git submodule update -q --init
             chmod a+x .jenkins/pytorch/macos-build.sh
@@ -1455,7 +1469,13 @@ jobs:
       PYTHON_VERSION: "2"
     <<: *caffe2_macos_build_defaults
 
-# update_s3_htmls job
+  # update_s3_htmls job
+  # These jobs create html files for every cpu/cu## folder in s3. The html
+  # files just store the names of all the files in that folder (which are
+  # binary files (.whl files)). This is to allow pip installs of the latest
+  # version in a folder without having to know the latest date. Pip has a flag
+  # -f that you can pass an html file listing a bunch of packages, and pip will
+  # then install the one with the most recent version.
   update_s3_htmls: &update_s3_htmls
     machine:
       image: ubuntu-1604:201903-01
@@ -1481,6 +1501,7 @@ jobs:
         name: Update s3 htmls
         no_output_timeout: "1h"
         command: |
+          set +x
           echo "declare -x \"AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}\"" >> /home/circleci/project/env
           echo "declare -x \"AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}\"" >> /home/circleci/project/env
           source /home/circleci/project/env
@@ -1502,6 +1523,44 @@ jobs:
     environment:
       PIP_UPLOAD_FOLDER: "nightly/devtoolset7/"
     <<: *update_s3_htmls
+
+
+  # upload_binary_logs job
+  # The builder hud at pytorch.org/builder shows the sizes of all the binaries
+  # over time. It gets this info from html files stored in S3, which this job
+  # populates every day.
+  upload_binary_sizes: &upload_binary_sizes
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    - run:
+        <<: *setup_linux_system_environment
+    - run:
+        <<: *binary_checkout
+    # N.B. This sources binary_populate_env so that it takes the Pytorch
+    # version listed there. The only variables it needs are the date and the
+    # version string.
+    - run:
+        <<: *binary_populate_env
+    - run:
+        <<: *binary_install_miniconda
+    - run:
+        name: Upload binary sizes
+        no_output_timeout: "1h"
+        command: |
+          set +x
+          echo "declare -x \"AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}\"" >> /home/circleci/project/env
+          echo "declare -x \"AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}\"" >> /home/circleci/project/env
+          source /home/circleci/project/env
+          set -ex
+
+          # Not any awscli will work. Most won't. This one will work
+          export PATH="$MINICONDA_ROOT/bin:$PATH"
+          retry conda create -qyn aws36 python=3.6
+          source activate aws36
+          pip install awscli==1.16.46
+
+          "/home/circleci/project/builder/cron/upload_binary_sizes.sh"
 ##############################################################################
 # Binary build specs individual job specifications
 ##############################################################################
@@ -4390,6 +4449,11 @@ workflows:
             - binary_macos_libtorch_2.7_cpu_build
 
   # Scheduled to run 4 hours after the binary jobs start
+  # These jobs need to run after all the binary jobs run, regardless of if the
+  # jobs failed or not. There's no way to do this in CircleCI right now, so we
+  # just schedule this to run after all the binary jobs should've finished.
+  # These jobs are all idempotent and very lightweight; they just upload html
+  # files that track what binaries are available and what their sizes are.
   update_s3_htmls:
     triggers:
       - schedule:
@@ -4402,4 +4466,6 @@ workflows:
       - update_s3_htmls_for_nightlies:
           context: org-member
       - update_s3_htmls_for_nightlies_devtoolset7:
+          context: org-member
+      - upload_binary_sizes:
           context: org-member
