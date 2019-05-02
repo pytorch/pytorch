@@ -1,10 +1,8 @@
 import torch
-import torch.nn.quantized as nn
 import torch.nn.quantized.functional as F
 
 import numpy as np
-import unittest
-from common_utils import TestCase, run_tests, skipIfNotRegistered
+from common_utils import TestCase, run_tests
 
 def _quantize(x, scale, zero_point, qmin=0, qmax=255):
     """Quantizes a numpy array."""
