@@ -17,11 +17,6 @@ inline bool check_type(PyObject* obj, at::TensorTypeId id, at::ScalarType dtype)
   return false;
 }
 
-template<typename T>
-inline T* unpack(PyObject* obj) {
-  return (T*) ((THPVariable*)obj)->cdata.unsafeGetTensorImpl();
-}
-
 }} // namespace torch::nn
 
 static inline int get_device(PyObject* args) {
