@@ -2353,7 +2353,6 @@ graph(%a, %b, %c, %d):
 
                 return a + b
 
-            orig = str(addmm.graph)
             self.run_pass('decompose_ops', addmm.graph)
             self.assertTrue(orig == str(addmm.graph))
 
@@ -2370,6 +2369,7 @@ graph(%a, %b, %c, %d):
             weight = torch.randn(2, 4)
             bias = torch.randn(2, 2)
 
+            self.assertTrue('aten::linear(' in str(linear_addmm.graph))
             out_ref = linear_addmm(input, weight, bias)
             torch._C._jit_pass_complete_shape_analysis(
                 linear_addmm.graph, (input, weight, bias), False)
@@ -2387,7 +2387,7 @@ graph(%a, %b, %c, %d):
             input = torch.randn(2, 4)
             weight = torch.randn(2, 4)
 
-            orig = str(linear_matmul.graph)
+            self.assertTrue('aten::linear(' in str(linear_matmul.graph))
             out_ref = linear_matmul(input, weight)
             torch._C._jit_pass_complete_shape_analysis(
                 linear_matmul.graph, (input, weight), False)
