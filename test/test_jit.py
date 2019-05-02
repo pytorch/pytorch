@@ -12019,7 +12019,8 @@ a")
             with open(fname, "rb") as handle:
                 loaded_tensor = torch.load(fname)
                 self.assertEqual(loaded_tensor, input + param)
-                
+    
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_pickle_checkpoint_cuda(self):
         self._test_pickle_checkpoint('cuda')
         
