@@ -28,9 +28,8 @@ Value* decomposeOp(
       source,
       method_name);
 
-  Value* new_output =
-      SubgraphUtils::inlineGraph(d_graph, inputs, op).at(0);
-  return new_output;
+  WithInsertPoint insert_guard{op};
+  return inlineCallTo(*op->owningGraph(), *d_graph, inputs).at(0);
 }
 
 // Yes, no, or no value if we can't tell
