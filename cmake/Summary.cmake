@@ -45,6 +45,8 @@ function (caffe2_print_configuration_summary)
   message(STATUS "  BUILD_SHARED_LIBS     : ${BUILD_SHARED_LIBS}")
   message(STATUS "  BUILD_TEST            : ${BUILD_TEST}")
 
+  message(STATUS "  INTERN_BUILD_MOBILE   : ${INTERN_BUILD_MOBILE}")
+
   message(STATUS "  USE_ASAN              : ${USE_ASAN}")
   message(STATUS "  USE_CUDA              : ${USE_CUDA}")
   if(${USE_CUDA})
