@@ -156,6 +156,6 @@ void BackendTransformerBase::dumpNet(
       qshape_arg->mutable_qtensors()->Add()->CopyFrom(t);
     }
   }
-  WriteProtoToTextFile(shape_net, "debug_ssa_net.pb_txt");
+  WriteProtoToTextFile(shape_net, fname);
 }
 } // namespace caffe2
