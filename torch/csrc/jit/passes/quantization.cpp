@@ -26,72 +26,162 @@ int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"};
   return quantnodeLookup.find(n);
 }
 
-void insertQuantNodeParams(Node* quant, std::tuple<float, int> qparam) {
+std::vector<Value*> insertQuantParamNodes(
+    Node* quant,
+    const std::tuple<std::string, float, int>& qparam) {
+  std::vector<Value*> qparam_vals;
+  auto& scale = std::get<1>(qparam);
+  auto& zero_point = std::get<2>(qparam);
+
+  // All params inserted before quant node which is
+  // beginning of the quant-dequant pattern
   WithInsertPoint ins(quant);
-  Value* scale = quant->owningGraph()->insertConstant(std::get<0>(qparam));
-  Value* zeropoint = quant->owningGraph()->insertConstant(std::get<1>(qparam));
-  quant->addInput(scale);
-  quant->addInput(zeropoint);
+  Value* scale_v = quant->owningGraph()->insertConstant(scale);
+  qparam_vals.emplace_back(scale_v);
+  Value* zeropoint_v = quant->owningGraph()->insertConstant(zero_point);
+  qparam_vals.emplace_back(zeropoint_v);
+  return qparam_vals;
 }
 
-// Create Quant-Dequant node pair for quantizable Value
-std::pair<Node*, Node*> createQuantDeQuantNodes(Value* v, Node* n) {
+Value* insertScalarType(Node* ins_node, at::ScalarType t) {
+  AT_ASSERT(t != at::ScalarType::Undefined);
+  WithInsertPoint ins(ins_node);
+  // ScalarType inserted before ins_node node which is
+  // beginning of the quant-dequant pattern
+  Value* scalartype_v =
+      ins_node->owningGraph()->insertConstant(IValue(static_cast<int>(t)));
+  return scalartype_v;
+}
+
+// Create Quant Node
+Node* createQuantNode(Value* v, Node* n) {
   Node* quant = n->owningGraph()->create(
       at::Symbol::fromQualString("aten::quantize_linear"));
   AT_ASSERTM(quant != nullptr, "Failed to create quant node");
   quant->output()->setUniqueName(v->uniqueName() + ".quant");
+  quant->setScope(n->scope());
+  return quant;
+}
 
-  Node* dequant =
-      n->owningGraph()->create(at::Symbol::fromQualString("aten::dequantize"));
+// Create Dequant node
+Node* createDeQuantNode(Value* v, Node* n) {
+  Node* dequant = n->owningGraph()->create(
+      at::Symbol::fromQualString("aten::dequantize_linear"));
   AT_ASSERTM(dequant != nullptr, "Failed to create dequant node");
   dequant->output()->setUniqueName(v->uniqueName() + ".dequant");
-
-  quant->setScope(n->scope());
   dequant->setScope(n->scope());
-
-  return std::make_pair(quant, dequant);
+  return dequant;
 }
 
-// Insert Quant-Dequant node pair for quantizable node outputs
-void addQuantDeQuantNodes(Value* v) {
+// Create IntTensor Node
+Node* createIntReprNode(Value* v, Node* n) {
+  Node* intrepr =
+      n->owningGraph()->create(at::Symbol::fromQualString("aten::int_repr"));
+  AT_ASSERTM(intrepr != nullptr, "Failed to create inttensor node");
+  intrepr->output()->setUniqueName(v->uniqueName() + ".intrepr");
+  intrepr->setScope(n->scope());
+  return intrepr;
+}
+
+// Insert Quant-Dequant node pattern for quantizable node outputs
+void addQuantDeQuantNodes(
+    Value* v,
+    const std::tuple<std::string, float, int>& qparam,
+    at::ScalarType t = at::ScalarType::Undefined) {
   AT_ASSERT(v != nullptr);
   Node* n = v->node();
-  auto qdq = createQuantDeQuantNodes(v, n);
-  Node* quant = qdq.first;
-  Node* dequant = qdq.second;
+  Node* quant = createQuantNode(v, n);
+  Node* intrepr = createIntReprNode(v, n);
+  Node* dequant = createDeQuantNode(v, n);
 
-  // Add quant-dequant nodes and replace for all uses of Value
+  // Add quant-intrepr-dequant nodes and replace for all uses of Value
   quant->insertAfter(n);
-  dequant->insertAfter(quant);
+  intrepr->insertAfter(quant);
+  dequant->insertAfter(intrepr);
   v->replaceAllUsesWith(dequant->output());
 
-  // Attach inputs to quant and dequant nodes
+  // Attach inputs to quantization pattern nodes
   quant->addInput(v);
-  // Default Quant Params <Scale:1.0, ZeroPoint:0>
-  insertQuantNodeParams(quant, std::make_tuple(1.0, 0));
-  dequant->addInput(quant->output());
+  intrepr->addInput(quant->output());
+  dequant->addInput(intrepr->output());
+  // Insert qparam nodes
+  auto qparam_values = insertQuantParamNodes(quant, qparam);
+  for (Value* qparam_value : qparam_values) {
+    quant->addInput(qparam_value);
+    dequant->addInput(qparam_value);
+  }
+  // optional argument required only for quantization
+  // of specific attributes eg: bias.
+  if (t != at::ScalarType::Undefined) {
+    Value* scalartype_v = insertScalarType(quant, t);
+    AT_ASSERT(scalartype_v != nullptr);
+    quant->addInput(scalartype_v);
+    dequant->addInput(scalartype_v);
+  }
 }
 
-// Insert Quant-Dequant node pair for specific input to node n
-void addQuantDeQuantNodesForInput(Value* v, Node* n) {
+// Insert Quant-Dequant node pattern for specific input to node n
+void addQuantDeQuantNodesForInput(
+    Value* v,
+    Node* n,
+    const std::tuple<std::string, float, int>& qparam,
+    at::ScalarType t = at::ScalarType::Undefined) {
   AT_ASSERT(v != nullptr);
   AT_ASSERT(n != nullptr);
-  auto qdq = createQuantDeQuantNodes(v, n);
-  Node* quant = qdq.first;
-  Node* dequant = qdq.second;
+  Node* quant = createQuantNode(v, n);
+  Node* intrepr = createIntReprNode(v, n);
+  Node* dequant = createDeQuantNode(v, n);
 
-  // Insert the quant-dequant node for the V->N
+  // Insert the quant-intrepr-dequant node for the V->N
   // pair which is identified as quantizable during
   // graph iteration
   dequant->insertBefore(n);
-  quant->insertBefore(dequant);
+  intrepr->insertBefore(dequant);
+  quant->insertBefore(intrepr);
   n->replaceInputWith(v, dequant->output());
 
-  // Attach inputs to quant and dequant nodes
+  // Attach inputs to quantization pattern nodes
   quant->addInput(v);
-  // Default Quant Params <Scale:1.0, ZeroPoint:0>
-  insertQuantNodeParams(quant, std::make_tuple(1.0, 0));
-  dequant->addInput(quant->output());
+  intrepr->addInput(quant->output());
+  dequant->addInput(intrepr->output());
+  // Insert qparam nodes
+  auto qparam_values = insertQuantParamNodes(quant, qparam);
+  for (Value* qparam_value : qparam_values) {
+    quant->addInput(qparam_value);
+    dequant->addInput(qparam_value);
+  }
+  if (t != at::ScalarType::Undefined) {
+    Value* scalartype_v = insertScalarType(quant, t);
+    AT_ASSERT(scalartype_v != nullptr);
+    quant->addInput(scalartype_v);
+    dequant->addInput(scalartype_v);
+  }
+}
+
+template <typename... ArgT>
+bool matchQParamDictKeytoObserver(
+    Node* n,
+    const std::unordered_map<std::string, std::tuple<ArgT...>>& qparam_dict,
+    std::tuple<ArgT...>& qparam_value) {
+  // Observer nodes have two inputs
+  if (n->kind() != prim::PythonOp || n->inputs().size() != 2) {
+    return false;
+  }
+  // For observer node, qparam dict key matches the
+  // second input name for observer node
+  Value* vname = n->inputs()[1];
+  AT_ASSERT(toIValue(vname).has_value());
+  IValue valuekey = toIValue(vname).value();
+  if (!valuekey.isString()) {
+    return false;
+  }
+  auto it = qparam_dict.find(valuekey.toStringRef());
+  if (it == qparam_dict.end()) {
+    return false;
+  }
+  // Extract the qparam_dict value
+  qparam_value = it->second;
+  return true;
 }
 
 } // namespace
@@ -101,20 +191,20 @@ void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
-static void addObserverFor(Value* v, Node* original_observer_node) {
-  Node* def = v->node();
-  WithInsertPoint ins(def);
+static Node* addObserverFor(
+    Value* v,
+    Node* original_observer_node,
+    Node* insert_point) {
+  AT_ASSERT(insert_point != nullptr);
+  WithInsertPoint ins(insert_point);
 
   // We need to pass the value name to observer function - create a constant
   // holding this name.
-  Value* vname = def->owningGraph()->insertConstant(v->uniqueName());
+  Value* vname = insert_point->owningGraph()->insertConstant(v->uniqueName());
 
   // Create a new observer node. We just need to clone the original one.
-  Node* observerNode =
-      def->owningGraph()
-          ->createClone(
-              &*original_observer_node, [&](Value* v) { return v; }, false)
-          ->insertAfter(def);
+  Node* observerNode = insert_point->owningGraph()->createClone(
+      &*original_observer_node, [&](Value* v) { return v; }, false);
 
   // Set the type and the name of the output of the new observer node. It will
   // be used instead of the original value v.
@@ -125,26 +215,56 @@ static void addObserverFor(Value* v, Node* original_observer_node) {
   // Now we can add the inputs.
   observerNode->addInput(v);
   observerNode->addInput(vname);
+  return observerNode;
 }
 
 static bool outputsNeedToBeObserved(Node* n) {
   return n->kind() != prim::Constant;
 }
 
-void InsertObserverNodes(std::shared_ptr<Graph>& graph, Node* observer_node) {
+void InsertObserverNodes(
+    const std::shared_ptr<Graph>& graph,
+    Node* observer_node,
+    size_t num_activation_inputs) {
+  AT_ASSERT(graph != nullptr);
+  // num_activation_inputs is the number of activations or external data
+  // excluding the parameters
+  AT_ASSERT(num_activation_inputs <= graph->inputs().size());
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
   // For traversing all blocks in the graph including subblocks.
   std::stack<Block*> blocks_to_visit;
 
+  // Mark observer nodes for inputs so we dont add observers
+  // for observers while traversing graph
+  std::unordered_set<Node*> observer_for_input;
+
+  // Add observer for external input nodes excluding parameters
+  // These are treated as activation as they vary across batches
+  // and need to be observed.
+
+  // prim::Param nodes do not belong to the graph. Hence the Insert
+  // point is the beginning of graph node. This also safe guards against
+  // observing a potentially mutated value due to some in-place operation
+  Node* insert_node = *graph->nodes().begin();
+  for (size_t idx = 0; idx < num_activation_inputs; ++idx) {
+    auto& v = graph->inputs()[idx];
+    if (v->type()->isSubtypeOf(TensorType::get())) {
+      Node* new_observer_node = addObserverFor(v, observer_node, insert_node);
+      new_observer_node->insertBefore(insert_node);
+      observer_for_input.emplace(new_observer_node);
+    }
+  }
+
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      // Skip nodes that we don't need to observe, e.g. 'prim::Constant'.
-      if (!outputsNeedToBeObserved(n)) {
+      // Skip nodes that we don't need to observe, e.g. 'prim::Constant' or
+      // observer nodes
+      if (!outputsNeedToBeObserved(n) || observer_for_input.count(n) != 0) {
         continue;
       }
 
@@ -164,12 +284,31 @@ void InsertObserverNodes(std::shared_ptr<Graph>& graph, Node* observer_node) {
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      addObserverFor(v, observer_node);
+      Node* clone_observer_node = addObserverFor(v, observer_node, v->node());
+      clone_observer_node->insertAfter(v->node());
     }
   }
 }
 
-void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
+void InsertObserverNodes(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    Node* observer_node) {
+  const auto& method = moduleObj->get_method(method_name);
+  InsertObserverNodes(method.graph(), observer_node, method.num_inputs());
+}
+
+void InsertObserverNodes(
+    std::shared_ptr<script::Function>& function_var,
+    Node* observer_node) {
+  InsertObserverNodes(
+      function_var->graph(), observer_node, function_var->num_inputs());
+}
+
+void InsertQuantDequantNodes(
+    std::shared_ptr<Graph>& graph,
+    const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
+        qparam_dict) {
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   // For storing quantizable values - node pairs that are external
@@ -181,6 +320,14 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
   std::vector<Value*> quantOutputs;
   std::unordered_set<Value*> valueLookup;
 
+  // Observer nodes to remove from graph
+  std::vector<Node*> nodes_to_remove;
+
+  // Create value:qparam dict. Once qparam dict key is matched
+  // to the observer node, we create value node to qparam for lookup.
+  std::unordered_map<Value*, std::tuple<std::string, float, int>>
+      qparam_value_dict;
+
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
@@ -189,6 +336,18 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
       // Schedule the sub blocks
       for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);
+      }
+
+      std::tuple<std::string, float, int> qparam_data;
+      if (matchQParamDictKeytoObserver<std::string, float, int>(
+              n, qparam_dict, qparam_data)) {
+        // This is the observer node. Mark it and the second input
+        // constant node for deletion.
+        Value* qparam_value = n->inputs()[0];
+        qparam_value_dict.emplace(qparam_value, qparam_data);
+        nodes_to_remove.emplace_back(n);
+        nodes_to_remove.emplace_back(n->inputs()[1]->node());
+        continue;
       }
 
       // We iterate over node inputs to identify which Values
@@ -238,14 +397,24 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
     } // end for
   } // end Block traversal
 
+  // Destory Observer Nodes
+  for (auto& n : nodes_to_remove) {
+    n->destroy();
+  }
+
   // Insert the quant-dequant pair for values output from quantizable nodes
   for (auto& ele : quantOutputs) {
-    addQuantDeQuantNodes(ele);
+    if (qparam_value_dict.count(ele) != 0) {
+      addQuantDeQuantNodes(ele, qparam_value_dict[ele]);
+    }
   }
 
   // Insert the quant-dequant pair for values inputs to quantizable nodes
   for (auto& ele : quantInputs) {
-    addQuantDeQuantNodesForInput(ele.first, ele.second);
+    if (qparam_value_dict.count(ele.first) != 0) {
+      addQuantDeQuantNodesForInput(
+          ele.first, ele.second, qparam_value_dict[ele.first]);
+    }
   }
 }
 

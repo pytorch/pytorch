@@ -50,6 +50,10 @@ struct Argument {
     return alias_info_;
   }
 
+  Argument cloneWithType(TypePtr new_type) const {
+    return Argument(name_, new_type, N_, default_value_, kwarg_only_, alias_info_);
+  }
+
 private:
   std::string name_;
   TypePtr type_;
@@ -109,8 +113,7 @@ struct FunctionSchema {
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
-      bool is_varret = false,
-      std::vector<std::string> writes = {})
+      bool is_varret = false)
       : FunctionSchema(
             name.toQualString(),
             std::move(overload_name),
@@ -121,14 +124,14 @@ struct FunctionSchema {
 
 private:
   OperatorName name_;
-  const std::vector<Argument> arguments_;
-  const std::vector<Argument> returns_;
+  std::vector<Argument> arguments_;
+  std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
   // after the argument specified in arguments
   // currently this is used primarily to represent 'primtive' operators whose
   // arguments are not checked by schema
-  const bool is_vararg_;
-  const bool is_varret_;
+  bool is_vararg_;
+  bool is_varret_;
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
 public:
@@ -178,6 +181,8 @@ public:
         is_vararg(),
         is_varret());
   }
+
+  FunctionSchema cloneWithRemappedTypes(const std::function<TypePtr(TypePtr)> type_map) const;
 
   // Check that inputs have the correct types and appends any missing default
   // values.

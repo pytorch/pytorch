@@ -36,8 +36,10 @@ void unmergeSubgraph(Node* subgraphNode) {
   AT_ASSERT(subgraphNode->kind() == prim::DifferentiableGraph);
 
   // Inline the graph, replace uses of node outputs and destroy the node
-  const auto subgraphOutputs = inlineGraph(
-      getSubgraph(subgraphNode), subgraphNode->inputs(), subgraphNode);
+  auto outerGraph = subgraphNode->owningGraph();
+  WithInsertPoint guard(subgraphNode);
+  const auto subgraphOutputs = inlineCallTo(
+      *outerGraph, *getSubgraph(subgraphNode), subgraphNode->inputs());
   AT_ASSERT(subgraphOutputs.size() >= subgraphNode->outputs().size());
   for (size_t i = 0; i < subgraphNode->outputs().size(); ++i) {
     subgraphNode->outputs()[i]->replaceAllUsesWith(subgraphOutputs[i]);
@@ -127,39 +129,6 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
 
   // Remove the original node now that the merge is complete
   toMerge->destroy();
-}
-
-// Invariant we depend on in mergeSubgraph: All inlined nodes are created
-// between the node preceding insertBefore and insertBefore.
-std::vector<Value*> inlineGraph(
-    const std::shared_ptr<Graph>& subgraph,
-    at::ArrayRef<Value*> outerInputs,
-    Node* insertBefore) {
-  auto outerGraph = insertBefore->owningGraph();
-
-  // Initialize a map of inner graph values to outer graph values
-  std::unordered_map<const Value*, Value*> innerToOuter;
-  const auto innerInputs = subgraph->inputs();
-  AT_ASSERT(outerInputs.size() == innerInputs.size());
-  for (size_t i = 0; i < innerInputs.size(); ++i) {
-    innerToOuter[innerInputs[i]] = outerInputs[i];
-  }
-
-  // Clone all nodes
-  for (auto inner : subgraph->nodes()) {
-    Node* outer = outerGraph->createClone(
-        inner, [&](Value* k) -> Value* { return innerToOuter.at(k); });
-    outer->insertBefore(insertBefore);
-    const auto innerOutputs = inner->outputs();
-    const auto outerOutputs = outer->outputs();
-    for (size_t i = 0; i < innerOutputs.size(); ++i) {
-      innerToOuter[innerOutputs[i]] = outerOutputs[i];
-    }
-  }
-
-  return fmap(subgraph->outputs(), [&](Value* output) {
-    return innerToOuter.at(output);
-  });
 }
 
 Node* createSingletonSubgraph(Node* n, Symbol subgraphKind) {
