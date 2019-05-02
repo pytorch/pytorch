@@ -26,7 +26,7 @@ namespace at {
 /// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
 /// thread_local is not supported. In that case, we don't provide
 /// `at::NonVariableTypeMode`.
-#if !defined(C10_MOBILE) && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
 
 thread_local bool NonVariableTypeMode_enabled = false;
 
@@ -38,7 +38,7 @@ void NonVariableTypeMode::set_enabled(bool enabled) {
   NonVariableTypeMode_enabled = enabled;
 }
 
-#else // defined(C10_MOBILE) || defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+#else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
 bool NonVariableTypeMode::is_enabled() {
   throw std::runtime_error("NonVariableTypeMode is not supported on mobile");

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/Type.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/Half.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
