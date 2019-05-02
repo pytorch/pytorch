@@ -85,6 +85,22 @@
       - THTensor* value
 ]]
 [[
+  name: _th_masked_fill_bool_
+  cname: maskedFillBool
+  variants: function
+  return: self
+  options:
+    - arguments:
+      - arg: THTensor* self
+      - THBoolTensor* mask
+      - real value
+    - zero_dim_tensor_only: True
+      arguments:
+      - arg: THTensor* self
+      - THBoolTensor* mask
+      - THTensor* value
+]]
+[[
   name: _th_masked_scatter_
   cname: maskedCopy
   variants: function
@@ -93,6 +109,16 @@
     - arg: THTensor* self
       broadcast: mask inplace fallback types:Byte
     - THByteTensor* mask
+    - THTensor* source
+]]
+[[
+  name: _th_masked_scatter_bool_
+  cname: maskedCopyBool
+  variants: function
+  return: self
+  arguments:
+    - arg: THTensor* self
+    - THBoolTensor* mask
     - THTensor* source
 ]]
 [[
@@ -107,6 +133,18 @@
     - arg: THTensor* self
       broadcast: mask fallback types:Byte
     - THByteTensor* mask
+]]
+[[
+  name: _th_masked_select_bool
+  cname: maskedSelectBool
+  variants:
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - arg: THTensor* self
+    - THBoolTensor* mask
 ]]
 [[
   name: _th_nonzero
@@ -316,6 +354,7 @@
 ]]
 [[
   name: _th_equal
+  cpu_bool: True
   cname: equal
   variants:
     - function
@@ -526,6 +565,8 @@
 ]]
 [[
   name: _th_lt
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -546,6 +587,8 @@
 ]]
 [[
   name: _th_lt_
+  cpu_bool: True
+  cuda_bool: True
   return: self
   variants: function
   options:
@@ -563,6 +606,8 @@
 ]]
 [[
   name: _th_gt
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -583,6 +628,8 @@
 ]]
 [[
   name: _th_gt_
+  cpu_bool: True
+  cuda_bool: True
   return: self
   variants: function
   options:
@@ -600,6 +647,8 @@
 ]]
 [[
   name: _th_le
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -620,6 +669,8 @@
 ]]
 [[
   name: _th_le_
+  cpu_bool: True
+  cuda_bool: True
   return: self
   variants: function
   options:
@@ -637,6 +688,8 @@
 ]]
 [[
   name: _th_ge
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -657,6 +710,8 @@
 ]]
 [[
   name: _th_ge_
+  cpu_bool: True
+  cuda_bool: True
   return: self
   variants: function
   options:
@@ -674,6 +729,8 @@
 ]]
 [[
   name: _th_eq
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -694,6 +751,8 @@
 ]]
 [[
   name: _th_eq_
+  cpu_bool: True
+  cuda_bool: True
   return: self
   variants: function
   options:
@@ -711,6 +770,8 @@
 ]]
 [[
   name: _th_ne
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -731,6 +792,8 @@
 ]]
 [[
   name: _th_ne_
+  cpu_bool: True
+  cuda_bool: True
   return: self
   variants: function
   options:
@@ -1844,7 +1907,7 @@
 ]]
 [[
   name: _th_dot
-  backend_type_pairs: [[CUDA,floating_point], [CPU,all]]
+  backend_types: {CUDA: [floating_point], CPU: [all]}
   cname: dot
   variants: function
   return: accreal
@@ -2663,6 +2726,7 @@
   types:
     - floating_point
   backends:
+    - CPU
     - CUDA
   return: self
   arguments:
@@ -2696,6 +2760,7 @@
 [[
   name: _th_geometric_
   backends:
+    - CPU
     - CUDA
   cname: geometric
   variants: function

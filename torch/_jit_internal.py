@@ -28,7 +28,7 @@ boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 # with an operator that always throws an error
 ignored_fns = weakref.WeakSet()  # noqa: T484
 
-# User defined class registry
+# qualified_name => ScriptClass mapping
 script_classes = {}
 
 
@@ -183,13 +183,16 @@ def ignore(fn):
     return fn
 
 
-def _parameter_list(fn):
+def _parameter_list(parameter_names_fn):
     """
     Decorator to denote that a function returns a list of all the parameters
     in a module
     """
-    fn._is_parameter_list = True
-    return fn
+    def decorator(fn):
+        fn._parameter_names_fn = parameter_names_fn
+        return fn
+
+    return decorator
 
 
 try:

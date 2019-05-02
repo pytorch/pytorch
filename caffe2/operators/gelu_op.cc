@@ -65,18 +65,8 @@ bool GeluGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
-REGISTER_CPU_OPERATOR(
-    Gelu,
-    UnaryElementwiseWithArgsOp<
-        TensorTypes<float>,
-        CPUContext,
-        GeluFunctor<CPUContext>>);
-REGISTER_CPU_OPERATOR(
-    GeluGradient,
-    BinaryElementwiseWithArgsOp<
-        TensorTypes<float>,
-        CPUContext,
-        GeluGradientFunctor<CPUContext>>);
+REGISTER_CPU_OPERATOR(Gelu, GeluOp<CPUContext>);
+REGISTER_CPU_OPERATOR(GeluGradient, GeluGradientOp<CPUContext>);
 
 namespace {
 
@@ -130,3 +120,8 @@ class GetGeluGradient : public GradientMakerBase {
 REGISTER_GRADIENT(Gelu, GetGeluGradient);
 
 } // namespace caffe2
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    Gelu,
+    "_caffe2::Gelu(Tensor input, bool fast_gelu = False) -> (Tensor output)",
+    caffe2::GeluOp<caffe2::CPUContext>);

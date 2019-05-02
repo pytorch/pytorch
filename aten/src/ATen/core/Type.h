@@ -45,69 +45,15 @@ struct Quantizer;
 static inline void noop_deleter(void*) {}
 
 enum class TypeID {
-  CPUBool,
-  CPUByte,
-  CPUChar,
-  CPUDouble,
-  CPUFloat,
-  CPUInt,
-  CPULong,
-  CPUShort,
-  CPUHalf,
-  CPUQInt8,
-  SparseCPUBool,
-  SparseCPUByte,
-  SparseCPUChar,
-  SparseCPUDouble,
-  SparseCPUFloat,
-  SparseCPUInt,
-  SparseCPULong,
-  SparseCPUShort,
-  SparseCPUQInt8,
-  MkldnnCPUFloat,
-  CUDABool,
-  CUDAByte,
-  CUDAChar,
-  CUDADouble,
-  CUDAFloat,
-  CUDAInt,
-  CUDALong,
-  CUDAShort,
-  CUDAHalf,
-  CUDAQInt8,
-  SparseCUDABool,
-  SparseCUDAByte,
-  SparseCUDAChar,
-  SparseCUDADouble,
-  SparseCUDAFloat,
-  SparseCUDAInt,
-  SparseCUDALong,
-  SparseCUDAShort,
-  SparseCUDAQInt8,
-  MSNPUBool,
-  MSNPUByte,
-  MSNPUChar,
-  MSNPUDouble,
-  MSNPUFloat,
-  MSNPUInt,
-  MSNPULong,
-  MSNPUShort,
-  MSNPUHalf,
-  MSNPUQInt8,
-  XLABool,
-  XLAByte,
-  XLAChar,
-  XLADouble,
-  XLAFloat,
-  XLAInt,
-  XLALong,
-  XLAShort,
-  XLAHalf,
-  XLAQInt8,
-  CPUComplexFloat,
-  CPUComplexDouble,
-  CUDAComplexFloat,
-  CUDAComplexDouble,
+  CPU,
+  SparseCPU,
+  MkldnnCPU,
+  CUDA,
+  SparseCUDA,
+  QuantizedCPU,
+  MSNPU,
+  XLA,
+  ComplexCPU,
   Undefined,
   NumOptions
 };
@@ -117,13 +63,12 @@ struct CAFFE2_API Type {
       : type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
 
   virtual ~Type() {}
-  virtual ScalarType scalarType() const = 0;
-  virtual caffe2::TypeMeta typeMeta() const = 0;
   virtual Backend backend() const = 0;
   Layout layout() const noexcept { return layout_from_backend(backend()); }
   virtual bool is_cuda() const = 0;
   virtual bool is_hip() const = 0;
   virtual bool is_sparse() const = 0;
+  virtual bool is_quantized() const = 0;
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
   bool is_undefined() const noexcept { return is_undefined_; }
@@ -162,12 +107,6 @@ struct CAFFE2_API Type {
     return backendToDeviceType(backend());
   }
 
-  virtual Tensor copy(
-      const Tensor& src,
-      bool non_blocking = false,
-      c10::optional<Device> to_device = {}) const = 0;
-  virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const = 0;
-
   virtual void backward(
       Tensor& self,
       c10::optional<Tensor> gradient,
@@ -182,9 +121,8 @@ struct CAFFE2_API Type {
     return this != &other;
   }
 
-  /// Constructs the `TensorOptions` from a type and a `device_index`.
-  TensorOptions options(int16_t device_index = -1) const {
-    return TensorOptions().dtype(typeMeta())
+  TensorOptions options(ScalarType s, int16_t device_index = -1) const {
+    return TensorOptions().dtype(s)
                           .device(device_type(), device_index)
                           .layout(layout())
                           .is_variable(is_variable());
@@ -192,18 +130,14 @@ struct CAFFE2_API Type {
 
   /// Constructs the `TensorOptions` from a type and a Device.  Asserts that
   /// the device type matches the device type of the type.
-  TensorOptions options(c10::optional<Device> device_opt) const {
+  TensorOptions options(ScalarType s, c10::optional<Device> device_opt) const {
     if (!device_opt.has_value()) {
-      return options(-1);
+      return options(s, -1);
     } else {
       Device device = device_opt.value();
       AT_ASSERT(device.type() == device_type());
-      return options(device.index());
+      return options(s, device.index());
     }
-  }
-
-  operator TensorOptions() const {
-    return options();
   }
 
   // example
@@ -249,6 +183,7 @@ struct CAFFE2_API Type {
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;
   virtual Tensor & clamp_min_(Tensor & self, Scalar min) const = 0;
   virtual Tensor contiguous(const Tensor & self) const = 0;
+  virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
   virtual Tensor cos(const Tensor & self) const = 0;
   virtual Tensor & cos_(Tensor & self) const = 0;
   virtual Tensor cosh(const Tensor & self) const = 0;
@@ -459,6 +394,7 @@ struct CAFFE2_API Type {
   virtual Tensor dequantize(const Tensor & self) const = 0;
   virtual Scalar q_scale(const Tensor & self) const = 0;
   virtual Scalar q_zero_point(const Tensor & self) const = 0;
+  virtual Tensor int_repr(const Tensor & self) const = 0;
   virtual Tensor to(const Tensor & self, const TensorOptions & options, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
@@ -584,7 +520,7 @@ struct CAFFE2_API Type {
   virtual Tensor cholesky(const Tensor & self, bool upper) const = 0;
   virtual Tensor cholesky_solve(const Tensor & self, const Tensor & input2, bool upper) const = 0;
   virtual std::tuple<Tensor,Tensor> solve(const Tensor & self, const Tensor & A) const = 0;
-  virtual Tensor potri(const Tensor & self, bool upper) const = 0;
+  virtual Tensor cholesky_inverse(const Tensor & self, bool upper) const = 0;
   virtual std::tuple<Tensor,Tensor> pstrf(const Tensor & self, bool upper, Scalar tol) const = 0;
   virtual std::tuple<Tensor,Tensor> qr(const Tensor & self) const = 0;
   virtual std::tuple<Tensor,Tensor> geqrf(const Tensor & self) const = 0;
@@ -629,5 +565,3 @@ protected:
 };
 
 } // namespace at
-
-#include <ATen/core/Tensor.h>

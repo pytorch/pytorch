@@ -148,9 +148,6 @@
 #include <THNN/generic/SpatialDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SpatialAdaptiveMaxPooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/SpatialAveragePooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
@@ -179,9 +176,6 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricDilatedConvolution.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricAdaptiveMaxPooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricAdaptiveAveragePooling.c>

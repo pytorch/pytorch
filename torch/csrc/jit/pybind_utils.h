@@ -5,6 +5,7 @@
 #include <ATen/core/stack.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
@@ -29,71 +30,127 @@
 
 namespace torch {
 namespace jit {
-namespace detail {
-
-using ::c10::Argument;
-using ::c10::FunctionSchema;
 
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
 // that is confusing to display to the end user since it always reports
 // locations in libtorch code rather than user code.
 
-inline void findErrorInKwargs(const FunctionSchema& schema, py::kwargs kwargs) {
-  const auto& arguments = schema.arguments();
-  // First check if any of the kwargs are unknown, i.e. don't match the name of
-  // any argument in the schema.
-  for (const auto& kwarg : kwargs) {
-    const auto key = py::cast<std::string>(kwarg.first);
-    if (!std::count_if(
-            arguments.begin(),
-            arguments.end(),
-            [&key](const Argument& argument) {
-              return argument.name() == key;
-            })) {
-      throw std::runtime_error(c10::str(
-          "Unknown keyword argument '",
-          key,
-          "' for operator '",
-          schema.name(),
-          "'. Schema: ",
-          schema));
-    }
+using tracer::TypedStack;
+struct TypedIValue : public std::pair<IValue, TypePtr> {
+  using pair::pair;
+
+  IValue& ivalue() {
+    return this->first;
   }
-  // If there are unconsumed kwargs but none of them were unknown, the first
-  // positional argument present in the kwargs is duplicated.
-  for (const auto& argument : arguments) {
-    if (kwargs.contains(argument.name().c_str())) {
-      AT_ASSERT(!argument.default_value());
-      throw std::runtime_error(c10::str(
-          "Argument '",
-          argument.name(),
-          "' specified both as positional and ",
-          "keyword argument. Schema: ",
-          schema));
-    }
+  TypePtr& type() {
+    return this->second;
+  }
+};
+
+inline TypedIValue toDictKeyIValue(py::handle key) {
+  if (py::isinstance<py::str>(key)) {
+    return TypedIValue(ConstantString::create(py::cast<std::string>(key)),
+                       StringType::create());
+  } else if (py::isinstance<py::int_>(key)) {
+    return TypedIValue(py::cast<int64_t>(key), IntType::create());
+  } else if (py::isinstance<py::float_>(key)) {
+    return TypedIValue(py::cast<double>(key), FloatType::create());
+  } else {
+    AT_ERROR("Dictionary inputs may only have string, int, or float keys");
   }
 }
-} // namespace detail
 
-inline IValue toIValue(py::handle input) {
+inline TypedIValue trySpecializeTensorList(std::vector<IValue> &elems, TypePtr type) {
+  // Since we only call this function for trace inputs, the only options are
+  // generic list, and list of tensors. We do not need to check for primitive types.
+  if (!type->isSubtypeOf(TensorType::get())) {
+    return TypedIValue(elems, ListType::create(type));
+  }
+  std::vector<at::Tensor> tensors;
+  tensors.reserve(elems.size());
+  for (auto elem : elems) {
+    tensors.push_back(elem.toTensor());
+  }
+  return TypedIValue(tensors, ListType::ofTensors());
+}
+
+inline c10::optional<TypePtr> unifyOrInitializeType(TypePtr accum, TypePtr unify) {
+  if (!accum) {
+    return unify;
+  }
+  return unifyTypes(accum, unify);
+}
+
+inline TypedIValue toTypedIValue(py::handle input) {
   if (THPVariable_Check(input.ptr())) {
     auto ten = py::cast<at::Tensor>(input);
     if (ten.is_sparse()) {
       AT_ERROR("sparse tensors not supported");
     }
-    return ten;
+    return TypedIValue(ten, CompleteTensorType::create(ten));
   } else if (six::isTuple(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
     Stack s;
+    std::vector<TypePtr> t;
     s.reserve(input_tuple.size());
+    t.reserve(input_tuple.size());
     for (py::handle elem : input_tuple) {
-      s.push_back(toIValue(elem));
+      auto info = toTypedIValue(elem);
+      s.push_back(info.first);
+      t.push_back(info.second);
     }
-    return Tuple::create(s);
+    return TypedIValue(Tuple::create(s), TupleType::create(t));
+  } else if (PyDict_Check(input.ptr())) {
+    // Check to make sure we can generate useful input/output types
+    auto dict = py::cast<py::dict>(input);
+    at::ivalue::UnorderedMap elems;
+
+    size_t len = py::len(dict);
+    if (!len) {
+      AT_ERROR("Dictionary inputs must have entries.");
+    }
+    elems.reserve(len);
+
+    TypePtr keyType = nullptr;
+    TypePtr valueType = nullptr;
+    for (auto entry : dict) {
+      auto keyInfo = toDictKeyIValue(entry.first);
+      auto valInfo = toTypedIValue(entry.second);
+      auto unifiedKey = unifyOrInitializeType(keyType, keyInfo.second);
+      auto unifiedValue = unifyOrInitializeType(valueType, valInfo.second);
+      if (!unifiedKey || !unifiedValue) {
+        AT_ERROR("Dictionary inputs to traced functions must have consistent type");
+      }
+      keyType = *unifiedKey;
+      valueType = *unifiedValue;
+      elems.insert(std::make_pair(keyInfo.first, valInfo.first));
+    }
+    return TypedIValue(at::ivalue::GenericDict::create(std::move(elems)),
+                       DictType::create(keyType, valueType));
+  } else if (PyList_Check(input.ptr())) {
+    auto list = py::cast<py::list>(input);
+    std::vector<IValue> elems;
+    size_t len = py::len(list);
+    if (!len) {
+      AT_ERROR("List trace inputs must have elements");
+    }
+    elems.reserve(len);
+
+    TypePtr listType = nullptr;
+    for (auto elem: list) {
+      TypedIValue typedVal = toTypedIValue(elem);
+      elems.push_back(typedVal.ivalue());
+      auto unify = unifyOrInitializeType(listType, typedVal.type());
+      if (!unify) {
+        AT_ERROR("List inputs to traced functions must have consistent element type");
+      }
+      listType = *unify;
+    }
+    return trySpecializeTensorList(elems, listType);
   } else {
     throw std::runtime_error(c10::str(
-        "Only tensors and (possibly nested) tuples of tensors are supported ",
+        "Only tensors and (possibly nested) tuples of tensors or dicts are supported ",
         "as inputs or outputs of traced functions",
         ", but instead got value of type ",
         py::str(input.get_type().attr("__name__")),
@@ -103,8 +160,18 @@ inline IValue toIValue(py::handle input) {
   }
 }
 
+inline IValue toIValue(py::handle input) {
+  return toTypedIValue(input).ivalue();
+}
+
 inline Stack toStack(const py::tuple& inputs) {
   return toIValue(inputs).toTuple()->elements();
+}
+
+inline TypedStack toTypedStack(const py::tuple& inputs) {
+  auto info = toTypedIValue(inputs);
+  return TypedStack(
+      info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
 }
 
 inline IValue toIValue(
@@ -141,6 +208,7 @@ inline IValue toIValue(
     case TypeKind::TensorType:
     case TypeKind::AutogradZeroTensorType:
     case TypeKind::DimensionedTensorType:
+    case TypeKind::ProfiledTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
@@ -345,12 +413,12 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = ivalue.toObject();
-    const auto classType = ClassType::get(obj->name());
+    const auto classType =
+        ClassType::get(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass = py::module::import("torch._jit_internal")
                        .attr("get_script_class")(obj->name())["class"];
     auto pyObj = pyClass.attr("__new__")(pyClass);
-
 
     const auto numAttrs = classType->numAttributes();
 
@@ -436,7 +504,11 @@ inline Stack createStackForSchema(
   }
 
   if (consumed_kwargs != kwargs.size()) {
-    detail::findErrorInKwargs(schema, kwargs);
+    std::vector<std::string> names;
+    for (const auto& kwarg : kwargs) {
+      names.emplace_back(py::cast<std::string>(kwarg.first));
+    }
+    schema.findErrorInKwargs(names);
   }
 
   return stack;
@@ -480,15 +552,16 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
   return result;
 }
 
+template<typename MethodOrFunction>
 inline py::object invokeScriptMethodFromPython(
-    script::Method& method,
+    MethodOrFunction& callee,
     tuple_slice args,
     py::kwargs kwargs) {
   auto stack = createStackForSchema(
-      method.getSchema(), std::move(args), std::move(kwargs));
+      callee.getSchema(), std::move(args), std::move(kwargs));
   {
     AutoNoGIL no_gil_guard;
-    method.run(stack);
+    callee.run(stack);
   }
   return toPyObject(std::move(stack.back()));
 }
@@ -506,5 +579,6 @@ inline py::object invokeOperatorFromPython(
 
   return createPyObjectForStack(std::move(stack));
 }
+
 } // namespace jit
 } // namespace torch

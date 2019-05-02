@@ -6,6 +6,7 @@ from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
+from scipy.stats import norm
 import unittest
 
 
@@ -202,6 +203,9 @@ class TorchIntegration(hu.HypothesisTestCase):
             soft_nms_sigma=0.5,
             soft_nms_min_score_thres=0.001,
             rotated=rotated,
+            cls_agnostic_bbox_reg=False,
+            input_boxes_include_bg_cls=True,
+            output_classes_include_bg_cls=True,
         )
 
         for o, o_ref in zip(outputs, output_refs):
@@ -446,6 +450,26 @@ class TorchIntegration(hu.HypothesisTestCase):
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
     def test_roi_align_cuda(self):
         self._test_roi_align(device="cuda")
+
+    @given(X=hu.tensor(),
+           fast_gelu=st.booleans())
+    def _test_gelu_op(self, X, fast_gelu, device):
+        def _gelu_ref(_X):
+            return (_X * norm.cdf(_X).astype(np.float32), )
+        expected_output, = _gelu_ref(X)
+        actual_output = torch.ops._caffe2.Gelu(torch.tensor(X), fast_gelu)
+
+        rtol = 1e-3 if fast_gelu else 1e-4
+        atol = 1e-5
+        torch.testing.assert_allclose(
+            expected_output, actual_output.cpu(), rtol=rtol, atol=atol)
+
+    def test_gelu_op(self):
+        self._test_gelu_op(device="cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_gelu_op_cuda(self):
+        self._test_gelu_op(device="cuda")
 
 
 if __name__ == '__main__':

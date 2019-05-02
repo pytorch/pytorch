@@ -23,6 +23,17 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
     }
     out << ")";
+  } else if (auto value = t.cast<ProfiledTensorType>()) {
+    out << "Tensor(dtype = ";
+    if  (value->scalarType().has_value())
+    {
+        out << *value->scalarType();
+    }
+    else
+    {
+      out << " dynamic";
+    }
+    out << " , shape = " << value->sizes();
   } else if (auto value = t.cast<DimensionedTensorType>()) {
     out << toString(value->scalarType()) << "(";
     for (int64_t i = 0; i < value->dim(); ++i) {
@@ -176,6 +187,15 @@ TypePtr attemptToRecoverType(const IValue& ivalue) {
 
 // Checks if input_ivalue is a subvalue of type.
 bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
+  if (auto optional = type->cast<OptionalType>()) {
+    // Unwrap the optional if the ivalue is not none
+    if (ivalue.isNone()) {
+      return true;
+    } else {
+      return isSubvalueOf(ivalue, optional->getElementType());
+    }
+  }
+
   if (ivalue.isTuple()) {
     const auto& ivalue_elem = ivalue.toTuple()->elements();
     auto tuple_type = type->cast<TupleType>();
@@ -267,6 +287,18 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
       }
     }
     return static_cast<TypePtr>(TupleType::create(elements));
+  } else if (t1->cast<DictType>() && t2->cast<DictType>()) {
+    auto dict1 = t1->cast<DictType>();
+    auto dict2 = t2->cast<DictType>();
+
+    auto unified_key = unifyTypes(dict1->getKeyType(), dict2->getKeyType());
+    auto unshaped_value1 = unshapedType(dict1->getValueType());
+    auto unshaped_value2 = unshapedType(dict2->getValueType());
+    auto unified_value = tryEitherIsTheSuperType(unshaped_value1, unshaped_value2);
+    if (!unified_key || !unified_value) {
+      return c10::nullopt;
+    }
+    return DictType::create(*unified_key, *unified_value);
   }
 
   return c10::nullopt;
@@ -440,13 +472,13 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
 namespace {
 class ClassTypeRegistry {
  public:
-  void registerType(std::string name, ClassTypePtr type) {
+  void registerType(QualifiedName name, ClassTypePtr type) {
     std::lock_guard<std::mutex> g(mutex_);
     // TODO: new type registrations will override the old ones. Is this safe?
-    reg_[name] = type;
+    reg_[std::move(name)] = type;
   }
 
-  ClassTypePtr getType(const std::string& name) {
+  ClassTypePtr getType(const QualifiedName& name) {
     std::lock_guard<std::mutex> g(mutex_);
     if (reg_.count(name)) {
       return reg_.at(name);
@@ -461,7 +493,7 @@ class ClassTypeRegistry {
 
  private:
   std::mutex mutex_;
-  std::unordered_map<std::string, ClassTypePtr> reg_;
+  std::unordered_map<QualifiedName, ClassTypePtr> reg_;
 };
 
 ClassTypeRegistry& getRegistry() {
@@ -471,19 +503,21 @@ ClassTypeRegistry& getRegistry() {
 } // namespace
 
 ClassTypePtr ClassType::create(
-    const std::string& name,
-    std::shared_ptr<Module> module) {
-  auto ptr = ClassTypePtr(new ClassType(name, std::move(module)));
-  getRegistry().registerType(name, ptr);
+    QualifiedName qualifiedName,
+    std::shared_ptr<CompilationUnit> cu) {
+  auto ptr =
+      ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
+  getRegistry().registerType(std::move(qualifiedName), ptr);
   return ptr;
 }
 
-ClassTypePtr ClassType::createModuleType() {
-  return ClassTypePtr(new ClassType("Module", nullptr));
+ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
+  return ClassTypePtr(new ClassType(
+      QualifiedName(QualifiedName("__torch__"), "$Module"), std::move(cu)));
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassTypePtr(new ClassType(typename_, module_));
+  auto ptr = ClassTypePtr(new ClassType(name_, compilation_unit_));
   AT_ASSERT(numAttributes() == refined_slots.size());
   for(size_t i = 0; i < attributeNames_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
@@ -492,13 +526,64 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   return ptr;
 }
 
-ClassTypePtr ClassType::get(const std::string& name) {
+ClassTypePtr ClassType::get(const QualifiedName& name) {
   return getRegistry().getType(name);
 }
-
 
 void ClassType::clearRegistry() {
   getRegistry().clear();
 }
+
+std::string ProfiledTensorType::str() const {
+  return "Tensor";
+}
+
+VaryingShape VaryingShape::merge(const VaryingShape& other) const
+{
+  if (size_ != other.size_) {
+    return VaryingShape(c10::optional<size_t>{});
+  }
+
+  VaryingShape vs(c10::optional<size_t>(dims_.size()));
+  for (size_t i = 0; i < dims_.size(); i++)
+  {
+    vs.dims_[i] = merge_primitive(dims_[i], other.dims_[i]);
+  }
+
+  return vs;
+}
+
+std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
+
+    out << "(";
+    if (!vs.size()) {
+      out << "*)";
+      return out;
+    }
+
+    for (size_t i = 0; i < vs.size(); i++)
+    {
+      if (i > 0) {
+        out << ", ";
+      }
+      if (vs[i].has_value())
+      {
+        out << vs[i].value();
+      }
+      else
+      {
+        out << "*";
+      }
+    }
+    out << ")";
+    return out;
+}
+
+ClassType::ClassType(
+    QualifiedName name,
+    std::shared_ptr<CompilationUnit> cu)
+    : Type(TypeKind::ClassType),
+      name_(std::move(name)),
+      compilation_unit_(std::move(cu)) {}
 
 } // namespace c10
