@@ -1,30 +1,82 @@
 import itertools
-from collections import defaultdict, namedtuple
-
 import torch
 
-
-class range(object):
-    def __init__(self, name):
-        self.name = name
-
-    def __enter__(self):
-        torch.autograd._push_range(self.name)
-
-    def __exit__(self, *args):
-        torch.autograd._pop_range()
-        return False
+from collections import defaultdict, namedtuple
+from operator import attrgetter
 
 
 class EventList(list):
     """A list of Events (for pretty printing)"""
     def __init__(self, *args, **kwargs):
         super(EventList, self).__init__(*args, **kwargs)
+        self._cpu_children_populated = False
 
     def __str__(self):
         return self.table()
 
-    def table(self, sort_by=None):
+    def populate_cpu_children(self):
+        """Populates child events into each underlying FunctionEvent object.
+        One event is a child of another if [s1, e1) is inside [s2, e2). Where
+        s1 and e1 would be start and end of the child event's interval. And
+        s2 and e2 start and end of the parent event's interval
+
+        Example: In event list [[0, 10], [1, 3], [3, 4]] would have make [0, 10]
+        be a parent of two other intervals.
+
+        If for any reason two intervals intersect only partialy, this function
+        will not record a parent child relationship between then.
+        """
+        if self.cpu_children_populated:
+            return
+        events = sorted(
+            self,
+            key=attrgetter("thread"),
+        )
+        threads = itertools.groupby(events, key=attrgetter("thread"))
+
+        # For each thread we keep a stack of current nested parents.
+        # We maintain the invariant that each interval is a subset of all other
+        # intervals lower in the stack.
+        #
+        # First we sort the intervals by their start time. Then we iterate over them.
+        # Every time we see a new interval we remove several parents from
+        # the top until we restore the invariant. Then parent child relationship
+        # if recorded if the stack is not empty.
+        # Finally we add new interval to the list
+        #
+        # Algorithm has O(N * log(N)) complexity where N is number of
+        # intervals
+        for thread_id, thread_events in threads:
+            thread_events = sorted(
+                thread_events,
+                key=lambda event: [event.cpu_interval.start, -event.cpu_interval.end],
+            )
+            current_events = []
+            cur_end = 0
+            for event in thread_events:
+                while len(current_events) > 0:
+                    parent = current_events[-1]
+                    if event.cpu_interval.start >= parent.cpu_interval.end or \
+                            event.cpu_interval.end > parent.cpu_interval.end:
+                        # this can't be a parent
+                        current_events.pop()
+                    else:
+                        parent.append_cpu_child(event)
+                        break
+
+                current_events.append(event)
+
+        self._cpu_children_populated = True
+
+    @property
+    def self_cpu_time_total(self):
+        return sum([event.self_cpu_time_total for event in self])
+
+    @property
+    def cpu_children_populated(self):
+        return self._cpu_children_populated
+
+    def table(self, sort_by=None, row_limit=100):
         """Prints an EventList as a nicely formatted table.
 
         Arguments:
@@ -36,7 +88,7 @@ class EventList(list):
         Returns:
             A string containing the table.
         """
-        return build_table(self, sort_by)
+        return build_table(self, sort_by=sort_by, row_limit=row_limit)
 
     def export_chrome_trace(self, path):
         """Exports an EventList as a Chrome tracing tools file.
@@ -102,6 +154,7 @@ class EventList(list):
         Returns:
             An EventList containing FunctionEventAvg objects.
         """
+        self.populate_cpu_children()
         stats = defaultdict(FunctionEventAvg)
         for evt in self:
             stats[evt.key] += evt
@@ -195,10 +248,11 @@ class profile(object):
     def _check_finish(self):
         if self.function_events is None:
             raise RuntimeError("can't export a trace that didn't finish running")
+        self.function_events.populate_cpu_children()
 
-    def table(self, sort_by=None):
+    def table(self, sort_by=None, row_limit=100):
         self._check_finish()
-        return self.function_events.table(sort_by)
+        return self.function_events.table(sort_by=sort_by, row_limit=row_limit)
     table.__doc__ = EventList.table.__doc__
 
     def export_chrome_trace(self, path):
@@ -215,6 +269,14 @@ class profile(object):
         self._check_finish()
         return self.function_events.total_average()
     total_average.__doc__ = EventList.total_average.__doc__
+
+    @property
+    def self_cpu_time_total(self):
+        """ Returns total time spent on CPU obtained as a sum of
+        all self times across all the events.
+        """
+        self._check_finish()
+        return self.function_events.self_cpu_time_total
 
 
 class emit_nvtx(object):
@@ -326,7 +388,21 @@ def load_nvprof(path):
 
 def format_time(time_us):
     """Defines how to format time in FunctionEvent"""
+    US_IN_SECOND = 1000.0 * 1000.0
+    US_IN_MS = 1000.0
+    if time_us >= US_IN_SECOND:
+        return '{:.3f}s'.format(time_us / US_IN_SECOND)
+    if time_us >= US_IN_MS:
+        return '{:.3f}ms'.format(time_us / US_IN_MS)
     return '{:.3f}us'.format(time_us)
+
+
+def format_time_share(time_us, total_time_us):
+    """Defines how to format time in FunctionEvent"""
+    if total_time_us == 0:
+        assert(time_us == 0)
+        return "NaN"
+    return '{:.2f}%'.format(time_us * 100.0 / total_time_us)
 
 
 def attr_formatter(name):
@@ -342,6 +418,7 @@ class FormattedTimesMixin(object):
     cuda_time_str = attr_formatter('cuda_time')
     cpu_time_total_str = attr_formatter('cpu_time_total')
     cuda_time_total_str = attr_formatter('cuda_time_total')
+    self_cpu_time_total_str = attr_formatter('self_cpu_time_total')
 
     @property
     def cpu_time(self):
@@ -374,9 +451,25 @@ class FunctionEvent(FormattedTimesMixin):
         self.thread = thread
         self.kernels = []
         self.count = 1
+        self.cpu_children = []
 
     def append_kernel(self, name, device, start, end):
         self.kernels.append(Kernel(name, device, Interval(start, end)))
+
+    def append_cpu_child(self, child):
+        """Append a CPU child of type FunctionEvent.
+
+        One is supposed to append only dirrect children to the event to have
+        correct self cpu time being reported.
+        """
+        assert(isinstance(child, FunctionEvent))
+        self.cpu_children.append(child)
+
+    @property
+    def self_cpu_time_total(self):
+        return self.cpu_time_total - sum(
+            [child.cpu_time_total for child in self.cpu_children]
+        )
 
     @property
     def cuda_time_total(self):
@@ -391,15 +484,29 @@ class FunctionEvent(FormattedTimesMixin):
         return self.name
 
     def __repr__(self):
-        return '<FunctionEvent id={} cpu_time={} cuda_time={} name={} thread={}>'.format(
-            self.id, self.cpu_time_str, self.cuda_time_str, self.name, self.thread)
+        return (
+            '<FunctionEvent id={} cpu_time={} cpu_start={} cpu_end={} '
+            'cpu_children={} cuda_time={} name={} thread={}>'.format(
+                self.id,
+                self.cpu_time_str,
+                self.cpu_interval.start,
+                self.cpu_interval.end,
+                str([child.id for child in self.cpu_children]),
+                self.cuda_time_str,
+                self.name,
+                self.thread
+            )
+        )
 
 
 class FunctionEventAvg(FormattedTimesMixin):
     """Used to average stats over multiple FunctionEvent objects."""
     def __init__(self):
         self.key = None
-        self.count = self.cpu_time_total = self.cuda_time_total = 0
+        self.count = 0
+        self.cpu_time_total = 0
+        self.cuda_time_total = 0
+        self.self_cpu_time_total = 0
 
     def __iadd__(self, other):
         if self.key is None:
@@ -408,6 +515,7 @@ class FunctionEventAvg(FormattedTimesMixin):
         assert other.key == self.key
         self.cpu_time_total += other.cpu_time
         self.cuda_time_total += other.cuda_time
+        self.self_cpu_time_total += other.self_cpu_time_total
         self.count += 1
         return self
 
@@ -561,10 +669,12 @@ def parse_nvprof_trace(path):
 ################################################################################
 # Pretty printer
 
-def build_table(events, sort_by=None, header=None):
+def build_table(events, sort_by=None, header=None, row_limit=100):
     """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if sort_by is not None:
-        events = sorted(events, key=lambda evt: getattr(evt, sort_by))
+        events = EventList(sorted(
+            events, key=lambda evt: getattr(evt, sort_by), reverse=True
+        ))
 
     name_lengths = [len(evt.key) for evt in events]
     if len(name_lengths) == 0:
@@ -573,8 +683,8 @@ def build_table(events, sort_by=None, header=None):
     max_name_length += 4  # Add some nice padding
     col_width = 15
     col_format = '  {: >' + str(col_width) + '}'
-    row_format = '{: <' + str(max_name_length) + '}' + col_format * 5
-    header_sep = '-' * max_name_length + ('  ' + '-' * col_width) * 5
+    row_format = '{: <' + str(max_name_length) + '}' + col_format * 9
+    header_sep = '-' * max_name_length + ('  ' + '-' * col_width) * 9
 
     # Have to use a list because nonlocal is Py3 only...
     result = []
@@ -583,16 +693,44 @@ def build_table(events, sort_by=None, header=None):
         result.append(s)
         result.append('\n')  # Yes, newline after the end as well
 
+    self_cpu_time_total = sum([event.self_cpu_time_total for event in events])
+    cuda_time_total = sum([evt.cuda_time_total for evt in events])
     # Actual printing
     if header is not None:
         line_length = max_name_length + (col_width + 2) * 5
         append('=' * line_length)
         append(header)
     append(header_sep)
-    append(row_format.format('Name', 'CPU time', 'CUDA time', 'Calls', 'CPU total', 'CUDA total'))
+    append(row_format.format(
+        'Name',
+        'Self CPU total %',
+        'Self CPU total',
+        'CPU total %',
+        'CPU total',
+        'CPU time avg',
+        'CUDA total %',
+        'CUDA total',
+        'CUDA time avg',
+        'Number of Calls',
+    ))
     append(header_sep)
-    for evt in events:
-        append(row_format.format(evt.key, evt.cpu_time_str, evt.cuda_time_str,
-                                 evt.count, evt.cpu_time_total_str, evt.cuda_time_total_str))
-
+    for evt in events[:row_limit]:
+        append(row_format.format(
+            evt.key,  # Name
+            # Self CPU total %
+            format_time_share(evt.self_cpu_time_total, self_cpu_time_total),
+            evt.self_cpu_time_total_str,  # Self CPU total
+            # CPU total %
+            format_time_share(evt.cpu_time_total, self_cpu_time_total),
+            evt.cpu_time_total_str,  # CPU total
+            evt.cpu_time_str,  # CPU time avg
+            # CUDA time total %
+            format_time_share(evt.cuda_time_total, cuda_time_total),
+            evt.cuda_time_total_str,
+            evt.cuda_time_str,  # Cuda time avg
+            evt.count,  # Number of calls
+        ))
+    append(header_sep)
+    append("Self CPU time total: {}".format(format_time(self_cpu_time_total)))
+    append("CUDA time total: {}".format(format_time(cuda_time_total)))
     return ''.join(result)

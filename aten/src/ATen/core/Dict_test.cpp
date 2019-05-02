@@ -1,4 +1,4 @@
-#include <c10/util/Dict.h>
+#include <ATen/core/Dict.h>
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <string>
@@ -195,7 +195,7 @@ TEST(DictTest, givenConstDict_whenIteratingWithForeach_thenFindsElements) {
 TEST(DictTest, givenIterator_thenCanModifyValue) {
   Dict<int, string> dict;
   dict.insert(3, "old_value");
-  dict.begin()->value() = "new_value";
+  dict.begin()->setValue("new_value");
   EXPECT_EQ("new_value", dict.begin()->value());
 }
 
@@ -241,39 +241,6 @@ TEST(DictTest, whenCallingAtWithNonExistingKey_thenReturnsCorrectElement) {
   dict.insert(3, "3");
   dict.insert(4, "4");
   EXPECT_THROW(dict.at(5), std::out_of_range);
-}
-
-TEST(DictTest, whenReadAccessingExistingKey_thenReturnsCorrectElement) {
-  Dict<int, string> dict;
-  dict.insert(3, "3");
-  dict.insert(4, "4");
-  EXPECT_EQ("4", dict[4]);
-}
-
-TEST(DictTest, whenReadAccessingNonExistingKey_thenCreatesElement) {
-  Dict<int, string> dict;
-  dict.insert(3, "3");
-  dict.insert(4, "4");
-  dict[5];
-  EXPECT_EQ(3, dict.size());
-  EXPECT_EQ("", dict.at(5));
-}
-
-TEST(DictTest, whenWriteAccessingExistingKey_thenChangesCorrectElement) {
-  Dict<int, string> dict;
-  dict.insert(3, "3");
-  dict.insert(4, "4");
-  dict[4] = "new_value";
-  EXPECT_EQ("new_value", dict.at(4));
-}
-
-TEST(DictTest, whenWriteAccessingNonExistingKey_thenCreatesElement) {
-  Dict<int, string> dict;
-  dict.insert(3, "3");
-  dict.insert(4, "4");
-  dict[5] = "5";
-  EXPECT_EQ(3, dict.size());
-  EXPECT_EQ("5", dict.at(5));
 }
 
 TEST(DictTest, givenMutableDict_whenCallingFindOnExistingKey_thenFindsCorrectElement) {
@@ -331,58 +298,6 @@ TEST(DictTest, whenCallingReserve_thenDoesntCrash) {
   dict.reserve(100);
 }
 
-TEST(DictTest, givenEqualDicts_whenCallingOperatorEquals_thenReturnsTrue) {
-  Dict<int, string> dict1;
-  dict1.reserve(1000); // to make sure reserve() doesn't change equality
-  dict1.insert(3, "3");
-  dict1.insert(4, "4");
-
-  Dict<int, string> dict2;
-  dict2.insert(4, "4");
-  dict2.insert(3, "3");
-
-  EXPECT_TRUE(dict1 == dict2);
-  EXPECT_FALSE(dict1 != dict2);
-}
-
-TEST(DictTest, givenDictsWithDifferentNumberOfEntries_whenCallingOperatorEquals_thenReturnsFalse) {
-  Dict<int, string> dict1;
-  dict1.insert(3, "3");
-  dict1.insert(4, "4");
-
-  Dict<int, string> dict2;
-  dict2.insert(4, "4");
-
-  EXPECT_FALSE(dict1 == dict2);
-  EXPECT_TRUE(dict1 != dict2);
-}
-
-TEST(DictTest, givenDictsWithDifferentKeys_whenCallingOperatorEquals_thenReturnsFalse) {
-  Dict<int, string> dict1;
-  dict1.insert(3, "3");
-  dict1.insert(4, "4");
-
-  Dict<int, string> dict2;
-  dict2.insert(2, "3");
-  dict2.insert(4, "4");
-
-  EXPECT_FALSE(dict1 == dict2);
-  EXPECT_TRUE(dict1 != dict2);
-}
-
-TEST(DictTest, givenDictsWithDifferentValues_whenCallingOperatorEquals_thenReturnsFalse) {
-  Dict<int, string> dict1;
-  dict1.insert(3, "3");
-  dict1.insert(4, "4");
-
-  Dict<int, string> dict2;
-  dict2.insert(3, "2");
-  dict2.insert(4, "4");
-
-  EXPECT_FALSE(dict1 == dict2);
-  EXPECT_TRUE(dict1 != dict2);
-}
-
 TEST(DictTest, whenCopyConstructingDict_thenAreEqual) {
   Dict<int, string> dict1;
   dict1.insert(3, "3");
@@ -390,7 +305,9 @@ TEST(DictTest, whenCopyConstructingDict_thenAreEqual) {
 
   Dict<int, string> dict2(dict1);
 
-  EXPECT_EQ(dict1, dict2);
+  EXPECT_EQ(2, dict2.size());
+  EXPECT_EQ("3", dict2.at(3));
+  EXPECT_EQ("4", dict2.at(4));
 }
 
 TEST(DictTest, whenCopyAssigningDict_thenAreEqual) {
@@ -401,7 +318,9 @@ TEST(DictTest, whenCopyAssigningDict_thenAreEqual) {
   Dict<int, string> dict2;
   dict2 = dict1;
 
-  EXPECT_EQ(dict1, dict2);
+  EXPECT_EQ(2, dict2.size());
+  EXPECT_EQ("3", dict2.at(3));
+  EXPECT_EQ("4", dict2.at(4));
 }
 
 TEST(DictTest, whenMoveConstructingDict_thenNewIsCorrect) {
@@ -409,10 +328,11 @@ TEST(DictTest, whenMoveConstructingDict_thenNewIsCorrect) {
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
-  Dict<int, string> dict2(dict1);
-  Dict<int, string> dict3(std::move(dict2));
+  Dict<int, string> dict2(std::move(dict1));
 
-  EXPECT_EQ(dict1, dict3);
+  EXPECT_EQ(2, dict2.size());
+  EXPECT_EQ("3", dict2.at(3));
+  EXPECT_EQ("4", dict2.at(4));
 }
 
 TEST(DictTest, whenMoveAssigningDict_thenNewIsCorrect) {
@@ -420,11 +340,12 @@ TEST(DictTest, whenMoveAssigningDict_thenNewIsCorrect) {
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
-  Dict<int, string> dict2(dict1);
-  Dict<int, string> dict3;
-  dict3 = std::move(dict2);
+  Dict<int, string> dict2;
+  dict2 = std::move(dict1);
 
-  EXPECT_EQ(dict1, dict3);
+  EXPECT_EQ(2, dict2.size());
+  EXPECT_EQ("3", dict2.at(3));
+  EXPECT_EQ("4", dict2.at(4));
 }
 
 TEST(DictTest, whenMoveConstructingDict_thenOldIsEmpty) {
@@ -575,14 +496,9 @@ TEST(DictTest, givenMutableIterator_whenWritingToValue_thenWorks) {
 
   Dict<int, string>::iterator iter = dict.begin();
 
-  (*iter).value() = "new_value";
+  (*iter).setValue("new_value");
   EXPECT_EQ("new_value", dict.begin()->value());
 
-  iter->value() = "new_value_2";
+  iter->setValue("new_value_2");
   EXPECT_EQ("new_value_2", dict.begin()->value());
 }
-
-static_assert(std::is_same<const int&, decltype(Dict<int, string>().cbegin()->key())>::value, "const iterators should not allow write access to key");
-static_assert(std::is_same<const string&, decltype(Dict<int, string>().cbegin()->value())>::value, "const iterators should not allow write access to value");
-static_assert(std::is_same<const int&, decltype(Dict<int, string>().begin()->key())>::value, "mutable iterators should not allow write access to key");
-static_assert(std::is_same<string&, decltype(Dict<int, string>().begin()->value())>::value, "mutable iterators should allow write access to value");

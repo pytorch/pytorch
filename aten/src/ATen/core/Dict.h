@@ -2,52 +2,97 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeTraits.h>
+#include <ATen/core/ivalue.h>
 #include <c10/util/flat_hash_map.h>
 
 namespace c10 {
 template<class Key, class Value> class Dict;
+namespace impl {
+inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
+  if (lhs.isNone()) {
+    return rhs.isNone();
+  } else if (lhs.isInt()) {
+    return rhs.isInt() && lhs.toInt() == rhs.toInt();
+  } else if (lhs.isString()) {
+    return rhs.isString() && lhs.toStringRef() == rhs.toStringRef();
+  } else if (lhs.isDouble()) {
+    return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
+  } else if (lhs.isBool()) {
+    return rhs.isBool() && lhs.toBool() == rhs.toBool();
+  } else {
+    AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
+  }
+}
+}
 
 namespace detail {
 
-template<class Iterator> class DictIterator;
+struct DictHash {
+  size_t operator()(const IValue& ivalue) const {
+    if (ivalue.isInt()) {
+      return std::hash<int>()(ivalue.toInt());
+    } else if (ivalue.isString()) {
+      return std::hash<std::string>()(ivalue.toStringRef());
+    } else if (ivalue.isDouble()) {
+      return std::hash<double>()(ivalue.toDouble());
+    } else if (ivalue.isBool()) {
+      return std::hash<bool>()(ivalue.toBool());
+    } else {
+      throw std::runtime_error("Can't hash IValues with this tag");
+    }
+  }
+};
+
+struct DictEqualTo {
+  bool operator()(const IValue& lhs, const IValue& rhs) const {
+    return impl::shallowEquals(lhs, rhs);
+  }
+};
+
+using dict_map_type = ska::flat_hash_map<IValue, IValue, DictHash, DictEqualTo>;
+}
+
+namespace impl {
+template<class Key, class Value, class Iterator> class DictIterator;
 
 /**
  * A reference to an entry in the Dict.
  * Use the `key()` and `value()` methods to read the element.
  */
-template<class Iterator>
+template<class Key, class Value, class Iterator>
 class DictEntryRef final {
 private:
-  using Key = typename Iterator::value_type::first_type;
-  using Value = typename Iterator::value_type::second_type;
-
   static constexpr bool is_const_ref() { return std::is_const<typename Iterator::value_type>::value; }
 
 public:
   explicit DictEntryRef(Iterator iterator)
   : iterator_(std::move(iterator)) {}
 
-  const Key& key() const {
-    return iterator_->first;
+  Key key() const {
+    return iterator_->first.template to<Key>();
   }
 
-  c10::guts::conditional_t<is_const_ref(), const Value&, Value&> value() const {
-    return iterator_->second;
+  Value value() const {
+    return iterator_->second.template to<Value>();
+  }
+
+  template<class Value_>
+  void setValue(Value_&& value) const {
+    static_assert(!is_const_ref(), "setValue() cannot be called on const_iterator.");
+    static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of setValue()");
+    iterator_->second = Value(std::forward<Value_>(value));
   }
 
 private:
   Iterator iterator_;
-  friend class DictIterator<Iterator>;
+  friend class DictIterator<Key, Value, Iterator>;
   friend class Dict<Key, Value>;
 };
 
 // this wraps map_type::iterator to make sure user code can't rely
 // on it being the type of the underlying map.
-template<class Iterator>
+template<class Key, class Value, class Iterator>
 class DictIterator final {
-private:
-  using Key = typename Iterator::value_type::first_type;
-  using Value = typename Iterator::value_type::second_type;
 public:
   explicit DictIterator() = default;
   ~DictIterator() = default;
@@ -76,28 +121,28 @@ public:
       return copy;
   }
 
-  const DictEntryRef<Iterator>& operator*() const {
+  const DictEntryRef<Key, Value, Iterator>& operator*() const {
       return entryRef_;
   }
 
-  const DictEntryRef<Iterator>* operator->() const {
+  const DictEntryRef<Key, Value, Iterator>* operator->() const {
     return &entryRef_;
   }
 
   // the template automatically disables the operator when we are already a
   // const_iterator, because that would cause a lot of compiler warnings otherwise.
-  template<class const_iterator_ = typename Dict<Key, Value>::map_type::const_iterator, class = guts::enable_if_t<!std::is_same<const_iterator_, Iterator>::value>>
-  /* implicit */ operator DictIterator<const_iterator_>() const
+  template<class const_iterator_ = typename detail::dict_map_type::const_iterator, class = guts::enable_if_t<!std::is_same<const_iterator_, Iterator>::value>>
+  /* implicit */ operator DictIterator<Key, Value, const_iterator_>() const
   {
-      return DictIterator<const_iterator_> { const_iterator_ { entryRef_.iterator_ } };
+      return DictIterator<Key, Value, const_iterator_> { const_iterator_ { entryRef_.iterator_ } };
   }
 
 private:
   explicit DictIterator(Iterator iterator): entryRef_(std::move(iterator)) {}
 
-  DictEntryRef<Iterator> entryRef_;
+  DictEntryRef<Key, Value, Iterator> entryRef_;
 
-  friend class DictIterator<typename Dict<Key, Value>::map_type::iterator>;
+  friend class DictIterator<Key, Value, typename detail::dict_map_type::iterator>;
   friend class Dict<Key, Value>;
 };
 }
@@ -124,15 +169,14 @@ private:
   // ska::flat_hash_map, return references to it or something like that,
   // because such operations would get expensive if we switch out
   // the actual map implementation.
-  using map_type = ska::flat_hash_map<Key, Value>;
-  map_type map_;
+  detail::dict_map_type map_;
 
 public:
   using key_type = Key;
   using mapped_type = Value;
-  using size_type = typename map_type::size_type;
-  using iterator = detail::DictIterator<typename map_type::iterator>;
-  using const_iterator = detail::DictIterator<typename map_type::const_iterator>;
+  using size_type = typename detail::dict_map_type::size_type;
+  using iterator = impl::DictIterator<Key, Value, typename detail::dict_map_type::iterator>;
+  using const_iterator = impl::DictIterator<Key, Value, typename detail::dict_map_type::const_iterator>;
 
   /**
    * Creates an empty dict.
@@ -227,8 +271,8 @@ public:
     static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of Dict::insert");
     static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of Dict::insert");
     auto inserted = map_.insert({
-      std::forward<Key_>(key),
-      std::forward<Value_>(value)});
+      Key(std::forward<Key_>(key)),
+      Value(std::forward<Value_>(value))});
     return {iterator{inserted.first}, inserted.second};
   }
 
@@ -244,8 +288,8 @@ public:
     static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of Dict::insert_or_assign");
     static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of Dict::insert_or_assign");
     auto inserted = map_.insert_or_assign(
-      std::forward<Key_>(key),
-      std::forward<Value_>(value));
+      Key(std::forward<Key_>(key)),
+      Value(std::forward<Value_>(value)));
     return {iterator{inserted.first}, inserted.second};
   }
 
@@ -269,31 +313,11 @@ public:
   }
 
   /**
-   * Returns a reference to the mapped value of the element with key equivalent to key.
+   * Returns the mapped value of the element with key equivalent to key.
    * If no such element exists, an exception of type std::out_of_range is thrown.
    */
-  Value& at(const Key& key) {
-    return map_.at(key);
-  }
-
-  /**
-   * Returns a reference to the mapped value of the element with key equivalent to key.
-   * If no such element exists, an exception of type std::out_of_range is thrown.
-   */
-  const Value& at(const Key& key) const {
-    return map_.at(key);
-  }
-
-  /**
-   * Returns a reference to the value that is mapped to a key equivalent to key,
-   * performing an insertion if such key does not already exist.
-   * May invalidate any references, pointers, or iterators referring to contained elements.
-   *
-   * @return Reference to the mapped value of the new element if no element with key key existed.
-   *         Otherwise a reference to the mapped value of the existing element whose key is equivalent to key.
-   */
-  Value& operator[](const Key& key) {
-    return map_[key];
+  Value at(const Key& key) {
+    return map_.at(key).template to<Value>();
   }
 
   /**
@@ -332,28 +356,8 @@ public:
   void reserve(size_type count) {
     map_.reserve(count);
   }
-
-  /**
-   * Compares the contents of two unordered containers.
-   * Two dicts are equal if they have the same set of (key, value) pairs,
-   * ignoring any potential ordering.
-   */
-  friend bool operator==(const Dict& lhs, const Dict& rhs) {
-    return lhs.map_ == rhs.map_;
-  }
-
-  /**
-   * Compares the contents of two unordered containers.
-   * Two dicts are equal if they have the same set of (key, value) pairs,
-   * ignoring any potential ordering.
-   */
-  friend bool operator!=(const Dict& lhs, const Dict& rhs) {
-    return !operator==(lhs, rhs);
-  }
-
-private:
-  friend class detail::DictIterator<typename map_type::iterator>;
-  friend class detail::DictIterator<typename map_type::const_iterator>;
 };
+
+using GenericDict = Dict<IValue, IValue>;
 
 }

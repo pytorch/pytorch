@@ -9,12 +9,13 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
-
 #include <ATen/core/Tensor.h>
 
 namespace c10 {
 struct IValue;
 struct ClassType;
+template<class Key, class Value> class Dict;
+using GenericDict = Dict<IValue, IValue>;
 
 namespace ivalue {
 
@@ -70,16 +71,6 @@ struct CAFFE2_API List : c10::intrusive_ptr_target {
     return std::move(elements_);
   }
 };
-
-struct DictHash {
-  size_t operator()(const IValue& ivalue) const;
-};
-
-struct DictEqualTo {
-  bool operator()(const IValue& lhs, const IValue& rhs) const;
-};
-
-using UnorderedMap = std::unordered_map<IValue, IValue, DictHash, DictEqualTo>;
 
 struct Future;
 struct GenericDict;
@@ -318,12 +309,13 @@ struct CAFFE2_API IValue final {
   const std::vector<bool>& toBoolListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
   const std::vector<IValue>& toGenericListRef() const;
-  const ivalue::UnorderedMap& toGenericDictRef() const;
+  const c10::GenericDict& toGenericDictRef() const;
   const std::string& toStringRef() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
+  IValue(const char* v): IValue(std::string(v)) {}
   bool isString() const { return Tag::String == tag; }
   c10::intrusive_ptr<ivalue::ConstantString> toString() && {
     AT_ASSERT(isString());
@@ -388,7 +380,7 @@ struct CAFFE2_API IValue final {
 
   // GenericDict
   IValue(c10::intrusive_ptr<ivalue::GenericDict> v);
-  IValue(ivalue::UnorderedMap v);
+  IValue(c10::GenericDict v);
   bool isGenericDict() const { return Tag::GenericDict == tag; }
   c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() && {
     AT_ASSERT(isGenericDict());
@@ -708,7 +700,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return slots_.at(slot);
   }
 
-  const std::string& name() const;
+  std::string name() const;
 
   const std::vector<IValue>& slots() const {
     return slots_;
@@ -723,29 +715,26 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::vector<IValue> slots_;
 };
 
+}
+#include <ATen/core/Dict.h>
+namespace c10 {
+
 struct C10_EXPORT ivalue::GenericDict : c10::intrusive_ptr_target {
  private:
-  UnorderedMap elements_;
+  c10::GenericDict elements_;
 
  public:
-  GenericDict(UnorderedMap elements_)
+  GenericDict(c10::GenericDict elements_)
       : elements_(std::move(elements_)) {}
   static c10::intrusive_ptr<GenericDict> create(
-      UnorderedMap elements_) {
+      c10::GenericDict elements_) {
     return c10::make_intrusive<GenericDict>(std::move(elements_));
   }
-  const UnorderedMap& elements() const {
+  const c10::GenericDict& elements() const & {
     return elements_;
   }
-  operator const UnorderedMap&() const {
-    return elements();
-  }
-
-  UnorderedMap& elements() {
+  c10::GenericDict& elements() & {
     return elements_;
-  }
-  operator UnorderedMap&() {
-    return elements();
   }
 
   using IterationOrder = std::vector<std::pair<IValue, IValue>>;
@@ -829,7 +818,7 @@ std::unordered_map<K, V> generic_to(
   std::unordered_map<K, V> specialized_dict;
 
   for (auto item : ivalue->toGenericDictRef()) {
-    specialized_dict[item.first.to<K>()] = item.second.to<V>();
+    specialized_dict[item.key().to<K>()] = item.value().to<V>();
   }
 
   return specialized_dict;
@@ -900,7 +889,7 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
 : tag(Tag::GenericDict), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(ivalue::UnorderedMap v)
+inline IValue::IValue(c10::GenericDict v)
 : IValue(ivalue::GenericDict::create(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
@@ -932,7 +921,7 @@ inline const std::vector<IValue>& IValue::toGenericListRef() const {
   return toGenericList()->elements();
 }
 
-inline const c10::ivalue::UnorderedMap& IValue::
+inline const c10::GenericDict& IValue::
     toGenericDictRef() const {
   return toGenericDict()->elements();
 }
@@ -979,49 +968,4 @@ inline bool IValue::isSameIdentity(IValue& rhs) {
   }
 }
 
-inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
-  if (lhs.isNone()) {
-    return rhs.isNone();
-  } else if (lhs.isInt()) {
-    return rhs.isInt() && lhs.toInt() == rhs.toInt();
-  } else if (lhs.isString()) {
-    return rhs.isString() && lhs.toStringRef() == rhs.toStringRef();
-  } else if (lhs.isDouble()) {
-    return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
-  } else if (lhs.isBool()) {
-    return rhs.isBool() && lhs.toBool() == rhs.toBool();
-  } else {
-    AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
-  }
-}
-
 } // namespace c10
-
-inline size_t at::ivalue::DictHash::operator()(
-    const c10::IValue& ivalue) const {
-  if (ivalue.isInt()) {
-    return std::hash<int>()(ivalue.toInt());
-  } else if (ivalue.isString()) {
-    return std::hash<std::string>()(ivalue.toStringRef());
-  } else if (ivalue.isDouble()) {
-    return std::hash<double>()(ivalue.toDouble());
-  } else {
-    throw std::runtime_error("Can't hash IValues with this tag");
-  }
-}
-
-inline bool at::ivalue::DictEqualTo::operator()(
-    const c10::IValue& lhs,
-    const c10::IValue& rhs) const {
-  if (lhs.isNone()) {
-    return rhs.isNone();
-  } else if (lhs.isInt()) {
-    return lhs.toInt() == rhs.toInt();
-  } else if (lhs.isString()) {
-    return lhs.toStringRef() == rhs.toStringRef();
-  } else if (lhs.isDouble()) {
-    return lhs.toDouble() == rhs.toDouble();
-  } else {
-    throw std::runtime_error("Can't compare IValues with this tag");
-  }
-}

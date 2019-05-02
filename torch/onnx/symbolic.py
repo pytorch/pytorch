@@ -686,8 +686,6 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if ceil_mode and input.type().kind() != "CompleteTensorType":
             return _unimplemented(name, "input size not accesible")
-        if set(tuple_fn(dilation)) != {1}:
-            return _unimplemented(name, "dilation")
         if not stride:
             stride = kernel_size
         padding = tuple(tuple_fn(padding))
@@ -696,6 +694,13 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
             padding = padding + tuple(numpy.add(padding_ceil, padding))
         else:
             padding = padding * 2
+        kwargs = {
+            'kernel_shape_i': tuple_fn(kernel_size),
+            'pads_i': padding,
+            'strides_i': tuple_fn(stride),
+        }
+        if set(tuple_fn(dilation)) != {1}:
+            kwargs['dilations_i'] = tuple_fn(dilation)
         # easy but hacky way to get flattened indices values
         # to be used to convert the indices values to non-flattened.
         # In ONNX the indices are computed as a flatten 1-D tensor,
@@ -710,10 +715,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
         # For more information :
         # https://github.com/pytorch/pytorch/pull/16455#issuecomment-460776407
         if return_indices:
-            r, indices = g.op("MaxPool", input, outputs=2,
-                              kernel_shape_i=tuple_fn(kernel_size),
-                              pads_i=padding,
-                              strides_i=tuple_fn(stride))
+            r, indices = g.op("MaxPool", input, outputs=2, **kwargs)
             _, flattened_indices = g.op("MaxPool", input, outputs=2,
                                         kernel_shape_i=[1 for _ in range(ndims)],
                                         strides_i=[1 for _ in range(ndims)])
@@ -723,10 +725,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
             indices = sub(g, indices, s)
             return r, indices
         else:
-            r = g.op("MaxPool", input, outputs=1,
-                     kernel_shape_i=tuple_fn(kernel_size),
-                     pads_i=padding,
-                     strides_i=tuple_fn(stride))
+            r = g.op("MaxPool", input, outputs=1, **kwargs)
             return r
 
     return symbolic_fn
@@ -1131,37 +1130,35 @@ def clamp_max(g, self, max):
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
 def max(g, self, dim_or_y=None, keepdim=None):
+    # torch.max(input)
     if dim_or_y is None and keepdim is None:
         return g.op("ReduceMax", self, keepdims_i=0)
+    # torch.max(input, other)
     if keepdim is None:
         return g.op("Max", self, dim_or_y)
+    # torch.max(input, dim, keepdim)
     else:
         dim = _get_const(dim_or_y, 'i', 'dim')
         keepdim = _get_const(keepdim, 'i', 'keepdim')
-        # TODO: export it as ReduceMax
-        return g.op("ATen",
-                    self,
-                    operator_s="max",
-                    dim_i=dim,
-                    keepdim_i=keepdim,
-                    outputs=2)
+        max = g.op("ReduceMax", self, axes_i=[dim], keepdims_i=keepdim)
+        indices = g.op('ArgMax', self, axis_i=dim, keepdims_i=keepdim)
+        return max, indices
 
 
 def min(g, self, dim_or_y=None, keepdim=None):
+    # torch.min(input)
     if dim_or_y is None and keepdim is None:
         return g.op("ReduceMin", self, keepdims_i=0)
+    # torch.min(input, other)
     if keepdim is None:
         return g.op("Min", self, dim_or_y)
+    # torch.min(input, dim, keepdim)
     else:
         dim = _get_const(dim_or_y, 'i', 'dim')
         keepdim = _get_const(keepdim, 'i', 'keepdim')
-        # TODO: export it as ReduceMax
-        return g.op("ATen",
-                    self,
-                    operator_s="min",
-                    dim_i=dim,
-                    keepdim_i=keepdim,
-                    outputs=2)
+        min = g.op("ReduceMin", self, axes_i=[dim], keepdims_i=keepdim)
+        indices = g.op('ArgMin', self, axis_i=dim, keepdims_i=keepdim)
+        return min, indices
 
 
 def exp(g, self):
@@ -1466,6 +1463,9 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                  num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
+    onnxActivations = ['Relu', 'Tanh', 'Sigmoid', 'Affine', 'LeakyRelu', 'ThresholdedRelu',
+                       'ScaledTanh', 'HardSigmoid', 'Elu', 'Softsign', 'Softplus']
+    variantToOnnxActivationMap = dict(zip([act_fun.lower() for act_fun in onnxActivations], onnxActivations))
     weights_per_layer = 4 if has_biases else 2
     assert len(all_weights) == num_layers * weights_per_layer * (1 + bidirectional)
     layer_weights = [all_weights[i:i + weights_per_layer] for i in range(0, len(all_weights), weights_per_layer)]
@@ -1475,7 +1475,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         return _unimplemented("RNN/GRU/LSTM", "dropout in training mode")
 
     if variant.startswith('RNN'):
-        nonlinearity = variant[4:].lower()
+        nonlinearity = variantToOnnxActivationMap[variant[4:].lower()]
         variant = 'RNN'
 
     w_hh = all_weights[1]
@@ -1753,3 +1753,12 @@ def argmin(g, input, dim, keepdim):
         dim = _parse_arg(dim, 'i')
         keepdim = _parse_arg(keepdim, 'i')
         return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
+
+
+def log2(g, self):
+    _ln2 = 0.693147180559945309
+    return g.op('Div', log(g, self), g.op('Constant', value_t=torch.Tensor([_ln2])))
+
+
+def prim_shape(g, self):
+    return g.op('Shape', self)
