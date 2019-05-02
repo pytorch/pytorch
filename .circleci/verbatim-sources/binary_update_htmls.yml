@@ -30,6 +30,7 @@
         name: Update s3 htmls
         no_output_timeout: "1h"
         command: |
+          set +x
           echo "declare -x \"AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}\"" >> /home/circleci/project/env
           echo "declare -x \"AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}\"" >> /home/circleci/project/env
           source /home/circleci/project/env
@@ -76,6 +77,7 @@
         name: Upload binary sizes
         no_output_timeout: "1h"
         command: |
+          set +x
           echo "declare -x \"AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}\"" >> /home/circleci/project/env
           echo "declare -x \"AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}\"" >> /home/circleci/project/env
           source /home/circleci/project/env
