@@ -689,8 +689,8 @@ class MultiheadAttention(Module):
         \text{where} head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)
 
     Args:
-        embed_dim: total dimension of the model
-        num_heads: parallel attention layers, or heads
+        embed_dim: total dimension of the model.
+        num_heads: parallel attention layers, or heads.
         add_bias_kv: add bias to the key and value sequences at dim=0.
         add_zero_attn: add a new batch of zeros to the key and 
                        value sequences at dim=1.
@@ -744,24 +744,20 @@ class MultiheadAttention(Module):
     @weak_script_method
     def forward(self, query, key, value, key_padding_mask=None, incremental_state=None,
                 need_weights=True, static_kv=False, attn_mask=None):
-        """
-        Inputs of forward function
-            query: [target length, batch size, embed dim]
-            key: [sequence length, batch size, embed dim]
-            value: [sequence length, batch size, embed dim]
-            key_padding_mask: if True, mask padding based on batch size
-            incremental_state: if provided, previous time steps are cashed
-            need_weights: output attn_output_weights
-            static_kv: key and value are static
-            attn_mask: mask to avoid attn to learn from certain positions.
-            if provided, the values are added to attn_output_weights.         
-            For exampel, adding -inf and passing softmax function later 
-            will filter out the original attn_output_weights values. Adding 
-            zeros to attn_output_weights changes nothing.
+        r"""
+    Inputs
+        query: [target length, batch size, embed dim].
+        key: [sequence length, batch size, embed dim].
+        value: [sequence length, batch size, embed dim].
+        key_padding_mask: if True, mask padding based on batch size.
+        incremental_state: if provided, previous time steps are cashed.
+        need_weights: output attn_output_weights.
+        static_kv: key and value are static.
+        attn_mask: mask to avoid attn to learn from certain positions.
 
-        Outputs of forward function
-            attn_output: [target length, batch size, embed dim]
-            attn_output_weights: [batch size, target length, sequence length]
+    Outputs
+        attn_output: [target length, batch size, embed dim].
+        attn_output_weights: [batch size, target length, sequence length].
         """
         qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
         kv_same = key.data_ptr() == value.data_ptr()
