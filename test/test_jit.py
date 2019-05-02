@@ -1474,6 +1474,43 @@ graph(%x : Tensor,
                    .check_next("dequantize_linear") \
                    .check("conv2d").run(str(scriptModule.graph))
 
+    def test_insert_quantdequant_for_bias(self):
+        input_data = torch.ones([1, 1, 1, 1])
+
+        class testModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(testModule, self).__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1, 1)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = self.conv1(x)
+                return x
+
+        def getQParamFunc(input_scale, weight_scale):
+            if input_scale == 0 or weight_scale == 0:
+                scale = 0.75
+            else:
+                scale = 1 / input_scale / weight_scale
+            zero_point = 0
+            return 'per_tensor_quant', scale, zero_point
+
+        scriptModule = testModule()
+
+        # Constant Propagation step is performed because this pass is intended
+        # to insert quant-dequant nodes for quantizable tensors. The type analysis
+        # happens as part of this jit pass
+        torch._C._jit_pass_constant_propagation(scriptModule.graph)
+        torch._C._jit_pass_insert_quantdequant_for_param(scriptModule._c,
+                                                         "forward",
+                                                         "bias",
+                                                         getQParamFunc)
+
+        # We expect to see quant-dequant node before conv node for bias.
+        FileCheck().check("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear") \
+                   .check("conv2d").run(str(scriptModule.graph))
+
     def test_pattern_based_fusion(self):
         class testModule(torch.jit.ScriptModule):
             @torch.jit.script_method

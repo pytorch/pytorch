@@ -47,6 +47,17 @@ int getParamIndexinOpArgs(Node* n, const std::string& param_name) {
   return -1;
 }
 
+float getScaleforNode(Node* n) {
+  if (!n->inputs().size()) {
+    return 0;
+  }
+  // TODO: Fetch the position of scale from op schema once its available
+  Value* scale_value = n->inputs()[1];
+  c10::IValue scale_ivalue = toIValue(scale_value).value();
+  float scale = static_cast<float>(scale_ivalue.toDouble());
+  return scale;
+}
+
 std::vector<param_info_t> getQuantizableParamsofType(script::Method& method,
   const std::string& param_name) {
   std::vector<param_info_t> params_to_insert_qdq;
@@ -504,6 +515,52 @@ void InsertQuantDequantNodesForParam(
   }
  }
 
+ // This is used to compute qparams for bias based on scale factors for input
+ // activation and weight
+ void InsertQuantDequantNodesForParam(
+   script::Method& method,
+   const std::string& param_name,
+   const std::function<std::tuple<std::string, float,
+     int>(float, float)>& getQParamFunc) {
+   AT_ASSERT(getQParamFunc != nullptr);
+   auto params_to_insert_qdq = getQuantizableParamsofType(method, param_name);
+
+   for (auto& param_info : params_to_insert_qdq) {
+     // Fetch scale for input activation to the quantizable
+     // node for which bias need to be quantized
+     Node* n = param_info.n;
+     // Check if this node has weight attr as input
+     int param_index = getParamIndexinOpArgs(n, std::string("weight"));
+     if (param_index < 0) {
+       // No attribute by name weight
+       continue;
+     }
+     std::vector<int> node_inputs_idx(0, param_index);
+     float scale_factors[2];
+     bool skip_node = false;
+     for (int idx = 0; idx < node_inputs_idx.size(); idx++) {
+       int input_index = node_inputs_idx[idx];
+       Value* input_value = n->inputs()[input_index];
+       Node* n_input_value = input_value->node();
+       if (n_input_value->kind().toQualString() != std::string(
+         "aten::dequantize_linear") || !n_input_value->inputs().size()) {
+         // Dequant node pattern for input is missing
+         skip_node = true;
+         break;
+       }
+       float input_scale = getScaleforNode(n_input_value);
+       AT_ASSERT(input_scale != 0.0);
+       scale_factors[idx] = input_scale;
+     }
+     if (skip_node) {
+       continue;
+     }
+     auto bias_qparam = getQParamFunc(scale_factors[0], scale_factors[1]);
+     addQuantDeQuantNodesForInput(param_info.v, param_info.n, bias_qparam,
+       at::ScalarType::Int);
+   }
+ }
+
  // We can have same param name apply different getQParamFunc or different
  // oaram share same function. Exposing the template api helps decouple the
  // param name to qpramfunc binding.
@@ -527,6 +584,14 @@ void InsertQuantDequantNodesForParam(
   const std::string& param_name,
   const std::function<std::tuple<std::string, float,
     int>(at::Tensor)>& getQParamFunc);
+
+template
+void InsertQuantDequantNodesForParam(
+  std::shared_ptr<script::Module>& moduleObj,
+  const std::string& method_name,
+  const std::string& param_name,
+  const std::function<std::tuple<std::string, float,
+    int>(float, float)>& getQParamFunc);
 
 } // namespace jit
 } // namespace torch

@@ -180,6 +180,13 @@ void initJITBindings(PyObject* module) {
                 int>(at::Tensor)>>(pyGetQParamFunc);
                InsertQuantDequantNodesForParam(
                 moduleObj, method_name, param_name, getQParamFunc);
+            } else if (param_name == std::string("bias")) {
+              auto getQParamFunc =
+                py::cast<std::function<std::tuple<std::string, float,
+                int>(float, float)>>(pyGetQParamFunc);
+               InsertQuantDequantNodesForParam(
+                moduleObj, method_name, param_name, getQParamFunc);
+
             }
           })
       .def(
