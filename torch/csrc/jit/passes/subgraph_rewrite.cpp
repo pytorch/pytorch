@@ -13,17 +13,16 @@ graph(%x, %w, %b):
   %c = aten::conv(%x, %w, %b)
   %r = aten::relu(%c)
   return (%r))IR",
-      /*fused_node_name=*/"aten::convrelu",
-      /*inputs=*/{"x", "w", "b"},
-      /*outputs=*/{"r"});
+      R"IR(
+graph(%x, %w, %b):
+  %r = aten::convrelu(%x, %w, %b)
+  return (%r))IR");
 }
 
 void SubgraphRewriter::RegisterRewritePattern(
     const std::string& pattern,
-    const std::string& fused_node_name,
-    std::vector<std::string> inputs,
-    std::vector<std::string> outputs) {
-  RewritePatternDescr d = {pattern, fused_node_name, inputs, outputs};
+    const std::string& replacement) {
+  RewritePatternDescr d = {pattern, replacement};
   patterns_.push_back(d);
 }
 
@@ -44,6 +43,39 @@ void SubgraphRewriter::runOnGraph(std::shared_ptr<Graph>& graph) {
   }
 }
 
+/**
+ * Clone \p SUBGRAPH_TO_COPY inserting it after \p ANCHOR and using \p INPUTS as
+ * incoming values for the new subgraph. Return a vector of values produced by
+ * the inserted subgraph.
+ */
+static std::vector<Value*> insertSubgraphCloneAfter(
+    Node* anchor,
+    Graph& subgraph_to_copy,
+    std::vector<Value*> inputs) {
+  std::unordered_map<Value*, Value*> vmap;
+  WithInsertPoint ins(anchor);
+
+  for (size_t i = 0; i < inputs.size(); i++) {
+    vmap[subgraph_to_copy.inputs()[i]] = inputs[i];
+  }
+
+  Graph* g = anchor->owningGraph();
+  for (auto rn : subgraph_to_copy.nodes()) {
+    Node* last_n = g->createClone(rn, [&](Value* v) { return vmap[v]; });
+    g->insertNode(last_n);
+    for (size_t j = 0; j < last_n->outputs().size(); j++) {
+      vmap[rn->outputs()[j]] = last_n->outputs()[j];
+    }
+  }
+
+  std::vector<Value*> result;
+  result.reserve(subgraph_to_copy.outputs().size());
+  for (Value* v : subgraph_to_copy.outputs()) {
+    result.push_back(vmap[v]);
+  }
+  return result;
+}
+
 void SubgraphRewriter::rewriteSinglePatternOnGraph(
     std::shared_ptr<Graph>& graph,
     RewritePatternDescr pattern) {
@@ -54,6 +86,9 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
   std::unordered_map<std::string, Value*> vmap;
   script::parseIR(pattern.pattern, &pattern_graph, vmap);
 
+  Graph replacement_graph;
+  script::parseIR(pattern.replacement, &replacement_graph);
+
   const auto& matches = findPatternMatches(pattern_graph, *graph);
   for (const Match& match : matches) {
     // Matches might overlap with each other, in that case some of the nodes in
@@ -63,32 +98,30 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
       continue;
     }
 
-    // Figure out what values we need to use as inputs and outputs for new fused
-    // node. We need to go through two maps: from name in pattern-descriptor
-    // (string) to a value in pattern graph (vmap), and from this value to a
-    // value in the actual graph (match.values_map).
+    // Figure out what values we need to use as inputs and outputs for the
+    // replacement subgraph. These would be inputs and outputs of the subgraph
+    // we matched.
     std::vector<Value*> inputs, outputs;
-    for (const std::string& i : pattern.inputs) {
-      Value* v = vmap[i];
+    for (Value* v : pattern_graph.inputs()) {
       inputs.push_back(const_cast<Value*>(match.values_map.at(v)));
     }
-    for (const std::string& o : pattern.outputs) {
-      Value* v = vmap[o];
+    for (Value* v : pattern_graph.outputs()) {
       outputs.push_back(const_cast<Value*>(match.values_map.at(v)));
     }
 
-    // Create a fused node and insert it after the last node in the matched
-    // subgraph
-    Node* fused_node = graph->create(
-        at::Symbol::fromQualString(pattern.fused_node_name),
-        inputs,
-        outputs.size());
-    fused_node->insertAfter(const_cast<Node*>(match.anchor));
+    // Insert a clone of replacement subgraph after the matched subgraph.
+    // `inputs` vector holds values that we would use as incoming values to the
+    // new subgraph, and we will get `new_outputs` vector containing values
+    // produced by this new subgraph - we will then rewrite old outputs with the
+    // new ones.
+    std::vector<Value*> new_outputs = insertSubgraphCloneAfter(
+        const_cast<Node*>(match.anchor), replacement_graph, inputs);
 
     // Record all planned rewritings
+    AT_ASSERT(outputs.size() == new_outputs.size());
     for (size_t idx = 0; idx < outputs.size(); idx++) {
       values_to_rewrite.push_back(outputs[idx]);
-      rewrite_map[outputs[idx]] = fused_node->outputs()[idx];
+      rewrite_map[outputs[idx]] = new_outputs[idx];
     }
     // Record all planned deletions
     for (Node* pattern_n : pattern_graph.nodes()) {

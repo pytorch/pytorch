@@ -1457,7 +1457,10 @@ graph(%x, %y, %z):
 graph(%a, %b, %c):
   %q = aten::mul(%a, %b)
   %r = aten::mul(%q, %c)
-  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], graph)
+  return (%r)""", """
+graph(%a, %b, %c):
+  %r = my::fused_mulmul(%a, %b, %c)
+  return (%r)""", graph)
         FileCheck().run(input_str, graph)
 
         # Check that overlapping matches are handled correctly
@@ -1476,7 +1479,10 @@ graph(%x, %y, %z):
 graph(%a, %b, %c):
   %q = aten::mul(%a, %b)
   %r = aten::mul(%q, %c)
-  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], graph)
+  return (%r)""", """
+graph(%a, %b, %c):
+  %r = my::fused_mulmul(%a, %b, %c)
+  return (%r)""", graph)
         FileCheck().run(input_str, graph)
 
         # Check add(mul(x,y),z) --> muladd(x,y,z) replacement
@@ -1495,7 +1501,54 @@ graph(%x, %y, %z):
 graph(%a, %b, %c, %d):
   %q = aten::mul(%a, %b)
   %r = aten::add(%q, %c, %d)
-  return (%r)""", "my::muladd", ["a", "b", "c", "d"], ["r"], graph)
+  return (%r)""", """
+graph(%a, %b, %c, %d):
+  %r = my::muladd(%a, %b, %c, %d)
+  return (%r)""", graph)
+        FileCheck().run(input_str, graph)
+
+        # Check add(mul(x,y),z) --> sub(add(x,y),z) replacement
+        input_str = """
+graph(%x, %y, %z):
+    # CHECK-NOT: aten::mul
+    %c = prim::Const[value=1]()
+    # CHECK: aten::add
+    %t = aten::mul(%x, %y)
+    # CHECK-NEXT: aten::sub
+    %p = aten::add(%t, %z, %c)
+    # CHECK-NOT: aten::add
+    # CHECK-NEXT: return
+    return (%p)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+graph(%a, %b, %c, %d):
+  %q = aten::mul(%a, %b)
+  %r = aten::add(%q, %c, %d)
+  return (%r)""", """
+graph(%a, %b, %c, %d):
+  %q = aten::add(%a, %b, %d)
+  %r = aten::sub(%q, %c, %d)
+  return (%r)""", graph)
+        FileCheck().run(input_str, graph)
+
+        # Check mul(x,y) --> x replacement
+        input_str = """
+graph(%x, %y, %z):
+    %c = prim::Const[value=1]()
+    # CHECK-NOT: aten::mul
+    %t = aten::mul(%x, %y)
+    # CHECK: aten::add(%x, %z
+    %p = aten::add(%t, %z, %c)
+    # CHECK-NEXT: return
+    return (%p)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+graph(%Pa, %Pb):
+  %Pq = aten::mul(%Pa, %Pb)
+  return (%Pq)""", """
+graph(%Ra, %Rb):
+  return (%Ra)""", graph)
+        print(graph)
         FileCheck().run(input_str, graph)
 
     def test_expand_quantlint(self):
