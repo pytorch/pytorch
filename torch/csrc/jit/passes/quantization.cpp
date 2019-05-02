@@ -36,7 +36,7 @@ size_t getParamIndexinOpArgs(Node* n, const std::string& param_name) {
   AT_ASSERT(n != nullptr);
   Operator* optr = checkIfNodeQuantizable(n);
   if (optr == nullptr) {
-    return -1;
+    return static_cast<size_t>(-1);
   }
   auto& opargs = optr->schema().arguments();
   for(size_t idx = 0; idx < opargs.size(); idx++) {
@@ -44,7 +44,7 @@ size_t getParamIndexinOpArgs(Node* n, const std::string& param_name) {
       return idx;
     }
   }
-  return -1;
+  return static_cast<size_t>(-1);
 }
 
 std::vector<param_info_t> getQuantizableParamsofType(script::Method& method,
@@ -68,7 +68,7 @@ std::vector<param_info_t> getQuantizableParamsofType(script::Method& method,
     // find its position. if the param is present we store it in vector so
     // later we can insert quant-dequant nodes. Caching the param index helps
     // faster lookup for same kind of node visited multiple timees.
-    size_t param_idx = -1;
+    size_t param_idx = static_cast<size_t>(-1);
     auto it = node_paramidx_map.find(n);
     if (it != node_paramidx_map.end()) {
       param_idx = it->second;
