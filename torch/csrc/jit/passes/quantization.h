@@ -7,7 +7,6 @@
 
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/module.h>
-#include <algorithm>
 
 namespace torch {
 namespace jit {

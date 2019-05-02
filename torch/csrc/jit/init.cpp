@@ -177,9 +177,9 @@ void initJITBindings(PyObject* module) {
             if (param_name == std::string("weight")) {
               auto getQParamFunc =
                 py::cast<std::function<std::tuple<std::string, float,
-                int>(at::Tensor)>>(pyGetQParamFunc);
-               InsertQuantDequantNodesForParam(
-                moduleObj, method_name, param_name, getQParamFunc);
+                  int>(at::Tensor)>>(pyGetQParamFunc);
+                InsertQuantDequantNodesForParam(
+                  moduleObj, method_name, param_name, getQParamFunc);
             }
           })
       .def(
