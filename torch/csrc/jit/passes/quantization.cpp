@@ -68,7 +68,7 @@ std::vector<param_info_t> getQuantizableParamsofType(script::Method& method,
     // find its position. if the param is present we store it in vector so
     // later we can insert quant-dequant nodes. Caching the param index helps
     // faster lookup for same kind of node visited multiple timees.
-    size_t param_idx = static_cast<size_t>(-1);
+    size_t param_idx;
     auto it = node_paramidx_map.find(n);
     if (it != node_paramidx_map.end()) {
       param_idx = it->second;
