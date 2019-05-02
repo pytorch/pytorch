@@ -8,10 +8,6 @@
 #include <cmath>
 #include <memory>
 
-#ifdef USE_FBGEMM
-#include <fbgemm/QuantUtils.h>
-#endif
-
 // TODO: move to c10 namespace after we
 // unified caffe2::Tensor and at::Tensor
 
@@ -243,84 +239,11 @@ CAFFE2_API QTensorImpl* get_qtensorimpl(const Tensor& self);
 
 // Quantize a float value into a uint value given scale and zero_point
 template <typename T>
-T quantize_uint(float scale, int32_t zero_point, float value) {
-  // Internally, fbgemm::Quantize uses std::nearbyint.
-  // std::nearbyint results in nearest integer value according to the current
-  // rounding mode and the default rounding mode is rounds to even in half-way
-  // cases in most popular processor architectures like x86 and ARM. This is
-  // typically faster than an alternatives like std::round that rounds half-way
-  // cases away from zero, and can be consistent with SIMD implementations for
-  // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
-  // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
-  int32_t qvalue;
-#ifdef USE_FBGEMM
-  qvalue = fbgemm::Quantize<typename T::underlying>(value, zero_point, scale,
-                                     /*result_precision=*/8);
-#else
-  constexpr int32_t qmin = std::numeric_limits<typename T::underlying>::min();
-  constexpr int32_t qmax = std::numeric_limits<typename T::underlying>::max();
-  qvalue = static_cast<int32_t>(std::nearbyint(value / scale + zero_point));
-  qvalue = std::max(qvalue, qmin);
-  qvalue = std::min(qvalue, qmax);
-#endif
-  return static_cast<T>(qvalue);
-}
-
-#ifdef USE_FBGEMM
+T quantize_val(float scale, int32_t zero_point, float value);
 template <typename T>
-Tensor quantize_fbgemm(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point) {
-  const float* rd = rtensor.data<float>();
-  auto qd = reinterpret_cast<typename T::underlying*>(qtensor.data<T>());
-  fbgemm::TensorQuantizationParams qparams;
-  qparams.scale = scale;
-  qparams.zero_point = zero_point;
-  qparams.precision = 8;
-  fbgemm::Quantize<typename T::underlying>(/*src=*/rd,
-                             /*dst=*/qd,
-                             /*len=*/rtensor.numel(),
-                             /*qparams=*/qparams);
-  return qtensor;
-}
-
+Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
 template <typename T>
-Tensor dequantize_fbgemm(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point) {
-  const auto* qd = reinterpret_cast<const typename T::underlying*>(qtensor.data<T>());
-  fbgemm::TensorQuantizationParams qparams;
-  qparams.scale = scale;
-  qparams.zero_point = zero_point;
-  qparams.precision = 8;
-  float* rd = rtensor.data<float>();
-  fbgemm::Dequantize<typename T::underlying>(/*src=*/qd,
-                              /*dst=*/rd,
-                              /*len=*/qtensor.numel(),
-                              /*qparams=*/qparams);
-  return rtensor;
-}
-
-#else
-template <typename T>
-Tensor quantize_naive(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point) {
-  const float* rdata = rtensor.data<float>();
-  auto qdata = qtensor.data<T>();
-  for (int i = 0; i < rtensor.numel(); ++i) {
-    qdata[i] = quantize_uint<T>(scale, zero_point, rdata[i]);
-  }
-  return qtensor;
-}
-
-template <typename T>
-Tensor dequantize_naive(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point) {
-  const auto* qd = qtensor.data<typename T::underlying>();
-  float* rd = rtensor.data<float>();
-  for (auto i = 0; i < qtensor.numel(); ++i) {
-    // We need to convert the quantized value to float to ensure the subtraction
-    // subexpression returns a float
-    rd[i] = (static_cast<float>(qd[i].val_) - zero_point) * scale;
-  }
-  return rtensor;
-}
-
-#endif
+Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point);
 
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions

@@ -6,6 +6,7 @@
 #pragma once
 
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/module.h>
 
 namespace torch {
 namespace jit {
@@ -22,12 +23,27 @@ TORCH_API void PropagateQuantInfo(std::shared_ptr<Graph>& graph);
  * a tensor.
  *
  * The distribution can then be used for computing qparams for quantization.
- * \param graph is the graph that would be instrumented.
+ * \param moduleObj is the module object whose containing methods are modified.
+ * \param methodName is module method whose containing graph is instrumented.
  * \param observer_node is a Node representing a call to observer function. It
  * will be cloned into all the places where we need to add instrumentation.
  */
 TORCH_API void InsertObserverNodes(
-    std::shared_ptr<Graph>& graph,
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& methodName,
+    Node* observer_node);
+
+/** \brief Inserts observer nodes for collecting distribution of values taken by
+ * a tensor. This is overloaded InsertObserverNodes which takes in different
+ * arguments and operates on pure functions not associated with module.
+ *
+ * The distribution can then be used for computing qparams for quantization.
+ * \param function_var is a pure script function whose graph is instrumented
+ * \param observer_node is a Node representing a call to observer function. It
+ * will be cloned into all the places where we need to add instrumentation.
+ */
+TORCH_API void InsertObserverNodes(
+    std::shared_ptr<script::Function>& function_var,
     Node* observer_node);
 
 /** \brief Inserts quant-dequant nodes.

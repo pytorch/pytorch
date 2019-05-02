@@ -1,10 +1,8 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
 #include <c10/core/Scalar.h>
 #include <c10/macros/Macros.h>
 #include <ATen/core/SparseTensorRef.h>
-#include <ATen/core/Type.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 
