@@ -15,6 +15,8 @@
 #include <ATen/core/Reduction.h>
 #include <c10/util/Optional.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/core/stack.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 
 namespace at {
 

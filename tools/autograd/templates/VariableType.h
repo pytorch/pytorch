@@ -30,6 +30,9 @@ using at::TensorList;
 using at::TensorOptions;
 using at::Type;
 using c10::optional;
+using torch::jit::Stack;
+using c10::KernelFunction;
+using c10::KernelCache;
 
 struct TORCH_API VariableType final : public at::TypeDefault {
   VariableType(Context* context, at::TypeExtendedInterface* baseType);

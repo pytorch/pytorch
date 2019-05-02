@@ -14,6 +14,7 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 namespace at {
 
@@ -51,5 +52,7 @@ Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
 }
 
 ${type_method_definitions}
+
+${c10_registrations}
 
 }

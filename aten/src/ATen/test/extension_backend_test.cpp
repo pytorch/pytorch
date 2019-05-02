@@ -27,6 +27,11 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
   return a;
 }
 
+Tensor kl_div_override(const Tensor & self, const Tensor & target, int64_t reduction) {
+  test_int = 4;
+  return self;
+}
+
 TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
   register_extension_backend_op(
@@ -51,6 +56,13 @@ TEST(BackendExtensionTest, TestRegisterOp) {
     "add(Tensor self, Tensor other, Scalar alpha) -> Tensor", &add_override);
   add(a, b);
   ASSERT_EQ(test_int, 3);
+
+  EXPECT_ANY_THROW(kl_div(a, b, 0));
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "kl_div(Tensor self, Tensor target, int64_t reduction) -> Tensor", &kl_div_override);
+  kl_div(a, b, 0);
+  ASSERT_EQ(test_int, 4);
 
   // Ensure that non-MSNPU operator still works
   Tensor d = empty({5, 5}, at::kCPU);

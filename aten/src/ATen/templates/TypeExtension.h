@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/TypeDefault.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 namespace at {
 

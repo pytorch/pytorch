@@ -1,5 +1,8 @@
 #include "torch/csrc/autograd/VariableTypeUtils.h"
 
+#include <ATen/core/stack.h>
+#include <ATen/core/op_registration/op_registration.h>
+
 // ${generated_comment}
 
 // NOTE [Sharded File]: on this file's split-into-shards state

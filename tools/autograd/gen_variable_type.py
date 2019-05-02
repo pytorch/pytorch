@@ -150,6 +150,18 @@ ${return_type} VariableType::${method_prefix_derived}${api_name}(${type_method_f
 }
 """)
 
+METHOD_DECLARATION_C10 = CodeTemplate("""\
+static void ${api_name}(Stack* stack, KernelFunction* fn, KernelCache* cache);
+""")
+
+METHOD_DEFINITION_C10 = CodeTemplate("""\
+void VariableType::${api_name}(Stack* stack, KernelFunction* fn, KernelCache* cache) {
+  ${type_definition_body}
+}
+static auto registry = c10::RegisterOperators()
+    .wrapper("${schema_string}", &VariableType::${api_name});
+""")
+
 UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
@@ -169,6 +181,15 @@ if (compute_requires_grad( ${args_with_derivatives} )) {
 ASSIGN_GRAD_FN = CodeTemplate("""\
 grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
+""")
+
+CALL_VIA_C10_WITH_RETURN_VALUES = CodeTemplate("""\
+(*fn)(stack, cache);
+${postprocess_stack}
+""")
+
+CALL_VIA_C10_WITHOUT_RETURN_VALUES = CodeTemplate("""\
+(*fn)(stack, cache);
 """)
 
 CALL_VIA_TYPE = CodeTemplate("""\
@@ -446,7 +467,10 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         # in which case they do!
         if declaration['is_factory_method']:
             continue
-        type_declarations.append(METHOD_DECLARATION.substitute(declaration))
+        if declaration['use_c10_dispatcher']:
+            type_declarations.append(METHOD_DECLARATION_C10.substitute(declaration))
+        else:
+            type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
             type_definitions.append(emit_method_definition(declaration))
 
@@ -462,6 +486,8 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
 def emit_method_definition(declaration):
     body = emit_body(declaration)
+    if declaration['use_c10_dispatcher']:
+        return METHOD_DEFINITION_C10.substitute(declaration, type_definition_body=body)
     return METHOD_DEFINITION.substitute(declaration, type_definition_body=body)
 
 
@@ -773,7 +799,12 @@ def emit_body(declaration):
     def emit_call(env):
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
-        if strategy == 'use_derived':
+        if declaration['use_c10_dispatcher']:
+            if not modifies_arguments and not returns_void:
+                call = CALL_VIA_C10_WITH_RETURN_VALUES.substitute(postprocess_stack=postprocess_stack(declaration))
+            else:
+                call = CALL_VIA_C10_WITHOUT_RETURN_VALUES.substitute()
+        elif strategy == 'use_derived':
             # We only care about adding `at::AutoNonVariableTypeMode` guard for `baseType` dispatch
             # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
             # the baseType operations still dispatch to non-Variable type, even if the arguments passed
@@ -862,6 +893,8 @@ def emit_body(declaration):
     combined = nested_dict(env, declaration)
 
     body = []
+    if declaration['use_c10_dispatcher']:
+        body.extend(preprocess_stack(declaration))
     if base_name not in DONT_PROFILE:
         input_names = record_function_input_names()
         body.append(
@@ -887,8 +920,22 @@ def emit_body(declaration):
     body.append(post_record_trace)
     if requires_derivative:
         body.append(emit_save_outputs())
-    if not returns_void:
+    if not returns_void and not declaration['use_c10_dispatcher']:
         body.append('return {};'.format(get_return_value()))
+    return body
+
+
+def preprocess_stack(declaration):
+    body = []
+    for i, arg in enumerate(declaration['arguments']):
+        body.append('{} {} = stack->at({}).to<{}>();'.format(arg['type'], arg['name'], i, arg['dynamic_type']))
+    return body
+
+
+def postprocess_stack(declaration):
+    body = []
+    for i, ret in enumerate(declaration['returns']):
+        body.append('{} {} = stack->at({}).to<{}>();'.format(ret['type'], ret['name'], i, ret['dynamic_type']))
     return body
 
 

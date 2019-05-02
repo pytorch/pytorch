@@ -210,6 +210,7 @@ top_env = {
     'native_function_declarations': [],
     'extension_backend_headers': [],
     'extension_backend_register_switches': [],
+    'c10_registrations': [],
 }
 
 
@@ -349,10 +350,11 @@ def generate_type_extension_backend(backend, declarations):
     env['TypeID'] = 'TypeID::' + backend
     top_env['type_ids'].append(backend + ',')
 
-    declarations, definitions = function_wrapper.create_extension_backend(
+    declarations, definitions, c10_registrations = function_wrapper.create_extension_backend(
         env, declarations)
     env['type_method_declarations'] = declarations
     env['type_method_definitions'] = definitions
+    env['c10_registrations'] = c10_registrations
 
     type_register = TYPE_REGISTER.substitute(backend=env['Backend'], type_name=env['Type'])
     top_env['cpu_type_headers'].append('#include "ATen/{}.h"'.format(env['Type']))

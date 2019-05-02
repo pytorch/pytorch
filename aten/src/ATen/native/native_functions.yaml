@@ -1005,6 +1005,7 @@
   device_guard: False
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
+  use_c10_dispatcher: True
 
 - func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean) -> Tensor
   dispatch:
