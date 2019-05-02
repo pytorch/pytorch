@@ -12,6 +12,10 @@
 namespace at { namespace native {
 
 Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
+  if (input.is_mkldnn()) {
+    return at::mkldnn_linear(input, weight, bias);
+  }
+
   if (input.dim() == 2 && bias.defined()) {
     // Fused op is marginally faster.
     return at::addmm(bias, input, weight.t());

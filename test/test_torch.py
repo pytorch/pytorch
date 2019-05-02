@@ -148,6 +148,16 @@ class _TestTorchMixin(object):
     def test_dir(self):
         dir(torch)
 
+    def test_type_conversion_via_dtype_name(self):
+        x = torch.tensor([1])
+        self.assertEqual(x.byte().dtype, torch.uint8)
+        self.assertEqual(x.bool().dtype, torch.bool)
+        self.assertEqual(x.char().dtype, torch.int8)
+        self.assertEqual(x.double().dtype, torch.float64)
+        self.assertEqual(x.float().dtype, torch.float32)
+        self.assertEqual(x.half().dtype, torch.float16)
+        self.assertEqual(x.int().dtype, torch.int32)
+
     def test_doc(self):
         checked_types = (types.MethodType, types.FunctionType,
                          types.BuiltinFunctionType, types.BuiltinMethodType)
@@ -890,6 +900,18 @@ class _TestTorchMixin(object):
 
     def test_max(self):
         self._testSelection(torch.max, max)
+
+    def test_log_normal(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.tensor([10], dtype=torch.float, device=device).log_normal_()
+            self.assertEqual(a.dtype, torch.float)
+            self.assertEqual(a.size(), torch.Size([1]))
+
+    def test_geometric(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.tensor([10], dtype=torch.float, device=device).geometric_(0.5)
+            self.assertEqual(a.dtype, torch.float)
+            self.assertEqual(a.size(), torch.Size([1]))
 
     @staticmethod
     def _test_max_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):
@@ -2690,17 +2712,15 @@ class _TestTorchMixin(object):
         # we can also print a qtensor
         sys.stderr.write(str(qr))
         self.assertEqual(str(qr),
-                         "tensor(float_values=tensor([15.]),\n" + " " * 7 +
-                         "int_repr=tensor([17]), size=(1,), dtype=torch.qint8,\n" +
+                         "tensor([15.], size=(1,), dtype=torch.qint8,\n" +
                          " " * 7 + "quantization_scheme=per_tensor_affine, scale=" +
-                         "tensor(1.),\n" + " " * 7 + "zero_point=tensor(2))")
+                         "1.0, zero_point=2)")
         empty_r = torch.ones((0, 1), dtype=torch.float)
         empty_qr = empty_r.quantize_linear(scale, zero_point)
         self.assertEqual(str(empty_qr),
-                         "tensor(float_values=tensor([]),\n" + " " * 7 +
-                         "int_repr=tensor([]), size=(0, 1), dtype=torch.qint8,\n" +
+                         "tensor([], size=(0, 1), dtype=torch.qint8,\n" +
                          " " * 7 + "quantization_scheme=per_tensor_affine, scale=" +
-                         "tensor(1.),\n" + " " * 7 + "zero_point=tensor(2))")
+                         "1.0, zero_point=2)")
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
@@ -7594,57 +7614,60 @@ class _TestTorchMixin(object):
         self._test_scatter_base(self, lambda t: t, 'scatter_', True)
 
     def test_masked_scatter(self):
-        num_copy, num_dest = 3, 10
-        dest = torch.randn(num_dest)
-        src = torch.randn(num_copy)
-        mask = torch.ByteTensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0))
-        dest2 = dest.clone()
-        dest.masked_scatter_(mask, src)
-        j = 0
-        for i in range(num_dest):
-            if mask[i]:
-                dest2[i] = src[j]
-                j += 1
-        self.assertEqual(dest, dest2, 0)
+        for dtype in [torch.uint8, torch.bool]:
+            num_copy, num_dest = 3, 10
+            dest = torch.randn(num_dest)
+            src = torch.randn(num_copy)
+            mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=dtype)
+            dest2 = dest.clone()
+            dest.masked_scatter_(mask, src)
+            j = 0
+            for i in range(num_dest):
+                if mask[i]:
+                    dest2[i] = src[j]
+                    j += 1
+            self.assertEqual(dest, dest2, 0)
 
-        # make source bigger than number of 1s in mask
-        src = torch.randn(num_dest)
-        dest.masked_scatter_(mask, src)
-
-        # make src smaller. this should fail
-        src = torch.randn(num_copy - 1)
-        with self.assertRaises(RuntimeError):
+            # make source bigger than number of 1s in mask
+            src = torch.randn(num_dest)
             dest.masked_scatter_(mask, src)
 
+            # make src smaller. this should fail
+            src = torch.randn(num_copy - 1)
+            with self.assertRaises(RuntimeError):
+                dest.masked_scatter_(mask, src)
+
     def test_masked_select(self):
-        num_src = 10
-        src = torch.randn(num_src)
-        mask = torch.rand(num_src).clamp(0, 1).mul(2).floor().byte()
-        dst = src.masked_select(mask)
-        dst2 = []
-        for i in range(num_src):
-            if mask[i]:
-                dst2 += [src[i]]
-        self.assertEqual(dst, torch.Tensor(dst2), 0)
+        for dtype in [torch.uint8, torch.bool]:
+            num_src = 10
+            src = torch.randn(num_src)
+            mask = torch.rand(num_src).clamp(0, 1).mul(2).floor().to(dtype)
+            dst = src.masked_select(mask)
+            dst2 = []
+            for i in range(num_src):
+                if mask[i]:
+                    dst2 += [src[i]]
+            self.assertEqual(dst, torch.Tensor(dst2), 0)
 
     def test_masked_fill(self):
-        num_dest = 10
-        dst = torch.randn(num_dest)
-        mask = torch.rand(num_dest).mul(2).floor().byte()
-        val = random.random()
-        dst2 = dst.clone()
-        dst.masked_fill_(mask, val)
-        for i in range(num_dest):
-            if mask[i]:
-                dst2[i] = val
-        self.assertEqual(dst, dst2, 0)
+        for dtype in [torch.uint8, torch.bool]:
+            num_dest = 10
+            dst = torch.randn(num_dest)
+            mask = torch.rand(num_dest).mul(2).floor().to(dtype)
+            val = random.random()
+            dst2 = dst.clone()
+            dst.masked_fill_(mask, val)
+            for i in range(num_dest):
+                if mask[i]:
+                    dst2[i] = val
+            self.assertEqual(dst, dst2, 0)
 
-        # test non-contiguous case
-        dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
-        dst2 = dst.clone()
-        dst.masked_fill_(dst > 0, val)
-        dst2.masked_fill_(dst2 > 0, val)
-        self.assertEqual(dst, dst2, 0)
+            # test non-contiguous case
+            dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
+            dst2 = dst.clone()
+            dst.masked_fill_((dst > 0).to(dtype), val)
+            dst2.masked_fill_((dst2 > 0).to(dtype), val)
+            self.assertEqual(dst, dst2, 0)
 
     def test_abs(self):
         def _test_abs(tensors_dict):
@@ -11302,11 +11325,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_c10_layer_norm(self):
         # test that we can call c10 ops and they return a reasonable result
         X = torch.rand(5, 5, dtype=torch.float)
+        weight = torch.rand(*X.size()[1:], dtype=torch.float)
+        bias = torch.rand(*X.size()[1:], dtype=torch.float)
         epsilon = 1e-4
 
-        expected_norm = torch.nn.functional.layer_norm(X, X.size()[1:], eps=epsilon)
+        expected_norm = torch.nn.functional.layer_norm(
+            X, X.size()[1:], weight=weight, bias=bias, eps=epsilon)
         actual_norm, actual_mean, actual_stdev = \
-            torch.ops._caffe2.LayerNorm(torch.tensor(X), 1, epsilon)
+            torch.ops._caffe2.LayerNorm(torch.tensor(X), torch.tensor(
+                weight), torch.tensor(bias), 1, epsilon, True)
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
 # Functions to test negative dimension wrapping

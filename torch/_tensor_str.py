@@ -268,18 +268,13 @@ def _str(self):
         tensor_str = indices_prefix + indices_str + '),\n' + ' ' * indent + values_prefix + values_str + ')'
     elif self.is_quantized:
         suffixes.append('size=' + str(tuple(self.shape)))
-        suffixes.append('dtype=' + str(self.dtype))
+        if not has_default_dtype:
+            suffixes.append('dtype=' + str(self.dtype))
+        # TODO: change to a call to self.q_scheme() when we add q_scheme method
         suffixes.append('quantization_scheme=' + 'per_tensor_affine')
-        suffixes.append('scale=' + str(self.q_scale()))
-        suffixes.append('zero_point=' + str(self.q_zero_point()))
-        values_prefix = 'float_values=tensor('
-        values = self.dequantize()
-        values_str = _tensor_str(values, indent + len(values_prefix))
-        int_repr_prefix = 'int_repr=tensor('
-        int_repr = self.int_repr()
-        int_repr_str = _tensor_str(int_repr, indent + len(int_repr_prefix))
-        tensor_str = values_prefix + values_str + '),\n' + ' ' * indent + \
-            int_repr_prefix + int_repr_str + ')'
+        suffixes.append('scale=' + str(float(self.q_scale())))
+        suffixes.append('zero_point=' + str(int(self.q_zero_point())))
+        tensor_str = _tensor_str(self.dequantize(), indent)
     else:
         if self.numel() == 0 and not self.is_sparse:
             # Explicitly print the shape if it is not (0,), to match NumPy behavior
