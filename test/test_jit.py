@@ -1496,18 +1496,16 @@ graph(%x : Tensor,
 
         scriptModule = testModule()
 
-        # Constant Propagation step is performed because this pass is intended
-        # to insert quant-dequant nodes for quantizable tensors. The type analysis
-        # happens as part of this jit pass
         torch._C._jit_pass_constant_propagation(scriptModule.graph)
         torch._C._jit_pass_insert_quantdequant_for_param(scriptModule._c,
                                                          "forward",
                                                          "bias",
                                                          getQParamFunc)
 
-        # We expect to see quant-dequant node before conv node for bias.
-        FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear") \
+        # This is negation test. We dont expect to see q-dq terms because
+        # activation and weight pass to insert q-dq nodes is not run
+        FileCheck().check_not("quantize_linear").check_not("int_repr") \
+                   .check_not("dequantize_linear") \
                    .check("conv2d").run(str(scriptModule.graph))
 
     def test_pattern_based_fusion(self):
