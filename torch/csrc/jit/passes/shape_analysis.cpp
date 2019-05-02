@@ -1454,6 +1454,11 @@ class ShapePropagator {
         node->output()->setType(weight_type->withDim(indices_type->dim() + 1));
         return true;
       }
+    } else if (node->matches("aten::linear(Tensor input, Tensor weight, Tensor? bias) -> Tensor")) {
+      if (auto type = input_type(0)) {
+        node->output()->setType(type);
+        return true;
+      }
     } else if (
         node->matches(
             "aten::bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor")) {

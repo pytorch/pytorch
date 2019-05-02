@@ -77,6 +77,13 @@ RegisterOperators reg_ln_view({Operator(
 
 
 static void DecomposeOps(Block* block) {
+  static const char* linear_source = R"SCRIPT(
+        def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+            output = input.matmul(weight.t())
+            if bias is not None:
+                output += bias
+            return output
+      )SCRIPT";
   static const char* addmm_source = R"SCRIPT(
       def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: number = 1.0, alpha: number = 1.0):
           return self + mat1.mm(mat2)
@@ -114,8 +121,30 @@ static void DecomposeOps(Block* block) {
     for (auto sub : it->blocks()) {
       DecomposeOps(sub);
     }
+    if (it->matches("aten::linear(Tensor input, Tensor weight, Tensor? bias) -> Tensor")) {
+      Value* input = it->namedInput(attr::input);
+      Value* weight = it->namedInput(attr::weight);
+      Value* bias = it->namedInput(attr::bias);
 
-    if (it->matches(
+      WithInsertPoint guard(*it);
+
+      Graph* graph = it->owningGraph();
+      int ndim = input->type()->cast<DimensionedTensorType>()->dim();
+      Value* new_output = nullptr;
+      if (ndim == 2 && isDefined(bias).value_or(false)) {
+        // if ndim == 2 and bias is statically defined, dispatch to addmm decomposition
+        Value* transposed_weight = graph->insert(aten::t, {weight});
+        Value* one = graph->insertConstant(1);
+        std::vector<Value*> inputs{bias, input, transposed_weight, one, one};
+        new_output = decomposeOp(*it, addmm_source, "addmm", inputs);
+      } else {
+        // otherwise dispatch to normal linear decomposition
+        new_output = decomposeOp(*it, linear_source, "linear", it->inputs());
+      }
+      new_output->setType(it->output()->type());
+      it->output()->replaceAllUsesWith(new_output);
+      it.destroyCurrent();
+    } else if (it->matches(
             "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
             /*const_inputs=*/{attr::beta, attr::alpha})) {
       // For the case where we have an addmm where alpha and beta are Attributes
