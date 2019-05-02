@@ -1312,8 +1312,7 @@ struct to_ir {
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
     WithInsertPoint guard(n);
 
-    if (!max_trip_count_val)
-    {
+    if (!max_trip_count_val) {
       max_trip_count_val = materializeConstant(
           std::numeric_limits<int64_t>::max(),
           *graph,
@@ -1335,8 +1334,7 @@ struct to_ir {
 
       // current_element_assigner uses an induction variable
       // to set a current element
-      if (current_element_assigner)
-      {
+      if (current_element_assigner) {
         current_element_assigner(trip_count, environment_stack);
       }
 
@@ -1384,7 +1382,8 @@ struct to_ir {
     }
     auto max_trip_count_val = ensureInt(range, emitExpr(args[0]));
     const auto& ident_name = target.name();
-    auto assigner = [ident_name, range](Value* index, std::shared_ptr<Environment> env) {
+    auto assigner = [ident_name, range](
+                        Value* index, std::shared_ptr<Environment> env) {
       env->setVar(range, ident_name, index);
     };
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
@@ -2700,6 +2699,23 @@ struct to_ir {
       Value* tuple_val,
       Value* idx_val) {
     auto tuple_typ = tuple_val->type()->cast<TupleType>();
+    auto elems = tuple_typ->elements();
+    if (!toIValue(idx_val) && elems.size() > 0) {
+      auto list = tryConvertToType(
+          loc,
+          *graph,
+          ListType::create(elems[0]),
+          tuple_val,
+          /*allow_conversions*/ true);
+      if (list == tuple_val) {
+        throw ErrorReport(loc)
+            << "Cannot index into a " << tuple_typ->python_str()
+            << " with a non-constant index because we cannot resolve the output type";
+      }
+      return emitBuiltinCall(
+          loc, *graph, aten::select, c10::nullopt, {list, idx_val}, {}, true);
+    }
+
     auto adj_index = getTupleIndexVal(
         loc, tuple_typ, idx_val, /*allow_out_of_bounds*/ false);
     return graph->insertNode(graph->createTupleIndex(tuple_val, adj_index))
@@ -2802,7 +2818,8 @@ struct to_ir {
 struct MethodResolver : public Resolver {
   explicit MethodResolver(
       const Resolver* otherResolver,
-      const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable)
+      const std::unordered_map<std::string, std::shared_ptr<Function>>&
+          functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
   std::shared_ptr<SugaredValue> resolveValue(
@@ -2822,7 +2839,8 @@ struct MethodResolver : public Resolver {
 
  private:
   const Resolver* otherResolver_;
-  const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable_;
+  const std::unordered_map<std::string, std::shared_ptr<Function>>&
+      functionTable_;
 };
 
 void CompilationUnit::define(
@@ -2885,8 +2903,7 @@ void lambdaLiftFork(Node* fork_node) {
   auto env = [&](Value* v) -> Value* {
     if (!uncaptures_map.count(v)) {
       // Capture values for both graphs
-      uncaptures_map[v] =
-          forked_graph->addInput()->copyMetadata(v);
+      uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
       fork_node->addInput(v);
     }
     return uncaptures_map[v];

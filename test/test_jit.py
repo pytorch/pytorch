@@ -9896,6 +9896,30 @@ a")
 
         FileCheck().check_not("aten::view").check("index_put_").run(str(test_index_put.graph))
 
+    def test_tuple_index_to_list(self):
+        def test_non_constant_input(a):
+            # type: (bool) -> int
+            if a:
+                b = 1
+            else:
+                b = 0
+            c = (0, 1)
+            return c[b]
+
+        self.checkScript(test_non_constant_input, (True,))
+        self.checkScript(test_non_constant_input, (False,))
+
+        with self.assertRaisesRegex(RuntimeError, "because we cannot resolve the output type"):
+            @torch.jit.script
+            def test_non_constant_input(a):
+                # type: (bool) -> None
+                if a:
+                    b = 1
+                else:
+                    b = 0
+                c = (0, 1.1)
+                print(c[b])
+
     def test_tuple_indexing(self):
         def tuple_index(a):
             if bool(a):
