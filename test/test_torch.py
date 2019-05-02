@@ -2710,7 +2710,6 @@ class _TestTorchMixin(object):
         qr[:] = x
         self.assertEqual(qr.item(), 15)
         # we can also print a qtensor
-        sys.stderr.write(str(qr))
         self.assertEqual(str(qr),
                          "tensor([15.], size=(1,), dtype=torch.qint8,\n" +
                          " " * 7 + "quantization_scheme=per_tensor_affine, scale=" +
