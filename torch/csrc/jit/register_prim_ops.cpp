@@ -129,7 +129,7 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 
 RegisterOperators reg(
     {Operator(
-         "prim::profile(...) -> ()",
+         prim::profile,
          [](const Node* node) {
            // TODO: figure out why cast isn't marked as const
            auto n = const_cast<Node*>(node); // NOLINT
