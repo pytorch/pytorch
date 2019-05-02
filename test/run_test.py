@@ -56,8 +56,12 @@ WINDOWS_BLACKLIST = [
 ]
 
 ROCM_BLACKLIST = [
+    'c10d',
     'cpp_extensions',
+    'distributed',
+    'multiprocessing',
     'nccl',
+    'thd_distributed',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {
