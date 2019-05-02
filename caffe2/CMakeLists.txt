@@ -72,7 +72,7 @@ if (NOT BUILD_ATEN_ONLY)
 endif()
 
 # Skip modules that are not used by libtorch mobile yet.
-if (NOT BUILD_ATEN_ONLY AND NOT BUILD_TORCH_MOBILE)
+if (NOT BUILD_ATEN_ONLY AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   add_subdirectory(contrib)
   add_subdirectory(predictor)
   add_subdirectory(predictor/emulator)

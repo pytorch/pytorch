@@ -70,7 +70,7 @@ option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_pa
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
-option(BUILD_TORCH_MOBILE "Build libtorch for mobile" OFF)
+option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
     "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
@@ -173,17 +173,17 @@ endif()
 
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
 # It's disabled for caffe2 mobile library.
-if (NOT INTERN_BUILD_MOBILE OR BUILD_TORCH_MOBILE)
-  set(INTERN_BUILD_ATEN_OPS ON)
-else()
+if (INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
   set(INTERN_BUILD_ATEN_OPS OFF)
+else()
+  set(INTERN_BUILD_ATEN_OPS ON)
 endif()
 
-# BUILD_TORCH_MOBILE is the master switch to choose between libtorch v.s. caffe2 mobile build.
-# When it's enabled it builds libtorch mobile library, which contains ATen/TH ops and native support for
+# BUILD_CAFFE2_MOBILE is the master switch to choose between libcaffe2 v.s. libtorch mobile build.
+# When it's enabled it builds original libcaffe2 mobile library without ATen/TH ops nor TorchScript support;
+# When it's disabled it builds libtorch mobile library, which contains ATen/TH ops and native support for
 # TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
-# When it's disabled it builds original caffe2 mobile library without ATen/TH ops nor TorchScript support;
-if (BUILD_TORCH_MOBILE)
+if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(BUILD_PYTHON OFF)
   set(BUILD_TORCH ON)
   set(BUILD_CAFFE2_OPS OFF)
