@@ -1,12 +1,12 @@
 #include <THC/THCGeneral.h>
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/Utils.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/CUDAContext.h"
-#include "THC/THCNumerics.cuh"
-#include "c10/util/Exception.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <THC/THCNumerics.cuh>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -22,7 +22,7 @@ __device__ inline int start_index(int a, int b, int c) {
 }
 
 __device__ inline int end_index(int a, int b, int c) {
-  return (int)std::ceil((float)(a * c) / b);
+  return (int)std::ceil((float)((a + 1) * c) / b);
 }
 
 // 5d tensor B x D x T x H x W
