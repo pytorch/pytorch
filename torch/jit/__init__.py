@@ -473,17 +473,24 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
     # Note: tracing is independent of optimizations, which consume the trace
     executor_options['optimize'] = False
     for inputs in check_inputs:
+
         if isinstance(inputs, torch.Tensor):
             inputs = (inputs,)
 
         if is_trace_module:
+            copied_dict = {}
+            for name, data in inputs.items():
+                copied_dict[name] = _clone_inputs(data)
             check_mod = torch.jit.trace_module(
                 func.__self__,
-                {func.__name__ : _clone_inputs(inputs)},
+                copied_dict,
                 check_trace=False,
                 _force_outplace=force_outplace,
                 **executor_options)
             check_mod_func = check_mod._c._get_method(traced_func.name)
+            inputs = inputs[traced_func.name]
+            if isinstance(inputs, torch.Tensor):
+                inputs = (inputs,)
         else:
             check_mod = torch.jit.trace(
                 func,
@@ -777,7 +784,7 @@ def trace_module(mod,
                                       deterministic ops or if you are sure that the network is correct despite
                                       a checker failure.
 
-        check_inputs (list of tuples, optional): A list of tuples of input arguments that should be used
+        check_inputs (list of dicts, optional): A list of dicts of input arguments that should be used
                                                  to check the trace against what is expected. Each tuple
                                                  is equivalent to a set of input arguments that would
                                                  be specified in ``example_inputs``. For best results, pass in a
@@ -802,7 +809,6 @@ def trace_module(mod,
     """
     if not _enabled:
         return mod
-
     executor_options = {'optimize': bool(optimize)}
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
 
@@ -826,7 +832,7 @@ def trace_module(mod,
             if check_inputs is not None:
                 _check_trace(check_inputs, func, executor_options, check_trace_method, check_tolerance, _force_outplace, True)
             else:
-                _check_trace([example_inputs], func, executor_options, check_trace_method, check_tolerance, _force_outplace, True)
+                _check_trace([inputs], func, executor_options, check_trace_method, check_tolerance, _force_outplace, True)
 
         return module
 

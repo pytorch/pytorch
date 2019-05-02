@@ -3167,12 +3167,18 @@ class TestScript(JitTestCase):
 
         example_weight = torch.rand(1, 1, 3, 3)
         example_forward_input = torch.rand(1, 1, 3, 3)
-        n = Net()
         inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+        n = Net()
         module = torch.jit.trace_module(n, inputs)
 
-    def test_submodule_twice(self):
+        check_inputs = []
+        for i in range(2):
+            check_weight = torch.rand(1, 1, 3, 3)
+            check_forward_input = torch.rand(1, 1, 3, 3)
+            check_inputs.append({'forward' : check_forward_input, 'weighted_kernel_sum' : check_weight})
+        module = torch.jit.trace_module(n, inputs, True, True, check_inputs)
 
+    def test_submodule_twice(self):
         @torch.jit.script
         def foo(x):
             return x * x
