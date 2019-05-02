@@ -137,7 +137,8 @@ class DispatchTable final {
   : kernels_()
   , dispatch_strategy_(get_dispatch_strategy_(schema))
   , operator_name_(schema.name())
-  , fallback_kernel_(c10::nullopt) {}
+  , fallback_kernel_(c10::nullopt)
+  , autograd_wrapper_(nullptr) {}
 
   DispatchTable(DispatchTable&&) = delete;
   DispatchTable& operator=(DispatchTable&&) = delete;
@@ -227,6 +228,18 @@ class DispatchTable final {
      return kernels_.isEmpty();
    }
 
+   KernelFunctionWrapper* getAutogradWrapper() {
+     return autograd_wrapper_;
+   }
+
+   void registerAutogradWrapper(KernelFunctionWrapper* wrapper) {
+     autograd_wrapper_ = wrapper;
+   }
+
+   void deregisterAutogradWrapper() {
+     autograd_wrapper_ = nullptr;
+   }
+
 private:
   struct DispatchStrategy final {
     // this is caching the index so we don't have to parse the schema inputs
@@ -292,6 +305,7 @@ private:
   DispatchStrategy dispatch_strategy_;
   std::string operator_name_;
   c10::optional<DispatchTableEntry> fallback_kernel_;
+  KernelFunctionWrapper* autograd_wrapper_;
 };
 
 } // namespace c10

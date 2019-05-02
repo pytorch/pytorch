@@ -35,16 +35,20 @@ public:
    * Call the operator kernel with the given arguments.
    */
   void call(Stack* stack) const {
+    if (autograd_wrapper_) {
+      return (*autograd_wrapper_)(stack, kernel_, cache_.get());
+    }
     return (*kernel_)(stack, cache_.get());
   }
 
 private:
-  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator)
-  : kernel_(kernel), cache_(cache_creator()) {}
+  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator, KernelFunctionWrapper* autograd_wrapper)
+  : kernel_(kernel), cache_(cache_creator()), autograd_wrapper_(autograd_wrapper) {}
   friend class Dispatcher;
 
   KernelFunction* kernel_;
   std::unique_ptr<c10::KernelCache> cache_;
+  KernelFunctionWrapper* autograd_wrapper_;
 };
 
 /**
@@ -155,6 +159,10 @@ public:
    */
   OpKernel lookup(const OperatorHandle& op, const Stack* stack) const;
 
+  void registerAutogradWrapper(const OperatorHandle& op, KernelFunctionWrapper* wrapper);
+
+  void deregisterAutogradWrapper(const OperatorHandle& op);
+
   /**
    * Add a listener that gets called whenever a new op is registered or an existing
    * op is deregistered. Immediately after registering, this listener gets called
@@ -201,7 +209,8 @@ private:
 inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const DispatchTableEntry& kernel = op.operatorDefIterator_->dispatchTable.lookup(stack);
-  return OpKernel(kernel.kernel_func, kernel.cache_creator_func);
+  const auto autograd_wrapper = op.operatorDefIterator_->dispatchTable.getAutogradWrapper();
+  return OpKernel(kernel.kernel_func, kernel.cache_creator_func, autograd_wrapper);
 }
 
 } // namespace c10

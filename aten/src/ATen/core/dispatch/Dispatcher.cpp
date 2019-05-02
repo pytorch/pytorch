@@ -123,6 +123,16 @@ void Dispatcher::deregisterFallbackKernel(const OperatorHandle& op) {
   op.operatorDefIterator_->dispatchTable.deregisterFallbackKernel();
 }
 
+void Dispatcher::registerAutogradWrapper(const OperatorHandle& op, KernelFunctionWrapper* wrapper) {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  op.operatorDefIterator_->dispatchTable.registerAutogradWrapper(wrapper);
+}
+
+void Dispatcher::deregisterAutogradWrapper(const OperatorHandle& op) {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  op.operatorDefIterator_->dispatchTable.deregisterAutogradWrapper();
+}
+
 void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
   std::lock_guard<std::mutex> lock(mutex_);
 

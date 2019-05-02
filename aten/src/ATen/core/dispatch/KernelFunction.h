@@ -12,5 +12,6 @@ using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack
  * function pointer `KernelFunction*`, i.e. kernels are not allowed to be closures.
  */
 using KernelFunction = void(Stack*, KernelCache* cache);
+using KernelFunctionWrapper = void(Stack*, KernelFunction*, KernelCache* cache);
 
 }

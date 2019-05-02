@@ -16,6 +16,9 @@ using c10::kernel;
 using c10::dispatchKey;
 using c10::Dispatcher;
 using c10::IValue;
+using c10::KernelFunction;
+using c10::KernelCache;
+using torch::jit::Stack;
 using at::Tensor;
 
 namespace {
@@ -38,6 +41,12 @@ struct MockKernel final : OperatorKernel {
 private:
   bool* called_;
 };
+
+static bool dummy_autograd_called = false;
+void dummy_autograd(torch::jit::Stack*, c10::KernelFunction*, c10::KernelCache* cache) {
+  dummy_autograd_called = true;
+}
+
 TEST(OperatorRegistrationTest, givenOpWithoutFallbackKernel_whenCallingOpWithWrongDispatchKey_thenFails) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
 
@@ -46,6 +55,18 @@ TEST(OperatorRegistrationTest, givenOpWithoutFallbackKernel_whenCallingOpWithWro
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType2()));
   }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+}
+
+TEST(OperatorRegistrationTest, myshittytest) {
+  auto registrar = c10::RegisterOperators()
+      .op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()))
+      .wrapper("_test::dummy(Tensor dummy) -> ()", &dummy_autograd);
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value());
+  EXPECT_FALSE(dummy_autograd_called);
+  callOp(*op, dummyTensor(TensorType1()));
+  EXPECT_TRUE(dummy_autograd_called);
 }
 
 TEST(OperatorRegistrationTest, givenOpWithFallbackKernelOutOfScope_whenCallingOpWithWrongDispatchKey_thenFails) {

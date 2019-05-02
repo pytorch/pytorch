@@ -13,7 +13,7 @@ RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) = default;
 class RegisterOperators::OperatorRegistrar final {
 public:
   explicit OperatorRegistrar(FunctionSchema&& schema, c10::optional<TensorTypeId> dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator)
-  : op_(Dispatcher::singleton().registerSchema(std::move(schema))), dispatch_key_(std::move(dispatch_key)), has_kernel_(kernel != nullptr), owns_registration_(true) {
+  : op_(Dispatcher::singleton().registerSchema(std::move(schema))), dispatch_key_(std::move(dispatch_key)), has_kernel_(kernel != nullptr), has_wrapper_(false), owns_registration_(true) {
     // either both, kernel and cache_creator, or none must be set.
     AT_ASSERT((kernel != nullptr) == static_cast<bool>(cache_creator));
 
@@ -26,8 +26,15 @@ public:
     }
   }
 
+  explicit OperatorRegistrar(FunctionSchema&& schema, KernelFunctionWrapper* wrapper)
+  : op_(Dispatcher::singleton().registerSchema(std::move(schema))), dispatch_key_(c10::nullopt), has_kernel_(false), has_wrapper_(wrapper != nullptr), owns_registration_(true) {
+    if (has_wrapper_) {
+      Dispatcher::singleton().registerAutogradWrapper(op_, wrapper);
+    }
+  }
+
   OperatorRegistrar(OperatorRegistrar&& rhs) noexcept
-  :  op_(std::move(rhs.op_)), dispatch_key_(std::move(rhs.dispatch_key_)), has_kernel_(rhs.has_kernel_), owns_registration_(rhs.owns_registration_) {
+  :  op_(std::move(rhs.op_)), dispatch_key_(std::move(rhs.dispatch_key_)), has_kernel_(rhs.has_kernel_), has_wrapper_(rhs.has_wrapper_), owns_registration_(rhs.owns_registration_) {
     rhs.owns_registration_ = false;
   }
 
@@ -45,6 +52,9 @@ public:
           Dispatcher::singleton().deregisterFallbackKernel(op_);
         }
       }
+      if (has_wrapper_) {
+        Dispatcher::singleton().deregisterAutogradWrapper(op_);
+      }
       Dispatcher::singleton().deregisterSchema(op_);
     }
   }
@@ -53,6 +63,7 @@ private:
   const OperatorHandle op_;
   const c10::optional<TensorTypeId> dispatch_key_;
   bool has_kernel_;
+  bool has_wrapper_;
   bool owns_registration_;
 };
 
@@ -94,6 +105,15 @@ void RegisterOperators::registerOp_(FunctionSchema&& schema, detail::KernelRegis
   AT_ASSERT((config.kernel_func != nullptr) == static_cast<bool>(config.cache_creator_func));
 
   registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, std::move(config.cache_creator_func));
+}
+
+void RegisterOperators::checkSchemaAndRegisterAutogradWrapper_(const std::string &schemaOrNameStr, KernelFunctionWrapper* wrapper) {
+  either<OperatorName, FunctionSchema> schemaOrName = torch::jit::parseSchemaOrName(schemaOrNameStr);
+  if (schemaOrName.is_right()) {
+    registrars_.emplace_back(std::move(schemaOrName).right(), wrapper);
+  } else {
+    AT_ERROR("Tried to register an autograd wrapper with a valid schema.");
+  }
 }
 
 }

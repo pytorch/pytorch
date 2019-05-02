@@ -189,6 +189,11 @@ public:
       return std::move(*this);
     }
 
+    RegisterOperators wrapper(const std::string& schemaOrName, KernelFunctionWrapper* wrapper) {
+      checkSchemaAndRegisterAutogradWrapper_(schemaOrName, wrapper);
+      return std::move(*this);
+    }
+
 private:
   template<class... ConfigParameters>
   void op_(FunctionSchema&& schema, ConfigParameters&&... configParameters) {
@@ -208,6 +213,8 @@ private:
   void checkSchemaAndRegisterOp_(const std::string& schemaOrName, detail::KernelRegistrationConfig&& config);
 
   void registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config);
+
+  void checkSchemaAndRegisterAutogradWrapper_(const std::string &schemaOrName, KernelFunctionWrapper* wrapper);
 
   class OperatorRegistrar;
 
