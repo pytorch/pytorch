@@ -1,10 +1,6 @@
 #pragma once
 #include <ATen/ATen.h>
 
-#include <atomic>
-#include <cstddef>
-#include <exception>
-
 namespace at {
 namespace internal {
 // This parameter is heuristically chosen to determine the minimum number of

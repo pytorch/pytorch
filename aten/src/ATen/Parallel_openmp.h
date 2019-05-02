@@ -2,7 +2,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 
-#include <atomic>
 #include <cstddef>
 #include <exception>
 
