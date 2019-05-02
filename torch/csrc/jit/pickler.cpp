@@ -513,7 +513,6 @@ OpCode Unpickler::readInstruction() {
       auto setitem_data = stack_.back().ivalue();
       stack_.pop_back();
 
-
       auto class_name =
         static_cast<PicklerClass>(uint8_t(stack_.back().ivalue().toInt()));
       stack_.pop_back();
@@ -546,21 +545,22 @@ OpCode Unpickler::readInstruction() {
         case PicklerClass::INTLIST:
           stack_.emplace_back(data->elements().at(0).toIntListRef());
           break;
-        case PicklerClass::OBJECT: {
-          auto data = setitem_data.toTuple();
-          auto class_type =
-              at::ClassType::get(data->elements().at(0).toStringRef());
-          auto num_slots = data->elements().at(1).toInt();
-
-          AT_CHECK(
-              class_type != nullptr,
-              "Unpickler could not find class '",
-              setitem_data.toStringRef(),
-              "'");
-          stack_.emplace_back(
-              c10::ivalue::Object::create(class_type, num_slots));
+        // case PicklerClass::OBJECT: {
+        //   auto data = setitem_data.toTuple();
+        //
+        //   auto class_type =
+        //       at::ClassType::get(data->elements().at(0).toStringRef());
+        //   auto num_slots = data->elements().at(1).toInt();
+        //
+        //   AT_CHECK(
+        //       class_type != nullptr,
+        //       "Unpickler could not find class '",
+        //       setitem_data.toStringRef(),
+        //       "'");
+        //   stack_.emplace_back(
+        //       c10::ivalue::Object::create(class_type, num_slots));
           break;
-        }
+        // }
         default:
           AT_ERROR("Unknown pickler class id");
       }
