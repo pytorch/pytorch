@@ -2353,6 +2353,7 @@ graph(%a, %b, %c, %d):
 
                 return a + b
 
+            orig = str(addmm.graph)
             self.run_pass('decompose_ops', addmm.graph)
             self.assertTrue(orig == str(addmm.graph))
 
@@ -2396,8 +2397,18 @@ graph(%a, %b, %c, %d):
             self.assertEqual(out_ref, out_test)
             FileCheck().check_not("linear").check("matmul").check("add_").run(str(linear_matmul.graph))
 
+        def doesnt_decompose():
+            @torch.jit.script
+            def linear(input, weight, bias):
+                return F.linear(input, weight, bias)
+
+            orig = str(linear.graph)
+            self.run_pass('decompose_ops', linear.graph)
+            self.assertTrue(orig == str(linear.graph))
+
         decompose_to_addmm()
         decompose_to_matmul()
+        doesnt_decompose()
 
     def test_index_put(self):
         ten = torch.zeros(3, 3)
