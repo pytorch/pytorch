@@ -240,10 +240,7 @@ void Pickler::pushGlobal(const std::string& name_temp) {
   if (memo_entry == memo_map_.end()) {
     push<OpCode>(OpCode::GLOBAL);
     pushString(memoized_strings_.back());
-    // pushString(name);
-    // std::string* name_ptr = &name;
     pushMemoization(&(memoized_strings_.back()));
-    // pushMemoization(reinterpret_cast<const void*>(name_ptr));
   } else {
     pushBinGet(memo_entry->second);
   }
