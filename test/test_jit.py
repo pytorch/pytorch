@@ -14599,6 +14599,24 @@ class TestClassType(JitTestCase):
                 self.x = x
                 self.y = y
 
+    def test_class_constructs_itself(self):
+        @torch.jit.script
+        class LSTMStateStack:
+            def __init__(self, num_layers: int, hidden_size: int):
+                self.num_layers = num_layers
+                self.hidden_size = hidden_size
+                self.last_state = (
+                    torch.zeros(num_layers, 1, hidden_size),
+                    torch.zeros(num_layers, 1, hidden_size),
+                )
+                self.stack = [(self.last_state[0][-1], self.last_state[0][-1])]
+
+            def copy(self):
+                # should be able to construct a class inside its own methods
+                other = LSTMStateStack(self.num_layers, self.hidden_size)
+                other.stack = list(self.stack)
+                return other
+
 
 class TestLogging(JitTestCase):
     def test_bump_numeric_counter(self):
