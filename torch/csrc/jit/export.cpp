@@ -668,7 +668,7 @@ void ScriptModuleSerializer::convertModel(
 
 
   // This may write some Tensor attributes to the tensor_table_ or Class
-  // attributs to the class_table_
+  // attributes to the class_table_
   writeAttributeTable();
 
   writeTensorTable(model_def);

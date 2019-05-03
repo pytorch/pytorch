@@ -819,7 +819,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         name = _qualified_name(obj)
         ast = get_jit_class_def(obj, name)
         _jit_script_class_compile(ast, _rcb)
-        class_type = _jit_script_class_compile(mod, ast, _rcb)
+        cu, class_type = _jit_script_class_compile(mod, ast, _rcb)
         _jit_internal.add_script_class(obj, obj.__name__, class_type)
         return obj
     else:
