@@ -233,10 +233,7 @@ static void upsample_bicubic2d_out_cuda_template(
                 odata);
       });
 
-  AT_CHECK(
-      cudaGetLastError() == cudaSuccess,
-      "Failed with error code ",
-      cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 static void upsample_bicubic2d_backward_out_cuda_template(
@@ -309,10 +306,7 @@ static void upsample_bicubic2d_backward_out_cuda_template(
                 num_kernels, rheight, rwidth, align_corners, idata, odata);
       });
 
-  AT_CHECK(
-      cudaGetLastError() == cudaSuccess,
-      "Failed with error code ",
-      cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace
