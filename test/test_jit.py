@@ -14602,7 +14602,8 @@ class TestClassType(JitTestCase):
     def test_class_constructs_itself(self):
         @torch.jit.script
         class LSTMStateStack:
-            def __init__(self, num_layers: int, hidden_size: int):
+            def __init__(self, num_layers, hidden_size):
+                # type: (int, int) -> None
                 self.num_layers = num_layers
                 self.hidden_size = hidden_size
                 self.last_state = (
