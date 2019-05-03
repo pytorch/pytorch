@@ -759,22 +759,22 @@ class MultiheadAttention(Module):
     Shape:
         - Inputs:
 
-        - query: :math:`(L, N, E)` where L is the target length, N is the batch size, E is 
+        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is 
           the embedding dimension.
-        - key: :math:`(S, N, E)`, where S is the sequence length, N is the batch size, E is 
-          the  embedding dimension.
-        - value: :math:`(S, N, E)` where S is the sequence length, N is the batch size, E is 
+        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is 
           the embedding dimension.
-        - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the sequence length.
+        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is 
+          the embedding dimension.
+        - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
         - incremental_state: a dictionary used for storing states.
-        - attn_mask: :math:`(L, L)` where L is the target length.
+        - attn_mask: :math:`(L, L)` where L is the target sequence length.
 
         - Outputs:
 
-        - attn_output: :math:`(L, N, E)` where L is the target length, N is the batch size, 
+        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, 
           E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
-          L is the target length, S is the sequence length.
+          L is the target sequence length, S is the source sequence length.
         """
         qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
         kv_same = key.data_ptr() == value.data_ptr()
