@@ -690,7 +690,7 @@ class MultiheadAttention(Module):
 
     Args:
         embed_dim: total dimension of the model.
-        num_heads: parallel attention layers, or heads.
+        num_heads: parallel attention heads.
         add_bias_kv: add bias to the key and value sequences at dim=0.
         add_zero_attn: add a new batch of zeros to the key and 
                        value sequences at dim=1.
@@ -759,22 +759,22 @@ class MultiheadAttention(Module):
     Shape:
         - Inputs:
 
-        - query: :math:`(L, N, E)` where L is target length, N is batch size, E is 
-          embedding dimension.
-        - key: :math:`(S, N, E)`, ByteTensor, where S is sequence length, N is batch size, E is 
-          embedding dimension.
-        - value: :math:`(S, N, E)` where S is sequence length, N is batch size, E is 
-          embedding dimension.
-        - key_padding_mask: :math:`(N, S)` where N is batch size, S is sequence length.
+        - query: :math:`(L, N, E)` where L is the target length, N is the batch size, E is 
+          the embedding dimension.
+        - key: :math:`(S, N, E)`, where S is the sequence length, N is the batch size, E is 
+          the  embedding dimension.
+        - value: :math:`(S, N, E)` where S is the sequence length, N is the batch size, E is 
+          the embedding dimension.
+        - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the sequence length.
         - incremental_state: a dictionary used for storing states.
-        - attn_mask: :math:`(L, L)` where L is target length.
+        - attn_mask: :math:`(L, L)` where L is the target length.
 
         - Outputs:
 
-        - attn_output: :math:`(L, N, E)` where L is target length, N is batch size, 
-          E is embedding dimension.
-        - attn_output_weights: :math:`(N, L, S)` where N is batch size,
-          L is target length, S is sequence length.
+        - attn_output: :math:`(L, N, E)` where L is the target length, N is the batch size, 
+          E is the embedding dimension.
+        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
+          L is the target length, S is the sequence length.
         """
         qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
         kv_same = key.data_ptr() == value.data_ptr()
