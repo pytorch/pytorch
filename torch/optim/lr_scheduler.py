@@ -23,6 +23,7 @@ class _LRScheduler(object):
                     raise KeyError("param 'initial_lr' is not specified "
                                    "in param_groups[{}] when resuming an optimizer".format(i))
         self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
+        self.last_epoch = last_epoch
         self.step(last_epoch)
 
     def state_dict(self):
