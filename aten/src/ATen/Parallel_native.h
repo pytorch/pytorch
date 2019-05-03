@@ -17,10 +17,14 @@ namespace internal {
 // template parallel primitives (parallel_for, parallel_reduce)
 CAFFE2_API TaskThreadPoolBase& _get_intraop_pool();
 
-// internal utility function to force master thread to return
-// correct in_parallel_region (true) when executing parallel
-// primitives
-CAFFE2_API void _force_in_parallel_region(bool);
+// internal utility function to mark master thread as in parallel
+// region when executing parallel primitives
+CAFFE2_API void _set_in_parallel_region(bool);
+
+// Simulate OMP's omp_get_thread_num() by force-setting thread local
+// task id as thread number when executing parallel primitives
+CAFFE2_API void _set_thread_num(size_t thread_num);
+CAFFE2_API void _unset_thread_num();
 }
 
 template <class F>
@@ -44,10 +48,12 @@ void parallel_for(
     // make sure each task is at least grain_size size
     chunk_size = std::max((size_t)grain_size, chunk_size);
     size_t num_tasks = divup((end - begin), chunk_size);
+
     std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
     std::exception_ptr eptr;
 
     auto task = [&](int64_t task_id, int64_t local_start, int64_t local_end) {
+      internal::_set_thread_num(task_id);
       try {
         f(local_start, local_end);
       } catch (...) {
@@ -55,6 +61,7 @@ void parallel_for(
           eptr = std::current_exception();
         }
       }
+      internal::_unset_thread_num();
     };
 
     std::vector<ivalue::Future> futures(num_tasks);
@@ -74,9 +81,9 @@ void parallel_for(
     }
 
     int64_t first_task_end = std::min(end, (int64_t)(chunk_size + begin));
-    internal::_force_in_parallel_region(true);
+    internal::_set_in_parallel_region(true);
     task(0, begin, first_task_end);
-    internal::_force_in_parallel_region(false);
+    internal::_set_in_parallel_region(false);
 
     // wait for all tasks to finish
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
@@ -118,6 +125,7 @@ scalar_t parallel_reduce(
     std::exception_ptr eptr;
 
     auto task = [&](int64_t task_id, int64_t local_start, int64_t local_end) {
+      internal::_set_thread_num(task_id);
       try {
         results_data[task_id] = f(local_start, local_end, ident);
       } catch (...) {
@@ -125,6 +133,7 @@ scalar_t parallel_reduce(
           eptr = std::current_exception();
         }
       }
+      internal::_unset_thread_num();
     };
 
     std::vector<ivalue::Future> futures(num_tasks);
@@ -144,7 +153,9 @@ scalar_t parallel_reduce(
     }
 
     int64_t first_task_end = std::min(end, (int64_t)(chunk_size + begin));
+    internal::_set_in_parallel_region(true);
     task(0, begin, first_task_end);
+    internal::_set_in_parallel_region(false);
 
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       futures[task_id].wait();

@@ -17,9 +17,12 @@ namespace {
 // Number of threads set by the user
 std::atomic<int> num_intraop_threads{-1};
 
-// used with _force_in_parallel_region to mark master thread
+// used with _set_in_parallel_region to mark master thread
 // as in parallel region while executing parallel primitives
 thread_local bool in_parallel_region_ = false;
+
+// thread number (task_id) set by parallel primitive
+thread_local int thread_num_ = -1;
 } // namespace
 
 namespace internal {
@@ -28,14 +31,23 @@ TaskThreadPoolBase& _get_intraop_pool() {
       ThreadPoolRegistry()->Create(
           "C10",
           /* device_id */ 0,
-          /* pool_size */ num_intraop_threads.exchange(-2),
+          /* pool_size */ check_and_get_pool_size(num_intraop_threads.exchange(-2)),
           /* create_new */ true); // create a separate thread pool for intra-op
   return *pool;
 }
 
-void _force_in_parallel_region(bool force) {
+void _set_in_parallel_region(bool force) {
   in_parallel_region_ = force;
 }
+
+void _set_thread_num(size_t thread_num) {
+  thread_num_ = thread_num;
+}
+
+void _unset_thread_num() {
+  thread_num_ = -1;
+}
+
 } // namespace internal
 
 //TODO: use OMP and MKL env. vars as default values
@@ -78,6 +90,10 @@ size_t get_num_threads() {
 }
 
 int get_thread_num() {
+  if (thread_num_ >= 0) {
+    return thread_num_;
+  }
+
   auto thread_num = internal::_get_intraop_pool().threadNum();
   // master thread has number zero
   if (thread_num < 0) {

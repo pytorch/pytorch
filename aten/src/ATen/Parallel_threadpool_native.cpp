@@ -24,7 +24,7 @@ TaskThreadPoolBase& get_pool() {
       ThreadPoolRegistry()->Create(
           "C10",
           /* device_id */ 0,
-          /* pool_size */ num_interop_threads.exchange(-2),
+          /* pool_size */ check_and_get_pool_size(num_interop_threads.exchange(-2)),
           /* create_new */ false);
   return *pool;
 }
