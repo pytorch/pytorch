@@ -853,6 +853,14 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("_register_module", &Module::register_module)
       .def("_register_buffer", &Module::register_buffer)
+      .def(
+          "_set_attribute",
+          [](Module& self, const std::string& name, py::object value) {
+            auto attr = self.find_attribute(name);
+            AT_CHECK(attr != nullptr, "Could not find attribute '", name, "'");
+            auto ivalue = toIValue(value, attr->type());
+            self.set_attribute(name, ivalue);
+          })
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
       .def("_get_buffer", &Module::get_buffer)

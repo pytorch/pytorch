@@ -244,6 +244,11 @@ struct TORCH_API Module {
     parameter_slot(name).setValue(std::move(v));
   }
 
+  void set_attribute(const std::string& name, IValue v) {
+    attributes_.at(get_offset(name, EntityType::ATTRIBUTE))
+        .setValue(std::move(v));
+  }
+
   autograd::Variable get_parameter(const std::string& name) const {
     return autograd::as_variable_ref(parameter_slot(name).value().toTensor());
   }

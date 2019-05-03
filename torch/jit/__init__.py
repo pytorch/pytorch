@@ -1138,9 +1138,9 @@ if _enabled:
                     # Compile weak script module
                     value = _make_strong(value)
                 if attr == 'training':
-                    if self._has_buffer('training'):
+                    if self._has_attribute('training'):
                         self.__dict__['training'] = value
-                        self._get_buffer('training').fill_(int(value))
+                        self._set_attribute('training', value)
                         return
                 if isinstance(value, Attribute):
                     the_type = torch.jit.annotations.ann_to_type(value.type)
