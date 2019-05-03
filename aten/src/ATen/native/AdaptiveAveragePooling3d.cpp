@@ -296,18 +296,18 @@ Tensor adaptive_avg_pool3d_cpu(
 
 Tensor& adaptive_avg_pool3d_backward_out_cpu(
     Tensor& gradInput,
-    const Tensor& gradOutput,
+    const Tensor& gradOutput_,
     const Tensor& input) {
   gradInput.resize_as_(input);
-  adaptive_avg_pool3d_backward_out_cpu_template(gradInput, gradOutput, input);
+  adaptive_avg_pool3d_backward_out_cpu_template(gradInput, gradOutput_, input);
   return gradInput;
 }
 
 Tensor adaptive_avg_pool3d_backward_cpu(
-    const Tensor& gradOutput,
+    const Tensor& gradOutput_,
     const Tensor& input) {
   auto gradInput = at::zeros_like(input);
-  adaptive_avg_pool3d_backward_out_cpu_template(gradInput, gradOutput, input);
+  adaptive_avg_pool3d_backward_out_cpu_template(gradInput, gradOutput_, input);
   return gradInput;
 }
 

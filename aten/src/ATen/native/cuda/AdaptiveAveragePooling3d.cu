@@ -1,11 +1,12 @@
-#include <THC/THCGeneral.h>
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
+#include <THC/THCAtomics.cuh>  // for atomicAdd
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -36,9 +37,9 @@ __device__ inline int end_index(int a, int b, int c) {
  *    gridDim.y blocks work together on a single 2D output plane specified by
  *    (blockIdx.x + offsetZ).
  */
-template <typename T>
+template <typename scalar_t>
 __global__ void adaptiveaveragepool(
-    T* input, T* output,
+    scalar_t *input, scalar_t *output,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW,
     int64_t istrideD,
@@ -66,9 +67,9 @@ __global__ void adaptiveaveragepool(
   int kT = iendT - istartT;
 
   // input offset by slice/feature and earliest relevant frame/time
-  T* input_dt = input + d*istrideD + istartT*istrideT;
+  scalar_t *input_dt = input + d*istrideD + istartT*istrideT;
   // output offset by slice/feature and frame/time
-  T* output_dt = output + o_plane*osizeH*osizeW;
+  scalar_t *output_dt = output + o_plane*osizeH*osizeW;
 
   // For all output pixels...
   for (oh = ostartH; oh < oendH; oh += ostepH) {
@@ -82,15 +83,15 @@ __global__ void adaptiveaveragepool(
       int kW = iendW - istartW;
 
       // Compute the average pooling from corresponding input pixels
-      T *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
-      T *ptr_output = output_dt + oh*osizeW + ow;
-      T sum = ScalarConvert<int, T>::to(0);
+      scalar_t *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
+      scalar_t *ptr_output = output_dt + oh*osizeW + ow;
+      scalar_t sum = ScalarConvert<int, scalar_t>::to(0);
 
       int it, ih, iw;
       for (it = 0; it < kT; ++it) {
         for (ih = 0; ih < kH; ++ih) {
           for (iw = 0; iw < kW; ++iw) {
-            T val = ptr_input[ih*istrideH + iw*istrideW];
+            scalar_t val = ptr_input[ih*istrideH + iw*istrideW];
             sum += val;
           }
         }
@@ -104,7 +105,7 @@ __global__ void adaptiveaveragepool(
 
 template <typename scalar_t>
 void adaptiveaveragepool_loop(
-    scalar_t* input_data, scalar_t* output_data,
+    scalar_t *input_data, scalar_t *output_data,
     int64_t totalZ,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW,
@@ -125,7 +126,7 @@ void adaptiveaveragepool_loop(
 
     totalZ -= 65535;
     offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -136,9 +137,9 @@ void adaptiveaveragepool_loop(
  *    gridDim.y blocks work together on a single 2D output plane specified by
  *    (blockIdx.x + offsetZ).
  */
-template <typename T>
+template <typename scalar_t>
 __global__ void adaptiveaveragegradinput(
-    T* gradInput, T* gradOutput,
+    scalar_t *gradInput, scalar_t *gradOutput,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW,
     int64_t offsetZ)
@@ -164,9 +165,9 @@ __global__ void adaptiveaveragegradinput(
   int oendT = end_index(it, isizeT, osizeT);
 
   // gradInput offset by slice/feature and frame/time.
-  T *gradInput_dt = gradInput + i_plane*isizeH*isizeW;
+  scalar_t *gradInput_dt = gradInput + i_plane*isizeH*isizeW;
   // gradOutput offset by slice/feature and earliest relevant frame/time
-  T *gradOutput_dt = gradOutput + (d*osizeT + ostartT)*osizeH*osizeW;
+  scalar_t *gradOutput_dt = gradOutput + (d*osizeT + ostartT)*osizeH*osizeW;
 
   // For all input pixels...
   for (ih = istartH; ih < iendH; ih += istepH) {
@@ -178,8 +179,8 @@ __global__ void adaptiveaveragegradinput(
       int oendW = end_index(iw, isizeW, osizeW);
 
       // Compute the gradients from corresponding output pixels
-      T *ptr_gradInput = gradInput_dt + ih*isizeW + iw;
-      T *ptr_gradOutput = gradOutput_dt;
+      scalar_t *ptr_gradInput = gradInput_dt + ih*isizeW + iw;
+      scalar_t *ptr_gradOutput = gradOutput_dt;
 
       // for all relevant output pixels
       int ot, oh, ow;
@@ -189,7 +190,7 @@ __global__ void adaptiveaveragegradinput(
           int kH = end_index(oh, osizeH, isizeH) - start_index(oh, osizeH, isizeH);
           for (ow = ostartW; ow < oendW; ++ow) {
             int kW = end_index(ow, osizeW, isizeW) - start_index(ow, osizeW, isizeW);
-            T grad_delta = ptr_gradOutput[oh*isizeW + ow] / kW / kH / kT;
+            scalar_t grad_delta = ptr_gradOutput[oh*isizeW + ow] / kW / kH / kT;
             *ptr_gradInput += grad_delta;
           }
         }
@@ -201,7 +202,7 @@ __global__ void adaptiveaveragegradinput(
 
 template <typename scalar_t>
 void adaptiveaveragegradinput_loop(
-    scalar_t* gradInput_data, scalar_t* gradOutput_data,
+    scalar_t *gradInput_data, scalar_t *gradOutput_data,
     int64_t totalZ,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW) {
@@ -219,7 +220,7 @@ void adaptiveaveragegradinput_loop(
 
     totalZ -= 65535;
     offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -233,9 +234,9 @@ void adaptiveaveragegradinput_loop(
  *    (uses atomic add)
  *
  */
-template <typename T>
+template <typename scalar_t>
 __global__ void atomicadaptiveaveragegradinput(
-    T* gradInput, T* gradOutput,
+    scalar_t *gradInput, scalar_t *gradOutput,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW,
     int64_t offsetZ)
@@ -262,9 +263,9 @@ __global__ void atomicadaptiveaveragegradinput(
   int kT = iendT - istartT;
 
   // gradInput offset by slice/feature and earliest relevant frame/time
-  T* gradInput_nt = gradInput + (d*isizeT + istartT)*isizeH*isizeW;
+  scalar_t *gradInput_nt = gradInput + (d*isizeT + istartT)*isizeH*isizeW;
   // gradOutput offset by slice/feature and frame/time
-  T* gradOutput_nt = gradOutput + o_plane*osizeH*osizeW;
+  scalar_t *gradOutput_nt = gradOutput + o_plane*osizeH*osizeW;
 
   // For all output pixels...
   for (oh = ostartH; oh < oendH; oh += ostepH) {
@@ -278,9 +279,9 @@ __global__ void atomicadaptiveaveragegradinput(
       int kW = iendW - istartW;
 
       // Compute the gradients from corresponding input pixels
-      T *ptr_gradInput = gradInput_nt + istartH*isizeW + istartW;
-      T *ptr_gradOutput = gradOutput_nt + oh*osizeW + ow;
-      T grad_delta = *ptr_gradOutput / kT / kH / kW;
+      scalar_t *ptr_gradInput = gradInput_nt + istartH*isizeW + istartW;
+      scalar_t *ptr_gradOutput = gradOutput_nt + oh*osizeW + ow;
+      scalar_t grad_delta = *ptr_gradOutput / kT / kH / kW;
 
       int it, ih, iw;
       for (it = 0; it < kT; ++it) {
@@ -314,7 +315,7 @@ void atomicadaptiveaveragegradinput_loop(
 
     totalZ -= 65535;
     offsetZ += 65535;
-    THCudaCheck(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -501,18 +502,18 @@ Tensor adaptive_avg_pool3d_cuda(
 
 Tensor& adaptive_avg_pool3d_backward_out_cuda(
     Tensor& gradInput,
-    const Tensor& gradOutput,
+    const Tensor& gradOutput_,
     const Tensor& input) {
   gradInput.resize_as_(input);
-  adaptive_avg_pool3d_backward_out_cuda_template(gradInput, gradOutput, input);
+  adaptive_avg_pool3d_backward_out_cuda_template(gradInput, gradOutput_, input);
   return gradInput;
 }
 
 Tensor adaptive_avg_pool3d_backward_cuda(
-    const Tensor& gradOutput,
+    const Tensor& gradOutput_,
     const Tensor& input) {
   auto gradInput = at::zeros_like(input);
-  adaptive_avg_pool3d_backward_out_cuda_template(gradInput, gradOutput, input);
+  adaptive_avg_pool3d_backward_out_cuda_template(gradInput, gradOutput_, input);
   return gradInput;
 }
 
