@@ -8,18 +8,18 @@ namespace impl {
 
 // This is a private class used inside the Dispatcher to represent an operator
 // and it's dispatch table. This is not part of the public API.
-class Operator final {
+class OperatorEntry final {
 private:
   struct Kernels final {
     DispatchTable dispatchTable;
   };
 public:
-  explicit Operator(FunctionSchema&& schema);
+  explicit OperatorEntry(FunctionSchema&& schema);
 
-  Operator(const Operator&) = delete;
-  Operator(Operator&&) noexcept = delete;
-  Operator& operator=(const Operator&) = delete;
-  Operator& operator=(Operator&&) noexcept = delete;
+  OperatorEntry(const OperatorEntry&) = delete;
+  OperatorEntry(OperatorEntry&&) noexcept = delete;
+  OperatorEntry& operator=(const OperatorEntry&) = delete;
+  OperatorEntry& operator=(OperatorEntry&&) noexcept = delete;
 
   const FunctionSchema& schema() const {
     return schema_;
