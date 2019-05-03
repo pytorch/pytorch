@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/utils/ParamUtils.h>
 
 namespace at { namespace native {
 
@@ -33,6 +34,41 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   return mkldnn_tensor;
 }
 
+// Mkldnn tensor has special non-public format for conv2d weights
+// (dense_to_mkldnn only converts dense tensor to mkldnn tensor with
+// public format). Ideep conv kernel will do implicit reorder if the
+// weight is not already in this optimized format. By the time I'm
+// writing this note, we are seeing ~20% perf cost of doing the
+// on-the-fly reorder.
+Tensor mkldnn_reorder_conv2d_weight(
+    const Tensor& self,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+
+  auto stride_vec = expand_param_if_needed(stride, "stride", 2);
+  auto padding_vec = expand_param_if_needed(padding, "padding", 2);
+  auto dilation_vec = expand_param_if_needed(dilation, "dilation", 2);
+
+  ideep::tensor w = itensor_from_mkldnn(self).as_weights();
+  w.make_group(groups);
+  ideep::tensor::descriptor desc =
+      ideep::convolution_forward::expected_weights_descriptor(
+          w.get_dims(),
+          w.get_data_type(),
+          {stride_vec.cbegin(), stride_vec.cend()},
+          {padding_vec.cbegin(), padding_vec.cend()},
+          {padding_vec.cbegin(), padding_vec.cend()},
+          {dilation_vec.cbegin(), dilation_vec.cend()},
+          groups,
+          ideep::algorithm::convolution_direct);
+  ideep::tensor result(desc);
+  ideep::reorder::compute(w, result);
+
+  return new_with_itensor_mkldnn(std::move(result), self.options());
+}
+
 #else
 
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
@@ -41,6 +77,15 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
 
 Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   AT_ERROR("MKL-DNN build is disabled");
+}
+
+Tensor mkldnn_reorder_conv2d_weight(
+    const Tensor& self,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+  AT_ERROR("mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()

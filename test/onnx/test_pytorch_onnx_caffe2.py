@@ -1047,13 +1047,29 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_unsqueeze(self):
         shape = (3, 4, 5)
-        for dim in range(len(shape) + 1):
+        # test negative dim as well.
+        for dim in range(-len(shape) - 1, len(shape) + 1):
+
             class MyModel(torch.nn.Module):
                 def __init__(self):
                     super(MyModel, self).__init__()
 
                 def forward(self, x):
                     return x.unsqueeze(dim)
+            x = torch.randn(*shape)
+            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, atol=1e-7)
+
+    def test_squeeze(self):
+        shape = (1, 1, 1)
+        # test negative dim as well
+        for dim in range(-len(shape), len(shape)):
+
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super(MyModel, self).__init__()
+
+                def forward(self, x):
+                    return x.squeeze(dim)
             x = torch.randn(*shape)
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, atol=1e-7)
 
@@ -1248,6 +1264,22 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(FlattenModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_max(self):
+        class MaxModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.max(input, dim=1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(MaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_min(self):
+        class MinModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.min(input, dim=1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(MinModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_argmax(self):
         class ArgmaxModel(torch.nn.Module):
@@ -1481,6 +1513,9 @@ class TestCaffe2Backend(unittest.TestCase):
                     soft_nms_sigma=0.5,
                     soft_nms_min_score_thres=0.001,
                     rotated=rotated,
+                    cls_agnostic_bbox_reg=False,
+                    input_boxes_include_bg_cls=True,
+                    output_classes_include_bg_cls=True,
                 )
                 return a, b, c, d
 
@@ -1526,6 +1561,40 @@ class TestCaffe2Backend(unittest.TestCase):
 
         self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3)
 
+    def test_floor(self):
+        class FloorModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.floor(input)
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_model_test(FloorModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_ceil(self):
+        class CeilModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.ceil(input)
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_model_test(CeilModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_log2(self):
+        class Log2Model(torch.nn.Module):
+            def forward(self, input):
+                return torch.log2(input)
+
+        x = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
+        self.run_model_test(Log2Model(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_prim_shape(self):
+        x = torch.randn(4, 5, requires_grad=True)
+        @torch.jit.script
+        def view_by_prim_shape(x):
+            return x.view(x.shape)
+
+        class PrimShapeModel(torch.nn.Module):
+            def forward(self, input):
+                return view_by_prim_shape(input)
+        self.run_model_test(PrimShapeModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
 # a bit of metaprogramming to set up all the rnn tests
 
