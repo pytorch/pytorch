@@ -42,9 +42,23 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # TODO: move this to Docker
   pip install -q hypothesis --user
 
+  # TODO: move this to Docker
+  PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
+  echo $PYTHON_VERSION
+  if [[ $PYTHON_VERSION == "2" ]]; then
+    pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl --user
+  else
+    pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl --user
+  fi
+
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
   pip install mypy --user || true
+fi
+
+# faulthandler become built-in since 3.3
+if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
+  pip install -q faulthandler --user
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems

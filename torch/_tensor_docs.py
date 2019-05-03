@@ -527,6 +527,13 @@ cholesky_solve(input2, upper=False) -> Tensor
 See :func:`torch.cholesky_solve`
 """)
 
+add_docstr_all('cholesky_inverse',
+               r"""
+cholesky_inverse(upper=False) -> Tensor
+
+See :func:`torch.cholesky_inverse`
+""")
+
 add_docstr_all('clamp',
                r"""
 clamp(min, max) -> Tensor
@@ -1721,13 +1728,6 @@ Example:
     torch.Size([5, 2, 3])
 """)
 
-add_docstr_all('potri',
-               r"""
-potri(upper=True) -> Tensor
-
-See :func:`torch.potri`
-""")
-
 add_docstr_all('pow',
                r"""
 pow(exponent) -> Tensor
@@ -2496,6 +2496,13 @@ add_docstr_all('byte',
 byte() -> Tensor
 
 ``self.byte()`` is equivalent to ``self.to(torch.uint8)``. See :func:`to`.
+""")
+
+add_docstr_all('bool',
+               r"""
+bool() -> Tensor
+
+``self.bool()`` is equivalent to ``self.to(torch.bool)``. See :func:`to`.
 """)
 
 add_docstr_all('char',

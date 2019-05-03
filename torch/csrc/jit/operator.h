@@ -5,6 +5,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/function_schema_parser.h>
 #include <ATen/core/stack.h>
 
 #include <ATen/ATen.h>
@@ -22,8 +23,6 @@ namespace torch {
 namespace jit {
 
 using ::c10::FunctionSchema;
-
-TORCH_API FunctionSchema parseSchema(const std::string& schema);
 
 using OperationCreator = std::function<Operation(const Node*)>;
 

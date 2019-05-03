@@ -41,15 +41,15 @@ static void upsample_bilinear2d_out_frame(
     }
     return;
   }
-  const scalar_t rheight = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t rheight = area_pixel_compute_scale<scalar_t>(
       input_height, output_height, align_corners);
 
-  const scalar_t rwidth = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
       input_width, output_width, align_corners);
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {
-    const scalar_t h1r = linear_upsample_compute_source_index<scalar_t>(
-        rheight, h2, align_corners);
+    const scalar_t h1r = area_pixel_compute_source_index<scalar_t>(
+        rheight, h2, align_corners, /*cubic=*/false);
 
     const int64_t h1 = h1r;
     const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
@@ -58,8 +58,8 @@ static void upsample_bilinear2d_out_frame(
     const scalar_t h0lambda = static_cast<scalar_t>(1.) - h1lambda;
 
     for (int64_t w2 = 0; w2 < output_width; ++w2) {
-      const scalar_t w1r = linear_upsample_compute_source_index<scalar_t>(
-          rwidth, w2, align_corners);
+      const scalar_t w1r = area_pixel_compute_source_index<scalar_t>(
+          rwidth, w2, align_corners, /*cubic=*/false);
 
       const int64_t w1 = w1r;
       const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
@@ -113,14 +113,14 @@ static void upsample_bilinear2d_backward_out_frame(
     return;
   }
 
-  const scalar_t rheight = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t rheight = area_pixel_compute_scale<scalar_t>(
       input_height, output_height, align_corners);
-  const scalar_t rwidth = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
       input_width, output_width, align_corners);
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {
-    const scalar_t h1r = linear_upsample_compute_source_index<scalar_t>(
-        rheight, h2, align_corners);
+    const scalar_t h1r = area_pixel_compute_source_index<scalar_t>(
+        rheight, h2, align_corners, /*cubic=*/false);
 
     const int64_t h1 = h1r;
     const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
@@ -129,8 +129,8 @@ static void upsample_bilinear2d_backward_out_frame(
     const scalar_t h0lambda = static_cast<scalar_t>(1.) - h1lambda;
 
     for (int64_t w2 = 0; w2 < output_width; ++w2) {
-      const scalar_t w1r = linear_upsample_compute_source_index<scalar_t>(
-          rwidth, w2, align_corners);
+      const scalar_t w1r = area_pixel_compute_source_index<scalar_t>(
+          rwidth, w2, align_corners, /*cubic=*/false);
 
       const int64_t w1 = w1r;
       const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;

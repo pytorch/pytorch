@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/Type.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/Scalar.h>
@@ -220,7 +221,6 @@ class CAFFE2_API Tensor {
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
-  Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor toType(const DeprecatedTypeProperties & t, bool non_blocking=false) const;
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
@@ -249,6 +249,9 @@ class CAFFE2_API Tensor {
 
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
+
+  /// Returns if a `Tensor` is mkldnn tensor.
+  bool is_mkldnn() const;
 
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
