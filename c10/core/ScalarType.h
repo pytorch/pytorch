@@ -234,6 +234,23 @@ static inline bool isQIntType(ScalarType t) {
   return t == ScalarType:: QInt8 || t == ScalarType::QUInt8 || t == ScalarType::QInt32;
 }
 
+static inline ScalarType toUnderlying(ScalarType t) {
+  switch (t) {
+    case ScalarType::QUInt8:
+      return ScalarType::Byte;
+    case ScalarType::QInt8:
+      return ScalarType::Char;
+    case ScalarType::QInt32:
+      return ScalarType::Int;
+    default:
+      return t;
+  }
+}
+
+static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
+  return type == toUnderlying(qtype);
+}
+
 static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   // This is generated according to NumPy's promote_types
   constexpr auto u1 = ScalarType::Byte;
