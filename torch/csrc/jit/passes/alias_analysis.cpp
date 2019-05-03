@@ -20,7 +20,7 @@ bool AliasDb::shouldAnnotate(const TypePtr& type) {
 // We only need to annotate values that either are mutable or could contain
 // mutable types.
 bool AliasDb::shouldAnnotate(const Value* v) {
-  return shouldAnnotate(v->type());
+  return !v->mustBeNone() && shouldAnnotate(v->type());
 }
 
 bool AliasDb::isContainerType(const TypePtr& type) {

@@ -452,6 +452,26 @@ void testAliasAnalysis() {
     AliasDb aliasDb(graph);
     ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
   }
+
+  // test none value does not alias anything
+  {
+    {
+      auto graph = std::make_shared<Graph>();
+      std::unordered_map<std::string, Value*> vmap;
+      script::parseIR(
+          R"IR(
+    graph():
+      %opt : Tensor? = prim::Constant()
+      %out : Tensor = prim::unchecked_unwrap_optional(%opt)
+      return (%opt, %out)
+      )IR",
+          &*graph,
+          vmap);
+
+      AliasDb aliasDb(graph);
+      AT_ASSERT(!aliasDb.mayAlias(vmap["opt"], vmap["out"]));
+    }
+  }
 }
 
 void testWriteTracking() {
