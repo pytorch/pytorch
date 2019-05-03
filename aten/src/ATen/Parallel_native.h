@@ -43,8 +43,7 @@ void parallel_for(
 
   if (((end - begin) >= grain_size) && !in_parallel_region()) {
     // choose number of tasks based on grain size and number of threads;
-    // plus one because of master thread
-    size_t chunk_size = divup((end - begin), get_num_threads() + 1);
+    size_t chunk_size = divup((end - begin), get_num_threads());
     // make sure each task is at least grain_size size
     chunk_size = std::max((size_t)grain_size, chunk_size);
     size_t num_tasks = divup((end - begin), chunk_size);
@@ -115,7 +114,7 @@ scalar_t parallel_reduce(
   }
 
   if (((end - begin) >= grain_size) && !in_parallel_region()) {
-    size_t chunk_size = divup((end - begin), get_num_threads() + 1);
+    size_t chunk_size = divup((end - begin), get_num_threads());
     chunk_size = std::max((size_t)grain_size, chunk_size);
     size_t num_tasks = divup((end - begin), chunk_size);
     std::vector<scalar_t> results(num_tasks);
