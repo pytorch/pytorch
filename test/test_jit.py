@@ -10059,21 +10059,11 @@ a")
         tuple_comp = torch.jit.script(tuple_index)
         FileCheck().check_count("TupleIndex", 2, exactly=True).run(str(tuple_comp.graph))
 
-        with self.assertRaisesRegex(RuntimeError, "tuple indices must be integer constants"):
+        with self.assertRaisesRegex(RuntimeError, "index must be an integer"):
             @torch.jit.script
-            def test_non_constant_input(a):
-                if bool(a):
-                    b = 1
-                else:
-                    b = 0
-                c = (0, 1)
-                return c[b]
-
-        def test_indexing_float():
-            c = (1, 2)
-            return c[0.1]
-        self.checkScriptRaisesRegex(test_indexing_float, (), Exception,
-                                    "tuple indices must")
+            def test_indexing_float():
+                c = (1, 2)
+                return c[0.1]
 
         def test_indexing_out_of_bounds_pos():
             c = (1, 2)

@@ -2743,56 +2743,55 @@ struct to_ir {
     return emitSlice(loc, sliceable, maybe_dim, slice_exp);
   }
 
-  int64_t getTupleIndexVal(
+  int64_t getAdjTupleIndex(
       const SourceRange& loc,
       const TupleTypePtr& tuple_type,
-      Value* idx_val,
+      int64_t input_index,
       bool allow_out_of_bounds) {
-    int64_t index;
-    at::optional<IValue> ivalue = toIValue(idx_val);
-    if (ivalue && ivalue->isInt()) {
-      index = ivalue->to<int64_t>();
-    } else {
-      throw ErrorReport(loc) << "tuple indices must be integer constants";
-    }
     // set index to be positive to simplify logic in runtime
-    int64_t adj_index = index;
+    int64_t adj_index = input_index;
     int64_t tuple_len = tuple_type->elements().size();
-    if (index < 0) {
-      adj_index = tuple_len + index;
+    if (input_index < 0) {
+      adj_index = tuple_len + input_index;
     }
     if (!allow_out_of_bounds && (adj_index >= tuple_len || adj_index < 0)) {
       throw ErrorReport(loc) << "Tuple index out of range. Tuple is length "
-                             << tuple_len << " and index is " << index;
+                             << tuple_len << " and index is " << input_index;
     }
     return adj_index;
   }
 
+  // When a list is marked const in a module, it gets converted to a tuple.
+  // The result is indexing into a Tuple which contains only one type
+  // is quite common. since indexing will likely be done in a for loop,
+  // we do not want to invoke the overhead of converting the tuple to a list
+  // each iter.
   Value* emitTupleIndex(
       const SourceRange& loc,
       Value* tuple_val,
       Value* idx_val) {
     auto tuple_typ = tuple_val->type()->cast<TupleType>();
     auto elems = tuple_typ->elements();
-    if (!toIValue(idx_val) && elems.size() > 0) {
-      auto list = tryConvertToType(
-          loc,
-          *graph,
-          ListType::create(elems[0]),
-          tuple_val,
-          /*allow_conversions*/ true);
-      if (list == tuple_val) {
+    TypePtr output_type;
+    auto idx = toIValue(idx_val);
+    if (!idx) {
+      if (elems.size() == 0 ||
+          !convertibleToList(tuple_typ, ListType::create(elems[0]))) {
         throw ErrorReport(loc)
             << "Cannot index into a " << tuple_typ->python_str()
             << " with a non-constant index because we cannot resolve the output type";
       }
-      return emitBuiltinCall(
-          loc, *graph, aten::select, c10::nullopt, {list, idx_val}, {}, true);
+      output_type = elems[0];
+    } else {
+      if (!idx->isInt()) {
+        throw ErrorReport(loc) << "tuple index must be an integer";
+      }
+      auto adj_index = getAdjTupleIndex(
+          loc, tuple_typ, idx->toInt(), /*allow_out_of_bounds*/ false);
+      output_type = elems[adj_index];
     }
-
-    auto adj_index = getTupleIndexVal(
-        loc, tuple_typ, idx_val, /*allow_out_of_bounds*/ false);
-    return graph->insertNode(graph->createTupleIndex(tuple_val, adj_index))
+    return graph
+        ->insertNode(graph->createTupleIndex(tuple_val, idx_val, output_type))
         ->output();
   }
 
@@ -2806,18 +2805,31 @@ struct to_ir {
         ->output();
   }
 
+  int64_t getSliceInd(Value* idx_val, const SourceRange& loc) {
+    at::optional<IValue> ivalue = toIValue(idx_val);
+    if (ivalue && ivalue->isInt()) {
+      return ivalue->to<int64_t>();
+    } else {
+      throw ErrorReport(loc) << "tuple slice indices must be integer constants";
+    }
+  }
+
   Value* emitTupleSlice(
       const SourceRange& loc,
       const NamedValue& tuple_val,
       const NamedValue& beg_val,
       const at::optional<NamedValue>& end_val) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
-    int64_t beg = getTupleIndexVal(
-        loc, tuple_type, beg_val.value(*graph), /*allow_out_of_bounds*/ true);
+    int64_t beg = getAdjTupleIndex(
+        loc,
+        tuple_type,
+        getSliceInd(beg_val.value(*graph), loc),
+        /*allow_out_of_bounds*/ true);
     int64_t end;
     int64_t tuple_len = tuple_type->elements().size();
     if (end_val) {
-      end = getTupleIndexVal(loc, tuple_type, end_val->value(*graph), true);
+      end = getAdjTupleIndex(
+          loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
     } else {
       end = tuple_len;
     }
@@ -2989,7 +3001,6 @@ void lambdaLiftFork(Node* fork_node) {
   fork_node->g_(attr::Subgraph, forked_graph);
   fork_node->eraseBlock(0);
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch

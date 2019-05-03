@@ -27,7 +27,8 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
       n->kind() != prim::TupleSlice) {
     return;
   }
-  auto construct = n->input()->node();
+  // tuple index has two inputs, tuple and index
+  auto construct = n->inputs().at(0)->node();
   if (construct->kind() != prim::TupleConstruct) {
     if (must_remove_tuples) {
       AT_ERROR(n->kind().toQualString(), " not matched to tuple construct");
@@ -39,8 +40,15 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
       n->outputs()[i]->replaceAllUsesWith(construct->inputs().at(i));
     }
   } else if (n->kind() == prim::TupleIndex) {
-    auto idx = n->i(attr::index);
-    n->output()->replaceAllUsesWith(construct->inputs().at(idx));
+    auto idx = n->inputs().at(1);
+    auto maybe_int = constant_as<int64_t>(idx);
+    if (!maybe_int) {
+      if (must_remove_tuples) {
+        AT_ERROR(n->getSourceLocation(), "tuple index with non-constant index");
+      }
+      return;
+    }
+    n->output()->replaceAllUsesWith(construct->inputs().at(*maybe_int));
   } else if (n->kind() == prim::TupleSlice) {
     std::vector<Value*> values;
     int64_t beg = n->i(attr::beg);
@@ -55,7 +63,6 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
     n->output()->replaceAllUsesWith(tuple_out->output());
   }
 }
-
 } // anonymous namespace
 
 static void LowerAllTuples(Block* block);
@@ -183,6 +190,5 @@ void LowerSimpleTuples(std::shared_ptr<Graph>& graph) {
   LowerSimpleTuples(graph->block());
   EliminateDeadCode(graph);
 }
-
 } // namespace jit
 } // namespace torch
