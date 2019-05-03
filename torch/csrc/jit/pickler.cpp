@@ -77,7 +77,7 @@ void Pickler::finish() {
     start();
     push<OpCode>(OpCode::MARK);
     for (const auto& tensor : literal_tensors_) {
-      std::string key = std::to_string(getTensorKey(tensor));
+      std::string key = std::to_string(getStorageKey(tensor));
       push<OpCode>(OpCode::BINUNICODE);
       push<uint32_t>(key.size());
       pushString(key);
@@ -171,7 +171,9 @@ void Pickler::addIValue(const IValue& ivalue) {
 }
 
 /// Returns a void* uniquely identifying this IValue's data. For non-containers,
-/// returns nullptr.
+/// returns nullptr. Also adds the ivalue to the Pickler's list of memoized
+/// IValues so the pointers are guaranteed to be valid for the Pickler's
+/// lifetime.
 const void* Pickler::getPointer(const IValue& ivalue) {
   if (ivalue.isGenericDict()) {
     return ivalue.toGenericDict().get();
@@ -231,12 +233,17 @@ void Pickler::pushString(const std::string& string) {
   stack_.insert(stack_.end(), string.begin(), string.end());
 }
 
-void Pickler::pushGlobal(const std::string& name) {
-  auto memo_entry = memo_map_.find(&name);
+void Pickler::pushGlobal(const std::string& name_temp) {
+  memoized_strings_.push_back(name_temp);
+  auto name = memoized_strings_.back();
+  auto memo_entry = memo_map_.find(&(memoized_strings_.back()));
   if (memo_entry == memo_map_.end()) {
     push<OpCode>(OpCode::GLOBAL);
-    pushString(name);
-    pushMemoization((void*)&name);
+    pushString(memoized_strings_.back());
+    // pushString(name);
+    // std::string* name_ptr = &name;
+    pushMemoization(&(memoized_strings_.back()));
+    // pushMemoization(reinterpret_cast<const void*>(name_ptr));
   } else {
     pushBinGet(memo_entry->second);
   }
@@ -274,7 +281,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   data_type << "torch\n" << toString(tensor.scalar_type()) << "Storage\n";
   pushGlobal(data_type.str());
   // root_key
-  pushMemoizedString(std::to_string(getTensorKey(tensor)));
+  pushMemoizedString(std::to_string(getStorageKey(tensor)));
   // location
   pushMemoizedString(std::string("cpu"));
   // size
@@ -409,6 +416,7 @@ void Pickler::pushMemoization(const void* item) {
 
 void Pickler::pushMemoization(const IValue& ivalue) {
   auto ptr = getPointer(ivalue);
+  memoized_ivalues_.push_back(ivalue);
   AT_CHECK(
       ptr != nullptr,
       "Pickler cannot memoize ",
@@ -767,11 +775,11 @@ std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
             record_size,
         "Storage tensor size did not match record size");
   }
-  
+
   return std::make_pair(storage_tensor, record_size);
 }
 
-uint64_t getTensorKey(const at::Tensor& tensor) {
+uint64_t getStorageKey(const at::Tensor& tensor) {
   at::StorageImpl* storage_key = tensor.storage().unsafeGetStorageImpl();
   return reinterpret_cast<intptr_t>(storage_key);
 }

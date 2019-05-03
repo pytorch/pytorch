@@ -168,6 +168,11 @@ class Pickler {
   // TODO: only use this if necessary (add a pass to find all shared ivalues,
   // and only memoize those)
   uint32_t memo_id = 0;
+
+  // When arbitrary (maybe temporary) values are saved, keep them here so they
+  // can be memoized correctly
+  std::vector<std::string> memoized_strings_;
+  std::vector<c10::IValue> memoized_ivalues_;
 };
 
 // An item in the unpickler stack. There needs to be a way to differentiate
@@ -250,12 +255,12 @@ class Unpickler {
   OpCode last_opcode_;
 };
 
-// returns (record_size, data_ptr) for a tensor, converting it to a CPU tensor
+// returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
 // if necessary
 std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor);
 
-// return a unique ID for this tensor
-uint64_t getTensorKey(const at::Tensor& tensor);
+// return the value of the tensor's storage pointer
+uint64_t getStorageKey(const at::Tensor& tensor);
 
 } // namespace jit
 } // namespace torch
