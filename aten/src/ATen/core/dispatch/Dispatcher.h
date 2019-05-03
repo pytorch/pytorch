@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/dispatch/Operator.h>
+#include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <c10/util/Exception.h>
 #include <mutex>
@@ -64,6 +64,7 @@ public:
 namespace detail {
 class RegistrationListenerList;
 }
+class SchemaRegistrationHandleRAII;
 
 /**
  * Top-level dispatch interface for dispatching via the dynamic dispatcher.
@@ -74,7 +75,7 @@ private:
     explicit OperatorDef(FunctionSchema&& schema)
     : op(std::move(schema)), refcount(0) {}
 
-    impl::Operator op;
+    impl::OperatorEntry op;
     size_t refcount;
   };
   friend class OperatorHandle;
@@ -99,7 +100,7 @@ public:
    *         object that manages the lifetime of the registration. Once that
    *         object is destructed, the kernel will be deregistered.
    */
-  std::pair<OperatorHandle, RegistrationHandleRAII> registerSchema(FunctionSchema schema);
+  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema);
 
   /**
    * Looks for an operator schema with the given name and overload name
@@ -159,8 +160,8 @@ private:
  */
 class CAFFE2_API OperatorHandle final {
 public:
-  OperatorHandle(OperatorHandle&&) = default;
-  OperatorHandle& operator=(OperatorHandle&&) = default;
+  OperatorHandle(OperatorHandle&&) noexcept = default;
+  OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
 
@@ -176,6 +177,19 @@ private:
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
 
+struct CAFFE2_API SchemaRegistrationHandleRAII final {
+  const OperatorHandle& opHandle() const {
+    return opHandle_;
+  }
+
+private:
+  friend class Dispatcher;
+  explicit SchemaRegistrationHandleRAII(OperatorHandle opHandle, RegistrationHandleRAII registrationHandle)
+    : opHandle_(std::move(opHandle)), registrationHandle_(std::move(registrationHandle)) {}
+
+  OperatorHandle opHandle_;
+  RegistrationHandleRAII registrationHandle_;
+};
 
 inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.

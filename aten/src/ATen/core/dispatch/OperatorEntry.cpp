@@ -1,14 +1,14 @@
-#include <ATen/core/dispatch/Operator.h>
+#include <ATen/core/dispatch/OperatorEntry.h>
 
 namespace c10 {
 namespace impl {
 
-Operator::Operator(FunctionSchema&& schema)
+OperatorEntry::OperatorEntry(FunctionSchema&& schema)
 : schema_(std::move(schema))
 , dispatchTable_(schema_)
 , kernels_() {}
 
-void Operator::prepareForDeregistration() {
+void OperatorEntry::prepareForDeregistration() {
   return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {
     if (!dispatchTable.isEmpty()) {
       std::ostringstream str;
@@ -19,7 +19,7 @@ void Operator::prepareForDeregistration() {
   AT_ASSERTM(kernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels");
 }
 
-RegistrationHandleRAII Operator::registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel) {
+RegistrationHandleRAII OperatorEntry::registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   // Add the kernel to the kernels list,
@@ -38,7 +38,7 @@ RegistrationHandleRAII Operator::registerKernel(TensorTypeId dispatch_key, Dispa
   });
 }
 
-void Operator::updateDispatchTable_(TensorTypeId dispatch_key) {
+void OperatorEntry::updateDispatchTable_(TensorTypeId dispatch_key) {
   // precondition: kernelsMutex_ is locked
 
   auto k = kernels_.find(dispatch_key);
@@ -54,7 +54,7 @@ void Operator::updateDispatchTable_(TensorTypeId dispatch_key) {
   }
 }
 
-void Operator::deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel) {
+void OperatorEntry::deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   auto found = kernels_.find(dispatch_key);
@@ -69,7 +69,7 @@ void Operator::deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTa
   updateDispatchTable_(dispatch_key);
 }
 
-RegistrationHandleRAII Operator::registerFallbackKernel(DispatchTableEntry kernel) {
+RegistrationHandleRAII OperatorEntry::registerFallbackKernel(DispatchTableEntry kernel) {
   return registerKernel(TensorTypeIds::undefined(), std::move(kernel));
 }
 

@@ -21,9 +21,9 @@ public:
 
     if (kernel != nullptr) {
       if (dispatch_key.has_value()) {
-        kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.first, *dispatch_key, kernel, std::move(cache_creator));
+        kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.opHandle(), *dispatch_key, kernel, std::move(cache_creator));
       } else {
-        kernel_registration_handle_ = Dispatcher::singleton().registerFallbackKernel(op_.first, kernel, std::move(cache_creator));
+        kernel_registration_handle_ = Dispatcher::singleton().registerFallbackKernel(op_.opHandle(), kernel, std::move(cache_creator));
       }
     }
   }
@@ -36,7 +36,7 @@ public:
   OperatorRegistrar& operator=(const OperatorRegistrar& rhs) = delete;
 
 private:
-  std::pair<OperatorHandle, RegistrationHandleRAII> op_;
+  c10::SchemaRegistrationHandleRAII op_;
   c10::optional<RegistrationHandleRAII> kernel_registration_handle_;
 };
 
