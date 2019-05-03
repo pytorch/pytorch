@@ -144,6 +144,20 @@ struct TORCH_API Variable : public at::Tensor {
       Edge gradient_edge,
       bool allow_tensor_metadata_change);
 
+  /// Creates a `Variable` from the given `Tensor` and specify a
+  /// `gradient_edge`, i.e. a (function, input_nr) pair specifying the function
+  /// in the autograd graph, and what particular input of that function, this
+  /// variable is connected to.
+  // yf225 TODO: add better comment here
+  ///
+  /// NOTE: if the given `Tensor` is already a `Variable`, this function will
+  /// create a new `Variable` that shares the same storage and tensor metadata
+  /// with the original `Variable`, but with a completely new autograd history.
+  friend Variable make_variable_consuming(
+      at::Tensor data,
+      Edge gradient_edge,
+      bool allow_tensor_metadata_change);
+
   // Tensor Conversions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -164,13 +178,25 @@ struct TORCH_API Variable : public at::Tensor {
 
   // NOTE: Assignment operators to Tensor come for free from the constructors.
 
+  // yf225 TODO: fix comments here
+  at::Tensor data_deprecated() const noexcept;
+
+  // yf225 TODO: fix comments here
   // NOTE: `var.data()` in C++ has the same semantics as `tensor.data` in Python,
   // which create a new `Variable` that shares the same storage and tensor metadata
   // with the original `Variable`, but with a completely new autograd history.
   //
   // NOTE: `var.data()` performs shallow-copying of `var`'s TensorImpl, which incurs
   // runtime overhead.
-  at::Tensor data() const noexcept;
+  /// NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
+  /// storage / storage_offset) of a tensor created from `.data`, those metadata
+  /// in the original tensor will also be updated. However, the new behavior is that
+  /// those metadata changes to the `.data` tensor will not update the original tensor
+  /// anymore, and here we need to set `allow_tensor_metadata_change_` to false to
+  /// make such changes explicitly illegal, in order to prevent users from changing
+  /// metadata of the `.data` tensor and expecting the original tensor to also
+  /// be updated.
+  at::Tensor _data_future() const noexcept;
 
   // Gradient Function and Edges
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -528,6 +554,9 @@ inline Variable make_variable(
     at::Tensor data,
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
+  AT_CHECK(
+      !data.is_variable(),
+      "Must not create a new variable from a variable, use its .data_deprecated()");
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
     data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -541,8 +570,10 @@ inline Variable make_variable_consuming(
     at::Tensor data,
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
+  AT_CHECK(
+      !data.is_variable(),
+      "Must not create a new variable from a variable, use its .data_deprecated()");
   if (data.defined()) {
-    AT_ASSERT(data.getIntrusivePtr().use_count() == 1);
     auto data_impl = data.getIntrusivePtr();
     data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
     data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl.get(), requires_grad));
@@ -555,6 +586,9 @@ inline Variable make_variable(
     at::Tensor data,
     Edge gradient_edge,
     bool allow_tensor_metadata_change = true) {
+  AT_CHECK(
+      !data.is_variable(),
+      "Must not create a new variable from a variable, use its .data_deprecated()");
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
     data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -563,6 +597,23 @@ inline Variable make_variable(
   }
   return Variable();
 }
+
+inline Variable make_variable_consuming(
+      at::Tensor data,
+      Edge gradient_edge,
+      bool allow_tensor_metadata_change = true) {
+  AT_CHECK(
+      !data.is_variable(),
+      "Must not create a new variable from a variable, use its .data_deprecated()");
+  if (data.defined()) {
+    auto data_impl = data.getIntrusivePtr();
+    data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl.get(), false, std::move(gradient_edge)));
+    return Variable(std::move(data_impl));
+  }
+  return Variable();
+}
+
 
 // Tensor Conversion
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -586,8 +637,18 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
   return static_cast<const Variable&>(tensor);
 }
 
-inline at::Tensor Variable::data() const noexcept {
-  return make_variable(*this, /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
+inline at::Tensor Variable::data_deprecated() const noexcept {
+  auto saved_version_ = get()->version_counter().current_version();
+  auto self_impl_copy = get()->shallow_copy_and_detach();
+  self_impl_copy->set_version_counter(saved_version_);
+  return at::Tensor(self_impl_copy);
+}
+
+inline at::Tensor Variable::_data_future() const noexcept {
+  auto self_impl_copy = get()->shallow_copy_and_detach();
+  self_impl_copy->set_allow_tensor_metadata_change(false);
+  self_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(self_impl_copy.get(), false));
+  return at::Tensor(self_impl_copy);
 }
 
 // Gradient Function and Edges

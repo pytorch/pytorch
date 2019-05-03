@@ -150,8 +150,8 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto data = as_variable_ref(r.tensor(1));
-  auto var = make_variable(data, r.toBool(2));
+  auto data = as_variable_ref(r.tensor(1)).data_deprecated();
+  auto var = make_variable_consuming(data, r.toBool(2));  // yf225 TODO: how to avoid shallow-copying twice? Use make_variable_consuming()?
   return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var));
   END_HANDLE_TH_ERRORS
 }
@@ -206,15 +206,7 @@ static PyObject *THPVariable_is_leaf(THPVariable *self)
 static PyObject * THPVariable_get_data(THPVariable *self)
 {
   HANDLE_TH_ERRORS
-  /// NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
-  /// storage / storage_offset) of a tensor created from `.data`, those metadata
-  /// in the original tensor will also be updated. However, the new behavior is that
-  /// those metadata changes to the `.data` tensor will not update the original tensor
-  /// anymore, and here we need to set `allow_tensor_metadata_change_` to false to
-  /// make such changes explicitly illegal, in order to prevent users from changing
-  /// metadata of the `.data` tensor and expecting the original tensor to also
-  /// be updated.
-  auto var = make_variable(self->cdata, /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
+  auto var = self->cdata._data_future();
   return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
@@ -509,6 +501,7 @@ void initTensorImplConversion(PyObject* module) {
     auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
         unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
     AT_CHECK(p.defined(), "Can't wrap undefined tensor");
+    AT_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
     auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
     return py::cast(torch::autograd::Variable(
         torch::autograd::make_variable(std::move(tensor), false)));

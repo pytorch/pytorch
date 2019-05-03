@@ -80,7 +80,7 @@ void Variable::backward(
 
   std::vector<Variable> inputs;
   if (!gradient.has_value()) {
-    gradient = make_variable(at::ones_like(*this), /*requires_grad=*/false);
+    gradient = at::ones_like(*this);  // yf225 TODO: do we need to explicitly set requires_grad of `gradient` to false here??
   }
   inputs.push_back(std::move(as_variable_ref(*gradient)));
   Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
@@ -90,7 +90,8 @@ void Variable::set_data(const at::Tensor &new_data) {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` has the same derived
   // type of TensorImpl as `var`.
-  typeid(this->unsafeGetTensorImpl()) == typeid(new_data.unsafeGetTensorImpl());
+  // yf225 TODO: need AT_CHECK with error message here!
+  AT_ASSERT(typeid(*this->unsafeGetTensorImpl()) == typeid(*new_data.unsafeGetTensorImpl()));
 
   // Resets gradient accumulator if metadata is out of date
   Variable::AutogradMeta* autograd_meta = get_autograd_meta();

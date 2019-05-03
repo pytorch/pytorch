@@ -386,7 +386,7 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
         "Can't call numpy() on Variable that requires grad. "
         "Use var.detach().numpy() instead.");
   }
-  return torch::utils::tensor_to_numpy(self_);
+  return torch::utils::tensor_to_numpy(self_.data_deprecated());
   END_HANDLE_TH_ERRORS
 }
 

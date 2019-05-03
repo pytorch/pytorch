@@ -48,9 +48,9 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
     // by nn.Parameter() with no arguments.
     auto scalar_type = torch::tensors::get_default_scalar_type();
     auto var = at::empty({0}, torch::tensors::get_default_tensor_type().options(scalar_type));
-    tensor = static_cast<Variable&>(var);
+    tensor = static_cast<Variable&>(var).data_deprecated();
   } else if (THPVariable_Check(data)) {
-    tensor = ((THPVariable*)data)->cdata;
+    tensor = ((THPVariable*)data)->cdata.data_deprecated();
   } else {
     throw torch::TypeError("Variable data has to be a tensor, but got %s",
         Py_TYPE(data)->tp_name);
@@ -60,9 +60,9 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   if (grad_fn) {
     auto grad_fn_ = THPFunction_asFunction((THPFunction*)grad_fn);
     Edge edge(grad_fn_, grad_fn_->add_input_metadata(tensor));
-    var = make_variable(std::move(tensor), std::move(edge));
+    var = make_variable_consuming(std::move(tensor), std::move(edge));
   } else {
-    var = make_variable(std::move(tensor), requires_grad);
+    var = make_variable_consuming(std::move(tensor), requires_grad);
   }
 
   if (name) {
