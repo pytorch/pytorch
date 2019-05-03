@@ -14600,8 +14600,8 @@ class TestClassType(JitTestCase):
                 self.y = y
 
     def test_class_constructs_itself(self):
-        @torch.jit.script
-        class LSTMStateStack:
+        @torch.jit.script  # noqa: B903
+        class LSTMStateStack(object):
             def __init__(self, num_layers, hidden_size):
                 # type: (int, int) -> None
                 self.num_layers = num_layers
