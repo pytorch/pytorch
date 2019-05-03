@@ -1,7 +1,6 @@
 import math
 import random
 import string
-import time
 import unittest
 import itertools
 import contextlib
@@ -38,7 +37,6 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     ctcloss_reference, new_module_tests
 
 from torch.nn import MultiheadAttention
-from torch.nn import Transformer 
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -7701,39 +7699,6 @@ class TestNN(NNTestCase):
         out = asfm.predict(x)
         self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
 
-    def test_transformer_number_match(self):
-        # Train the simple copy task.
-        V = 11
-        num_encoder_layers = 1
-        num_decoder_layers = 1
-        d_model = 16  # embedding
-        nhead = 2  # number of heads
-        dropout = 0.20
-        d_ff = 64
-        batch_size = 400
-        milliseconds = int(round(time.time() * 1000))
-        torch.manual_seed(milliseconds)
-
-        model = Transformer(V, V, d_model=d_model, nhead=nhead, num_encoder_layers=num_encoder_layers, 
-                            num_decoder_layers=num_decoder_layers, d_ff=d_ff)
-        model_opt = NoamOpt(model.encoder.src_embed.d_model, 1, 400,
-                            torch.optim.Adam(model.parameters(), lr=2.5, betas=(0.9, 0.98), eps=1e-9))
-        criterion = LabelSmoothingLoss(size=V, padding_idx=0, smoothing=0.0)
-
-        print("Training the model...")
-        for epoch in range(10):
-            model.train()
-            train_epoch(data_gen(V, batch_size, 21), model, criterion, model_opt) 
-            model.eval()
-            valid_epoch(data_gen(V, batch_size, 6), model, criterion) 
-
-        model.eval()
-
-        for _ in range(3):    
-            src = Variable(torch.randint(1, V, (10, 1)))
-            src[0][0] = 1
-            tgt = generate_test(model, src, max_len=10, start_symbol=1)
-            assert np.allclose(src, tgt, atol=1e-5) 
 
 class TestNNInit(TestCase):
     def setUp(self):
@@ -8606,110 +8571,6 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
     return transform_tensor, transform_ary, grid_ary
 # end TestNN.test_affine_* helpers
 
-
-# The following are some helpers for TestNN.test_transformer_number_match
-class DataBatch:
-    "Object for holding a batch of data with mask during training."
-    def __init__(self, src, trg=None, pad=0):
-        self.src = src.transpose(0, 1).contiguous()
-        self.src_mask = (src != pad).unsqueeze(-2)
-        if trg is not None:
-            self.trg = trg[:, :-1].transpose(0, 1).contiguous()
-            self.trg_y = trg[:, 1:].transpose(0, 1).contiguous()
-            self.ntokens = (self.trg_y != pad).data.sum().item()
-
-class NoamOpt:
-    "Optim wrapper that implements rate."
-    def __init__(self, model_size, factor, warmup, optimizer):
-        self.optimizer = optimizer
-        self._step = 0
-        self.warmup = warmup
-        self.factor = factor
-        self.model_size = model_size
-        self._rate = 0
-
-    def step(self):
-        self._step += 1
-        rate = self.rate()
-        for p in self.optimizer.param_groups:
-            p['lr'] = rate
-        self._rate = rate
-        self.optimizer.step()
-
-    def rate(self, step=None):
-        if step is None:
-            step = self._step
-        return self.factor * (self.model_size ** (-0.5) * 
-                              min(step ** (-0.5), step * self.warmup ** (-1.5)))
-
-class LabelSmoothingLoss(nn.Module):
-    "Implement label smoothing."
-    def __init__(self, size, padding_idx, smoothing=0.0):
-        super(LabelSmoothingLoss, self).__init__()
-        self.criterion = nn.KLDivLoss(size_average=False)
-        self.padding_idx = padding_idx
-        self.confidence = 1.0 - smoothing
-        self.smoothing = smoothing
-        self.size = size
-        self.true_dist = None
-
-    def forward(self, x, target):
-        assert x.size(1) == self.size
-        true_dist = x.data.clone()
-        true_dist.fill_(self.smoothing / (self.size - 2))
-        true_dist.scatter_(1, target.data.unsqueeze(1), self.confidence)
-        true_dist[:, self.padding_idx] = 0
-        mask = torch.nonzero(target.data == self.padding_idx)
-        if mask.dim() > 0:
-            true_dist.index_fill_(0, mask.squeeze(), 0.0)
-        self.true_dist = true_dist
-        return self.criterion(x, Variable(true_dist, requires_grad=False))
-
-def train_epoch(data_iter, model, criterion, opt):
-    start = time.time()
-    total_tokens = 0
-    total_loss = 0
-    tokens = 0
-    for i, batch in enumerate(data_iter):
-        tgt_mask = model.generate_square_subsequent_mask(batch.trg.size(0)).double()
-        out = model.forward(batch.src, batch.trg, tgt_mask=tgt_mask)
-        loss = criterion(out.contiguous().view(-1, out.size(-1)), 
-                         batch.trg_y.contiguous().view(-1)) / batch.ntokens
-        loss.backward()
-        opt.step()
-        opt.optimizer.zero_grad()
-
-def valid_epoch(data_iter, model, criterion):
-    start = time.time()
-    total_tokens = 0
-    total_loss = 0
-    tokens = 0
-    for i, batch in enumerate(data_iter):
-        tgt_mask = model.generate_square_subsequent_mask(batch.trg.size(0)).double()
-        out = model.forward(batch.src, batch.trg, tgt_mask=tgt_mask)
-        loss = criterion(out.contiguous().view(-1, out.size(-1)), 
-                         batch.trg_y.contiguous().view(-1)) / batch.ntokens
-        loss.backward()
-
-def data_gen(V, batch, nbatches):
-    "Generate random data for a src-tgt copy task."
-    for i in range(nbatches):
-        data = torch.from_numpy(np.random.randint(1, V, size=(batch, 10)))
-        data[:, 0] = 1
-        src = Variable(data, requires_grad=False)
-        tgt = Variable(data, requires_grad=False)
-        yield DataBatch(src, tgt, 0)
-
-def generate_test(model, src, max_len, start_symbol):
-    memory = model.encode(src)
-    ys = torch.ones(1, 1).fill_(start_symbol).type_as(src.data)
-    for i in range(max_len - 1):
-        out = model.decode(Variable(ys), memory) 
-        prob = model.generator(out[-1, :].unsqueeze(0))
-        _, next_word = torch.max(prob, dim=2)
-        ys = torch.cat([ys, torch.ones(1, 1).type_as(src.data).fill_(next_word.item())], dim=0)
-    return ys
-# end TestNN.test_transformer_number_match
 
 if __name__ == '__main__':
     run_tests()
