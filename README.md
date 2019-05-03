@@ -37,11 +37,12 @@ At a granular level, PyTorch is a library that consists of the following compone
 
 | Component | Description |
 | ---- | --- |
-| **torch** | a Tensor library like NumPy, with strong GPU support |
-| **torch.autograd** | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
-| **torch.nn** | a neural networks library deeply integrated with autograd designed for maximum flexibility |
-| **torch.multiprocessing** | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
-| **torch.utils** | DataLoader and other utility functions for convenience |
+| [**torch**](https://pytorch.org/docs/stable/torch.html) | a Tensor library like NumPy, with strong GPU support |
+| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
+| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | a compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code  |
+| [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | a neural networks library deeply integrated with autograd designed for maximum flexibility |
+| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
+| [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
 
 Usually one uses PyTorch either as:
 
@@ -149,10 +150,10 @@ They requires JetPack 4.2 and above and are maintained by @dusty-nv
 
 ### From Source
 
-If you are installing from source, we highly recommend installing an [Anaconda](https://www.continuum.io/downloads) environment.
+If you are installing from source, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
 You will get a high-quality BLAS library (MKL) and you get a controlled compiler version regardless of your Linux distro.
 
-Once you have [Anaconda](https://www.continuum.io/downloads) installed, here are the instructions.
+Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
 
 If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above

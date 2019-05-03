@@ -158,6 +158,10 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_HIP_HOST_DEVICE
 #endif
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 #if defined(__ANDROID__)
 #define C10_ANDROID 1
 #define C10_MOBILE 1

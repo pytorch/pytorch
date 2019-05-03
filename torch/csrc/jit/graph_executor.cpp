@@ -54,6 +54,11 @@ void debugSetAutodiffSubgraphInlining(bool state) {
   autodiff_subgraph_inlining = state;
 }
 
+thread_local std::weak_ptr<Graph> last_executed_optimized_graph;
+std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
+  return last_executed_optimized_graph.lock();
+}
+
 namespace {
 
 using tensor_list = std::vector<at::Tensor>;
@@ -72,7 +77,8 @@ struct ExecutionPlan {
       : code(graph), graph(std::move(graph)) {}
 
   void run(Stack& stack) const {
-    return InterpreterState(code).run(stack);
+    InterpreterState(code).run(stack);
+    last_executed_optimized_graph = graph;
   }
 
   operator bool() const {
@@ -519,22 +525,6 @@ struct GraphExecutorImpl {
     return execution_plan.run(stack);
   }
 
-  std::shared_ptr<Graph> graphFor(const Stack& stack) const {
-    AT_ASSERT(stack.size() >= num_inputs);
-
-    ArgumentSpec spec =
-        arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
-
-    if (!optimize) {
-      AT_CHECK(fallback, "No graph found for given inputs");
-      return fallback.graph;
-    }
-
-    auto it = plan_cache.find(spec);
-    AT_CHECK(it != plan_cache.end(), "No graph found for given inputs");
-    return it->second.graph;
-  }
-
   GraphExecutorState getDebugState() {
     GraphExecutorState state;
     state.graph = graph.get();
@@ -751,10 +741,6 @@ void GraphExecutor::run(Stack& inputs) {
 
 std::shared_ptr<Graph> GraphExecutor::graph() const {
   return pImpl->graph;
-}
-
-std::shared_ptr<Graph> GraphExecutor::graphFor(const Stack& inputs) const {
-  return pImpl->graphFor(inputs);
 }
 
 GraphExecutorState GraphExecutor::getDebugState() {

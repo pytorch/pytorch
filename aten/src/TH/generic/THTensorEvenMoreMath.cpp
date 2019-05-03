@@ -67,6 +67,26 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   delete [] idx;
 }
 
+accreal THTensor_(sumall)(THTensor *tensor)
+{
+  accreal sum = 0;
+  int serial_path = 0;
+#ifdef _OPENMP
+  int inOMP = omp_in_parallel();
+  if(inOMP) {
+    serial_path = 1;
+  } else {
+    TH_TENSOR_APPLY_REDUCTION_OMP(scalar_t, tensor, +:sum, sum += *tensor_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+  }
+#else
+    serial_path = 1;
+#endif
+  if (serial_path) {
+    TH_TENSOR_APPLY(scalar_t, tensor, sum += *tensor_data;);
+  }
+  return sum;
+}
+
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
@@ -93,6 +113,28 @@ void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
       THFree(tensor_counter);
       THError("Mask tensor can take 0 and 1 values only");
     } else if (*mask_data == 1) {
+      *tensor_data = value;
+    });
+}
+
+void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value)
+{
+#ifdef _OPENMP
+  int64_t tensor_size = THTensor_(nElement)(tensor);
+  int tensor_contig = THTensor_(isContiguous)(tensor);
+  int mask_contig = THTensor_(isContiguous)(mask);
+  if (!omp_in_parallel() && tensor_contig && mask_contig) {
+    TH_TENSOR_APPLY2_OMP(tensor_size, tensor_contig, mask_contig,
+      scalar_t, tensor, bool, mask,
+      if (*mask_data) {
+        *tensor_data = value;
+      },
+      TH_OMP_OVERHEAD_THRESHOLD);
+    return;
+  }
+#endif
+  TH_TENSOR_APPLY2(scalar_t, tensor, bool, mask,
+    if (*mask_data) {
       *tensor_data = value;
     });
 }
@@ -132,6 +174,34 @@ void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
   c10::raw::intrusive_ptr::decref(srct);
 }
 
+void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* src )
+{
+  THTensor *srct = THTensor_(newContiguous)(src);
+  scalar_t *src_data = srct->data<scalar_t>();
+  ptrdiff_t cntr = 0;
+  ptrdiff_t nelem = THTensor_(nElement)(srct);
+  if (THTensor_(nElement)(tensor) != THBoolTensor_nElement(mask))
+  {
+    c10::raw::intrusive_ptr::decref(srct);
+    THError("Number of elements of destination tensor != Number of elements in mask");
+  }
+  TH_TENSOR_APPLY2(scalar_t, tensor, bool, mask,
+                   if (*mask_data)
+                   {
+                     if (cntr == nelem)
+                     {
+                       c10::raw::intrusive_ptr::decref(srct);
+                       THFree(mask_counter);
+                       THFree(tensor_counter);
+                       THError("Number of elements of src < number of ones in mask");
+                     }
+                     *tensor_data = *src_data;
+                     src_data++;
+                     cntr++;
+                   });
+  c10::raw::intrusive_ptr::decref(srct);
+}
+
 void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
 {
   ptrdiff_t numel = THByteTensor_sumall(mask);
@@ -150,6 +220,24 @@ void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask
                      THError("Mask tensor can take 0 and 1 values only");
                    }
                    else if (*mask_data == 1)
+                   {
+                     *tensor_data = *src_data;
+                     tensor_data++;
+                   });
+}
+
+void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *mask)
+{
+  ptrdiff_t numel = THBoolTensor_sumall(mask);
+  scalar_t *tensor_data;
+
+#ifdef DEBUG
+  THAssert(numel <= LONG_MAX);
+#endif
+  THTensor_(resize1d)(tensor,numel);
+  tensor_data = tensor->data<scalar_t>();
+  TH_TENSOR_APPLY2(scalar_t, src, bool, mask,
+                   if (*mask_data)
                    {
                      *tensor_data = *src_data;
                      tensor_data++;
@@ -600,26 +688,6 @@ scalar_t THTensor_(maxall)(THTensor *tensor)
                     th_isnan_break(value)
                   });
   return theMax;
-}
-
-accreal THTensor_(sumall)(THTensor *tensor)
-{
-  accreal sum = 0;
-  int serial_path = 0;
-#ifdef _OPENMP
-  int inOMP = omp_in_parallel();
-  if(inOMP) {
-    serial_path = 1;
-  } else {
-    TH_TENSOR_APPLY_REDUCTION_OMP(scalar_t, tensor, +:sum, sum += *tensor_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-  }
-#else
-    serial_path = 1;
-#endif
-  if (serial_path) {
-    TH_TENSOR_APPLY(scalar_t, tensor, sum += *tensor_data;);
-  }
-  return sum;
 }
 
 void THTensor_(add)(THTensor *r_, THTensor *t, scalar_t value)

@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
 #include <torch/csrc/utils/hash.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <iostream>
 #include <vector>
 

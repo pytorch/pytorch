@@ -10,7 +10,7 @@ namespace caffe2 {
 namespace {
 template <class DataType>
 void enforce_finite_op_impl_cpu(const at::Tensor& input_) {
-  Tensor input{C10Tensor(input_)};
+  Tensor input(input_);
   const DataType* input_data = input.template data<DataType>();
   auto size = input.numel();
 
