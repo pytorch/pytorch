@@ -35,6 +35,12 @@ class C10_API TaskThreadPoolBase {
    */
   virtual bool inThreadPool() const = 0;
 
+  /**
+   * Get the logic number of thread in the thread pool (starting from 0)
+   * or -1 if thread is not in the thread pool
+   */
+   virtual int threadNum() const = 0;
+
   virtual ~TaskThreadPoolBase() noexcept {}
 };
 
@@ -53,6 +59,7 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
 
   std::queue<task_element_t> tasks_;
   std::vector<std::thread> threads_;
+  std::unordered_map<std::thread::id, int> thread_to_id_;
   std::mutex mutex_;
   std::condition_variable condition_;
   std::condition_variable completed_;
@@ -76,6 +83,8 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
   size_t numAvailable() const override;
 
   bool inThreadPool() const override;
+
+  int threadNum() const override;
 
   void run(const std::function<void()>& func) override;
 

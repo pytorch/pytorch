@@ -1,4 +1,4 @@
-#if AT_PARALLEL_OPENMP
+#if AT_PARALLEL_OPENMP || AT_PARALLEL_NATIVE
 #include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>
 
@@ -29,26 +29,34 @@ TaskThreadPoolBase& get_pool() {
   return *pool;
 }
 
-std::shared_ptr<TaskThreadPoolBase> createC10ThreadPool(
-    int device_id,
-    int pool_size,
-    bool create_new) {
+std::shared_ptr<TaskThreadPoolBase> get_shared_threadpool(int pool_size) {
   static std::shared_ptr<TaskThreadPoolBase> pool =
-      std::make_shared<PTThreadPool>(
-          pool_size > 0 ? pool_size : std::thread::hardware_concurrency());
-  // For now, the only accepted device id is 0
-  // for the JIT inter-op pool (CPU),
-  AT_ASSERT(device_id == 0);
-  // we use the shared thread pool
-  AT_ASSERT(!create_new);
-  // and the size does not change
+      std::make_shared<PTThreadPool>(pool_size);
+  // the size does not change
   AT_ASSERT(pool->size() == pool_size);
   return pool;
 }
 
+// Factory method for ThreadPoolRegistry
+std::shared_ptr<TaskThreadPoolBase> create_c10_threadpool(
+    int device_id,
+    int pool_size,
+    bool create_new) {
+  // For now, the only accepted device id is 0
+  // for the JIT inter-op pool (CPU),
+  AT_ASSERT(device_id == 0);
+  if (!create_new) {
+    // use existing shared thread pool
+    return get_shared_threadpool(pool_size);
+  } else {
+    // create a new thread pool
+    return std::make_shared<PTThreadPool>(pool_size);
+  }
+}
+
 } // namespace
 
-C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, createC10ThreadPool);
+C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, create_c10_threadpool);
 
 void set_num_interop_threads(size_t nthreads) {
   if (nthreads == 0) {
@@ -68,7 +76,8 @@ size_t get_num_interop_threads() {
   if (nthreads > 0) {
     return nthreads;
   } else if (nthreads == -1) {
-    return std::thread::hardware_concurrency();
+    // return default value
+    return check_and_get_pool_size(-1);
   } else {
     return get_pool().size();
   }

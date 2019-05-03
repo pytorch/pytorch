@@ -252,9 +252,12 @@ target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 
 # Parallelism settings
 #  OPENMP - OpenMP for intra-op, native thread pool for inter-op parallelism
+#  NATIVE - using native thread pool for intra- and inter-op parallelism
 set(PARALLEL_BACKEND "OPENMP" CACHE STRING "ATen parallel backend")
 if ("${PARALLEL_BACKEND}" STREQUAL "OPENMP")
   target_compile_definitions(caffe2 PUBLIC "-DAT_PARALLEL_OPENMP=1")
+elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE")
+  target_compile_definitions(caffe2 PUBLIC "-DAT_PARALLEL_NATIVE=1")
 else()
   message(FATAL_ERROR "Unknown parallel backend: ${PARALLEL_BACKEND}")
 endif()
@@ -450,6 +453,7 @@ if (BUILD_TEST)
   foreach(test_src ${Caffe2_CPU_TEST_SRCS})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
+
     target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
     target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
