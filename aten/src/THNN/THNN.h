@@ -20,6 +20,6 @@ typedef int32_t THInteger_t;
 typedef void THNNState;
 
 #include <THNN/generic/THNN.h>
-#include <THGenerateFloatTypes.h>
+#include <THGenerateFloatAndLongTypes.h>
 
 #endif

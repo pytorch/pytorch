@@ -137,10 +137,10 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/unfold.c>
-#include <TH/THGenerateFloatTypes.h>
+#include <TH/THGenerateFloatAndLongTypes.h>
 
 #include <THNN/generic/SpatialConvolutionMM.c>
-#include <TH/THGenerateFloatTypes.h>
+#include <TH/THGenerateFloatAndLongTypes.h>
 
 #include <THNN/generic/SpatialFullDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
@@ -149,7 +149,7 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SpatialAveragePooling.c>
-#include <TH/THGenerateFloatTypes.h>
+#include <TH/THGenerateFloatAndLongTypes.h>
 
 #include <THNN/generic/SpatialDilatedMaxPooling.c>
 #include <TH/THGenerateFloatTypes.h>

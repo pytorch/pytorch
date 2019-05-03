@@ -83,4 +83,4 @@ __global__ void AvePoolBackward(const int nthreads, const Dtype* const top_diff,
 }
 
 #include <THCUNN/generic/SpatialAveragePooling.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include <THC/THCGenerateFloatAndLongTypes.h>

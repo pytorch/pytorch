@@ -18,7 +18,7 @@ THC_API void THCudaBlas_Dger(THCState *state, int64_t m, int64_t n, double alpha
 /* Level 3 */
 THC_API void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, float alpha, float *a, int64_t lda, float *b, int64_t ldb, float beta, float *c, int64_t ldc);
 THC_API void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, double alpha, double *a, int64_t lda, double *b, int64_t ldb, double beta, double *c, int64_t ldc);
-
+THC_API void THCudaBlas_Lgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, long alpha, long *a, int64_t lda, long *b, int64_t ldb, long beta, long *c, int64_t ldc);
 THC_API void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, THHalf alpha, THHalf *a, int64_t lda, THHalf *b, int64_t ldb, THHalf beta, THHalf *c, int64_t ldc);
 
 THC_API void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,

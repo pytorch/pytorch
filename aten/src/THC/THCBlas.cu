@@ -51,6 +51,12 @@ double THCudaBlas_Ddot(THCState *state, int64_t n, double *x, int64_t incx, doub
   return 0;
 }
 
+void THCudaBlas_Lgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, long alpha, long *a, int64_t lda, long *b, int64_t ldb, long beta, long *c, int64_t ldc)
+{
+  THError("THCudaBlas_Lgemm is not supported");
+  return;
+}
+
 at::Half THCudaBlas_Hdot(THCState *state, int64_t n, at::Half *x, int64_t incx, at::Half *y, int64_t incy)
 {
 #if CUDA_VERSION >= 8000

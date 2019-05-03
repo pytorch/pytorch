@@ -7,4 +7,4 @@
 #include <THCUNN/THCHalfAutoNumerics.cuh>
 
 #include <THCUNN/generic/SpatialConvolutionMM.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include <THC/THCGenerateFloatAndLongTypes.h>

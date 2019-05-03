@@ -185,6 +185,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
       THCudaBlas_Hgemm(
       #elif defined(THC_REAL_IS_DOUBLE)
       THCudaBlas_Dgemm(
+      #elif defined(THC_REAL_IS_LONG)
+      THCudaBlas_Lgemm(
       #endif
           state,
           't', 'n',
@@ -222,6 +224,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     THCudaBlas_Hgemm(
     #elif defined(THC_REAL_IS_DOUBLE)
     THCudaBlas_Dgemm(
+    #elif defined(THC_REAL_IS_LONG)
+    THCudaBlas_Lgemm(
     #endif
         state,
         'n', 'n',
@@ -319,6 +323,8 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
     THCudaBlas_Hgemm(
     #elif defined(THC_REAL_IS_DOUBLE)
     THCudaBlas_Dgemm(
+    #elif defined(THC_REAL_IS_LONG)
+    THCudaBlas_Lgemm(
     #endif
         state,
         'n', 't',
@@ -452,6 +458,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       THCudaBlas_Hgemm(
       #elif defined(THC_REAL_IS_DOUBLE)
       THCudaBlas_Dgemm(
+      #elif defined(THC_REAL_IS_LONG)
+      THCudaBlas_Lgemm(
       #endif
           state,
           't', 'n',
@@ -477,6 +485,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       THCudaBlas_Sgemv(
       #elif defined(THC_REAL_IS_DOUBLE)
       THCudaBlas_Dgemv(
+
       #endif
           state,
           't',

@@ -225,7 +225,7 @@ def unique_args(argslist):
     return result
 
 
-def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_check):
+def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_check, scalar_types):
     """
     cimpls contains information use to call into THNN:
         cname: THNN function name
@@ -235,7 +235,7 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_ch
     return {
         'mode': 'NN',
         'name': name,
-        'types': ['Float', 'Double', 'Half'],  # Half will be stripped for CPU backend
+        'types': scalar_types,
         'arguments': arguments,
         'return': 'argument 0' if inplace else get_return(arguments),
         'buffers': buffers,
@@ -244,7 +244,6 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_ch
         'scalar_check': scalar_check,
         'variants': ['function'],
     }
-
 
 def base_declaration(func, thnn_function, backends, inplace=False):
     """Creates the NN function without any buffers in it's signature"""
@@ -257,8 +256,9 @@ def base_declaration(func, thnn_function, backends, inplace=False):
         arguments += output_arguments(thnn_function)
     buffers = [argument_to_declaration('Tensor ' + buf)
                for buf in func.get('buffers', [])]
+    scalar_types = func.get('scalar_types', ['Float', 'Double', 'Half']) # Half will be stripped for CPU backend
 
-    return function_info(name, arguments, None, buffers, backends, inplace, func.get('scalar_check'))
+    return function_info(name, arguments, None, buffers, backends, inplace, func.get('scalar_check'), scalar_types)
 
 
 def forward_declaration(base, thnn_function, inplace=False):
@@ -283,8 +283,9 @@ def forward_declaration(base, thnn_function, inplace=False):
     if scalar_check is not None:
         output_arg_names = [arg['name'] for arg in arguments if arg.get('output', False)]
         scalar_check = {k: v for (k, v) in scalar_check.items() if k in output_arg_names}
+    scalar_types = base['types']
 
-    return function_info(name, arguments, [cimpl], [], base['backends'], inplace, scalar_check)
+    return function_info(name, arguments, [cimpl], [], base['backends'], inplace, scalar_check, scalar_types)
 
 
 def backward_declaration(base, thnn_functions):
@@ -375,8 +376,9 @@ def backward_declaration(base, thnn_functions):
                 raise ValueError(("Could not infer scalar_check for {} argument of func {} because {} "
                                   "does not exist.  Please explicitly specify scalar_check."
                                   .format(arg['name'], name, base_name)))
+    scalar_types = base['types']
 
-    return function_info(name, arguments, cimpls, [], base['backends'], False, scalar_check)
+    return function_info(name, arguments, cimpls, [], base['backends'], False, scalar_check, scalar_types)
 
 
 def parse_nn_yaml(filename):
