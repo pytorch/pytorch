@@ -19,7 +19,6 @@ class FunctionalAPITest(TestCase):
         Y[Y < 0] = 0
         qY = _quantize(Y, scale, zero_point)
         qX = X.quantize_linear(scale=scale, zero_point=zero_point)
-        qY_hat = torch.ops.quantized.relu(qX)
         qY_hat = F.relu(qX)
         np.testing.assert_equal(qY, qY_hat.int_repr())
 
