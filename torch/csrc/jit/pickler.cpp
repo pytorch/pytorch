@@ -149,10 +149,24 @@ void Pickler::pushObject(const IValue& ivalue) {
       class_table_->cend()) {
     class_table_->push_back(class_type);
   }
+
+  // pushGlobal("idk");
   pushClass(PicklerClass::OBJECT);
-  addIValue(c10::ivalue::Tuple::create(
-      {class_type->python_str(), static_cast<int64_t>(obj->slots().size())}));
+
+  // call to '__new__'
+  push<OpCode>(OpCode::NEWOBJ);
+
+  // call '__getstate__', push arguments
+  // auto state = ivalue.toObject()->type()->getMethod("__getstate__")->run();
+  auto state = IValue();
+  addIValue(state);
+
+  // call to '__setstate__'
   push<OpCode>(OpCode::BUILD);
+
+  // addIValue(c10::ivalue::Tuple::create(
+  //     {class_type->python_str(), static_cast<int64_t>(obj->slots().size())}));
+  //     push<OpCode>(OpCode::BUILD);
 }
 
 void Pickler::pushBinGet(uint32_t memo_id) {
