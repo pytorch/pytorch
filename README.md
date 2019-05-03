@@ -182,6 +182,8 @@ conda install -c pytorch magma-cuda90 # or [magma-cuda80 | magma-cuda92 | magma-
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
+git submodule sync 
+git submodule update --init
 ```
 
 #### Install PyTorch
