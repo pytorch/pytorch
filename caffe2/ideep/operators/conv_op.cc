@@ -61,8 +61,7 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
     }
 
     bool weights_changed = (cached_weights_descriptor_ != filter.get_descriptor());
-    if (!training_mode_ &&
-        (weights_changed || (input_changed && algo_ == ialgo::convolution_winograd))) {
+    if (!training_mode_ && weights_changed) {
       op_key_.clear();
       cached_weights_descriptor_ = filter.dup_descriptor();
       auto filter_in = filter.as_weights();
