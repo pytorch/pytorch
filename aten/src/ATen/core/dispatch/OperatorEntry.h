@@ -2,6 +2,7 @@
 
 #include <ATen/core/dispatch/DispatchTable.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
+#include <list>
 
 namespace c10 {
 namespace impl {
