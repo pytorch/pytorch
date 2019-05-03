@@ -38,6 +38,7 @@ std::vector<IValue> runNode(Node* n) {
       auto t = std::move(v).toTensor();
       if (t.defined()) {
         if (t.requires_grad()) {
+          // error gets caught within propagateNode()
           throw c10::Error("Can't insert requires grad as constant", "");
         }
         return IValue(autograd::as_variable_ref(t).data());
@@ -63,17 +64,16 @@ void propagateNode(Node* n) {
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
-    try {
-      auto new_output = graph->insertConstant(outputs[i]);
+
+    auto new_output = tryInsertConstant(*graph, outputs[i]);
+    if (new_output) {
       if (outputs[i].isNone()) {
-        new_output->setType(n->outputs()[i]->type());
+        (*new_output)->setType(n->outputs()[i]->type());
       }
-      n->outputs()[i]->replaceAllUsesWith(new_output);
-    } catch (constant_not_supported_error& err) {
-      // we cannot actually represent the IValue as a constant node,
-      // so we give up replacing it
+      n->outputs()[i]->replaceAllUsesWith(*new_output);
     }
-    // let dce elimination remove n
+    // If we cannot insert the IValue as a constant, give up replacing the node
+    // and let DCE remove it
   }
 }
 

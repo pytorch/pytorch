@@ -63,7 +63,6 @@ endif()
 include(CMakeDependentOption)
 option(BUILD_TORCH "Build Torch" OFF)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
-option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
 option(BUILD_ATEN_ONLY "Build only a subset focused on ATen only" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
@@ -165,8 +164,10 @@ if (MSVC)
   endforeach(flag_var)
 endif(MSVC)
 
+# Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
+# applicable to mobile are disabled by this variable.
 if (ANDROID OR IOS)
-  set(BUILD_ATEN_MOBILE ON)
+  set(INTERN_BUILD_MOBILE ON)
 endif()
 
 if (BUILD_ATEN_ONLY)
