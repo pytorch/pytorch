@@ -1,5 +1,7 @@
 #include <ATen/core/op_registration/op_registration.h>
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/script/function_schema_parser.h>
+#endif
 
 namespace c10 {
 
@@ -57,24 +59,28 @@ private:
 };
 
 void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNameStr, detail::KernelRegistrationConfig&& config) {
-  either<OperatorName, FunctionSchema> schemaOrName = torch::jit::parseSchemaOrName(schemaOrNameStr);
-  if (schemaOrName.is_right()) {
-    // schema was explicitly specified. Check it matches the inferred one and register the op.
-    checkSchemaAndRegisterOp_(std::move(schemaOrName).right(), std::move(config));
-  } else {
-    // schema wasn't explicitly specified. Take the inferred schema for registering the op.
-    AT_ASSERTM(nullptr != config.inferred_function_schema.get(), "Cannot infer schema from this kernel function. Please explicitly specify the operator schema.");
-    OperatorName name = std::move(schemaOrName).left();
-    FunctionSchema inferredSchema(
-      std::move(name.name),
-      std::move(name.overload_name),
-      config.inferred_function_schema->arguments(),
-      config.inferred_function_schema->returns(),
-      config.inferred_function_schema->is_vararg(),
-      config.inferred_function_schema->is_varret()
-    );
-    registerOp_(std::move(inferredSchema), std::move(config));
-  }
+  #if defined(CAFFE2_IS_XPLAT_BUILD)
+    throw std::logic_error("We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
+  #else
+    either<OperatorName, FunctionSchema> schemaOrName = torch::jit::parseSchemaOrName(schemaOrNameStr);
+    if (schemaOrName.is_right()) {
+      // schema was explicitly specified. Check it matches the inferred one and register the op.
+      checkSchemaAndRegisterOp_(std::move(schemaOrName).right(), std::move(config));
+    } else {
+      // schema wasn't explicitly specified. Take the inferred schema for registering the op.
+      AT_ASSERTM(nullptr != config.inferred_function_schema.get(), "Cannot infer schema from this kernel function. Please explicitly specify the operator schema.");
+      OperatorName name = std::move(schemaOrName).left();
+      FunctionSchema inferredSchema(
+        std::move(name.name),
+        std::move(name.overload_name),
+        config.inferred_function_schema->arguments(),
+        config.inferred_function_schema->returns(),
+        config.inferred_function_schema->is_vararg(),
+        config.inferred_function_schema->is_varret()
+      );
+      registerOp_(std::move(inferredSchema), std::move(config));
+    }
+  #endif
 }
 
 void RegisterOperators::checkSchemaAndRegisterOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config) {
