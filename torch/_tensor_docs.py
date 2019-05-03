@@ -996,7 +996,7 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
 .. math::
 
-    f(X=k) = (1 - p)^{k - 1} p
+    f(X=k) = p^{k - 1} (1 - p)
 
 """)
 
@@ -2496,6 +2496,13 @@ add_docstr_all('byte',
 byte() -> Tensor
 
 ``self.byte()`` is equivalent to ``self.to(torch.uint8)``. See :func:`to`.
+""")
+
+add_docstr_all('bool',
+               r"""
+bool() -> Tensor
+
+``self.bool()`` is equivalent to ``self.to(torch.bool)``. See :func:`to`.
 """)
 
 add_docstr_all('char',

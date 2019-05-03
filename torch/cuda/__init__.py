@@ -271,7 +271,7 @@ def get_device_name(device=None):
     Arguments:
         device (torch.device or int, optional): device for which to return the
             name. This function is a no-op if this argument is a negative
-            integer. Uses the current device, given by :meth:`~torch.cuda.current_device`,
+            integer. It uses the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
     """
     return get_device_properties(device).name
@@ -283,8 +283,8 @@ def get_device_capability(device=None):
     Arguments:
         device (torch.device or int, optional): device for which to return the
             device capability. This function is a no-op if this argument is
-            a negative integer. Uses the current device, given by
-            :meth:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+            a negative integer. It uses the current device, given by
+            :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
             (default).
 
     Returns:
@@ -339,7 +339,7 @@ def stream(stream):
 
 
 def device_count():
-    """Returns the number of GPUs available."""
+    r"""Returns the number of GPUs available."""
     if is_available():
         return torch._C._cuda_getDeviceCount()
     else:
@@ -352,10 +352,17 @@ def current_device():
     return torch._C._cuda_getDevice()
 
 
-def synchronize():
-    r"""Waits for all kernels in all streams on current device to complete."""
+def synchronize(device=None):
+    r"""Waits for all kernels in all streams on a CUDA device to complete.
+
+    Arguments:
+        device (torch.device or int, optional): device for which to synchronize.
+            It uses the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+    """
     _lazy_init()
-    return torch._C._cuda_synchronize()
+    with torch.cuda.device(device):
+        return torch._C._cuda_synchronize()
 
 
 def ipc_collect():
@@ -377,7 +384,7 @@ def current_stream(device=None):
     Arguments:
         device (torch.device or int, optional): selected device. Returns
             the currently selected :class:`Stream` for the current device, given
-            by :meth:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+            by :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
             (default).
     """
     _lazy_init()
@@ -391,7 +398,7 @@ def default_stream(device=None):
     Arguments:
         device (torch.device or int, optional): selected device. Returns
             the default :class:`Stream` for the current device, given by
-            :meth:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+            :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
             (default).
     """
     _lazy_init()
@@ -411,7 +418,7 @@ def empty_cache():
     `nvidia-smi`.
 
     .. note::
-        :meth:`~torch.cuda.empty_cache` doesn't increase the amount of GPU
+        :func:`~torch.cuda.empty_cache` doesn't increase the amount of GPU
         memory available for PyTorch. See :ref:`cuda-memory-management` for
         more details about GPU memory management.
     """
@@ -425,7 +432,7 @@ def memory_allocated(device=None):
 
     Arguments:
         device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :meth:`~torch.cuda.current_device`,
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
 
     .. note::
@@ -450,7 +457,7 @@ def max_memory_allocated(device=None):
 
     Arguments:
         device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :meth:`~torch.cuda.current_device`,
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
 
     .. note::
@@ -469,7 +476,7 @@ def reset_max_memory_allocated(device=None):
 
     Arguments:
         device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :meth:`~torch.cuda.current_device`,
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
 
     .. note::
@@ -486,7 +493,7 @@ def memory_cached(device=None):
 
     Arguments:
         device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :meth:`~torch.cuda.current_device`,
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
 
     .. note::
@@ -509,7 +516,7 @@ def max_memory_cached(device=None):
 
     Arguments:
         device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :meth:`~torch.cuda.current_device`,
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
 
     .. note::
@@ -528,7 +535,7 @@ def reset_max_memory_cached(device=None):
 
     Arguments:
         device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :meth:`~torch.cuda.current_device`,
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
 
     .. note::
