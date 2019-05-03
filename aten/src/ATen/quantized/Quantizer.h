@@ -239,11 +239,11 @@ CAFFE2_API QTensorImpl* get_qtensorimpl(const Tensor& self);
 
 // Quantize a float value into a uint value given scale and zero_point
 template <typename T>
-T quantize_val(float scale, int32_t zero_point, float value);
+CAFFE2_API T quantize_val(float scale, int32_t zero_point, float value);
 template <typename T>
-Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
+CAFFE2_API Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
 template <typename T>
-Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point);
+CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point);
 
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
