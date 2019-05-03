@@ -90,6 +90,6 @@ binary_run_in_docker: &binary_run_in_docker
   command: |
     # This step only runs on circleci linux machine executors that themselves
     # need to start docker images
-    script="/home/circleci/project/pytorch/.circleci/scripts/binary_install_miniconda.sh"
+    script="/home/circleci/project/pytorch/.circleci/scripts/binary_run_in_docker.sh"
     cat "$script"
     source "$script"
