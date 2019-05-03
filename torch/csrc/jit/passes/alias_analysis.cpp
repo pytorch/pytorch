@@ -20,7 +20,7 @@ bool AliasDb::shouldAnnotate(const TypePtr& type) {
 // We only need to annotate values that either are mutable or could contain
 // mutable types.
 bool AliasDb::shouldAnnotate(const Value* v) {
-  return !v->mustBeNone() && shouldAnnotate(v->type());
+  return shouldAnnotate(v->type());
 }
 
 bool AliasDb::isContainerType(const TypePtr& type) {
@@ -763,19 +763,17 @@ void AliasDb::analyzeBroadcastingChunk(Node* node) {
 
 // Register the fact that `value` is a pointer to `to`
 void AliasDb::makePointerTo(const Value* from, const Value* to) {
+  // guaranteed to not alias
+  if (from->mustBeNone() || to->mustBeNone()) {
+    return;
+  }
+
   if (!shouldAnnotate(from)) {
     AT_ASSERT(!shouldAnnotate(to));
     return;
   }
 
   if (from == to) {
-    return;
-  }
-
-  // Special case: if `from` is an optional, `to` could be a None. Don't
-  // create a pointer in that case
-  if (from->type()->kind() == TypeKind::OptionalType &&
-      to->type()->kind() == TypeKind::NoneType) {
     return;
   }
 
