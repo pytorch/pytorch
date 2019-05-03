@@ -12,9 +12,7 @@ namespace native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void upsample_bicubic2d_out_frame(
     const int64_t num_elements,
     const accscalar_t height_scale,
