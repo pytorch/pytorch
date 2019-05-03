@@ -2110,9 +2110,9 @@ RegisterOperators reg2({
     DEFINE_MATH_OP(aten::gamma, std::tgamma(a), float, float),
     DEFINE_MATH_OP(aten::erf, std::erf(a), float, float),
     DEFINE_MATH_OP(aten::erfc, std::erfc(a), float, float),
-    DEFINE_MATH_OP(aten::expm1, std:expm1(a), float, float),
+    DEFINE_MATH_OP(aten::expm1, std::expm1(a), float, float),
     DEFINE_MATH_OP(aten::fabs, std::fabs(a), float, float),
-    DEFINE_MATH_OP(aten::lgamma, std:lgamma(a), float, float),
+    DEFINE_MATH_OP(aten::lgamma, std::lgamma(a), float, float),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),
