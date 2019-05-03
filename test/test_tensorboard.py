@@ -16,6 +16,13 @@ try:
 except ImportError:
     TEST_TENSORBOARD = False
 
+HAS_TORCHVISION = True
+try:
+    import torchvision
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
 TEST_MATPLOTLIB = True
 try:
     import matplotlib
@@ -27,7 +34,6 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-import torchvision
 from common_utils import TestCase, run_tests
 
 
@@ -398,18 +404,23 @@ if TEST_TENSORBOARD:
                 with SummaryWriter(comment='expect_error') as w:
                     w.add_graph(model, dummy_input)  # error
 
+        @skipIfNoTorchVision
         def test_torchvision_smoke(self):
-            model_name_input = {
+            model_input_shapes = {
                 'alexnet': (2, 3, 224, 224),
                 'resnet34': (2, 3, 224, 224),
+                'resnet152': (2, 3, 224, 224),
                 'densenet121': (2, 3, 224, 224),
+                'vgg16': (2, 3, 224, 224),
                 'vgg19': (2, 3, 224, 224),
-                # 'mobilenet_v2': (2, 3, 224, 224),  # will fail onnx
+                'vgg16_bn': (2, 3, 224, 224),
+                'vgg19_bn': (2, 3, 224, 224),
+                # 'mobilenet_v2': (2, 3, 224, 224),  # will fail optimize_graph
             }
-            for model_name, input_size in model_name_input.items():
+            for model_name, input_shape in model_input_shapes.items():
                 with SummaryWriter(comment=model_name) as w:
                     model = getattr(torchvision.models, model_name)()
-                    w.add_graph(model, torch.zeros(input_size))
+                    w.add_graph(model, torch.zeros(input_shape))
 
     class TestTensorBoardFigure(BaseTestCase):
         @skipIfNoMatplotlib
