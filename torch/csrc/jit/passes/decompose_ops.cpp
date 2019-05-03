@@ -53,11 +53,16 @@ static void DecomposeOps(Block* block) {
       Value* input = it->namedInput(attr::input);
       Value* weight = it->namedInput(attr::weight);
       Value* bias = it->namedInput(attr::bias);
+      auto input_type = input->type()->cast<DimensionedTensorType>();
+      if (!input_type) {
+        // if the input type is not specialized, don't do decomposition
+        continue;
+      }
 
       WithInsertPoint guard(*it);
 
       Graph* graph = it->owningGraph();
-      int ndim = input->type()->cast<DimensionedTensorType>()->dim();
+      int ndim = input_type->dim();
       Value* new_output = nullptr;
       if (ndim == 2 && bias->type()->isSubtypeOf(TensorType::get())) {
         // if ndim == 2 and bias is statically defined, dispatch to addmm decomposition
