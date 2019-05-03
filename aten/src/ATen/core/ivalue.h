@@ -9,7 +9,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
-
+#include <c10/util/TypeList.h>
 #include <ATen/core/Tensor.h>
 
 namespace c10 {
@@ -153,6 +153,10 @@ struct CAFFE2_API IValue final {
   IValue & operator=(IValue const & rhs) & {
     IValue(rhs).swap(*this);
     return *this;
+  }
+
+  template<class T> IValue(T x) {
+    static_assert(!guts::false_t<T>::value, "Implicit conversions are disabled for IValues to avoid accidental casting to bool");
   }
 
   void dump() const;
