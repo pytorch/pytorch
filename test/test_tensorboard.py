@@ -415,12 +415,16 @@ if TEST_TENSORBOARD:
                 'vgg19': (2, 3, 224, 224),
                 'vgg16_bn': (2, 3, 224, 224),
                 'vgg19_bn': (2, 3, 224, 224),
-                # 'mobilenet_v2': (2, 3, 224, 224),  # will fail optimize_graph
+                'mobilenet_v2': (2, 3, 224, 224),  # will fail optimize_graph
             }
             for model_name, input_shape in model_input_shapes.items():
                 with SummaryWriter(comment=model_name) as w:
                     model = getattr(torchvision.models, model_name)()
-                    w.add_graph(model, torch.zeros(input_shape))
+                    # ValueError: only one element tensors can be converted to Python scalars
+                    if model_name == 'mobilenet_v2':
+                        w.add_graph(model, torch.zeros(input_shape), operator_export_type="RAW")
+                    else:
+                        w.add_graph(model, torch.zeros(input_shape))
 
     class TestTensorBoardFigure(BaseTestCase):
         @skipIfNoMatplotlib
