@@ -201,7 +201,8 @@ private:
 
   template<class FuncType>
   void legacyAPIOp_(const std::string& schemaOrName, FuncType&& func) {
-    op_(schemaOrName, kernel<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(std::forward<FuncType>(func)));
+    constexpr bool AllowLegacyTypes = true;
+    op_(schemaOrName, detail::kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(std::forward<FuncType>(func)));
   }
 
   void checkSchemaAndRegisterOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config);

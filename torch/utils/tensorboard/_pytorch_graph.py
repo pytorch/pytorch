@@ -76,6 +76,10 @@ class NodePyIO(NodePy):
         except RuntimeError:
             tensor_size = [1, ]  # fail when constant model is used.
         self.tensor_size = tensor_size
+        # Kind attribute string is purely descriptive and will be shown
+        # in detailed information for the node in TensorBoard's graph plugin.
+        #
+        # NodePyOP nodes get this from their kind() method.
         self.kind = 'Parameter'
         if input_or_output:
             self.input_or_output = input_or_output
@@ -92,6 +96,26 @@ class NodePyOP(NodePy):
 
 
 class GraphPy(object):
+    """Helper class to convert torch.nn.Module to GraphDef proto and visualization
+    with TensorBoard.
+
+    GraphDef generation operates in two passes:
+
+    In the first pass, all nodes are read and saved to two lists.
+    One list is for input/output nodes (nodes_io), which only have inbound
+    or outbound connections, but not both. Another list is for internal
+    operator nodes (nodes_op). The first pass also saves all scope name
+    appeared in the nodes in scope_name_appeared list for later processing.
+
+    In the second pass, scope names are fully applied to all nodes.
+    uniqueNameToScopedName is a mapping from a node's ID to its fully qualified
+    scope name. e.g. Net1/Linear[0]/1. Unfortunately torch.jit doesn't have
+    totally correct scope output, so this is nontrivial. The function
+    populate_namespace_from_OP_to_IO and find_common_root are used to
+    assign scope name to a node based on the connection between nodes
+    in a heuristic kind of way. Bookkeeping is done with shallowest_scope_name
+    and scope_name_appeared.
+    """
     def __init__(self):
         self.nodes_op = []
         self.nodes_io = OrderedDict()
