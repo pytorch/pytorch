@@ -10,21 +10,21 @@ namespace native {
 /* TODO: move this to a common place */
 template <typename scalar_t>
 __device__ inline scalar_t min(scalar_t a, scalar_t b) {
-  return ((a) < (b)) ? (a) : (b);
+  return a < b ? a : b;
 }
 
 template <typename scalar_t>
 __device__ inline scalar_t max(scalar_t a, scalar_t b) {
-  return ((a) > (b)) ? (a) : (b);
+  return a > b ? a : b;
 }
 
 static inline void upsample_1d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
-    int64_t nbatch,
-    int64_t nchannels,
-    int64_t input_width,
-    int64_t output_width) {
+    int nbatch,
+    int nchannels,
+    int input_width,
+    int output_width) {
   AT_CHECK(
       input_width > 0 && output_width > 0,
       "input and output sizes should be greater than 0, but got input (W: ",
@@ -48,12 +48,12 @@ static inline void upsample_1d_shape_check(
 static inline void upsample_2d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
-    int64_t nbatch,
-    int64_t nchannels,
-    int64_t input_height,
-    int64_t input_width,
-    int64_t output_height,
-    int64_t output_width) {
+    int nbatch,
+    int nchannels,
+    int input_height,
+    int input_width,
+    int output_height,
+    int output_width) {
   AT_CHECK(
       input_height > 0 && input_width > 0 && output_height > 0 &&
           output_width > 0,
@@ -84,14 +84,14 @@ static inline void upsample_2d_shape_check(
 static inline void upsample_3d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
-    int64_t nbatch,
-    int64_t nchannels,
-    int64_t input_depth,
-    int64_t input_height,
-    int64_t input_width,
-    int64_t output_depth,
-    int64_t output_height,
-    int64_t output_width) {
+    int nbatch,
+    int nchannels,
+    int input_depth,
+    int input_height,
+    int input_width,
+    int output_depth,
+    int output_height,
+    int output_width) {
   AT_CHECK(
       input_depth > 0 && input_height > 0 && input_width > 0 &&
           output_depth > 0 && output_height > 0 && output_width > 0,
@@ -125,8 +125,8 @@ static inline void upsample_3d_shape_check(
 
 template <typename accscalar_t>
 __host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
-    int64_t input_size,
-    int64_t output_size,
+    int input_size,
+    int output_size,
     bool align_corners) {
   if (output_size > 1) {
     return align_corners ? (accscalar_t)(input_size - 1) / (output_size - 1)
@@ -139,7 +139,7 @@ __host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
 template <typename accscalar_t>
 __device__ __forceinline__ static accscalar_t area_pixel_compute_source_index(
     accscalar_t scale,
-    int64_t dst_index,
+    int dst_index,
     bool align_corners,
     bool cubic) {
   if (align_corners) {
@@ -154,45 +154,55 @@ __device__ __forceinline__ static accscalar_t area_pixel_compute_source_index(
   }
 }
 
-__device__ __forceinline__ static int64_t nearest_neighbor_compute_source_index(
+__device__ __forceinline__ static int nearest_neighbor_compute_source_index(
     const float scale,
-    int64_t dst_index,
-    int64_t input_size) {
-  const int64_t src_index = min<int64_t>(
-      static_cast<int64_t>(floorf(dst_index * scale)), input_size - 1);
+    int dst_index,
+    int input_size) {
+  const int src_index = min<int>(
+      static_cast<int>(floorf(dst_index * scale)), input_size - 1);
   return src_index;
 }
 
+/* just affect UpSampleBicubic2d.cu */
+/* TODO: change width and height order in the arguments */
+/* TODO: maybe change x and y order in the arguments */
+/* TODO: maybe change channel and batch order in the arguments */
 template <typename scalar_t>
-__device__ __forceinline__ static scalar_t upsampling_get_value_bounded(
-    const PackedTensorAccessor<scalar_t, 4> data,
-    int64_t channel,
-    int64_t batch,
-    int64_t width,
-    int64_t height,
-    int64_t x,
-    int64_t y) {
-  int64_t access_x =
-      max<int64_t>(min<int64_t>(x, width - 1), static_cast<int64_t>(0));
-  int64_t access_y =
-      max<int64_t>(min<int64_t>(y, height - 1), static_cast<int64_t>(0));
+__device__ __forceinline__ static scalar_t upsample_get_value_bounded(
+    const PackedTensorAccessor<scalar_t, 4>& data,
+    int channel,
+    int batch,
+    int width,
+    int height,
+    int x,
+    int y) {
+  int access_x =
+      max<int>(min<int>(x, width - 1), static_cast<int>(0));
+  int access_y =
+      max<int>(min<int>(y, height - 1), static_cast<int>(0));
   return data[batch][channel][access_y][access_x];
 }
 
+/* just affect UpSampleBicubic2d.cu */
+/* TODO: change width and height order in the arguments */
+/* TODO: maybe change x and y order in the arguments */
+/* TODO: maybe change channel and batch order in the arguments */
 template <typename scalar_t, typename accscalar_t>
-__device__ __forceinline__ static void upsampling_increment_value_bounded(
-    PackedTensorAccessor<scalar_t, 4> data,
-    int64_t channel,
-    int64_t batch,
-    int64_t width,
-    int64_t height,
-    int64_t x,
-    int64_t y,
+__device__ __forceinline__ static void upsample_increment_value_bounded(
+    PackedTensorAccessor<scalar_t, 4>& data,
+    int channel,
+    int batch,
+    int width,
+    int height,
+    int x,
+    int y,
     accscalar_t value) {
-  int64_t access_x =
-      max<int64_t>(min<int64_t>(x, width - 1), static_cast<int64_t>(0));
-  int64_t access_y =
-      max<int64_t>(min<int64_t>(y, height - 1), static_cast<int64_t>(0));
+  int access_x =
+      max<int>(min<int>(x, width - 1), static_cast<int>(0));
+  int access_y =
+      max<int>(min<int>(y, height - 1), static_cast<int>(0));
+  /* TODO: result here is trucated to scalar_t, 
+     check: https://github.com/pytorch/pytorch/pull/19630#discussion_r281426912 */
   atomicAdd(
       &data[batch][channel][access_y][access_x], static_cast<scalar_t>(value));
 }

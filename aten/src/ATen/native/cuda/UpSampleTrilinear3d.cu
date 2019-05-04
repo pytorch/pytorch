@@ -16,33 +16,33 @@ namespace {
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_trilinear3d_out_frame(
-    const int64_t n,
+    const int n,
     const accscalar_t rdepth,
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
     const PackedTensorAccessor<scalar_t, 5> idata,
     PackedTensorAccessor<scalar_t, 5> odata) {
-  int64_t index = threadIdx.x + blockIdx.x * blockDim.x;
+  int index = threadIdx.x + blockIdx.x * blockDim.x;
 
-  const int64_t batchsize = idata.size(0);
-  const int64_t channels = idata.size(1);
-  const int64_t depth1 = idata.size(2);
-  const int64_t height1 = idata.size(3);
-  const int64_t width1 = idata.size(4);
-  const int64_t depth2 = odata.size(2);
-  const int64_t height2 = odata.size(3);
-  const int64_t width2 = odata.size(4);
+  const int batchsize = idata.size(0);
+  const int channels = idata.size(1);
+  const int depth1 = idata.size(2);
+  const int height1 = idata.size(3);
+  const int width1 = idata.size(4);
+  const int depth2 = odata.size(2);
+  const int height2 = odata.size(3);
+  const int width2 = odata.size(4);
 
   if (index < n) {
-    const int64_t w2 = (index % (height2 * width2)) % width2; // 0:width2-1
-    const int64_t h2 = (index % (height2 * width2)) / width2; // 0:height2-1
-    const int64_t t2 = index / (height2 * width2); // 0:depth2-1
+    const int w2 = (index % (height2 * width2)) % width2; // 0:width2-1
+    const int h2 = (index % (height2 * width2)) / width2; // 0:height2-1
+    const int t2 = index / (height2 * width2); // 0:depth2-1
     // special case: just copy
     if (depth1 == depth2 && height1 == height2 && width1 == width2) {
-      const int64_t t1 = t2;
-      const int64_t h1 = h2;
-      const int64_t w1 = w2;
+      const int t1 = t2;
+      const int h1 = h2;
+      const int w1 = w2;
 
       for (int n = 0; n < batchsize; n++) {
         for (int c = 0; c < channels; ++c) {
@@ -55,22 +55,22 @@ __global__ void upsample_trilinear3d_out_frame(
     //
     const accscalar_t t1r = area_pixel_compute_source_index<accscalar_t>(
         rdepth, t2, align_corners, /*cubic=*/false);
-    const int64_t t1 = t1r;
-    const int64_t t1p = (t1 < depth1 - 1) ? 1 : 0;
+    const int t1 = t1r;
+    const int t1p = (t1 < depth1 - 1) ? 1 : 0;
     const accscalar_t t1lambda = t1r - t1;
     const accscalar_t t0lambda = static_cast<accscalar_t>(1) - t1lambda;
     //
     const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
         rheight, h2, align_corners, /*cubic=*/false);
-    const int64_t h1 = h1r;
-    const int64_t h1p = (h1 < height1 - 1) ? 1 : 0;
+    const int h1 = h1r;
+    const int h1p = (h1 < height1 - 1) ? 1 : 0;
     const accscalar_t h1lambda = h1r - h1;
     const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
     //
     const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
         rwidth, w2, align_corners, /*cubic=*/false);
-    const int64_t w1 = w1r;
-    const int64_t w1p = (w1 < width1 - 1) ? 1 : 0;
+    const int w1 = w1r;
+    const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const accscalar_t w1lambda = w1r - w1;
     const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
     //
@@ -100,38 +100,38 @@ __global__ void upsample_trilinear3d_out_frame(
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_trilinear3d_backward_out_frame(
-    const int64_t n,
+    const int n,
     const accscalar_t rdepth,
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
     PackedTensorAccessor<scalar_t, 5> idata,
     const PackedTensorAccessor<scalar_t, 5> odata) {
-  int64_t index = threadIdx.x + blockIdx.x * blockDim.x;
+  int index = threadIdx.x + blockIdx.x * blockDim.x;
 
-  const int64_t batchsize = idata.size(0);
-  const int64_t channels = idata.size(1);
-  const int64_t depth1 = idata.size(2);
-  const int64_t height1 = idata.size(3);
-  const int64_t width1 = idata.size(4);
-  const int64_t depth2 = odata.size(2);
-  const int64_t height2 = odata.size(3);
-  const int64_t width2 = odata.size(4);
+  const int batchsize = idata.size(0);
+  const int channels = idata.size(1);
+  const int depth1 = idata.size(2);
+  const int height1 = idata.size(3);
+  const int width1 = idata.size(4);
+  const int depth2 = odata.size(2);
+  const int height2 = odata.size(3);
+  const int width2 = odata.size(4);
 
   if (index < n) {
-    const int64_t w2 = (index % (height2 * width2)) % width2; // 0:width2-1
-    const int64_t h2 = (index % (height2 * width2)) / width2; // 0:height2-1
-    const int64_t t2 = index / (height2 * width2); // 0:depth2-1
+    const int w2 = (index % (height2 * width2)) % width2; // 0:width2-1
+    const int h2 = (index % (height2 * width2)) / width2; // 0:height2-1
+    const int t2 = index / (height2 * width2); // 0:depth2-1
     // special case: just copy
     if (depth1 == depth2 && height1 == height2 && width1 == width2) {
-      const int64_t t1 = t2;
-      const int64_t h1 = h2;
-      const int64_t w1 = w2;
+      const int t1 = t2;
+      const int h1 = h2;
+      const int w1 = w2;
 
       for (int n = 0; n < batchsize; n++) {
         for (int c = 0; c < channels; ++c) {
           const scalar_t val = odata[n][c][t1][h1][w1];
-          idata[n][c][t2][h2][w2] += val;
+          idata[n][c][t2][h2][w2] = val;
         }
       }
       return;
@@ -139,22 +139,22 @@ __global__ void upsample_trilinear3d_backward_out_frame(
     //
     const accscalar_t t1r = area_pixel_compute_source_index<accscalar_t>(
         rdepth, t2, align_corners, /*cubic=*/false);
-    const int64_t t1 = t1r;
-    const int64_t t1p = (t1 < depth1 - 1) ? 1 : 0;
+    const int t1 = t1r;
+    const int t1p = (t1 < depth1 - 1) ? 1 : 0;
     const accscalar_t t1lambda = t1r - t1;
     const accscalar_t t0lambda = static_cast<accscalar_t>(1) - t1lambda;
     //
     const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
         rheight, h2, align_corners, /*cubic=*/false);
-    const int64_t h1 = h1r;
-    const int64_t h1p = (h1 < height1 - 1) ? 1 : 0;
+    const int h1 = h1r;
+    const int h1p = (h1 < height1 - 1) ? 1 : 0;
     const accscalar_t h1lambda = h1r - h1;
     const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
     //
     const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
         rwidth, w2, align_corners, /*cubic=*/false);
-    const int64_t w1 = w1r;
-    const int64_t w1p = (w1 < width1 - 1) ? 1 : 0;
+    const int w1 = w1r;
+    const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const accscalar_t w1lambda = w1r - w1;
     const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
     //
@@ -203,15 +203,15 @@ static void upsample_trilinear3d_out_cuda_template(
       "It is expected output_size equals to 3, but got size ",
       output_size.size());
 
-  int64_t output_depth = output_size[0];
-  int64_t output_height = output_size[1];
-  int64_t output_width = output_size[2];
+  int output_depth = output_size[0];
+  int output_height = output_size[1];
+  int output_width = output_size[2];
 
-  int64_t nbatch = input.size(0);
-  int64_t channels = input.size(1);
-  int64_t input_depth = input.size(2);
-  int64_t input_height = input.size(3);
-  int64_t input_width = input.size(4);
+  int nbatch = input.size(0);
+  int channels = input.size(1);
+  int input_depth = input.size(2);
+  int input_height = input.size(3);
+  int input_width = input.size(4);
 
   upsample_3d_shape_check(
       input,
@@ -236,8 +236,8 @@ static void upsample_trilinear3d_out_cuda_template(
       input_depth > 0 && input_height > 0 && input_width > 0 &&
       output_depth > 0 && output_height > 0 && output_width > 0);
 
-  const int64_t num_kernels = output_depth * output_height * output_width;
-  const int64_t num_threads =
+  const int num_kernels = output_depth * output_height * output_width;
+  const int num_threads =
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -256,7 +256,7 @@ static void upsample_trilinear3d_out_cuda_template(
             input_width, output_width, align_corners);
 
         upsample_trilinear3d_out_frame<scalar_t, accscalar_t>
-            <<<(num_kernels + num_threads - 1) / num_threads,
+            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
                num_threads,
                0,
                stream>>>(
@@ -269,10 +269,7 @@ static void upsample_trilinear3d_out_cuda_template(
                 odata);
       });
 
-  AT_CHECK(
-      cudaGetLastError() == cudaSuccess,
-      "Failed with error code ",
-      cudaGetLastError());
+      AT_CUDA_CHECK(cudaGetLastError());
 }
 
 static void upsample_trilinear3d_backward_out_cuda_template(
@@ -297,15 +294,15 @@ static void upsample_trilinear3d_backward_out_cuda_template(
       "It is expected input_size equals to 5, but got size ",
       input_size.size());
 
-  int64_t output_depth = output_size[0];
-  int64_t output_height = output_size[1];
-  int64_t output_width = output_size[2];
+  int output_depth = output_size[0];
+  int output_height = output_size[1];
+  int output_width = output_size[2];
 
-  int64_t nbatch = input_size[0];
-  int64_t channels = input_size[1];
-  int64_t input_depth = input_size[2];
-  int64_t input_height = input_size[3];
-  int64_t input_width = input_size[4];
+  int nbatch = input_size[0];
+  int channels = input_size[1];
+  int input_depth = input_size[2];
+  int input_height = input_size[3];
+  int input_width = input_size[4];
 
   upsample_3d_shape_check(
       Tensor(),
@@ -324,8 +321,8 @@ static void upsample_trilinear3d_backward_out_cuda_template(
       {nbatch, channels, input_depth, input_height, input_width});
   grad_input.zero_();
 
-  const int64_t num_kernels = output_depth * output_height * output_width;
-  const int64_t num_threads =
+  const int num_kernels = output_depth * output_height * output_width;
+  const int num_threads =
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -346,7 +343,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
             input_width, output_width, align_corners);
 
         upsample_trilinear3d_backward_out_frame<scalar_t, accscalar_t>
-            <<<(num_kernels + num_threads - 1) / num_threads,
+            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
                num_threads,
                0,
                stream>>>(
@@ -359,10 +356,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
                 odata);
       });
 
-  AT_CHECK(
-      cudaGetLastError() == cudaSuccess,
-      "Failed with error code ",
-      cudaGetLastError());
+      AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace
@@ -381,7 +375,7 @@ Tensor upsample_trilinear3d_cuda(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners) {
-  Tensor output = at::empty({0}, input.options());
+  Tensor output = at::empty_like(input);
   upsample_trilinear3d_out_cuda_template(
       output, input, output_size, align_corners);
   return output;
@@ -403,7 +397,7 @@ Tensor upsample_trilinear3d_backward_cuda(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners) {
-  Tensor grad_input = at::zeros(input_size, grad_output.options());
+  Tensor grad_input = at::empty_like(grad_output);
   upsample_trilinear3d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners);
   return grad_input;
