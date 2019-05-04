@@ -53,7 +53,7 @@ class Threshold(Module):
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'threshold={}, value={}{}'.format(
             self.threshold, self.value, inplace_str
         )
@@ -99,7 +99,7 @@ class ReLU(Module):
         return F.relu(input, inplace=self.inplace)
 
     def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
@@ -156,7 +156,7 @@ class RReLU(Module):
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'lower={}, upper={}{}'.format(self.lower, self.upper, inplace_str)
 
 
@@ -218,7 +218,7 @@ class Hardtanh(Module):
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'min_val={}, max_val={}{}'.format(
             self.min_val, self.max_val, inplace_str
         )
@@ -252,7 +252,7 @@ class ReLU6(Hardtanh):
         super(ReLU6, self).__init__(0., 6., inplace)
 
     def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
@@ -345,7 +345,7 @@ class ELU(Module):
         return F.elu(input, self.alpha, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
@@ -390,7 +390,7 @@ class CELU(Module):
         return F.celu(input, self.alpha, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
@@ -435,7 +435,7 @@ class SELU(Module):
         return F.selu(input, self.inplace)
 
     def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
@@ -561,7 +561,7 @@ class LeakyReLU(Module):
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
 
 
