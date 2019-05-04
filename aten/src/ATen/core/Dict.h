@@ -2,7 +2,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeTraits.h>
-#include <ATen/core/ivalue.h>
+#include <ATen/core/ivalue_base.h>
 #include <c10/util/flat_hash_map.h>
 
 namespace c10 {
@@ -358,6 +358,13 @@ public:
   }
 };
 
+namespace impl {
+// GenericDict is how IValue stores dicts. It is, however, not part of the
+// public API. Kernels should use Dicts with concrete Key, Value types instead
+// (maybe except for some internal prim ops).
 using GenericDict = Dict<IValue, IValue>;
+}
 
 }
+
+#include <ATen/core/ivalue.h>
