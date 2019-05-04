@@ -443,16 +443,13 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
     osizeW = gradOutput.size(4);
   }
 
-  // somehow nonatomic is passing all test for volumetric case. (copied from
-  // THCUNN source code.)
-  // bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0) || // (isizeT%osizeT != 0)
-  bool atomic = false;
+  bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0) || (isizeT%osizeT != 0);
 
   if (input.ndimension() == 4) {
-    totalZ = sizeD * osizeT;
+    totalZ = atomic ? sizeD * osizeT : sizeD * isizeT;
   } else {
     int sizeB = input.size(0);
-    totalZ = sizeB * sizeD * osizeT;
+    totalZ = atomic ? sizeB * sizeD * osizeT : sizeB * sizeD * isizeT;
   }
 
   if (atomic) {
@@ -504,7 +501,6 @@ Tensor& adaptive_avg_pool3d_backward_out_cuda(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input) {
-  gradInput.resize_as_(input);
   adaptive_avg_pool3d_backward_out_cuda_template(gradInput, gradOutput_, input);
   return gradInput;
 }
