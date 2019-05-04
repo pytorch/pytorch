@@ -154,28 +154,28 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
     const bool consecutive,
     const bool return_inverse,
     const bool return_counts) {
-  // check if dim is in range and see if the size along that dim is 0
-  if (dim <= self.dim() && self.size(dim) == 0) {
-    // assume tensor has all dimentions non-zero
-    bool well_formed_tensor = true;
-    for (int64_t i = 0; i < self.dim(); ++i) {
-      if (dim == i)
-        continue;
-      if (self.size(i) == 0) {
-        // found atleast 1 zero sized dimention, hence the tensor is not well formed
-        well_formed_tensor = false;
-        break;
-      }
-    }
-    if (well_formed_tensor) {
-      Tensor output = at::empty({0}, self.options().dtype(kLong));
-      Tensor inverse_indices =
-          at::empty(self.sizes(), self.options().dtype(kLong));
-        Tensor counts = at::empty({0}, self.options().dtype(kLong));
 
-      return std::make_tuple(output, inverse_indices,counts);
+    auto sizes = self.sizes().vec();
+    // check how many zero dimentions exist
+    auto num_zero_dims = std::count(sizes.begin(), sizes.end(),0);
+    
+    // tensor is not well formed as it has 0 sized dimentions
+    if (self.size(dim)==0){
+      AT_CHECK(
+          num_zero_dims == 1,
+          "Number of zero sized dimentions is more than one, so unique cannot be applied ")
+      Tensor output = at::empty({0}, self.options());
+      Tensor inverse_indices =
+          at::empty(self.size(dim), self.options().dtype(kLong));
+      Tensor counts = at::empty({0}, self.options().dtype(kLong));
+
+      return std::make_tuple(output, inverse_indices, counts);
     }
-  }
+    if (self.size(dim) != 0 ){
+      AT_CHECK(num_zero_dims==0,
+      "There are 0 sized dimentions, and they aren't selected, so unique cannot be applied");
+    }
+  
   // reshape tensor as [dim, -1]
   Tensor input_flat = self.transpose(dim, 0);
   auto orig_sizes = input_flat.sizes().vec();
