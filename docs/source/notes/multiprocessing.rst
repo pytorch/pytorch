@@ -35,7 +35,10 @@ required to use CUDA in subprocesses.
 
 Unlike CPU tensors, the sending process is required to keep the original tensor
 as long as the receiving process retains a copy of the tensor. It is implemented
-under the hood but requires users to follow the best practices described in
+under the hood but requires users to follow the best practices for the program
+to run correctly. For example, the sending process must stay alive as long as
+the consumer process has references to the tensor, and the refcounting can not
+save you if the consumer process exits abnormally via a fatal signal. See
 :ref:`this section <multiprocessing-cuda-sharing-details>`.
 
 See also: :ref:`cuda-nn-dataparallel-instead`
