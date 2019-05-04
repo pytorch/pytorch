@@ -98,9 +98,11 @@ The following shows how to log data in tensorboard from pytorch.
 
 .. autoclass:: SummaryWriter
 
+   .. automethod:: __init__
    .. automethod:: add_scalar
    .. automethod:: add_histogram
    .. automethod:: add_image
+   .. automethod:: add_images
    .. automethod:: add_figure
    .. automethod:: add_video
    .. automethod:: add_audio

@@ -182,6 +182,23 @@ class SummaryWriter(object):
             kwargs: extra keyword arguments for FileWriter (e.g. 'flush_secs'
               controls how often to flush pending events). For more arguments
               please refer to docs for 'tf.summary.FileWriter'.
+
+        Examples::
+
+            from torch.utils.tensorboard import SummaryWriter
+
+            # create a summary writer with automatically generated folder name.
+            writer = SummaryWriter()
+            # folder location: runs/May04_22-14-54_s-MacBook-Pro.local/
+
+            # create a summary writer using the specified folder name.
+            writer = SummaryWriter("my_experiment")
+            # folder location: my_experiment
+
+            # create a summary writer with comment appended.
+            writer = SummaryWriter(comment="LR_0.1_BATCH_16")
+            # folder location: runs/May04_22-14-54_s-MacBook-Pro.localLR_0.1_BATCH_16/
+
         """
         if not log_dir:
             import socket
@@ -235,7 +252,7 @@ class SummaryWriter(object):
             else:
                 self.file_writer = FileWriter(logdir=self.log_dir, **self.kwargs)
             self.all_writers = {self.file_writer.get_logdir(): self.file_writer}
-        return self.file_writer
+        return self.file_writer 
 
     def add_scalar(self, tag, scalar_value, global_step=None, walltime=None):
         """Add scalar data to summary.
@@ -246,6 +263,21 @@ class SummaryWriter(object):
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               with seconds after epoch of event
+
+        Examples::
+
+            from torch.utils.tensorboard import SummaryWriter
+            writer = SummaryWriter()
+            x = range(100)
+            for i in x:
+                writer.add_scalar('y=2x', i * 2, i)
+            writer.close()
+
+        Expected result:
+
+        .. image:: _static/img/tensorboard/add_scalar.png
+           :scale: 50 %
+
         """
         if self._check_caffe2_blob(scalar_value):
             scalar_value = workspace.FetchBlob(scalar_value)
@@ -297,6 +329,22 @@ class SummaryWriter(object):
               other options in: https://docs.scipy.org/doc/numpy/reference/generated/numpy.histogram.html
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
+
+        Examples::
+
+            from torch.utils.tensorboard import SummaryWriter
+            import numpy as np
+            writer = SummaryWriter()
+            for i in range(10):
+                x = np.random.random(1000)
+                writer.add_histogram('distribution centers', x + i, i)
+            writer.close()
+
+        Expected result:
+
+        .. image:: _static/img/tensorboard/add_histogram.png
+           :scale: 50 %
+
         """
         if self._check_caffe2_blob(values):
             values = workspace.FetchBlob(values)
@@ -352,6 +400,31 @@ class SummaryWriter(object):
             convert a batch of tensor into 3xHxW format or call ``add_images`` and let us do the job.
             Tensor with :math:`(1, H, W)`, :math:`(H, W)`, :math:`(H, W, 3)` is also suitible as long as
             corresponding ``dataformats`` argument is passed. e.g. CHW, HWC, HW.
+
+        Examples::
+
+            from torch.utils.tensorboard import SummaryWriter
+            import numpy as np
+            my_img = np.zeros((3, 100, 100))
+            my_img[0] = np.arange(0, 10000).reshape(100, 100) / 10000
+            my_img[1] = 1 - np.arange(0, 10000).reshape(100, 100) / 10000
+
+            my_img_HWC = np.zeros((100, 100, 3))
+            my_img_HWC[:, :, 0] = np.arange(0, 10000).reshape(100, 100) / 10000
+            my_img_HWC[:, :, 1] = 1 - np.arange(0, 10000).reshape(100, 100) / 10000
+
+            writer = SummaryWriter()
+            writer.add_image('my_image', my_img, 0)
+
+            # If you have non-default dimension setting, set the dataformats argument.
+            writer.add_image('my_image_HWC', my_img_HWC, 0, dataformats='HWC')
+            writer.close()
+
+        Expected result:
+
+        .. image:: _static/img/tensorboard/add_image.png
+           :scale: 50 %
+
         """
         if self._check_caffe2_blob(img_tensor):
             img_tensor = workspace.FetchBlob(img_tensor)
@@ -372,6 +445,26 @@ class SummaryWriter(object):
         Shape:
             img_tensor: Default is :math:`(N, 3, H, W)`. If ``dataformats`` is specified, other shape will be
             accepted. e.g. NCHW or NHWC.
+
+        Examples::
+
+            from torch.utils.tensorboard import SummaryWriter
+            import numpy as np
+
+            my_img_batch = np.zeros((16, 3, 100, 100))
+            for i in range(16):
+                my_img_batch[i, 0] = np.arange(0, 10000).reshape(100, 100) / 10000 / 16 * i
+                my_img_batch[i, 1] = (1 - np.arange(0, 10000).reshape(100, 100) / 10000) / 16 * i
+
+            writer = SummaryWriter()
+            writer.add_images('my_image_batch', my_img_batch, 0)
+            writer.close()
+
+        Expected result:
+
+        .. image:: _static/img/tensorboard/add_images.png
+           :scale: 30 %
+
         """
         if self._check_caffe2_blob(img_tensor):
             img_tensor = workspace.FetchBlob(img_tensor)
@@ -601,6 +694,10 @@ class SummaryWriter(object):
     def add_pr_curve(self, tag, labels, predictions, global_step=None,
                      num_thresholds=127, weights=None, walltime=None):
         """Adds precision recall curve.
+        Precision recall curve lets you understand you model's performance under different
+        threshold settings. With this function, you provide the groundthuth label (T/F) and
+        confidence (usually the output of your algorithm) for each target.
+        TensorBoard will let you choose the threshold on the webpage.
 
         Args:
             tag (string): Data identifier
@@ -611,6 +708,16 @@ class SummaryWriter(object):
             num_thresholds (int): Number of thresholds used to draw the curve.
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
+
+        Examples::
+
+            from torch.utils.tensorboard import SummaryWriter
+            import numpy as np
+            labels = np.random.randint(2, size=100)  # binary label
+            predictions = np.random.rand(100)
+            writer = SummaryWriter()
+            writer.add_pr_curve('pr_curve', labels, predictions, 0)
+            writer.close()
 
         """
         labels, predictions = make_np(labels), make_np(predictions)
