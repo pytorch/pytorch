@@ -38,24 +38,24 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
         else:
             idx, data = r
             try:
-                data = pin_memory_data(data)
+                data = pin_memory(data)
             except Exception:
                 out_queue.put((idx, ExceptionWrapper(sys.exc_info())))
             else:
                 out_queue.put((idx, data))
 
 
-def pin_memory_data(data):
+def pin_memory(data):
     if isinstance(data, torch.Tensor):
         return data.pin_memory()
     elif isinstance(data, string_classes):
         return data
     elif isinstance(data, container_abcs.Mapping):
-        return {k: pin_memory_data(sample) for k, sample in data.items()}
+        return {k: pin_memory(sample) for k, sample in data.items()}
     elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
-        return type(data)(*(pin_memory_data(sample) for sample in data))
+        return type(data)(*(pin_memory(sample) for sample in data))
     elif isinstance(data, container_abcs.Sequence):
-        return [pin_memory_data(sample) for sample in data]
+        return [pin_memory(sample) for sample in data]
     elif hasattr(data, "pin_memory"):
         return data.pin_memory()
     else:

@@ -614,10 +614,6 @@ def _test_get_worker_info():
 def init_fn(worker_id):
     torch.manual_seed(12345)
 
-# used with test_error_in_init
-def error_worker_init_fn(_):
-    raise RuntimeError("Error in worker_init_fn")
-
 
 # used with test_error_in_init
 class ErrorIterableDataset(IterableDataset):
@@ -692,11 +688,6 @@ class TestDataLoader(TestCase):
                 setattr(dl, attr, {})
 
             self.assertRaises(ValueError, fn)
-
-    def test_error_in_init(self):
-        loader = DataLoader(self.dataset, num_workers=2, worker_init_fn=error_worker_init_fn)
-        with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
-            list(iter(loader))
 
     def test_sequential(self):
         self._test_sequential(DataLoader(self.dataset))

@@ -23,10 +23,11 @@ Dataset Types
 Map-style datasets
 ^^^^^^^^^^^^^^^^^^
 
-A map-style dataset is one that implements the ``__getitem__`` protocol,
-and represents a map from (possibly non-integral) indices/keys to data samples.
-E.g., such a dataset, when called ``dataset[idx]`` could read and the ``idx``-th
-image and its corresponding label from a folder on the disk.
+A map-style dataset is one that implements the :meth:`__getitem__` and
+:meth:`__len__` protocols, and represents a map from (possibly non-integral)
+indices/keys to data samples. E.g., such a dataset, when called ``dataset[idx]``
+could read and the ``idx``-th image and its corresponding label from a folder
+on the disk.
 
 .. note::
   :class:`~torch.utils.data.DataLoader` by default constructs a index sampler
@@ -38,7 +39,7 @@ See :class:`~torch.utils.data.Dataset` for more details.
 Iterable-style datasets
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-An iterable-style dataset is one that implements the ``__iter__`` protocol,
+An iterable-style dataset is one that implements the :meth:`__iter__` protocol,
 and represents an iterable over data samples. This type of datasets is
 particularly suitable for cases where random reads are expensive or even
 improbable. E.g., such a dataset, when called ``iter(dataset)``, could return a
@@ -76,14 +77,14 @@ Data Loading Strategies
 arguments, a :class:`~torch.utils.data.DataLoader` operates in one of three
 following strategies:
 
-* `Batched loading from a map-style dataset (default)`_
+* `Batched loading from a map-style dataset`_
 
 * `Loading individual members of a map-style dataset`_
 
 * `Loading from an iterable-style dataset`_
 
-Batched loading from a map-style dataset (default)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Batched loading from a map-style dataset
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This is the most common case, and corresponds to fetching a minibatch of
 data and collating them into batched Tensors, i.e., Tensors with one dimension
@@ -94,8 +95,9 @@ that starts this mode are:
   :attr:`sampler`, and :attr:`drop_last` to specify the batch indices sampling
   behavior.
 
-  With the default arguments, a :class:`~torch.utils.data.DataLoader`
-  loads data as batches of size ``1`` with indices sampled without replacement.
+  With the default arguments :attr:`batch_size=1`, :attr:`shuffle=False`,
+  :attr:`sampler=None` and :attr:`drop_last=False`, :class:`~torch.utils.data.DataLoader`
+  loads data as batches of size ``1`` sequentially.
 
 * Setting argument :attr:`batch_sampler` to a custom sampler returning a list
   of indices at each time, representing the indices for a batch.
@@ -113,8 +115,8 @@ The behavior of this mode is roughly equivalent with::
 Working with :attr:`collate_fn`
 """""""""""""""""""""""""""""""
 
-For instance, if each data sample consists of a 3-channeled image and an
-integral class label, i.e., each element of the dataset returns a tuple
+For instance, if each data sample consists of a 3-channel image and an integral
+class label, i.e., each element of the dataset returns a tuple
 ``(image, class_index)``, the default :attr:`collate_fn` collates a list of such
 tuples into a single tuple of a batched image tensor and a batched class label
 Tensor. In particular, the default :attr:`collate_fn` has the following
@@ -131,7 +133,7 @@ properties:
   for ``list`` s, ``tuple`` s, ``namedtuple`` s, etc.
 
 Users may use customized :attr:`collate_fn` to achieve custom batching, e.g.,
-along a dimension other than the first.
+along a dimension other than the first, or to add support for custom data types.
 
 Loading individual members of a map-style dataset
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -179,7 +181,7 @@ with::
 
 For multi-process loading, each worker process gets a different copy of
 :attr:`dataset`, so it is often desired to configure each copy independently to
-avoid having duplicate data returned from the workers. See the documentations of
+avoid having duplicate data returned from the workers. See the documentation of
 :class:`~torch.utils.data.IterableDataset` for details on this.
 
 Single- and Multi-process Data Loading

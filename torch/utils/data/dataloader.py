@@ -38,9 +38,9 @@ class DataLoader(object):
     The :class:`~torch.utils.data.DataLoader` applies one of the following
     data loading strategies based on the constructor arguments:
 
-    * batched loading from a map-style dataset (default)
+    * batched loading from a map-style dataset (default for map-style datasets)
 
-    * Loading individual members of a map-style dataset
+    * loading individual members of a map-style dataset
 
     * loading from an iterable-style dataset
 
@@ -54,7 +54,7 @@ class DataLoader(object):
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
             at every epoch (default: ``False``).
         sampler (Sampler, optional): defines the strategy to draw samples from
-            the dataset. If specified, :attr:`shuffle` must be False.
+            the dataset. If specified, :attr:`shuffle` must be ``False``.
         batch_sampler (Sampler, optional): like :attr:`sampler`, but returns a batch of
             indices at a time. Mutually exclusive with :attr:`batch_size`,
             :attr:`shuffle`, :attr:`sampler`, and :attr:`drop_last`.
@@ -198,11 +198,6 @@ class _BaseDataLoaderIter(object):
         else:
             self.sampler_iter = iter(self.sampler)
 
-        if self.mode == _DataLoaderStrategy.Iterable and self.num_workers == 0:
-            self.dataset_iter = iter(self.dataset)
-        else:
-            self.dataset_iter = None
-
         self.base_seed = torch.empty((), dtype=torch.int64).random_().item()
 
     def __iter__(self):
@@ -238,6 +233,9 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         assert self.timeout == 0
         assert self.num_workers == 0
 
+        if self.mode == _DataLoaderStrategy.Iterable:
+            self.dataset_iter = iter(self.dataset)
+
     def __next__(self):
         if self.mode == _DataLoaderStrategy.Iterable:
             data = self.convert_fn(next(self.dataset_iter))  # may raise StopIteration
@@ -249,7 +247,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
                 # mode == _DataLoaderStrategy.MapWithBatchedRead:
                 data = self.collate_fn([self.dataset[i] for i in index])
         if self.pin_memory:
-            data = _utils.pin_memory.pin_memory_data(data)
+            data = _utils.pin_memory.pin_memory(data)
         return data
 
     next = __next__  # Python 2 compatibility
