@@ -27,8 +27,8 @@ class CAFFE2_API OperatorHandle;
  */
 class CAFFE2_API OpKernel final {
 public:
-  OpKernel(OpKernel&&) = default;
-  OpKernel& operator=(OpKernel&&) = default;
+  OpKernel(OpKernel&&) noexcept = default;
+  OpKernel& operator=(OpKernel&&) noexcept = default;
   OpKernel(const OpKernel&) = delete;
   OpKernel& operator=(const OpKernel&) = delete;
 
