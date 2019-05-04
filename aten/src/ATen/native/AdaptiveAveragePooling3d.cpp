@@ -1,4 +1,3 @@
-#include <tuple>
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 
@@ -78,8 +77,8 @@ static void adaptive_avg_pool3d_out_frame(
 }
 
 void adaptive_avg_pool3d_out_cpu_template(
-    at::Tensor& output,
-    at::Tensor const& input,
+    Tensor& output,
+    Tensor const& input,
     IntArrayRef output_size) {
   for (int64_t i = 0; i < input.ndimension(); i++) {
     AT_CHECK(
@@ -287,7 +286,7 @@ Tensor& adaptive_avg_pool3d_out_cpu(
 }
 
 Tensor adaptive_avg_pool3d_cpu(
-    at::Tensor const& input,
+    Tensor const& input,
     IntArrayRef output_size) {
   auto output = at::empty({0}, input.options());
   adaptive_avg_pool3d_out_cpu_template(output, input, output_size);
