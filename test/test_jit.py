@@ -5556,19 +5556,22 @@ a")
         self.assertEqual(next(g.inputs()).type().kind(), 'DimensionedTensorType')
 
         @torch.jit.script
-        def fn(x, y):
-            # type: (Optional[Tensor], float) -> Tensor
-            y = torch.jit._unwrap_optional(x) * y
-            return y
+        def fn(x, y, b):
+            # type: (Optional[Tensor], Tensor, bool) -> Tensor
+            if b:
+                res = y
+            else:
+                res = torch.jit._unwrap_optional(x)
+            return res
 
-        res = fn(t, 2.0)
-        self.assertEqual(res, t * 2.0)
+        t2 = torch.zeros(1)
+        res = fn(t, t2, True)
+        self.assertEqual(res, t2)
         with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
-            res = fn(None, 2.0)
+            res = fn(None, t2, False)
+        res = fn(None, t2, True)
         g = torch.jit.last_executed_optimized_graph()
-        # FIXME: I would love to see if the graph has the right output
-        if g is not None:
-            self.assertEqual(next(g.outputs()).type().str(), "Tensor")
+        self.assertEqual(next(g.outputs()).type().str(), "Tensor")
 
     def test_optional_list(self):
         @torch.jit.script
@@ -5596,19 +5599,22 @@ a")
         self.assertEqual(next(g.inputs()).type().kind(), 'ListType')
 
         @torch.jit.script
-        def fn(x, y):
-            # type: (Optional[List[int]], int) -> List[int]
-            l = torch.jit._unwrap_optional(x)
-            return l[:y]
+        def fn(x, y, b):
+            # type: (Optional[List[int]], List[int], bool) -> List[int]
+            if b:
+                l = torch.jit._unwrap_optional(x)
+            else:
+                l = y
+            return l
 
-        res = fn(l, 1)
-        self.assertEqual(res, l[:1])
+        l2 = [0, 1]
+        res = fn(l, l2, True)
+        self.assertEqual(res, l)
         with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
-            res = fn(None, 1)
+            res = fn(None, l2, True)
+        res = fn(None, l2, False)
         g = torch.jit.last_executed_optimized_graph()
-        # FIXME: I would love to see if the graph has the right output
-        if g is not None:
-            self.assertEqual(next(g.outputs()).type().str(), "int[]")
+        self.assertEqual(next(g.outputs()).type().str(), "int[]")
 
     def test_while_write_outer_then_read(self):
         def func(a, b):
