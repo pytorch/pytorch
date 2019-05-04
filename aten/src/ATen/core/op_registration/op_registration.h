@@ -42,7 +42,7 @@ public:
   RegisterOperators(const RegisterOperators&) = delete;
   RegisterOperators& operator=(const RegisterOperators&) = delete;
   RegisterOperators(RegisterOperators&&) noexcept;
-  RegisterOperators& operator=(RegisterOperators&&);
+  RegisterOperators& operator=(RegisterOperators&&) noexcept;
 
   /**
    * Register an operator based on a function schema and a set of configuration
