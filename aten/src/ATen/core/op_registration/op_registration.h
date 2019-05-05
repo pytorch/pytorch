@@ -212,6 +212,9 @@ private:
   class OperatorRegistrar;
 
   std::vector<OperatorRegistrar> registrars_;
+
+  static_assert(std::is_nothrow_move_constructible<std::vector<OperatorRegistrar>>::value, "");
+  static_assert(std::is_nothrow_move_assignable<std::vector<OperatorRegistrar>>::value, "");
 };
 
 }

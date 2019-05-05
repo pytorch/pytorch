@@ -5,11 +5,6 @@
 
 namespace c10 {
 
-RegisterOperators::RegisterOperators() = default;
-RegisterOperators::~RegisterOperators() = default;
-RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
-RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
-
 static_assert(std::is_nothrow_move_constructible<c10::optional<RegistrationHandleRAII>>::value, "");
 static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRAII>>::value, "");
 
@@ -86,5 +81,10 @@ void RegisterOperators::registerOp_(FunctionSchema&& schema, detail::KernelRegis
 
   registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, std::move(config.cache_creator_func));
 }
+
+RegisterOperators::RegisterOperators() = default;
+RegisterOperators::~RegisterOperators() = default;
+RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
+RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
 
 }
