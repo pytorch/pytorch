@@ -278,7 +278,8 @@ void ArgumentSpecCreator::specializeTypes(
     if (auto ot = t->cast<OptionalType>()) {
       // if an optional input hasn't been specialized above, it is None
       // so we disconnect the input here and replace its uses with
-      // a constant.
+      // a constant
+      WithInsertPoint guard(*graph.nodes().begin());
       auto c = graph.insertConstant({}, ot);
       inputs[i]->replaceAllUsesWith(c);
     } else {
