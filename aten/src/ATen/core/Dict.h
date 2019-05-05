@@ -87,6 +87,7 @@ private:
   Iterator iterator_;
   friend class DictIterator<Key, Value, Iterator>;
   friend class Dict<Key, Value>;
+  friend bool operator==(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs);
 };
 
 // this wraps map_type::iterator to make sure user code can't rely
