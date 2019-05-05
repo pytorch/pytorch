@@ -150,7 +150,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
         "Number of zero sized dimentions is more than one, so unique cannot be applied ")
     Tensor output = at::empty({0}, self.options());
     Tensor inverse_indices =
-        at::empty(self.size(dim), self.options().dtype(kLong));
+        at::empty({0}, self.options().dtype(kLong));
     Tensor counts = at::empty({0}, self.options().dtype(kLong));
 
     return std::make_tuple(output, inverse_indices, counts);

@@ -10959,13 +10959,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
             # test not a well formed tensor
             # Checking for runtime error, as this is the expected behaviour
-            self.assertRaises(RuntimeError, torch.unique,
+            self.assertRaises(
+                RuntimeError, torch.unique,
                 x_ill_formed_empty, 
                 return_inverse=True, 
                 return_counts=True, 
                 dim=1) 
             # test along dim2
-            self.assertRaises(RuntimeError, torch.unique,
+            self.assertRaises(
+                RuntimeError, torch.unique,
                 x_ill_formed_empty_another, 
                 return_inverse=True, 
                 return_counts=True, 
