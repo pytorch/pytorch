@@ -9,35 +9,11 @@
 namespace torch {
 namespace jit {
 
-Value* decomposeOp(
-    Node* op,
-    const char* source,
-    const std::string& method_name,
-    const at::ArrayRef<Value*> inputs) {
-  std::shared_ptr<Graph> d_graph;
-  std::once_flag flag;
-  std::call_once(
-      flag,
-      [](std::shared_ptr<Graph>* graph_ptr,
-         const char* source,
-         const std::string& method_name) {
-        script::CompilationUnit cu;
-        cu.define(source, script::nativeResolver(), nullptr);
-        *graph_ptr = cu.get_function(method_name).graph();
-      },
-      &d_graph,
-      source,
-      method_name);
-
-  WithInsertPoint insert_guard{op};
-  return inlineCallTo(*op->owningGraph(), *d_graph, inputs).at(0);
-}
-
 static bool DecomposeOps(Block* block) {
-  static const char* addmm_source = R"SCRIPT(
+  static script::CompilationUnit decompose_funcs(R"SCRIPT(
       def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: number = 1.0, alpha: number = 1.0):
           return self + mat1.mm(mat2)
-    )SCRIPT";
+      )SCRIPT");
 
   bool decomposed = false;
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
@@ -60,7 +36,8 @@ static bool DecomposeOps(Block* block) {
       decomposed = true;
       WithInsertPoint guard(*it);
 
-      Value* new_output = decomposeOp(*it, addmm_source, "addmm", it->inputs());
+      std::shared_ptr<Graph> d_graph = decompose_funcs.get_function("addmm").graph();
+      Value* new_output = inlineCallTo(*it->owningGraph(), *d_graph, it->inputs()).at(0);
       // Set the output of the decomposed graph to have the same output type as the
       // original op otherwise the canonicalized graph will have
       // TensorType as the output of this node which is incorrect
