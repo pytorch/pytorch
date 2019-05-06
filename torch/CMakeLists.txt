@@ -163,6 +163,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/pattern_fusion.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_inplace_ops.cpp
@@ -540,6 +541,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/init.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/python_sugared_value.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
     ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
     ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp

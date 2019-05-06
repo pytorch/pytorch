@@ -148,6 +148,16 @@ class _TestTorchMixin(object):
     def test_dir(self):
         dir(torch)
 
+    def test_type_conversion_via_dtype_name(self):
+        x = torch.tensor([1])
+        self.assertEqual(x.byte().dtype, torch.uint8)
+        self.assertEqual(x.bool().dtype, torch.bool)
+        self.assertEqual(x.char().dtype, torch.int8)
+        self.assertEqual(x.double().dtype, torch.float64)
+        self.assertEqual(x.float().dtype, torch.float32)
+        self.assertEqual(x.half().dtype, torch.float16)
+        self.assertEqual(x.int().dtype, torch.int32)
+
     def test_doc(self):
         checked_types = (types.MethodType, types.FunctionType,
                          types.BuiltinFunctionType, types.BuiltinMethodType)
@@ -890,6 +900,18 @@ class _TestTorchMixin(object):
 
     def test_max(self):
         self._testSelection(torch.max, max)
+
+    def test_log_normal(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.tensor([10], dtype=torch.float, device=device).log_normal_()
+            self.assertEqual(a.dtype, torch.float)
+            self.assertEqual(a.size(), torch.Size([1]))
+
+    def test_geometric(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.tensor([10], dtype=torch.float, device=device).geometric_(0.5)
+            self.assertEqual(a.dtype, torch.float)
+            self.assertEqual(a.size(), torch.Size([1]))
 
     @staticmethod
     def _test_max_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):

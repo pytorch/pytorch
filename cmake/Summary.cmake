@@ -20,7 +20,6 @@ function (caffe2_print_configuration_summary)
 
   message(STATUS "  TORCH_VERSION         : ${TORCH_VERSION}")
   message(STATUS "  CAFFE2_VERSION        : ${CAFFE2_VERSION}")
-  message(STATUS "  BUILD_ATEN_MOBILE     : ${BUILD_ATEN_MOBILE}")
   message(STATUS "  BUILD_ATEN_ONLY       : ${BUILD_ATEN_ONLY}")
   message(STATUS "  BUILD_BINARY          : ${BUILD_BINARY}")
   message(STATUS "  BUILD_CUSTOM_PROTOBUF : ${BUILD_CUSTOM_PROTOBUF}")
