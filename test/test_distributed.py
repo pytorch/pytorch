@@ -16,7 +16,6 @@ import torch.cuda
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.models as models
 from common_utils import TestCase, run_tests
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -1546,7 +1545,7 @@ class _DistTestBase(object):
 
         process_ids = 0
         process_group = torch.distributed.new_group([process_ids])
-        res50_model = models.resnet50()
+        res50_model = torchvision.models.resnet50()
         res50_model_sync = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(res50_model), process_group)
         process_group_sync = res50_model_sync.layer1[0].bn1.process_group
         self.assertEqual(process_group_sync, process_group)
