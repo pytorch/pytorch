@@ -350,6 +350,46 @@ TEST(BoundShapeInference, FC3D) {
       out_shape, "Out0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
 }
 
+TEST(BoundShapeInference, ClipRangesGatherSigridHash) {
+  FLAGS_caffe2_extract_feature_length_for_shape_inference = true;
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "ClipRangesGatherSigridHash",
+      "",
+      {"R0", "V0"},
+      {"F0_lengths_0", "F0_values_0", "F1_lengths_0", "F1_values_0"},
+      {MakeArgument<std::vector<int>>("max_lengths", {200, 400})}));
+  ShapeInfoMap shape_map;
+  BoundShapeSpec spec(50, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "F0_lengths_0",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape,
+      "F0_values_0",
+      ShapeInfo::DimType::SEQ,
+      {spec.max_batch_size * 200},
+      TensorProto_DataType_INT64);
+  verifyShapeInfo(
+      out_shape,
+      "F1_lengths_0",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape,
+      "F1_values_0",
+      ShapeInfo::DimType::SEQ,
+      {spec.max_batch_size * 400},
+      TensorProto_DataType_INT64);
+}
+
 TEST(BoundShapeInference, Combo0) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -386,4 +426,51 @@ TEST(BoundShapeInference, Combo0) {
   LOG(INFO) << eng.PrintShapeInfo();
   verifyShapeInfo(
       out_shape, "Gout", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 2});
+}
+
+TEST(BoundShapeInference, Combo1) {
+  FLAGS_caffe2_extract_feature_length_for_shape_inference = true;
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "ClipRangesGatherSigridHash",
+      "",
+      {"R0", "V0"},
+      {"F0_lengths_0", "F0_values_0", "F1_lengths_0", "F1_values_0"},
+      {MakeArgument<std::vector<int>>("max_lengths", {300, 400})}));
+
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "SparseLengthsSumFused8BitRowwise",
+      "",
+      {"Weights", "F0_values_0", "F0_lengths_0"},
+      {"Out"},
+      {}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "Weights",
+      makeTensorInfo(
+          ShapeInfo::DimType::CONSTANT, {1000, 58}, TensorProto_DataType_INT8));
+  BoundShapeSpec spec(20, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "Weights",
+      ShapeInfo::DimType::CONSTANT,
+      {1000, 58},
+      TensorProto_DataType_INT8);
+  verifyShapeInfo(
+      out_shape,
+      "F0_values_0",
+      ShapeInfo::DimType::SEQ,
+      {spec.max_batch_size * 300},
+      TensorProto_DataType_INT64);
+  verifyShapeInfo(
+      out_shape,
+      "F0_lengths_0",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape, "Out", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 50});
 }

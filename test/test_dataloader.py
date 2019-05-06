@@ -765,6 +765,8 @@ class TestDataLoader(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
+    @unittest.skipIf(sys.version_info[0] < 3,
+                     "this test is flaky in py2, see https://github.com/pytorch/pytorch/issues/14501, 18950, 19421")
     def test_proper_exit(self):
         (r'''There might be ConnectionResetError or leaked semaphore warning '''
          r'''(due to dirty process exit), but they are all safe to ignore''')
