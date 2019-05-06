@@ -511,6 +511,7 @@ void initJitScriptBindings(PyObject* module) {
             return tensors;
           })
       .def_property_readonly("schema", &Method::getSchema)
+      .def_property_readonly("name", &Method::name)
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;

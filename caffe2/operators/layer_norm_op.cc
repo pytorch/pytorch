@@ -1,5 +1,7 @@
 #include "caffe2/operators/layer_norm_op.h"
 
+#include <array>
+
 #include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
@@ -15,13 +17,12 @@ void LayerNormOp<CPUContext>::ComputeSigmaAndFusedParams(
     const T* var,
     T* sigma,
     T* scale,
-    T* bias,
-    CPUContext* context) {
+    T* bias) {
   ConstEigenVectorArrayMap<T> var_arr(var, N);
   EigenVectorArrayMap<T> sigma_arr(sigma, N);
   sigma_arr = var_arr + static_cast<T>(eps);
-  math::Rsqrt<T>(N, sigma, scale, context);
-  math::Mul<T>(N, scale, sigma, sigma, context);
+  math::Rsqrt<T, CPUContext>(N, sigma, scale, &context_);
+  math::Mul<T, CPUContext>(N, scale, sigma, sigma, &context_);
   EigenVectorArrayMap<T>(bias, N) = -ConstEigenVectorArrayMap<T>(scale, N) *
       ConstEigenVectorArrayMap<T>(mean, N);
 }
@@ -36,8 +37,7 @@ void LayerNormOp<CPUContext>::LayerNormForward(
     const T* bias,
     const T* gamma,
     const T* beta,
-    T* Y,
-    CPUContext* /* context */) {
+    T* Y) {
   ConstEigenArrayMap<T> X_arr(X, N, M);
   ConstEigenVectorArrayMap<T> scale_arr(scale, M);
   ConstEigenVectorArrayMap<T> bias_arr(bias, M);
@@ -68,13 +68,22 @@ void LayerNormGradientOp<CPUContext>::ComputeInternalGradients(
     const int N,
     const T* dY,
     const T* X,
+    const T* gamma,
+    T* dYxX,
     T* ds,
     T* db) {
+  math::Mul<T, CPUContext>(M * N, dY, X, dYxX, &context_);
+  ConstEigenArrayMap<T> dYxX_arr(dYxX, N, M);
   ConstEigenArrayMap<T> dY_arr(dY, N, M);
-  ConstEigenArrayMap<T> X_arr(X, N, M);
-  for (int i = 0; i < M; ++i) {
-    ds[i] = (dY_arr.col(i) * X_arr.col(i)).sum();
-    db[i] = dY_arr.col(i).sum();
+  if (gamma != nullptr) {
+    ConstEigenVectorArrayMap<T> gamma_arr(gamma, N);
+    for (int i = 0; i < M; ++i) {
+      ds[i] = (dYxX_arr.col(i) * gamma_arr).sum();
+      db[i] = (dY_arr.col(i) * gamma_arr).sum();
+    }
+  } else {
+    EigenVectorArrayMap<T>(ds, M) = dYxX_arr.colwise().sum();
+    EigenVectorArrayMap<T>(db, M) = dY_arr.colwise().sum();
   }
 }
 
@@ -84,22 +93,26 @@ void LayerNormGradientOp<CPUContext>::ComputeFusedParams(
     const int M,
     const int N,
     const T* mean,
-    const T* sig,
+    const T* sigma,
     const T* ds,
     const T* db,
-    T* dY_scale,
+    T* rstd,
     T* X_scale,
-    T* bias) {
+    T* bias,
+    T* g_scale) {
   const T scale = T(1) / static_cast<T>(N);
   ConstEigenVectorArrayMap<T> mean_arr(mean, M);
   ConstEigenVectorArrayMap<T> ds_arr(ds, M);
   ConstEigenVectorArrayMap<T> db_arr(db, M);
-  EigenVectorArrayMap<T> rsig_arr(dY_scale, M);
+  EigenVectorArrayMap<T> rstd_arr(rstd, M);
   EigenVectorArrayMap<T> X_scale_arr(X_scale, M);
-  rsig_arr = ConstEigenVectorArrayMap<T>(sig, M).inverse();
-  X_scale_arr = (db_arr * mean_arr - ds_arr) * rsig_arr.cube() * scale;
+  rstd_arr = ConstEigenVectorArrayMap<T>(sigma, M).inverse();
+  X_scale_arr = (db_arr * mean_arr - ds_arr) * rstd_arr.cube() * scale;
   EigenVectorArrayMap<T>(bias, M) =
-      -X_scale_arr * mean_arr - db_arr * rsig_arr * scale;
+      -X_scale_arr * mean_arr - db_arr * rstd_arr * scale;
+  if (g_scale != nullptr) {
+    EigenVectorArrayMap<T>(g_scale, M) = -rstd_arr * mean_arr;
+  }
 }
 
 template <>
@@ -107,22 +120,58 @@ template <typename T>
 void LayerNormGradientOp<CPUContext>::LayerNormBackward(
     const int M,
     const int N,
-    const T* dY_scale,
     const T* dY,
-    const T* X_scale,
     const T* X,
+    const T* gamma,
+    const T* dY_scale,
+    const T* X_scale,
     const T* bias,
     T* dX) {
-  EigenArrayMap<T>(dX, N, M) =
-      (ConstEigenArrayMap<T>(dY, N, M).rowwise() *
-           ConstEigenVectorArrayMap<T>(dY_scale, M).transpose() +
-       ConstEigenArrayMap<T>(X, N, M).rowwise() *
-           ConstEigenVectorArrayMap<T>(X_scale, M).transpose())
-          .rowwise() +
-      ConstEigenVectorArrayMap<T>(bias, M).transpose();
+  ConstEigenArrayMap<T> dY_arr(dY, N, M);
+  ConstEigenArrayMap<T> X_arr(X, N, M);
+  EigenArrayMap<T> dX_arr(dX, N, M);
+  if (gamma != nullptr) {
+    ConstEigenVectorArrayMap<T> gamma_arr(gamma, N);
+    for (int i = 0; i < M; ++i) {
+      dX_arr.col(i) = dY_arr.col(i) * gamma_arr * dY_scale[i] +
+          X_arr.col(i) * X_scale[i] + bias[i];
+    }
+  } else {
+    ConstEigenVectorArrayMap<T> dY_scale_arr(dY_scale, M);
+    ConstEigenVectorArrayMap<T> X_scale_arr(X_scale, M);
+    ConstEigenVectorArrayMap<T> bias_arr(bias, M);
+    dX_arr = (dY_arr.rowwise() * dY_scale_arr.transpose() +
+              X_arr.rowwise() * X_scale_arr.transpose())
+                 .rowwise() +
+        bias_arr.transpose();
+  }
 }
 
-OPERATOR_SCHEMA(LayerNormGradient).NumInputs(5).NumOutputs(1);
+template <>
+template <typename T>
+void LayerNormGradientOp<CPUContext>::GammaBetaBackward(
+    const int M,
+    const int N,
+    const T* dYxX,
+    const T* dY,
+    const T* rstd,
+    const T* g_scale,
+    T* dgamma,
+    T* dbeta,
+    T* /* scratch */) {
+  math::Set<T, CPUContext>(N, T(0), dgamma, &context_);
+  math::Set<T, CPUContext>(N, T(0), dbeta, &context_);
+  ConstEigenArrayMap<T> dYxX_arr(dYxX, N, M);
+  ConstEigenArrayMap<T> dY_arr(dY, N, M);
+  EigenVectorArrayMap<T> dgamma_arr(dgamma, N);
+  EigenVectorArrayMap<T> dbeta_arr(dbeta, N);
+  for (int i = 0; i < M; ++i) {
+    dgamma_arr += dYxX_arr.col(i) * rstd[i] + dY_arr.col(i) * g_scale[i];
+    dbeta_arr += dY_arr.col(i);
+  }
+}
+
+OPERATOR_SCHEMA(LayerNormGradient).NumInputs({5, 6}).NumOutputs({1, 3});
 
 REGISTER_CPU_OPERATOR(LayerNormGradient, LayerNormGradientOp<CPUContext>);
 
@@ -131,11 +180,23 @@ namespace {
 class GetLayerNormGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   std::vector<OperatorDef> GetGradientDefs() override {
-    return SingleGradientDef(
-        "LayerNormGradient",
-        "",
-        std::vector<std::string>{GO(0), O(0), O(1), O(2), I(0)},
-        std::vector<std::string>{GI(0)});
+    bool elementwise_affine = false;
+    if (ArgumentHelper::HasArgument(Def(), "elementwise_affine")) {
+      elementwise_affine = GetArgument(Def(), "elementwise_affine").i();
+    }
+    if (elementwise_affine) {
+      return SingleGradientDef(
+          "LayerNormGradient",
+          "",
+          std::vector<std::string>{GO(0), O(0), O(1), O(2), I(0), I(1)},
+          std::vector<std::string>{GI(0), GI(1), GI(2)});
+    } else {
+      return SingleGradientDef(
+          "LayerNormGradient",
+          "",
+          std::vector<std::string>{GO(0), O(0), O(1), O(2), I(0)},
+          std::vector<std::string>{GI(0)});
+    }
   }
 };
 

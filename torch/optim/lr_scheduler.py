@@ -684,7 +684,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
         if T_mult < 1 or not isinstance(T_mult, int):
-            raise ValueError("Expected integer T_mul >= 1, but got {}".format(T_mul))
+            raise ValueError("Expected integer T_mult >= 1, but got {}".format(T_mult))
         self.T_0 = T_0
         self.T_i = T_0
         self.T_mult = T_mult
