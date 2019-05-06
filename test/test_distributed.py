@@ -21,6 +21,15 @@ from common_utils import TestCase, run_tests
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 
+try:
+    import torchvision
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+
+
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
 BACKEND = os.environ["BACKEND"]
 TEMP_DIR = os.environ["TEMP_DIR"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
@@ -1529,6 +1538,7 @@ class _DistTestBase(object):
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
 
+    @skipIfNoTorchVision
     def test_SyncBatchNorm_process_group(self):
         # When adopting `convert_sync_batchnorm` to convert a `nn.modules`,
         # it need to recursively pass the `process_group` in the module when the `SyncBatchNorm`
