@@ -214,36 +214,55 @@ struct TORCH_API ClassValue : public SugaredValue {
   ClassTypePtr type_;
 };
 
-// defines how a method obtained from a module behaves in script
-struct MethodValue : public SugaredValue {
-  MethodValue(c10::optional<NamedValue> self, std::shared_ptr<Function> method)
-      : self_(std::move(self)), method_(std::move(method)) {}
+
+struct FunctionValue : public SugaredValue {
+  FunctionValue(std::shared_ptr<Function> callee)
+      : callee_(std::move(callee)) {}
+
   std::string kind() const override {
-    return "method";
+    return "function";
   }
+
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& f,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    Graph& graph = *f.graph();
-    if (self_) {
-      std::vector<NamedValue> inputsWithSelf;
-      inputsWithSelf.emplace_back(loc, self_->value(graph));
-      inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
-      return std::make_shared<SimpleValue>(
-          method_->emit_call(graph, loc, inputsWithSelf, attributes));
-    }
-
     return std::make_shared<SimpleValue>(
-        method_->emit_call(graph, loc, inputs, attributes));
+        callee_->emit_call(*f.graph(), loc, inputs, attributes));
+  }
+ private:
+  std::shared_ptr<Function> callee_;
+};
+
+// defines how a method obtained from a module behaves in script
+struct MethodValue : public SugaredValue {
+  MethodValue(NamedValue self, std::shared_ptr<Function> method)
+      : self_(std::move(self)), method_(std::move(method)) {}
+  std::string kind() const override {
+    return "method";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& f,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    std::vector<NamedValue> inputsWithSelf;
+    inputsWithSelf.emplace_back(loc, self_.value(*f.graph()));
+    inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
+    return FunctionValue(method_).call(
+        loc, f, inputsWithSelf, attributes, n_binders);
   }
 
  private:
-  c10::optional<NamedValue> self_;
+  NamedValue self_;
   std::shared_ptr<Function> method_;
 };
+
+
 
 struct TORCH_API PrintValue : public SugaredValue {
   std::string kind() const override {

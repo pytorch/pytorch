@@ -38,7 +38,7 @@ if [[ -d "$PYTORCH_ROOT" ]]; then
   docker cp "$PYTORCH_ROOT" "$id:/pytorch"
 fi
 if [[ -d "$BUILDER_ROOT" ]]; then
-  docker cp "$BUILDER ROOT" "$id:/builder"
+  docker cp "$BUILDER_ROOT" "$id:/builder"
 fi
 
 # Execute the test script that was populated by an earlier section
