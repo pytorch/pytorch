@@ -48,7 +48,7 @@ static bool DecomposeOps(Block* block) {
 
   bool decomposed = false;
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
-       ++it) {
+      ++it) {
     for (auto sub : it->blocks()) {
       DecomposeOps(sub);
     }
@@ -82,8 +82,8 @@ static bool DecomposeOps(Block* block) {
       it->output()->replaceAllUsesWith(new_output);
       it.destroyCurrent();
     } else if (it->matches(
-            "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
-            /*const_inputs=*/{attr::beta, attr::alpha})) {
+          "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
+          /*const_inputs=*/{attr::beta, attr::alpha})) {
       // For the case where we have an addmm where alpha and beta are Attributes
       // and both of those scalars are equal to 1.0, decompose this into an mm
       // followed by an add so that it can go through the existing optimization (batchmm)
