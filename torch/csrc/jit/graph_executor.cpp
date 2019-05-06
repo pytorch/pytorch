@@ -639,13 +639,10 @@ struct GraphExecutorImpl {
   }
 
   void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
-    // run custom passes that backend registered
+    // run custom passes that different backends can register
     for (const auto& pass : getCustomPasses()) {
       pass(graph);
     }
-    // decomposition pass, decompose certain ops that will be used in the following
-    // passes (like batchmm and jit fusion)
-
     // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
 

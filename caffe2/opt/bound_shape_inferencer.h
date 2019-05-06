@@ -9,6 +9,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+C10_DECLARE_bool(caffe2_extract_feature_length_for_shape_inference);
+
 namespace caffe2 {
 // This struct stores the max bound size for batch in the general sense. We have
 // the conventioal batch size and the look-up sequence, which is also batch in a
@@ -62,6 +64,14 @@ class CAFFE2_API BoundShapeInferencer {
       ShapeInfo::DimType t,
       std::vector<int64_t> bound_dims,
       TensorProto::DataType type,
+      bool is_quantized,
+      bool allow_existing_shape = false);
+
+  TensorShape& SetTensorShapeAndTypeIfNotExist(
+      const std::string& name,
+      ShapeInfo::DimType t,
+      std::vector<int64_t> bound_dims,
+      TensorProto::DataType type,
       bool is_quantized);
 
   void InferConcatInputs(const OperatorDef& op);
@@ -73,6 +83,7 @@ class CAFFE2_API BoundShapeInferencer {
   void InferShape(const OperatorDef& op);
   void InferReshape(const OperatorDef& op);
   void InferLengthsRangeFill(const OperatorDef& op);
+  void InferClipRangesGatherSigridHash(const OperatorDef& op);
 
   // Standard shape/type inference using op schema registered shape inference
   // function
