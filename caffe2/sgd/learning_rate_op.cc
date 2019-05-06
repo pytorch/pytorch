@@ -19,6 +19,7 @@ Required:
    `fixed`
    `step`: uses `stepsize`, `gamma`
    `exp`: uses `gamma`
+   `gate`: uses 'multiplier_1', 'multiplier_2', `num_iter``
    `inv`: uses `gamma`, `power`
    `linearWarmup`: uses `start_multiplier`, `num_iter`
    `constantWarmup`: uses `multiplier`, `num_iter`
@@ -38,6 +39,8 @@ Optional:
   `num_iter`: defaults to 0
   `start_multiplier`: defaults to 0
   `multiplier`: defaults to 0.5
+  `multiplier_1`: defaults to 1
+  `multiplier_2`: defaults to 1
 
 
 Usage:
@@ -72,6 +75,10 @@ Example usage:
     .Arg(
         "multiplier",
         "(float, default 0.5) constant multiplier for learning rate")
+    .Arg(
+        "multiplier_1",
+        "(float, default 1) start multiplier for learning rate")
+    .Arg("multiplier_2", "(float, default 1) end multiplier for learning rate")
     .Arg(
         "sub_policy_num_iters",
         "(int array, default empty) number of iterations for each sub learning rate policy in composite policy")
