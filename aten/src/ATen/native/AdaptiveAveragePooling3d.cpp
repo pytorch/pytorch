@@ -30,7 +30,7 @@ static void adaptive_avg_pool3d_single_out_frame(
     int64_t istrideH,
     int64_t istrideW) {
   int64_t d;
-#pragma omp parallel for
+#pragma omp parallel for private(d)
   for (d = 0; d < sizeD; d++) {
     /* loop over output */
     int64_t ot, oh, ow;
