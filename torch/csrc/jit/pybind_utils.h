@@ -408,7 +408,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     const auto& elements = dict->elements();
     py::dict py_dict;
     for (auto pair : elements) {
-      py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
+      py_dict[toPyObject(IValue{pair.key()})] = toPyObject(IValue{pair.value()});
     }
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
