@@ -2498,6 +2498,13 @@ byte() -> Tensor
 ``self.byte()`` is equivalent to ``self.to(torch.uint8)``. See :func:`to`.
 """)
 
+add_docstr_all('bool',
+               r"""
+bool() -> Tensor
+
+``self.bool()`` is equivalent to ``self.to(torch.bool)``. See :func:`to`.
+""")
+
 add_docstr_all('char',
                r"""
 char() -> Tensor

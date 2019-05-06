@@ -459,7 +459,7 @@ class SummaryWriter(object):
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
         Shape:
-            vid_tensor: :math:`(N, T, C, H, W)`.
+            vid_tensor: :math:`(N, T, C, H, W)`. The values should lie in [0, 255] for type `uint8` or [0, 1] for type `float`.
         """
         self._get_file_writer().add_summary(
             video(tag, vid_tensor, fps), global_step, walltime)
@@ -714,7 +714,7 @@ class SummaryWriter(object):
     def add_custom_scalars(self, layout):
         """Create special chart by collecting charts tags in 'scalars'. Note that this function can only be called once
         for each SummaryWriter() object. Because it only provides metadata to tensorboard, the function can be called
-        before or after the training loop. See ``examples/demo_custom_scalars.py`` for more.
+        before or after the training loop.
 
         Args:
             layout (dict): {categoryName: *charts*}, where *charts* is also a dictionary

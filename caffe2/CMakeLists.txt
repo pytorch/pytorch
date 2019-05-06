@@ -4,7 +4,7 @@ include(../cmake/Codegen.cmake)
 # ---[ Declare source file lists
 
 # ---[ ATen build
-if (NOT BUILD_ATEN_MOBILE)
+if (NOT INTERN_BUILD_MOBILE)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(AT_LINK_STYLE INTERFACE)
@@ -405,7 +405,7 @@ if(USE_ROCM)
   target_compile_options(caffe2_hip PRIVATE ${HIP_CXX_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
   target_link_libraries(caffe2_hip PUBLIC c10_hip)
-  if(NOT BUILD_ATEN_MOBILE)
+  if(NOT INTERN_BUILD_MOBILE)
     # TODO: Cut this over to ATEN_HIP_FILES_GEN_LIB.  At the moment, we
     # only generate CUDA files
     # NB: This dependency must be PRIVATE, because we don't install
