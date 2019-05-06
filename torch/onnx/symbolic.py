@@ -129,8 +129,8 @@ def parse_args(*arg_descriptors):
             # some args may be optional, so the length may be smaller
             assert len(arg_descriptors) >= len(args)
             argspec = inspect.getfullargspec(fn)
-            args_names = argspec.args
-            args_defaults = argspec.defaults
+            args_names = argspec.args if argspec.args else []
+            args_defaults = argspec.defaults if argspec.defaults else []
             default_args_dict = dict(zip(args_names[-len(args_defaults):], args_defaults))
 
             fn_args = []
