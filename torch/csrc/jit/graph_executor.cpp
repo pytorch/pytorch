@@ -576,7 +576,7 @@ struct GraphExecutorImpl {
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
-    arg_spec_creator_.setInputTypes(*opt_graph, spec);
+    arg_spec_creator_.specializeTypes(*opt_graph, spec);
 
     // Phase 1. Specialize to input definedness (this is very important for
     //          gradient graphs), and run required passes to bring the graph
@@ -699,7 +699,7 @@ struct GraphExecutorImpl {
     // tracing and so we only do the type propgation if no concrete types have
     // been set.
     auto local_graph = this->graph->copy();
-    arg_spec_creator_.setInputTypes(*local_graph, spec);
+    arg_spec_creator_.specializeTypes(*local_graph, spec);
     PropagateInputShapes(local_graph);
     auto output_values =
         inlineCallTo(*state->graph, *local_graph, input_values);
