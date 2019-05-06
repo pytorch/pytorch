@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/script/python_tree_views.h>
 
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/tree_views.h>
 
 #include <pybind11/pybind11.h>
@@ -160,8 +159,8 @@ void initTreeViewBindings(PyObject* module) {
       }));
   py::class_<Pass, Stmt>(m, "Pass").def(
       py::init([](const SourceRange& range) { return Pass::create(range); }));
-      py::class_<Dots, Expr>(m, "Dots").def(
-          py::init([](const SourceRange& range) { return Dots::create(range); }));
+  py::class_<Dots, Expr>(m, "Dots").def(
+      py::init([](const SourceRange& range) { return Dots::create(range); }));
   py::class_<If, Stmt>(m, "If").def(
       py::init([](const SourceRange& range,
                   const Expr& cond,
@@ -240,10 +239,12 @@ void initTreeViewBindings(PyObject* module) {
             return TernaryIf::create(cond.range(), cond, true_expr, false_expr);
           }));
   py::class_<ListComp, Expr>(m, "ListComp")
-      .def(py::init(
-          [](const SourceRange& range, const Expr& elt, const Expr& target, const Expr& iter) {
-            return ListComp::create(range, elt, target, iter);
-          }));
+      .def(py::init([](const SourceRange& range,
+                       const Expr& elt,
+                       const Expr& target,
+                       const Expr& iter) {
+        return ListComp::create(range, elt, target, iter);
+      }));
   py::class_<ListLiteral, Expr>(m, "ListLiteral")
       .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
         return ListLiteral::create(range, wrap_list(range, std::move(args)));

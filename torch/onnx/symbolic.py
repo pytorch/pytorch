@@ -1678,6 +1678,10 @@ def randn(g, *shapes):
     return g.op('RandomNormal', shape_i=shape)
 
 
+def randn_like(g, self, *others):
+    return g.op('RandomNormalLike', self)
+
+
 @parse_args('v', 'f', 'f', 'i', 'none')
 def rrelu(g, input, lower, upper, training, generator):
     p = g.op('RandomUniformLike', input, high_f=upper, low_f=lower)
