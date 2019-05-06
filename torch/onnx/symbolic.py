@@ -1630,7 +1630,9 @@ rnn_relu = _one_hidden_rnn('RNN_RELU')
 
 @parse_args('v', 'i')
 def _dim_arange(g, like, dim):
-    return g.op('ATen', like, dim_i=dim, operator_s='_dim_arange')
+    like_shape = g.op('Shape', like)
+    stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
+    return g.op("_caffe2::Range", stop)
 
 
 def detach(g, input):
