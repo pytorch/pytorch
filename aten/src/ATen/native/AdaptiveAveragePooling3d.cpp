@@ -15,7 +15,7 @@ inline int end_index(int a, int b, int c) {
 }
 
 template <typename scalar_t>
-static void adaptive_avg_pool3d_out_frame(
+static void adaptive_avg_pool3d_single_out_frame(
     scalar_t* input_p,
     scalar_t* output_p,
     int64_t sizeD,
@@ -76,6 +76,37 @@ static void adaptive_avg_pool3d_out_frame(
   }
 }
 
+template <typename scalar_t>
+void adaptive_avg_pool3d_out_frame(
+    scalar_t *input_data,
+    scalar_t *output_data,
+    int64_t sizeB,
+    int64_t sizeD,
+    int64_t isizeT,
+    int64_t isizeH,
+    int64_t isizeW,
+    int64_t osizeT,
+    int64_t osizeH,
+    int64_t osizeW,
+    int64_t istrideB,
+    int64_t istrideD,
+    int64_t istrideT,
+    int64_t istrideH,
+    int64_t istrideW)
+{
+  int64_t b;
+#pragma omp parallel for private(b)
+  for (b = 0; b < sizeB; b++)
+  {
+    adaptive_avg_pool3d_single_out_frame<scalar_t>(
+      input_data+b*istrideB, output_data+b*sizeD*osizeT*osizeH*osizeW,
+      sizeD,
+      isizeT, isizeH, isizeW,
+      osizeT, osizeH, osizeW,
+      istrideD, istrideT, istrideH, istrideW);
+  }
+}
+
 void adaptive_avg_pool3d_out_cpu_template(
     Tensor& output,
     Tensor const& input,
@@ -122,7 +153,7 @@ void adaptive_avg_pool3d_out_cpu_template(
         input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
           auto input_data = input.data<scalar_t>();
           auto output_data = output.data<scalar_t>();
-          adaptive_avg_pool3d_out_frame<scalar_t>(
+          adaptive_avg_pool3d_single_out_frame<scalar_t>(
               input_data,
               output_data,
               sizeD,
@@ -138,35 +169,35 @@ void adaptive_avg_pool3d_out_cpu_template(
               istrideW);
         });
   } else {
-    output.resize_({input.size(-5), sizeD, osizeT, osizeH, osizeW});
-    int64_t b;
-#pragma omp parallel for private(b)
-    for (b = 0; b < input.size(0); b++) {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-          input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
-            auto input_data = input.data<scalar_t>();
-            auto output_data = output.data<scalar_t>();
-            adaptive_avg_pool3d_out_frame<scalar_t>(
-                input_data + b * input.stride(0),
-                output_data + b * sizeD * osizeT * osizeH * osizeW,
-                sizeD,
-                isizeT,
-                isizeH,
-                isizeW,
-                osizeT,
-                osizeH,
-                osizeW,
-                istrideD,
-                istrideT,
-                istrideH,
-                istrideW);
-          });
-    }
+    int64_t sizeB = input.size(0);
+    int64_t istrideB = input.stride(0);
+    output.resize_({sizeB, sizeD, osizeT, osizeH, osizeW});
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
+          auto input_data = input.data<scalar_t>();
+          auto output_data = output.data<scalar_t>();
+          adaptive_avg_pool3d_out_frame<scalar_t>(
+              input_data,
+              output_data,
+              sizeB,
+              sizeD,
+              isizeT,
+              isizeH,
+              isizeW,
+              osizeT,
+              osizeH,
+              osizeW,
+              istrideB,
+              istrideD,
+              istrideT,
+              istrideH,
+              istrideW);
+        });
   }
 }
 
 template <typename scalar_t>
-static void adaptive_avg_pool3d_backward_out_frame(
+static void adaptive_avg_pool3d_backward_single_out_frame(
     scalar_t* gradInput_p,
     scalar_t* gradOutput_p,
     int64_t sizeD,
@@ -219,6 +250,31 @@ static void adaptive_avg_pool3d_backward_out_frame(
   }
 }
 
+template <typename scalar_t>
+static void adaptive_avg_pool3d_backward_out_frame(
+    scalar_t *gradInput_p,
+    scalar_t *gradOutput_p,
+    int64_t sizeB,
+    int64_t sizeD,
+    int64_t isizeT,
+    int64_t isizeH,
+    int64_t isizeW,
+    int64_t osizeT,
+    int64_t osizeH,
+    int64_t osizeW)
+{
+  int64_t b;
+#pragma omp parallel for private(b)
+  for (b = 0; b < sizeB; b++)
+  {
+    adaptive_avg_pool3d_backward_single_out_frame(
+      gradInput_p+b*sizeD*isizeT*isizeH*isizeW,
+      gradOutput_p+b*sizeD*osizeT*osizeH*osizeW,
+      sizeD,
+      isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
+  }
+}
+
 Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
@@ -242,7 +298,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
           scalar_t* gradInput_data = gradInput.data<scalar_t>();
           scalar_t* gradOutput_data = gradOutput.data<scalar_t>();
 
-          adaptive_avg_pool3d_backward_out_frame<scalar_t>(
+          adaptive_avg_pool3d_backward_single_out_frame<scalar_t>(
               gradInput_data,
               gradOutput_data,
               sizeD,
@@ -254,26 +310,24 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
               osizeW);
         });
   } else {
-    int64_t b;
-#pragma omp parallel for private(b)
-    for (b = 0; b < input.size(0); b++) {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-          input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
-            /* get raw pointers */
-            scalar_t* gradInput_data = gradInput.data<scalar_t>();
-            scalar_t* gradOutput_data = gradOutput.data<scalar_t>();
-            adaptive_avg_pool3d_backward_out_frame<scalar_t>(
-                gradInput_data + b * sizeD * isizeT * isizeH * isizeW,
-                gradOutput_data + b * sizeD * osizeT * osizeH * osizeW,
-                sizeD,
-                isizeT,
-                isizeH,
-                isizeW,
-                osizeT,
-                osizeH,
-                osizeW);
-          });
-    }
+    int64_t sizeB = input.size(0);
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
+          /* get raw pointers */
+          scalar_t* gradInput_data = gradInput.data<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput.data<scalar_t>();
+          adaptive_avg_pool3d_backward_out_frame<scalar_t>(
+              gradInput_data,
+              gradOutput_data,
+              sizeB,
+              sizeD,
+              isizeT,
+              isizeH,
+              isizeW,
+              osizeT,
+              osizeH,
+              osizeW);
+        });
   }
   return gradInput;
 }
