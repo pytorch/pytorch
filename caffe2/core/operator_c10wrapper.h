@@ -227,7 +227,7 @@ createC10OperatorWrapper(const char* op_name, const char* overload_name) {
 } // namespace detail
 
 // TODO Also register c10 operators on mobile
-#ifndef C10_MOBILE
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(        \
