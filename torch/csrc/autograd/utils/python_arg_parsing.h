@@ -9,7 +9,7 @@ namespace torch { namespace autograd { namespace utils {
 
 // The parameter allow_copy is to accept copy for Tensor.to (and by proxy
 // PackedSequences.to) but not nn.Module.to.
-inline std::tuple<c10::optional<at::Device>, c10::optional<at::ScalarType>, bool, bool, MemoryFormat>
+inline std::tuple<c10::optional<at::Device>, c10::optional<at::ScalarType>, bool, bool, at::MemoryFormat>
   parse_to_conversion(PyObject *args, PyObject *kwargs, bool allow_copy) {
   static PythonArgParser parser({
     "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False)",
@@ -22,11 +22,11 @@ inline std::tuple<c10::optional<at::Device>, c10::optional<at::ScalarType>, bool
   if (r.idx == 0) {
     if (!allow_copy && !r.isNone(3))
       throw std::runtime_error(".to() does not accept copy argument");
-    return std::make_tuple(r.deviceOptional(0), r.scalartypeOptional(1), r.toBool(2), r.toBool(3), MemoryFormat::Contiguous);
+    return std::make_tuple(r.deviceOptional(0), r.scalartypeOptional(1), r.toBool(2), r.toBool(3), at::MemoryFormat::Contiguous);
   } else if (r.idx == 1) {
     if (!allow_copy && !r.isNone(2))
       throw std::runtime_error(".to() does not accept copy argument");
-    return std::make_tuple(c10::nullopt, r.scalartype(0), r.toBool(1), r.toBool(2), MemoryFormat::Contiguous);
+    return std::make_tuple(c10::nullopt, r.scalartype(0), r.toBool(1), r.toBool(2), at::MemoryFormat::Contiguous);
   } else if (r.idx == 2) {
     auto tensor = r.tensor(0);
     if (!allow_copy && !r.isNone(2))
@@ -36,10 +36,10 @@ inline std::tuple<c10::optional<at::Device>, c10::optional<at::ScalarType>, bool
       tensor.scalar_type(),
       r.toBool(1),
       r.toBool(2),
-      MemoryFormat::Contiguous
+      at::MemoryFormat::Contiguous
     );
   } else {
-    MemoryFormat memory_format = r.toMemoryFormat(0);
+    at::MemoryFormat memory_format = r.toMemoryFormat(0);
     return std::make_tuple(c10::nullopt, c10::nullopt, false, false, memory_format);
   }
 }

@@ -2,6 +2,7 @@
 
 // ${generated_comment}
 
+
 #include "torch/csrc/Device.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
@@ -15,6 +16,7 @@
 
 using at::Tensor;
 using at::Scalar;
+using at::MemoryFormat;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {

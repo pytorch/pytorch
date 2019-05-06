@@ -21,7 +21,6 @@ static inline Device ensure_has_index(Device device) {
 
 static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking, MemoryFormat memory_format=MemoryFormat::Contiguous) {
   auto r = at::empty(self.sizes(), options);
-  // VITALYF: Optimize if already channels first
   if (memory_format == MemoryFormat::ChannelsLast) {
     r.maybe_as_channels_last();
   }
