@@ -68,6 +68,8 @@ class OnnxifiOp final : public Operator<Context> {
     // Get output resizing hints
     adjust_output_batch_ =
         this->template GetSingleArgument<int>("adjust_output_batch", 0);
+    permit_unknown_output_batch_size_ = this->template GetSingleArgument<int>(
+        "permit_unknown_output_batch_size", 0);
     auto output_resize_hints =
         this->template GetRepeatedArgument<int>("output_resize_hints");
     CAFFE_ENFORCE_EQ(
@@ -299,6 +301,10 @@ class OnnxifiOp final : public Operator<Context> {
 
   // Whether we need to resize outputs or not
   bool adjust_output_batch_{false};
+
+  // Whether we allow unknown output batch size. This is often needed when
+  // we explicitly blacklist operators out of the onnxifi op.
+  bool permit_unknown_output_batch_size_{false};
 
   // Output resizing hint map
   // key: max batch size

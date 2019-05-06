@@ -37,11 +37,12 @@ At a granular level, PyTorch is a library that consists of the following compone
 
 | Component | Description |
 | ---- | --- |
-| **torch** | a Tensor library like NumPy, with strong GPU support |
-| **torch.autograd** | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
-| **torch.nn** | a neural networks library deeply integrated with autograd designed for maximum flexibility |
-| **torch.multiprocessing** | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
-| **torch.utils** | DataLoader and other utility functions for convenience |
+| [**torch**](https://pytorch.org/docs/stable/torch.html) | a Tensor library like NumPy, with strong GPU support |
+| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
+| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | a compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code  |
+| [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | a neural networks library deeply integrated with autograd designed for maximum flexibility |
+| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
+| [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
 
 Usually one uses PyTorch either as:
 
