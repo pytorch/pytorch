@@ -53,10 +53,14 @@ TORCH_API void InsertObserverNodes(
  * performs quantization of the model by inserting quant-dequant node pairs for
  * quantizatable tensors - later passes only cleanup the IR and
  * make sure the model runs faster/consumes less memory.
+ * \param graph which is instrumented for quant-dequant nodes.
+ * \param qparam_dict dictionary of tensor unique names to qparams.
  *
- * TODO: This should also take a qparam-map as an input.
  */
-TORCH_API void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph);
+TORCH_API void InsertQuantDequantNodes(
+    std::shared_ptr<Graph>& graph,
+    const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
+        qparam_dict);
 
 /** \brief Check that all expected optimizations after quant-dequant nodes
  * insertion actually happened.
