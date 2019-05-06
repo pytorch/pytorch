@@ -33,7 +33,7 @@ std::shared_ptr<TaskThreadPoolBase> get_shared_threadpool(int pool_size) {
   static std::shared_ptr<TaskThreadPoolBase> pool =
       std::make_shared<PTThreadPool>(pool_size);
   // the size does not change
-  AT_ASSERT(pool->size() == pool_size);
+  AT_ASSERT(pool_size < 0 || pool->size() == pool_size);
   return pool;
 }
 
