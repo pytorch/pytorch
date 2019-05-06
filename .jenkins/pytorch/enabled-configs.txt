@@ -55,3 +55,5 @@ pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX-NO_AVX2-test
 pytorch-linux-xenial-cuda8-cudnn7-py3-slow-test
 pytorch-xla-linux-trusty-py3.6-gcc5.4-build
 pytorch-xla-linux-trusty-py3.6-gcc5.4-test
+pytorch-namedtensor-linux-trusty-py3.6-gcc5.4-build
+pytorch-namedtensor-linux-trusty-py3.6-gcc5.4-test
