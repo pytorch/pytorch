@@ -19,10 +19,10 @@ inline int64_t divup(int64_t x, int64_t y) {
 CAFFE2_API void init_num_threads();
 
 // Sets the number of threads to be used in parallel region
-CAFFE2_API void set_num_threads(size_t);
+CAFFE2_API void set_num_threads(int);
 
 // Returns the number of threads used in parallel region
-CAFFE2_API size_t get_num_threads();
+CAFFE2_API int get_num_threads();
 
 // Returns the current thread number (starting from 0)
 // in the current parallel region, or 0 in the sequential region
@@ -84,10 +84,10 @@ scalar_t parallel_reduce(
 CAFFE2_API std::string get_parallel_info();
 
 // Sets number of threads used for inter-op parallelism
-CAFFE2_API void set_num_interop_threads(size_t);
+CAFFE2_API void set_num_interop_threads(int);
 
 // Returns the number of threads used for inter-op parallelism
-CAFFE2_API size_t get_num_interop_threads();
+CAFFE2_API int get_num_interop_threads();
 
 // Launches inter-op parallel task
 CAFFE2_API void launch(const std::function<void()>& func);

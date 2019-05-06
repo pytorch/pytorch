@@ -31,9 +31,10 @@ void init_num_threads() {
   }
 }
 
-void set_num_threads(size_t nthreads) {
-  if (nthreads == 0) {
-    return;
+void set_num_threads(int nthreads) {
+  if (nthreads <= 0) {
+    throw std::runtime_error(
+      "Expected positive number of threads");
   }
   num_threads.store(nthreads);
 #ifdef _OPENMP
@@ -55,7 +56,7 @@ void set_num_threads(size_t nthreads) {
 // region might be different in the new thread;
 // Use init_num_threads() during thread initialization to ensure
 // consistent size of parallel region in different threads
-size_t get_num_threads() {
+int get_num_threads() {
 #ifdef _OPENMP
   return omp_get_max_threads();
 #else

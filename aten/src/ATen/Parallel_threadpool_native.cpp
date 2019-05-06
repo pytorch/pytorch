@@ -24,7 +24,7 @@ TaskThreadPoolBase& get_pool() {
       ThreadPoolRegistry()->Create(
           "C10",
           /* device_id */ 0,
-          /* pool_size */ check_and_get_pool_size(num_interop_threads.exchange(-2)),
+          /* pool_size */ num_interop_threads.exchange(-2),
           /* create_new */ false);
   return *pool;
 }
@@ -58,26 +58,27 @@ std::shared_ptr<TaskThreadPoolBase> create_c10_threadpool(
 
 C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, create_c10_threadpool);
 
-void set_num_interop_threads(size_t nthreads) {
-  if (nthreads == 0) {
-    return;
+void set_num_interop_threads(int nthreads) {
+  if (nthreads <= 0) {
+    throw std::runtime_error(
+      "Expected positive number of threads");
   }
 
   int no_value = -1;
   if (!num_interop_threads.compare_exchange_strong(no_value, nthreads)) {
     throw std::runtime_error(
       "Error: cannot set number of interop threads "
-      "after parallel work has started");
+      "after parallel work has started or after set_num_interop_threads call");
   }
 }
 
-size_t get_num_interop_threads() {
+int get_num_interop_threads() {
   int nthreads = num_interop_threads.load();
   if (nthreads > 0) {
     return nthreads;
   } else if (nthreads == -1) {
     // return default value
-    return check_and_get_pool_size(-1);
+    return TaskThreadPoolBase::defaultNumThreads();
   } else {
     return get_pool().size();
   }

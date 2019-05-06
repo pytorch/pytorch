@@ -53,6 +53,7 @@ void parallel_for(
 
     auto task = [&](int64_t task_id, int64_t local_start, int64_t local_end) {
       internal::_set_thread_num(task_id);
+      internal::_set_in_parallel_region(true);
       try {
         f(local_start, local_end);
       } catch (...) {
@@ -60,33 +61,37 @@ void parallel_for(
           eptr = std::current_exception();
         }
       }
+      internal::_set_in_parallel_region(false);
       internal::_unset_thread_num();
     };
 
-    std::vector<ivalue::Future> futures(num_tasks);
+    // using shared_ptr to share ownership of the future with the lambda,
+    // to ensure we don't destroy future while lambda is still
+    // running in markCompleted
+    std::vector<std::shared_ptr<ivalue::Future>> futures(num_tasks);
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
+      futures[task_id] = std::make_shared<ivalue::Future>();
+      auto future_ptr = futures[task_id];
       int64_t local_start = begin + task_id * chunk_size;
       if (local_start < end) {
         int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
         internal::_get_intraop_pool().run(
-            // copy task_id, local_start, local_end
-            [&futures, &task, task_id, local_start, local_end]() {
+            // copy future_ptr, task_id, local_start, local_end
+            [&, future_ptr, task_id, local_start, local_end]() {
           task(task_id, local_start, local_end);
-          futures[task_id].markCompleted(IValue());
+          future_ptr->markCompleted(IValue());
         });
       } else {
-        futures[task_id].markCompleted(IValue());
+        future_ptr->markCompleted(IValue());
       }
     }
 
     int64_t first_task_end = std::min(end, (int64_t)(chunk_size + begin));
-    internal::_set_in_parallel_region(true);
     task(0, begin, first_task_end);
-    internal::_set_in_parallel_region(false);
 
     // wait for all tasks to finish
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
-      futures[task_id].wait();
+      futures[task_id]->wait();
     }
 
     if (eptr) {
@@ -125,6 +130,7 @@ scalar_t parallel_reduce(
 
     auto task = [&](int64_t task_id, int64_t local_start, int64_t local_end) {
       internal::_set_thread_num(task_id);
+      internal::_set_in_parallel_region(true);
       try {
         results_data[task_id] = f(local_start, local_end, ident);
       } catch (...) {
@@ -132,32 +138,33 @@ scalar_t parallel_reduce(
           eptr = std::current_exception();
         }
       }
+      internal::_set_in_parallel_region(false);
       internal::_unset_thread_num();
     };
 
-    std::vector<ivalue::Future> futures(num_tasks);
+    std::vector<std::shared_ptr<ivalue::Future>> futures(num_tasks);
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
+      futures[task_id] = std::make_shared<ivalue::Future>();
+      auto future_ptr = futures[task_id];
       int64_t local_start = begin + task_id * chunk_size;
       if (local_start < end) {
         int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
         internal::_get_intraop_pool().run(
-            // copy task_id, local_start, local_end
-            [&futures, &task, task_id, local_start, local_end]() {
+            // copy future_ptr, task_id, local_start, local_end
+            [&, future_ptr, task_id, local_start, local_end]() {
           task(task_id, local_start, local_end);
-          futures[task_id].markCompleted(IValue());
+          future_ptr->markCompleted(IValue());
         });
       } else {
-        futures[task_id].markCompleted(IValue());
+        future_ptr->markCompleted(IValue());
       }
     }
 
     int64_t first_task_end = std::min(end, (int64_t)(chunk_size + begin));
-    internal::_set_in_parallel_region(true);
     task(0, begin, first_task_end);
-    internal::_set_in_parallel_region(false);
 
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
-      futures[task_id].wait();
+      futures[task_id]->wait();
     }
 
     if (eptr) {
