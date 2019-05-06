@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -6,6 +5,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -2937,7 +2937,19 @@ void CompilationUnit::define(
   auto resolver_it = resolvers.begin();
   std::vector<Function*> methods;
   std::unordered_map<std::string, std::shared_ptr<Function>> function_table;
-  for (const Def& def : definitions) {
+
+  // We need to compile `__init__` first, since it can determine what attributes
+  // are available to other methods. So reorder the definitions accordingly.
+  std::vector<Def> ordered_defs = definitions;
+  const auto it = std::find_if(
+      ordered_defs.begin(), ordered_defs.end(), [](const Def& def) {
+        return def.name().name() == "__init__";
+      });
+  if (it != ordered_defs.end()) {
+    std::swap(ordered_defs[0], *it);
+  }
+
+  for (const Def& def : ordered_defs) {
     const std::string& name = def.name().name();
     ResolverPtr resolver = *resolver_it++;
     AT_ASSERT(resolver);
