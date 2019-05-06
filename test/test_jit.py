@@ -14626,6 +14626,17 @@ class TestClassType(JitTestCase):
         output = m_loaded(input)
         self.assertEqual(3 * input, output)
 
+    def test_init_compiled_first(self):
+        @torch.jit.script  # noqa: B903
+        class Foo(object):
+            def __before_init__(self):
+                # accessing this field should not throw, since __init__ should be compiled
+                return self.x
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
 
 class TestLogging(JitTestCase):
     def test_bump_numeric_counter(self):
