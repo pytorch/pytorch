@@ -5557,6 +5557,89 @@ a")
                 if y is not None and x_none:
                     print(x + y)  # noqa: T484
 
+    def test_optional_tensor(self):
+        @torch.jit.script
+        def fn(x, y):
+            # type: (Optional[Tensor], int) -> int
+            if x is None:
+                return y
+            else:
+                return 0
+
+        res = fn(None, 1)
+        self.assertEqual(res, 1)
+        g = torch.jit.last_executed_optimized_graph()
+        first_input = next(g.inputs())
+        # check if input is disconnected
+        self.assertEqual(first_input.type().kind(), 'OptionalType')
+        self.assertEqual(first_input.uses(), [])
+        t = torch.ones(1)
+        res = fn(t, 1)
+        self.assertEqual(res, 0)
+        g = torch.jit.last_executed_optimized_graph()
+        self.assertEqual(next(g.inputs()).type().kind(), 'DimensionedTensorType')
+
+        @torch.jit.script
+        def fn(x, y, b):
+            # type: (Optional[Tensor], Tensor, bool) -> Tensor
+            if b:
+                res = y
+            else:
+                res = torch.jit._unwrap_optional(x)
+            return res
+
+        t2 = torch.zeros(1)
+        res = fn(t, t2, True)
+        self.assertEqual(res, t2)
+        with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
+            res = fn(None, t2, False)
+        res = fn(None, t2, True)
+        g = torch.jit.last_executed_optimized_graph()
+        self.assertEqual(next(g.outputs()).type().str(), "Tensor")
+
+    def test_optional_list(self):
+        @torch.jit.script
+        def fn(x, y):
+            # type: (Optional[List[int]], int) -> int
+            if x is None:
+                return y
+            else:
+                res = 0
+                for d in x:
+                    res += d
+                return res
+
+        res = fn(None, 1)
+        self.assertEqual(res, 1)
+        g = torch.jit.last_executed_optimized_graph()
+        first_input = next(g.inputs())
+        # check if input is disconnected
+        self.assertEqual(first_input.type().kind(), 'OptionalType')
+        self.assertEqual(first_input.uses(), [])
+        l = [2, 3]
+        res = fn(l, 1)
+        self.assertEqual(res, 5)
+        g = torch.jit.last_executed_optimized_graph()
+        self.assertEqual(next(g.inputs()).type().kind(), 'ListType')
+
+        @torch.jit.script
+        def fn(x, y, b):
+            # type: (Optional[List[int]], List[int], bool) -> List[int]
+            if b:
+                l = torch.jit._unwrap_optional(x)
+            else:
+                l = y
+            return l
+
+        l2 = [0, 1]
+        res = fn(l, l2, True)
+        self.assertEqual(res, l)
+        with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
+            res = fn(None, l2, True)
+        res = fn(None, l2, False)
+        g = torch.jit.last_executed_optimized_graph()
+        self.assertEqual(next(g.outputs()).type().str(), "int[]")
+
     def test_while_write_outer_then_read(self):
         def func(a, b):
             while bool(a < 10):
@@ -14625,6 +14708,36 @@ class TestClassType(JitTestCase):
         input = torch.rand(2, 3)
         output = m_loaded(input)
         self.assertEqual(3 * input, output)
+
+    def test_init_compiled_first(self):
+        @torch.jit.script  # noqa: B903
+        class Foo(object):
+            def __before_init__(self):
+                # accessing this field should not throw, since __init__ should be compiled
+                return self.x
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+    def test_class_constructs_itself(self):
+        @torch.jit.script  # noqa: B903
+        class LSTMStateStack(object):
+            def __init__(self, num_layers, hidden_size):
+                # type: (int, int) -> None
+                self.num_layers = num_layers
+                self.hidden_size = hidden_size
+                self.last_state = (
+                    torch.zeros(num_layers, 1, hidden_size),
+                    torch.zeros(num_layers, 1, hidden_size),
+                )
+                self.stack = [(self.last_state[0][-1], self.last_state[0][-1])]
+
+            def copy(self):
+                # should be able to construct a class inside its own methods
+                other = LSTMStateStack(self.num_layers, self.hidden_size)
+                other.stack = list(self.stack)
+                return other
 
 
 class TestLogging(JitTestCase):
