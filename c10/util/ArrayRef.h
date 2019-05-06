@@ -80,9 +80,13 @@ class ArrayRef final {
       : Data(Vec.data()), Length(Vec.size()) {}
 
   /// Construct an ArrayRef from a std::vector.
+  // The enable_if stuff here makes sure that this isn't used for std::vector<bool>,
+  // because ArrayRef can't work on a std::vector<bool> bitfield.
   template <typename A>
   /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
-      : Data(Vec.data()), Length(Vec.size()) {}
+      : Data(Vec.data()), Length(Vec.size()) {
+    static_assert(!std::is_same<T, bool>::value, "ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
+  }
 
   /// Construct an ArrayRef from a std::array
   template <size_t N>

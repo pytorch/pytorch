@@ -129,7 +129,8 @@ class TestCaffe2Backend(unittest.TestCase):
         return cuda_model, cuda_input
 
     def run_debug_test(self, model, train, batch_size, state_dict=None,
-                       input=None, use_gpu=True, example_outputs=None):
+                       input=None, use_gpu=True, example_outputs=None,
+                       do_constant_folding=False):
         """
         # TODO: remove this from the final release version
         This test is for our debugging only for the case where
@@ -147,7 +148,8 @@ class TestCaffe2Backend(unittest.TestCase):
             model, input = self.convert_cuda(model, input)
 
         onnxir, torch_out = do_export(model, input, export_params=self.embed_params, verbose=False,
-                                      example_outputs=example_outputs)
+                                      example_outputs=example_outputs,
+                                      do_constant_folding=do_constant_folding)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -157,7 +159,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                        example_outputs=None):
+                        example_outputs=None, do_constant_folding=False):
         """
         This is what the user facing version will look like
         """
@@ -176,19 +178,22 @@ class TestCaffe2Backend(unittest.TestCase):
             model, input = self.convert_cuda(model, input)
 
         # Verify the model runs the same in Caffe2
-        verify.verify(model, input, c2, rtol=rtol, atol=atol)
+        verify.verify(model, input, c2, rtol=rtol, atol=atol,
+                      do_constant_folding=do_constant_folding)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                       example_outputs=None):
+                       example_outputs=None, do_constant_folding=False):
         use_gpu_ = torch.cuda.is_available() and use_gpu
         if self.embed_params:
             self.run_actual_test(model, train, batch_size, state_dict, input,
                                  use_gpu=use_gpu_, rtol=rtol, atol=atol,
-                                 example_outputs=example_outputs)
+                                 example_outputs=example_outputs,
+                                 do_constant_folding=do_constant_folding)
         else:
             self.run_debug_test(model, train, batch_size, state_dict, input,
-                                use_gpu=use_gpu_, example_outputs=example_outputs)
+                                use_gpu=use_gpu_, example_outputs=example_outputs,
+                                do_constant_folding=do_constant_folding)
 
     def test_linear(self):
         class MyModel(torch.nn.Module):
@@ -881,6 +886,58 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(*shape)
         self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_lstm_constant_folding(self):
+        class LstmNet(nn.Module):
+            def __init__(self, input_size, hidden_size, num_layers, bidirectional):
+                super(LstmNet, self).__init__()
+                self.lstm = nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional)
+
+            def forward(self, input, initial_state):
+                return self.lstm(input, initial_state)
+
+        def get_LstmNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size,
+                                         seq_len, bidirectional):
+            num_directions = 2 if bidirectional else 1
+            model = LstmNet(input_size, hidden_size, num_layers, bidirectional)
+            input = torch.randn(seq_len, batch_size, input_size)
+            h0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+            c0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+            return model, (input, (h0, c0))
+
+        batch_size1 = 3
+        model1, input1 = get_LstmNet_model_and_inputs(7, 3, 2, batch_size1, 5, True)
+        self.run_actual_test(model1, train=False, batch_size=batch_size1, input=input1, use_gpu=False, do_constant_folding=True)
+
+        batch_size2 = 4
+        model2, input2 = get_LstmNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
+        self.run_actual_test(model2, train=False, batch_size=batch_size2, input=input2, use_gpu=False, do_constant_folding=True)
+
+    def test_gru_constant_folding(self):
+        class GruNet(nn.Module):
+            def __init__(self, input_size, hidden_size, num_layers, bidirectional):
+                super(GruNet, self).__init__()
+                self.mygru = nn.GRU(input_size, hidden_size, num_layers, bidirectional=bidirectional)
+
+            def forward(self, input, initial_state):
+                out = self.mygru(input, initial_state)
+                return out
+
+        def get_GruNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size,
+                                        seq_len, bidirectional):
+            num_directions = 2 if bidirectional else 1
+            model = GruNet(input_size, hidden_size, num_layers, bidirectional)
+            input = torch.randn(seq_len, batch_size, input_size)
+            h0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+            return model, (input, h0)
+
+        batch_size1 = 3
+        model1, input1 = get_GruNet_model_and_inputs(7, 3, 2, batch_size1, 5, True)
+        self.run_actual_test(model1, train=False, batch_size=batch_size1, input=input1, use_gpu=False, do_constant_folding=True)
+
+        batch_size2 = 4
+        model2, input2 = get_GruNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
+        self.run_actual_test(model2, train=False, batch_size=batch_size2, input=input2, use_gpu=False, do_constant_folding=True)
+
     def test_repeat(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -990,13 +1047,29 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_unsqueeze(self):
         shape = (3, 4, 5)
-        for dim in range(len(shape) + 1):
+        # test negative dim as well.
+        for dim in range(-len(shape) - 1, len(shape) + 1):
+
             class MyModel(torch.nn.Module):
                 def __init__(self):
                     super(MyModel, self).__init__()
 
                 def forward(self, x):
                     return x.unsqueeze(dim)
+            x = torch.randn(*shape)
+            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, atol=1e-7)
+
+    def test_squeeze(self):
+        shape = (1, 1, 1)
+        # test negative dim as well
+        for dim in range(-len(shape), len(shape)):
+
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super(MyModel, self).__init__()
+
+                def forward(self, x):
+                    return x.squeeze(dim)
             x = torch.randn(*shape)
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, atol=1e-7)
 
@@ -1191,6 +1264,22 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(FlattenModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_max(self):
+        class MaxModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.max(input, dim=1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(MaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_min(self):
+        class MinModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.min(input, dim=1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(MinModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_argmax(self):
         class ArgmaxModel(torch.nn.Module):
@@ -1424,6 +1513,9 @@ class TestCaffe2Backend(unittest.TestCase):
                     soft_nms_sigma=0.5,
                     soft_nms_min_score_thres=0.001,
                     rotated=rotated,
+                    cls_agnostic_bbox_reg=False,
+                    input_boxes_include_bg_cls=True,
+                    output_classes_include_bg_cls=True,
                 )
                 return a, b, c, d
 
@@ -1469,6 +1561,48 @@ class TestCaffe2Backend(unittest.TestCase):
 
         self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3)
 
+    def test_floor(self):
+        class FloorModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.floor(input)
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_model_test(FloorModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_ceil(self):
+        class CeilModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.ceil(input)
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_model_test(CeilModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test__dim_arange(self):
+        class DimArange(torch.nn.Module):
+            def forward(self, input):
+                return torch._dim_arange(input, 1)
+
+        x = torch.ones(5, 6)
+        self.run_model_test(DimArange(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_log2(self):
+        class Log2Model(torch.nn.Module):
+            def forward(self, input):
+                return torch.log2(input)
+
+        x = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
+        self.run_model_test(Log2Model(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_prim_shape(self):
+        x = torch.randn(4, 5, requires_grad=True)
+        @torch.jit.script
+        def view_by_prim_shape(x):
+            return x.view(x.shape)
+
+        class PrimShapeModel(torch.nn.Module):
+            def forward(self, input):
+                return view_by_prim_shape(input)
+        self.run_model_test(PrimShapeModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
 # a bit of metaprogramming to set up all the rnn tests
 
