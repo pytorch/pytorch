@@ -55,10 +55,7 @@ class Beta(ExponentialFamily):
                 (total.pow(2) * (total + 1)))
 
     def rsample(self, sample_shape=()):
-        value = self._dirichlet.rsample(sample_shape).select(-1, 0)
-        if isinstance(value, Number):
-            value = self._dirichlet.concentration.new_tensor(value)
-        return value
+        return self._dirichlet.rsample(sample_shape).select(-1, 0)
 
     def log_prob(self, value):
         if self._validate_args:

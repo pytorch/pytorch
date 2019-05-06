@@ -199,7 +199,7 @@ Value* ConstantPythonTupleValue::asValue(const SourceRange& loc, Function& m) {
   return m.graph()->insertNode(node)->output();
 }
 
-std::shared_ptr<SugaredValue> OverloadedFunctionValue::call(
+std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
     const SourceRange& loc,
     Function& caller,
     at::ArrayRef<NamedValue> inputs,
@@ -267,7 +267,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   py::object overloads =
       py_module_.attr("_overloads").attr("get")(field, py::none());
   if (!overloads.is_none()) {
-    return std::make_shared<OverloadedFunctionValue>(
+    return std::make_shared<OverloadedMethodValue>(
         self_, py::cast<std::vector<std::string>>(overloads));
   }
 
@@ -410,7 +410,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     obj = weak_obj;
   }
   if (auto callee = as_function(obj)) {
-    return std::make_shared<MethodValue>(c10::nullopt, callee);
+    return std::make_shared<FunctionValue>(callee);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
@@ -434,7 +434,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
     if (auto callee = as_function(compiled_fn)) {
-      return std::make_shared<MethodValue>(c10::nullopt, callee);
+      return std::make_shared<FunctionValue>(callee);
     }
   }
 

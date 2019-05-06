@@ -1577,6 +1577,14 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(CeilModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test__dim_arange(self):
+        class DimArange(torch.nn.Module):
+            def forward(self, input):
+                return torch._dim_arange(input, 1)
+
+        x = torch.ones(5, 6)
+        self.run_model_test(DimArange(), train=False, input=x, batch_size=BATCH_SIZE)
+
     def test_log2(self):
         class Log2Model(torch.nn.Module):
             def forward(self, input):
