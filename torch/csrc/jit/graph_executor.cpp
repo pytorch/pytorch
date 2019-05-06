@@ -606,6 +606,7 @@ struct GraphExecutorImpl {
       for (Node* dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
+        runPostdiffOptimization(gradient.f);
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
@@ -639,18 +640,23 @@ struct GraphExecutorImpl {
     CheckInplace(graph);
   }
 
+  void runPostdiffOptimization(std::shared_ptr<Graph>& graph){
+    PropagateInputShapes(graph);
+    ConstantPropagation(graph);
+
+    // Unroll small loops, and eliminate expressions that are the same at every
+    // iteration.
+    UnrollLoops(graph);
+  }
+
   void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
-    // run custom passes that backend registered
+    // run custom passes that different backends can register
     for (const auto& pass : getCustomPasses()) {
       pass(graph);
     }
     // decomposition pass, decompose certain ops that will be used in the following
     // passes (like batchmm and jit fusion)
     DecomposeOps(graph);
-    // Autodiff and decompositon pass will replace some parts of graph with new graph
-    // these new graphs usually miss shape information on nodes, so we propagate shapes
-    // PropagateInputShapes(graph);
-
     // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
 

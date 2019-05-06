@@ -370,15 +370,29 @@ const std::vector<std::string> functions = {
                 out = torch.matmul(mat1, mat2)
             return out
 
+        def AD_matmul_backward(grad_output, self, other):
+            self_size = self.size()
+            other_size = other.size()
+            grad_self = AD_matmul_size(grad_output, AD_mat_transpose(other), self_size)._grad_sum_to_size(self_size)
+            grad_other = AD_matmul_size(AD_mat_transpose(self), grad_output, other_size)._grad_sum_to_size(other_size)
+            return grad_self, grad_other
+
         def matmul(self, other):
             def backward(grad_output):
-                self_size = self.size()
-                other_size = other.size()
-                grad_self = AD_matmul_size(grad_output, AD_mat_transpose(other), self_size)._grad_sum_to_size(self_size)
-                grad_other = AD_matmul_size(AD_mat_transpose(self), grad_output, other_size)._grad_sum_to_size(other_size)
-                return grad_self, grad_other
+                return AD_matmul_backward(grad_output, self, other)
 
             return torch.matmul(self, other), backward
+
+        def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+            def backward(grad_output):
+                if bias is not None:
+                    grad_bias = grad_output._grad_sum_to_size(bias.size())
+                else:
+                    grad_bias = None
+                grad_input, grad_weight = AD_matmul_backward(grad_output, input, weight.t())
+                return grad_input, grad_weight.t(), grad_bias
+
+            return torch.linear(input, weight, bias), backward
     )",
     R"(
         def addcmul(self,

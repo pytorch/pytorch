@@ -2395,7 +2395,7 @@ graph(%a, %b, %c, %d):
             self.run_pass('decompose_ops', linear_matmul.graph)
             out_test = linear_matmul(input, weight)
             self.assertEqual(out_ref, out_test)
-            FileCheck().check_not("linear").check("matmul").check("add_").run(str(linear_matmul.graph))
+            FileCheck().check_not("linear").check("aten::t(").check("aten::matmul").run(str(linear_matmul.graph))
 
         def doesnt_decompose():
             @torch.jit.script
@@ -13344,8 +13344,8 @@ nn_functional_tests = [
     ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],), '', (True,)),
     ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],), '', (True,)),
     ('dropout', (S, S, S), (0.5,), '', (True,
-                                        ['prim::is_cuda', 'aten::bernoulli_'],
-                                        ['aten::rand_like', 'aten::lt', 'aten::type_as', 'aten::mul', 'aten::div'])),
+                                        ['prim::is_cuda', 'aten::bernoulli_',
+                                         'aten::rand_like', 'aten::lt', 'aten::type_as', 'aten::mul', 'aten::div'])),
     ('alpha_dropout', (S, S, S), (0.5,)),
     ('dropout2d', (S, S, S), (0.5,)),
     ('dropout3d', (S, S, S), (0.5,)),
