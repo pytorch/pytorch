@@ -54,6 +54,8 @@ using dict_map_type = ska::flat_hash_map<IValue, IValue, DictHash, DictEqualTo>;
 
 namespace impl {
 template<class Key, class Value, class Iterator> class DictIterator;
+template<class Key, class Value, class Iterator>
+bool operator==(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs);
 
 /**
  * A reference to an entry in the Dict.
@@ -87,8 +89,7 @@ private:
   Iterator iterator_;
   friend class DictIterator<Key, Value, Iterator>;
   friend class Dict<Key, Value>;
-  template<class Key_, class Value_, class Iterator_>
-  friend bool operator==(const DictIterator<Key_, Value_, Iterator_>& lhs, const DictIterator<Key_, Value_, Iterator_>& rhs);
+  friend bool operator==<Key, Value, Iterator>(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs);
 };
 
 // this wraps map_type::iterator to make sure user code can't rely
@@ -103,14 +104,6 @@ public:
   DictIterator(DictIterator&&) noexcept = default;
   DictIterator& operator=(const DictIterator&) = default;
   DictIterator& operator=(DictIterator&&) = default;
-
-  friend bool operator==(const DictIterator& lhs, const DictIterator& rhs) {
-    return lhs.entryRef_.iterator_ == rhs.entryRef_.iterator_;
-  }
-
-  friend bool operator!=(const DictIterator& lhs, const DictIterator& rhs) {
-    return !operator==(lhs, rhs);
-  }
 
   DictIterator& operator++() {
       ++entryRef_.iterator_;
@@ -146,7 +139,19 @@ private:
 
   friend class DictIterator<Key, Value, typename detail::dict_map_type::iterator>;
   friend class Dict<Key, Value>;
+  friend bool operator==<Key, Value, Iterator>(const DictIterator& lhs, const DictIterator& rhs);
 };
+
+template<class Key, class Value, class Iterator>
+inline bool operator==(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs) {
+  return lhs.entryRef_.iterator_ == rhs.entryRef_.iterator_;
+}
+
+template<class Key, class Value, class Iterator>
+inline bool operator!=(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs) {
+  return !(lhs == rhs);
+}
+
 }
 
 /**
