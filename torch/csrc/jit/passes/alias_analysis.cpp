@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <list>
+
 namespace torch {
 namespace jit {
 
