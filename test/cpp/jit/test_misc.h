@@ -835,7 +835,7 @@ void testProfiler() {
   ArgumentSpecCreator arg_spec_creator(opt_graph);
   ArgumentSpec spec =
       arg_spec_creator.create(autograd::GradMode::is_enabled(), stack);
-  arg_spec_creator.setInputTypes(opt_graph, spec);
+  arg_spec_creator.specializeTypes(opt_graph, spec);
   auto pr = ProfilingRecord::instrumentGraph(g);
   Code cd(pr->profiled_graph_);
   InterpreterState is{cd};
