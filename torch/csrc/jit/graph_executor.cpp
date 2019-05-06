@@ -638,16 +638,17 @@ struct GraphExecutorImpl {
     UnrollLoops(graph);
     EliminateCommonSubexpression(graph);
 
-    // Rewrite subgraphs with many MMs into expressions that batch them.
-    BatchMM(graph);
-
     CheckInplace(graph);
   }
 
   void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
+    // run custom passes that different backends can register
     for (const auto& pass : getCustomPasses()) {
       pass(graph);
     }
+    // Rewrite subgraphs with many MMs into expressions that batch them.
+    BatchMM(graph);
+
     FuseGraph(graph);
   }
 
