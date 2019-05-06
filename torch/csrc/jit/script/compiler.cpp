@@ -2899,6 +2899,11 @@ struct FunctionResolver : public Resolver {
   const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable_;
 };
 
+CompilationUnit::CompilationUnit(const std::string& source)
+{
+  define(source, nativeResolver(), nullptr);
+}
+
 void CompilationUnit::define(
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& resolvers,

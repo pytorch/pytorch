@@ -9,42 +9,17 @@
 namespace torch {
 namespace jit {
 
-Value* decomposeOp(
-    Node* op,
-    const char* source,
-    const std::string& method_name,
-    const at::ArrayRef<Value*> inputs) {
-  std::shared_ptr<Graph> d_graph;
-  std::once_flag flag;
-  std::call_once(
-      flag,
-      [](std::shared_ptr<Graph>* graph_ptr,
-         const char* source,
-         const std::string& method_name) {
-        script::CompilationUnit cu;
-        cu.define(source, script::nativeResolver(), nullptr);
-        *graph_ptr = cu.get_function(method_name).graph();
-      },
-      &d_graph,
-      source,
-      method_name);
-
-  WithInsertPoint insert_guard{op};
-  return inlineCallTo(*op->owningGraph(), *d_graph, inputs).at(0);
-}
-
 static bool DecomposeOps(Block* block) {
-  static const char* linear_source = R"SCRIPT(
+  static script::CompilationUnit decompose_funcs(R"SCRIPT(
       def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]):
           output = input.matmul(weight.t())
           if bias is not None:
               output += bias
           return output
-      )SCRIPT";
-  static const char* addmm_source = R"SCRIPT(
+
       def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: number = 1.0, alpha: number = 1.0):
           return self + mat1.mm(mat2)
-    )SCRIPT";
+      )SCRIPT");
 
   bool decomposed = false;
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
@@ -66,6 +41,7 @@ static bool DecomposeOps(Block* block) {
       WithInsertPoint guard(*it);
 
       Graph* graph = it->owningGraph();
+      std::shared_ptr<Graph> d_graph;
       int ndim = input_type->dim();
       Value* new_output = nullptr;
       if (ndim == 2 && bias->type()->isSubtypeOf(TensorType::get())) {
@@ -73,10 +49,12 @@ static bool DecomposeOps(Block* block) {
         Value* transposed_weight = graph->insert(aten::t, {weight});
         Value* one = graph->insertConstant(1);
         std::vector<Value*> inputs{bias, input, transposed_weight, one, one};
-        new_output = decomposeOp(*it, addmm_source, "addmm", inputs);
+        d_graph = decompose_funcs.get_function("addmm").graph();
+        new_output = inlineCallTo(*it->owningGraph(), *d_graph, inputs).at(0);
       } else {
         // otherwise dispatch to normal linear decomposition
-        new_output = decomposeOp(*it, linear_source, "linear", it->inputs());
+        d_graph = decompose_funcs.get_function("linear").graph();
+        new_output = inlineCallTo(*it->owningGraph(), *d_graph, it->inputs()).at(0);
       }
       new_output->setType(it->output()->type());
       it->output()->replaceAllUsesWith(new_output);
@@ -95,7 +73,8 @@ static bool DecomposeOps(Block* block) {
       decomposed = true;
       WithInsertPoint guard(*it);
 
-      Value* new_output = decomposeOp(*it, addmm_source, "addmm", it->inputs());
+      std::shared_ptr<Graph> d_graph = decompose_funcs.get_function("addmm").graph();
+      Value* new_output = inlineCallTo(*it->owningGraph(), *d_graph, it->inputs()).at(0);
       // Set the output of the decomposed graph to have the same output type as the
       // original op otherwise the canonicalized graph will have
       // TensorType as the output of this node which is incorrect
