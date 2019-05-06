@@ -14,9 +14,10 @@ CONFIG_TREE_DATA = [
         ("gcc", [
             ("4.8", [X("3.6")]),
             ("5.4", [
+                X("3.6"),
                 ("3.6", [
-                    ("xla", [X(False), X(True)]),
-                    ("namedtensor", [X(False), X(True)]),
+                    ("xla", [X(True)]),
+                    ("namedtensor", [X(True)]),
                 ]),
             ]),
             ("7", [X("3.6")]),
