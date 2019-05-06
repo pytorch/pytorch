@@ -85,7 +85,13 @@ enum class OpCode : char {
   FRAME = '\x95'
 };
 
-enum PicklerClass : uint8_t { TENSOR = 0, INTLIST = 1 };
+enum PicklerClass : uint8_t {
+  TENSOR = 0,
+  INTLIST = 1,
+  TENSORLIST = 2,
+  DOUBLELIST = 3,
+  BOOLLIST = 4
+};
 
 using ::c10::IValue;
 
@@ -109,12 +115,15 @@ class Pickler {
   void pushDouble(const IValue& ivalue);
   void pushMemoization(const void* item);
   void pushMemoization(const IValue& ivalue);
-  void pushList(const IValue& ivalue);
-  void pushIntList(const IValue& ivalue);
+  void pushGenericList(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
   void pushClass(PicklerClass cls);
   void pushInt(const IValue& ivalue);
+  void pushSpecializedList(
+      const IValue& ivalue,
+      PicklerClass cls,
+      std::function<void(const IValue&)> item_pusher);
   const void* getPointer(const IValue& ivalue);
 
   // These convert values to bytes and add them to the stack (NB: since T is to
