@@ -36,44 +36,51 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
 
 #include <ATen/mkldnn/Runtime.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
-#include <ATen/native/mkldnn/MKLDNNConversions.h>
 #include <ATen/native/mkldnn/Utils.h>
 
 using namespace mkldnn;
 
 namespace at { namespace native {
 
-Tensor _mkldnn_conv2d(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
-    at::IntArrayRef padding, at::IntArrayRef stride, at::IntArrayRef dilation, int64_t groups) {
-  const ideep::tensor& x = itensor_from_mkldnn(input);
-  const ideep::tensor& w = itensor_from_mkldnn(weight);
+ideep::tensor _mkldnn_conv2d(
+    const ideep::tensor& x,
+    const ideep::tensor& w,
+    const c10::optional<ideep::tensor>& b,
+    at::IntArrayRef padding,
+    at::IntArrayRef stride,
+    at::IntArrayRef dilation,
+    int64_t groups) {
 
-  std::vector<int64_t> kernel_size(input.dim());
+  std::vector<int64_t> kernel_size(x.ndims());
   // mkldnn conv2d weights could have been re-ordered to 5d by
   // mkldnn_reorder_conv2d_weight
-  if (weight.dim() == input.dim() + 1) {
+  if (w.ndims() == x.ndims() + 1) {
     AT_ASSERTM(
         groups > 1,
         "Only group _mkldnn_conv2d weights could have been reordered to 5d");
-    kernel_size[0] = weight.size(0) * weight.size(1);
+    kernel_size[0] = w.get_dim(0) * w.get_dim(1);
     std::copy_n(
-        weight.sizes().cbegin() + 2, input.dim() - 1, kernel_size.begin() + 1);
+        w.get_dims().cbegin() + 2, x.ndims() - 1, kernel_size.begin() + 1);
   } else {
     std::copy_n(
-        weight.sizes().cbegin(), input.dim(), kernel_size.begin());
+        w.get_dims().cbegin(), x.ndims(), kernel_size.begin());
   }
 
+  const ideep::param::dims x_dims = x.get_dims();
+  std::vector<int64_t> input_size{x_dims.cbegin(), x_dims.cend()};
   std::vector<int64_t> output_sizes = conv_output_size(
-    input.sizes(), kernel_size, padding, stride, dilation);
+      input_size,
+      kernel_size,
+      padding,
+      stride,
+      dilation);
 
   ideep::tensor y;
-  if (bias.defined()) {
-    const ideep::tensor& b = itensor_from_mkldnn(bias);
+  if (b.has_value()) {
     ideep::convolution_forward::compute<AllocForMKLDNN>(
       x,
       w,
-      b,
+      b.value(),
       {output_sizes.cbegin(), output_sizes.cend()},
       y,
       {stride.begin(), stride.end()},
@@ -99,7 +106,7 @@ Tensor _mkldnn_conv2d(
       ideep::algorithm::convolution_direct,
       ideep::prop_kind::forward);
   }
-  return new_with_itensor_mkldnn(std::move(y), input.options());
+  return y;
 }
 
 at::Tensor mkldnn_convolution(
@@ -110,38 +117,44 @@ at::Tensor mkldnn_convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  Tensor mkldnn_input, mkldnn_weight, mkldnn_bias;
   if (input.is_mkldnn()) {
-    mkldnn_input = input;
     AT_ASSERTM(weight.is_mkldnn(), "weight is supposed to be a mkldnn tenser");
-    mkldnn_weight = weight;
     if (bias.defined()) {
       AT_ASSERTM(bias.is_mkldnn(), "bias is supposed to be a mkldnn tensor");
-      mkldnn_bias = bias;
     }
-  } else {
-    mkldnn_input = at::native::mkldnn_reorder_conv2d_input(
-        input.contiguous(), weight, padding, stride, dilation, groups);
-    mkldnn_weight = at::native::mkldnn_reorder_conv2d_weight(
-        weight.contiguous(), padding, stride, dilation, groups);
+
+    const ideep::tensor& mkldnn_input = itensor_from_mkldnn(input);
+    const ideep::tensor& mkldnn_weight = itensor_from_mkldnn(weight);
+    c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
     if (bias.defined()) {
-      mkldnn_bias = dense_to_mkldnn(bias);
+      mkldnn_bias = itensor_from_mkldnn(bias);
     }
-  }
-
-  Tensor mkldnn_output = _mkldnn_conv2d(
-      mkldnn_input,
-      mkldnn_weight,
-      mkldnn_bias,
-      padding,
-      stride,
-      dilation,
-      groups);
-
-  if (input.is_mkldnn()) {
-    return mkldnn_output;
+    ideep::tensor mkldnn_output = _mkldnn_conv2d(
+        mkldnn_input,
+        mkldnn_weight,
+        mkldnn_bias,
+        padding,
+        stride,
+        dilation,
+        groups);
+    return new_with_itensor_mkldnn(std::move(mkldnn_output), input.options());
   } else {
-    return mkldnn_to_dense(mkldnn_output);
+    ideep::tensor mkldnn_input = itensor_view_from_dense(input);
+    ideep::tensor mkldnn_weight = itensor_view_from_dense(weight);
+    c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+    if (bias.defined()) {
+      mkldnn_bias = itensor_view_from_dense(bias);
+    }
+    ideep::tensor mkldnn_output = _mkldnn_conv2d(
+        mkldnn_input,
+        mkldnn_weight,
+        mkldnn_bias,
+        padding,
+        stride,
+        dilation,
+        groups);
+    return mkldnn_to_dense(
+        new_with_itensor_mkldnn(std::move(mkldnn_output), input.options()));
   }
 }
 
