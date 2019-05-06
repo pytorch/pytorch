@@ -61,6 +61,7 @@ namespace jit {
   _(SubgraphUtils)                 \
   _(AliasAnalysis)                 \
   _(ContainerAliasing)             \
+  _(AliasRegistration)             \
   _(WriteTracking)                 \
   _(Wildcards)                     \
   _(MemoryDAG)                     \
