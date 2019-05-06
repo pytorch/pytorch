@@ -730,6 +730,6 @@ inline Variable::Variable(c10::intrusive_ptr<at::TensorImpl> self)
 
 inline at::TensorImpl* Variable::get() const {
   AT_CHECK(defined(), "Called Variable::get() on an undefined Variable");
-  return impl_.get();
+  return unsafeGetTensorImpl();
 }
 }} // namespace torch::autograd

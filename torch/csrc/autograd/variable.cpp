@@ -22,9 +22,6 @@
 namespace torch {
 namespace autograd {
 Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, Edge gradient_edge) {
-  if (!self_impl) {
-    throw std::runtime_error("Attempted to set requires_grad of an undefined Variable");
-  }
   grad_fn_ = std::move(gradient_edge.function);
   requires_grad_ = false;
   is_view_ = false;
