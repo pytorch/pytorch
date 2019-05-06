@@ -246,7 +246,7 @@ similar to how you would declare a TorchScript function: ::
 
     @torch.jit.script
     class Foo:
-      def __init__(self, x, y)
+      def __init__(self, x, y):
         self.x = x
 
       def aug_add_x(self, inc):
@@ -286,16 +286,16 @@ like any other TorchScript type:
 
     @torch.jit.script
     class Pair:
-      def __init__(self, first, second)
+      def __init__(self, first, second):
         self.first = first
         self.second = second
 
     @torch.jit.script
     def sum_pair(p):
-      # type : (Pair) -> Tensor
+      # type: (Pair) -> Tensor
       return p.first + p.second
 
-    p = Pair(torch.rand(2, 3), torch.rand(2, 3)
+    p = Pair(torch.rand(2, 3), torch.rand(2, 3))
     print(sum_pair(p))
 
 

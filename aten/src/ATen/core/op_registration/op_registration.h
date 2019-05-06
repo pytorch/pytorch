@@ -42,7 +42,7 @@ public:
   RegisterOperators(const RegisterOperators&) = delete;
   RegisterOperators& operator=(const RegisterOperators&) = delete;
   RegisterOperators(RegisterOperators&&) noexcept;
-  RegisterOperators& operator=(RegisterOperators&&);
+  RegisterOperators& operator=(RegisterOperators&&) noexcept;
 
   /**
    * Register an operator based on a function schema and a set of configuration
@@ -213,6 +213,9 @@ private:
   class OperatorRegistrar;
 
   std::vector<OperatorRegistrar> registrars_;
+
+  static_assert(std::is_nothrow_move_constructible<std::vector<OperatorRegistrar>>::value, "");
+  static_assert(std::is_nothrow_move_assignable<std::vector<OperatorRegistrar>>::value, "");
 };
 
 }

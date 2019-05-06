@@ -1,8 +1,7 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 
-#include <c10/util/Exception.h>
 #include <ATen/core/interned_strings.h>
-#include <torch/csrc/jit/symbolic_variable.h>
+#include <c10/util/Exception.h>
 
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
