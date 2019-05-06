@@ -33,10 +33,6 @@ static constexpr topo_position_t kMidPoint = 0;
 //   - 2^(64-n) is the maximum number of appends to the end without reindex
 static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
-// Sigh, see
-// https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
-constexpr Symbol PythonOp::Kind;
-
 static void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->uniqueName();
 }
@@ -286,19 +282,6 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
   }
   */
   return out;
-}
-
-std::ostream& Graph::prettyPrint(std::ostream& out) {
-  std::vector<at::Tensor> tensor_table;
-  std::vector<ClassTypePtr> class_table;
-  PythonPrint(out, *this, tensor_table, class_table);
-  return out;
-}
-
-void Graph::dumpPretty() {
-  std::vector<at::Tensor> tensor_table;
-  std::vector<ClassTypePtr> class_table;
-  PythonPrint(std::cout, *this, tensor_table, class_table);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -624,6 +607,33 @@ std::shared_ptr<Graph> Graph::copy() {
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
+}
+
+void Block::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
+  for (Value* input : inputs()) {
+    input->setType(type_map(input->type()));
+  }
+  for (Node* node : nodes()) {
+    for (Value* output : node->outputs()) {
+      output->setType(type_map(output->type()));
+    }
+    for (Block* sub_block : node->blocks()) {
+      sub_block->remapTypes(type_map);
+    }
+    for (Symbol name : node->attributeNames()) {
+      if (node->kindOf(name) == AttributeKind::g) {
+        node->g(name)->remapTypes(type_map);
+      } else if (node->kindOf(name) == AttributeKind::gs) {
+          for(const auto& g : node->gs(name)) {
+            g->remapTypes(type_map);
+          }
+      }
+    }
+  }
+}
+
+void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
+  block()->remapTypes(type_map);
 }
 
 bool Value::mustBeNone() const {

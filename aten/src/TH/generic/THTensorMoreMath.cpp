@@ -38,6 +38,31 @@ TENSOR_IMPLEMENT_LOGICAL(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL(eq,==)
 TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 
+int THTensor_(equal)(THTensor *ta, THTensor* tb)
+{
+  int equal = 1;
+  if(!THTensor_(isSameSizeAs)(ta, tb))
+    return 0;
+
+  if (THTensor_(isContiguous)(ta) && THTensor_(isContiguous)(tb)) {
+    scalar_t *tap = ta->data<scalar_t>();
+    scalar_t *tbp = tb->data<scalar_t>();
+    ptrdiff_t sz = THTensor_(nElement)(ta);
+    ptrdiff_t i;
+    for (i=0; i<sz; ++i){
+      if(tap[i] != tbp[i]) return 0;
+    }
+  } else {
+    // Short-circuit the apply function on inequality
+    TH_TENSOR_APPLY2(scalar_t, ta, scalar_t, tb,
+                     if (equal && *ta_data != *tb_data) {
+                        equal = 0;
+                        TH_TENSOR_APPLY_hasFinished = 1; break;
+                     })
+  }
+  return equal;
+}
+
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
@@ -151,7 +176,8 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
       at::Tensor values__wrap = THTensor_wrap(values_);
       at::Tensor t0_wrap = THTensor_wrap(t0);
-      at::_copy_same_type_(values__wrap, t0_wrap);
+      auto right_shape = t0_wrap.reshape(values__wrap.sizes());
+      at::_copy_same_type_(values__wrap, right_shape);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
@@ -234,7 +260,8 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
       at::Tensor values__wrap = THTensor_wrap(values_);
       at::Tensor t0_wrap = THTensor_wrap(t0);
-      at::_copy_same_type_(values__wrap, t0_wrap);
+      auto right_shape = t0_wrap.reshape(values__wrap.sizes());
+      at::_copy_same_type_(values__wrap, right_shape);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
@@ -1009,31 +1036,6 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
   }
 }
 
-int THTensor_(equal)(THTensor *ta, THTensor* tb)
-{
-  int equal = 1;
-  if(!THTensor_(isSameSizeAs)(ta, tb))
-    return 0;
-
-  if (THTensor_(isContiguous)(ta) && THTensor_(isContiguous)(tb)) {
-    scalar_t *tap = ta->data<scalar_t>();
-    scalar_t *tbp = tb->data<scalar_t>();
-    ptrdiff_t sz = THTensor_(nElement)(ta);
-    ptrdiff_t i;
-    for (i=0; i<sz; ++i){
-      if(tap[i] != tbp[i]) return 0;
-    }
-  } else {
-    // Short-circuit the apply function on inequality
-    TH_TENSOR_APPLY2(scalar_t, ta, scalar_t, tb,
-                     if (equal && *ta_data != *tb_data) {
-                        equal = 0;
-                        TH_TENSOR_APPLY_hasFinished = 1; break;
-                     })
-  }
-  return equal;
-}
-
 #ifdef _OPENMP
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, OMP_THRESHOLD)             \
@@ -1137,7 +1139,7 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
 LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 
 #if defined(TH_REAL_IS_LONG)
-LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
+LAB_IMPLEMENT_BASIC_FUNCTION(abs,std::abs)
 #endif /* int64_t only part */
 
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_CHAR)

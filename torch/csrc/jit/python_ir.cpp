@@ -19,6 +19,8 @@
 namespace torch {
 namespace jit {
 
+Symbol ConcretePythonOp::Kind = prim::PythonOp;
+
 using c10::Type;
 
 std::string getPythonName(const PyObject* obj_) {
