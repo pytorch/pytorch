@@ -11,6 +11,11 @@ smoke_linux_test: &smoke_linux_test
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
+  # This checkout is only needed to access
+  # .circleci/scripts/binary_populate_env.sh, which can't be inlined because
+  # it blows up the yaml size.
+  - run:
+      <<: *binary_checkout
   - run:
       <<: *binary_populate_env
   - run:
@@ -21,7 +26,6 @@ smoke_linux_test: &smoke_linux_test
         cat >/home/circleci/project/ci_test_script.sh <<EOL
         # The following code will be executed inside Docker container
         set -ex
-        git clone https://github.com/pytorch/builder.git /builder
         /builder/smoke_test.sh
         # The above code will be executed inside Docker container
         EOL
@@ -32,6 +36,11 @@ smoke_mac_test: &smoke_mac_test
   macos:
     xcode: "9.0"
   steps:
+    # This checkout is only needed to access
+    # .circleci/scripts/binary_populate_env.sh, which can't be inlined because
+    # it blows up the yaml size.
+    - run:
+        <<: *binary_checkout
     - run:
         <<: *binary_populate_env
     - run:
@@ -42,8 +51,7 @@ smoke_mac_test: &smoke_mac_test
         command: |
           set -ex
           source "/Users/distiller/project/env"
-          git clone https://github.com/pytorch/builder.git
-          unbuffer ./builder/smoke_test.sh | ts
+          unbuffer "$BUILDER_ROOT/smoke_test.sh" | ts
 
 
 

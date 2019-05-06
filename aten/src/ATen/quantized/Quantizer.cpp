@@ -58,6 +58,7 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t ze
   return rtensor;
 }
 #else
+
 template <typename T>
 T quantize_val(float scale, int32_t zero_point, float value) {
   // std::nearbyint results in nearest integer value according to the current
@@ -75,6 +76,7 @@ T quantize_val(float scale, int32_t zero_point, float value) {
   qvalue = std::min(qvalue, qmax);
   return static_cast<T>(qvalue);
 }
+
 template <typename T>
 Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point) {
   const float* rdata = rtensor.data<float>();
