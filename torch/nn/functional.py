@@ -2691,7 +2691,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     Returns:
         output (Tensor): output Tensor
 
-    .. _`Spatial Transformer Networks`: 
+    .. _`Spatial Transformer Networks`:
         https://arxiv.org/abs/1506.02025
     """
     if mode != 'bilinear' and mode != 'nearest':
