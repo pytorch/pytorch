@@ -777,6 +777,13 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
+  // Special case: if `from` is an optional, `to` could be a None. Don't
+  // create a pointer in that case
+  if (from->type()->kind() == TypeKind::OptionalType &&
+      to->type()->kind() == TypeKind::NoneType) {
+    return;
+  }
+
   // At this point, we should be dealing with two mutable types.
   AT_ASSERT(shouldAnnotate(from) && shouldAnnotate(to));
 
