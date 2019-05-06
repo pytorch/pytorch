@@ -247,7 +247,9 @@ struct GraphFuser {
   bool isFusableDefault(Node* node) {
     bool fusableDevice = true;
     for (const auto& output : node->outputs()) {
-      fusableDevice &= isFusableDevice(output);
+      if (output->uses().size() > 0) {
+        fusableDevice &= isFusableDevice(output);
+      }
     }
     return fusableDevice && (isFusableMap(node) || isFusableNorm(node));
   }

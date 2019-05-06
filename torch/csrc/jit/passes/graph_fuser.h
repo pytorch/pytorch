@@ -21,8 +21,8 @@ TORCH_API void FuseGraph(std::shared_ptr<Graph>& graph);
 
 TORCH_API void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,
-    std::function<bool(Node*)> fn,
-    Symbol tag);
+    std::function<bool(Node*)> is_fusable,
+    Symbol kind);
 
 TORCH_API bool trackSingleGradSumToSizeToOutputs(
     Value* gradSumToSizeOutput,
