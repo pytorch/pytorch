@@ -19,7 +19,7 @@ namespace detail {
     explicit WrapRuntimeKernelFunctor_(FuncType_&& kernel_func)
     : kernel_func_(std::forward<FuncType_>(kernel_func)) {}
 
-    auto operator()(Parameters&&... args) -> decltype(std::declval<FuncType>()(std::forward<Parameters>(args)...)) {
+    auto operator()(Parameters... args) -> decltype(std::declval<FuncType>()(std::forward<Parameters>(args)...)) {
       return kernel_func_(std::forward<Parameters>(args)...);
     }
 

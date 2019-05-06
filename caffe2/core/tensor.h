@@ -176,7 +176,7 @@ class CAFFE2_API Tensor final {
   }
 
   /**
-   * @brief Copies the data from a source tensor, with a contex provided to
+   * @brief Copies the data from a source tensor, with a context provided to
    * carry out the underlying memcpy operation.  This method respects
    * caffe2_keep_on_shrink.
    *
