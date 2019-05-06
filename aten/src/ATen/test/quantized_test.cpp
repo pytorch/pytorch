@@ -9,7 +9,6 @@
 #include <type_traits>
 // For quantize_val
 #include <ATen/quantized/Quantizer.h>
-#include <c10/util/qint8.h>
 #include <c10/core/ScalarType.h>
 
 using namespace at;
