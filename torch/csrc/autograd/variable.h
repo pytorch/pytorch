@@ -179,7 +179,7 @@ struct TORCH_API Variable : public at::Tensor {
   // NOTE: Assignment operators to Tensor come for free from the constructors.
 
   // yf225 TODO: fix comments here
-  at::Tensor data_deprecated() const noexcept;
+  at::Tensor tensor_data() const noexcept;
 
   // yf225 TODO: fix comments here
   // NOTE: `var.data()` in C++ has the same semantics as `tensor.data` in Python,
@@ -196,7 +196,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// make such changes explicitly illegal, in order to prevent users from changing
   /// metadata of the `.data` tensor and expecting the original tensor to also
   /// be updated.
-  at::Tensor _data_future() const noexcept;
+  at::Tensor variable_data() const noexcept;
 
   // Gradient Function and Edges
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -556,7 +556,7 @@ inline Variable make_variable(
     bool allow_tensor_metadata_change = true) {
   AT_CHECK(
       !data.is_variable(),
-      "Must not create a new variable from a variable, use its .data_deprecated()");
+      "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
     data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -572,7 +572,7 @@ inline Variable make_variable_consuming(
     bool allow_tensor_metadata_change = true) {
   AT_CHECK(
       !data.is_variable(),
-      "Must not create a new variable from a variable, use its .data_deprecated()");
+      "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
     auto data_impl = data.getIntrusivePtr();
     data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -588,7 +588,7 @@ inline Variable make_variable(
     bool allow_tensor_metadata_change = true) {
   AT_CHECK(
       !data.is_variable(),
-      "Must not create a new variable from a variable, use its .data_deprecated()");
+      "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
     data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -604,7 +604,7 @@ inline Variable make_variable_consuming(
       bool allow_tensor_metadata_change = true) {
   AT_CHECK(
       !data.is_variable(),
-      "Must not create a new variable from a variable, use its .data_deprecated()");
+      "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
     auto data_impl = data.getIntrusivePtr();
     data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -637,14 +637,14 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
   return static_cast<const Variable&>(tensor);
 }
 
-inline at::Tensor Variable::data_deprecated() const noexcept {
+inline at::Tensor Variable::tensor_data() const noexcept {
   auto saved_version_ = get()->version_counter().current_version();
   auto self_impl_copy = get()->shallow_copy_and_detach();
   self_impl_copy->set_version_counter(saved_version_);
   return at::Tensor(self_impl_copy);
 }
 
-inline at::Tensor Variable::_data_future() const noexcept {
+inline at::Tensor Variable::variable_data() const noexcept {
   auto self_impl_copy = get()->shallow_copy_and_detach();
   self_impl_copy->set_allow_tensor_metadata_change(false);
   self_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(self_impl_copy.get(), false));

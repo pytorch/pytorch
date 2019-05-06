@@ -150,7 +150,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto data = as_variable_ref(r.tensor(1)).data_deprecated();
+  auto data = as_variable_ref(r.tensor(1)).tensor_data();
   auto var = make_variable_consuming(data, r.toBool(2));  // yf225 TODO: how to avoid shallow-copying twice? Use make_variable_consuming()?
   return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var));
   END_HANDLE_TH_ERRORS
@@ -206,7 +206,7 @@ static PyObject *THPVariable_is_leaf(THPVariable *self)
 static PyObject * THPVariable_get_data(THPVariable *self)
 {
   HANDLE_TH_ERRORS
-  auto var = self->cdata._data_future();
+  auto var = self->cdata.variable_data();
   return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
@@ -504,7 +504,7 @@ void initTensorImplConversion(PyObject* module) {
     auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
     torch::autograd::Variable var;
     if (tensor.is_variable()) {
-      var = torch::autograd::as_variable_ref(tensor)._data_future();
+      var = torch::autograd::as_variable_ref(tensor).variable_data();
     } else {
       var = torch::autograd::make_variable(std::move(tensor), false);
     }
