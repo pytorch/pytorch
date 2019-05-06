@@ -153,24 +153,27 @@ struct TORCH_API Variable : public at::Tensor {
 
   // NOTE: Assignment operators to Tensor come for free from the constructors.
 
-  // yf225 TODO: fix comments here
+  /// NOTE: This is similar to the legacy `.data()` function on `Variable`, and is intended
+  /// to be used from functions that need to access the `Variable`'s equivalent `Tensor`
+  /// (i.e. `Tensor` that shares the same storage and tensor metadata with the `Variable`).
+  ///
+  /// One notable difference with the legacy `.data()` function is that changes to the
+  /// returned `Tensor`'s tensor metadata (e.g. sizes / strides / storage / storage_offset)
+  /// will not update the original `Variable`, due to the fact that this function
+  /// shallow-copies the `Variable`'s underlying TensorImpl.
   at::Tensor tensor_data() const noexcept;
 
-  // yf225 TODO: fix comments here
-  // NOTE: `var.data()` in C++ has the same semantics as `tensor.data` in Python,
-  // which create a new `Variable` that shares the same storage and tensor metadata
-  // with the original `Variable`, but with a completely new autograd history.
-  //
-  // NOTE: `var.data()` performs shallow-copying of `var`'s TensorImpl, which incurs
-  // runtime overhead.
-  /// NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
-  /// storage / storage_offset) of a tensor created from `.data`, those metadata
-  /// in the original tensor will also be updated. However, the new behavior is that
-  /// those metadata changes to the `.data` tensor will not update the original tensor
-  /// anymore, and here we need to set `allow_tensor_metadata_change_` to false to
-  /// make such changes explicitly illegal, in order to prevent users from changing
-  /// metadata of the `.data` tensor and expecting the original tensor to also
-  /// be updated.
+  /// NOTE: `var.variable_data()` in C++ has the same semantics as `tensor.data`
+  /// in Python, which create a new `Variable` that shares the same storage and
+  /// tensor metadata with the original `Variable`, but with a completely new
+  /// autograd history.
+  ///
+  /// NOTE: If we change the tensor metadata (e.g. sizes / strides /
+  /// storage / storage_offset) of a variable created from `var.variable_data()`, those
+  /// changes will not update the original variable `var`. In `.variable_data()`, we set
+  /// `allow_tensor_metadata_change_` to false to make such changes explicitly illegal,
+  /// in order to prevent users from changing metadata of `var.variable_data()`
+  /// and expecting the original variable `var` to also be updated.
   at::Tensor variable_data() const noexcept;
 
   // Gradient Function and Edges
