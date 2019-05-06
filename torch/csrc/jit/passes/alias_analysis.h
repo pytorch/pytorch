@@ -199,6 +199,7 @@ class AliasDb {
   void analyzeSetAttr(Node* node);
   void analyzeTupleConstruct(Node* node);
   void analyzeCustomOp(Node* node);
+  bool tryRegisteredAnalysis(Node* node);
 
   /**
    * Alias manipulation methods
