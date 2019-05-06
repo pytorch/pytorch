@@ -31,6 +31,9 @@
 #include <TH/generic/THTensorMath.h>
 #include <TH/THGenerateBoolType.h>
 
+#include <TH/generic/THTensorMath.h>
+#include <TH/THGenerateHalfType.h>
+
 /* fill and zero*/
 #include <TH/generic/THTensorFill.h>
 #include <TH/THGenerateAllTypes.h>

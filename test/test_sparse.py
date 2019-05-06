@@ -234,33 +234,35 @@ class TestSparse(TestCase):
             [0, 0, 0, 3],
             [0, 0, 1, 4],
         ])
-        v = self.value_tensor([2, 1, 3, 4])
-        x = self.sparse_tensor(i, v, torch.Size([3, 4, 5]))
-        res = self.value_tensor([
-            [[2, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0]],
-            [[1, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0]],
-            [[0, 3, 0, 0, 0],
-             [0, 0, 0, 0, 0],
-             [0, 0, 0, 0, 0],
-             [0, 0, 0, 0, 4]],
-        ])
-        test_tensor(x, res)
+        for dtype in [torch.float16, torch.int, torch.float64]:
+            v = self.value_tensor([2, 1, 3, 4]).to(dtype=dtype)
+            x = self.sparse_tensor(i, v, torch.Size([3, 4, 5]))
+            res = self.value_tensor([
+                [[2, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0]],
+                [[1, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0]],
+                [[0, 3, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 4]],
+            ]).to(dtype=dtype)
 
-        i = self.index_tensor([
-            [0, 1, 2, 2],
-            [0, 0, 0, 3],
-            [0, 0, 1, 4],
-        ])
-        v = self.value_empty(4, 0)
-        x = self.sparse_tensor(i, v, torch.Size([3, 4, 5, 0]))
-        res = self.value_empty(3, 4, 5, 0)
-        test_tensor(x, res)
+            test_tensor(x, res)
+
+            i = self.index_tensor([
+                [0, 1, 2, 2],
+                [0, 0, 0, 3],
+                [0, 0, 1, 4],
+            ])
+            v = self.value_empty(4, 0).to(dtype=dtype)
+            x = self.sparse_tensor(i, v, torch.Size([3, 4, 5, 0]))
+            res = self.value_empty(3, 4, 5, 0).to(dtype=dtype)
+            test_tensor(x, res)
 
     def test_to_sparse(self):
         shape = [10, 5, 19, 8]
@@ -269,12 +271,14 @@ class TestSparse(TestCase):
             max_nnz *= dim_sz
             rnnz = torch.randint(2, max_nnz, (1,)).item()
             for nnz in [0, 1, rnnz]:
-                expected, _, _ = self._gen_sparse(dim, nnz, shape)
-                d = expected.to_dense()
-                result = d.to_sparse(dim)
-                self.assertEqual(d, result.to_dense())  # == not implemented for sparse tensors yet
-                self.assertEqual(expected.size(), result.size())
-                self.assertEqual(dim, result.sparse_dim())
+                for dtype in [torch.float16, torch.float64, torch.int]:
+                    expected, _, _ = self._gen_sparse(dim, nnz, shape)
+                    expected = expected.to(dtype)
+                    d = expected.to_dense()
+                    result = d.to_sparse(dim)
+                    self.assertEqual(d, result.to_dense())  # == not implemented for sparse tensors yet
+                    self.assertEqual(expected.size(), result.size())
+                    self.assertEqual(dim, result.sparse_dim())
 
         sp, _, _ = self._gen_sparse(2, 10, [3, 3, 3])
         self.assertRaises(RuntimeError, lambda: sp.to_sparse())
@@ -637,6 +641,9 @@ class TestSparse(TestCase):
         test_tensor(x)
 
         x = torch.sparse.HalfTensor(2, 3, 4)
+        test_tensor(x)
+
+        x = torch.cuda.sparse.HalfTensor(2, 3, 4)
         test_tensor(x)
 
         x = torch.sparse.FloatTensor(2, 3, 4, 0)

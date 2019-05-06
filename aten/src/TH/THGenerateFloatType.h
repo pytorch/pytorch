@@ -2,6 +2,10 @@
 #error "You must define TH_GENERIC_FILE before including THGenerateFloatType.h"
 #endif
 
+// no BLAS support for half types
+#pragma push_macro("USE_BLAS")
+#undef USE_BLAS
+
 #define scalar_t float
 #define accreal double
 #define TH_CONVERT_REAL_TO_ACCREAL(_val) (accreal)(_val)
@@ -18,6 +22,8 @@
 #undef TH_REAL_IS_FLOAT
 #undef TH_CONVERT_REAL_TO_ACCREAL
 #undef TH_CONVERT_ACCREAL_TO_REAL
+
+#pragma pop_macro("USE_BLAS")
 
 #ifndef THGenerateManyTypes
 #undef TH_GENERIC_FILE

@@ -1656,6 +1656,7 @@
     SparseCUDA: add_out_sparse_cuda
 
 - func: _sparse_dense_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  cpu_half: True
   dispatch:
     CPU: add_out_dense_sparse_cpu
     CUDA: add_out_dense_sparse_cuda
@@ -2386,6 +2387,7 @@
 
 
 - func: coalesce(Tensor self) -> Tensor
+  cpu_half: True
   variants: method
   dispatch:
     SparseCPU: coalesce_sparse_cpu
@@ -2473,12 +2475,14 @@
   variants: function, method
 
 - func: to_sparse(Tensor self, int sparse_dim) -> Tensor
+  cpu_half: True
   variants: method
   dispatch:
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
 
 - func: to_sparse(Tensor self) -> Tensor
+  cpu_half: True
   variants: method
   dispatch:
     CPU: dense_to_sparse

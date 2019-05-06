@@ -364,7 +364,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
       dstBuffer.add_(srcBuffer, value);
     }
   } else {
-    AT_DISPATCH_ALL_TYPES(
+    AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half,
         values.scalar_type(), "add_dense_sparse", [&] {
           add_dense_sparse_worker_cpu<scalar_t>(r, value, sparse, indices, values);
         });
