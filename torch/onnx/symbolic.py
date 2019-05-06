@@ -12,6 +12,7 @@ from functools import partial, wraps
 
 import numpy
 import math
+import inspect
 
 # EDITING THIS FILE? READ THIS FIRST!
 #
@@ -67,7 +68,7 @@ _sum = sum
 def _parse_arg(value, desc):
     if desc == 'none':
         return value
-    if desc == 'v' or not _is_value(value):
+    if desc == 'v' or not _is_value(value) or value.node().kind() == 'prim::Constant':
         return value
     if value.node().kind() == 'onnx::Constant':
         tval = value.node()['value']
@@ -127,8 +128,29 @@ def parse_args(*arg_descriptors):
         def wrapper(g, *args):
             # some args may be optional, so the length may be smaller
             assert len(arg_descriptors) >= len(args)
-            args = [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args, arg_descriptors)]
-            return fn(g, *args)
+            argspec = inspect.getfullargspec(fn)
+            args_names = argspec.args
+            args_defaults = argspec.defaults
+            default_args_dict = dict(zip(args_names[-len(args_defaults):], args_defaults))
+
+            fn_args = []
+            fn_kwargs = {}
+            for i, (arg, arg_desc) in enumerate(zip(args, arg_descriptors)):
+                arg = _parse_arg(arg, arg_desc)
+                arg_name = args_names[i + 1]
+
+                # NOTE: Unprovided optional args become prim::Constant() in scripting.
+                is_arg_required = not arg_name in default_args_dict
+                if not _is_prim_constant(arg):
+                    if is_arg_required:
+                        fn_args.append(arg)
+                    else:
+                        fn_kwargs[arg_name] = arg
+                elif is_arg_required:
+                    raise RuntimeError('Unsupported: ONNX export ' + fn.__name__ + ' missing ' + str(i + 1) + 'th argument ' +
+                                       arg_name)
+
+            return fn(g, *fn_args, **fn_kwargs)
         # In Python 2 functools.wraps chokes on partially applied functions, so we need this as a workaround
         try:
             wrapper = wraps(fn)(wrapper)
@@ -163,6 +185,10 @@ def _if_scalar_type_as(g, self, tensor):
 
 def _is_value(x):
     return isinstance(x, torch._C.Value)
+
+
+def _is_prim_constant(x):
+    return _is_value(x) and x.node().kind() == 'prim::Constant'
 
 
 def _is_tensor_list(x):
@@ -1290,7 +1316,7 @@ scalar_type_to_onnx = [
 
 
 @parse_args('v', 'i', 'v', 'v', 'b')
-def zeros(g, sizes, dtype, layout, device, pin_memory=False):
+def zeros(g, sizes, dtype=scalar_type_to_pytorch_type.index(torch.get_default_dtype()), layout=None, device=None, pin_memory=False):
     if pin_memory:
         raise RuntimeError("onnx pin_memory support is not implemented")
     # NOTE: no way to set device and layout in ONNX, so we ignore it
@@ -1299,7 +1325,8 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
 
 
 @parse_args('v', 'i', 'v', 'v', 'b')
-def zeros_like(g, input, dtype, layout, device, pin_memory=False):
+def zeros_like(g, input, dtype, layout=None, device=None, pin_memory=False):
+    # NOTE: no way to get default dtype (same dtype of input).
     if pin_memory:
         raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
@@ -1308,7 +1335,7 @@ def zeros_like(g, input, dtype, layout, device, pin_memory=False):
 
 
 @parse_args('v', 'i', 'v', 'v', 'b')
-def ones(g, sizes, dtype, layout, device, pin_memory=False):
+def ones(g, sizes, dtype=scalar_type_to_pytorch_type.index(torch.get_default_dtype()), layout=None, device=None, pin_memory=False):
     if pin_memory:
         raise RuntimeError("onnx pin_memory support is not implemented")
     return g.op("ConstantOfShape", sizes,
@@ -1316,7 +1343,7 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
 
 
 @parse_args('v', 'i', 'v', 'v', 'b')
-def ones_like(g, input, dtype, layout, device, pin_memory=False):
+def ones_like(g, input, dtype, layout=None, device=None, pin_memory=False):
     if pin_memory:
         raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
@@ -1324,7 +1351,7 @@ def ones_like(g, input, dtype, layout, device, pin_memory=False):
                 value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-def full(g, sizes, value, dtype, layout, device, pin_memory=False):
+def full(g, sizes, value, dtype=scalar_type_to_pytorch_type.index(torch.get_default_dtype()), layout=None, device=None, pin_memory=False):
     if pin_memory and _parse_arg(pin_memory, 'b'):
         raise RuntimeError("onnx pin_memory support is not implemented")
     const_value = _maybe_get_const(value, 't')
