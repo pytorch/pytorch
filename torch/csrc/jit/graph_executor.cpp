@@ -27,12 +27,10 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/logging.h>
 
 #include <cstdint>
@@ -99,7 +97,8 @@ struct ExecutionPlan {
 struct CaptureList {
   CaptureList(size_t capture_size) {
     capture_types_.reserve(capture_size);
-    var_captures_.reserve(capture_size); // var_captures_.size() might be greater than capture_size
+    var_captures_.reserve(capture_size); // var_captures_.size() might be
+                                         // greater than capture_size
     ivalue_captures_.reserve(capture_size);
   }
 
@@ -120,7 +119,7 @@ struct CaptureList {
       const std::vector<at::Tensor>& tensors = val.toTensorListRef();
       sizes_.push_back(tensors.size());
 
-      for (const at::Tensor& tensor: tensors) {
+      for (const at::Tensor& tensor : tensors) {
         captureTensor(tensor, is_output);
       }
     } else {
@@ -133,12 +132,14 @@ struct CaptureList {
     return capture_types_.size();
   }
 
-  void unpack(Stack & stack, const std::shared_ptr<autograd::Function>& saved_for) {
+  void unpack(
+      Stack& stack,
+      const std::shared_ptr<autograd::Function>& saved_for) {
     auto var_capture_it = var_captures_.begin();
     auto ivalue_capture_it = ivalue_captures_.begin();
     auto size_it = sizes_.begin();
     for (Capture capture_type : capture_types_) {
-      switch(capture_type) {
+      switch (capture_type) {
         case CAPTURE_TENSOR: {
           stack.emplace_back(var_capture_it->unpack(saved_for));
           ++var_capture_it;
@@ -158,8 +159,9 @@ struct CaptureList {
       }
     }
   }
-private:
-  enum Capture: uint8_t {
+
+ private:
+  enum Capture : uint8_t {
     CAPTURE_TENSOR,
     CAPTURE_LIST,
     CAPTURE_IVALUE,
@@ -187,8 +189,8 @@ struct UnpackInstructions {
   void unpack(variable_list&& inputs, Stack& stack) {
     auto input_it = std::make_move_iterator(inputs.begin());
     auto sizes_it = sizes_.begin();
-    for(Inst inst : insts_) {
-      switch(inst) {
+    for (Inst inst : insts_) {
+      switch (inst) {
         case PUSH_TENSOR: {
           at::Tensor t = *input_it++;
           stack.emplace_back(std::move(t));
@@ -200,7 +202,8 @@ struct UnpackInstructions {
       }
     }
   }
-private:
+
+ private:
   enum Inst : uint8_t {
     PUSH_TENSOR,
     PUSH_LIST, // consumes one size
@@ -210,10 +213,13 @@ private:
 };
 
 struct DifferentiableGraphBackward : public autograd::Function {
-  DifferentiableGraphBackward(GraphExecutor executor, size_t input_size, size_t capture_size)
-      : executor(std::move(executor))
-      , captures_(capture_size)
-      , input_instructions_(input_size) {}
+  DifferentiableGraphBackward(
+      GraphExecutor executor,
+      size_t input_size,
+      size_t capture_size)
+      : executor(std::move(executor)),
+        captures_(capture_size),
+        input_instructions_(input_size) {}
 
   variable_list apply(variable_list&& inputs) override {
     Stack stack;
@@ -239,7 +245,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     size_t output_index = 0;
     for (IValue& v : stack) {
       if (v.isTensorList()) {
-        for(at::Tensor tensor : v.toTensorListRef()) {
+        for (at::Tensor tensor : v.toTensorListRef()) {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
       } else if (v.isTensor()) {
@@ -257,15 +263,13 @@ struct DifferentiableGraphBackward : public autograd::Function {
     captures_.capture(val, is_output);
   }
 
-
   void addOutputForTensor(const at::Tensor& tensor) {
     auto v = Variable(tensor);
-    add_next_edge(
-        v.defined() ? v.gradient_edge() : autograd::Edge{});
+    add_next_edge(v.defined() ? v.gradient_edge() : autograd::Edge{});
   }
   void addOutputForIValue(const IValue& value) {
-    if (value.isTensorList()){
-      for(const at::Tensor& tensor : value.toTensorListRef()) {
+    if (value.isTensorList()) {
+      for (const at::Tensor& tensor : value.toTensorListRef()) {
         addOutputForTensor(tensor);
       }
     } else {
@@ -298,8 +302,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     }
   }
 
-private:
-
+ private:
   void produceOutput(size_t i, at::Tensor output, variable_list& outputs) {
     if (should_compute_output(i)) {
       const auto& edge = next_edge(i);
@@ -387,13 +390,13 @@ struct DifferentiableGraphOp {
   }
 
   void detach(IValue& v) const {
-    if(v.isTensor()) {
+    if (v.isTensor()) {
       auto t = std::move(v).toTensor();
       detach(t);
       v = IValue{t};
-    } else if(v.isTensorList()) {
+    } else if (v.isTensorList()) {
       std::vector<at::Tensor> lst = v.toTensorListRef();
-      for(at::Tensor& t : lst) {
+      for (at::Tensor& t : lst) {
         detach(t);
       }
       v = TensorList::create(std::move(lst));
