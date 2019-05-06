@@ -16,6 +16,7 @@ import torch.cuda
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.models as models
 from common_utils import TestCase, run_tests
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -1527,6 +1528,18 @@ class _DistTestBase(object):
         # test device_ids
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+    def test_SyncBatchNorm_process_group(self):
+        # When adopting `convert_sync_batchnorm` to convert a `nn.modules`,
+        # it need to recursively pass the `process_group` in the module when the `SyncBatchNorm`
+        # is nested in a sub-module or sub-sub-module (e.g. resnet50 in torchvision.models).
+
+        process_ids = 0
+        process_group = torch.distributed.new_group([process_ids])
+        res50_model = models.resnet50()
+        res50_model_sync = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(res50_model), process_group)
+        process_group_sync = res50_model_sync.layer1[0].bn1.process_group
+        self.assertEqual(process_group_sync, process_group)
 
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
