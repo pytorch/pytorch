@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/import_export_helpers.h>
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 
