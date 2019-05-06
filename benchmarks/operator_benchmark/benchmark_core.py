@@ -142,7 +142,7 @@ class BenchmarkRunner(object):
                 continue
             if self.args.framework:
                 frameworks = benchmark_utils.get_requested_frameworks(self.args.framework)
-                if all([fr not in full_test_id for fr in frameworks]):
+                if all(fr not in full_test_id for fr in frameworks):
                     continue
 
             # To reduce variance, fix a numpy randseed to the test case,

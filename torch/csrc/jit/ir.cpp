@@ -1243,11 +1243,12 @@ Node* Graph::createTupleUnpack(Value* v) {
   return n;
 }
 
-Node* Graph::createTupleIndex(Value* tup, int64_t index) {
-  auto n = create(prim::TupleIndex, {tup});
-  n->i_(attr::index, index);
-  auto tuple_type = tup->type()->expect<TupleType>();
-  n->output()->setType(tuple_type->elements().at(index));
+Node* Graph::createTupleIndex(
+    Value* tup,
+    Value* idx,
+    const TypePtr& output_type) {
+  auto n = create(prim::TupleIndex, {tup, idx});
+  n->output()->setType(output_type);
   return n;
 }
 
@@ -1478,6 +1479,5 @@ Node* ProfileOp::allocNewInstance(Graph* g) {
 }
 
 constexpr Symbol ProfileOp::Kind;
-
 } // namespace jit
 } // namespace torch
