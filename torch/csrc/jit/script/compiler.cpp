@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/script/compiler.h>
-
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -191,7 +190,7 @@ static bool meaningfulName(const std::string& name) {
 struct Environment {
   Environment(
       Function& method,
-      Resolver resolver,
+      ResolverPtr resolver,
       Block* b,
       std::shared_ptr<Environment> next = nullptr)
       : method(method),
@@ -200,7 +199,7 @@ struct Environment {
         next(std::move(next)) {}
 
   Function& method;
-  Resolver resolver;
+  ResolverPtr resolver;
   std::vector<std::string> captured_inputs;
   std::unordered_map<std::string, std::string> error_messages;
   Block* b;
@@ -414,13 +413,14 @@ struct Environment {
     }
 
     if (!retval) {
-      if (auto class_type = ClassType::get(ident)) {
+      if (auto type = resolver->resolveType(ident)) {
+        const auto class_type = type->expect<ClassType>();
         retval = std::make_shared<script::ClassValue>(class_type);
       }
     }
 
     if (!retval) {
-      retval = resolver(ident, method, range);
+      retval = resolver->resolveValue(ident, method, range);
     }
 
     if (!retval && required) {
@@ -517,12 +517,13 @@ struct DefContext {
 struct to_ir {
   to_ir(
       const Def& def,
-      Resolver resolver_,
+      ResolverPtr resolver_,
       const Self& self,
       Function& method) // method being constructed
       : method(method),
         graph(method.graph()),
         resolver(std::move(resolver_)),
+        typeParser_(resolver),
         environment_stack(nullptr) {
     AT_ASSERT(resolver);
     pushFrame(graph->block(), /*starts_def=*/true);
@@ -536,14 +537,13 @@ struct to_ir {
     }
 
     method.setSchema(emitDef(def, self, graph->block()));
-
     runCleanupPasses(graph);
   }
 
  private:
   Function& method;
   std::shared_ptr<Graph> graph;
-  Resolver resolver;
+  ResolverPtr resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
   ScriptTypeParser typeParser_;
@@ -575,10 +575,7 @@ struct to_ir {
     ConstantPooling(to_clean);
   }
 
-  FunctionSchema emitDef(
-      const Def& def,
-      const Self& self,
-      Block* block) {
+  FunctionSchema emitDef(const Def& def, const Self& self, Block* block) {
     auto schema = extractSchemaFromDef(def, self);
     // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
@@ -631,9 +628,7 @@ struct to_ir {
     return stack.at(0).toTuple()->elements();
   }
 
-  std::vector<Argument> parseArgsFromDecl(
-      const Decl& decl,
-      const Self& self) {
+  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
     if (self) {
@@ -705,9 +700,7 @@ struct to_ir {
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false)};
   }
-  FunctionSchema extractSchemaFromDef(
-      const Def& def,
-      const Self& self) {
+  FunctionSchema extractSchemaFromDef(const Def& def, const Self& self) {
     const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
@@ -720,7 +713,6 @@ struct to_ir {
       const Self& self,
       const FunctionSchema& schema,
       Block* block) {
-
     std::vector<Argument> arguments; // for schema
     // inputs
     auto it = def.decl().params().begin();
@@ -741,7 +733,8 @@ struct to_ir {
       AT_ASSERT(it != end);
       const auto& name = (*it).ident().name();
       Value* new_input = block->addInput()->setUniqueName(name);
-      environment_stack->setSugaredVar((*it).ident().range(), name, self(new_input));
+      environment_stack->setSugaredVar(
+          (*it).ident().range(), name, self(new_input));
       arguments.emplace_back(name, new_input->type());
       ++it;
     }
@@ -1309,44 +1302,26 @@ struct to_ir {
 
   void emitLoopCommon(
       SourceRange range,
-      c10::optional<Expr> max_trip_count,
-      c10::optional<Expr> cond,
       const List<Stmt>& body,
-      c10::optional<Ident> itr_ident,
-      bool in_list = false) {
+      const std::function<void(Value*, std::shared_ptr<Environment>)>&
+          current_element_assigner,
+      c10::optional<Expr> cond,
+      Value* max_trip_count_val = nullptr) {
+    Value* cond_val = nullptr;
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
-    Value *max_trip_count_val, *cond_val;
-    {
-      WithInsertPoint guard(n);
-      if (max_trip_count) {
-        if (in_list) {
-          auto listArg = emitExpr(max_trip_count.value());
+    WithInsertPoint guard(n);
 
-          max_trip_count_val = emitBuiltinCall(
-              max_trip_count->range(),
-              *graph,
-              aten::len,
-              c10::nullopt,
-              {listArg},
-              {},
-              /*required=*/true);
-        } else {
-          max_trip_count_val = ensureInt(
-              max_trip_count->range(), emitExpr(max_trip_count.value()));
-        }
-      } else {
-        max_trip_count_val = materializeConstant(
-            std::numeric_limits<int64_t>::max(),
-            *graph,
-            range,
-            integral_constants);
-      }
-      if (cond) {
-        cond_val = emitCond(cond.value());
-      } else {
-        cond_val = graph->insertConstant(true, nullptr, range);
-      }
+    if (!max_trip_count_val)
+    {
+      max_trip_count_val = materializeConstant(
+          std::numeric_limits<int64_t>::max(),
+          *graph,
+          range,
+          integral_constants);
     }
+
+    cond_val = (cond) ? emitCond(cond.value())
+                      : graph->insertConstant(true, nullptr, range);
     n->addInput(max_trip_count_val);
     n->addInput(cond_val);
     auto* body_block = n->addBlock();
@@ -1356,33 +1331,20 @@ struct to_ir {
     {
       pushFrame(body_block);
       WithInsertPoint guard(body_block);
-      if (itr_ident) {
-        if (in_list) {
-          // set user's iterator variable to the current element
-          auto listArg = emitExpr(max_trip_count.value());
-          trip_count = emitBuiltinCall(
-              max_trip_count->range(),
-              *graph,
-              aten::select,
-              c10::nullopt,
-              {listArg, trip_count},
-              {},
-              /*required=*/true);
-        }
-        environment_stack->setVar(
-            itr_ident->range(), itr_ident->name(), trip_count);
+
+      // current_element_assigner uses an induction variable
+      // to set a current element
+      if (current_element_assigner)
+      {
+        current_element_assigner(trip_count, environment_stack);
       }
+
       emitStatements(body);
 
       // Also emit the conditional
-      if (cond) {
-        Value* body_cond_value = emitCond(cond.value());
-        body_block->registerOutput(body_cond_value);
-      } else {
-        Value* cond_value_dummy = graph->insertConstant(true, nullptr, range);
-        body_block->registerOutput(cond_value_dummy);
-      }
-
+      cond_val = (cond) ? emitCond(cond.value())
+                        : graph->insertConstant(true, nullptr, range);
+      body_block->registerOutput(cond_val);
       auto body_frame = popFrame();
       auto outer_frame = environment_stack;
 
@@ -1419,15 +1381,120 @@ struct to_ir {
       throw ErrorReport(range)
           << "range() expects 1 argument but got " << args.size();
     }
-    emitLoopCommon(range, {args[0]}, {}, body, target);
+    auto max_trip_count_val = ensureInt(range, emitExpr(args[0]));
+    const auto& ident_name = target.name();
+    auto assigner = [ident_name, range](Value* index, std::shared_ptr<Environment> env) {
+      env->setVar(range, ident_name, index);
+    };
+    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
+  }
+
+  void emitForInListLoop(
+      const For& stmt,
+      const std::shared_ptr<torch::jit::script::SimpleValue>& siv) {
+    auto targets = stmt.targets();
+    auto itrs = stmt.itrs();
+    auto body = stmt.body();
+    auto& range = stmt.range();
+    auto target = Var(targets[0]).name();
+
+    auto listArg = siv->asValue(range, method);
+    auto max_trip_count_val = emitBuiltinCall(
+        range,
+        *graph,
+        aten::len,
+        c10::nullopt,
+        {listArg},
+        {},
+        /*required=*/true);
+    const auto& ident_name = target.name();
+    auto assigner = [ident_name, range, listArg, this](
+                        Value* index, std::shared_ptr<Environment> env) {
+      auto cur_elm = emitBuiltinCall(
+          range,
+          *this->graph,
+          aten::select,
+          c10::nullopt,
+          {listArg, index},
+          {},
+          /*required=*/true);
+      env->setVar(range, ident_name, cur_elm);
+    };
+    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
+  }
+
+  void emitForInTensorLoop(const For& stmt, Value* tensorArg) {
+    auto targets = stmt.targets();
+    auto target = Var(targets[0]).name();
+    auto itrs = stmt.itrs();
+    auto body = stmt.body();
+    auto& range = stmt.range();
+
+    auto outermost_dim_index = graph->insertConstant(0, IntType::get(), range);
+    auto num_dim = graph->insert(aten::dim, {tensorArg});
+    Value* cond_value = emitBuiltinCall(
+        range,
+        *method.graph(),
+        aten::eq,
+        c10::nullopt,
+        {num_dim, outermost_dim_index},
+        {},
+        /*required=*/true);
+
+    Node* n = graph->insertNode(create(prim::If, range, 0));
+    n->addInput(cond_value);
+    auto true_block = n->addBlock();
+    n->addBlock();
+    {
+      WithInsertPoint guard(true_block);
+      graph->insert(
+          prim::RaiseException,
+          {std::string("iteration over a 0-d tensor")},
+          {},
+          range);
+    }
+
+    auto sizes_tuple = emitBuiltinCall(
+        range,
+        *graph,
+        aten::size,
+        c10::nullopt,
+        {tensorArg},
+        {},
+        /*required=*/true);
+
+    auto max_trip_count_val = emitBuiltinCall(
+        range,
+        *graph,
+        aten::select,
+        c10::nullopt,
+        {sizes_tuple, outermost_dim_index},
+        {},
+        /*required=*/true);
+
+    const auto& ident_name = target.name();
+    auto assigner = [outermost_dim_index, ident_name, range, tensorArg, this](
+                        Value* index, std::shared_ptr<Environment> env) {
+      auto cur_elm = emitBuiltinCall(
+          range,
+          *this->graph,
+          aten::select,
+          c10::nullopt,
+          {tensorArg, outermost_dim_index, index},
+          {},
+          /*required=*/true);
+      env->setVar(range, ident_name, cur_elm);
+    };
+
+    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
   void emitFor(const For& stmt) {
     // For now, we only support range loops. e.g. for i in range(3): ...
+
     auto targets = stmt.targets();
     auto itrs = stmt.itrs();
     auto body = stmt.body();
-
     if (stmt.itrs().size() != 1) {
       throw ErrorReport(stmt)
           << "List of iterables is not supported currently.";
@@ -1459,13 +1526,22 @@ struct to_ir {
     // it isn't a range(<expr>) loop, treat it as a sugared value that maybe can
     // be unrolled
     auto sv = emitSugaredExpr(itrs[0], 1);
-    // check if a value is simple and list-like
-    if (auto siv = std::dynamic_pointer_cast<SimpleValue>(sv)) {
-      if (siv->getValue()->type()->kind() == TypeKind::ListType) {
-        return emitLoopCommon(
-            stmt.range(), {itrs[0]}, {}, body, {target}, true);
-      }
+
+    auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
+
+    // for-in lists
+    if (siv && siv->getValue()->type()->kind() == TypeKind::ListType) {
+      emitForInListLoop(stmt, siv);
+      return;
     }
+
+    // for-in tensors
+    if (siv && siv->getValue()->type()->isSubclass(TypeKind::TensorType)) {
+      auto value = siv->asValue(stmt.range(), method);
+      emitForInTensorLoop(stmt, value);
+      return;
+    }
+
     auto instances = sv->asTuple(stmt.range(), method);
     const std::string& target_name = target.name();
     pushFrame(environment_stack->block());
@@ -1485,7 +1561,7 @@ struct to_ir {
 
   void emitWhile(const While& stmt) {
     auto cond = stmt.cond();
-    emitLoopCommon(stmt.range(), {}, {cond}, stmt.body(), {});
+    emitLoopCommon(stmt.range(), stmt.body(), nullptr, cond, nullptr);
   }
 
   // Currently we do not support assigning exceptions to variables,
@@ -2111,8 +2187,21 @@ struct to_ir {
       if (apply.inputs().size() != 1) {
         throw ErrorReport(loc) << "Only one argument to __new__ allowed";
       }
-      return classNew->createObject(
-          apply.range(), method, Var(apply.inputs()[0]).name().name());
+      auto arg = emitSugaredExpr(apply.inputs()[0], 1);
+      auto class_arg = dynamic_cast<ClassValue*>(arg.get());
+      if (!class_arg) {
+        throw ErrorReport(loc)
+            << "Expected class value as argument to __new__, got "
+            << arg->kind() << " instead";
+      }
+      if (class_arg->type_ != classNew->type_) {
+        throw ErrorReport(loc) << "Argument to __new__() must match the class "
+                               << "you are calling __new__() on. "
+                               << "Got: " << class_arg->type_->str()
+                               << ", expected: " << classNew->type_->str();
+      }
+
+      return classNew->createObject(apply.range(), method);
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
@@ -2262,7 +2351,7 @@ struct to_ir {
     }
     // Lambda lift block(0) into attr::Subgraph
     lambdaLiftFork(fork_node);
-
+    runCleanupPasses(fork_node->g(attr::Subgraph));
     return std::make_shared<SimpleValue>(node_output);
   }
 
@@ -2274,7 +2363,6 @@ struct to_ir {
       case TK_POW:
       case TK_IS:
       case TK_ISNOT:
-      case TK_NOT:
       case TK_NE:
       case TK_EQ:
       case '<':
@@ -2302,6 +2390,18 @@ struct to_ir {
             {},
             /*required=*/true);
       }
+      case TK_NOT: {
+        Value* input = emitCond(Expr(tree->trees()[0]));
+        return emitBuiltinCall(
+            tree->range(),
+            *method.graph(),
+            aten::__not__,
+            c10::nullopt,
+            {input},
+            {},
+            /*required=*/true);
+      }
+
       case TK_UNARY_MINUS: {
         return emitNegate(tree);
       }
@@ -2433,16 +2533,10 @@ struct to_ir {
   Value* emitSelect(
       const SourceRange& loc,
       Value* input,
-      int64_t dim,
+      Value* dim,
       Value* index) {
     return emitBuiltinCall(
-        loc,
-        *graph,
-        aten::select,
-        c10::nullopt,
-        {input, graph->insertConstant(dim, nullptr, loc), index},
-        {},
-        true);
+        loc, *graph, aten::select, c10::nullopt, {input, dim, index}, {}, true);
   }
 
   // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,
@@ -2450,7 +2544,7 @@ struct to_ir {
   Value* emitSlice(
       const SourceRange& loc,
       Value* input,
-      c10::optional<int64_t> dim, // Only used for tensor slicing
+      Value* dim, // Only used for tensor slicing
       const SliceExpr& slice) {
     std::vector<NamedValue> args;
     args.reserve(4);
@@ -2460,8 +2554,8 @@ struct to_ir {
     // aten::slice, we should separate it from this function.
     if (dim) {
       AT_ASSERT(input->type()->isSubtypeOf(TensorType::get()));
-      args.emplace_back(
-          loc, "dim", graph->insertConstant(dim.value(), nullptr, loc));
+
+      args.emplace_back(dim);
     } else {
       AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
     }
@@ -2530,15 +2624,43 @@ struct to_ir {
       dim++;
     };
 
+    // before ellipsis, dimension index should be `dim`
+    // after ellipsis, dimension index should be `-offset`
+    int offset = 0;
+    size_t ellipsis_dim = 0;
+    auto insert_value_for_dim = [&](int64_t dim) {
+      return (offset == 0)
+          ? graph->insertConstant(dim, nullptr, loc)
+          :
+          // NB: offset is incremented to move to the next dimension index
+          graph->insertConstant(offset++, nullptr, loc);
+    };
+
     for (const auto& subscript_expr : subscript_exprs) {
+      // NB: ellipsis_dim is **always** incremented
+      // (comparing to dim) in order to compute
+      // the correct offsets for the remaining
+      // dimension indices following an ellipsis "..."
+      // token
+      ellipsis_dim++;
+      if (subscript_expr.kind() == TK_DOTS) {
+        offset = -(subscript_exprs.size() - ellipsis_dim);
+        ++dim;
+        continue;
+      }
       if (subscript_expr.kind() == TK_SLICE_EXPR) {
-        sliceable = emitSlice(loc, sliceable, dim, SliceExpr(subscript_expr));
+        auto dim_val = insert_value_for_dim(dim);
+        sliceable =
+            emitSlice(loc, sliceable, dim_val, SliceExpr(subscript_expr));
         ++dim;
         continue;
       }
       auto index = emitExpr(subscript_expr, OptionalType::ofTensor());
       if (index->type() == IntType::get()) {
-        sliceable = emitSelect(loc, sliceable, dim, index);
+        // NB: note, select squeezes out a dimension,
+        // so dim is **not** incremented
+        auto dim_val = insert_value_for_dim(dim);
+        sliceable = emitSelect(loc, sliceable, dim_val, index);
         continue;
       } else if (index->type()->isSubtypeOf(NoneType::get())) {
         sliceable = emitUnsqueeze(loc, sliceable, dim);
@@ -2614,10 +2736,10 @@ struct to_ir {
     AT_ASSERT(subscript_exprs.size() == 1);
     AT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript_exprs[0]);
-    c10::optional<int64_t> maybe_dim;
+    Value* maybe_dim = nullptr;
     if (sliceable->type()->isSubtypeOf(TensorType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
-      maybe_dim = 0;
+      maybe_dim = graph->insertConstant(0, nullptr, loc);
     }
     return emitSlice(loc, sliceable, maybe_dim, slice_exp);
   }
@@ -2751,40 +2873,58 @@ struct to_ir {
   }
 };
 
+struct FunctionResolver : public Resolver {
+  explicit FunctionResolver(
+      const Resolver* otherResolver,
+      const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable)
+      : otherResolver_(otherResolver), functionTable_(functionTable) {}
+
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) const override {
+    auto it = functionTable_.find(name);
+    if (it != functionTable_.end()) {
+      return std::make_shared<FunctionValue>(it->second);
+    }
+    return otherResolver_->resolveValue(name, m, loc);
+  }
+
+  TypePtr resolveType(const std::string& name) const override {
+    return otherResolver_->resolveType(name);
+  }
+
+ private:
+  const Resolver* otherResolver_;
+  const std::unordered_map<std::string, std::shared_ptr<Function>>& functionTable_;
+};
+
 void CompilationUnit::define(
     const std::vector<Def>& definitions,
-    const std::vector<Resolver>& resolvers,
+    const std::vector<ResolverPtr>& resolvers,
     const Self& self) {
   AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Function*> methods;
-  std::unordered_map<std::string, Function*> function_table;
+  std::unordered_map<std::string, std::shared_ptr<Function>> function_table;
   for (const Def& def : definitions) {
     const std::string& name = def.name().name();
-    auto resolver = *resolver_it++;
+    ResolverPtr resolver = *resolver_it++;
     AT_ASSERT(resolver);
     if (!self) {
       // if self is defined, then these are methods and do not go into the
       // global namespace otherwise, they get defined together so we add them to
       // the function table so the methods can see each other
-      resolver = [resolver, &function_table](
-                     const std::string& name,
-                     Function& m,
-                     const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
-        auto it = function_table.find(name);
-        if (it != function_table.end()) {
-          return std::make_shared<MethodValue>(c10::nullopt, *it->second);
-        }
-        return resolver(name, m, loc);
-      };
+      resolver =
+          std::make_shared<FunctionResolver>(resolver.get(), function_table);
     }
     auto creator = [def, resolver, self](Function& method) {
       AT_ASSERT(resolver);
       to_ir(def, resolver, self, method);
     };
-    std::unique_ptr<Function> fn(
+    std::shared_ptr<Function> fn(
         new Function(name, is_optimized(), std::make_shared<Graph>(), creator));
-    function_table[name] = fn.get();
+    function_table[name] = fn;
     methods.push_back(fn.get());
     register_function(std::move(fn));
   }
@@ -2795,11 +2935,11 @@ void CompilationUnit::define(
 
 void CompilationUnit::define(
     const std::string& source,
-    const Resolver& resolver,
+    const ResolverPtr& resolver,
     const Self& self) {
   Parser p(source);
   std::vector<Def> definitions;
-  std::vector<Resolver> resolvers;
+  std::vector<ResolverPtr> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
     definitions.push_back(def);
@@ -2819,11 +2959,13 @@ void lambdaLiftFork(Node* fork_node) {
   auto env = [&](Value* v) -> Value* {
     if (!uncaptures_map.count(v)) {
       // Capture values for both graphs
-      uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
+      uncaptures_map[v] =
+          forked_graph->addInput()->copyMetadata(v);
       fork_node->addInput(v);
     }
     return uncaptures_map[v];
   };
+
   forked_graph->block()->cloneFrom(body_block, env);
 
   // Separate the subgraph and clean up the orignal one

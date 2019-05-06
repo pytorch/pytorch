@@ -1,6 +1,5 @@
 #pragma once
 #include <c10/util/Exception.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/graph_executor.h>
@@ -16,6 +15,7 @@
 #include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
+#include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 
@@ -37,6 +37,7 @@ namespace script {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
+using ::c10::QualifiedName;
 // Map which stores filename to content.
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
@@ -56,12 +57,7 @@ using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(Module* owner, Function* function, std::vector<Slot> initial_members)
-      : owner_(owner),
-        function_(function),
-        initial_ivalues_(std::move(initial_members)) {
-    AT_ASSERT(function->num_inputs() >= initial_ivalues_.size());
-  }
+  Method(Module* owner, Function* function);
 
   // the module that contains this method.
   Module& owner() const {
@@ -78,8 +74,10 @@ struct TORCH_API Method {
     run(stack);
   }
 
-  IValue operator()(std::vector<IValue> stack) {
-    getSchema().checkAndNormalizeInputs(stack);
+  IValue operator()(
+      std::vector<IValue> stack,
+      const Kwargs& kwargs = Kwargs()) {
+    getSchema().checkAndNormalizeInputs(stack, kwargs);
     for (auto input : initial_ivalues_) {
       push(stack, input.value());
     }
@@ -90,14 +88,6 @@ struct TORCH_API Method {
 
   const std::vector<Slot>& initial_ivalues() const {
     return initial_ivalues_;
-  }
-
-  // proxies for underlying unbound Function
-  std::shared_ptr<Graph> graph_for(Stack inputs) {
-    for (auto tp : initial_ivalues_) {
-      inputs.emplace_back(tp.value());
-    }
-    return function_->get_executor().graphFor(inputs);
   }
 
   std::shared_ptr<Graph> graph() const {
@@ -112,13 +102,8 @@ struct TORCH_API Method {
     return function_->num_inputs() - initial_ivalues_.size();
   }
 
-  FunctionSchema getSchema() const {
-    // we are required to slice out the slot inputs from the schema
-    // we can't cache this because setSchema on the underlying function
-    // will change the underlying schema
-    auto sliced = ArrayRef<Argument>(function_->getSchema().arguments())
-                      .slice(0, num_inputs());
-    return function_->getSchema().cloneWithArguments(sliced.vec());
+  const FunctionSchema& getSchema() const {
+    return schema_;
   }
 
   GraphExecutor& get_executor() {
@@ -135,11 +120,14 @@ struct TORCH_API Method {
   Module* owner_;
 
   // Underlying unbound function
-  Function* function_;
+  // This is the _lowered_ function and is different than the
+  // first-class function in class_compilation_unit()
+  std::shared_ptr<Function> function_;
 
   // parameters and attributes loaded from the Module and appending
   // before calling function_
   std::vector<Slot> initial_ivalues_;
+  FunctionSchema schema_;
 };
 
 struct Module;
@@ -157,7 +145,7 @@ struct TORCH_API Module {
     // Function has a self argument which owns the ClassType, created a
     // referernce cycle. By dropping all the methods of the module's class
     // here we break the cycle.
-    class_cu().drop_all_functions();
+    class_compilation_unit().drop_all_functions();
   }
   const std::string& name() const {
     return name_;
@@ -166,12 +154,11 @@ struct TORCH_API Module {
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
   void set_optimized(bool o) {
-    lowered_methods().set_optimized(o);
-    class_cu().set_optimized(o);
+    class_compilation_unit().set_optimized(o);
   }
 
   bool is_optimized() const {
-    return class_cu().is_optimized();
+    return class_compilation_unit().is_optimized();
   }
 
   IValue forward(std::vector<IValue> inputs) {
@@ -290,8 +277,8 @@ struct TORCH_API Module {
   }
   const std::vector<std::unique_ptr<Method>>& get_methods() const {
     // force methods_ to be up to date by querying all
-    // methods. This will go away when lowered_methods_ is deleted
-    for (const auto& m : class_cu().get_functions()) {
+    // methods.
+    for (const auto& m : class_compilation_unit().get_functions()) {
       get_method(m->name());
     }
     return methods_;
@@ -322,13 +309,21 @@ struct TORCH_API Module {
       return methods_[*offset].get();
     }
 
-    if (Function* fn = class_cu().find_function(name).get()) {
-      // temporary lock because technically this is marked const,
+    if (Function* fn = class_compilation_unit().find_function(name).get()) {
+      // lock because technically this is marked const,
       // but we have to update the internal Method cache.
-      // This can be removed when class_cu() is the source of truth for
-      // methods.
-      std::lock_guard<std::recursive_mutex> guard(find_method_guard_);
-      return &const_cast<Module*>(this)->lower_first_class_method(fn);
+      // This can be removed when class_compilation_unit() is the source of
+      // truth for methods.
+      std::lock_guard<std::recursive_mutex> guard(create_method_guard_);
+      Module* mutable_this = const_cast<Module*>(this);
+      std::unique_ptr<Method> m(new Method(mutable_this, fn));
+      return mutable_this
+          ->insert(
+              fn->name(),
+              mutable_this->methods_,
+              EntityType::METHOD,
+              std::move(m))
+          .get();
     }
 
     return nullptr;
@@ -340,12 +335,7 @@ struct TORCH_API Module {
     fn(*this);
   }
   /// Enables "training" mode.
-  void train(bool on = true) {
-    for (auto& submod : get_modules()) {
-      submod->train(on);
-    }
-    register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
-  }
+  void train(bool on = true);
   /// Calls train(false) to enable "eval" mode.
   /// Do not override this method, override `train()` instead.
   void eval() {
@@ -411,51 +401,31 @@ struct TORCH_API Module {
       const ExtraFilesMap& extra_files = ExtraFilesMap());
 
   void copy_into(
-      ModuleLookup module_lookup,
-      // parameter_remap is needed when a parent module uses a parameter of a
-      // submodule
-      std::unordered_map<Slot, Slot>& parameter_remap,
-      std::vector<std::string> names = {}) const {
-    auto curr = module_lookup(names);
-    for (auto& param : get_parameters()) {
-      curr->register_parameter(
-          param.name(),
-          param.value().toTensor(),
-          /*is_buffer=*/false);
-      parameter_remap[param] = curr->parameter_slot(param.name());
-    }
-    for (auto& attr : get_attributes()) {
-      if (attr.type()->isSubtypeOf(TensorType::get())) {
-        curr->register_buffer(attr.name(), attr.value().toTensor());
-        parameter_remap[attr] = *curr->find_buffer(attr.name());
-      } else {
-        curr->register_attribute(attr.name(), attr.type(), attr.value());
-        parameter_remap[attr] = *curr->find_attribute(attr.name());
-      }
-    }
-    for (auto& mod : get_modules()) {
-      names.push_back(mod->name());
-      // Submodules must be translated first, otherwise parameter_remap entries
-      // will not be filled in for methods of this module.
-      mod->copy_into(module_lookup, parameter_remap, names);
-      names.pop_back();
-    }
+      const ModuleLookup& module_lookup,
+      // translate current module singleton type to new module
+      // singleton type.
+      std::unordered_map<TypePtr, TypePtr>& type_remap,
+      std::vector<std::string> names = {}) const;
 
-    for (auto& fn : class_cu().get_functions()) {
-      curr->class_cu().clone_function(*fn);
-    }
-  }
+  void clone_method(
+      const Module& orig,
+      const std::string& name,
+      const std::unordered_map<TypePtr, TypePtr>& type_remap);
+
+  void clone_method(const Module& orig, const std::string& name);
 
   enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
 
   at::optional<EntityType> kind_of(const std::string& name) const {
-    // force lazy creation of Method if needed
-    // remove once lowered_methods_ is removed.
-    find_method(name);
-
     auto it = dict_.find(name);
-    if (it == dict_.end())
+    if (it == dict_.end()) {
+      // methods are lazily created, see if this is, in face,
+      // a method that has not been created yet.
+      if (auto fn = class_compilation_unit().find_function(name)) {
+        return EntityType::METHOD;
+      }
       return at::nullopt;
+    }
     return it->second.type;
   }
 
@@ -465,31 +435,16 @@ struct TORCH_API Module {
   CompilationUnit& class_compilation_unit() {
     return module_object()->type()->compilation_unit();
   }
-  CompilationUnit& lowered_methods() const {
-    return lowered_methods_;
+  const CompilationUnit& class_compilation_unit() const {
+    return module_object()->type()->compilation_unit();
   }
 
   // so that C++ users can easily add methods
-  void define(const std::string& src, const Resolver& resolver = nullptr);
-
-  void _define_lowered(
-      const std::vector<Def>& definitions,
-      const std::vector<Resolver>& resolvers);
-  void _define_lowered(const std::string& src, const Resolver& resolver);
-
-  Method& _define_lowered(
-      std::string name,
-      std::shared_ptr<Graph> graph,
-      std::vector<Slot> slots);
+  void define(const std::string& src, const ResolverPtr& resolver = nullptr);
 
  private:
-  Method& _create_lowered_method(
-      Function* func,
-      std::vector<Slot> member_inputs);
-
-  Method& lower_first_class_method(Function* fn);
-  void lift_lowered_method(Method& fn);
-  void lift_lowered_methods(size_t start);
+  std::pair<std::shared_ptr<Function>, std::vector<Slot>>
+  lower_first_class_method(Function* fn);
 
   void to_impl(
       const c10::optional<at::Device>& device,
@@ -578,13 +533,6 @@ struct TORCH_API Module {
     return Slot(module_value_, slot_index);
   }
 
-  CompilationUnit& class_cu() {
-    return module_value_->type()->compilation_unit();
-  }
-  const CompilationUnit& class_cu() const {
-    return module_value_->type()->compilation_unit();
-  }
-
   // modules have a single namespace, but spread over 4 different concepts:
   // parameters, attributes, methods, and sub-modules
   // we store individual lists of each concept, and a single map to
@@ -617,81 +565,13 @@ struct TORCH_API Module {
   // first-class: module_value_->type().compilation_unit() holds Functions that
   // treat modules as first class.
 
-  // lowered: In this lowered form, all the attributes/parameters are appended
-  // as additional inputs. lowered_methods_ holds this lowered form
-  // mutable because it is a cache for class_cu() methods
-  mutable CompilationUnit lowered_methods_;
-  mutable std::recursive_mutex find_method_guard_;
+  mutable std::recursive_mutex create_method_guard_;
+  friend struct Method;
+
+  // TEMPRORARY: this should only be non-empty on the root module. Represents
+  // all class types used by this module hierarchy.
+  std::unordered_map<QualifiedName, ClassTypePtr> classes_;
 };
-
-static void setInputTensorTypes(Graph& g, const Stack& stack) {
-  AT_ASSERT(stack.size() == g.inputs().size());
-  for (size_t i = 0; i < stack.size(); ++i) {
-    g.inputs().at(i)->setType(
-        DimensionedTensorType::create(stack.at(i).toTensor()));
-  }
-}
-
-inline std::shared_ptr<Graph> propagate_shapes(
-    Graph& graph,
-    const std::vector<at::Tensor>& inputs,
-    const std::vector<Slot>& initial_ivalues,
-    bool with_grad = false) {
-  auto retval = graph.copy();
-  Stack stack;
-  stack.reserve(inputs.size() + initial_ivalues.size());
-  for (const at::Tensor& i : inputs) {
-    stack.emplace_back(std::move(i));
-  }
-  for (const Slot& inp : initial_ivalues) {
-    stack.push_back(inp.value());
-  }
-  setInputTensorTypes(*retval, stack);
-  PropagateInputShapes(retval);
-  return retval;
-}
-
-inline std::shared_ptr<Graph> propagate_and_assign_input_and_output_shapes(
-    Graph& graph,
-    std::vector<at::Tensor> inputs,
-    const std::vector<Slot>& initial_ivalues,
-    std::vector<at::Tensor> outputs,
-    bool with_grad = false,
-    bool propagate = true) {
-  auto retval = graph.copy();
-  for (auto inp : initial_ivalues) {
-    if (inp.value().isTensor()) {
-      inputs.push_back(inp.value().toTensor());
-    }
-  }
-  if (propagate) {
-    setInputTensorTypes(*retval, fmap<IValue>(inputs));
-    PropagateInputShapes(retval);
-  }
-  AT_ASSERT(retval->inputs().size() == inputs.size());
-  for (size_t i = 0; i < retval->inputs().size(); ++i) {
-    auto scalar_type = inputs[i].scalar_type();
-    auto sizes = inputs[i].sizes();
-    auto type =
-        torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
-    retval->inputs()[i]->setType(type);
-  }
-  at::ArrayRef<Value*> output_values = retval->outputs();
-  // patch this to still work if we are returning a tuple of multiple values
-  if (output_values.at(0)->type()->kind() == TupleType::Kind) {
-    AT_ASSERT(output_values.at(0)->node()->kind() == prim::TupleConstruct);
-    output_values = output_values.at(0)->node()->inputs();
-  }
-  AT_ASSERT(output_values.size() == outputs.size());
-  for (size_t i = 0; i < retval->outputs().size(); ++i) {
-    auto scalar_type = outputs[i].scalar_type();
-    auto sizes = outputs[i].sizes();
-    auto type =
-        torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
-    output_values[i]->setType(type);
-  }
-  return retval;
-}
 
 } // namespace script
 } // namespace jit

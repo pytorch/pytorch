@@ -262,9 +262,11 @@ namespace {
     return output;
   }
 
-  Tensor adaptive_avg_pool2d(
-    at::Tensor const& input,
-    IntArrayRef output_size){
+  Tensor adaptive_avg_pool2d(at::Tensor const& input, IntArrayRef output_size) {
+    if (input.is_mkldnn()) {
+      return at::mkldnn_adaptive_avg_pool2d(input, output_size);
+    }
+
     if (output_size[0] == 1 && output_size[1] == 1) {
 //in this case, adaptive pooling is just computing mean over hw dimensions, which can be done more efficiently
        int64_t mean_size = input.size(-1) * input.size(-2);
