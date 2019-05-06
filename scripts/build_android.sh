@@ -22,7 +22,9 @@
 set -e
 
 # Android specific flags
-ANDROID_ABI="armeabi-v7a with NEON"
+if [ -z "$ANDROID_ABI" ]; then
+  ANDROID_ABI="armeabi-v7a with NEON"
+fi
 ANDROID_NATIVE_API_LEVEL="21"
 echo "Build with ANDROID_ABI[$ANDROID_ABI], ANDROID_NATIVE_API_LEVEL[$ANDROID_NATIVE_API_LEVEL]"
 
@@ -114,7 +116,7 @@ if [ -z "$MAX_JOBS" ]; then
     MAX_JOBS=$(nproc)
   fi
 fi
-cmake --build . -- "-j${MAX_JOBS}"
+cmake --build . --target install -- "-j${MAX_JOBS}"
 
 # copy headers and libs to install directory
 echo "Will install headers and libs to $INSTALL_PREFIX for further Android project usage."
