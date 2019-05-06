@@ -1,1 +1,1 @@
-import functional # noqa: F401
+from . import functional # noqa: F401

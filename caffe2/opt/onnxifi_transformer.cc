@@ -273,10 +273,13 @@ OnnxifiTransformer::generateBatchPaddingHints(
         if (shape_info_it->second.dim_type == ShapeInfo::DimType::BATCH) {
           auto max_batch_size =
               getBlob1stDimSize(shape_info_it->second, output_blob);
-          CAFFE_ENFORCE(
-              batch_pos_map.count(max_batch_size),
-              "Cannot find input with max batch size: ",
-              max_batch_size);
+
+          if (!opts_.permit_unknown_output_batch_size) {
+            CAFFE_ENFORCE(
+                batch_pos_map.count(max_batch_size),
+                "Cannot find input with max batch size: ",
+                max_batch_size);
+          }
         } else if (shape_info_it->second.dim_type == ShapeInfo::DimType::SEQ) {
           LOG(WARNING) << "It's unusual that output tensor " << output_blob
                        << " is of dim_type SEQ. "
@@ -372,6 +375,10 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
     }
   } else {
     AddArgument("adjust_output_batch", 0, &op);
+  }
+
+  if (opts_.permit_unknown_output_batch_size) {
+    AddArgument("permit_unknown_output_batch_size", 1, &op);
   }
 
   return op;
