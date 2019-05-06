@@ -33,12 +33,13 @@ Value* decomposeOp(
   return inlineCallTo(*op->owningGraph(), *d_graph, inputs).at(0);
 }
 
-static void DecomposeOps(Block* block) {
+static bool DecomposeOps(Block* block) {
   static const char* addmm_source = R"SCRIPT(
       def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: number = 1.0, alpha: number = 1.0):
           return self + mat1.mm(mat2)
     )SCRIPT";
 
+  bool decomposed = false;
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
     for (auto sub : it->blocks()) {
@@ -56,6 +57,7 @@ static void DecomposeOps(Block* block) {
         continue;
       }
 
+      decomposed = true;
       WithInsertPoint guard(*it);
 
       Value* new_output = decomposeOp(*it, addmm_source, "addmm", it->inputs());
@@ -67,14 +69,17 @@ static void DecomposeOps(Block* block) {
       it.destroyCurrent();
     }
   }
-
+  return decomposed;
 }
 
 void DecomposeOps(std::shared_ptr<Graph>& graph) {
-  DecomposeOps(graph->block());
-  PropagateInputShapes(graph);
-  ConstantPropagation(graph);
-  EliminateDeadCode(graph);
+  bool is_decomposed = DecomposeOps(graph->block());
+  if (is_decomposed) {
+    // we only re-run those passes when the graph get decomposed
+    PropagateInputShapes(graph);
+    ConstantPropagation(graph);
+    EliminateDeadCode(graph);
+  }
 }
 
 } // namespace jit
