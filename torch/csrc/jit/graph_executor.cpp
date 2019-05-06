@@ -641,7 +641,7 @@ struct GraphExecutorImpl {
   }
 
   void runPostdiffOptimization(std::shared_ptr<Graph>& graph){
-    // Run post differentiation optimization passes, Autodiff will replace some parts of graph with new graph	
+    // Run post differentiation optimization passes, Autodiff will replace some parts of graph with new graph
     // these new graphs usually consists of control flow and miss shape information on nodes, so we run shape
     // prop and constant prop, as well as loop unrolling in some cases
     PropagateInputShapes(graph);
