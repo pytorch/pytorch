@@ -60,8 +60,8 @@ bool AliasDb::isWildcard(const Value* v) const {
 }
 
 bool AliasDb::writesTo(Node* n, const Value* v) const {
-  if (!shouldAnnotate(v)) {
-    // This is a primitive type
+  if (!shouldAnnotate(v) || v->mustBeNone()) {
+    // This is a non-aliasing value
     return false;
   }
   if (isWildcard(v)) {
@@ -104,7 +104,7 @@ bool AliasDb::hasWriters(const Value* v) const {
     return numWrites_ != 0;
   }
 
-  if (!elementMap_.count(v)) {
+  if (!elementMap_.count(v) || v->mustBeNone()) {
     return false;
   }
 
@@ -763,11 +763,6 @@ void AliasDb::analyzeBroadcastingChunk(Node* node) {
 
 // Register the fact that `value` is a pointer to `to`
 void AliasDb::makePointerTo(const Value* from, const Value* to) {
-  // guaranteed to not alias
-  if (from->mustBeNone() || to->mustBeNone()) {
-    return;
-  }
-
   if (!shouldAnnotate(from)) {
     AT_ASSERT(!shouldAnnotate(to));
     return;
