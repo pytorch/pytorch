@@ -9,7 +9,6 @@ import torch._jit_internal as _jit_internal
 from torch._six import with_metaclass, get_function_from_type, \
     string_classes
 from torch._jit_internal import ignore  # noqa: F401
-from torch.jit._pickle import Unpickler  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
@@ -99,7 +98,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         Returns:
             A ``ScriptModule`` object.
 
-        Example:
+        Example: ::
+
             torch.jit.load('scriptmodule.pt')
 
             # Load ScriptModule from io.BytesIO object
@@ -178,7 +178,8 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
 
             Please use something like ``io.BytesIO`` instead.
 
-        Example:
+        Example: ::
+
             m = torch.jit.ScriptModule()
 
             # Save to file
@@ -1069,13 +1070,13 @@ if _enabled:
         The core data structure in TorchScript is the ``ScriptModule``. It is an
         analogue of torch's ``nn.Module`` and represents an entire model as a tree of
         submodules. Like normal modules, each individual module in a ``ScriptModule`` can
-        have submodules, parameters, and methods. In ``nn.Module``s methods are implemented
-        as Python functions, but in ``ScriptModule``s methods are implemented as
+        have submodules, parameters, and methods. In ``nn.Module``\s methods are implemented
+        as Python functions, but in ``ScriptModule``\s methods are implemented as
         TorchScript functions,  a statically-typed subset of Python that contains all
         of PyTorch's built-in Tensor operations. This difference allows your
         ScriptModules code to run without the need for a Python interpreter.
 
-        ``ScriptModule``s be created in two ways:
+        ``ScriptModule``\s be created in two ways:
 
         **Tracing:**
 
@@ -1132,9 +1133,9 @@ if _enabled:
             You can write TorchScript code directly using Python syntax. You do this
             using the ``@torch.jit.script`` decorator (for functions) or
             ``@torch.jit.script_method`` decorator (for methods) on subclasses of
-            ScriptModule. With this decorator the body of the annotated function is
+            ``ScriptModule``. With this decorator the body of the annotated function is
             directly translated into TorchScript. TorchScript itself is a subset of
-            the Python language, so not all features in python work, but we provide
+            the Python language, so not all features in Python work, but we provide
             enough functionality to compute on tensors and do control-dependent
             operations.
 
