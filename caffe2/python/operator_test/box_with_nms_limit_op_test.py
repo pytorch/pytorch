@@ -120,11 +120,31 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
 
         self.assertReferenceChecks(gc, op, [scores, boxes], ref)
 
-    @given(num_classes=st.integers(2, 10), **HU_CONFIG)
-    def test_multiclass(self, num_classes, gc):
+    @given(
+        num_classes=st.integers(2, 10),
+        cls_agnostic_bbox_reg=st.booleans(),
+        input_boxes_include_bg_cls=st.booleans(),
+        output_classes_include_bg_cls=st.booleans(),
+        **HU_CONFIG
+    )
+    def test_multiclass(
+        self,
+        num_classes,
+        cls_agnostic_bbox_reg,
+        input_boxes_include_bg_cls,
+        output_classes_include_bg_cls,
+        gc
+    ):
         in_centers = [(0, 0), (20, 20), (50, 50)]
         in_scores = [0.7, 0.85, 0.6]
         boxes, scores = gen_multiple_boxes(in_centers, in_scores, 10, num_classes)
+
+        if not input_boxes_include_bg_cls:
+            # remove backgound class
+            boxes = boxes[:, 4:]
+        if cls_agnostic_bbox_reg:
+            # only leave one class
+            boxes = boxes[:, :4]
 
         gt_centers = [(20, 20), (0, 0), (50, 50)]
         gt_scores = [0.85, 0.7, 0.6]
@@ -133,12 +153,22 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         gt_classes = np.tile(
             np.array(range(1, num_classes), dtype=np.float32),
             (gt_boxes.shape[0], 1)).T.flatten()
+        if not output_classes_include_bg_cls:
+            # remove backgound class
+            gt_classes -= 1
         gt_boxes = np.tile(gt_boxes, (num_classes - 1, 1))
         gt_scores = np.tile(gt_scores, (num_classes - 1, 1)).flatten()
 
         op = get_op(
             2, 3,
-            {"score_thresh": 0.5, "nms": 0.9, "detections_per_im": 100}
+            {
+                "score_thresh": 0.5,
+                "nms": 0.9,
+                "detections_per_im": 100,
+                "cls_agnostic_bbox_reg": cls_agnostic_bbox_reg,
+                "input_boxes_include_bg_cls": input_boxes_include_bg_cls,
+                "output_classes_include_bg_cls": output_classes_include_bg_cls
+            }
         )
 
         def ref(*args, **kwargs):

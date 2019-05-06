@@ -55,7 +55,7 @@ class CAFFE2_API LegacyTypeDispatch {
   // have a Tensor and thus the Type of that Tensor must already
   // be initialized.
   Type* getNonVariableTypeRaw(Backend p, ScalarType s) {
-    return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
+    return type_registry[static_cast<int>(p)].get();
   }
   Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
     if (p != Backend::Undefined) {
@@ -99,9 +99,9 @@ class CAFFE2_API LegacyTypeDispatch {
       return getNonVariableType(p, s);
     }
   }
-  void registerType(Backend b, ScalarType s, TypeUniquePtr&& t) {
-    type_registry[static_cast<int>(b)][static_cast<int>(s)] = std::move(t);
-    detail::getVariableHooks().registerVariableTypeFor(this, b, s);
+  void registerType(Backend b, TypeUniquePtr&& t) {
+    type_registry[static_cast<int>(b)] = std::move(t);
+    detail::getVariableHooks().registerVariableTypeFor(this, b);
   }
 private:
   void initForDeviceType(DeviceType p) {
@@ -134,8 +134,7 @@ private:
   // NB: type_registry has nullptr for all CUDA backends until
   // CUDA initialization has occurred
   TypeUniquePtr type_registry
-    [static_cast<int>(Backend::NumOptions)]
-    [static_cast<int>(ScalarType::NumOptions)];
+    [static_cast<int>(Backend::NumOptions)];
 };
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();

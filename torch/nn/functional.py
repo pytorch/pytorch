@@ -455,8 +455,10 @@ def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
 def _max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tensor  # noqa
-    return max_pool1d_with_indices(
-        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+    if stride is None:
+        stride = torch.jit.annotate(List[int], [])
+    return torch.max_pool1d(
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 max_pool1d = torch._jit_internal.boolean_dispatch(
     arg_name='return_indices',
@@ -486,8 +488,10 @@ def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation
 def _max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tensor  # noqa
-    return max_pool2d_with_indices(
-        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+    if stride is None:
+        stride = torch.jit.annotate(List[int], [])
+    return torch.max_pool2d(
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 max_pool2d = torch._jit_internal.boolean_dispatch(
     arg_name='return_indices',
@@ -518,8 +522,10 @@ def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
 def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tensor  # noqa
-    return max_pool3d_with_indices(
-        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+    if stride is None:
+        stride = torch.jit.annotate(List[int], [])
+    return torch.max_pool3d(
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 max_pool3d = torch._jit_internal.boolean_dispatch(
     arg_name='return_indices',
@@ -1502,8 +1508,9 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
 
 @weak_script
 def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
-                  scale_grad_by_freq=False, mode='mean', sparse=False):
-    # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool) -> Tensor
+                  scale_grad_by_freq=False, mode='mean', sparse=False,
+                  per_sample_weights=None):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool, Optional[Tensor]) -> Tensor
     r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
 
@@ -1530,6 +1537,11 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
                                  :class:`torch.nn.Embedding` for more details regarding sparse gradients.
                                  Note: this option is not supported when ``mode="max"``.
+        per_sample_weights (Tensor, optional): a tensor of float / double weights, or None
+            to indicate all weights should be taken to be 1. If specified, :attr:`per_sample_weights`
+            must have exactly the same shape as input and is treated as having the same
+            :attr:`offsets`, if those are not None.
+
 
     Shape:
 
@@ -1553,6 +1565,9 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         - :attr:`weight` (Tensor): the learnable weights of the module of
           shape `(num_embeddings, embedding_dim)`
 
+        - :attr:`per_sample_weights` (Tensor, optional). Has the same shape as
+          :attr:`input`.
+
         - :attr:`output`: aggregated embedding values of shape `(B, embedding_dim)`
 
     Examples::
@@ -1575,17 +1590,23 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                       "and should now be `embedding_bag(input, weight, ...)`.")
         weight, input = input, weight
 
+    if per_sample_weights is not None and input.size() != per_sample_weights.size():
+        raise ValueError("embedding_bag: If per_sample_weights ({}) is not None, "
+                         "then it must have the same shape as the input ({})"
+                         .format(per_sample_weights.shape, input.shape))
+
     if input.dim() == 2:
         if offsets is not None:
             raise ValueError("if input is 2D, then offsets has to be None"
                              ", as input is treated is a mini-batch of"
                              " fixed length sequences. However, found "
                              "offsets of type {}".format(type(offsets)))
-        else:
-            offsets = torch.arange(0, input.numel(), input.size(1),
-                                   dtype=torch.long, device=input.device)
+        offsets = torch.arange(0, input.numel(), input.size(1),
+                               dtype=torch.long, device=input.device)
 
-            input = input.reshape(-1)
+        input = input.reshape(-1)
+        if per_sample_weights is not None:
+            per_sample_weights = per_sample_weights.reshape(-1)
     elif input.dim() == 1:
         if offsets is None:
             raise ValueError("offsets has to be a 1D Tensor but got None")
@@ -1628,13 +1649,20 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         # remove once script supports set_grad_enabled
         _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
 
+    if per_sample_weights is not None and mode != 'sum':
+        raise NotImplementedError("embedding_bag: per_sample_weights was not None. "
+                                  "per_sample_weights is only supported for mode='sum' "
+                                  "(got mode='{}'). Please open a feature request on GitHub."
+                                  .format(mode))
+
     ret, _, _, _ = torch.embedding_bag(
         weight,
         input,
         offsets,
         scale_grad_by_freq,
         mode_enum,
-        sparse)
+        sparse,
+        per_sample_weights)
     return ret
 
 
@@ -2495,7 +2523,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
         # make scale_factor a tensor in tracing so constant doesn't get baked in
         if torch._C._get_tracing_state():
-            return [(torch.floor(input.size(i + 2) * torch.tensor(scale_factors[i]))) for i in range(dim)]
+            return [(torch.floor(input.size(i + 2) * torch.tensor(float(scale_factors[i])))) for i in range(dim)]
         else:
             return [int(math.floor(int(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
@@ -2629,25 +2657,25 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest`` or
     ``bilinear`` interpolation method to sample the input pixels.
 
-    :attr:`grid` should have most values in the range of ``[-1, 1]``. This is
-    because the pixel locations are normalized by the :attr:`input` spatial
-    dimensions. For example, values ``x = -1, y = -1`` is the left-top pixel of
-    :attr:`input`, and values  ``x = 1, y = 1`` is the right-bottom pixel of
-    :attr:`input`.
+    :attr:`grid` specifies the sampling pixel locations normalized by the
+    :attr:`input` spatial dimensions. Therefore, it should have most values in
+    the range of ``[-1, 1]``. For example, values ``x = -1, y = -1`` is the
+    left-top pixel of :attr:`input`, and values  ``x = 1, y = 1`` is the
+    right-bottom pixel of :attr:`input`.
 
-    If :attr:`grid` has values outside the range of ``[-1, 1]``, those locations
-    are handled as defined by :attr:`padding_mode`. Options are
+    If :attr:`grid` has values outside the range of ``[-1, 1]``, the corresponding
+    outputs are handled as defined by :attr:`padding_mode`. Options are
 
-        * ``padding_mode="zeros"``: use ``0`` for out-of-bound values,
-        * ``padding_mode="border"``: use border values for out-of-bound values,
+        * ``padding_mode="zeros"``: use ``0`` for out-of-bound grid locations,
+        * ``padding_mode="border"``: use border values for out-of-bound grid locations,
         * ``padding_mode="reflection"``: use values at locations reflected by
-          the border for out-of-bound values. For location far away from the
-          border, it will keep being reflected until becoming in bound, e.g.,
-          (normalized) pixel location ``x = -3.5`` reflects by ``-1`` and
-          becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
+          the border for out-of-bound grid locations. For location far away
+          from the border, it will keep being reflected until becoming in bound,
+          e.g., (normalized) pixel location ``x = -3.5`` reflects by border ``-1``
+          and becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
           ``x'' = -0.5``.
 
-    .. Note:: This function is often used in building Spatial Transformer Networks.
+    .. Note:: This function is often used in building `Spatial Transformer Networks`_ .
     .. include:: cuda_deterministic_backward.rst
 
     Args:
@@ -2663,6 +2691,8 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     Returns:
         output (Tensor): output Tensor
 
+    .. _`Spatial Transformer Networks`:
+        https://arxiv.org/abs/1506.02025
     """
     if mode != 'bilinear' and mode != 'nearest':
         raise ValueError("nn.functional.grid_sample(): expected mode to be "

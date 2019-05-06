@@ -7,7 +7,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
-#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_stub.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
@@ -22,6 +22,12 @@
 #include <iostream>
 #include <unordered_set>
 #include <vector>
+
+// Forward declare, the real meat is in python_ir.cpp
+template <class T>
+class THPPointer;
+using THPObjectPtr = THPPointer<PyObject>;
+using pyobj_list = std::vector<THPObjectPtr>;
 
 namespace torch {
 namespace jit {
@@ -134,7 +140,6 @@ struct Use {
 using node_list = std::vector<Node*>;
 using value_list = std::vector<Value*>;
 using use_list = std::vector<Use>;
-using pyobj_list = std::vector<THPObjectPtr>;
 template <typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
@@ -226,7 +231,7 @@ struct Value {
   TORCH_API Value* copyMetadata(Value* from);
 };
 
-struct Node {
+struct TORCH_API Node {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
   friend struct Block;
@@ -254,7 +259,7 @@ struct Node {
   topo_position_t topo_position_ = 0;
 
  protected:
-  TORCH_API Node(Graph* graph_, NodeKind kind_); // defined after graph
+  Node(Graph* graph_, NodeKind kind_); // defined after graph
  public:
   // each node but Return/Param
   // is associated with exactly one place in the node list...
@@ -353,7 +358,7 @@ struct Node {
     return false;
   }
 
-  TORCH_API void replaceAllUsesWith(Node* n);
+  void replaceAllUsesWith(Node* n);
 
   // lots of things like chunk have a single input or single output, so we have
   // a helper to make accessing it easier
@@ -394,10 +399,10 @@ struct Node {
   bool is_constant(Symbol name) const {
     return static_cast<bool>(get(name));
   }
-  TORCH_API bool mustBeNone() const;
+  bool mustBeNone() const;
 
-  TORCH_API bool isNondeterministic() const;
-  TORCH_API bool hasSideEffects() const;
+  bool isNondeterministic() const;
+  bool hasSideEffects() const;
 
   // Graphs
 
@@ -419,11 +424,11 @@ struct Node {
   // Given:   %3 = f(%1, %2)
   // Execute: %3.addInput(%4)
   // Result:  %3 = f(%1, %2, %4)
-  TORCH_API Value* addInput(Value* value);
+  Value* addInput(Value* value);
 
   // Add 'value' as an input to 'this' at the specified position in the
   // arguments. Returns the added value for ease of chaining.
-  TORCH_API Value* insertInput(size_t i, Value* value);
+  Value* insertInput(size_t i, Value* value);
 
   // Replace the input of 'this' at position 'i' with
   // 'newValue', returning the old node.
@@ -431,7 +436,7 @@ struct Node {
   // Given:   %3 = f(%1, %2)
   // Execute: %3.replaceInput(1, %4)
   // Result:  %3 = f(%1, %4)
-  TORCH_API Value* replaceInput(size_t i, Value* newValue);
+  Value* replaceInput(size_t i, Value* newValue);
 
   // Replace all occurrences of 'from' in the inputs of this
   // node with 'to'. Corresponds to llvm's replaceUsesOfWith.
@@ -439,16 +444,16 @@ struct Node {
   // Given:   %3 = f(%1, %2, %1)
   // Execute: %3.replaceInputWith(%1, %4)
   // Result:  %3 = f(%4, %2, %4)
-  TORCH_API void replaceInputWith(Value* from, Value* to);
+  void replaceInputWith(Value* from, Value* to);
 
-  TORCH_API Value* addOutput();
+  Value* addOutput();
 
-  TORCH_API Value* insertOutput(size_t i);
+  Value* insertOutput(size_t i);
 
-  TORCH_API void eraseOutput(size_t i);
+  void eraseOutput(size_t i);
 
-  TORCH_API Block* addBlock();
-  TORCH_API void eraseBlock(size_t i);
+  Block* addBlock();
+  void eraseBlock(size_t i);
 
   // Each Node can have a list of subblocks. These are used to define structured
   // nested control flow operators such as If and Loop.
@@ -477,10 +482,10 @@ struct Node {
   }
 
   // Is 'this' before 'n' in the topological order?
-  TORCH_API bool isBefore(const Node* n) const;
+  bool isBefore(const Node* n) const;
 
   // Is 'this' after 'n' in the topological order?
-  TORCH_API bool isAfter(const Node* n) const;
+  bool isAfter(const Node* n) const;
 
   // Insert unattached 'this' node before 'n' in the topological order.
   // Returns this (for chaining).
@@ -492,7 +497,7 @@ struct Node {
   // Result:  %3 = f(%1, %2)
   //          %5 = h(%1)
   //          %4 = g(%3)
-  TORCH_API Node* insertBefore(Node* n);
+  Node* insertBefore(Node* n);
 
   // Insert unattached 'this' node after 'n' in the topological order.
   // Returns this (for chaining).
@@ -504,7 +509,7 @@ struct Node {
   // Result:  %3 = f(%1, %2)
   //          %4 = g(%3)
   //          %5 = h(%1)
-  TORCH_API Node* insertAfter(Node* n);
+  Node* insertAfter(Node* n);
 
   // Move 'this' (already in the graph) after 'n' in the topological order.
   //
@@ -517,7 +522,7 @@ struct Node {
   // Result: %3 = g(%1)
   //         %2 = f(%1)
   //
-  TORCH_API void moveAfter(Node* n);
+  void moveAfter(Node* n);
 
   // Move a node 'n' (already in the graph) before 'this' in the topological
   // order.
@@ -530,7 +535,7 @@ struct Node {
   // Execute: %3.moveBefore(%2)
   // Result: %3 = g(%1)
   //         %2 = f(%1)
-  TORCH_API void moveBefore(Node* n);
+  void moveBefore(Node* n);
 
   // Remove the input at 'i' from this node.
   //
@@ -540,14 +545,14 @@ struct Node {
   // Given: %3 = f(%1, %2)
   // Execute: %3.removeInput(1)
   // Result: %3 = f(%1)
-  TORCH_API void removeInput(size_t i);
+  void removeInput(size_t i);
 
   // Remove all inputs from a node.
   //
   // Given: %3 = f(%1, %2)
   // Execute: %3.removeAllInputs()
   // Result: %3 = f()
-  TORCH_API void removeAllInputs();
+  void removeAllInputs();
 
   // iterators of the node list starting at this node
   // useful for resuming a search starting at this node
@@ -572,7 +577,7 @@ struct Node {
   //        %3 = g(%1)
   // Execute: %2.destroy()
   // Result: %3 = g(%1)
-  TORCH_API void destroy();
+  void destroy();
 
   // Dynamically cast this node to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid..
@@ -599,7 +604,7 @@ struct Node {
   }
 
   // XXX: this function is meant to be used with string literals only!
-  TORCH_API bool matches(
+  bool matches(
       const char* signature_literal,
       at::ArrayRef<Symbol> const_inputs = {}) const;
 
@@ -780,12 +785,12 @@ struct Node {
   void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of
   // _this_
-  TORCH_API use_list::iterator findUseForInput(size_t i);
+  use_list::iterator findUseForInput(size_t i);
 
   // remove the use of input i, this sets input i to nullptr, but
   // is only used internally to Node before setting it to a new value
   // or erasing the entry from the list.
-  TORCH_API Value* dropInput(size_t i);
+  Value* dropInput(size_t i);
 
   bool inBlockList() const {
     if (next() == nullptr) {
@@ -794,8 +799,8 @@ struct Node {
     return next() != nullptr;
   }
 
-  TORCH_API void removeFromList();
-  TORCH_API void lint() const;
+  void removeFromList();
+  void lint() const;
 
   void assignTopoPosition();
 
@@ -813,7 +818,7 @@ struct Node {
   // 'this' will be allocated with s->allocNewInstance(g) so it should have
   // the same concrete type as 's'
   //
-  TORCH_API virtual void cloneFrom(Node* s);
+  virtual void cloneFrom(Node* s);
 };
 
 struct Block {
@@ -907,6 +912,7 @@ struct Block {
   // value_map is used whenever a node in src references a free variable
   // in src to look up its corresponding value
   TORCH_API void cloneFrom(Block* src, std::function<Value*(Value*)> value_map);
+  TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
   void reIndexTopology();
@@ -1049,7 +1055,10 @@ struct Graph {
       at::ArrayRef<Value*> values,
       c10::OptNameList field_names = c10::nullopt);
   TORCH_API Node* createTupleUnpack(Value* v);
-  TORCH_API Node* createTupleIndex(Value* tup, int64_t index);
+  TORCH_API Node* createTupleIndex(
+      Value* tup,
+      Value* idx,
+      const TypePtr& output_type);
   TORCH_API Node* createTupleSlice(Value* tup, int64_t beg, int64_t end);
   TORCH_API Node* createList(
       const TypePtr& elem_type,
@@ -1069,6 +1078,11 @@ struct Graph {
       const std::string& field,
       Value* newValue);
   TORCH_API Node* createGetAttr(Value* obj, const std::string& field);
+  TORCH_API Value* insertGetAttr(Value* obj, const std::string& field) {
+    return insertNode(createGetAttr(obj, field))->output();
+  }
+
+  // Note: defined in python_ir.cpp and can be used only in python extension
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -1155,10 +1169,8 @@ struct Graph {
 
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 
-  TORCH_API std::ostream& prettyPrint(std::ostream& out);
-  TORCH_API void dumpPretty();
-
   TORCH_API std::shared_ptr<Graph> copy();
+  TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
   TORCH_API void freeNode(Node* n);
@@ -1231,33 +1243,36 @@ inline const Graph* Value::owningGraph() const {
 }
 
 /************* All nodes not required to be defined before Graph **************/
+struct ProfileOp : public Node {
+  static constexpr Symbol Kind = ::c10::prim::profile;
+  ProfileOp(Graph* graph, std::function<void(std::vector<IValue>&)> callback)
+      : Node(graph, ::c10::prim::profile), callback_(callback) {}
+
+  void cloneFrom(Node* other_) override;
+  Node* allocNewInstance(Graph* g) override;
+
+  const std::function<void(std::vector<IValue>&)>& getCallback() const {
+    return callback_;
+  }
+
+ private:
+  std::function<void(std::vector<IValue>&)> callback_;
+};
 
 // execute a Python function, used for Ops we can't optimize but that we want to
 // optimize around
-struct PythonOp : public Node {
-  static constexpr Symbol Kind = ::c10::prim::PythonOp;
+//
+// Note: actual implementation (ConcretePythonOp) is defined in python_ir.cpp
+// which is not included in libtorch.so. We still include some bits and pieces
+// of PythonOp here to enable writing simple passes generically. In general,
+// python-aware bits need to be moved to the descendant classes.
+struct TORCH_API PythonOp : public Node {
+  using Node::Node;
 
-  PythonOp(Graph* graph) : Node(graph, ::c10::prim::PythonOp) {}
-  PythonOp* init(
-      THPObjectPtr&& pyobj,
-      const std::string& cconv,
-      pyobj_list&& scalar_args) {
-    this->pyobj = std::move(pyobj);
-    this->scalar_args = std::move(scalar_args);
-    this->cconv = cconv;
-    return this;
-  }
-  // The Python object which contains the implementation of this function.
-  // This is either a class (non-legacy) or an object (legacy).  See
-  // TraceInterpreterState for execution semantics.
-  THPObjectPtr pyobj;
-  // The calling convention for the Python function.
-  // 'c' -- constant argument
-  // 'd' -- dynamic argument
-  std::string cconv;
-  // Scalar arguments to the Python function.  Not necessarily passed to
-  // the function in this order; see cconv for the correct order.
-  std::vector<THPObjectPtr> scalar_args;
+  // should this Python function be skipped over when exported (i.e. for
+  // debugging functions that only run in Python)
+  bool ignore_on_export = false;
+
   virtual std::string name() const = 0;
   virtual void writeScalars(std::ostream& out) const = 0;
   void cloneFrom(Node* other_) override = 0;
@@ -1267,20 +1282,8 @@ struct PythonOp : public Node {
   // used in ONNX for discovering symbolics
   virtual c10::optional<THPObjectPtr> autogradFunction() const = 0;
 
-  // should this Python function be skipped over when exported (i.e. for
-  // debugging functions that only run in Python)
-  bool ignore_on_export = false;
+  virtual void lint_python() const = 0;
 };
-// patched in when python bindings are loaded
-TORCH_API PythonOp* allocPythonOp(Graph* g);
-TORCH_API void setAllocPythonOp(PythonOp* (*v)(Graph* g));
-inline Node* Graph::createPythonOp(
-    THPObjectPtr&& pyobj,
-    const std::string& cconv,
-    pyobj_list&& scalar_args) {
-  PythonOp* op = allocPythonOp(this);
-  return op->init(std::move(pyobj), cconv, std::move(scalar_args));
-}
 
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
 
@@ -1293,6 +1296,5 @@ TORCH_API std::vector<Value*> inlineCallTo(
     Graph& callee,
     ArrayRef<Value*> inputs,
     bool unpack_outputs = false);
-
 } // namespace jit
 } // namespace torch

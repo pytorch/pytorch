@@ -2,6 +2,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHFunctions.h>
 
+#include <ATen/native/mkldnn/TensorShape.h>
+
 namespace at { namespace native {
 
 // Methods
@@ -51,18 +53,39 @@ Tensor& zero_(Tensor& self) {
 }
 
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, Scalar value) {
-  return at::legacy::th::_th_masked_fill_(self, mask, value);
+  // As we dispatch on self and TH is type-checked, we need different definitions.
+  // This can be fixed by moving to ATen.
+  if (mask.dtype() == at::ScalarType::Byte) {
+    return at::legacy::th::_th_masked_fill_(self, mask, value);
+  } else {
+    return at::legacy::th::_th_masked_fill_bool_(self, mask, value);
+  }
 }
 
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, const Tensor & value) {
-  return at::legacy::th::_th_masked_fill_(self, mask, value);
+  // As we dispatch on self and TH is type-checked, we need different definitions.
+  // This can be fixed by moving to ATen.
+  if (mask.dtype() == at::ScalarType::Byte) {
+    return at::legacy::th::_th_masked_fill_(self, mask, value);
+  } else {
+    return at::legacy::th::_th_masked_fill_bool_(self, mask, value);
+  }
 }
 
 Tensor & masked_scatter_(Tensor& self, const Tensor & mask, const Tensor & source) {
-  return at::legacy::th::_th_masked_scatter_(self, mask, source);
+  // As we dispatch on self and TH is type-checked, we need different definitions.
+  // This can be fixed by moving to ATen.
+  if (mask.dtype() == at::ScalarType::Byte) {
+    return at::legacy::th::_th_masked_scatter_(self, mask, source);
+  } else {
+    return at::legacy::th::_th_masked_scatter_bool_(self, mask, source);
+  }
 }
 
 Tensor view(const Tensor& self, IntArrayRef size) {
+  if (self.is_mkldnn()) {
+    return mkldnn_view(self, size);
+  }
   return at::legacy::th::_th_view(self, size);
 }
 
@@ -162,20 +185,8 @@ Tensor & erfinv_(Tensor& self) {
   return at::legacy::th::_th_erfinv_(self);
 }
 
-Tensor & frac_(Tensor& self) {
-  return at::legacy::th::_th_frac_(self);
-}
-
 Tensor & renorm_(Tensor& self, Scalar p, int64_t dim, Scalar maxnorm) {
   return at::legacy::th::_th_renorm_(self, p, dim, maxnorm);
-}
-
-Tensor & reciprocal_(Tensor& self) {
-  return at::legacy::th::_th_reciprocal_(self);
-}
-
-Tensor & neg_(Tensor& self) {
-  return at::legacy::th::_th_neg_(self);
 }
 
 Tensor & pow_(Tensor& self, Scalar exponent) {
@@ -393,7 +404,11 @@ Tensor & masked_select_out(Tensor & result, const Tensor & self, const Tensor & 
 }
 
 Tensor masked_select(const Tensor & self, const Tensor & mask) {
+  if (mask.dtype() == at::ScalarType::Byte) {
   return at::legacy::th::_th_masked_select(self, mask);
+} else {
+  return at::legacy::th::_th_masked_select_bool(self, mask);
+}
 }
 
 Tensor & nonzero_out(Tensor & result, const Tensor & self) {
@@ -460,11 +475,11 @@ std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some, bool comput
   return at::legacy::th::_th_svd(self, some, compute_uv);
 }
 
-Tensor & potri_out(Tensor & result, const Tensor & self, bool upper) {
+Tensor & cholesky_inverse_out(Tensor & result, const Tensor & self, bool upper) {
   return at::legacy::th::_th_potri_out(result, self, upper);
 }
 
-Tensor potri(const Tensor & self, bool upper) {
+Tensor cholesky_inverse(const Tensor & self, bool upper) {
   return at::legacy::th::_th_potri(self, upper);
 }
 
@@ -508,20 +523,20 @@ Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, 
   return at::legacy::th::_th_ormqr(self, input2, input3, left, transpose);
 }
 
+Tensor & lu_solve_out(Tensor & result, const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
+  return at::legacy::th::_th_btrisolve_out(result, self, LU_data, LU_pivots);
+}
+
+Tensor lu_solve(const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
+  return at::legacy::th::_th_btrisolve(self, LU_data, LU_pivots);
+}
+
 std::tuple<Tensor,Tensor> _multinomial_alias_setup(const Tensor & probs) {
   return at::legacy::th::_th_multinomial_alias_setup(probs);
 }
 
 Tensor _multinomial_alias_draw(const Tensor & q, const Tensor & J, int64_t num_samples, Generator * generator) {
   return at::legacy::th::_th_multinomial_alias_draw(q, J, num_samples, generator);
-}
-
-Tensor & btrisolve_out(Tensor & result, const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
-  return at::legacy::th::_th_btrisolve_out(result, self, LU_data, LU_pivots);
-}
-
-Tensor btrisolve(const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
-  return at::legacy::th::_th_btrisolve(self, LU_data, LU_pivots);
 }
 
 Tensor & multinomial_out(Tensor & result, const Tensor & self, int64_t num_samples, bool replacement, Generator * generator) {
@@ -563,32 +578,8 @@ Tensor erfinv(const Tensor & self) {
   return at::legacy::th::_th_erfinv(self);
 }
 
-Tensor & frac_out(Tensor & result, const Tensor & self) {
-  return at::legacy::th::_th_frac_out(result, self);
-}
-
-Tensor frac(const Tensor & self) {
-  return at::legacy::th::_th_frac(self);
-}
-
 Tensor dist(const Tensor & self, const Tensor & other, Scalar p) {
   return at::legacy::th::_th_dist(self, other, p);
-}
-
-Tensor & reciprocal_out(Tensor & result, const Tensor & self) {
-  return at::legacy::th::_th_reciprocal_out(result, self);
-}
-
-Tensor reciprocal(const Tensor & self) {
-  return at::legacy::th::_th_reciprocal(self);
-}
-
-Tensor & neg_out(Tensor & result, const Tensor & self) {
-  return at::legacy::th::_th_neg_out(result, self);
-}
-
-Tensor neg(const Tensor & self) {
-  return at::legacy::th::_th_neg(self);
 }
 
 Tensor & atan2_out(Tensor & result, const Tensor & self, const Tensor & other) {

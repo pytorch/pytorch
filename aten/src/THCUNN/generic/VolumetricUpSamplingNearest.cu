@@ -47,10 +47,10 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
   int inputWidth  = THCTensor_(size)(state, input, 4);
 
   THNN_(VolumetricUpSamplingNearest_shapeCheck)(state, input, NULL, nbatch, channels,
-		  inputDepth, inputHeight, inputWidth,
-		  outputDepth, outputHeight, outputWidth);
+                  inputDepth, inputHeight, inputWidth,
+                  outputDepth, outputHeight, outputWidth);
   THAssert(inputDepth > 0 && inputHeight > 0 && inputWidth > 0 &&
-		  outputDepth > 0 && outputHeight > 0 && outputWidth > 0);
+                  outputDepth > 0 && outputHeight > 0 && outputWidth > 0);
 
   THCTensor_(resize5d)(state, output,
                        THCTensor_(size)(state, input, 0),
@@ -67,7 +67,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
   const int num_threads = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   nearest_neighbor_5d_kernel<scalar_t, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads,
-	 0, stream>>>(num_kernels, idata, odata);
+         0, stream>>>(num_kernels, idata, odata);
   THCudaCheck(cudaGetLastError());
 }
 
@@ -88,8 +88,8 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
 {
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   THNN_(VolumetricUpSamplingNearest_shapeCheck)(state, NULL, gradOutput, nbatch, nchannels,
-		  inputDepth, inputHeight, inputWidth,
-		  outputDepth, outputHeight, outputWidth);
+                  inputDepth, inputHeight, inputWidth,
+                  outputDepth, outputHeight, outputWidth);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resize5d)(state, gradInput, nbatch, nchannels, inputDepth, inputHeight, inputWidth);
 
@@ -100,7 +100,7 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
   const int num_threads = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   nearest_neighbor_5d_kernel_backward<scalar_t, accreal> <<<THCCeilDiv(num_kernels, num_threads),
-	  num_threads, 0, stream>>>(num_kernels, data1, data2);
+          num_threads, 0, stream>>>(num_kernels, data1, data2);
   THCudaCheck(cudaGetLastError());
   THCTensor_(free)(state, gradOutput);
 }
