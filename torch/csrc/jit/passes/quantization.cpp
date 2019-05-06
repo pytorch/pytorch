@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
 
 #include <stack>
 
