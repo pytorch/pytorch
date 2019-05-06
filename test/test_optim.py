@@ -526,6 +526,29 @@ class TestLRScheduler(TestCase):
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
 
+    def test_old_pattern_warning(self):
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        with self.assertWarnsRegex(UserWarning, r'Old pattern'):
+            for e in range(epochs):
+                scheduler.step()
+                self.opt.step()
+
+    def test_old_pattern_warning_resuming(self):
+
+        for i, group in enumerate(self.opt.param_groups):
+            group['initial_lr'] = 0.01
+
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+        with self.assertWarnsRegex(UserWarning, r'Old pattern'):
+            for e in range(35):
+                scheduler.step()
+                self.opt.step()
+
+    def test_new_pattern_no_warning(self):
+        pass
+
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3
         # lr = 0.005    if 30 <= epoch < 6
