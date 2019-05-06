@@ -13,7 +13,12 @@ CONFIG_TREE_DATA = [
         ]),
         ("gcc", [
             ("4.8", [X("3.6")]),
-            ("5.4", [("3.6", [X(False), X(True)])]),
+            ("5.4", [
+                ("3.6", [
+                    ("xla", [X(False), X(True)]),
+                    ("namedtensor", [X(False), X(True)]),
+                ]),
+            ]),
             ("7", [X("3.6")]),
         ]),
     ]),
@@ -117,7 +122,21 @@ class PyVerConfigNode(TreeConfigNode):
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
-        return XlaConfigNode
+        return ExperimentalFeatureConfigNode
+
+
+class ExperimentalFeatureConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["experimental_feature"] = node_name
+
+    def child_constructor(self):
+        experimental_feature = self.find_prop("experimental_feature")
+
+        next_nodes = {
+            "xla": XlaConfigNode,
+            "namedtensor": NamedTensorConfigNode,
+        }
+        return next_nodes[experimental_feature]
 
 
 class XlaConfigNode(TreeConfigNode):
@@ -126,6 +145,14 @@ class XlaConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_xla"] = node_name
+
+
+class NamedTensorConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "NAMEDTENSOR=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_namedtensor"] = node_name
 
 
 class XenialCompilerConfigNode(TreeConfigNode):

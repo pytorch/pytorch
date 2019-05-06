@@ -24,7 +24,8 @@ class Conf(object):
                  restrict_phases=None,
                  gpu_resource=None,
                  dependent_tests=None,
-                 parent_build=None):
+                 parent_build=None,
+                 is_namedtensor=False):
 
         self.distro = distro
         self.pyver = pyver
@@ -35,6 +36,7 @@ class Conf(object):
         #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
         # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
         self.is_xla = is_xla
+        self.is_namedtensor = is_namedtensor
 
         self.restrict_phases = restrict_phases
         self.gpu_resource = gpu_resource
@@ -47,6 +49,8 @@ class Conf(object):
         leading = ["pytorch"]
         if self.is_xla and not for_docker:
             leading.append("xla")
+        if self.is_namedtensor and not for_docker:
+            leading.append("namedtensor")
 
         cuda_parms = []
         if self.cuda_version:
@@ -220,6 +224,7 @@ def instantiate_configs():
             parms_list.append("gcc7")
 
         is_xla = fc.find_prop("is_xla") or False
+        is_namedtensor = fc.find_prop("is_namedtensor") or False
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
@@ -233,6 +238,7 @@ def instantiate_configs():
             is_xla,
             restrict_phases,
             gpu_resource,
+            is_namedtensor=is_namedtensor,
         )
 
         if cuda_version == "8":
