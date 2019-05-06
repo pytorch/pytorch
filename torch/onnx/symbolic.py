@@ -68,7 +68,7 @@ _sum = sum
 def _parse_arg(value, desc):
     if desc == 'none':
         return value
-    if desc == 'v' or not _is_value(value) or value.node().kind() == 'prim::Constant':
+    if desc == 'v' or not _is_value(value) or _is_prim_constant(value):
         return value
     if value.node().kind() == 'onnx::Constant':
         tval = value.node()['value']
