@@ -107,11 +107,8 @@ struct TORCH_API Variable : public at::Tensor {
   /// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
   /// `requires_grad` should be
   /// set only for leaves, and determines whether the `Variable` will accumulate
-  /// gradients.
-  ///
-  /// NOTE: if the given `Tensor` is already a `Variable`, this function will
-  /// create a new `Variable` that shares the same storage and tensor metadata
-  /// with the original `Variable`, but with a completely new autograd history.
+  /// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
+  /// type *must* be `Tensor`.
   friend Variable make_variable(
       at::Tensor data,
       bool requires_grad,
@@ -122,38 +119,16 @@ struct TORCH_API Variable : public at::Tensor {
   /// convert it to a `Variable`, and then free it; it has been found to
   /// decrease the overhead of those operations, in some situations.
   /// The comments about `requires_grad` and `data` on the above version also apply to this one.
-  ///
-  /// NOTE: if the given `Tensor` is already a `Variable`, this function will
-  /// create a new `Variable` that shares the same storage and tensor metadata
-  /// with the original `Variable`, but with a completely new autograd history.
   friend Variable make_variable_consuming(
       at::Tensor data,
       bool requires_grad,
       bool allow_tensor_metadata_change);
 
-  /// Creates a `Variable` from the given `Tensor` and specify a
-  /// `gradient_edge`, i.e. a (function, input_nr) pair specifying the function
+  /// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
+  /// `gradient_edge` should be a (function, input_nr) pair specifying the function
   /// in the autograd graph, and what particular input of that function, this
   /// variable is connected to.
-  ///
-  /// NOTE: if the given `Tensor` is already a `Variable`, this function will
-  /// create a new `Variable` that shares the same storage and tensor metadata
-  /// with the original `Variable`, but with a completely new autograd history.
   friend Variable make_variable(
-      at::Tensor data,
-      Edge gradient_edge,
-      bool allow_tensor_metadata_change);
-
-  /// Creates a `Variable` from the given `Tensor` and specify a
-  /// `gradient_edge`, i.e. a (function, input_nr) pair specifying the function
-  /// in the autograd graph, and what particular input of that function, this
-  /// variable is connected to.
-  // yf225 TODO: add better comment here
-  ///
-  /// NOTE: if the given `Tensor` is already a `Variable`, this function will
-  /// create a new `Variable` that shares the same storage and tensor metadata
-  /// with the original `Variable`, but with a completely new autograd history.
-  friend Variable make_variable_consuming(
       at::Tensor data,
       Edge gradient_edge,
       bool allow_tensor_metadata_change);
@@ -574,10 +549,10 @@ inline Variable make_variable_consuming(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
-    auto data_impl = data.getIntrusivePtr();
-    data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-    data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl.get(), requires_grad));
-    return Variable(std::move(data_impl));
+    AT_ASSERT(data.getIntrusivePtr().use_count() == 1);
+    data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
+    return Variable(c10::make_intrusive<Variable::Impl>(std::move(data), std::move(autograd_meta), requires_grad));
   }
   return Variable();
 }
@@ -597,23 +572,6 @@ inline Variable make_variable(
   }
   return Variable();
 }
-
-inline Variable make_variable_consuming(
-      at::Tensor data,
-      Edge gradient_edge,
-      bool allow_tensor_metadata_change = true) {
-  AT_CHECK(
-      !data.is_variable(),
-      "Must not create a new variable from a variable, use its .tensor_data()");
-  if (data.defined()) {
-    auto data_impl = data.getIntrusivePtr();
-    data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-    data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl.get(), false, std::move(gradient_edge)));
-    return Variable(std::move(data_impl));
-  }
-  return Variable();
-}
-
 
 // Tensor Conversion
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
