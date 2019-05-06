@@ -1,9 +1,6 @@
 #pragma once
 
-#include <c10/util/Exception.h>
-
 #include <cstdint>
-#include <functional>
 #include <initializer_list>
 #include <string>
 #include <unordered_map>

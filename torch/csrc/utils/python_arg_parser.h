@@ -48,7 +48,6 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/MemoryFormat.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/tensor/python_tensor.h>
