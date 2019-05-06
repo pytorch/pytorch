@@ -155,6 +155,10 @@
 #     possible values:
 #       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
+#
+#   USE_EIGEN_THEADPOOL
+#      use Eigen thread pool as a native implementation of thread pool
+#
 
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, find_packages

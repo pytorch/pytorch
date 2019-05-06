@@ -223,6 +223,10 @@ def run_cmake(version,
         parallel_backend = 'OPENMP'
     cmake_defines(cmake_args, PARALLEL_BACKEND=parallel_backend)
 
+    use_eigen_threadpool = os.getenv('USE_EIGEN_THREADPOOL')
+    if use_eigen_threadpool:
+        cmake_defines(cmake_args, USE_EIGEN_THREADPOOL=use_eigen_threadpool)
+
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
 
