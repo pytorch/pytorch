@@ -4,7 +4,7 @@ max-line-length = 120
 # C408 ignored because we like the dict keyword argument syntax
 # E501 is not flexible enough, we're using B950 instead
 ignore =
-    E203,E305,E402,E501,E721,E741,F403,F405,F821,F841,F999,W503,W504,C408,E302,
+    E203,E305,E402,E501,E721,E741,F403,F405,F821,F841,F999,W503,W504,C408,E302,W291,
     # these ignores are from flake8-bugbear; please fix!
     B007,B008,
     # these ignores are from flake8-comprehensions; please fix!

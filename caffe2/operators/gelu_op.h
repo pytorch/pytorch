@@ -4,6 +4,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/c10_operator.h"
 #include "caffe2/operators/elementwise_ops.h"
 
 C10_DECLARE_CAFFE2_OPERATOR(Gelu);

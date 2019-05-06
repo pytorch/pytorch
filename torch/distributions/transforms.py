@@ -434,7 +434,7 @@ class AffineTransform(Transform):
         shape = x.shape
         scale = self.scale
         if isinstance(scale, numbers.Number):
-            result = x.new_empty(shape).fill_(math.log(abs(scale)))
+            result = torch.full_like(x, math.log(abs(scale)))
         else:
             result = torch.abs(scale).log()
         if self.event_dim:
