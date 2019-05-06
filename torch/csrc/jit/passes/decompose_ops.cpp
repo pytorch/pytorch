@@ -2,6 +2,8 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
 namespace torch {
@@ -68,8 +70,10 @@ static void DecomposeOps(Block* block) {
 
 }
 
-void DecomposeOps(const std::shared_ptr<Graph>& graph) {
+void DecomposeOps(std::shared_ptr<Graph>& graph) {
   DecomposeOps(graph->block());
+  PropagateInputShapes(graph);
+  ConstantPropagation(graph);
   EliminateDeadCode(graph);
 }
 
