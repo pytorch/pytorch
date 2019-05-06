@@ -190,7 +190,6 @@ namespace detail {
   struct return_type_to_ivalue<c10::ArrayRef<T>> {
     static_assert(guts::false_t<c10::ArrayRef<T>>::value, "You tried to register a kernel with an unsupported return type: c10::ArrayRef<T>. Please use std::vector<T> instead.");
   };
-  // TODO legacy_return_type_to_ivalue should support std::unordered_map
   template<class Key, class Value>
   struct return_type_to_ivalue<std::unordered_map<Key, Value>> {
     static_assert(guts::false_t<std::unordered_map<Key, Value>>::value, "You tried to register a kernel with an unsupported return type: std::unordered_map<Key, Value>. Please use c10::Dict<Key, Value> instead.");
