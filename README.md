@@ -169,7 +169,7 @@ If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xa
 
 Common
 ```
-conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
 ```
 
 On Linux
@@ -182,6 +182,9 @@ conda install -c pytorch magma-cuda90 # or [magma-cuda80 | magma-cuda92 | magma-
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
+# if you are updating an existing checkout
+git submodule sync 
+git submodule update --init --recursive
 ```
 
 #### Install PyTorch
