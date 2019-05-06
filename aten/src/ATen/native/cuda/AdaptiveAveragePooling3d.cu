@@ -348,8 +348,8 @@ void adaptive_avg_pool3d_out_cuda_template(
       "adaptive_avg_pool3d: internal error: output_size.size() must be 1 or 3");
 
   int64_t osizeT = output_size[0];
-  int64_t osizeH = output_size[1];
-  int64_t osizeW = output_size[2];
+  int64_t osizeH = output_size.size() == 1 ? output_size[0] : output_size[1];
+  int64_t osizeW = output_size.size() == 1 ? output_size[0] : output_size[2];
 
   int64_t sizeD, isizeT, isizeH, isizeW;
   int64_t istrideD, istrideT, istrideH, istrideW;

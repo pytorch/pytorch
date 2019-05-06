@@ -96,6 +96,10 @@ void adaptive_avg_pool3d_out_cpu_template(
       (input.ndimension() == 4 || input.ndimension() == 5),
       "non-empty 4D or 5D (batch mode) tensor expected for input");
 
+  AT_CHECK(
+      output_size.size() == 1 || output_size.size() == 3,
+      "adaptive_avg_pool3d: internal error: output_size.size() must be 1 or 3");
+
   /* sizes */
   int64_t sizeD = input.size(-4);
   int64_t isizeT = input.size(-3);
@@ -107,9 +111,9 @@ void adaptive_avg_pool3d_out_cpu_template(
   int64_t istrideH = input.stride(-2);
   int64_t istrideW = input.stride(-1);
   /* output sizes */
-  auto osizeT = output_size[0];
-  auto osizeH = output_size[1];
-  auto osizeW = output_size[2];
+  int64_t osizeT = output_size[0];
+  int64_t osizeH = output_size.size() == 1 ? output_size[0] : output_size[1];
+  int64_t osizeW = output_size.size() == 1 ? output_size[0] : output_size[2];
 
   if (input.ndimension() == 4) {
     output.resize_({sizeD, osizeT, osizeH, osizeW});
@@ -219,18 +223,17 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input) {
-  /* sizes */
-  int sizeD = input.size(-4);
-  int isizeT = input.size(-3);
-  int isizeH = input.size(-2);
-  int isizeW = input.size(-1);
-  int osizeT = gradOutput_.size(-3);
-  int osizeH = gradOutput_.size(-2);
-  int osizeW = gradOutput_.size(-1);
-
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
 
+  /* sizes */
+  int64_t sizeD = input.size(-4);
+  int64_t isizeT = input.size(-3);
+  int64_t isizeH = input.size(-2);
+  int64_t isizeW = input.size(-1);
+  int64_t osizeT = gradOutput_.size(-3);
+  int64_t osizeH = gradOutput_.size(-2);
+  int64_t osizeW = gradOutput_.size(-1);
   /* backprop */
   if (input.ndimension() == 4) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -297,7 +300,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input) {
-  gradInput.resize_as_(input);
+  gradInput.resize_as_(input).zero_();
   adaptive_avg_pool3d_backward_out_cpu_template(gradInput, gradOutput_, input);
   return gradInput;
 }

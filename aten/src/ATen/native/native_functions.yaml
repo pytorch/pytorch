@@ -3667,7 +3667,7 @@
     CPU: adaptive_avg_pool3d_cpu
     CUDA: adaptive_avg_pool3d_cuda
 
-- func: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self, *, Tensor(a!) gradInput) -> Tensor(a!)
+- func: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
   dispatch:
     CPU: adaptive_avg_pool3d_backward_out_cpu
     CUDA: adaptive_avg_pool3d_backward_out_cuda
