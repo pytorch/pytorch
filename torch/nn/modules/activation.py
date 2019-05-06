@@ -691,6 +691,8 @@ class MultiheadAttention(Module):
     Args:
         embed_dim: total dimension of the model.
         num_heads: parallel attention heads.
+        dropout: a Dropout layer on attn_output_weights. Default: 0.0.
+        bias: add bias as module parameter. Default: True.
         add_bias_kv: add bias to the key and value sequences at dim=0.
         add_zero_attn: add a new batch of zeros to the key and 
                        value sequences at dim=1.
@@ -754,8 +756,7 @@ class MultiheadAttention(Module):
         attn_mask: mask that prevents attention to certain positions.
 
     Shape:
-        - Inputs:
-
+        Inputs:
         - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is 
           the embedding dimension.
         - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is 
@@ -765,8 +766,7 @@ class MultiheadAttention(Module):
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
         - attn_mask: :math:`(L, L)` where L is the target sequence length.
 
-        - Outputs:
-
+        Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, 
           E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
