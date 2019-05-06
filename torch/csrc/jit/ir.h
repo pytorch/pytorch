@@ -24,7 +24,7 @@
 #include <vector>
 
 // Forward declare, the real meat is in python_ir.cpp
-template<class T>
+template <class T>
 class THPPointer;
 using THPObjectPtr = THPPointer<PyObject>;
 using pyobj_list = std::vector<THPObjectPtr>;
@@ -913,6 +913,7 @@ struct Block {
   // in src to look up its corresponding value
   TORCH_API void cloneFrom(Block* src, std::function<Value*(Value*)> value_map);
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
+
  private:
   void reIndexTopology();
 
@@ -1054,7 +1055,10 @@ struct Graph {
       at::ArrayRef<Value*> values,
       c10::OptNameList field_names = c10::nullopt);
   TORCH_API Node* createTupleUnpack(Value* v);
-  TORCH_API Node* createTupleIndex(Value* tup, int64_t index);
+  TORCH_API Node* createTupleIndex(
+      Value* tup,
+      Value* idx,
+      const TypePtr& output_type);
   TORCH_API Node* createTupleSlice(Value* tup, int64_t beg, int64_t end);
   TORCH_API Node* createList(
       const TypePtr& elem_type,
@@ -1292,6 +1296,5 @@ TORCH_API std::vector<Value*> inlineCallTo(
     Graph& callee,
     ArrayRef<Value*> inputs,
     bool unpack_outputs = false);
-
 } // namespace jit
 } // namespace torch

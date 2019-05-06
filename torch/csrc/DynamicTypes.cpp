@@ -1,13 +1,14 @@
 #include <torch/csrc/python_headers.h>
 
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Dtype.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/PythonTypes.h>
-#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/cuda_enabled.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/object_ptr.h>
 
 #include <ATen/ATen.h>
 
