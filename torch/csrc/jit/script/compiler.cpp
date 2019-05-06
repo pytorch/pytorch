@@ -390,6 +390,7 @@ struct Environment {
           {"float", std::make_shared<CastValue>(FloatType::get(), prim::Float)},
           {"int", std::make_shared<CastValue>(IntType::get(), prim::Int)},
           {"bool", std::make_shared<CastValue>(BoolType::get(), prim::Bool)},
+          {"str", std::make_shared<CastValue>(StringType::get(), prim::str)},
           {"getattr", std::make_shared<GetAttrValue>()},
           {"isinstance", std::make_shared<IsInstanceValue>()},
           // todo(zach): remove when we can correctly export torch.full via ONNX
