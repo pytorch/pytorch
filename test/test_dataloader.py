@@ -63,7 +63,7 @@ if not NO_MULTIPROCESSING_SPAWN:
 # Yes, in environments where physical CPU resources are shared, e.g., CI, the
 # time for a inter-process communication can be highly varying.  With 15~17s of
 # timeout, we have observed flakiness in some CI builds (see
-# pytorch/pytorch#14501, pytoch/pytorch#16608).  We follow the CPython
+# pytorch/pytorch#14501, pytorch/pytorch#16608).  We follow the CPython
 # multiprocessing setup and set the timeout to 60s here:
 #
 # https://github.com/python/cpython/blob/e8113f51a8bdf33188ee30a1c038a298329e7bfa/Lib/test/_test_multiprocessing.py#L73
@@ -765,6 +765,8 @@ class TestDataLoader(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
+    @unittest.skipIf(sys.version_info[0] < 3,
+                     "this test is flaky in py2, see https://github.com/pytorch/pytorch/issues/14501, 18950, 19421")
     def test_proper_exit(self):
         (r'''There might be ConnectionResetError or leaked semaphore warning '''
          r'''(due to dirty process exit), but they are all safe to ignore''')
