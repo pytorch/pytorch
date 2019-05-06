@@ -5,17 +5,13 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/jit_exception.h>
-#include <torch/csrc/jit/script/logging.h>
 
 #include <exception>
 #include <iostream>
@@ -476,7 +472,9 @@ struct CodeImpl {
           createJumpFalse(cond_branch, instructions.size());
           createJumpTrue(cond_branch_end, entry);
         } break;
-        default: { insertInstruction(node); } break;
+        default: {
+          insertInstruction(node);
+        } break;
       }
     }
   }
