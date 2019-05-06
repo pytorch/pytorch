@@ -1,13 +1,11 @@
-#include <torch/csrc/python_headers.h>
-
 #include <torch/csrc/utils/tensor_layouts.h>
-
-#include <torch/csrc/Layout.h>
+#include <ATen/Layout.h>
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
-
-#include <c10/core/ScalarType.h>
-#include <ATen/Layout.h>
+#include <torch/csrc/Layout.h>
+#include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/object_ptr.h>
 
 namespace torch { namespace utils {
 
