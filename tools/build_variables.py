@@ -38,6 +38,7 @@ libtorch_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
+    "torch/csrc/autograd/function_hook.cpp",
     "torch/csrc/autograd/functions/accumulate_grad.cpp",
     "torch/csrc/autograd/functions/basic_ops.cpp",
     "torch/csrc/autograd/functions/tensor.cpp",
@@ -59,6 +60,7 @@ libtorch_sources = [
     "torch/csrc/jit/pickler.cpp",
     "torch/csrc/jit/graph_executor.cpp",
     "torch/csrc/jit/import.cpp",
+    "torch/csrc/jit/import_export_helpers.cpp",
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/irparser.cpp",
@@ -84,6 +86,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/loop_unrolling.cpp",
     "torch/csrc/jit/passes/lower_grad_of.cpp",
     "torch/csrc/jit/passes/lower_tuples.cpp",
+    "torch/csrc/jit/passes/pattern_fusion.cpp",
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/python_print.cpp",
     "torch/csrc/jit/passes/quantization.cpp",
@@ -107,6 +110,7 @@ libtorch_sources = [
     "torch/csrc/jit/script/schema_matching.cpp",
     "torch/csrc/jit/script/class_type.cpp",
     "torch/csrc/jit/script/parser.cpp",
+    "torch/csrc/jit/script/jit_exception.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/jit/import_source.cpp",
     "torch/csrc/jit/hooks_for_testing.cpp",
@@ -138,8 +142,8 @@ libtorch_cuda_sources = [
 
 def add_torch_libs():
     r = {}
+    c2_gpu = (read_config("caffe2", "gpu", "1") == "1")
     libtorch_python_sources = [
-        ":generate-code=THCUNN.cpp",
         ":generate-code=THNN.cpp",
         ":generate-code=python_functions.cpp",
         ":generate-code=python_nn_functions.cpp",
@@ -194,17 +198,7 @@ def add_torch_libs():
         "torch/csrc/autograd/python_variable.cpp",
         "torch/csrc/autograd/python_variable_indexing.cpp",
         "torch/csrc/byte_order.cpp",
-        "torch/csrc/cuda/Event.cpp",
-        "torch/csrc/cuda/Module.cpp",
-        "torch/csrc/cuda/Storage.cpp",
-        "torch/csrc/cuda/Stream.cpp",
-        "torch/csrc/cuda/Tensor.cpp",
-        "torch/csrc/cuda/python_comm.cpp",
-        "torch/csrc/cuda/python_nccl.cpp",
-        "torch/csrc/cuda/serialization.cpp",
-        "torch/csrc/cuda/utils.cpp",
         "torch/csrc/distributed/Module.cpp",
-        "torch/csrc/distributed/c10d/ddp.cpp",
         "torch/csrc/distributed/c10d/init.cpp",
         "torch/csrc/distributed/c10d/reducer.cpp",
         "torch/csrc/jit/init.cpp",
@@ -221,6 +215,7 @@ def add_torch_libs():
         "torch/csrc/jit/python_ir.cpp",
         "torch/csrc/jit/python_tracer.cpp",
         "torch/csrc/jit/script/init.cpp",
+        "torch/csrc/jit/script/python_sugared_value.cpp",
         "torch/csrc/jit/script/python_tree_views.cpp",
         "torch/csrc/multiprocessing/init.cpp",
         "torch/csrc/onnx/init.cpp",
@@ -242,13 +237,25 @@ def add_torch_libs():
         "torch/csrc/utils/tuple_parser.cpp",
     ]
 
+    libtorch_python_cuda_sources = [
+        ":generate-code=THCUNN.cpp",
+        "torch/csrc/cuda/Event.cpp",
+        "torch/csrc/cuda/Module.cpp",
+        "torch/csrc/cuda/Storage.cpp",
+        "torch/csrc/cuda/Stream.cpp",
+        "torch/csrc/cuda/Tensor.cpp",
+        "torch/csrc/cuda/python_comm.cpp",
+        "torch/csrc/cuda/python_nccl.cpp",
+        "torch/csrc/cuda/serialization.cpp",
+        "torch/csrc/cuda/utils.cpp",
+        "torch/csrc/distributed/c10d/ddp.cpp",
+    ]
+
     common_flags = {
         "compiler_flags": [
             "-D_THP_CORE",
             "-DUSE_C10D",
-            "-DUSE_CUDNN",
             "-DUSE_DISTRIBUTED",
-            "-DUSE_NCCL",
             "-DUSE_NUMPY",
             "-DUSE_SCALARS",
             "-DNO_CUDNN_DESTROY_HANDLE",
@@ -259,7 +266,10 @@ def add_torch_libs():
             "-Wno-non-virtual-dtor",
             "-Wno-shadow-compatible-local",
             "-Wno-empty-body",
-        ],
+        ] + ([
+            "-DUSE_CUDNN",
+            "-DUSE_NCCL",
+        ] if c2_gpu else []),
         "compiler_specific_flags": {
             "clang": [
                 "-Wno-absolute-value",
@@ -331,14 +341,17 @@ def add_torch_libs():
     # TODO: split it into cpp and cuda parts similarly to libtorch
     cpp_library(
         name="_C_impl",
-        srcs=libtorch_python_sources,
+        srcs=libtorch_python_sources + (
+            libtorch_python_cuda_sources if c2_gpu else []
+        ),
         link_whole=True,
         deps=[
-            ":libtorch_cuda",
             ":thnn",
             "//caffe2/torch/lib/THD:THD",
             "//caffe2/torch/lib/c10d:c10d",
             "//caffe2/torch/lib/libshm:libshm",
+        ] + [
+            ":libtorch_cuda" if c2_gpu else ":libtorch",
         ],
         external_deps=[
             ("numpy", None, "cpp"),
