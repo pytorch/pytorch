@@ -236,7 +236,10 @@ void Pickler::pushTensor(const IValue& ivalue) {
   push<OpCode>(OpCode::REDUCE);
 }
 
-void Pickler::pushSpecializedList(const IValue& ivalue, PicklerClass cls, std::function<void(const IValue&)> item_pusher) {
+void Pickler::pushSpecializedList(
+    const IValue& ivalue,
+    PicklerClass cls,
+    std::function<void(const IValue&)> item_pusher) {
   pushClass(cls);
 
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
@@ -394,7 +397,6 @@ void Unpickler::run() {
   AT_ERROR("Overran buffer while unpickling data, didn't find STOP opcode");
 }
 
-
 OpCode Unpickler::readInstruction() {
   auto opcode = readOpCode();
   switch (opcode) {
@@ -545,20 +547,19 @@ OpCode Unpickler::readInstruction() {
       auto setitem_data = stack_.back().ivalue();
       stack_.pop_back();
 
-
       auto class_name =
-        static_cast<PicklerClass>(uint8_t(stack_.back().ivalue().toInt()));
+          static_cast<PicklerClass>(uint8_t(stack_.back().ivalue().toInt()));
       stack_.pop_back();
 
       switch (class_name) {
-      case PicklerClass::TENSOR:
-        stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
-        break;
-      case PicklerClass::INTLIST:
-        stack_.emplace_back(setitem_data);
-        break;
-      default:
-        AT_ERROR("Unknown pickler class id");
+        case PicklerClass::TENSOR:
+          stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
+          break;
+        case PicklerClass::INTLIST:
+          stack_.emplace_back(setitem_data);
+          break;
+        default:
+          AT_ERROR("Unknown pickler class id");
       }
     } break;
     case OpCode::REDUCE: {
@@ -591,7 +592,11 @@ OpCode Unpickler::readInstruction() {
       }
     } break;
     default:
-      AT_ERROR("Unknown opcode for unpickling at ", reinterpret_cast<void*>(opcode),": ", static_cast<uint8_t>(opcode));
+      AT_ERROR(
+          "Unknown opcode for unpickling at ",
+          reinterpret_cast<void*>(opcode),
+          ": ",
+          static_cast<uint8_t>(opcode));
   }
   return opcode;
 }
