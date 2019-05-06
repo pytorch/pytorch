@@ -287,9 +287,9 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
   int64_t isizeT = input.size(-3);
   int64_t isizeH = input.size(-2);
   int64_t isizeW = input.size(-1);
-  int64_t osizeT = gradOutput_.size(-3);
-  int64_t osizeH = gradOutput_.size(-2);
-  int64_t osizeW = gradOutput_.size(-1);
+  int64_t osizeT = gradOutput.size(-3);
+  int64_t osizeH = gradOutput.size(-2);
+  int64_t osizeW = gradOutput.size(-1);
   /* backprop */
   if (input.ndimension() == 4) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
