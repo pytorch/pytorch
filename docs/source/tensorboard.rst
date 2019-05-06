@@ -49,50 +49,32 @@ and runnable with::
     tensorboard --logdir=runs
 
 
-The following shows how to log data in tensorboard from pytorch.
+Lots of information can be logged for one experiment. To avoid cluttering
+the UI and have better result clustering, we can group plots by naming them
+hierarchically. For example, "Loss/train" and "Loss/test" will be grouped
+together, while "Accuracy/train" and "Accuracy/test" will be grouped separately
+in the TensorBoard interface.
 
 .. code:: python
 
-    import torch
-    import torchvision.utils as vutils
-    import numpy as np  # you can use torch tensor instead of numpy array.
-    from torch.utils.tensorboard import SummaryWriter
 
+    from torch.utils.tensorboard import SummaryWriter
+    import numpy as np
 
     writer = SummaryWriter()
-    sample_rate = 44100
-    freqs = [262, 294, 330, 349, 392, 440, 440, 440, 440, 440, 440]
 
-    for n_iter in range(100):  # n_iter is used as the x axis of the plot.
+    for n_iter in range(100):
+        writer.add_scalar('Loss/train', np.random.random(), n_iter)
+        writer.add_scalar('Loss/test', np.random.random(), n_iter)
+        writer.add_scalar('Accuracy/train', np.random.random(), n_iter)
+        writer.add_scalar('Accuracy/test', np.random.random(), n_iter)
 
-        dummy_s1 = torch.rand(1)
-        dummy_s2 = torch.rand(1)
-        # data can be grouped by `slash`
-        writer.add_scalar('data/scalar1', dummy_s1[0], n_iter)
-        writer.add_scalar('data/scalar2', dummy_s2[0], n_iter)
 
-        # plot many lines in one graph
-        writer.add_scalars('data/scalar_group', {'xsinx': n_iter * np.sin(n_iter),
-                                                'xcosx': n_iter * np.cos(n_iter),
-                                                'arctanx': np.arctan(n_iter)}, n_iter)
+Expected result:
 
-        dummy_img = torch.rand(32, 3, 64, 64)  # your input to the network
-        if n_iter % 10 == 0:  # saving images cost you computing power and disk space, only save when needed.
-            x = vutils.make_grid(dummy_img, normalize=True, scale_each=True)
-            writer.add_image('Image_vutils_mosaic', x, n_iter)
-            writer.add_images('Image_implicit_mosaic', dummy_img, n_iter)  # note the 's'
+.. image:: _static/img/tensorboard/hier_tags.png
+    :scale: 75 %
 
-            dummy_audio = torch.zeros(sample_rate * 2)
-            for i in range(x.size(0)):
-                # amplitude of sound should in [-1, 1]
-                dummy_audio[i] = np.cos(freqs[n_iter // 10] * np.pi * float(i) / float(sample_rate))
-            writer.add_audio('myAudio', dummy_audio, n_iter, sample_rate=sample_rate)
-
-            writer.add_text('Text', 'text logged at step:' + str(n_iter), n_iter)
-
-            writer.add_pr_curve('xoxo', np.random.randint(2, size=100), np.random.rand(100), n_iter)
-
-    writer.close()
 
 .. currentmodule:: torch.utils.tensorboard.writer
 
