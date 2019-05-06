@@ -1446,11 +1446,11 @@ if _enabled:
         def __init__(self, original, stubs):
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
             # __init__ can run correctly
+            object.__setattr__(self, '__dict__', {})
             self.__dict__['_initialized'] = False
             super(WeakScriptModuleProxy, self).__init__()
 
             self.__dict__["_original"] = weakref.ref(original)
-
             # Copy Parameters / Modules / Buffers
             for name in dir(original):
                 item = getattr(original, name)
@@ -1469,6 +1469,17 @@ if _enabled:
             # Copy constants
             self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
 
+            # Automatically register primitive types as attributes
+            for name in dir(original):
+                if name == 'training':
+                    # TODO: remove this hack when training is a bool attribute
+                    # instead of a buffer
+                    continue
+                item = getattr(original, name)
+                primitive_type = torch.jit.annotations.get_primitive_type(item)
+                if name not in self.__dict__["_constants_set"] and primitive_type:
+                    ScriptModule.__setattr__(self, name, torch.jit.Attribute(item, primitive_type))
+
             # Copy overloads
             self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
 
@@ -1481,7 +1492,8 @@ if _enabled:
             try:
                 return ScriptModule.__getattr__(self, attr)
             except AttributeError:
-                if self.__dict__["_initialized"]:
+                orig = self.__dict__["_original"]()
+                if orig and self.__dict__["_initialized"]:
                     return getattr(self.__dict__["_original"](), attr)
                 else:
                     # Only fall back to original once __init__() is done
@@ -1539,7 +1551,12 @@ def _make_strong(mod):
         _jit_internal.weak_types[type(mod)]["method_stubs"] = stubs
 
     # Create proxy with stubs
-    proxy = WeakScriptModuleProxy(mod, stubs)
+    original_type = type(mod)
+
+    # Construct a new type that inherits from both WeakScriptModuleProxy and
+    # original_type so that isinstance checks work correctly
+    weak_type = type(original_type.__name__, (WeakScriptModuleProxy, original_type), {})
+    proxy = weak_type(mod, stubs)
 
     _jit_internal.weak_modules[mod] = proxy
 

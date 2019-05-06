@@ -12,7 +12,7 @@ from ..._jit_internal import weak_module, weak_script_method, List
 @weak_module
 class _ConvNd(Module):
 
-    __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias', 'padding_mode']
+    __constants__ = ['stride', 'padding', 'dilation', 'groups', 'padding_mode']
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
@@ -480,7 +480,7 @@ class Conv3d(_ConvNd):
 class _ConvTransposeMixin(object):
     __constants__ = ['stride', 'padding', 'kernel_size', 'dim_size',
                      'output_padding', 'groups', 'dilation', 'transposed',
-                     'bias', 'padding_mode']
+                     'padding_mode']
 
     @weak_script_method
     def forward(self, input, output_size=None):
