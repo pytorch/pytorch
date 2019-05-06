@@ -12,7 +12,12 @@ def to_mkldnn(module):
     def m_fn(m):
         for key, param in m._parameters.items():
             if param is not None:
-                # yf225 TODO: explain the change here!
+                # NOTE: Here we are converting `param` to its equivalent MKLDNN tensor, which has
+                # `OpaqueTensorImpl<IDeepTensorWrapperPtr>` as their TensorImpl type which can be different
+                # from `param`'s original TensorImpl type. Due to this reason, we cannot use
+                # `param.data = t_fn(param.data)`, because `param.data = tensor` (which internally calls
+                # `Variable.set_data(tensor)`) does not accept `tensor` with a TensorImpl type that's
+                # different from the `param`'s original TensorImpl type.
                 m._parameters[key] = t_fn(param)
                 if param._grad is not None:
                     m._parameters[key]._grad = t_fn(param._grad)
@@ -25,9 +30,11 @@ def to_mkldnn(module):
         # nn.Linear is decomposed into addmm/matmul. Later we will
         # change nn.Linear to directly call aten linear and we can
         # remove this patch
-        # yf225 TODO: add comment: this needs to happen after the conversion for param and buf, because
-        # the conversion can potentially change the values that `m.weight` and `m.bias` point to, which invalidates
-        # the original pointers
+        #
+        # NOTE: This code block needs to be placed after the conversions
+        # for `m._parameters` and `m._buffers`, because those conversions
+        # can potentially change the actual tensors that `m.weight` and
+        # `m.bias` point to.
         if isinstance(m, torch.nn.Linear):
             m.forward = functools.partial(
                 torch._C._nn.linear,
