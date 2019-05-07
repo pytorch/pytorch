@@ -1196,19 +1196,22 @@ class TestCaffe2Backend(unittest.TestCase):
                 return torch.zeros(x.shape, dtype=torch.float) + torch.ones(x.shape)
 
         x = torch.randn(2, 3, 4)
-        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False, example_outputs=(torch.ones(x.size()),))
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),))
 
     def test_tensor_like_factories_script(self):
         class TensorFactory(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                # NOTE: issue #17932, scripting requires dtype, layout, device to be either provided together, or not provided at all.
+                # NOTE: issue #17932, scripting requires dtype, layout, device to be either provided together,
+                # or not provided at all.
                 zeros = torch.zeros_like(x, dtype=torch.float, layout=torch.strided, device=torch.device('cpu'))
                 ones = torch.ones_like(x, dtype=torch.float, layout=torch.strided, device=torch.device('cpu'))
                 return zeros + ones
 
         x = torch.randn(2, 3, 4)
-        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False, example_outputs=(torch.ones(x.size()),))
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),))
 
     def test_where_functional(self):
         class WhereFunctional(torch.nn.Module):

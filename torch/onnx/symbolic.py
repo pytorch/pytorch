@@ -130,7 +130,7 @@ def parse_args(*arg_descriptors):
             assert len(arg_descriptors) >= len(args)
             try:
                 argspec = inspect.getfullargspec(fn)
-            except:
+            except AttributeError:
                 argspec = inspect.getargspec(fn)
             args_names = argspec.args if argspec.args else []
             args_defaults = argspec.defaults if argspec.defaults else []
@@ -143,7 +143,7 @@ def parse_args(*arg_descriptors):
                 arg_name = args_names[i + 1]
 
                 # NOTE: Unprovided optional args become prim::Constant() in scripting.
-                is_arg_required = not arg_name in default_args_dict
+                is_arg_required = arg_name not in default_args_dict
                 if not _is_prim_constant(arg):
                     if is_arg_required:
                         fn_args.append(arg)
@@ -1354,7 +1354,8 @@ def ones_like(g, input, dtype, layout=None, device=None, pin_memory=False):
                 value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-def full(g, sizes, value, dtype=scalar_type_to_pytorch_type.index(torch.get_default_dtype()), layout=None, device=None, pin_memory=False):
+def full(g, sizes, value, dtype=scalar_type_to_pytorch_type.index(torch.get_default_dtype()),
+         layout=None, device=None, pin_memory=False):
     if pin_memory and _parse_arg(pin_memory, 'b'):
         raise RuntimeError("onnx pin_memory support is not implemented")
     const_value = _maybe_get_const(value, 't')
