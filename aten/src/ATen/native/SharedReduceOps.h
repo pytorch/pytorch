@@ -6,11 +6,11 @@
 #if defined(__CUDACC__)
 #include <THC/THCDeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
-#include <assert.h>
+#include <thrust/tuple.h>
 #elif defined(__HIPCC__)
 #include <THH/THHDeviceUtils.cuh>
 #include <ATen/native/hip/DeviceSqrt.cuh>
-#include <assert.h>
+#include <thrust/tuple.h>
 #else
 #include <cmath>
 #define device_sqrt std::sqrt
@@ -44,7 +44,7 @@ struct WelfordData {
 };
 
 
-template <typename scalar_t, typename acc_scalar_t, typename index_t, typename combine_t>
+template <typename scalar_t, typename acc_scalar_t, typename index_t, typename combine_t, typename res_t>
 struct WelfordOps {
   bool unbiased;
   bool take_sqrt;
@@ -82,20 +82,18 @@ struct WelfordOps {
       new_count
     };
   }
-  inline C10_DEVICE scalar_t project(acc_t acc, int result_index = 0) const {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(result_index >= 0 && result_index <= 1);
-#else
-    AT_ASSERT(result_index >= 0 && result_index <= 1);
-#endif
-    if (result_index == 1) {
-      return acc.mean;
-    }
+  inline C10_DEVICE res_t project(acc_t acc) const {
+    auto mean = acc.mean;
     combine_t divisor = unbiased ? (acc.nf - 1) : acc.nf;
     auto ret = (divisor > 0) ?
       (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
       : NAN;
-    return (scalar_t) ret;
+#if defined(__CUDACC__) || defined(__HIPCC__)
+    thrust::tuple<scalar_t, scalar_t> results((scalar_t) ret, mean);
+#else
+    std::vector<scalar_t> results{(scalar_t) ret, mean};
+#endif
+    return results;
   }
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline __device__ acc_t warp_shfl_down(acc_t acc, int offset) const {
@@ -124,12 +122,7 @@ struct MeanOps {
     return reduce(a, b);
   }
 
-  inline C10_DEVICE acc_t project(acc_t a, int result_index = 0) const {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(result_index == 0);
-#else
-    AT_ASSERT(result_index == 0);
-#endif
+  inline C10_DEVICE acc_t project(acc_t a) const {
     return a * factor;
   }
 
@@ -154,12 +147,7 @@ struct AbsMinOps {
     return MIN(a, b);
   }
 
-  inline C10_DEVICE acc_t project(acc_t a, int result_index = 0) const {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(result_index == 0);
-#else
-    AT_ASSERT(result_index == 0);
-#endif
+  inline C10_DEVICE acc_t project(acc_t a) const {
     return a;
   }
 
@@ -181,12 +169,7 @@ struct AbsMaxOps {
     return MAX(a, b);
   }
 
-  inline C10_DEVICE acc_t project(acc_t a, int result_index = 0) const {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(result_index == 0);
-#else
-    AT_ASSERT(result_index == 0);
-#endif
+  inline C10_DEVICE acc_t project(acc_t a) const {
     return a;
   }
 
@@ -209,12 +192,7 @@ struct NormOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a, int result_index = 0) const {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(result_index == 0);
-#else
-    AT_ASSERT(result_index == 0);
-#endif
+  inline C10_DEVICE acc_t project(acc_t a) const {
     return compat_pow(a, acc_t(1.0)/norm);
   }
 
@@ -238,12 +216,7 @@ struct NormZeroOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a, int result_index = 0) const {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(result_index == 0);
-#else
-    AT_ASSERT(result_index == 0);
-#endif
+  inline C10_DEVICE acc_t project(acc_t a) const {
     return a;
   }
 
@@ -264,12 +237,7 @@ struct NormOneOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a, int result_index = 0) const {
-#if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(result_index == 0);
-#else
-    AT_ASSERT(result_index == 0);
-#endif
+  inline C10_DEVICE acc_t project(acc_t a) const {
     return a;
   }
 

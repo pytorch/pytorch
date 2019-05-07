@@ -498,13 +498,13 @@
   other: grad.clone().masked_fill_(self > other, 0)
 
 - name: mean(Tensor self)
-  self: mean_backward(grad, self)
+  self: mean_backward(grad, self.sizes(), self.numel())
 
 - name: mean(Tensor self, ScalarType dtype)
   self: grad.expand(self.sizes()).to(self.scalar_type()) / self.numel()
 
 - name: mean(Tensor self, IntArrayRef dim, bool keepdim)
-  self: mean_backward(grad, self, dim, keepdim)
+  self: mean_backward(grad, self.sizes(), dim, keepdim)
 
 - name: mean(Tensor self, IntArrayRef dim, ScalarType dtype)
   self: sum_backward(grad, self.sizes(), dim, false).to(self.scalar_type()) / _safe_size(self.sizes(), dim)

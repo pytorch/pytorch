@@ -16,6 +16,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <thrust/tuple.h>
 
 namespace at { namespace native {
 
@@ -243,7 +244,7 @@ struct func_wrapper_t {
   using arg_t = typename binary_function_traits<func_t>::arg2_t;
   func_t reduce;
   func_t combine;
-  static inline __device__ out_scalar_t project(arg_t arg, int val) {
+  static inline __device__ out_scalar_t project(arg_t arg) {
     return (out_scalar_t) arg;
   }
   static inline __device__ arg_t warp_shfl_down(arg_t arg, int offset) {
@@ -328,6 +329,7 @@ struct ReduceOp {
       value = block_x_reduce(value, shared_memory);
     }
 
+    auto out = (out_scalar_t*)((char*)dst[0] + base_offsets[0]);
     arg_t* acc = nullptr;
     if (acc_buf != nullptr) {
       size_t numerator = sizeof(arg_t);
@@ -340,22 +342,20 @@ struct ReduceOp {
       value = global_reduce(value, acc, shared_memory);
     } else if (config.should_store(output_idx)) {
       if (acc == nullptr) {
-        for (int i = 0; i < noutputs; i++) {
-          auto out = (out_scalar_t*)((char*)dst[i] + base_offsets[0]);
-          if (accumulate) {
-            value = accumulate_in_output<can_accumulate_in_output>(out, value);
-          }
-          *out = project_if_necessary<can_accumulate_in_output>(value, i);
+        if (accumulate) {
+          value = accumulate_in_output<can_accumulate_in_output>(out, value);
+        }
+        if (final_output) {
+          set_results_to_output(value, base_offsets[0]);
+        } else {
+          *out = get_accumulated_output<can_accumulate_in_output>(out, value);
         }
       } else {
         if (accumulate) {
           value = ops.combine(*acc, value);
         }
         if (final_output) {
-          for (int i = 0; i < noutputs; i++) {
-            auto out = (out_scalar_t*)((char*)dst[i] + base_offsets[0]);
-            *out = ops.project(value, i);
-          }
+          set_results_to_output(value, base_offsets[0]);
         } else {
           *acc = value;
         }
@@ -466,14 +466,13 @@ struct ReduceOp {
   }
 
   template <bool can_acc>
-  C10_DEVICE out_scalar_t project_if_necessary(
-    arg_t value,
-    int index,
+  C10_DEVICE out_scalar_t get_accumulated_output(
+    out_scalar_t* out, arg_t value,
     typename std::enable_if<can_acc>::type* = nullptr
   ) const {
-    return final_output ? (out_scalar_t)ops.project(value, index) : (out_scalar_t)value;
+    assert(!final_output);
+    return (out_scalar_t)value;
   }
-
 
   // This function should never be called --
   // it's the version of `accumulate_in_output`
@@ -487,20 +486,48 @@ struct ReduceOp {
     return arg_t {};
   }
 
+  // This function should never be called --
+  // it's the version of `get_accumulated_output`
+  // when accumulation in the output is not possible.
   template <bool can_acc>
-  C10_DEVICE out_scalar_t project_if_necessary(
-    arg_t value,
-    int index,
+  C10_DEVICE out_scalar_t get_accumulated_output(
+    out_scalar_t* out, arg_t value,
     typename std::enable_if<!can_acc>::type* = nullptr
   ) const {
+    assert(false);
+    return *out;
+  }
+
+  template<class T>
+  C10_DEVICE void set_results(const T x, const index_t base_offset) const {
+    assert(noutputs == 1);
+    auto res = (out_scalar_t*)((char*)dst[0] + base_offset);
+    *res = x;
+  }
+
+  //Currently implemented for max of two outputs
+  template<class T>
+  C10_DEVICE void set_results(const thrust::tuple<T, T> x, const index_t base_offset) const {
+    if (noutputs >= 1) {
+      auto res0 = (out_scalar_t*)((char*)dst[0] + base_offset);
+      *res0 = thrust::get<0>(x);
+    }
+    if (noutputs >= 2) {
+      auto res1 = (out_scalar_t *) ((char *) dst[1] + base_offset);
+      *res1 = thrust::get<1>(x);
+    }
+  }
+
+  C10_DEVICE void set_results_to_output(arg_t value, index_t base_offset) const {
     assert(final_output);
-    return ops.project(value, index);
+    set_results(ops.project(value), base_offset);
   }
 
   C10_DEVICE arg_t global_reduce(arg_t value, arg_t* acc, char* shared_memory) const {
     arg_t* reduce_buffer = (arg_t*)cta_buf;
     index_t output_idx = config.output_idx();
     auto base_offsets = output_calc.get(output_idx);
+    auto out = (out_scalar_t*)((char*)dst[0] + base_offsets[0]);
 
     bool should_store = config.should_store(config.output_idx());
     if (should_store) {
@@ -537,22 +564,20 @@ struct ReduceOp {
       }
       if (should_store) {
         if (acc == nullptr) {
-          for (int i = 0; i < noutputs; i++) {
-            auto out = (out_scalar_t *) (dst[i] + base_offsets[0]);
-            if (accumulate) {
-              value = accumulate_in_output<can_accumulate_in_output>(out, value);
-            }
-            *out = project_if_necessary<can_accumulate_in_output>(value, i);
+          if (accumulate) {
+            value = accumulate_in_output<can_accumulate_in_output>(out, value);
+          }
+          if (final_output) {
+            set_results_to_output(value, base_offsets[0]);
+          } else {
+            *out = get_accumulated_output<can_accumulate_in_output>(out, value);
           }
         } else {
           if (accumulate) {
             value = ops.combine(*acc, value);
           }
           if (final_output) {
-            for (int i = 0; i < noutputs; i++) {
-              auto out = (out_scalar_t *) (dst[i] + base_offsets[0]);
-              *out = ops.project(value, i);
-            }
+            set_results_to_output(value, base_offsets[0]);
           } else {
             *acc = value;
           }

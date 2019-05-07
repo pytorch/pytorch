@@ -652,21 +652,17 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
 }
 
 static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, c10::optional<IntArrayRef> dim, bool unbiased, bool keepdim, bool take_sqrt) {
+  AT_ASSERT(result1.defined() && result2.defined());
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            fname, " only support CPU and CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), fname, " only support floating-point dtypes");
-  ScalarType dtype;
-  if (result1.defined()) {
-    AT_CHECK(!result2.defined() || result1.type().scalarType() == result2.type().scalarType(),
-        "provided by result1 dtype must match dtype of result2. Got ",
-        toString(result1.type().scalarType()),
-             " and ",
-             toString(result2.type().scalarType()),
-             ".");
-    dtype = get_dtype(result1, self, {}, true);
-  } else {
-    dtype = get_dtype(result2, self, {}, true);
-  }
+  AT_CHECK(result1.type().scalarType() == result2.type().scalarType(),
+           "provided by result1 dtype must match dtype of result2. Got ",
+           toString(result1.type().scalarType()),
+           " and ",
+           toString(result2.type().scalarType()),
+           ".");
+  ScalarType dtype = get_dtype(result1, self, {}, true);
   auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
   if (iter->numel() == 0) {
     result1.fill_(NAN);
