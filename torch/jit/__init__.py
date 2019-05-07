@@ -1365,7 +1365,6 @@ if _enabled:
             return Module.__getattr__(self, attr)
 
         def __setattr__(self, attr, value):
-            print("setting scriptmodule attr", attr, value)
             if attr not in self._constants_set:
                 if isinstance(value, Module) and _is_weak_type(type(value)):
                     # Compile weak script module
@@ -1446,24 +1445,25 @@ if _enabled:
 
     class WeakScriptModuleProxy(ScriptModule):
         def __init__(self, original, stubs):
-            # Clear any inherited properties
-            object.__setattr__(self, '__dict__', {})
-
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
             # __init__ can run correctly
             self.__dict__['_initialized'] = False
             super(WeakScriptModuleProxy, self).__init__()
 
+            # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
-            # Copy Parameters / Modules / Buffers
+
+            # Copy Parameters and Modules
             for name in dir(original):
                 item = getattr(original, name)
-                # if item is None and name in original._parameters:
-                #     # XXX: treat None value simply as module attributes instead of adding them to the parameter list
-                #     # TODO: need to handle this more generally when non-tensor attributes added to module
-                #     object.__setattr__(self, name, item)
+                if item is None and name in original._parameters:
+                    # XXX: treat None value simply as module attributes instead of adding them to the parameter list
+                    # TODO: need to handle this more generally when non-tensor attributes added to module
+                    object.__setattr__(self, name, item)
                 if isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
                     ScriptModule.__setattr__(self, name, item)
+
+            # Copy buffers
             for name in original._buffers:
                 if original._buffers[name] is None:
                     object.__setattr__(self, name, None)
@@ -1472,6 +1472,8 @@ if _enabled:
 
             # Copy constants
             self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
+            for name in self.__dict__["_constants_set"]:
+                self.__dict__[name] = getattr(original, name)
 
             # Copy overloads
             self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
@@ -1483,6 +1485,7 @@ if _enabled:
             # Try to get the attribute directly, if that fails, fall back to the
             # weak module itself
             try:
+                print("getting", attr)
                 return ScriptModule.__getattr__(self, attr)
             except AttributeError:
                 # unwrap the original
@@ -1494,20 +1497,6 @@ if _enabled:
                     # Only fall back to original once __init__() is done
                     raise AttributeError("Weak module has no attribute '{}'"
                                          .format(attr))
-
-        # def __setattr__(self, attr, value):
-        #     # Once constructed, no new properties can be set
-        #
-        #     if not self.__dict__["_initialized"]:
-        #         # If constructing, don't fall back to original module
-        #         return ScriptModule.__setattr__(self, attr, value)
-        #
-        #     if hasattr(self, attr):
-        #         return ScriptModule.__setattr__(self, attr, value)
-        #     else:
-        #         raise AttributeError("Cannot set new attribute '{}' on "
-        #                              "weak script module once it has been "
-        #                              "created".format(attr))
 
 else:
     class ScriptModule(torch.nn.Module):
