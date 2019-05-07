@@ -1,4 +1,4 @@
-/** \brief This file defines API for pattern-based subgraph rewrites.
+/** This file defines API for pattern-based subgraph rewrites.
  *
  * The API can be used for finding concrete patterns in the model and replacing
  * the corresponding subgraphs with another subgraph. A special case of such
@@ -22,16 +22,16 @@ namespace jit {
 struct RewritePatternDescr;
 struct Match;
 
-/** \brief Run pattern-based subgraph rewrites on all methods in the module.
+/** Run pattern-based subgraph rewrites on all methods in the module.
  *
  * This pass will go through all methods in the module and try to replace all
  * recognized patterns (see SubgraphRewriter::RegisterDefaultPatterns for the
  * list of these patterns).
  */
 TORCH_API std::shared_ptr<script::Module> PatternBasedRewrite(
-    std::shared_ptr<script::Module> module);
+    std::shared_ptr<script::Module>& module);
 
-/** \brief A class implementing API for pattern-based subgraph rewrites.
+/** A class implementing API for pattern-based subgraph rewrites.
  *
  * To perform pattern-based subgraph rewrites on a module using this API, one
  * needs to crete an object of such class, register rewrite patterns and run the
@@ -44,14 +44,14 @@ TORCH_API std::shared_ptr<script::Module> PatternBasedRewrite(
  */
 class TORCH_API SubgraphRewriter {
  public:
-  // \brief Run pattern-based subgraph rewrite pass on the module.
+  // Run pattern-based subgraph rewrite pass on the module.
   std::shared_ptr<script::Module> runOnModule(
       std::shared_ptr<script::Module> module);
 
-  // \brief Register standard rewrite patterns.
+  // Register standard rewrite patterns.
   void RegisterDefaultPatterns();
 
-  /** \brief Register a custom rewrite pattern.
+  /** Register a custom rewrite pattern.
    *
    * The method takes four parameters specifying the pattern:
    * \p PATTERN - IR string with representing the pattern subgraph.
@@ -81,7 +81,7 @@ class TORCH_API SubgraphRewriter {
   bool overlapsWithPreviousMatches(const Match* match);
 };
 
-/** \brief Rewrite pattern descriptor.
+/** Rewrite pattern descriptor.
  *
  * This structure is used in implementation of `SubgraphRewriter` and not
  * supposed to be used externally.

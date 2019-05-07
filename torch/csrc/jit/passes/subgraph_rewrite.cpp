@@ -123,7 +123,7 @@ bool SubgraphRewriter::overlapsWithPreviousMatches(const Match* match) {
 }
 
 std::shared_ptr<script::Module> PatternBasedRewrite(
-    std::shared_ptr<script::Module> module) {
+    std::shared_ptr<script::Module>& module) {
   // TODO: Deep-copy the module
   SubgraphRewriter subgraph_rewriter;
   subgraph_rewriter.RegisterDefaultPatterns();
