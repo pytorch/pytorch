@@ -24,9 +24,9 @@ def PyTorchOperatorTestCase(test_name, op_type, input_shapes, op_args, run_mode)
         tensor_shape = list(shape)
         if not is_contig:
             tensor_shape = [s * 2 for s in tensor_shape]
-        if dtype in [torch.float32, torch.float64]:
+        if dtype in [torch.float32, torch.float64]:  # skip float16
             input = torch.rand(tensor_shape, dtype=dtype)
-        elif dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+        elif not dtype.is_floating_point:
             input = torch.randint(low=0, high=100, size=tensor_shape, dtype=dtype)
         else:
             input = torch.ones(tensor_shape, dtype=dtype)
