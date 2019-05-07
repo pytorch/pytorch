@@ -1085,7 +1085,6 @@ class OrderedParameterDict(OrderedDictWrapper):
         return [(name, param) for name, param in self.module._get_parameters()]
 
     def __setitem__(self, k, v):
-        print("Setting param", k, v)
         self.module._register_parameter(k, v, False)
 
     def __contains__(self, k):
@@ -1453,6 +1452,9 @@ if _enabled:
             # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
 
+            constants_set = set(getattr(original, "__constants__", []))
+            self.__dict__["_constants_set"] = {}
+
             # Copy Parameters and Modules
             for name in dir(original):
                 item = getattr(original, name)
@@ -1460,7 +1462,7 @@ if _enabled:
                     # XXX: treat None value simply as module attributes instead of adding them to the parameter list
                     # TODO: need to handle this more generally when non-tensor attributes added to module
                     object.__setattr__(self, name, item)
-                if isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
+                elif isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
                     ScriptModule.__setattr__(self, name, item)
 
             # Copy buffers
@@ -1471,7 +1473,7 @@ if _enabled:
                     self.register_buffer(name, original._buffers[name])
 
             # Copy constants
-            self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
+            self.__dict__["_constants_set"] = constants_set
             for name in self.__dict__["_constants_set"]:
                 self.__dict__[name] = getattr(original, name)
 
@@ -1485,7 +1487,6 @@ if _enabled:
             # Try to get the attribute directly, if that fails, fall back to the
             # weak module itself
             try:
-                print("getting", attr)
                 return ScriptModule.__getattr__(self, attr)
             except AttributeError:
                 # unwrap the original
@@ -1497,6 +1498,20 @@ if _enabled:
                     # Only fall back to original once __init__() is done
                     raise AttributeError("Weak module has no attribute '{}'"
                                          .format(attr))
+
+        def __setattr__(self, attr, value):
+            # Once constructed, no new properties can be set
+
+            if not self.__dict__["_initialized"]:
+                # If constructing, don't fall back to original module
+                return ScriptModule.__setattr__(self, attr, value)
+
+            if hasattr(self, attr):
+                return ScriptModule.__setattr__(self, attr, value)
+            else:
+                raise AttributeError("Cannot set new attribute '{}' on "
+                                     "weak script module once it has been "
+                                     "created".format(attr))
 
 else:
     class ScriptModule(torch.nn.Module):
