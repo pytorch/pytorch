@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import numpy as np
 import itertools
 import random
-import torch
+
 
 """Performance microbenchmarks's utils.
 
