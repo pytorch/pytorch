@@ -179,10 +179,13 @@ setup_ci_environment: &setup_ci_environment
     # Check if we should actually run
     echo "BUILD_ENVIRONMENT: ${BUILD_ENVIRONMENT}"
     echo "CIRCLE_PULL_REQUEST: ${CIRCLE_PULL_REQUEST}"
+
+    topmost_commit=$(git log --format='%B' -n 1 HEAD)
+
     if [[ "${BUILD_ENVIRONMENT}" == *-slow-* ]]; then
       if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
         # It's a PR; test for [slow ci] tag on the TOPMOST commit
-        if !(git log --format='%B' -n 1 HEAD | grep -q -e '\[slow ci\]' -e '\[ci slow\]' -e '\[test slow\]' -e '\[slow test\]'); then
+        if !(echo $topmost_commit | grep -q -e '\[slow ci\]' -e '\[ci slow\]' -e '\[test slow\]' -e '\[slow test\]'); then
           circleci step halt
           exit
         fi
@@ -191,7 +194,7 @@ setup_ci_environment: &setup_ci_environment
     if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
       if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
         # It's a PR; test for [xla ci] tag on the TOPMOST commit
-        if !(git log --format='%B' -n 1 HEAD | grep -q -e '\[xla ci\]' -e '\[ci xla\]' -e '\[test xla\]' -e '\[xla test\]'); then
+        if !(echo $topmost_commit | grep -q -e '\[xla ci\]' -e '\[ci xla\]' -e '\[test xla\]' -e '\[xla test\]'); then
           # NB: This doesn't halt everything, just this job.  So
           # the rest of the workflow will keep going and you need
           # to make sure you halt there too.  Blegh.
