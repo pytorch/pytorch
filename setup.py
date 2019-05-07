@@ -790,6 +790,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/*.h',
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
+                'include/torch/csrc/jit/passes/utils/*.h',
                 'include/torch/csrc/jit/script/*.h',
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/onnx/*.h',

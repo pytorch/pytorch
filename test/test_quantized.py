@@ -6,7 +6,6 @@ import numpy as np
 import unittest
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, skipIfNotRegistered
 import torch.nn.functional as F
-import torch.nn as nn
 
 
 def canonical(graph):
