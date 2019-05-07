@@ -282,8 +282,8 @@ class DistributedDataParallel(Module):
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())
         if len(module_states) > 0:
-            self._dist_broadcast_coalesced(module_states,
-                                           self.broadcast_bucket_size)
+            self._broadcast_coalesced(module_states,
+                                      self.broadcast_bucket_size)
 
         self._ddp_init_helper()
 
@@ -406,8 +406,8 @@ class DistributedDataParallel(Module):
         for module in self._module_copies[1:]:
             module.train(mode)
 
-    def _dist_broadcast_coalesced(self, tensors, buffer_size):
-        dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size, False)
+    def _broadcast_coalesced(self, tensors, buffer_size):
+        dist._broadcast_coalesced(self.process_group, tensors, buffer_size)
 
     def _sync_params(self):
         with torch.no_grad():
@@ -432,9 +432,10 @@ class DistributedDataParallel(Module):
 
             # module buffer sync
             if self.broadcast_buffers and len(self.modules_buffers[0]) > 0:
-                # cross-node buffer sync
-                self._dist_broadcast_coalesced(self.modules_buffers[0],
-                                               self.broadcast_bucket_size)
+                # Synchronize buffers across processes.
+                # The process with rank 0 is considered the authoritative copy.
+                self._broadcast_coalesced(self.modules_buffers[0],
+                                          self.broadcast_bucket_size)
                 # only do intra-node buffer sync for replicated single-device
                 # CUDA modules
                 if self.device_ids and len(self.device_ids) > 1:
