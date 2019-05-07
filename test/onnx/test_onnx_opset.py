@@ -12,7 +12,7 @@ from torch.onnx.symbolic_helper import _export_onnx_opset_version
 from torch.onnx import ir_version, producer_name, producer_version
 
 
-def test_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_version):
+def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_version):
     # check_onnx_components
     assert model.ir_version == ir_version and \
         model.producer_name == producer_name and \
@@ -34,12 +34,12 @@ def test_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versio
                 assert attributes[j][attribute_field] == getattr(graph.node[i].attribute[j], attribute_field)
 
 
-def test_onnx_operator(module, x, ops, opset_versions):
+def check_onnx_opsets_operator(module, x, ops, opset_versions):
     for opset_version in opset_versions:
         f = io.BytesIO()
         torch.onnx.export(module, x, f, opset_version=opset_version)
         model = onnx.load(io.BytesIO(f.getvalue()))
-        test_onnx_opset_operator(model, ops[opset_version], opset_version)
+        check_onnx_opset_operator(model, ops[opset_version], opset_version)
 
 
 class TestONNXOpset(TestCase):
@@ -56,7 +56,8 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2}]}]
         ops = {9 : ops_9, 10 : ops_10}
         x = torch.arange(1., 6., requires_grad=True)
-        test_onnx_operator(MyModule(), x, ops, opset_versions=[9, 10])
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
+
 
 if __name__ == '__main__':
     run_tests()
