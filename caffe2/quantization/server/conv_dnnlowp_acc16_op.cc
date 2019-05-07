@@ -174,13 +174,12 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
       nbits_in_non_outlier_ < 8) {
     CAFFE_ENFORCE(!W_quantized_.empty());
 
-    Wq_outlier_.reset(ExtractOutlierMatrix(
+    int outlier_cnt = CountOutliers(
         group_,
         kernel_dim,
         num_out_channels,
         nbits_in_non_outlier_,
-        W_quantized_));
-    int outlier_cnt = Wq_outlier_->ColPtr()[num_out_channels];
+        W_quantized_);
 
     C10_LOG_FIRST_N(INFO, 10)
         << "Proportion of outlier for Conv layer with weight blob "
@@ -202,6 +201,13 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
       // We need to call GetQuantizationParameters_ again to pack for acc32
       return BaseType::GetQuantizationParameters_();
     }
+
+    Wq_outlier_.reset(ExtractOutlierMatrix(
+        group_,
+        kernel_dim,
+        num_out_channels,
+        nbits_in_non_outlier_,
+        W_quantized_));
   }
 
   bool packW = this->order_ == StorageOrder::NHWC && GetCpuId().avx2();

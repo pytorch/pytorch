@@ -6,9 +6,9 @@
 #include <algorithm>
 
 static inline void THNN_(SpatialAveragePooling_shapeCheck)(
-	THTensor *input, THTensor *gradOutput,
-	int kH, int kW, int dH, int dW, int padH, int padW,
-	bool ceil_mode) {
+        THTensor *input, THTensor *gradOutput,
+        int kH, int kW, int dH, int dW, int padH, int padW,
+        bool ceil_mode) {
 
   THArgCheck(kW > 0 && kH > 0, 5,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
@@ -27,12 +27,12 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   }
 
   THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
-		"non-empty 3D or 4D input tensor expected but got: %s");
+                "non-empty 3D or 4D input tensor expected but got: %s");
 
   THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
-	     "pad should be smaller than half of kernel size, but got "
-	     "padW = %d, padH = %d, kW = %d, kH = %d",
-	     padW, padH, kW, kH);
+             "pad should be smaller than half of kernel size, but got "
+             "padW = %d, padH = %d, kW = %d, kH = %d",
+             padW, padH, kW, kH);
 
   int64_t nInputPlane = input->size(dimh-1);
   int64_t inputHeight = input->size(dimh);
@@ -44,7 +44,7 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
 
   if (outputWidth < 1 || outputHeight < 1)
     THError("Given input size: (%dx%dx%d). "
-	    "Calculated output size: (%dx%dx%d). Output size is too small",
+            "Calculated output size: (%dx%dx%d). Output size is too small",
             nInputPlane,inputHeight,inputWidth,nInputPlane,outputHeight,outputWidth);
 
   if (gradOutput != NULL) {

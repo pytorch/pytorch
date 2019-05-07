@@ -54,7 +54,8 @@ class Reducer {
   std::unordered_map<torch::autograd::Function*, std::tuple<int, int>> func_;
 
   bool expect_autograd_hooks_;
-  bool has_queued_final_callback_;
+  bool require_finalize_;
+  bool has_marked_unused_parameters_;
   size_t next_bucket_;
 
   void mark_variable_ready(
@@ -138,5 +139,9 @@ class Reducer {
   int64_t backward_stats_base_;
   std::vector<std::vector<int64_t>> backward_stats_;
 };
+
+std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+    const std::vector<at::Tensor>& tensors,
+    std::vector<size_t> bucket_size);
 
 } // namespace c10d

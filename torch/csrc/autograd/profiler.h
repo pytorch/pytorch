@@ -1,13 +1,11 @@
 #pragma once
 
-#include <thread>
 #include <iostream>
 #include <mutex>
 #include <memory>
 #include <vector>
 #include <cstdint>
 #include <string>
-#include <list>
 #include <sstream>
 #include <forward_list>
 #include <tuple>
@@ -18,7 +16,6 @@
 #endif
 
 #include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/jit/code_template.h>
 
 typedef struct CUevent_st* CUDAEventStub;
 
@@ -91,11 +88,27 @@ inline int64_t getTime() {
 #endif
 }
 
-enum class EventKind : uint16_t {
+// Old GCC versions generate warnings incorrectly
+// see https://stackoverflow.com/questions/2463113/g-c0x-enum-class-compiler-warnings
+#ifndef _MSC_VER
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wattributes"
+#endif
+enum class TORCH_API ProfilerState {
+    Disabled,
+    CPU, // CPU-only profiling
+    CUDA, // CPU + CUDA events
+    NVTX,  // only emit NVTX markers
+};
+
+enum class TORCH_API EventKind : uint16_t {
   Mark,
   PushRange,
   PopRange
 };
+#ifndef _MSC_VER
+#  pragma GCC diagnostic pop
+#endif
 
 struct TORCH_API Event final {
   Event(EventKind kind, StringView name, uint16_t thread_id, bool record_cuda)
@@ -181,13 +194,6 @@ struct RangeEventList {
   }
 
   std::forward_list<block_type> blocks;
-};
-
-enum class ProfilerState {
-    Disabled,
-    CPU, // CPU-only profiling
-    CUDA, // CPU + CUDA events
-    NVTX,  // only emit NVTX markers
 };
 
 TORCH_API RangeEventList& getEventList();

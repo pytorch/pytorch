@@ -8,7 +8,7 @@
 // To explicitly use interned strings as symbols in your code, you must add
 // them to this list.
 
-#ifndef C10_MOBILE
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
 _(aten, __and__) \
 _(aten, __iand__) \
@@ -225,7 +225,6 @@ _(aten, bincount) \
 _(aten, blackman_window) \
 _(aten, bmm) \
 _(aten, broadcast_tensors) \
-_(aten, btrisolve) \
 _(aten, cartesian_prod) \
 _(aten, cat) \
 _(aten, cauchy) \
@@ -233,6 +232,7 @@ _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
 _(aten, cholesky) \
+_(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
 _(aten, chunk) \
 _(aten, clamp) \
@@ -416,6 +416,7 @@ _(aten, logsumexp) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lt) \
+_(aten, lu_solve) \
 _(aten, margin_ranking_loss) \
 _(aten, masked_fill) \
 _(aten, masked_scatter) \
@@ -519,7 +520,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
-_(aten, potri) \
 _(aten, pow) \
 _(aten, prelu) \
 _(aten, prelu_backward) \

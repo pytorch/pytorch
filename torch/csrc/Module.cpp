@@ -13,6 +13,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/dlpack.h>
 #include <ATen/DLConvertor.h>
+#include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -147,14 +148,13 @@ static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
 
 static PyObject * THPModule_getNumThreads(PyObject *module)
 {
-  return PyLong_FromLong(THGetNumThreads());
+  return PyLong_FromLong(at::get_num_threads());
 }
 
 static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
 {
   THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
           "but got %s", THPUtils_typename(arg));
-  THSetNumThreads((int)THPUtils_unpackLong(arg));
   at::set_num_threads((int)THPUtils_unpackLong(arg));
   Py_RETURN_NONE;
 }
@@ -299,6 +299,20 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 #endif
 }
 
+static PyObject *THPModule_showConfig(PyObject *module)
+{
+  HANDLE_TH_ERRORS
+  return THPUtils_packString(at::show_config());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject *THPModule_parallelInfo(PyObject *module)
+{
+  HANDLE_TH_ERRORS
+  return THPUtils_packString(at::get_parallel_info());
+  END_HANDLE_TH_ERRORS
+}
+
 void DLPack_Capsule_Destructor(PyObject* data) {
   HANDLE_TH_ERRORS
   DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
@@ -404,8 +418,8 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
 
 PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  auto& type = torch::tensors::get_default_tensor_type();
-  auto dtype = (PyObject*)torch::getDtype(type.scalarType());
+  auto scalar_type = torch::tensors::get_default_scalar_type();
+  auto dtype = (PyObject*)torch::getDtype(scalar_type);
   Py_INCREF(dtype);
   return dtype;
   END_HANDLE_TH_ERRORS
@@ -433,6 +447,8 @@ static PyMethodDef TorchMethods[] = {
   {"_crash_if_csrc_asan", (PyCFunction)THPModule_crashIfCsrcASAN, METH_O, nullptr},
   {"_crash_if_csrc_ubsan", (PyCFunction)THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
   {"_crash_if_aten_asan", (PyCFunction)THPModule_crashIfATenASAN, METH_O, nullptr},
+  {"_show_config",    (PyCFunction)THPModule_showConfig, METH_NOARGS, nullptr},
+  {"_parallel_info",    (PyCFunction)THPModule_parallelInfo, METH_NOARGS, nullptr},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, nullptr},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, nullptr},
   {"_set_backcompat_keepdim_warn", (PyCFunction)THPModule_setBackcompatKeepdimWarn, METH_O, nullptr},
@@ -533,7 +549,7 @@ __declspec(dllexport)
 #endif
 PyObject* initModule() {
   HANDLE_TH_ERRORS
-  THInferNumThreads();
+  at::init_num_threads();
 
 #define ASSERT_TRUE(cmd) if (!(cmd)) return nullptr
 
