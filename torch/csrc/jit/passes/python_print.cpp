@@ -2,7 +2,6 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
@@ -891,8 +890,8 @@ struct PythonPrintPass {
             stmt, node->inputs(), "(", node->inputs().size() == 1 ? ",)" : ")");
       } break;
       case prim::TupleIndex: {
-        stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::index)
-             << "]";
+        stmt << "(" << useOf(node->inputs().at(0)) << ")["
+             << useOf(node->inputs().at(1)) << "]";
       } break;
       case prim::TupleSlice: {
         stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::beg) << ":"

@@ -2,6 +2,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
@@ -26,6 +27,7 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
+#include <torch/csrc/jit/passes/pattern_fusion.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -40,6 +42,7 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/init.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
 
@@ -127,21 +130,64 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<Graph>& g, py::function pyObserverFunction) {
+          [](std::shared_ptr<script::Module>& moduleObj,
+             const std::string& methodName,
+             py::function pyObserverFunction) {
             // Create a new node that would be used in the insert observer pass:
             // all observer nodes will be cloned from this one.
-            Node* new_node = g->createPythonOp(
+            Graph g;
+            Node* new_node = g.createPythonOp(
                 THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(g, new_node);
+            InsertObserverNodes(moduleObj, methodName, new_node);
+            // We don't need this node anymore, don't forget to remove it.
+            new_node->destroy();
+          })
+      .def(
+          "_jit_pass_insert_observers",
+          [](std::shared_ptr<script::Function>& function_var,
+             py::function pyObserverFunction) {
+            // Overloaded jit pass for pure functions instead of modules.
+            // Create a new node that would be used in the insert observer pass:
+            // all observer nodes will be cloned from this one.
+            Graph g;
+            Node* new_node = g.createPythonOp(
+                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
+            InsertObserverNodes(function_var, new_node);
             // We don't need this node anymore, don't forget to remove it.
             new_node->destroy();
           })
       .def(
           "_jit_pass_insert_quantdequant",
-          [](std::shared_ptr<Graph>& g) { return InsertQuantDequantNodes(g); })
+          [](std::shared_ptr<Graph>& g, py::dict& pyQParamDict) {
+            if (!pyQParamDict.size()) {
+              return;
+            }
+
+            auto qparam_dict = py::cast<std::unordered_map<
+                std::string,
+                std::tuple<std::string, float, int>>>(pyQParamDict);
+            return InsertQuantDequantNodes(g, qparam_dict);
+          })
       .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
+      .def(
+          "_jit_pass_pattern_based_fusion",
+          [](std::shared_ptr<script::Module> m) {
+            return PatternBasedFusion(m);
+          })
+      .def(
+          "_jit_pass_custom_pattern_based_fusion",
+          [](const std::string& pattern,
+             const std::string& fused_node_name,
+             std::vector<std::string> inputs,
+             std::vector<std::string> outputs,
+             std::shared_ptr<script::Module> m) {
+            PatternFuser pattern_fuser;
+            pattern_fuser.RegisterFusionPattern(
+                pattern, fused_node_name, inputs, outputs);
+            pattern_fuser.runOnModule(m);
+          })
       .def(
           "_jit_pass_fold_quant_inputs",
           [](std::shared_ptr<Graph>& g) {
@@ -165,13 +211,22 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_complete_shape_analysis",
           [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
-            CompleteArgumentSpec spec(
-                with_grad,
-                evilDeprecatedBadCreateStackDoNotUse(inputs, graph->inputs()));
-            auto graph_inputs = graph->inputs();
-            AT_ASSERT(spec.size() == graph_inputs.size());
-            for (size_t i = 0; i < graph_inputs.size(); ++i) {
-              graph_inputs[i]->setType(spec.at(i));
+            ArgumentSpecCreator arg_spec_creator(*graph);
+            Stack stack;
+            stack.reserve(inputs.size()); // captures?
+            for (auto& obj : inputs) {
+              stack.push_back(toIValue(obj));
+            }
+            ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
+            arg_spec_creator.specializeTypes(*graph, spec);
+            // We only get DimensionedTensorType from the arg_spec_creator, but
+            // we want CompleteTensorType. The alternative would be to have a
+            // "complete type inference" function in ArguemntSpecCreator.
+            auto g_inputs = graph->inputs();
+            for (size_t i = 0; i < inputs.size(); ++i) {
+              if (stack[i].isTensor()) {
+                g_inputs[i]->setType(incompleteInferTypeFrom(stack[i]));
+              }
             }
             PropagateInputShapes(graph);
           })

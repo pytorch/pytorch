@@ -5,7 +5,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import json
 import os
 import six
 import time
@@ -207,17 +206,6 @@ class SummaryWriter(object):
             neg_buckets.append(-v)
             v *= 1.1
         self.default_bins = neg_buckets[::-1] + [0] + buckets
-        self.scalar_dict = {}
-
-    def _append_to_scalar_dict(self, tag, scalar_value, global_step,
-                               timestamp):
-        """This adds an entry to the self.scalar_dict datastructure with format
-        {writer_id : [[timestamp, step, value], ...], ...}.
-        """
-        if tag not in self.scalar_dict.keys():
-            self.scalar_dict[tag] = []
-        self.scalar_dict[tag].append(
-            [timestamp, global_step, float(make_np(scalar_value))])
 
     def _check_caffe2_blob(self, item):
         """
@@ -297,19 +285,6 @@ class SummaryWriter(object):
                 scalar_value = workspace.FetchBlob(scalar_value)
             fw.add_summary(scalar(main_tag, scalar_value),
                            global_step, walltime)
-            self._append_to_scalar_dict(
-                fw_tag, scalar_value, global_step, walltime)
-
-    def export_scalars_to_json(self, path):
-        """Exports to the given path an ASCII file containing all the scalars written
-        so far by this instance, with the following format:
-        {writer_id : [[timestamp, step, value], ...], ...}
-
-        The scalars saved by ``add_scalars()`` will be flushed after export.
-        """
-        with open(path, "w") as f:
-            json.dump(self.scalar_dict, f)
-        self.scalar_dict = {}
 
     def add_histogram(self, tag, values, global_step=None, bins='tensorflow', walltime=None, max_bins=None):
         """Add histogram to summary.
@@ -459,7 +434,7 @@ class SummaryWriter(object):
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
         Shape:
-            vid_tensor: :math:`(N, T, C, H, W)`.
+            vid_tensor: :math:`(N, T, C, H, W)`. The values should lie in [0, 255] for type `uint8` or [0, 1] for type `float`.
         """
         self._get_file_writer().add_summary(
             video(tag, vid_tensor, fps), global_step, walltime)
@@ -714,7 +689,7 @@ class SummaryWriter(object):
     def add_custom_scalars(self, layout):
         """Create special chart by collecting charts tags in 'scalars'. Note that this function can only be called once
         for each SummaryWriter() object. Because it only provides metadata to tensorboard, the function can be called
-        before or after the training loop. See ``examples/demo_custom_scalars.py`` for more.
+        before or after the training loop.
 
         Args:
             layout (dict): {categoryName: *charts*}, where *charts* is also a dictionary

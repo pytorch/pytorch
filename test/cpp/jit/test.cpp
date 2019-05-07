@@ -46,6 +46,7 @@ namespace jit {
   _(CustomOperators)               \
   _(CustomOperatorAliasing)        \
   _(IValueKWargs)                  \
+  _(CustomFusion)                  \
   _(Differentiate)                 \
   _(DifferentiateWithRequiresGrad) \
   _(DynamicDAG)                    \
@@ -61,6 +62,7 @@ namespace jit {
   _(SubgraphUtils)                 \
   _(AliasAnalysis)                 \
   _(ContainerAliasing)             \
+  _(AliasRegistration)             \
   _(WriteTracking)                 \
   _(Wildcards)                     \
   _(MemoryDAG)                     \
@@ -80,6 +82,7 @@ namespace jit {
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
+  _(CompleteArgumentSpec)       \
   _(Fusion)                     \
   _(GraphExecutor)              \
   _(ModuleConversion)           \

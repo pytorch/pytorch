@@ -31,6 +31,10 @@ TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
     std::ostream& failure_messages,
     bool allow_conversions);
 
+TORCH_API bool convertibleToList(
+    const TypePtr& type,
+    const TypePtr& list_type_);
+
 TORCH_API Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
