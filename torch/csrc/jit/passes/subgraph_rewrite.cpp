@@ -43,39 +43,6 @@ void SubgraphRewriter::runOnGraph(std::shared_ptr<Graph>& graph) {
   }
 }
 
-/**
- * Clone \p SUBGRAPH_TO_COPY inserting it after \p ANCHOR and using \p INPUTS as
- * incoming values for the new subgraph. Return a vector of values produced by
- * the inserted subgraph.
- */
-static std::vector<Value*> insertSubgraphCloneAfter(
-    Node* anchor,
-    Graph& subgraph_to_copy,
-    std::vector<Value*> inputs) {
-  std::unordered_map<Value*, Value*> vmap;
-  WithInsertPoint ins(anchor);
-
-  for (size_t i = 0; i < inputs.size(); i++) {
-    vmap[subgraph_to_copy.inputs()[i]] = inputs[i];
-  }
-
-  Graph* g = anchor->owningGraph();
-  for (auto rn : subgraph_to_copy.nodes()) {
-    Node* last_n = g->createClone(rn, [&](Value* v) { return vmap[v]; });
-    g->insertNode(last_n);
-    for (size_t j = 0; j < last_n->outputs().size(); j++) {
-      vmap[rn->outputs()[j]] = last_n->outputs()[j];
-    }
-  }
-
-  std::vector<Value*> result;
-  result.reserve(subgraph_to_copy.outputs().size());
-  for (Value* v : subgraph_to_copy.outputs()) {
-    result.push_back(vmap[v]);
-  }
-  return result;
-}
-
 void SubgraphRewriter::rewriteSinglePatternOnGraph(
     std::shared_ptr<Graph>& graph,
     RewritePatternDescr pattern) {
@@ -114,8 +81,9 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // new subgraph, and we will get `new_outputs` vector containing values
     // produced by this new subgraph - we will then rewrite old outputs with the
     // new ones.
-    std::vector<Value*> new_outputs = insertSubgraphCloneAfter(
-        const_cast<Node*>(match.anchor), replacement_graph, inputs);
+    WithInsertPoint insert_point(const_cast<Node*>(match.anchor));
+    std::vector<Value*> new_outputs =
+        inlineCallTo(*graph, replacement_graph, inputs);
 
     // Record all planned rewritings
     AT_ASSERT(outputs.size() == new_outputs.size());
@@ -156,7 +124,7 @@ bool SubgraphRewriter::overlapsWithPreviousMatches(const Match* match) {
 }
 
 std::shared_ptr<script::Module> PatternBasedRewrite(
-    std::shared_ptr<script::Module> module) {
+    std::shared_ptr<script::Module>& module) {
   // TODO: Deep-copy the module
   SubgraphRewriter subgraph_rewriter;
   subgraph_rewriter.RegisterDefaultPatterns();

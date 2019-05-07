@@ -7,7 +7,6 @@ import numpy as np
 import os
 import shutil
 import sys
-import tempfile
 import unittest
 
 TEST_TENSORBOARD = True
@@ -180,9 +179,6 @@ if TEST_TENSORBOARD:
                                         false_negative_counts,
                                         precision,
                                         recall, n_iter)
-                d = tempfile.mkdtemp()
-                writer.export_scalars_to_json(os.path.join(d, "all_scalars.json"))
-                shutil.rmtree(d)
 
     class TestTensorBoardSummaryWriter(BaseTestCase):
         def test_summary_writer_ctx(self):
@@ -278,7 +274,6 @@ if TEST_TENSORBOARD:
                 summary.histogram('dummy', [1, 3, 4, 5, 6], 'tensorflow')
 
         def test_empty_input(self):
-            print('expect error here:')
             with self.assertRaises(Exception) as e_info:
                 summary.histogram('dummy', np.ndarray(0), 'tensorflow')
 
@@ -354,13 +349,10 @@ if TEST_TENSORBOARD:
         expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      module_id.split('.')[-1] + '.' + functionName + ".expect")
-        print(expected_file)
         assert os.path.exists(expected_file)
         with open(expected_file) as f:
             expected = f.read()
         str_to_compare = str(str_to_compare)
-        print(remove_whitespace(str_to_compare))
-        print(remove_whitespace(expected))
         return remove_whitespace(str_to_compare) == remove_whitespace(expected)
 
     def write_proto(str_to_compare, function_ptr):
@@ -370,7 +362,6 @@ if TEST_TENSORBOARD:
         expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      module_id.split('.')[-1] + '.' + functionName + ".expect")
-        print(expected_file)
         with open(expected_file, 'w') as f:
             f.write(str(str_to_compare))
 
@@ -389,8 +380,35 @@ if TEST_TENSORBOARD:
             with SummaryWriter(comment='LinearModel') as w:
                 w.add_graph(myLinear(), dummy_input, True)
 
+        def test_mlp_graph(self):
+            dummy_input = (torch.zeros(2, 1, 28, 28),)
+
+            # This MLP class with the above input is expected
+            # to fail JIT optimizations as seen at
+            # https://github.com/pytorch/pytorch/issues/18903
+            #
+            # However, it should not raise an error during
+            # the add_graph call and still continue.
+            class myMLP(torch.nn.Module):
+                def __init__(self):
+                    super(myMLP, self).__init__()
+                    self.input_len = 1 * 28 * 28
+                    self.fc1 = torch.nn.Linear(self.input_len, 1200)
+                    self.fc2 = torch.nn.Linear(1200, 1200)
+                    self.fc3 = torch.nn.Linear(1200, 10)
+
+                def forward(self, x, update_batch_stats=True):
+                    h = torch.nn.functional.relu(
+                        self.fc1(x.view(-1, self.input_len)))
+                    h = self.fc2(h)
+                    h = torch.nn.functional.relu(h)
+                    h = self.fc3(h)
+                    return h
+
+            with SummaryWriter(comment='MLPModel') as w:
+                w.add_graph(myMLP(), dummy_input, True)
+
         def test_wrong_input_size(self):
-            print('expect error here:')
             with self.assertRaises(RuntimeError) as e_info:
                 dummy_input = torch.rand(1, 9)
                 model = torch.nn.Linear(3, 5)
