@@ -61,3 +61,12 @@ def generate_configs(**configs):
 
     results = configs['sample_func'](*result)
     return results
+
+def is_caffe2_enabled(framework_arg):
+    return 'Caffe2' in framework_arg
+
+def is_pytorch_enabled(framework_arg):
+    return 'PyTorch' in framework_arg
+
+def get_requested_frameworks(framework_arg):
+    return [fr.strip() for fr in framework_arg.split(',') if len(fr.strip()) > 0]
