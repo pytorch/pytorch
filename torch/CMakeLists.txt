@@ -163,6 +163,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/pattern_fusion.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_inplace_ops.cpp
@@ -336,7 +337,7 @@ endif()
 target_link_libraries(torch caffe2_library)
 
 find_package(OpenMP QUIET)
-if(OPENMP_FOUND)
+if(USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
@@ -540,6 +541,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/init.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/python_sugared_value.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
     ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
     ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp
@@ -692,7 +694,7 @@ if (BUILD_PYTHON)
       list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
-      if (USE_CUDA)
+      if (USE_CUDA OR USE_ROCM)
         list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/c10d/ddp.cpp)
       endif()
     endif()

@@ -735,4 +735,11 @@ std::function<void(const OperatorDef&)> GetOperatorLogger() {
   return OperatorLogger;
 }
 
+c10::optional<int> OperatorBase::argumentIndexWithName(
+    const std::string& name) const {
+  return getFunctionSchema().argumentIndexWithName(name);
+}
+
+OperatorBase::~OperatorBase() noexcept = default;
+
 }  // namespace caffe2

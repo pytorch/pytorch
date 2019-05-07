@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
 
@@ -110,6 +109,16 @@ static at::Tensor to_dispatch(
   } else {
     return self.to(*device, *scalarType, non_blocking, copy);
   }
+}
+
+// Convert an python index (which may be negative) into an index usable for a
+// C++ container
+int64_t normalizeIndex(int64_t idx, int64_t list_size) {
+  if (idx < 0) {
+    // Handle negative indexing
+    idx = list_size + idx;
+  }
+  return idx;
 }
 
 RegisterOperators reg(
@@ -649,12 +658,16 @@ RegisterOperators reg(
      Operator(
          prim::TupleIndex,
          [](const Node* node) {
-           auto index = node->i(attr::index);
-           return [=](Stack& stack) {
+           return [](Stack& stack) {
+             int64_t index = pop(stack).toInt();
              auto tup = pop(stack).toTuple();
              const auto& elems = tup->elements();
-             // index is normalized to be positive at compile time
-             stack.emplace_back(elems.at(index));
+             auto norm_index = normalizeIndex(index, elems.size());
+             if (norm_index < 0 ||
+                 norm_index > static_cast<int64_t>(elems.size())) {
+               throw std::out_of_range("Tuple list index out of range");
+             }
+             stack.emplace_back(elems.at(norm_index));
              return 0;
            };
          }),
@@ -1008,16 +1021,6 @@ RegisterOperators logging_operators(
     push(stack, op);                                               \
     return 0;                                                      \
   })
-
-// Convert an python index (which may be negative) into an index usable for a
-// C++ container
-int64_t normalizeIndex(int64_t idx, int64_t list_size) {
-  if (idx < 0) {
-    // Handle negative indexing
-    idx = list_size + idx;
-  }
-  return idx;
-}
 
 int stringSlice(Stack& stack) {
   auto step = pop(stack).toInt();
