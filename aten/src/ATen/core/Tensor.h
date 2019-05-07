@@ -384,7 +384,8 @@ class CAFFE2_API Tensor {
   Tensor & clamp_max_(Scalar max);
   Tensor clamp_min(Scalar min) const;
   Tensor & clamp_min_(Scalar min);
-  Tensor contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const;
+  Tensor contiguous(MemoryFormat memory_format) const;
+  Tensor contiguous() const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor cos() const;
   Tensor & cos_();
