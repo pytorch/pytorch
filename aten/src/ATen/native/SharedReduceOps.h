@@ -89,9 +89,9 @@ struct WelfordOps {
       (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
       : NAN;
 #if defined(__CUDACC__) || defined(__HIPCC__)
-    thrust::tuple<scalar_t, scalar_t> results((scalar_t) ret, mean);
+    thrust::tuple<scalar_t, scalar_t> results((scalar_t) ret, (scalar_t) mean);
 #else
-    std::vector<scalar_t> results{(scalar_t) ret, mean};
+    std::vector<scalar_t> results{(scalar_t) ret, (scalar_t) mean};
 #endif
     return results;
   }
