@@ -25,12 +25,15 @@
 #include "caffe2/opt/onnxifi_transformer.h"
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
+#include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/script/module_python.h"
+
 
 // Because of CMake setup, we can't depend on script module here just yet -
 // it pulls in generated files from a different directory and it
@@ -243,9 +246,9 @@ bool feedBlob(
     return true;
   }
 #ifdef FBCODE_CAFFE2
-  if (py::isinstance<torch::jit::script::Module>(arg)) {
+  if (auto module = torch::jit::script::as_module(arg)) {
     *blob->GetMutable<std::shared_ptr<torch::jit::script::Module>>() =
-        arg.cast<std::shared_ptr<torch::jit::script::Module>>();
+        module;
     return true;
   }
 #endif
@@ -1146,6 +1149,19 @@ void addGlobalMethods(py::module& m) {
     return gWorkspace->HasBlob(name);
   });
   m.def(
+      "fill_random_network_inputs",
+      [](const py::bytes& net_def,
+         const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
+         const std::vector<std::vector<std::string>>& inputTypes) {
+        CAFFE_ENFORCE(gWorkspace);
+        py::gil_scoped_release g;
+        NetDef net;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(net_def.cast<std::string>(), &net));
+        caffe2::emulator::fillRandomNetworkInputs(
+            net, inputDims, inputTypes, gWorkspace);
+      });
+  m.def(
       "create_net",
       [](py::bytes net_def, bool overwrite) {
         CAFFE_ENFORCE(gWorkspace);
@@ -1663,6 +1679,7 @@ void addGlobalMethods(py::module& m) {
          const std::vector<int>& black_list,
          int max_batch_size,
          int max_seq_size,
+         bool adjust_batch,
          bool debug_builder,
          bool use_onnx) -> py::bytes {
         caffe2::NetDef pred_net;
@@ -1678,6 +1695,7 @@ void addGlobalMethods(py::module& m) {
         OnnxifiTransformerOptions opts;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
         opts.bound_shape_spec.max_seq_size = max_seq_size;
+        opts.adjust_batch = adjust_batch;
         opts.debug = debug_builder;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
