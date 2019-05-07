@@ -17,11 +17,11 @@ namespace datasets {
 /// A chunk could be an entire file, such as an audio data file or an image,
 /// or part of a file in the case of a large text-file split based on seek
 /// positions.
-template <typename DataType, typename ContainerType = std::vector<DataType>>
+template <typename ExampleType_, typename ChunkType_ = std::vector<ExampleType_>>
 class ChunkDataReader {
  public:
-  using ChunkType = ContainerType;
-  using ExampleType = DataType;
+  using ChunkType = ChunkType_;
+  using ExampleType = ExampleType_;
 
   /// Read an entire chunk.
   virtual ChunkType read_chunk(size_t chunk_index) = 0;
