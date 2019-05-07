@@ -423,6 +423,13 @@ def cumsum(g, input, dim):
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
 
 
+def _sample_dirichlet(g, self, generator):
+    if not generator.node().mustBeNone():
+        return _unimplemented('_sample_dirichlet',
+                              'We are not able to export generator')
+    return g.op("ATen", self, operator_s="_sample_dirichlet")
+
+
 def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
@@ -1630,7 +1637,9 @@ rnn_relu = _one_hidden_rnn('RNN_RELU')
 
 @parse_args('v', 'i')
 def _dim_arange(g, like, dim):
-    return g.op('ATen', like, dim_i=dim, operator_s='_dim_arange')
+    like_shape = g.op('Shape', like)
+    stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
+    return g.op("_caffe2::Range", stop)
 
 
 def detach(g, input):
@@ -1674,6 +1683,10 @@ def randn(g, *shapes):
     shapes_list = list(shapes)
     shape = _maybe_get_const(shapes_list[0], "is")
     return g.op('RandomNormal', shape_i=shape)
+
+
+def randn_like(g, self, *others):
+    return g.op('RandomNormalLike', self)
 
 
 @parse_args('v', 'f', 'f', 'i', 'none')

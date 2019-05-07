@@ -1,8 +1,11 @@
 #pragma once
 
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/module.h>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace torch {
 namespace jit {
