@@ -7,8 +7,22 @@
 namespace torch {
 namespace jit {
 
-// IValue -> Constant node
 Value* insertConstant(
+    Graph& g,
+    const IValue& val,
+    const c10::TypePtr& result_type,
+    c10::optional<SourceRange> loc,
+    c10::optional<ScopePtr> scope) {
+  auto value = tryInsertConstant(g, val, result_type, loc, scope);
+  if (value) {
+    return *value;
+  }
+  throw constant_not_supported_error(
+      "Unsupported value kind: " + val.tagKind());
+}
+
+// IValue -> Constant node
+c10::optional<Value*> tryInsertConstant(
     Graph& g,
     const IValue& val,
     const c10::TypePtr& result_type,
@@ -68,8 +82,7 @@ Value* insertConstant(
     n->output()->setType(NoneType::get());
   } else {
     n->destroy();
-    throw constant_not_supported_error(
-        "Unsupported value kind: " + val.tagKind());
+    return c10::nullopt;
   }
   if (loc)
     n->setSourceLocation(std::make_shared<SourceRange>(*loc));
