@@ -6,19 +6,19 @@
 
 namespace c10 {
 template<class Key, class Value> class Dict;
-class IValue;
+struct IValue;
 namespace ivalue {
-class Tuple;
-template<class Elem> class List;
+struct Tuple;
+template<class Elem> struct List;
 using IntList = List<int64_t>;
 using TensorList = List<at::Tensor>;
 using DoubleList = List<double>;
 using BoolList = List<bool>;
 using GenericList = List<IValue>;
-class Future;
-class ConstantString;
-class GenericDict;
-class Object;
+struct Future;
+struct ConstantString;
+struct GenericDict;
+struct Object;
 }
 
 // IValue is the generic tagged union used by the interpreter to hold
