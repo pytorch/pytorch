@@ -37,7 +37,11 @@ bool InputArchive::try_read(
   // clang-format on
   if (tensor.defined()) {
     torch::NoGradGuard guard;
-    tensor.set_(read_tensor);
+    if (tensor.device() != read_tensor.device()) {
+      tensor.set_data(read_tensor);
+    } else {
+      tensor.set_(read_tensor);
+    }
   } else {
     tensor = std::move(read_tensor);
   }
