@@ -186,11 +186,15 @@ bool areNodeInputsConstant(
       [&valsToParamsMap](Value* v) { return isConstant(v, valsToParamsMap); });
 }
 
-std::vector<Node*> getOnnxConstParents(Node* node) {
+std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
   std::vector<Node*> parentNodes;
   for (auto val : node->inputs()) {
-    if (val->node()->kind() == onnx::Constant) {
-      parentNodes.push_back(val->node());
+    // If the parent of 'node' is an onnx::Constant node,
+    // and 'node' is the only downstream node it serves (this
+    // is important), then push it in the list to remove.
+    if (val->node()->kind() == onnx::Constant &&
+        val->uses().size() == 1) {
+          parentNodes.push_back(val->node());
     }
   }
   return parentNodes;
@@ -245,7 +249,7 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
     // below), and then remove the current node. If the parent was
     // an initializer (not onnx::Constant) then they are all removed
     // by eraseUnusedBlockInputs() call (below) outside the loop.
-    auto onnxConstParents = getOnnxConstParents(node);
+    auto onnxConstParents = getOnnxConstParentsToRemove(node);
     node->removeAllInputs();
     for (auto* n : onnxConstParents) {
       n->destroy();
