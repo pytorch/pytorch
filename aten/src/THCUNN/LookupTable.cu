@@ -88,7 +88,7 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature
 #else
             first_remaining_peer = __ffs(matchmask) - 1;
 #endif
-	    my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
+            my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
             matchmask ^= (1 << first_remaining_peer);
           }
           if(f < s)

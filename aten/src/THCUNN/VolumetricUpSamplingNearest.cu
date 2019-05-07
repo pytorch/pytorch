@@ -16,9 +16,9 @@ template<typename Dtype, typename Acctype>
 C10_LAUNCH_BOUNDS_1(1024)
 #endif
 __global__ void nearest_neighbor_5d_kernel(
-		const int n,
-		const THCDeviceTensor<Dtype, 5> data1,
-		THCDeviceTensor<Dtype, 5> data2) {
+                const int n,
+                const THCDeviceTensor<Dtype, 5> data1,
+                THCDeviceTensor<Dtype, 5> data2) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
   const int batchsize = data1.getSize(0);
   const int channels = data1.getSize(1);
@@ -55,8 +55,8 @@ __global__ void nearest_neighbor_5d_kernel(
     const int d1 = nearest_neighbor_compute_source_index(depth_scale, d2, depth1);
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
-	const Dtype val = data1[n][c][d1][h1][w1];
-	data2[n][c][d2][h2][w2] = val;
+        const Dtype val = data1[n][c][d1][h1][w1];
+        data2[n][c][d2][h2][w2] = val;
       }
     }
   }
@@ -68,9 +68,9 @@ template <typename Dtype, typename Acctype>
 C10_LAUNCH_BOUNDS_1(1024)
 #endif
 __global__ void nearest_neighbor_5d_kernel_backward(
-		const int n,
-		THCDeviceTensor<Dtype, 5> data1,
-		const THCDeviceTensor<Dtype, 5> data2) {
+                const int n,
+                THCDeviceTensor<Dtype, 5> data1,
+                const THCDeviceTensor<Dtype, 5> data2) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
   const int batchsize = data1.getSize(0);
   const int channels = data1.getSize(1);
@@ -108,8 +108,8 @@ __global__ void nearest_neighbor_5d_kernel_backward(
     const int d1 = nearest_neighbor_compute_source_index(depth_scale, d2, depth1);
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
-	const Dtype val = data2[n][c][d2][h2][w2];
-	atomicAdd(data1[n][c][d1][h1][w1].data(), val);
+        const Dtype val = data2[n][c][d2][h2][w2];
+        atomicAdd(data1[n][c][d1][h1][w1].data(), val);
       }
     }
   }

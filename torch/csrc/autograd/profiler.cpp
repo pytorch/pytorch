@@ -1,8 +1,12 @@
 #include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/jit/code_template.h>
 
-#include <sstream>
 #include <fstream>
+#include <list>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <vector>
 
 namespace torch { namespace autograd { namespace profiler {
 
@@ -12,7 +16,7 @@ constexpr CUDAStubs* default_stubs_addr = &default_stubs;
 // static initialization calls which may invoke registerCUDAMethods
 static CUDAStubs* cuda_stubs = default_stubs_addr;
 
-TORCH_API void registerCUDAMethods(CUDAStubs* stubs) {
+void registerCUDAMethods(CUDAStubs* stubs) {
   cuda_stubs = stubs;
 }
 

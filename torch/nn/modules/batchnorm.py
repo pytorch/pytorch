@@ -60,7 +60,13 @@ class _BatchNorm(Module):
     def forward(self, input):
         self._check_input_dim(input)
 
-        exponential_average_factor = 0.0
+        # exponential_average_factor is self.momentum set to
+        # (when it is available) only so that if gets updated
+        # in ONNX graph when this node is exported to ONNX.
+        if self.momentum is None:
+            exponential_average_factor = 0.0
+        else:
+            exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
@@ -499,6 +505,6 @@ class SyncBatchNorm(_BatchNorm):
             module_output.running_var = module.running_var
             module_output.num_batches_tracked = module.num_batches_tracked
         for name, child in module.named_children():
-            module_output.add_module(name, cls.convert_sync_batchnorm(child))
+            module_output.add_module(name, cls.convert_sync_batchnorm(child, process_group))
         del module
         return module_output

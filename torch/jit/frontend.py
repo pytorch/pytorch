@@ -135,17 +135,17 @@ def _uses_true_division(fn):
             '_uses_true_division: expected function or method, got {}'.format(type(fn)))
 
 
-def get_jit_class_def(cls, self_name=None):
+def get_jit_class_def(cls, self_name):
     # Get defs for each method independently
     methods = inspect.getmembers(
         cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
     method_defs = [get_jit_def(method[1],
-                   self_name=cls.__name__) for method in methods]
+                   self_name=self_name) for method in methods]
 
     source = dedent(inspect.getsource(cls))
     py_ast = ast.parse(source)
     ctx = SourceContext(source, False)
-    return build_class_def(ctx, py_ast.body[0], method_defs)
+    return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 
 
 def get_jit_def(fn, self_name=None):
@@ -174,10 +174,10 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_class_def(ctx, py_def, methods):
+def build_class_def(ctx, py_def, methods, self_name):
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, py_def.name), methods)
+    return ClassDef(Ident(r, self_name), methods)
 
 
 def build_def(ctx, py_def, type_line, self_name=None):
@@ -414,6 +414,11 @@ class ExprBuilder(Builder):
         return Apply(func, args, kwargs)
 
     @staticmethod
+    def build_Ellipsis(ctx, expr):
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 3)  # len("...") == 3
+        return Dots(r)
+
+    @staticmethod
     def build_Name(ctx, expr):
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(expr.id))
         if expr.id.startswith(_reserved_prefix):
@@ -531,6 +536,8 @@ class ExprBuilder(Builder):
                     sub_exprs.append(build_Index(ctx, base, expr))
                 elif sub_type is ast.Slice:
                     sub_exprs.append(build_SliceExpr(ctx, base, expr))
+                elif sub_type is ast.Ellipsis:
+                    sub_exprs.append(Dots(base.range()))
                 else:
                     raise NotSupportedError(base.range(),
                                             "slicing multiple dimensions with "

@@ -26,8 +26,8 @@ void cast_op_cpu_impl(
     const at::Tensor& input_,
     const at::Tensor& output_,
     int64_t to_) {
-  Tensor input{C10Tensor(input_)};
-  Tensor output{C10Tensor(output_)};
+  Tensor input(input_);
+  Tensor output(output_);
   TensorProto_DataType to = static_cast<TensorProto_DataType>(to_);
 
   switch (to) {
