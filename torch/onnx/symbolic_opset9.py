@@ -18,11 +18,11 @@ import warnings
 
 
 # EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files]
+# see Note [Edit Symbolic Files] in symbolic_helper.py
 
-# ---------------------------------------------------------------------
-# Symbolic definitions
-# ---------------------------------------------------------------------
+# This file exports ONNX ops for opset 9
+# Opset 9 is supported by ONNX release 1.4.1
+# release on 01/23/19 
 
 
 # Note [Pointwise by scalar]

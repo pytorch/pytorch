@@ -296,7 +296,6 @@ void BlockToONNX(
     if (func) {
       pyobj = func->get();
     }
-    
     if (!py::hasattr(pyobj, "symbolic")) {
       cloneNode(op);
       return;
@@ -332,7 +331,8 @@ void BlockToONNX(
     // Call the symbolic function
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
-    onnx_registry.attr("register_op")(op->name(), pyobj.attr("symbolic"), "", 0);
+    py::object opset_version = onnx_symbolic.attr("_export_onnx_opset_version");
+    onnx_registry.attr("register_op")(op->name(), pyobj.attr("symbolic"), "", opset_version);
     py::object raw_output = onnx.attr("_run_symbolic_method")(
         op->name(), pyobj.attr("symbolic"), py_symbolic_args);
 

@@ -202,8 +202,7 @@ def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
         args = (args, )
-    from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
-    _set_opset_version(_default_onnx_opset_version)
+
     trace, torch_out = torch.jit.get_trace_graph(func, args, _force_outplace=True)
     trace.set_graph(_optimize_graph(trace.graph(), operator_export_type))
     if return_outs:
@@ -618,6 +617,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)
                 return new_op_outputs
             else:
+                # TODO: we sould lift prim's symbolic out
                 symbolic_name = 'prim_' + op_name
                 is_exportable = sym_registry.is_registered_op(symbolic_name, '', opset_version)
                 if not is_exportable:
@@ -627,14 +627,14 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 return symbolic_fn(g, *inputs, **attrs)
 
         # custom ops
-        elif sym_registry.is_registered_version(ns, 0):
-            if not sym_registry.is_registered_op(op_name, ns, 0):
+        elif sym_registry.is_registered_custom_version(ns, opset_version):
+            if not sym_registry.is_registered_custom_op(op_name, ns, opset_version):
                 warnings.warn("ONNX export failed on custom operator {}::{} because "
                               "torch.onnx.symbolic_opset{}.{} does not exist. "
                               "Have you registered your symbolic function with "
                               "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
                               .format(ns, op_name, opset_version, op_name))
-            symbolic_fn = sym_registry.get_registered_op(symbolic_name, ns, 0)
+            symbolic_fn = sym_registry.get_registered_custom_op(symbolic_name, ns, opset_version)
             attrs = {k: n[k] for k in n.attributeNames()}
             return symbolic_fn(g, *inputs, **attrs)
 
@@ -702,7 +702,7 @@ def _node_getitem(self, k):
     return getattr(self, sel)(k)
 
 
-def register_custom_op_symbolic(symbolic_name, symbolic_fn):
+def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     if not bool(re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z]+[a-zA-Z0-9-_]*$", symbolic_name)):
         raise RuntimeError("Failed to register operator {}. \
                            The symbolic name must match the format Domain::Name, \
@@ -710,12 +710,12 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn):
                            alphanumerical characters"
                            .format(symbolic_name))
     ns, op_name = symbolic_name.split('::')
-    unaccepted_domain_names = []  # how to get complete list of used domain names?
+    unaccepted_domain_names = ["onnx", "aten", "prim"]
     if ns in unaccepted_domain_names:
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
     import torch.onnx.symbolic_registry as sym_registry
-    sym_registry.register_op(op_name, symbolic_fn, ns, 0)
+    sym_registry.register_op(op_name, symbolic_fn, ns, opset_version)
 
 
 torch._C.Graph.op = _graph_op

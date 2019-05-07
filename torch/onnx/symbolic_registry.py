@@ -60,3 +60,30 @@ def get_registered_op(opname, domain, version):
         warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
     global _registry
     return _registry[(domain, version)][opname]
+
+def is_registered_custom_version(domain, version):
+    while version > 0:
+        if is_registered_version(domain, version):
+            return True
+        version = version - 1
+    return False
+
+def is_registered_custom_op(opname, domain, version):
+    if domain is None or version is None:
+        warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
+    while version > 0:
+        if is_registered_op(opname, domain, version):
+            return True
+        version = version - 1
+    return False
+
+def get_registered_custom_op(opname, domain, version):
+    if domain is None or version is None:
+        warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
+    while version > 0:
+        if is_registered_custom_op(opname, domain, version):
+            get_registered_op(opname, domain, version)
+        version = version - 1
+    warnings.warn("ONNX export failed. "
+                  "The registered op {} does not exist for domain {} and version {}."
+                  .format(opname, domain, version))

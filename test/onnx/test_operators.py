@@ -214,7 +214,6 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), x, params=(y, ))
 
     def test_symbolic_mismatch(self):
-
         class MyFun(Function):
             @staticmethod
             def symbolic(g, x):

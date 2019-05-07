@@ -9,7 +9,11 @@ import torch.onnx.symbolic_opset9
 
 
 # EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files]
+# see Note [Edit Symbolic Files] in symbolic_helper.py
+
+# This file exports ONNX ops for opset 10
+# Opset 10 is supported by ONNX release 1.5.0
+# release on 04/24/19
 
 
 # Add new operator here

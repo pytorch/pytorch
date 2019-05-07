@@ -42,7 +42,7 @@ def test_onnx_operator(module, x, ops, opset_versions):
         test_onnx_opset_operator(model, ops[opset_version], opset_version)
 
 
-class TestONNXOperators(TestCase):
+class TestONNXOpset(TestCase):
 
     def test_topk(self):
         class MyModule(Module):

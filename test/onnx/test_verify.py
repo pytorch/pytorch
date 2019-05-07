@@ -30,7 +30,6 @@ class TestVerify(TestCase):
         self.assertTrue(False, msg="verify() did not fail when expected to")
 
     def test_result_different(self):
-
         class BrokenAdd(Function):
             @staticmethod
             def symbolic(g, a, b):
