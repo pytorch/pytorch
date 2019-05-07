@@ -423,6 +423,13 @@ def cumsum(g, input, dim):
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
 
 
+def _sample_dirichlet(g, self, generator):
+    if not generator.node().mustBeNone():
+        return _unimplemented('_sample_dirichlet',
+                              'We are not able to export generator')
+    return g.op("ATen", self, operator_s="_sample_dirichlet")
+
+
 def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
@@ -1676,6 +1683,10 @@ def randn(g, *shapes):
     shapes_list = list(shapes)
     shape = _maybe_get_const(shapes_list[0], "is")
     return g.op('RandomNormal', shape_i=shape)
+
+
+def randn_like(g, self, *others):
+    return g.op('RandomNormalLike', self)
 
 
 @parse_args('v', 'f', 'f', 'i', 'none')

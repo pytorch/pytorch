@@ -211,13 +211,22 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_complete_shape_analysis",
           [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
-            CompleteArgumentSpec spec(
-                with_grad,
-                evilDeprecatedBadCreateStackDoNotUse(inputs, graph->inputs()));
-            auto graph_inputs = graph->inputs();
-            AT_ASSERT(spec.size() == graph_inputs.size());
-            for (size_t i = 0; i < graph_inputs.size(); ++i) {
-              graph_inputs[i]->setType(spec.at(i));
+            ArgumentSpecCreator arg_spec_creator(*graph);
+            Stack stack;
+            stack.reserve(inputs.size()); // captures?
+            for (auto& obj : inputs) {
+              stack.push_back(toIValue(obj));
+            }
+            ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
+            arg_spec_creator.specializeTypes(*graph, spec);
+            // We only get DimensionedTensorType from the arg_spec_creator, but
+            // we want CompleteTensorType. The alternative would be to have a
+            // "complete type inference" function in ArguemntSpecCreator.
+            auto g_inputs = graph->inputs();
+            for (size_t i = 0; i < inputs.size(); ++i) {
+              if (stack[i].isTensor()) {
+                g_inputs[i]->setType(incompleteInferTypeFrom(stack[i]));
+              }
             }
             PropagateInputShapes(graph);
           })

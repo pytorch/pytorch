@@ -893,8 +893,8 @@ struct PythonPrintPass {
             stmt, node->inputs(), "(", node->inputs().size() == 1 ? ",)" : ")");
       } break;
       case prim::TupleIndex: {
-        stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::index)
-             << "]";
+        stmt << "(" << useOf(node->inputs().at(0)) << ")["
+             << useOf(node->inputs().at(1)) << "]";
       } break;
       case prim::TupleSlice: {
         stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::beg) << ":"
@@ -1220,6 +1220,5 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   return handled.count(sym) || unneeded.count(sym) ||
       !required_namespaces.count(sym.ns());
 }
-
 } // namespace jit
 } // namespace torch

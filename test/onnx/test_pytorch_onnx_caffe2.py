@@ -1338,6 +1338,19 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(3, 3, requires_grad=True)
         self.run_model_test(NarrowModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_randn_like(self):
+        class RandNLikeModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.randn_like(input)
+
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        model = RandNLikeModel()
+        onnxir, _ = do_export(model, x)
+        onnx_model = onnx.ModelProto.FromString(onnxir)
+        prepared = c2.prepare(onnx_model)
+        caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
+        self.assertEqual(caffe2_out[0].shape, x.shape)
+
     def test_traced_ints(self):
         A = 4
         H = 10
@@ -1592,6 +1605,19 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
         self.run_model_test(Log2Model(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_sample_dirichlet(self):
+        class DirichletModel(torch.nn.Module):
+            def forward(self, input):
+                return torch._sample_dirichlet(input)
+
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        model = DirichletModel()
+        onnxir, _ = do_export(model, x)
+        onnx_model = onnx.ModelProto.FromString(onnxir)
+        prepared = c2.prepare(onnx_model)
+        caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
+        self.assertEqual(caffe2_out[0].shape, x.shape)
 
     def test_prim_shape(self):
         x = torch.randn(4, 5, requires_grad=True)
