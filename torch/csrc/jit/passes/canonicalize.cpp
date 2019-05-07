@@ -163,20 +163,14 @@ std::vector<size_t> sort_indexes(at::ArrayRef<Value*> values) {
   return idx;
 }
 
-std::string uniqueName(Value* v) {
-  return v->hasUniqueName() ? v->uniqueName() : "";
-}
-
 void CanonicalizeLoopOutputs(Node* n) {
   auto new_indices = sort_indexes(n->outputs());
-  LoopView loop_node(n);
-  loop_node.permuteLoopCarried(new_indices);
+  LoopView(n).permuteLoopCarried(new_indices);
 }
 
 void CanonicalizeIfOutputs(Node* n) {
   auto new_indices = sort_indexes(n->outputs());
-  IfView if_node(n);
-  if_node.permuteOutputs(new_indices);
+  IfView(n).permuteOutputs(new_indices);
 }
 
 void CanonicalizeOutputs(Block* block) {
