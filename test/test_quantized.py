@@ -5,6 +5,8 @@ import torch.jit
 import numpy as np
 import unittest
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, skipIfNotRegistered
+import torch.nn.functional as F
+import torch.nn as nn
 
 
 def canonical(graph):
@@ -24,7 +26,12 @@ def _dequantize(qx, scale, zero_point):
     return x
 
 
-# Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM
+# Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
+# On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
+# for the 8-bit int multiplication. This instruction vertically multiplies each
+# unsigned 8-bit integer from a with the corresponding signed 8-bit integer from
+# b, producing intermediate signed 16-bit integers. This function modifies the
+# weights to eliminate the overflow on the signed 16-bit integers.
 def avoid_vpmaddubsw_overflow_fc(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
@@ -246,6 +253,16 @@ class TestQuantizedFC(unittest.TestCase):
 
         # Assert equal
         np.testing.assert_equal(Y_q_ref, Y_q.int_repr().numpy())
+
+        # Reference quantized result from PyTorch Linear operator
+        W_fp32 = W_q.dequantize().to(dtype=torch.float)
+        X_fp32 = X_q.dequantize().to(dtype=torch.float)
+        b_fp32 = torch.from_numpy(_dequantize(b_q.numpy(), W_scale * X_scale, 0).astype(np.float)).to(dtype=torch.float)
+        Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
+        Y_q_ref2 = Y_fp32_ref.quantize_linear(Y_scale, Y_zp)
+
+        # Assert equal
+        np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
 
 if __name__ == "__main__":
