@@ -4,31 +4,12 @@ from .. import functional as F
 from .module import Module
 from .activation import MultiheadAttention
 from .container import ModuleList
-import numpy as np
 from ..init import xavier_uniform_
 from .dropout import Dropout
 from .linear import Linear
 from .normalization import LayerNorm
 
-class TransformerBase(Module):
-    r"""A base Transformer class. The transformer is based on a standard
-        Encoder-Decoder architecture.
-
-    Args:
-        encoder: an encoder component (required).
-        decoder: a decoder component (required).
-
-    Examples:
-        >>> transformer_model = nn.TransformerBase(encoder, decoder)
-    """
-
-    def __init__(self, encoder, decoder):
-        super(TransformerBase, self).__init__()
-        self.encoder = encoder 
-        self.decoder = decoder
-
-
-class Transformer(TransformerBase):
+class Transformer(Module):
     r"""A transformer model. User is able to modified the attributes as needed.
 
     Args:
@@ -38,6 +19,8 @@ class Transformer(TransformerBase):
         num_decoder_layers: the number of sub-decoder-layers in the decoder (default=6).
         dim_feedforward: the dimension of the feedforward network model (default=2048).
         dropout: the dropout value (default=0.1).
+        custom_encoder: custom encoder (default=None).
+        custom_decoder: custom decoder (default=None).
 
     Examples::
         >>> transformer_model = nn.Transformer(src_vocab, tgt_vocab)
@@ -45,16 +28,23 @@ class Transformer(TransformerBase):
     """
 
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
-                 num_decoder_layers=6, dim_feedforward=2048, dropout=0.1):
-        encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout)
-        encoder_norm = LayerNorm(d_model) 
-        encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
+                 num_decoder_layers=6, dim_feedforward=2048, dropout=0.1,
+                 custom_encoder=None, custom_decoder=None):
+        super(Transformer, self).__init__()
 
-        decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout)    
-        decoder_norm = LayerNorm(d_model) 
-        decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
+        if custom_encoder is not None:
+            self.encoder = custom_encoder
+        else:
+            encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout)
+            encoder_norm = LayerNorm(d_model) 
+            self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
-        super(Transformer, self).__init__(encoder, decoder)
+        if custom_decoder is not None:
+            self.decoder = custom_decoder
+        else:
+            decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout)    
+            decoder_norm = LayerNorm(d_model) 
+            self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
         self._reset_parameters()
 
@@ -98,9 +88,7 @@ class Transformer(TransformerBase):
         r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
             Unmasked positions are filled with float(0.0).
         """
-        attn_shape = (sz, sz)
-        mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
-        mask = torch.from_numpy(mask) == 0
+        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
         return mask    
 
