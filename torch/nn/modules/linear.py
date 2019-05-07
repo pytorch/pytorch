@@ -1,4 +1,7 @@
 import math
+import operator
+from collections import Iterable
+from functools import reduce
 
 import torch
 from torch.nn.parameter import Parameter
@@ -73,23 +76,70 @@ class Linear(Module):
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = Parameter(torch.Tensor(out_features, in_features))
+
+        sizes = []
+        sizes.append(out_features) \
+            if isinstance(out_features, int) else sizes.extend(out_features)
+        sizes.append(in_features) \
+            if isinstance(in_features, int) else sizes.extend(in_features)
+
+        self.in_prod = self._sizes_prod(in_features)
+        self.out_prod = self._sizes_prod(out_features)
+
+        self.weight = Parameter(torch.empty(sizes))
         if bias:
-            self.bias = Parameter(torch.Tensor(out_features))
+            self.bias = Parameter(torch.empty(self.out_features))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
 
+    def _sizes_prod(self, features):
+        assert isinstance(features, (int, Iterable)), (
+            "nn.Linear in_features and out_features must be either an int or "
+            "an Iterable, but got {}."
+        ).format(type(features))
+
+        return features if isinstance(features, int) else \
+            reduce(operator.mul, features, 1) if features else 1
+
     def reset_parameters(self):
-        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+        weight, bias = self._reshape_params()
+        init.kaiming_uniform_(weight, a=math.sqrt(5))
+        if bias is not None:
+            fan_in, _ = init._calculate_fan_in_and_fan_out(weight)
             bound = 1 / math.sqrt(fan_in)
-            init.uniform_(self.bias, -bound, bound)
+            init.uniform_(bias, -bound, bound)
+
+    def _reshape_params(self):
+        if self.in_prod != self.in_features or self.out_prod != self.out_features:
+            weight_view = self.weight.view(self.out_prod, self.in_prod)
+            bias_view = self.bias.view(self.out_prod)
+            return weight_view, bias_view
+        else:
+            return self.weight, self.bias
 
     @weak_script_method
     def forward(self, input):
-        return F.linear(input, self.weight, self.bias)
+        # In order to keep parameters() show correct dimensions, weight
+        # and bias need to be reshaped in every iteration.
+        weight, bias = self._reshape_params()
+
+        if self.in_prod != self.in_features:
+            # reshape input
+            view_sizes = input.size()[:-len(self.in_features)] \
+                if self.in_features else input.size()
+            view_sizes = view_sizes.__add__(torch.Size([self.in_prod]))
+            input = input.view(view_sizes)
+
+        output = F.linear(input, weight, bias)
+
+        if self.out_prod != self.out_features:
+            # reshape output
+            view_sizes = output.size()[:-1] \
+                               .__add__(torch.Size(self.out_features))
+            output = output.view(view_sizes)
+
+        return output
 
     def extra_repr(self):
         return 'in_features={}, out_features={}, bias={}'.format(

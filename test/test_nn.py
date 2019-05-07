@@ -7192,6 +7192,73 @@ class TestNN(NNTestCase):
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
                     _test_interpolate_helper(_make_input(3), scale_factor, m)
 
+    def _test_linear(self, input, m, in_sizes, out_sizes, expected_output_sizes):
+        in_list = [in_sizes] if isinstance(in_sizes, int) else list(in_sizes)
+        out_list = [out_sizes] if isinstance(out_sizes, int) else list(out_sizes)
+        sizes = out_list + in_list
+
+        self.assertEqual(m.weight.size(), torch.Size(sizes))
+        self.assertEqual(m.bias.size(), torch.Size(out_list))
+
+        def prod(sizes):
+            p = 1
+            for size in sizes:
+                p *= size
+            return p
+
+        weight = m.weight.data.clone().reshape(prod(out_list), prod(in_list))
+        bias = m.bias.data.clone().reshape(prod(out_list))
+
+        if in_list:
+            input_sizes = list(input.size())[:-len(in_list)]
+        else:
+            input_sizes = list(input.size())
+        input_sizes.append(prod(in_list))
+
+        output = torch.matmul(input.view(input_sizes), weight.t()) + bias
+
+        output_sizes = list(output.size())[:-1]
+        output_sizes.extend(out_list)
+        output = output.view(output_sizes)
+
+        self.assertEqual(output, m(input))
+        self.assertEqual(torch.Size(expected_output_sizes), m(input).size())
+
+    def test_linear(self):
+        inp = torch.randn(3, 2, 2, 3)
+
+        m = nn.Linear([2, 3], [4, 1])
+        self._test_linear(
+            inp, m, in_sizes=[2, 3], out_sizes=[4, 1], expected_output_sizes=[3, 2, 4, 1])
+
+        m = nn.Linear([2, 2, 3], 3)
+        self._test_linear(
+            inp, m, in_sizes=[2, 2, 3], out_sizes=3, expected_output_sizes=[3, 3])
+
+        m = nn.Linear([2, 2, 3], ())
+        self._test_linear(
+            inp, m, in_sizes=[2, 2, 3], out_sizes=(), expected_output_sizes=[3])
+
+        m = nn.Linear(3, [1, 2, 3])
+        self._test_linear(
+            inp, m, in_sizes=3, out_sizes=[1, 2, 3], expected_output_sizes=[3, 2, 2, 1, 2, 3])
+
+        m = nn.Linear([3, 2, 2, 3], 1)
+        self._test_linear(
+            inp, m, in_sizes=[3, 2, 2, 3], out_sizes=1, expected_output_sizes=[1])
+
+        m = nn.Linear([3, 2, 2, 3], [])
+        self._test_linear(
+            inp, m, in_sizes=[3, 2, 2, 3], out_sizes=[], expected_output_sizes=[])
+
+        m = nn.Linear([], [3, 3])
+        self._test_linear(
+            inp, m, in_sizes=[], out_sizes=[3, 3], expected_output_sizes=[3, 2, 2, 3, 3, 3])
+
+        m = nn.Linear([], [])
+        self._test_linear(
+            inp, m, in_sizes=[], out_sizes=[], expected_output_sizes=[3, 2, 2, 3])
+
     def test_linear_broadcasting(self):
         m = nn.Linear(5, 8)
         inp = torch.randn(2, 3, 5)

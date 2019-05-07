@@ -118,6 +118,70 @@ TEST_F(ModulesTest, Linear) {
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
 
+TEST_F(ModulesTest, LinearSizes) {
+  auto x = torch::randn({10, 5, 2, 3}, torch::requires_grad());
+
+  // vec in, vec out
+  std::vector<int64_t> in1 = {2, 3};
+  std::vector<int64_t> out1 = {3, 2, 4};
+  Linear model1(in1, out1);
+  auto y = model1(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({10, 5, 3, 2, 4}));
+  ASSERT_EQ(model1->weight.grad().numel(), 2 * 3 * 3 * 2 * 4);
+
+  // int in, vec out
+  int64_t in2 = 3;
+  std::vector<int64_t> out2 = {2, 3};
+  Linear model2(in2, out2);
+  y = model2(x);
+  s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({10, 5, 2, 2, 3}));
+  ASSERT_EQ(model2->weight.grad().numel(), 3 * 2 * 3);
+
+  // vec in, int out
+  std::vector<int64_t> in3 = {2, 3};
+  int64_t out3 = 3;
+  Linear model3(in3, out3);
+  y = model3(x);
+  s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({10, 5, 3}));
+  ASSERT_EQ(model3->weight.grad().numel(), 2 * 3 * 3);
+
+  // vec in, scalar out
+  std::vector<int64_t> in4 = {2, 3};
+  std::vector<int64_t> out4 = {};
+  Linear model4(in4, out4);
+  y = model4(x);
+  s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({10, 5}));
+  ASSERT_EQ(model4->weight.grad().numel(), 2 * 3);
+
+  // scalar in, vec out
+  std::vector<int64_t> in5 = {};
+  std::vector<int64_t> out5 = {2, 2};
+  Linear model5(in5, out5);
+  y = model5(x);
+  s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({10, 5, 2, 3, 2, 2}));
+  ASSERT_EQ(model5->weight.grad().numel(), 2 * 2);
+}
+
 TEST_F(ModulesTest, SimpleContainer) {
   auto model = std::make_shared<SimpleContainer>();
   auto l1 = model->add(Linear(10, 3), "l1");
