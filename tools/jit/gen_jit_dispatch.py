@@ -159,6 +159,15 @@ CONSTRUCTOR = CodeTemplate("""\
 }
 """)
 
+CONSTRUCTOR_C10 = CodeTemplate("""\
+[](Stack & stack) {
+    static auto op = c10::Dispatcher::singleton().findSchema("aten::${name}", "");
+    AT_CHECK(op.has_value(), "Schema aten::${name} is not registered");
+    c10::Dispatcher::singleton().callOp(*op, &stack);
+    return 0;
+}
+""")
+
 OPERATOR = CodeTemplate("""\
 Operator(
     "${signature}",
@@ -296,12 +305,15 @@ def gen_jit_dispatch(declarations, out, template_path):
 
         returns = decl['returns']
 
-        constructor = CONSTRUCTOR.substitute(name=decl['name'],
-                                             call=call,
-                                             kw_assignments=kw_assignments,
-                                             num_inputs=num_inputs,
-                                             op_capture=op_capture,
-                                             lvalues=lvalues)
+        if decl['use_c10_dispatcher']:
+            constructor = CONSTRUCTOR_C10.substitute(name=decl['name'])
+        else:
+            constructor = CONSTRUCTOR.substitute(name=decl['name'],
+                                                 call=call,
+                                                 kw_assignments=kw_assignments,
+                                                 num_inputs=num_inputs,
+                                                 op_capture=op_capture,
+                                                 lvalues=lvalues)
         return constructor
 
     # This function declares an order on declarations. This is necessary because
@@ -335,6 +347,7 @@ def gen_jit_dispatch(declarations, out, template_path):
         'method_of': ['Tensor'],
         'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
+        'use_c10_dispatcher': False,
     } for name in ['sizes', 'strides', 'dim']]
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
     jit_decls = [d for d in aten_decls if is_jit_op(d)]

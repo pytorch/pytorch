@@ -209,6 +209,9 @@ struct CAFFE2_API IValue final {
     AT_ASSERT(isTensor());
     return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
   }
+  at::TensorImpl* toTensorImplRef() const {
+    return static_cast<at::TensorImpl*>(payload.as_intrusive_ptr);
+  }
 
   const IValue& toIValue() const {
     return *this;

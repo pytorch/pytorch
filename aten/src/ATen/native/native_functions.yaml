@@ -1,5 +1,19 @@
 # See README.md in this directory for more guidance
 
+- func: null(Tensor self) -> Tensor
+
+- func: null4(Tensor self, Tensor a, Tensor b, Tensor c) -> Tensor
+
+- func: null_back(Tensor self) -> Tensor
+
+- func: null_c10(Tensor self) -> Tensor
+  use_c10_dispatcher: True
+
+- func: null4_c10(Tensor self, Tensor a, Tensor b, Tensor c) -> Tensor
+  use_c10_dispatcher: True
+
+- func: null_back_c10(Tensor self) -> Tensor
+  use_c10_dispatcher: True
 
 # Temporary type cast operators. These are needed to trace type-casts now since
 # Type's are not supported in the IR. Instead, we call down to these
@@ -907,6 +921,7 @@
 - func: hamming_window(int window_length, bool periodic, float alpha, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
+  use_c10_dispatcher: True
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
   variants: function, method

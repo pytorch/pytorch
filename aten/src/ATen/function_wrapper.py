@@ -154,6 +154,9 @@ ${return_type} ${Type}::${api_name}(${type_method_formals}) const {
 TYPE_DEFINITION_BODY_NATIVE = CodeTemplate("""\
 ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
 """)
+TYPE_DEFINITION_BODY_NATIVE_C10 = CodeTemplate("""\
+${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${moved_native_actuals});
+""")
 
 # Overrideable stubs to be used in user-extendable backends
 TYPE_DEFINITION_EXTENSION_BACKEND = CodeTemplate("""\
@@ -191,9 +194,11 @@ FUNCTION_DEFINITION_C10 = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
     static auto op = c10::Dispatcher::singleton().findSchema("aten::${api_name}", "");
     AT_CHECK(op.has_value(), "Schema ${schema_string} is not registered");
-    torch::jit::Stack s;
-    torch::jit::push(s, ${type_method_actuals});
-    c10::Dispatcher::singleton().lookup(*op, &s).call(&s);
+    static torch::jit::Stack s;
+    s.clear();
+    s.reserve(10);
+    torch::jit::push(s, ${stack_args});
+    c10::Dispatcher::singleton().callOp(*op, &s);
     return torch::jit::pop(s).toTensor();
 }
 """)
@@ -623,6 +628,7 @@ FunctionOption = TypedDict('FunctionOption', {
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
+    ('id', int),
     ('matches_jit_signature', bool),
     ('use_c10_dispatcher', bool),
     ('schema_string', str),
@@ -1012,6 +1018,7 @@ def create_generic(top_env, declarations):
 
         output_options.append(OutputDeclaration(
             name=option['api_name'],
+            id=option['id'],
             matches_jit_signature=option['matches_jit_signature'],
             use_c10_dispatcher=False,
             schema_string=option['schema_string'],
@@ -1072,10 +1079,21 @@ def create_generic(top_env, declarations):
                     'TensorList': 'TensorList',
                 }
 
+            def translate_map_c10():
+                # type: (bool) -> Dict[str, str]
+                return {
+                    'Tensor': 'Tensor',
+                    'Type': 'Type',
+                    'TensorOptions': 'TensorOptions',
+                    'TensorList': 'TensorList',
+                }
+
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
                 argument['type'] = "c10::optional<{}>".format(argument['type'])
 
-            if (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):
+            if option['use_c10_dispatcher']:
+                argument['type'] = translate_map_c10().get(argument['type'], argument['type'])
+            elif (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):
                 argument['type'] = translate_map(False).get(argument['type'], argument['type'])
             else:
                 argument['type'] = translate_map(True).get(argument['type'], argument['type'])
@@ -1212,14 +1230,21 @@ def create_generic(top_env, declarations):
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
         else:
-            body = TYPE_DEFINITION_BODY_NATIVE.substitute(env)
             if use_c10:
+                moved_native_actuals = []
+                for f in formals:
+                    if f['dynamic_type'] == 'Tensor':
+                        moved_native_actuals.append('std::move({})'.format(f['name']))
+                    else:
+                        moved_native_actuals.append(f['name'])
+                body = TYPE_DEFINITION_BODY_NATIVE_C10.substitute(env, moved_native_actuals=moved_native_actuals)
                 top_env['type_method_definitions'].append(
                     TYPE_METHOD_DEFINITION_CONCRETE_C10.substitute(
                         env, type_definition_body=body))
                 top_env['c10_registrations'].append(
                     C10_REGISTRATION.substitute(env))
             else:
+                body = TYPE_DEFINITION_BODY_NATIVE.substitute(env)
                 top_env['type_method_definitions'].append(
                     TYPE_METHOD_DEFINITION_CONCRETE.substitute(
                         env, type_definition_body=body))
@@ -1257,13 +1282,20 @@ def create_generic(top_env, declarations):
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             top_env['function_declarations'].append(declaration.substitute(env))
             if option['use_c10_dispatcher']:
-                top_env['function_definitions'].append(FUNCTION_DEFINITION_C10.substitute(env))
+                stack_args = []
+                for f in formals:
+                    if f['dynamic_type'] == 'Tensor':
+                        stack_args.append('std::move({})'.format(f['name']))
+                    else:
+                        stack_args.append(f['name'])
+                top_env['function_definitions'].append(FUNCTION_DEFINITION_C10.substitute(env, stack_args=stack_args))
             else:
                 top_env['function_definitions'].append(FUNCTION_DEFINITION.substitute(env))
             method_of.append('namespace')
 
         output_options.append(OutputDeclaration(
             name=option['api_name'],
+            id=option['id'],
             matches_jit_signature=option["matches_jit_signature"],
             use_c10_dispatcher=option['use_c10_dispatcher'],
             schema_string=option["schema_string"],

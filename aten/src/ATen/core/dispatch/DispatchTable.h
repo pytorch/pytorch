@@ -259,7 +259,7 @@ private:
     bool is_valid_;
 
     TensorTypeId get_dispatch_key(const Stack* stack) const {
-      auto first_tensor_arg = torch::jit::peek(
+      const IValue& first_tensor_arg = torch::jit::peek(
         *stack,
         0,
         reverse_index_of_first_tensor_arg_
@@ -272,7 +272,7 @@ private:
         return tensor_list[0].type_id();
       } else {
         // TODO Avoid bumping the refcounter
-        return first_tensor_arg.toTensor().type_id();
+        return first_tensor_arg.toTensorImplRef()->type_id();
       }
     }
   };

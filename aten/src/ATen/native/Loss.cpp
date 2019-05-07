@@ -34,7 +34,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   return apply_loss_reduction(output, reduction);
 }
 
-Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double margin, int64_t reduction) {
+Tensor hinge_embedding_loss(Tensor self, Tensor target, double margin, int64_t reduction) {
   auto zeros = at::zeros_like(self);
   auto margin_clamp = (margin - self).clamp_min_(0);
   auto output_margin = at::where(target != 1, margin_clamp, zeros);
@@ -60,7 +60,7 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
   return apply_loss_reduction(output, reduction);
 }
 
-Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction) {
+Tensor kl_div(Tensor input, Tensor target, int64_t reduction) {
   auto zeros = at::zeros_like(target);
   auto output_pos = target * (at::log(target) - input);
   auto output = at::where(target > 0, output_pos, zeros);

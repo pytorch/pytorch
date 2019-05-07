@@ -93,6 +93,13 @@
 #
 # NB: The parameter names here MUST be consistent with the parameter names
 # in ./torch/lib/ATen/Declarations.cwrap
+
+- name: null_back(Tensor self)
+  self: grad
+
+- name: null_back_c10(Tensor self)
+  self: grad
+
 - name: abs(Tensor self)
   self: grad * self.sign()
 

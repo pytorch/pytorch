@@ -159,6 +159,8 @@ public:
    */
   OpKernel lookup(const OperatorHandle& op, const Stack* stack) const;
 
+  void callOp(const OperatorHandle& op, Stack* stack) const;
+
   void registerAutogradWrapper(const OperatorHandle& op, KernelFunctionWrapper* wrapper);
 
   void deregisterAutogradWrapper(const OperatorHandle& op);
@@ -211,6 +213,16 @@ inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack)
   const DispatchTableEntry& kernel = op.operatorDefIterator_->dispatchTable.lookup(stack);
   const auto autograd_wrapper = op.operatorDefIterator_->dispatchTable.getAutogradWrapper();
   return OpKernel(kernel.kernel_func, kernel.cache_creator_func, autograd_wrapper);
+}
+
+inline void Dispatcher::callOp(const OperatorHandle& op, Stack* stack) const {
+  const DispatchTableEntry& kernel = op.operatorDefIterator_->dispatchTable.lookup(stack);
+  const auto autograd_wrapper = op.operatorDefIterator_->dispatchTable.getAutogradWrapper();
+  if (autograd_wrapper) {
+    (*autograd_wrapper)(stack, kernel.kernel_func, nullptr);
+    return;
+  }
+  (*kernel.kernel_func)(stack, nullptr);
 }
 
 } // namespace c10

@@ -159,6 +159,9 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
 class RegistrationListener final : public c10::OpRegistrationListener {
 public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
+    if (op.schema().name().rfind("aten::", 0) == 0) {
+      return;
+    }
     torch::jit::registerOperator(createOperatorFromC10(op));
   }
 

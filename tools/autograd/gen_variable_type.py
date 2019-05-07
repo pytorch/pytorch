@@ -151,15 +151,15 @@ ${return_type} VariableType::${method_prefix_derived}${api_name}(${type_method_f
 """)
 
 METHOD_DECLARATION_C10 = CodeTemplate("""\
-static void ${api_name}(Stack* stack, KernelFunction* fn, KernelCache* cache);
+static void ${api_name}_${id}(Stack* stack, KernelFunction* fn, KernelCache* cache);
 """)
 
 METHOD_DEFINITION_C10 = CodeTemplate("""\
-void VariableType::${api_name}(Stack* stack, KernelFunction* fn, KernelCache* cache) {
+void VariableType::${api_name}_${id}(Stack* stack, KernelFunction* fn, KernelCache* cache) {
   ${type_definition_body}
 }
-static auto registry = c10::RegisterOperators()
-    .wrapper("${schema_string}", &VariableType::${api_name});
+static auto registry_${id} = c10::RegisterOperators()
+    .wrapper("${schema_string}", &VariableType::${api_name}_${id});
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -183,12 +183,14 @@ grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
-CALL_VIA_C10_WITH_RETURN_VALUES = CodeTemplate("""\
-(*fn)(stack, cache);
-${postprocess_stack}
+CALL_VIA_C10_AND_DISPATCH_TO_NON_VAR_TYPE = CodeTemplate("""\
+{
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  (*fn)(stack, cache);
+}
 """)
 
-CALL_VIA_C10_WITHOUT_RETURN_VALUES = CodeTemplate("""\
+CALL_VIA_C10 = CodeTemplate("""\
 (*fn)(stack, cache);
 """)
 
@@ -232,6 +234,10 @@ RECORD_FUNCTION = CodeTemplate("""\
 RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Function::peek_at_next_sequence_nr());
 """)
 
+RECORD_FUNCTION_C10 = CodeTemplate("""\
+RECORD_FUNCTION("${name}", *stack, Function::peek_at_next_sequence_nr());
+""")
+
 SELECT = CodeTemplate("""\
 if (${cond}) {
   ${true}
@@ -265,6 +271,8 @@ jit::tracer::ensureUniqueIfOutOfPlaced("${name}", ${mutable_input});
 """)
 
 ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${input});""")
+
+ADD_TRACE_INPUT_C10 = CodeTemplate("""jit::tracer::addInputs(node, "${name}", stack->at(${i}).to<${type}>());""")
 
 POST_RECORD_TRACE = CodeTemplate("""\
 if (tracer_state) {
@@ -311,6 +319,12 @@ def is_out_overload(declaration):
 
 
 def format_postrecord_trace(declaration):
+    if declaration['use_c10_dispatcher']:
+        outputs = []
+        for i, ret in enumerate(declaration['returns']):
+            outputs.append('jit::tracer::addOutput(node, stack->at({}).to<{}>());'.format(i, ret['dynamic_type']))
+        return POST_RECORD_TRACE.substitute(add_trace_outputs=outputs)
+
     # For outplacing ops, *_out overloads require special handling to move the
     # output *argument* to a return value
     if is_out_overload(declaration):
@@ -361,13 +375,19 @@ def format_trace_op_name(declaration):
 
 
 def format_trace_inputs(declaration):
-    def dispatch_trace_input(arg_spec):
-        name, value, simple_type, nullable = arg_spec
-        # XXX: For arg that have type of Tensor?[], tracer will pass allow_undefined to addInputs
-        if simple_type == 'TensorList' and nullable:
-            return '''jit::tracer::addInputs(node, "{}", {}, {});'''.format(name, value, "true")
-        else:
-            return ADD_TRACE_INPUT.substitute(name=name, input=value)
+    def dispatch_trace_inputs(trace_inputs):
+        ret = []
+        for i, trace_input in enumerate(trace_inputs):
+            name = trace_input['name']
+            nullable = trace_input.get('is_nullable')
+            if declaration['use_c10_dispatcher']:
+                return ADD_TRACE_INPUT_C10.substitute(name=name, i=i, type=trace_input['dynamic_type'])
+            else:
+                # XXX: For arg that have type of Tensor?[], tracer will pass allow_undefined to addInputs
+                if trace_input['simple_type'] == 'TensorList' and nullable:
+                    return '''jit::tracer::addInputs(node, "{}", {}, {});'''.format(name, name, "true")
+                else:
+                    return ADD_TRACE_INPUT.substitute(name=name, input=name)
 
     trace_inputs = declaration['arguments']
 
@@ -377,10 +397,7 @@ def format_trace_inputs(declaration):
         out_input = trace_inputs[0]
         trace_inputs = trace_inputs[1:]
 
-    trace_input_spec = [(i['name'], i['name'], i['simple_type'], i.get('is_nullable')) for i in trace_inputs]
-
-    trace_inputs = \
-        '\n'.join(dispatch_trace_input(arg_spec) for arg_spec in trace_input_spec)
+    trace_inputs = dispatch_trace_inputs(trace_inputs)
 
     if is_out_overload(declaration):
         # for *_out functions, handle the result argument differently for inplace/outplace.
@@ -800,10 +817,10 @@ def emit_body(declaration):
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if declaration['use_c10_dispatcher']:
-            if not modifies_arguments and not returns_void:
-                call = CALL_VIA_C10_WITH_RETURN_VALUES.substitute(postprocess_stack=postprocess_stack(declaration))
+            if strategy == 'use_derived':
+                call = CALL_VIA_C10_AND_DISPATCH_TO_NON_VAR_TYPE.substitute()
             else:
-                call = CALL_VIA_C10_WITHOUT_RETURN_VALUES.substitute()
+                call = CALL_VIA_C10.substitute()
         elif strategy == 'use_derived':
             # We only care about adding `at::AutoNonVariableTypeMode` guard for `baseType` dispatch
             # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
@@ -891,25 +908,34 @@ def emit_body(declaration):
 
     env = {}
     combined = nested_dict(env, declaration)
+    unwrap_args = strategy != 'use_type'
 
     body = []
-    if declaration['use_c10_dispatcher']:
-        body.extend(preprocess_stack(declaration))
     if base_name not in DONT_PROFILE:
-        input_names = record_function_input_names()
-        body.append(
-            RECORD_FUNCTION.substitute(combined, input_names=input_names))
-    if strategy != 'use_type':
+        if declaration['use_c10_dispatcher']:
+            body.append(RECORD_FUNCTION_C10.substitute(combined))
+        else:
+            input_names = record_function_input_names()
+            body.append(
+                RECORD_FUNCTION.substitute(combined, input_names=input_names))
+
+    pre_record_trace, post_record_trace = emit_record_trace(env)
+    body.append(pre_record_trace)
+
+    if unwrap_args:
+        if declaration['use_c10_dispatcher']:
+            body.extend(unstack_args(declaration))
         body.extend(unpack_args(env, declaration))
     if requires_derivative:
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables())
 
-    pre_record_trace, post_record_trace = emit_record_trace(env)
-
-    body.append(pre_record_trace)
+    if unwrap_args and declaration['use_c10_dispatcher']:
+        body.extend(restack_args(declaration))
     body.append(emit_call(env))
+    if unwrap_args and declaration['use_c10_dispatcher']:
+        body.extend(unstack_rets(declaration))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
@@ -922,20 +948,57 @@ def emit_body(declaration):
         body.append(emit_save_outputs())
     if not returns_void and not declaration['use_c10_dispatcher']:
         body.append('return {};'.format(get_return_value()))
+    if unwrap_args and declaration['use_c10_dispatcher']:
+        body.extend(restack_rets(declaration))
     return body
 
 
-def preprocess_stack(declaration):
+def unstack_args(declaration):
     body = []
     for i, arg in enumerate(declaration['arguments']):
-        body.append('{} {} = stack->at({}).to<{}>();'.format(arg['type'], arg['name'], i, arg['dynamic_type']))
+        if arg['dynamic_type'] == 'Tensor':
+            body.append('{} {} = std::move(stack->at({})).to<{}>();'.format(
+                arg['dynamic_type'], arg['name'], i, arg['dynamic_type']))
+            #body.append('{} {} = stack->at({}).to<{}>();'.format(
+            #    arg['dynamic_type'], arg['name'], i, arg['dynamic_type']))
+        else:
+            body.append('{} {} = stack->at({}).to<{}>();'.format(arg['type'], arg['name'], i, arg['dynamic_type']))
     return body
 
 
-def postprocess_stack(declaration):
+def restack_args(declaration):
+    body = []
+    for i, arg in enumerate(declaration['arguments']):
+        if arg['dynamic_type'] == 'Tensor':
+            #body.append('(*stack)[{}] = IValue(std::move({}_));'.format(i, arg['name']))
+            body.append('(*stack)[{}] = IValue({}_);'.format(i, arg['name']))
+        else:
+            body.append('(*stack)[{}] = IValue(std::move({}));'.format(i, arg['name']))
+            #body.append('(*stack)[{}] = IValue({});'.format(i, arg['name']))
+    return body
+
+
+def unstack_rets(declaration):
     body = []
     for i, ret in enumerate(declaration['returns']):
-        body.append('{} {} = stack->at({}).to<{}>();'.format(ret['type'], ret['name'], i, ret['dynamic_type']))
+        if ret['dynamic_type'] == 'Tensor':
+            body.append('auto {} = as_variable(std::move(stack->at({})).to<{}>());'.format(
+                ret['name'], i, ret['dynamic_type']))
+            #body.append('auto {} = as_variable(stack->at({}).to<{}>());'.format(
+            #    ret['name'], i, ret['dynamic_type']))
+        else:
+            body.append('auto {} = std::move(stack->at({})).to<{}>();'.format(
+                ret['name'], i, ret['dynamic_type']))
+            #body.append('auto {} = stack->at({}).to<{}>();'.format(
+            #    ret['name'], i, ret['dynamic_type']))
+    return body
+
+
+def restack_rets(declaration):
+    body = []
+    for i, ret in enumerate(declaration['returns']):
+        body.append('(*stack)[{}] = IValue(std::move({}));'.format(i, ret['name']))
+        #body.append('(*stack)[{}] = IValue({});'.format(i, ret['name']))
     return body
 
 
