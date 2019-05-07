@@ -308,6 +308,7 @@ class TestWorkspace(unittest.TestCase):
         workspace.FeedBlob('bar', z)
         workspace.RunOperatorOnce(
             core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2)))
+        z = workspace.FetchTorch("bar")
         z[0,1] = 123
         np.testing.assert_array_equal(
             workspace.FetchBlob("bar"), np.array([[1,123],[1,1]]))
@@ -398,6 +399,7 @@ class TestWorkspaceGPU(test_util.TestCase):
         workspace.RunOperatorOnce(
             core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2),
             device_option=core.DeviceOption(workspace.GpuDeviceType)))
+        z = workspace.FetchTorch("bar")
         z[0,1] = 123
         np.testing.assert_array_equal(
             workspace.FetchBlob("bar"), np.array([[1,123],[1,1]]))
