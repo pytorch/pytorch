@@ -6613,6 +6613,9 @@ a")
         def test_all_outputs(g):
             ifs = g.findAllNodes("prim::If")
             loops = g.findAllNodes("prim::Loop")
+
+            def contained_blocks(node):
+                return len(node.findAllNodes("prim::If")) * 2 + len(node.findAllNodes("prim::Loop"))
             for node in ifs + loops:
                 outs = list(node.outputs())
                 out_name = list(map(lambda x: x.uniqueName(), outs))
@@ -6622,6 +6625,8 @@ a")
                 # find the last output, then all subsequent uses
                 fc.check(out_name[-1] + " : ")
                 # skip past node body
+                for i in range(contained_blocks(node)):
+                    fc.check("->")
                 if (node.kind() == "prim::If"):
                     fc.check("->").check("->").check("\n")
                 else:

@@ -136,6 +136,10 @@ std::vector<size_t> sort_indexes(at::ArrayRef<Value*> values) {
 
   // Sort values based on canonical ordering of their first usage
   std::sort(idx.begin(), idx.end(), [&values](size_t i1, size_t i2) {
+    // if neither has any uses, use original ordering. Since the
+    // only values that jitter are ones added by the compiler which are
+    // guaranteed to not be loop carried dependencies (the only control outputs
+    // which can have 0 uses) original ordering is fine
     if (values[i1]->uses().size() == 0 && values[i2]->uses().size() == 0) {
       return i1 < i2;
     }
@@ -163,77 +167,16 @@ std::string uniqueName(Value* v) {
   return v->hasUniqueName() ? v->uniqueName() : "";
 }
 
-void CanonicalizeOutputs(Block* block);
-
-void swapIfNodeOutputs(Node* n, const std::vector<size_t>& new_indices) {
-  for (size_t index : new_indices) {
-    auto orig = n->outputs().at(index);
-    auto new_out =
-        n->addOutput()->setUniqueName(uniqueName(orig))->setType(orig->type());
-    orig->replaceAllUsesWith(new_out);
-  }
-  while (n->outputs().size() > new_indices.size()) {
-    n->eraseOutput(0);
-  }
-}
-
-void swapIfBlockOutputs(Block* b, const std::vector<size_t>& new_indices) {
-  for (size_t index : new_indices) {
-    b->registerOutput(b->outputs().at(index));
-  }
-  for (size_t i = 0; i < new_indices.size(); ++i) {
-    b->eraseOutput(0);
-  }
-}
-
-void swapLoopBlockOutputs(Node* n, const std::vector<size_t>& new_indices) {
-  LoopView loop(n);
-  Block* b = loop.bodyBlock();
-  for (size_t index : new_indices) {
-    b->registerOutput(loop.bodyCarriedOutputs().at(index));
-    auto orig_inp = loop.bodyCarriedInputs().at(index);
-    auto new_inp = b->addInput(uniqueName(orig_inp))->setType(orig_inp->type());
-    orig_inp->replaceAllUsesWith(new_inp);
-  }
-
-  constexpr size_t body_carried_offset = 1;
-  for (size_t i = 0; i < new_indices.size(); ++i) {
-    b->eraseOutput(body_carried_offset);
-    b->eraseInput(body_carried_offset);
-  }
-}
-
-void swapLoopNodeInputs(Node* n, const std::vector<size_t>& new_indices) {
-  LoopView loop(n);
-  for (size_t index : new_indices) {
-    auto orig = n->outputs().at(index);
-    auto new_out =
-        n->addOutput()->setUniqueName(uniqueName(orig))->setType(orig->type());
-    orig->replaceAllUsesWith(new_out);
-  }
-
-  for (size_t index : new_indices) {
-    auto orig = loop.carriedInputs().at(index);
-    n->addInput(orig);
-  }
-
-  for (size_t i = 0; i < new_indices.size(); ++i) {
-    n->eraseOutput(0);
-    n->removeInput(/*carried_inputs_offset*/ 2);
-  }
-}
-
 void CanonicalizeLoopOutputs(Node* n) {
   auto new_indices = sort_indexes(n->outputs());
-  swapLoopBlockOutputs(n, new_indices);
-  swapLoopNodeInputs(n, new_indices);
+  LoopView loop_node(n);
+  loop_node.permuteLoopCarried(new_indices);
 }
 
 void CanonicalizeIfOutputs(Node* n) {
   auto new_indices = sort_indexes(n->outputs());
-  swapIfBlockOutputs(n->blocks().at(0), new_indices);
-  swapIfBlockOutputs(n->blocks().at(1), new_indices);
-  swapIfNodeOutputs(n, new_indices);
+  IfView if_node(n);
+  if_node.permuteOutputs(new_indices);
 }
 
 void CanonicalizeOutputs(Block* block) {

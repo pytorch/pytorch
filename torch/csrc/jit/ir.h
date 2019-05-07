@@ -24,7 +24,7 @@
 #include <vector>
 
 // Forward declare, the real meat is in python_ir.cpp
-template<class T>
+template <class T>
 class THPPointer;
 using THPObjectPtr = THPPointer<PyObject>;
 using pyobj_list = std::vector<THPObjectPtr>;
@@ -554,6 +554,13 @@ struct TORCH_API Node {
   // Result: %3 = f()
   void removeAllInputs();
 
+  // Rearrange the ordering of inputs or outputs of a node
+  // Given: %3 = f(%1, %2)
+  // Execute: %3.permuteInputs({1, 0})
+  // Result: %3 = f(%2, %1)
+  void permuteInputs(const std::vector<size_t>& new_inputs);
+  void permuteOutputs(const std::vector<size_t>& new_inputs);
+
   // iterators of the node list starting at this node
   // useful for resuming a search starting at this node
   inline graph_node_list_iterator iterator() {
@@ -896,6 +903,12 @@ struct Block {
   void eraseOutput(size_t i) {
     output_->removeInput(i);
   }
+  void permuteOutputs(const std::vector<size_t>& new_inputs) {
+    output_->permuteInputs(new_inputs);
+  }
+  void permuteInputs(const std::vector<size_t>& new_inputs) {
+    input_->permuteOutputs(new_inputs);
+  }
 
   Node* appendNode(Node* n) {
     AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
@@ -913,6 +926,7 @@ struct Block {
   // in src to look up its corresponding value
   TORCH_API void cloneFrom(Block* src, std::function<Value*(Value*)> value_map);
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
+
  private:
   void reIndexTopology();
 
@@ -1292,6 +1306,5 @@ TORCH_API std::vector<Value*> inlineCallTo(
     Graph& callee,
     ArrayRef<Value*> inputs,
     bool unpack_outputs = false);
-
 } // namespace jit
 } // namespace torch
