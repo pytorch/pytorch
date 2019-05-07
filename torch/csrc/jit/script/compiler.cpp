@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -5,7 +6,6 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -2341,17 +2341,16 @@ struct to_ir {
   Value* emitNegate(const TreeRef& tree) {
     const auto& inputs = tree->trees();
     auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-
-    auto neg_val = emitBuiltinCall(
-        tree->range(),
-        *method.graph(),
-        aten::neg,
-        c10::nullopt,
-        named_values,
-        {},
-        /*required=*/true);
+    auto neg_val =
+        asSimple(OperatorOverload(aten::neg, "__neg__")
+                     .call(tree->range(), method, named_values, {}, 0));
 
     // constant fold the input if possible
+
+    // can occur with desugared class type __neg__ function
+    if (neg_val->node()->inputs().size() == 0) {
+      return neg_val;
+    }
     auto maybe_constant_input = toIValue(neg_val->node()->input());
     if (!maybe_constant_input) {
       return neg_val;
