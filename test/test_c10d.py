@@ -1741,25 +1741,28 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device)
 
     @skip_if_not_multigpu
-    def test_gloo_backend_1gpu_module(self):
+    def test_gloo_backend_1gpu_module_device_ids_integer_list(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
-        self._test_gloo_backend(devices, int_devices, multi_device=False)
-        self._test_gloo_backend(devices, devices, multi_device=False)
+        self._test_gloo_backend(devices, int_devices)
+
+    @skip_if_not_multigpu
+    def test_gloo_backend_1gpu_module_device_ids_torch_device_list(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        self._test_gloo_backend(devices, devices)
 
     @skip_if_lt_x_gpu(4)
     def test_gloo_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
-        self._test_gloo_backend(devices, int_devices, multi_device=True)
-        self._test_gloo_backend(devices, devices, multi_device=True)
+        self._test_gloo_backend(devices, [], multi_device=True)
 
     @skip_if_lt_x_gpu(8)
     def test_gloo_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
-        self._test_gloo_backend(devices, int_devices, multi_device=True)
-        self._test_gloo_backend(devices, devices, multi_device=True)
+        self._test_gloo_backend(devices, [], multi_device=True)
 
     def _test_nccl_backend(self, devices, device_ids, multi_device=False):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1768,27 +1771,31 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @skip_if_not_multigpu
     @skip_if_not_nccl
-    def test_nccl_backend_1gpu_module(self):
+    def test_nccl_backend_1gpu_module_device_ids_integer_list(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
-        self._test_nccl_backend(devices, int_devices, multi_device=False)
-        self._test_nccl_backend(devices, devices, multi_device=False)
+        self._test_nccl_backend(devices, int_devices)
+
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_nccl_backend_1gpu_module_device_ids_torch_device_list(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        self._test_nccl_backend(devices, devices)
 
     @skip_if_lt_x_gpu(4)
     @skip_if_not_nccl
     def test_nccl_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
-        self._test_nccl_backend(devices, int_devices, multi_device=True)
-        self._test_nccl_backend(devices, devices, multi_device=True)
+        self._test_nccl_backend(devices, [], multi_device=True)
 
     @skip_if_lt_x_gpu(8)
     @skip_if_not_nccl
-    def test_nccl_backend_2gpu_module(self):
+    def test_nccl_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
-        self._test_nccl_backend(devices, int_devices, multi_device=True)
-        self._test_nccl_backend(devices, devices, multi_device=True)
+        self._test_nccl_backend(devices, [], multi_device=True)
 
     @skip_if_lt_x_gpu(4)
     @skip_if_not_nccl
