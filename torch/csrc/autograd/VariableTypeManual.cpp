@@ -353,9 +353,9 @@ Tensor VariableType::_sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim
   // auto-generated version of this function doesn't always return `indices_` and `values_`
   // with requires_grad=false, and we need another way to create non-requires-grad `indices_`
   // and `values_` tensors that contains the same data as `indices` and `values`, which is
-  // achieved by shallow-copying `indices` and `values` and wrapping them in new Tensors here.
-  auto indices_ = Tensor(indices.unsafeGetTensorImpl()->shallow_copy_and_detach());
-  auto values_ = Tensor(values.unsafeGetTensorImpl()->shallow_copy_and_detach());
+  // achieved by using `indices`'s and `values`'s `tensor_data()`.
+  auto indices_ = as_variable_ref(indices).tensor_data();
+  auto values_ = as_variable_ref(values).tensor_data();
   auto options_ = TensorOptions(options).is_variable(false);
   check_no_requires_grad(indices, "indices");
   std::shared_ptr<SparseCooTensorWithDimsAndTensorsBackward> grad_fn;
