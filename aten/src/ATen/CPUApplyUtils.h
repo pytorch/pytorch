@@ -331,31 +331,6 @@ apply_op(int64_t numel, int64_t offset, const Op& op, Args... iters) {
   }
 }
 
-
-inline void apply_kernel(){};
-
-// TODO: Deal elegantly with 0-dim tensors. iters.strides_ of 0-dim
-// strided_tensor_iter will be of size 0 for dim 0 and iters.strides_[iters.dim_
-// - 1] will index at -1. C++14 integer_sequence could be of use here.
-template <typename Op, typename... Args>
-inline void
-apply_kernel(int64_t numel, int64_t offset, const Op& op, Args... iters) {
-  if (offset > 0)
-    forward(offset, iters...);
-  int64_t size = std::min(numel, max_iterate_size(iters...));
-  op(size, iters.data_..., iters.strides_[iters.dim_ - 1]...);
-  iterate(size, iters...);
-  iterate_overflow(iters...);
-  int64_t i = size;
-  size = std::min(numel, max_iterate_size(iters...));
-  for (; i < numel;) {
-    op(size, iters.data_..., iters.strides_[iters.dim_ - 1]...);
-    iterate(size, iters...);
-    i += size;
-    iterate_overflow(iters...);
-  }
-}
-
 /*
   Apply a pointwise operator to sequence of tensors
 
