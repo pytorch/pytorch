@@ -73,11 +73,3 @@ def is_pytorch_enabled(framework_arg):
 
 def get_requested_frameworks(framework_arg):
     return [fr.strip() for fr in framework_arg.split(',') if len(fr.strip()) > 0]
-
-
-def is_integer_dtype(dtype):
-    return dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
-
-
-def is_float_dtype(dtype):
-    return dtype in [torch.float16, torch.float32, torch.float64]
