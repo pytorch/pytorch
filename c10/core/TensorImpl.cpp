@@ -144,7 +144,6 @@ bool TensorImpl::maybe_as_channels_last() {
   return false;
 }
 
-// VITALYF Move back to .h file
 bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 #ifdef DEBUG
   AT_ASSERT(compute_contiguous() == is_contiguous_);
