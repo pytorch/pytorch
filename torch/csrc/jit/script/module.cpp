@@ -353,8 +353,7 @@ void Module::train(bool on) {
   register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
 }
 
-IValue Module::create_class(const c10::QualifiedName& name, Stack stack)
-    const {
+IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   // Classes live in the top-level compilation unit.
   if (parent_) {
     return parent_->create_class(name, std::move(stack));
@@ -364,8 +363,10 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack)
   const auto classType =
       class_compilation_unit().get_class(c10::QualifiedName(name));
   if (!classType) {
-    AT_ERROR("Could not find class with name: '", name.qualifiedName()),
-        "' in module.";
+    AT_ERROR(
+        "Could not find class with name: '",
+        name.qualifiedName(),
+        "' in module.");
   }
 
   // Create a bare object with correct number of slots
