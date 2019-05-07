@@ -234,13 +234,14 @@ void Pickler::pushString(const std::string& string) {
 }
 
 void Pickler::pushGlobal(const std::string& name_temp) {
-  memoized_strings_.push_back(name_temp);
-  auto name = memoized_strings_.back();
-  auto memo_entry = memo_map_.find(&(memoized_strings_.back()));
-  if (memo_entry == memo_map_.end()) {
+  auto memo_entry = memoized_strings_map_.find(name_temp);
+  if (memo_entry == memoized_strings_map_.end()) {
+    memoized_strings_map_.insert({name_temp, memo_id});
     push<OpCode>(OpCode::GLOBAL);
-    pushString(memoized_strings_.back());
-    pushMemoization(&(memoized_strings_.back()));
+    pushString(name_temp);
+
+    // Push BINPUT without adding anything to the memo_map_
+    pushMemoization(nullptr);
   } else {
     pushBinGet(memo_entry->second);
   }
@@ -397,7 +398,6 @@ void Pickler::pushDict(const IValue& ivalue) {
 }
 
 void Pickler::pushMemoization(const void* item) {
-  AT_CHECK(item != nullptr, "Pickler cannot memoize a nullptr");
   if (memo_id <= std::numeric_limits<uint8_t>::max()) {
     push<OpCode>(OpCode::BINPUT);
     push<uint8_t>(memo_id);
@@ -406,7 +406,9 @@ void Pickler::pushMemoization(const void* item) {
     push<OpCode>(OpCode::LONG_BINPUT);
     push<uint32_t>(memo_id);
   }
-  memo_map_[item] = memo_id;
+  if (item != nullptr) {
+    memo_map_[item] = memo_id;
+  }
   AT_ASSERT(memo_id <= std::numeric_limits<uint32_t>::max());
   ++memo_id;
 }

@@ -171,8 +171,8 @@ class Pickler {
 
   // When arbitrary (maybe temporary) values are saved, keep them here so they
   // can be memoized correctly
-  std::vector<std::string> memoized_strings_;
   std::vector<c10::IValue> memoized_ivalues_;
+  std::unordered_map<std::string, uint32_t> memoized_strings_map_;
 };
 
 // An item in the unpickler stack. There needs to be a way to differentiate
