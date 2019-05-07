@@ -57,6 +57,27 @@ namespace {
 // A resolver that will inspect the outer Python scope to find `name`.
 struct PythonResolver : public Resolver {
   explicit PythonResolver(ResolutionCallback rcb) : rcb_(std::move(rcb)) {}
+
+  /**
+   * While compiling classes, the class type we're compiling will not be
+   * available in Python, since we haven't finished defining the class yet. So
+   * in order to make the class type available to its own methods, we need to
+   * explicitly resolve it.
+   *
+   * @param rcb Python function to resolve a name to its Python object in the
+   *            enclosing scope
+   * @param classname The unqualified classname of the class currently being
+   *                  compiled.
+   * @param classType The class's type.
+   */
+  explicit PythonResolver(
+      ResolutionCallback rcb,
+      std::string classname,
+      ClassTypePtr classType)
+      : rcb_(std::move(rcb)),
+        classname_(std::move(classname)),
+        classType_(std::move(classType)) {}
+
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
@@ -70,6 +91,9 @@ struct PythonResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name) const override {
+    if (classType_ && name == classname_) {
+      return classType_;
+    }
     AutoGIL ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
@@ -88,10 +112,19 @@ struct PythonResolver : public Resolver {
 
  private:
   ResolutionCallback rcb_;
+  std::string classname_;
+  ClassTypePtr classType_;
 };
 
 std::shared_ptr<PythonResolver> pythonResolver(ResolutionCallback rcb) {
   return std::make_shared<PythonResolver>(rcb);
+}
+std::shared_ptr<PythonResolver> pythonResolver(
+    ResolutionCallback rcb,
+    std::string classname,
+    ClassTypePtr classType) {
+  return std::make_shared<PythonResolver>(
+      rcb, std::move(classname), std::move(classType));
 }
 } // namespace
 
@@ -517,15 +550,18 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_jit_script_class_compile",
-      [](const ClassDef& classDef, ResolutionCallback rcb) {
+      [](const std::string& qualifiedName,
+         const ClassDef& classDef,
+         ResolutionCallback rcb) {
         auto cu = std::make_shared<CompilationUnit>();
         auto classType =
-            ClassType::create(c10::QualifiedName(classDef.name().name()), cu);
+            ClassType::create(c10::QualifiedName(qualifiedName), cu);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
           methodDefs.push_back(def);
-          rcbs.push_back(pythonResolver(rcb));
+          rcbs.push_back(
+              pythonResolver(rcb, classDef.name().name(), classType));
         }
         cu->define(methodDefs, rcbs, simpleSelf(classType));
       });
