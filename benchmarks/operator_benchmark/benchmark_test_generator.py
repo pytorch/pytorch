@@ -80,10 +80,10 @@ def map_pt_config_matmul(test_name, M, N, K, trans_a, trans_b, contig, dtype):
 
 def map_pt_config_intraop(test_name, N, M, contig, dtype):
     if test_name in ['bitor', 'cbitor']:
-        if not is_integer_dtype(dtype):
+        if dtype.is_floating_point:
             return None
     if test_name in ['tanh', 'sigmoid', 'sumall']:
-        if not is_float_dtype(dtype):
+        if not dtype.is_floating_point:
             return None
     input_shapes = [(N, M), (N, M)]
     args = {'contig': contig, 'dtype': dtype}
