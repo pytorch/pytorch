@@ -11085,7 +11085,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     @slowTest
     def test_slow_test(self):
         # Just a smoketest to make sure our slowTest decorator works.
-        pass
+        raise RuntimeError("slow broken")
 
     def test_bincount_cpu(self):
         self._test_bincount(self, device='cpu')
