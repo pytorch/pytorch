@@ -308,15 +308,17 @@ class TestWorkspace(unittest.TestCase):
         workspace.FeedBlob('bar', z)
         workspace.RunOperatorOnce(
             core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2)))
-        # NOTE: When we call `workspace.FeedBlob('bar', z)` above, `z`'s
-        # AutogradMeta is removed, which makes `z` an invalid tensor in PyTorch.
-        # To work around this, we use `z = workspace.FetchTorch("bar")` to fetch
-        # `z` from the Caffe2 workspace, attach AutogradMeta to `z` and make it
-        # a valid PyTorch tensor again.
-        # In the near future, a PyTorch tensor without AutogradMeta will be
-        # a valid tensor, and at that point we don't need `z = workspace.FetchTorch("bar")`
-        # to fetch `z` from the Caffe2 workspace, since it will exactly be
-        # the same as the original tensor `z`.
+        # NOTE: `workspace.FeedBlob('bar', z)` above creates a shallow-copy of `z`
+        # and assign it to `bar` in the Caffe2 workspace. Since it's a shallow-copy,
+        # any sizes or strides change to `bar` will not be propagated back to `z`,
+        # and we need to call `z = workspace.FetchTorch("bar")` to manually put
+        # the value of `bar` into `z` again.
+        #
+        # In the near future, we won't need to perform the shallow-copy of `z` and
+        # can directly pass it in as long as `z` doesn't have AutogradMeta. At that
+        # point we won't need to use `z = workspace.FetchTorch("bar")` to fetch `z`
+        # from the Caffe2 workspace, since it will exactly be the same as the original
+        # tensor `z`.
         z = workspace.FetchTorch("bar")
         z[0,1] = 123
         np.testing.assert_array_equal(
@@ -408,15 +410,17 @@ class TestWorkspaceGPU(test_util.TestCase):
         workspace.RunOperatorOnce(
             core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2),
             device_option=core.DeviceOption(workspace.GpuDeviceType)))
-        # NOTE: When we call `workspace.FeedBlob('bar', z)` above, `z`'s
-        # AutogradMeta is removed, which makes `z` an invalid tensor in PyTorch.
-        # To work around this, we use `z = workspace.FetchTorch("bar")` to fetch
-        # `z` from the Caffe2 workspace, attach AutogradMeta to `z` and make it
-        # a valid PyTorch tensor again.
-        # In the near future, a PyTorch tensor without AutogradMeta will be
-        # a valid tensor, and at that point we don't need `z = workspace.FetchTorch("bar")`
-        # to fetch `z` from the Caffe2 workspace, since it will exactly be
-        # the same as the original tensor `z`.
+        # NOTE: `workspace.FeedBlob('bar', z)` above creates a shallow-copy of `z`
+        # and assign it to `bar` in the Caffe2 workspace. Since it's a shallow-copy,
+        # any sizes or strides change to `bar` will not be propagated back to `z`,
+        # and we need to call `z = workspace.FetchTorch("bar")` to manually put
+        # the value of `bar` into `z` again.
+        #
+        # In the near future, we won't need to perform the shallow-copy of `z` and
+        # can directly pass it in as long as `z` doesn't have AutogradMeta. At that
+        # point we won't need to use `z = workspace.FetchTorch("bar")` to fetch `z`
+        # from the Caffe2 workspace, since it will exactly be the same as the original
+        # tensor `z`.
         z = workspace.FetchTorch("bar")
         z[0,1] = 123
         np.testing.assert_array_equal(
