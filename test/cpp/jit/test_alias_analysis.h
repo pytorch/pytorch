@@ -453,7 +453,7 @@ void testAliasAnalysis() {
     ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
   }
 
-  // test none value does not alias anything
+  // test none value does not have writers
   {
     {
       auto graph = std::make_shared<Graph>();
@@ -463,13 +463,14 @@ void testAliasAnalysis() {
     graph():
       %opt : Tensor? = prim::Constant()
       %out : Tensor = prim::unchecked_unwrap_optional(%opt)
-      return (%opt, %out)
+      %ret.2 : Tensor = aten::div(%out, %out, %out)
+      return (%opt, %out, %ret.2)
       )IR",
           &*graph,
           vmap);
 
       AliasDb aliasDb(graph);
-      AT_ASSERT(!aliasDb.mayAlias(vmap["opt"], vmap["out"]));
+      AT_ASSERT(!aliasDb.hasWriters(vmap["opt"]->node()));
     }
   }
 }
