@@ -47,11 +47,11 @@ class Cauchy(Distribution):
 
     @property
     def mean(self):
-        return self.loc.new_tensor(nan).expand(self._extended_shape())
+        return torch.full(self._extended_shape(), nan, dtype=self.loc.dtype, device=self.loc.device)
 
     @property
     def variance(self):
-        return self.loc.new_tensor(inf).expand(self._extended_shape())
+        return torch.full(self._extended_shape(), inf, dtype=self.loc.dtype, device=self.loc.device)
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
