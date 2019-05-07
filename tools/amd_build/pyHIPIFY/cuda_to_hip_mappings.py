@@ -276,6 +276,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("cusparse.h", ("hipsparse.h", CONV_INCLUDE, API_RAND)),
     ("cufft.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
     ("cufftXt.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
+    ("thrust/system/cuda/", ("thrust/system/hip/", CONV_INCLUDE, API_BLAS)),
 ])
 
 CUDA_IDENTIFIER_MAP = collections.OrderedDict([
@@ -2172,6 +2173,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cufftDestroy", ("hipfftDestroy", CONV_MATH_FUNC, API_FFT)),
     ("cufftGetVersion", ("hipfftGetVersion", CONV_MATH_FUNC, API_FFT)),
     ("cufftGetProperty", ("hipfftGetProperty", CONV_MATH_FUNC, API_FFT, HIP_UNSUPPORTED)),
+    ("thrust::cuda::", ("thrust::hip::", CONV_MATH_FUNC, API_BLAS)),
 ])
 
 CUDA_SPARSE_MAP = collections.OrderedDict([

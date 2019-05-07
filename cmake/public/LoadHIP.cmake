@@ -150,6 +150,10 @@ IF(HIP_FOUND)
   #find_package_and_print_version(hipsparse REQUIRED)
   find_package_and_print_version(rocsparse REQUIRED)
 
+  find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
+  find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/hipcub")
+  #find_package(rocthrust REQUIRED)
+  
   # TODO: hip_hcc has an interface include flag "-hc" which is only
   # recognizable by hcc, but not gcc and clang. Right now in our
   # setup, hcc is only used for linking, but it should be used to
@@ -167,6 +171,6 @@ IF(HIP_FOUND)
   set(hcc_INCLUDE_DIRS ${HCC_PATH}/include)
   set(hsa_INCLUDE_DIRS ${HSA_PATH}/include)
 
-  set(thrust_INCLUDE_DIRS ${THRUST_PATH} ${THRUST_PATH}/thrust/system/cuda/detail/cub-hip)
+  #set(thrust_INCLUDE_DIRS ${THRUST_PATH} ${THRUST_PATH}/thrust/system/cuda/detail/cub-hip)
 
 ENDIF()
