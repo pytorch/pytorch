@@ -133,6 +133,15 @@ How to adjust Learning Rate
 rate based on the number of epochs. :class:`torch.optim.lr_scheduler.ReduceLROnPlateau`
 allows dynamic learning rate reducing based on some validation measurements.
 
+Learning rate scheduling should be applied after optimizer's update. The pattern is the following:
+
+    >>> scheduler = ...
+    >>> for epoch in range(100):
+    >>>     train(...)
+    >>>     validate(...)
+    >>>     scheduler.step()
+
+
 .. autoclass:: torch.optim.lr_scheduler.LambdaLR
     :members:
 .. autoclass:: torch.optim.lr_scheduler.StepLR

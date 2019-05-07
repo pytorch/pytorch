@@ -530,24 +530,77 @@ class TestLRScheduler(TestCase):
         epochs = 35
         scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
 
-        with self.assertWarnsRegex(UserWarning, r'Old pattern'):
+        def old_pattern():
             for e in range(epochs):
                 scheduler.step()
                 self.opt.step()
 
-    def test_old_pattern_warning_resuming(self):
+        self.assertWarnsRegex(old_pattern, r'Old pattern')
 
+    def test_old_pattern_warning_with_arg(self):
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        def old_pattern2():
+            for e in range(epochs):
+                scheduler.step(e)
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern2, r'Old pattern')
+
+    def test_old_pattern_warning_resuming(self):
+        epochs = 35
         for i, group in enumerate(self.opt.param_groups):
             group['initial_lr'] = 0.01
 
         scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
-        with self.assertWarnsRegex(UserWarning, r'Old pattern'):
-            for e in range(35):
+
+        def old_pattern():
+            for e in range(epochs):
                 scheduler.step()
                 self.opt.step()
 
+        self.assertWarnsRegex(old_pattern, r'Old pattern')
+
+    def test_old_pattern_warning_resuming_with_arg(self):
+        epochs = 35
+        for i, group in enumerate(self.opt.param_groups):
+            group['initial_lr'] = 0.01
+
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+
+        def old_pattern2():
+            for e in range(epochs):
+                scheduler.step(e)
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern2, r'Old pattern')
+
     def test_new_pattern_no_warning(self):
-        pass
+        import warnings
+
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            for e in range(epochs):                
+                self.opt.step()
+                scheduler.step()
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+    def test_new_pattern_no_warning_with_arg(self):
+        import warnings
+
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            for e in range(epochs):                
+                self.opt.step()
+                scheduler.step(e)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
 
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3
