@@ -2583,7 +2583,7 @@ class ComputeBucketAssignmentTest(TestCase):
 
 class CommTest(MultiProcessTestCase):
     def tearDown(self):
-        super()
+        super(CommTest, self).tearDown()
         try:
             os.remove(self.file.name)
         except OSError:
