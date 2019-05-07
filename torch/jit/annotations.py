@@ -184,18 +184,6 @@ def ann_to_type(ann):
     raise ValueError("Unknown type annotation: '{}'".format(ann.__name__))
 
 
-def get_primitive_type(value):
-    if isinstance(value, int):
-        return int
-    if isinstance(value, float):
-        return float
-    if isinstance(value, bool):
-        return bool
-    if isinstance(value, str):
-        return str
-    return None
-
-
 __all__ = [
     'List',
     'BroadcastingList1',

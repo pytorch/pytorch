@@ -1085,6 +1085,7 @@ class OrderedParameterDict(OrderedDictWrapper):
         return [(name, param) for name, param in self.module._get_parameters()]
 
     def __setitem__(self, k, v):
+        print("Setting param", k, v)
         self.module._register_parameter(k, v, False)
 
     def __contains__(self, k):
@@ -1364,6 +1365,7 @@ if _enabled:
             return Module.__getattr__(self, attr)
 
         def __setattr__(self, attr, value):
+            print("setting scriptmodule attr", attr, value)
             if attr not in self._constants_set:
                 if isinstance(value, Module) and _is_weak_type(type(value)):
                     # Compile weak script module
@@ -1444,9 +1446,11 @@ if _enabled:
 
     class WeakScriptModuleProxy(ScriptModule):
         def __init__(self, original, stubs):
+            # Clear any inherited properties
+            object.__setattr__(self, '__dict__', {})
+
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
             # __init__ can run correctly
-            object.__setattr__(self, '__dict__', {})
             self.__dict__['_initialized'] = False
             super(WeakScriptModuleProxy, self).__init__()
 
@@ -1454,11 +1458,11 @@ if _enabled:
             # Copy Parameters / Modules / Buffers
             for name in dir(original):
                 item = getattr(original, name)
-                if item is None and name in original._parameters:
-                    # XXX: treat None value simply as module attributes instead of adding them to the parameter list
-                    # TODO: need to handle this more generally when non-tensor attributes added to module
-                    object.__setattr__(self, name, item)
-                elif isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
+                # if item is None and name in original._parameters:
+                #     # XXX: treat None value simply as module attributes instead of adding them to the parameter list
+                #     # TODO: need to handle this more generally when non-tensor attributes added to module
+                #     object.__setattr__(self, name, item)
+                if isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
                     ScriptModule.__setattr__(self, name, item)
             for name in original._buffers:
                 if original._buffers[name] is None:
@@ -1468,17 +1472,6 @@ if _enabled:
 
             # Copy constants
             self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
-
-            # Automatically register primitive types as attributes
-            for name in dir(original):
-                if name == 'training':
-                    # TODO: remove this hack when training is a bool attribute
-                    # instead of a buffer
-                    continue
-                item = getattr(original, name)
-                primitive_type = torch.jit.annotations.get_primitive_type(item)
-                if name not in self.__dict__["_constants_set"] and primitive_type:
-                    ScriptModule.__setattr__(self, name, torch.jit.Attribute(item, primitive_type))
 
             # Copy overloads
             self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
@@ -1492,27 +1485,29 @@ if _enabled:
             try:
                 return ScriptModule.__getattr__(self, attr)
             except AttributeError:
-                orig = self.__dict__["_original"]()
-                if orig and self.__dict__["_initialized"]:
-                    return getattr(self.__dict__["_original"](), attr)
+                # unwrap the original
+                original_module = self.__dict__["_original"]()
+                if original_module and self.__dict__["_initialized"]:
+                    # get attr from original if it is still alive
+                    return getattr(original_module, attr)
                 else:
                     # Only fall back to original once __init__() is done
                     raise AttributeError("Weak module has no attribute '{}'"
                                          .format(attr))
 
-        def __setattr__(self, attr, value):
-            # Once constructed, no new properties can be set
-
-            if not self.__dict__["_initialized"]:
-                # If constructing, don't fall back to original module
-                return ScriptModule.__setattr__(self, attr, value)
-
-            if hasattr(self, attr):
-                return ScriptModule.__setattr__(self, attr, value)
-            else:
-                raise AttributeError("Cannot set new attribute '{}' on "
-                                     "weak script module once it has been "
-                                     "created".format(attr))
+        # def __setattr__(self, attr, value):
+        #     # Once constructed, no new properties can be set
+        #
+        #     if not self.__dict__["_initialized"]:
+        #         # If constructing, don't fall back to original module
+        #         return ScriptModule.__setattr__(self, attr, value)
+        #
+        #     if hasattr(self, attr):
+        #         return ScriptModule.__setattr__(self, attr, value)
+        #     else:
+        #         raise AttributeError("Cannot set new attribute '{}' on "
+        #                              "weak script module once it has been "
+        #                              "created".format(attr))
 
 else:
     class ScriptModule(torch.nn.Module):
