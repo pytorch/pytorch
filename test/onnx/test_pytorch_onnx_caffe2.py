@@ -1338,6 +1338,19 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(3, 3, requires_grad=True)
         self.run_model_test(NarrowModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_randn_like(self):
+        class RandNLikeModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.randn_like(input)
+
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        model = RandNLikeModel()
+        onnxir, _ = do_export(model, x)
+        onnx_model = onnx.ModelProto.FromString(onnxir)
+        prepared = c2.prepare(onnx_model)
+        caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
+        self.assertEqual(caffe2_out[0].shape, x.shape)
+
     def test_traced_ints(self):
         A = 4
         H = 10
@@ -1576,6 +1589,14 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(CeilModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test__dim_arange(self):
+        class DimArange(torch.nn.Module):
+            def forward(self, input):
+                return torch._dim_arange(input, 1)
+
+        x = torch.ones(5, 6)
+        self.run_model_test(DimArange(), train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_log2(self):
         class Log2Model(torch.nn.Module):
