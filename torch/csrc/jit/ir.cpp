@@ -1208,6 +1208,12 @@ Node* Graph::createNone(TypePtr typ) {
   return n;
 }
 
+Node* Graph::createUninitialized(TypePtr typ) {
+  Node* n = create(prim::Uninitialized);
+  n->output()->setType(std::move(typ));
+  return n;
+}
+
 Node* Graph::createFusionGroup() {
   auto n = create(prim::FusionGroup, 0);
   n->g_(attr::Subgraph, std::make_shared<Graph>(current_scope()));
@@ -1457,6 +1463,5 @@ std::vector<Value*> inlineCallTo(
 
   return outputs;
 }
-
 } // namespace jit
 } // namespace torch

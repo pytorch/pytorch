@@ -857,6 +857,9 @@ struct PythonPrintPass {
         value->writeScalars(stmt);
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
+      case prim::Uninitialized: {
+        stmt << "uninitialized(" << node->output()->type()->python_str() << ")";
+      } break;
       case prim::Constant: {
         if (node->kind() == prim::Constant && !node->mustBeNone()) {
           IValue v = toIValue(node->output()).value();
@@ -1244,6 +1247,7 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
   // that require special handling because they do not fit normal schema
   const static std::unordered_set<Symbol> handled = {
       prim::Constant,
+      prim::Uninitialized,
       prim::fork,
       prim::ListConstruct,
       prim::DictConstruct,
@@ -1286,6 +1290,5 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
 
   return handled.count(sym) || unneeded.count(sym);
 }
-
 } // namespace jit
 } // namespace torch

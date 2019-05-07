@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
+#include <torch/csrc/jit/ir.h>
 
 namespace torch {
 namespace jit {
@@ -14,9 +14,10 @@ const std::unordered_map<std::string, TypePtr>& ident_to_type_lut() {
       {"bool", BoolType::get()},
       {"str", StringType::get()},
       {"Device", DeviceObjType::get()},
-      // technically this is not a python type but we need it when
-      // parsing serialized methods that use implicit converions to Scalar
+      // technically number & Bottom are not python types but we need it when
+      // parsing serialized methods
       {"number", NumberType::get()},
+      {"Bottom", BottomType::get()},
       {"None", NoneType::get()},
   };
   return map;

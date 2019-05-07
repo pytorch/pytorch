@@ -24,7 +24,7 @@
 #include <vector>
 
 // Forward declare, the real meat is in python_ir.cpp
-template<class T>
+template <class T>
 class THPPointer;
 using THPObjectPtr = THPPointer<PyObject>;
 using pyobj_list = std::vector<THPObjectPtr>;
@@ -1047,6 +1047,7 @@ struct Graph {
 
   TORCH_API Node* createNone(
       TypePtr typ); // value of None with type Optional[typ]
+  TORCH_API Node* createUninitialized(TypePtr typ);
   TORCH_API Node* createAutogradZero();
   TORCH_API Node* createFusionGroup();
   TORCH_API Node* createDifferentiableSubgraph();
@@ -1281,6 +1282,5 @@ TORCH_API std::vector<Value*> inlineCallTo(
     Graph& callee,
     ArrayRef<Value*> inputs,
     bool unpack_outputs = false);
-
 } // namespace jit
 } // namespace torch

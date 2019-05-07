@@ -75,6 +75,7 @@ struct SourceImporter {
         {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
         {"fork", std::make_shared<ForkValue>()},
         {"annotate", std::make_shared<AnnotateValue>()},
+        {"uninitialized", std::make_shared<UninitializedValue>()},
         {"inf",
          std::make_shared<ConstantValue>(
              std::numeric_limits<double>::infinity())},
@@ -99,8 +100,10 @@ struct SourceImporter {
   // value
   const std::vector<at::Tensor>& constant_table_;
   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
-  std::function<std::shared_ptr<
-      SugaredValue>(const std::string& name, Function& m, const SourceRange& loc)>
+  std::function<std::shared_ptr<SugaredValue>(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc)>
       resolver_;
 
   size_t parseVersionNumber() {
@@ -138,7 +141,8 @@ void import_methods(
     v->setType(mod->module_object()->type());
     return std::make_shared<SimpleValue>(v);
   };
-  mod->module_object()->type()->compilation_unit().define(definitions, resolvers, self);
+  mod->module_object()->type()->compilation_unit().define(
+      definitions, resolvers, self);
 }
 
 void import_libs(
@@ -165,7 +169,6 @@ void import_libs(
     cu->define(definitions, resolvers, self);
   }
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch

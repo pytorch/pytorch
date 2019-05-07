@@ -33,9 +33,9 @@ constexpr size_t HAS_RETURNED_OFFSET = 1;
 struct EarlyReturns {
   EarlyReturns(std::shared_ptr<Graph> graph_) : graph(std::move(graph_)) {
     WithInsertPoint guard(graph->block()->nodes().front());
-    bottom_val = graph->insertNode(graph->create(prim::Bottom, {}, 1))
-                     ->output()
-                     ->setType(BottomType::get());
+    bottom_val =
+        graph->insertNode(graph->createUninitialized(BottomType::get()))
+            ->output();
     true_val = graph->insertConstant(true);
     false_val = graph->insertConstant(false);
   };

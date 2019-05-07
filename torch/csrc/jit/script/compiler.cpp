@@ -526,9 +526,9 @@ struct to_ir {
     AT_ASSERT(resolver);
     pushFrame(graph->block(), /*starts_def=*/true);
     WithInsertPoint guard(graph->block()->nodes().front());
-    bottom_val = graph->insertNode(graph->create(prim::Bottom, {}, 1))
-                     ->output()
-                     ->setType(BottomType::get());
+    bottom_val =
+        graph->insertNode(graph->createUninitialized(BottomType::get()))
+            ->output();
 
     // Type annotations exclude explicitly typing the "self" parameter, so in
     // the case that this is a method with self we expect one fewer parameter
@@ -2019,11 +2019,15 @@ struct to_ir {
     });
   }
 
-  void checkApplyExpr(Apply& apply, SourceRange& loc) {
-    if (apply.inputs().size() != 2) {
-      throw ErrorReport(loc) << Var(apply.callee()).name().name()
-                             << " expected exactly two arguments but found "
-                             << apply.inputs().size();
+  void checkApplyExpr(
+      Apply& apply,
+      SourceRange& loc,
+      size_t expected_inputs = 2) {
+    if (apply.inputs().size() != expected_inputs) {
+      throw ErrorReport(loc)
+          << Var(apply.callee()).name().name() << " expected exactly "
+          << expected_inputs << " arguments but found "
+          << apply.inputs().size();
     }
     if (apply.attributes().size() > 0) {
       throw ErrorReport(loc)
@@ -2070,6 +2074,14 @@ struct to_ir {
             << " but found " << expr->type()->python_str();
       }
       return std::make_shared<SimpleValue>(expr);
+    } else if (
+        auto uninitialized_value =
+            dynamic_cast<UninitializedValue*>(sv.get())) {
+      checkApplyExpr(apply, loc, 1);
+      TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+      auto out = graph->insertNode(graph->createUninitialized(type))
+                     ->setSourceLocation(std::make_shared<SourceRange>(loc));
+      return std::make_shared<SimpleValue>(out->output());
     } else if (auto getattr = dynamic_cast<GetAttrValue*>(sv.get())) {
       checkApplyExpr(apply, loc);
       auto obj = emitSugaredExpr(apply.inputs()[0], 1);
