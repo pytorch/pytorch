@@ -243,7 +243,7 @@ THC_API void THNN_(LookupTableBag_updateOutput)(
            THCTensor *weight,
            THCTensor *output,
            THCIndexTensor *offset2bag,
-	   int mode,
+           int mode,
            THCIndexTensor *seq_length);       // [OPTIONAL]
 
 THC_API void THNN_(LookupTableBag_accGradParameters)(
@@ -256,8 +256,8 @@ THC_API void THNN_(LookupTableBag_accGradParameters)(
            THCIndexTensor *sortedIndices,
            THCIndexTensor *origIndices,
            bool scaleGradByFreq,
-	   int mode,
-	   THCIndexTensor *seq_length,        // [OPTIONAL]
+           int mode,
+           THCIndexTensor *seq_length,        // [OPTIONAL]
            accreal scale_);
 
 THC_API void THNN_(L1Cost_updateOutput)(
@@ -407,21 +407,6 @@ THC_API void THNN_(IndexLinear_updateParameters)(
                   int64_t keysOffset,
                   accreal weightDecay,
                   accreal learningRate);
-
-THC_API void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCIndexTensor *indices,
-                  int osizeW,
-                  int osizeH);
-
-THC_API void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCIndexTensor *indices);
 
 THC_API void THNN_(SpatialAveragePooling_updateOutput)(
                   THCState *state,
@@ -1329,22 +1314,6 @@ THC_API void THNN_(VolumetricMaxUnpooling_updateGradInput)(
                   int outputTime, int outputWidth, int outputHeight,
                   int dT, int dW, int dH,
                   int padT, int padW, int padH);
-
-THC_API void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCIndexTensor *indices,
-                  int osizeT,
-                  int osizeW,
-                  int osizeH);
-
-THC_API void THNN_(VolumetricAdaptiveMaxPooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCIndexTensor *indices);
 
 THC_API void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
                   THCState *state,

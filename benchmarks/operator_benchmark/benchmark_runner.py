@@ -8,13 +8,7 @@ import argparse
 
 from caffe2.python import workspace
 
-from caffe2.benchmarks.operator_benchmark import benchmark_core
-
-import caffe2.benchmarks.operator_benchmark.benchmark_caffe2
-import caffe2.benchmarks.operator_benchmark.benchmark_pytorch
-
-import caffe2.benchmarks.operator_benchmark.ops.add
-import caffe2.benchmarks.operator_benchmark.ops.matmul # noqa
+from operator_benchmark import benchmark_core, benchmark_utils
 
 """Performance microbenchmarks's main binary.
 
@@ -23,7 +17,7 @@ It also registers existing benchmark tests via Python module imports.
 """
 
 
-if __name__ == "__main__":
+def main():
     print("Python version " + str(sys.version_info[0]))
 
     parser = argparse.ArgumentParser(
@@ -79,12 +73,17 @@ if __name__ == "__main__":
 
     parser.add_argument(
         '--framework',
-        help='Run PyTorch or Caffe2 operators',
-        default=None)
+        help='Comma-delimited list of frameworks to test (Caffe2, PyTorch)',
+        default="Caffe2,PyTorch")
 
     args = parser.parse_args()
 
-    workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
-    workspace.ClearGlobalNetObserver()
+    if benchmark_utils.is_caffe2_enabled(args.framework):
+        workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
+        workspace.ClearGlobalNetObserver()
 
     benchmark_core.BenchmarkRunner(args).run()
+
+
+if __name__ == "__main__":
+    main()

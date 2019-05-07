@@ -5,10 +5,10 @@
 #include <ATen/div_rtn.h>
 
 static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
-	THTensor *input, THTensor *gradOutput,
-	THTensor *weight, THTensor *bias,
-	int kH, int kW, int dH, int dW, int padH, int padW,
-	int dilationH, int dilationW, int weight_nullable) {
+        THTensor *input, THTensor *gradOutput,
+        THTensor *weight, THTensor *bias,
+        int kH, int kW, int dH, int dW, int padH, int padW,
+        int dilationH, int dilationW, int weight_nullable) {
   THArgCheck(kW > 0 && kH > 0, 9,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
@@ -40,7 +40,7 @@ static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
   }
 
   THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
-		"non-empty 3D or 4D input tensor expected but got: %s");
+                "non-empty 3D or 4D input tensor expected but got: %s");
 
   int64_t inputHeight  = input->size(dimh);
   int64_t inputWidth   = input->size(dimw);
@@ -235,7 +235,7 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
     is_batch = 0;
     THTensor_(resize4d)(input, 1, input->size(0), input->size(1), input->size(2));
     THTensor_(resize4d)(gradOutput, 1, gradOutput->size(0), gradOutput->size(1),
-			gradOutput->size(2));
+                        gradOutput->size(2));
   }
 
   int64_t inputWidth   = input->size(3);
@@ -342,7 +342,7 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     is_batch = 0;
     THTensor_(resize4d)(input, 1, input->size(0), input->size(1), input->size(2));
     THTensor_(resize4d)(gradOutput, 1, gradOutput->size(0),
-			gradOutput->size(1), gradOutput->size(2));
+                        gradOutput->size(1), gradOutput->size(2));
   }
 
   int64_t nInputPlane = input->size(1);

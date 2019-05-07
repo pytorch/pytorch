@@ -75,7 +75,7 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
 
   if (otime < 1 || owidth < 1 || oheight < 1)
     THError("Given input size: (%dx%dx%dx%d). "
-	    "Calculated output size: (%dx%dx%dx%d). Output size is too small",
+            "Calculated output size: (%dx%dx%dx%d). Output size is too small",
             nslices,itime,iheight,iwidth,nslices,otime,oheight,owidth);
 
   if (gradOutput != NULL) {

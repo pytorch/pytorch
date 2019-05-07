@@ -14,7 +14,8 @@ void ArgumentSpecCreator::scan(
     // generate a skip for the whole aggregate.
     bool any_spec = std::any_of(
         instructions_.begin() + pos, instructions_.end(), [](Inst i) {
-          return i == SPECIALIZE_TENSOR || i == SPECIALIZE_NONTENSOR_OPTIONAL;
+          return i == SPECIALIZE_TENSOR || i == SPECIALIZE_OPTIONAL ||
+              i == SPECIALIZE_OPTIONAL_TENSOR;
         });
     if (!any_spec) {
       instructions_[pos] = SKIP;
@@ -28,14 +29,18 @@ void ArgumentSpecCreator::scan(
   if (depth >= DEPTH_LIMIT) {
     instructions_.emplace_back(SKIP);
   }
-  if (typ->isSubtypeOf(TensorType::get()) || typ->isSubtypeOf(OptionalType::ofTensor())) {
-    num_tensors_or_optionals_++;
+  if (typ->isSubtypeOf(TensorType::get())) {
+    num_tensors_++;
     instructions_.emplace_back(SPECIALIZE_TENSOR);
+  } else if (typ->isSubtypeOf(OptionalType::ofTensor())) {
+    num_tensors_++;
+    num_optionals_++;
+    instructions_.emplace_back(SPECIALIZE_OPTIONAL_TENSOR);
   } else if (typ->kind() == TypeKind::OptionalType) {
     // note that Optional[Tuple] or Optional[Class] will just register
     // as optional (previously they didn't at all, so it's not a regression).
-    num_tensors_or_optionals_++;
-    instructions_.emplace_back(SPECIALIZE_NONTENSOR_OPTIONAL);
+    num_optionals_++;
+    instructions_.emplace_back(SPECIALIZE_OPTIONAL);
   } else if (auto tup = typ->cast<TupleType>()) {
     size_t pos = instructions_.size();
     instructions_.emplace_back(ENTER_TUPLE);
@@ -47,7 +52,7 @@ void ArgumentSpecCreator::scan(
     size_t pos = instructions_.size();
     instructions_.emplace_back(ENTER_OBJECT);
     for (size_t i = 0; i < cls->numAttributes(); ++i) {
-      auto key = cls->name() + cls->attributeNames().at(i);
+      auto key = cls->qualname() + cls->attributeNames().at(i);
       // it is only safe to specialize because someone might have written to it
       if (!written_slots.count(key)) {
         scan(cls->containedTypes().at(i), depth + 1, written_slots);
@@ -72,7 +77,7 @@ static void scanWrittenSlots(
   for (Node* n : block->nodes()) {
     if (n->kind() == prim::SetAttr) {
       if (auto cls = n->inputs().at(0)->type()->cast<ClassType>()) {
-        written_slots.insert(cls->name() + n->s(attr::name));
+        written_slots.insert(cls->qualname() + n->s(attr::name));
       }
     }
     for (Block* subblock : n->blocks()) {
@@ -111,8 +116,11 @@ void ArgumentSpecCreator::dump() const {
       case SPECIALIZE_TENSOR:
         std::cout << "SpecializeTensor ";
         break;
-      case SPECIALIZE_NONTENSOR_OPTIONAL:
-        std::cout << "SpecializeNonTensorOptional ";
+      case SPECIALIZE_OPTIONAL_TENSOR:
+        std::cout << "SpecializeOptionalTensor ";
+        break;
+      case SPECIALIZE_OPTIONAL:
+        std::cout << "SpecializeOptional ";
         break;
     }
   }
@@ -121,20 +129,28 @@ void ArgumentSpecCreator::dump() const {
 
 ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
     const {
-  ArgumentSpec spec(num_tensors_or_optionals_);
+  ArgumentSpec spec(num_tensors_, num_optionals_);
   const IValue* stack[DEPTH_LIMIT]; // The stack of IValue lists
   // The stack gets initialized with the input list
   stack[0] = last(input, num_inputs_).begin();
   size_t stack_top = 0; // offset to the top of the stack
   for (Inst inst : instructions_) {
     switch (inst) {
+      case SPECIALIZE_OPTIONAL_TENSOR: {
+        // consume a tensor optional and add to the argspec
+        auto& arg = *stack[stack_top]++;
+        spec.addOptional(arg);
+        if (!arg.isNone()) {
+          spec.addTensor(arg, with_grad);
+        }
+      } break;
       case SPECIALIZE_TENSOR:
         // consume a tensor and add to the argspec
         spec.addTensor(*stack[stack_top]++, with_grad);
         break;
-      case SPECIALIZE_NONTENSOR_OPTIONAL:
-        // consume a tensor and add to the argspec
-        spec.addNontensorOptional(*stack[stack_top]++);
+      case SPECIALIZE_OPTIONAL:
+        // consume a non-tensor optional and add to the argspec
+        spec.addOptional(*stack[stack_top]++);
         break;
       case ENTER_TUPLE: {
         // consume tuple
@@ -171,7 +187,7 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
 
 // For every input of a given graph, returns a most detailed type that can be
 // inferred for it based on this ArgumentSpec.
-std::vector<TypePtr> ArgumentSpecCreator::getSpecializedTypes(
+void ArgumentSpecCreator::specializeTypes(
     Graph& graph,
     const ArgumentSpec& spec) const {
   auto input_types =
@@ -181,33 +197,48 @@ std::vector<TypePtr> ArgumentSpecCreator::getSpecializedTypes(
   std::vector<const TypePtr*> input_stack = {input_types.data()};
   std::vector<std::function<TypePtr()>> aggregate_creators;
 
-  size_t arg_spec_offset = 0; // number of specialized tensors seen so far
+  size_t tensor_arg_spec_offset =
+      0; // number of specialized tensors seen so far
+  size_t optional_arg_spec_offset =
+      0; // number of specialized optionals seen so far
 
+  auto dim_tensor_type_from_arg = [](const ArgumentInfo& arg) {
+    return DimensionedTensorType::create(
+        arg.type(),
+        ConvertIntToCPUOrCUDA(arg.device()),
+        arg.dim(),
+        arg.requires_grad());
+  };
   for (Inst inst : instructions_) {
     switch (inst) {
+      case SPECIALIZE_OPTIONAL_TENSOR: {
+        auto& input_type = *input_stack.back()++;
+        auto is_present = spec.isPresent(optional_arg_spec_offset++);
+        if (!is_present) {
+          result_stack.back().emplace_back(input_type);
+          break;
+        }
+        auto& arg = spec.tensorAt(tensor_arg_spec_offset++);
+        AT_ASSERT(arg.defined());
+        result_stack.back().emplace_back(dim_tensor_type_from_arg(arg));
+      } break;
       case SPECIALIZE_TENSOR: {
         input_stack.back()++;
-        auto& arg = spec.at(arg_spec_offset++);
-	if (arg.isNone()) {
-	  result_stack.back().emplace_back(NoneType::get());
-	} else if (!arg.defined()) {
+        auto& arg = spec.tensorAt(tensor_arg_spec_offset++);
+        if (!arg.defined()) {
           result_stack.back().emplace_back(AutogradZeroTensorType::get());
         } else {
-          result_stack.back().emplace_back(DimensionedTensorType::create(
-              arg.type(),
-              ConvertIntToCPUOrCUDA(arg.device()),
-              arg.dim(),
-              arg.requires_grad()));
+          result_stack.back().emplace_back(dim_tensor_type_from_arg(arg));
         }
       } break;
-      case SPECIALIZE_NONTENSOR_OPTIONAL: {
+      case SPECIALIZE_OPTIONAL: {
+        auto is_present = spec.isPresent(optional_arg_spec_offset++);
         auto ot = (*input_stack.back()++)->expect<OptionalType>();
-        auto& arg = spec.at(arg_spec_offset++);
-	if (arg.isNone()) {
-	  result_stack.back().emplace_back(NoneType::get());
-	} else {
-	  result_stack.back().emplace_back(ot->getElementType());
-	}
+        if (!is_present) {
+          result_stack.back().emplace_back(ot);
+        } else {
+          result_stack.back().emplace_back(ot->getElementType());
+        }
       } break;
       case ENTER_TUPLE: {
         auto tup = (*input_stack.back()++)->expect<TupleType>();
@@ -236,15 +267,24 @@ std::vector<TypePtr> ArgumentSpecCreator::getSpecializedTypes(
     }
   }
   AT_ASSERT(result_stack.size() == 1);
-  return result_stack.back();
-}
-
-void ArgumentSpecCreator::setInputTypes(Graph& g, const ArgumentSpec& spec)
-    const {
-  auto input_types = getSpecializedTypes(g, spec);
-  auto inputs = g.inputs();
+  // FIXME: by doing this only on the inputs, we only capture graph inputs and
+  // not
+  //        optionals in tuples or objects. For that to work, we would have
+  //        to investigate the uses of the inputs in detail to change the
+  //        accesses/ unwrapping
+  auto inputs = graph.inputs();
   for (size_t i = 0; i < inputs.size(); ++i) {
-    inputs[i]->setType(input_types[i]);
+    auto t = result_stack.back()[i];
+    if (auto ot = t->cast<OptionalType>()) {
+      // if an optional input hasn't been specialized above, it is None
+      // so we disconnect the input here and replace its uses with
+      // a constant
+      WithInsertPoint guard(*graph.nodes().begin());
+      auto c = graph.insertConstant({}, ot);
+      inputs[i]->replaceAllUsesWith(c);
+    } else {
+      inputs[i]->setType(t);
+    }
   }
 }
 

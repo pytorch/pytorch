@@ -63,7 +63,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       }
     } else if (node->matches(
                    "aten::_grad_sum_to_size(Tensor self, int[]? size) -> Tensor")) {
-      if (node->input(1)->type()->isSubtypeOf(NoneType::get())) {
+      if (node->input(1)->mustBeNone()) {
         node->output()->replaceAllUsesWith(node->input(0));
       }
     } else if (
@@ -166,7 +166,8 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       auto uses = node->output()->uses();
       for (Use u : uses) {
         if (u.user->matches(
-                "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
+                "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")
+	    && u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
           u.user->replaceInput(0, node->inputs().at(0));
         }
       }
@@ -193,24 +194,16 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       // replace the output with true if node is __isnot__ or false if node is
       // __is__
       AT_ASSERT(node->inputs().size() == 2);
-      if (node->inputs().at(0)->mustBeNone() &&
-          node->inputs().at(1)->mustBeNone()) {
-        WithInsertPoint guard(node);
-        auto output =
-            node->owningGraph()->insertConstant(node->kind() == aten::__is__);
-        node->output()->replaceAllUsesWith(output);
-      } else {
-        for (size_t check_none_index : {0, 1}) {
-          bool input_must_be_none =
-              node->inputs().at(check_none_index)->mustBeNone();
-          bool other_must_not_be_none =
-              node->inputs().at(1 - check_none_index)->mustNotBeNone();
-          if (input_must_be_none && other_must_not_be_none) {
-            WithInsertPoint guard(node);
-            auto output = node->owningGraph()->insertConstant(
-                node->kind() == aten::__isnot__);
-            node->output()->replaceAllUsesWith(output);
-          }
+      for (size_t check_none_index : {0, 1}) {
+        bool input_must_be_none =
+            node->inputs().at(check_none_index)->mustBeNone();
+        bool other_must_not_be_none =
+            node->inputs().at(1 - check_none_index)->mustNotBeNone();
+        if (input_must_be_none && other_must_not_be_none) {
+          WithInsertPoint guard(node);
+          auto output = node->owningGraph()->insertConstant(
+              node->kind() == aten::__isnot__);
+          node->output()->replaceAllUsesWith(output);
         }
       }
     } else if (

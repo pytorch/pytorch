@@ -36,9 +36,8 @@ void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
 bool needTrimGrad(Node* n) {
   static OperatorSet need_trim_grad_ops = {
       "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
-      "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
-      "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
       "aten::topk(Tensor self, int k, int dim, bool largest, bool sorted) -> (Tensor, Tensor)",
+      "aten::max_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
   };
   if (need_trim_grad_ops.find(n)) {
     return true;
@@ -66,6 +65,8 @@ bool isDifferentiable(Node* n) {
       "aten::ne(Tensor self, Scalar other) -> Tensor",
       "aten::fmod(Tensor self, Scalar other) -> Tensor",
       "aten::remainder(Tensor self, Scalar other) -> Tensor",
+      "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
+      "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
       "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
   };
 
@@ -344,6 +345,56 @@ class GradientHelper {
 
     } else if (comparison_ops.find(node)) {
       return {nullptr, nullptr};
+
+    } else if (
+        node->matches(
+            "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)")) {
+      AT_ASSERT(grads.size() == 2);
+      auto graph = node->owningGraph();
+      auto backward_value = graph->insert(
+          aten::max_pool2d_with_indices_backward,
+          {grads.at(0).value(),
+           node->namedInput(attr::self),
+           node->namedInput(attr::kernel_size),
+           node->namedInput(attr::stride),
+           node->namedInput(attr::padding),
+           node->namedInput(attr::dilation),
+           node->namedInput(attr::ceil_mode),
+           outputs.at(1).value()});
+      return {backward_value->node()->output(0),
+              nullptr,
+              nullptr,
+              nullptr,
+              nullptr,
+              nullptr};
+
+    } else if (
+        node->matches(
+            "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)")) {
+      auto graph = node->owningGraph();
+      auto backward_value = graph->insert(
+          aten::thnn_conv2d_backward,
+          {grads.at(0).value(),
+           inputs.at(0).value(),
+           inputs.at(1).value(),
+           node->namedInput(attr::kernel_size),
+           node->namedInput(attr::stride),
+           node->namedInput(attr::padding),
+           outputs.at(1).value(),
+           outputs.at(2).value(),
+           graph->insertConstant(std::vector<bool>{true, true, true})});
+      // graph->insert returns a tuple automatically if multiple outputs are
+      // returned. So unpack them again.
+      Node* tuple_unpack_node =
+          graph->insertNode(graph->createTupleUnpack(backward_value));
+      auto tuple_outputs = tuple_unpack_node->outputs();
+      AT_ASSERT(tuple_outputs.size() == size_t(3));
+      return {tuple_outputs[0],
+              tuple_outputs[1],
+              nullptr,
+              tuple_outputs[2],
+              nullptr,
+              nullptr};
 
     } else if (
         node->matches(
@@ -754,7 +805,14 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     // we create an incorrect sum that doesn't use prev vjp, replace uses, and
     // fix the sum.
     Value* new_vjp = createAutogradAdd(tmp_vjp_in, tmp_vjp_in);
-    new_vjp->node()->moveAfter(tmp_vjp_prev->node());
+    if (tmp_vjp_prev->node()->kind() == prim::Param) {
+      // can't move a node after a block param node
+      new_vjp->node()->moveBefore(
+          *tmp_vjp_prev->node()->owningBlock()->nodes().begin());
+    } else {
+      new_vjp->node()->moveAfter(tmp_vjp_prev->node());
+    }
+
     tmp_vjp_prev->replaceAllUsesWith(new_vjp);
     new_vjp->node()->replaceInput(1, tmp_vjp_prev);
     grad_desc.df_input_vjps.emplace_back(i);
@@ -809,6 +867,5 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   ConstantPooling(grad_desc.df);
   return grad_desc;
 }
-
 } // namespace jit
 } // namespace torch
