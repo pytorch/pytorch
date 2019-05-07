@@ -252,7 +252,7 @@ class SummaryWriter(object):
             else:
                 self.file_writer = FileWriter(logdir=self.log_dir, **self.kwargs)
             self.all_writers = {self.file_writer.get_logdir(): self.file_writer}
-        return self.file_writer 
+        return self.file_writer
 
     def add_scalar(self, tag, scalar_value, global_step=None, walltime=None):
         """Add scalar data to summary.
@@ -298,11 +298,22 @@ class SummaryWriter(object):
 
         Examples::
 
-            writer.add_scalars('run_14h', {'xsinx':i*np.sin(i/r),
-                                           'xcosx':i*np.cos(i/r),
-                                           'arctanx': numsteps*np.arctan(i/r)}, i)
+            from torch.utils.tensorboard import SummaryWriter
+            writer = SummaryWriter()
+            r = 5
+            for i in range(100):
+                writer.add_scalars('run_14h', {'xsinx':i*np.sin(i/r),
+                                                'xcosx':i*np.cos(i/r),
+                                                'tanx': np.tan(i/r)}, i)
+            writer.close()
             # This call adds three values to the same scalar plot with the tag
             # 'run_14h' in TensorBoard's scalar section.
+
+        Expected result:
+
+        .. image:: _static/img/tensorboard/add_scalars.png
+           :scale: 50 %
+
         """
         walltime = time.time() if walltime is None else walltime
         fw_logdir = self._get_file_writer().get_logdir()
@@ -405,19 +416,19 @@ class SummaryWriter(object):
 
             from torch.utils.tensorboard import SummaryWriter
             import numpy as np
-            my_img = np.zeros((3, 100, 100))
-            my_img[0] = np.arange(0, 10000).reshape(100, 100) / 10000
-            my_img[1] = 1 - np.arange(0, 10000).reshape(100, 100) / 10000
+            img = np.zeros((3, 100, 100))
+            img[0] = np.arange(0, 10000).reshape(100, 100) / 10000
+            img[1] = 1 - np.arange(0, 10000).reshape(100, 100) / 10000
 
-            my_img_HWC = np.zeros((100, 100, 3))
-            my_img_HWC[:, :, 0] = np.arange(0, 10000).reshape(100, 100) / 10000
-            my_img_HWC[:, :, 1] = 1 - np.arange(0, 10000).reshape(100, 100) / 10000
+            img_HWC = np.zeros((100, 100, 3))
+            img_HWC[:, :, 0] = np.arange(0, 10000).reshape(100, 100) / 10000
+            img_HWC[:, :, 1] = 1 - np.arange(0, 10000).reshape(100, 100) / 10000
 
             writer = SummaryWriter()
-            writer.add_image('my_image', my_img, 0)
+            writer.add_image('my_image', img, 0)
 
             # If you have non-default dimension setting, set the dataformats argument.
-            writer.add_image('my_image_HWC', my_img_HWC, 0, dataformats='HWC')
+            writer.add_image('my_image_HWC', img_HWC, 0, dataformats='HWC')
             writer.close()
 
         Expected result:
@@ -451,13 +462,13 @@ class SummaryWriter(object):
             from torch.utils.tensorboard import SummaryWriter
             import numpy as np
 
-            my_img_batch = np.zeros((16, 3, 100, 100))
+            img_batch = np.zeros((16, 3, 100, 100))
             for i in range(16):
-                my_img_batch[i, 0] = np.arange(0, 10000).reshape(100, 100) / 10000 / 16 * i
-                my_img_batch[i, 1] = (1 - np.arange(0, 10000).reshape(100, 100) / 10000) / 16 * i
+                img_batch[i, 0] = np.arange(0, 10000).reshape(100, 100) / 10000 / 16 * i
+                img_batch[i, 1] = (1 - np.arange(0, 10000).reshape(100, 100) / 10000) / 16 * i
 
             writer = SummaryWriter()
-            writer.add_images('my_image_batch', my_img_batch, 0)
+            writer.add_images('my_image_batch', img_batch, 0)
             writer.close()
 
         Expected result:
@@ -694,10 +705,10 @@ class SummaryWriter(object):
     def add_pr_curve(self, tag, labels, predictions, global_step=None,
                      num_thresholds=127, weights=None, walltime=None):
         """Adds precision recall curve.
-        Precision recall curve lets you understand you model's performance under different
-        threshold settings. With this function, you provide the groundthuth label (T/F) and
-        confidence (usually the output of your algorithm) for each target.
-        TensorBoard will let you choose the threshold on the webpage.
+        Plotting a precision-recall curve lets you understand you model's performance under different
+        threshold settings. With this function, you provide the ground truth labeling (T/F) and
+        prediction confidence (usually the output of your model) for each target. The TensorBoard UI
+        will let you choose the threshold interactively.
 
         Args:
             tag (string): Data identifier

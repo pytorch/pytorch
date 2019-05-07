@@ -82,6 +82,7 @@ Expected result:
 
    .. automethod:: __init__
    .. automethod:: add_scalar
+   .. automethod:: add_scalars
    .. automethod:: add_histogram
    .. automethod:: add_image
    .. automethod:: add_images
