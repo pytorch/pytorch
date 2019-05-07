@@ -281,8 +281,6 @@ macos_brew_update: &macos_brew_update
   no_output_timeout: "1h"
   command: |
     set -ex
-    pwd
-    ls -lah
     # moreutils installs a `parallel` executable by default, which conflicts
     # with the executable from the GNU `parallel`, so we must unlink GNU
     # `parallel` first, and relink it afterwards
@@ -292,3 +290,19 @@ macos_brew_update: &macos_brew_update
     brew link parallel --overwrite
     brew install expect
     brew install libomp
+
+# In version 2.1 and above we could make this a command and pass a parameter to
+# it, but in this version there is no way to pass a parameter to a step
+binary_macos_brew_update: &binary_macos_brew_update
+  name: Brew update and install moreutils and expect
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    # moreutils installs a `parallel` executable by default, which conflicts
+    # with the executable from the GNU `parallel`, so we must unlink GNU
+    # `parallel` first, and relink it afterwards
+    brew update
+    brew unlink parallel
+    brew install moreutils
+    brew link parallel --overwrite
+    brew install expect

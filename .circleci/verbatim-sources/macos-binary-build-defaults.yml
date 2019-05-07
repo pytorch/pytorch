@@ -12,7 +12,7 @@ binary_mac_build: &binary_mac_build
   - run:
       <<: *binary_populate_env
   - run:
-      <<: *macos_brew_update
+      <<: *binary_macos_brew_update
   - run:
       <<: *binary_install_miniconda
 
@@ -47,7 +47,7 @@ binary_mac_upload: &binary_mac_upload
   - run:
       <<: *binary_populate_env
   - run:
-      <<: *macos_brew_update
+      <<: *binary_macos_brew_update
   - run:
       <<: *binary_install_miniconda
   - attach_workspace:
