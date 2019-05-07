@@ -188,12 +188,27 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
 }
 
 struct GraphFuser {
+  using FusionCallback = std::function<bool(Node*)>;
+
   Block* block_;
   std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
+  FusionCallback callback_ = [&](Node* n) { return isFusableDefault(n); };
+  Symbol kind_ = prim::FusionGroup;
 
   GraphFuser(Block* block, std::shared_ptr<Graph> graph)
       : block_(block), graph_(std::move(graph)) {}
+
+  // Custom passes require kind to specified
+  GraphFuser(
+      Block* block,
+      std::shared_ptr<Graph> graph,
+      FusionCallback callback,
+      Symbol kind)
+      : block_(block),
+        graph_(std::move(graph)),
+        callback_(callback),
+        kind_(kind) {}
 
   value_list tensorInputs(Node* node) {
     return filter(node->inputs(), [](Value* v) {
@@ -209,7 +224,33 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
-    return isFusableMap(node) || isFusableNorm(node);
+    return callback_(node);
+  }
+
+  bool isFusableDevice(Value *v) {
+    auto tensor_type = v->type()->cast<DimensionedTensorType>();
+    if (!tensor_type) {
+      return true;
+    }
+    if (tensor_type->device().is_cpu()) {
+      return canFuseOnCPU();
+    } else if (tensor_type->device().is_cuda()) {
+      return canFuseOnGPU();
+    }
+    throw std::runtime_error("Unknown device");
+  }
+
+
+  // Default fusability check - used when the user doesn't pass in
+  // a callback.
+  bool isFusableDefault(Node* node) {
+    bool fusableDevice = true;
+    for (const auto& output : node->outputs()) {
+      if (output->uses().size() > 0) {
+        fusableDevice &= isFusableDevice(output);
+      }
+    }
+    return fusableDevice && (isFusableMap(node) || isFusableNorm(node));
   }
 
   bool isFusableMap(Node* node) {
@@ -267,7 +308,7 @@ struct GraphFuser {
   }
 
   Graph& getSubgraph(Node* n) {
-    AT_ASSERT(n->kind() == prim::FusionGroup);
+    AT_ASSERT(n->kind() == kind_);
     return *n->g(attr::Subgraph);
   }
 
@@ -440,7 +481,7 @@ struct GraphFuser {
   // DOES NOT WORK if n is a consumer of an output of the fusion group
   // returns the node _inside_ the group that represents the node
   Node* mergeNodeIntoGroup(Node* group, Node* n) {
-    AT_ASSERT(n->kind() != prim::FusionGroup);
+    AT_ASSERT(n->kind() != kind_);
     auto& subgraph = getSubgraph(group);
     // map from nodes in the surrounding graph to parameters in the fusion
     // group's subgraph that correspond to them
@@ -518,7 +559,7 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node* createSingletonFusionGroup(Node* n) {
-    auto group = block_->owningGraph()->createFusionGroup();
+    auto group = block_->owningGraph()->createWithSubgraph(kind_);
     // propogate position information for the new node so we can always
     // have a valid mapping
     group->insertBefore(n);
@@ -529,19 +570,6 @@ struct GraphFuser {
     n->replaceAllUsesWith(group);
     n->destroy();
     return group;
-  }
-
-  bool isFusableDevice(Value* v) {
-    auto tensor_type = v->type()->cast<DimensionedTensorType>();
-    if (!tensor_type) {
-      return true;
-    }
-    if (tensor_type->device().is_cpu()) {
-      return canFuseOnCPU();
-    } else if (tensor_type->device().is_cuda()) {
-      return canFuseOnGPU();
-    }
-    throw std::runtime_error("Unknown device");
   }
 
   at::optional<Node*> tryFuse(Node* consumer, Value* producer) {
@@ -571,7 +599,7 @@ struct GraphFuser {
     }
 
     if (producer->node()->kind() == aten::_grad_sum_to_size &&
-        consumer->kind() == prim::FusionGroup) {
+        consumer->kind() == kind_) {
       // check that we will be able to move the _grad_sum_to_size to be fused
       // to the end of the fusion group in the fusion compiler
       // the difficulty here is that the producer is not part of the fusion
@@ -588,13 +616,15 @@ struct GraphFuser {
     }
 
     auto group = consumer;
-    if (consumer->kind() != prim::FusionGroup) {
+    if (consumer->kind() != kind_) {
       group = createSingletonFusionGroup(consumer);
     }
-    if (producer->node()->matches(
-            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor") ||
-        producer->node()->matches(
-            "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")) {
+
+    if (kind_ == prim::FusionGroup &&
+        (producer->node()->matches(
+             "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor") ||
+         producer->node()->matches(
+             "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor"))) {
       // We don't do any fusions in here, but simply decompose the normalization
       // ops into a kernel that computes the stats + pointwise ops which will be
       // considered in this fusion next.
@@ -602,7 +632,7 @@ struct GraphFuser {
       return group;
     }
 
-    if (producer->node()->kind() == prim::FusionGroup) {
+    if (producer->node()->kind() == kind_) {
       mergeFusionGroups(group, producer->node());
       return group;
     }
@@ -1153,7 +1183,7 @@ struct GraphFuser {
   }
 
   bool canFuseWithConcat(Value* producer, Node* before_check) {
-    if (!isFusableDevice(producer) || !isFusable(producer->node())) {
+    if (!isFusable(producer->node())) {
       return false;
     }
     // NB: it is important that this check happens after isFusable, which checks
@@ -1445,6 +1475,18 @@ void FuseGraph(std::shared_ptr<Graph>& graph) {
   EliminateDeadCode(graph);
   // Improve the quality of shape propagation code that was left
   PeepholeOptimizeShapeExpressions(graph->block());
+}
+
+void CustomFuseGraph(
+    std::shared_ptr<Graph>& graph,
+    std::function<bool(Node*)> fn,
+    Symbol kind) {
+  GraphFuser(
+      graph->block(),
+      graph,
+      [=](Node* n) { return fn(n) || n->kind() == kind; },
+      kind)
+      .run();
 }
 
 } // namespace jit

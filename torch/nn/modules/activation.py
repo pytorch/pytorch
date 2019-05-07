@@ -1128,6 +1128,9 @@ class Softmax(Module):
     def forward(self, input):
         return F.softmax(input, self.dim, _stacklevel=5)
 
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)
+
 
 @weak_module
 class Softmax2d(Module):
