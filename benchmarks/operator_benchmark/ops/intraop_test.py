@@ -9,20 +9,18 @@ from operator_benchmark.benchmark_test_generator import *
 import torch
 
 
-"""Microbenchmarks for TH and ATen (PyTorch) CPU intra-op parallelism.
+"""Microbenchmarks for PyTorch CPU intra-op parallelism.
 
 Tests the following functions:
 
 - bitor, cbitor
-    - tensor-scalar and tensor-tensor element-wise function), integer-only
-    - explicit OMP pragma, THTensorApply macros
+    - tensor-scalar and tensor-tensor element-wise function, integer-only
 
 - tahn and sigmoid
-    - unary ops, THTensorMoreMath macro and UnaryOps
+    - unary ops
 
 - sumall
     - basic reduction function
-    - pragma OMP 'parallel for' with reduction
 """
 
 # Config
@@ -37,40 +35,33 @@ config = generate_configs(
 
 
 def torch_or(tensor_arg):
-    def _ior(x, s):
-        return x.__ior__(s if tensor_arg else 42)
+    jit_ior_loop_code = """\
+def forward(self, a, b, iterations):
+    # type: (Tensor, Tensor, int)
+    for _ in range(iterations):
+        a.__ior__({})
+    return a
+"""
+    jit_ior_loop = torch.jit.ScriptModule()
+    jit_ior_loop.define(jit_ior_loop_code.format("b" if tensor_arg else "42"))
 
-    x = torch.ones(64, 64, dtype=torch.int32)
-    s = torch.ones(64, 64, dtype=torch.int32)
-    traced_ior = torch.jit.trace(_ior, (x, s,))
-
-    @torch.jit.script
-    def _jit_ior_loop(a, b, iterations):
-        # type: (Tensor, Tensor, int)
-        for _ in range(iterations):
-            traced_ior(a, b)
-        return a
-
-    print("torch_or(", tensor_arg, "):\n", _jit_ior_loop.code)
-    return _jit_ior_loop
+    print("torch_or(", tensor_arg, "):\n", jit_ior_loop.code)
+    return jit_ior_loop
 
 
 def torch_unary(op_str):
-    def _op(x):
-        return getattr(x, op_str)()
+    jit_op_loop_code = """\
+def forward(self, a, b, iterations):
+    # type: (Tensor, Tensor, int)
+    for _ in range(iterations):
+        a.{}()
+    return a
+"""
+    jit_op_loop = torch.jit.ScriptModule()
+    jit_op_loop.define(jit_op_loop_code.format(op_str))
 
-    x = torch.ones(64, 64)
-    traced_op = torch.jit.trace(_op, (x,))
-
-    @torch.jit.script
-    def _jit_op_loop(a, b, iterations):
-        # type: (Tensor, Tensor, int)
-        for _ in range(iterations):
-            traced_op(a)
-        return a
-
-    print("torch_unary(", op_str, "):\n", _jit_op_loop.code)
-    return _jit_op_loop
+    print("torch_unary(", op_str, "):\n", jit_op_loop.code)
+    return jit_op_loop
 
 
 @torch.jit.script
@@ -81,6 +72,7 @@ def torch_sumall(a, b, iterations):
         result += float(torch.sum(a))
         a[0][0] += 0.01
     return result
+
 print("torch_sumall:\n", torch_sumall.code)
 
 @benchmark_core.register_test
