@@ -50,7 +50,6 @@ ideep::tensor _mkldnn_conv2d(
     at::IntArrayRef stride,
     at::IntArrayRef dilation,
     int64_t groups) {
-
   std::vector<int64_t> kernel_size(x.ndims());
   // mkldnn conv2d weights could have been re-ordered to 5d by
   // mkldnn_reorder_conv2d_weight
@@ -62,35 +61,30 @@ ideep::tensor _mkldnn_conv2d(
     std::copy_n(
         w.get_dims().cbegin() + 2, x.ndims() - 1, kernel_size.begin() + 1);
   } else {
-    std::copy_n(
-        w.get_dims().cbegin(), x.ndims(), kernel_size.begin());
+    std::copy_n(w.get_dims().cbegin(), x.ndims(), kernel_size.begin());
   }
 
   const ideep::param::dims x_dims = x.get_dims();
   std::vector<int64_t> input_size{x_dims.cbegin(), x_dims.cend()};
-  std::vector<int64_t> output_sizes = conv_output_size(
-      input_size,
-      kernel_size,
-      padding,
-      stride,
-      dilation);
+  std::vector<int64_t> output_sizes =
+      conv_output_size(input_size, kernel_size, padding, stride, dilation);
 
   ideep::tensor y;
   if (b.has_value()) {
     ideep::convolution_forward::compute<AllocForMKLDNN>(
-      x,
-      w,
-      b.value(),
-      {output_sizes.cbegin(), output_sizes.cend()},
-      y,
-      {stride.begin(), stride.end()},
-      {dilation.begin(), dilation.end()},
-      {padding.begin(), padding.end()},
-      {padding.begin(), padding.end()},
-      groups,
-      ideep::descriptor_group::attr_t{},
-      ideep::algorithm::convolution_direct,
-      ideep::prop_kind::forward);
+        x,
+        w,
+        b.value(),
+        {output_sizes.cbegin(), output_sizes.cend()},
+        y,
+        {stride.begin(), stride.end()},
+        {dilation.begin(), dilation.end()},
+        {padding.begin(), padding.end()},
+        {padding.begin(), padding.end()},
+        groups,
+        ideep::descriptor_group::attr_t{},
+        ideep::algorithm::convolution_direct,
+        ideep::prop_kind::forward);
   } else {
     ideep::convolution_forward::compute<AllocForMKLDNN>(
       x,
@@ -139,8 +133,8 @@ at::Tensor mkldnn_convolution(
         groups);
     return new_with_itensor_mkldnn(std::move(mkldnn_output), input.options());
   } else {
-    ideep::tensor mkldnn_input = itensor_view_from_dense(input);
-    ideep::tensor mkldnn_weight = itensor_view_from_dense(weight);
+    const ideep::tensor mkldnn_input = itensor_view_from_dense(input);
+    const ideep::tensor mkldnn_weight = itensor_view_from_dense(weight);
     c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
     if (bias.defined()) {
       mkldnn_bias = itensor_view_from_dense(bias);
