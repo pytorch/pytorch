@@ -11969,8 +11969,8 @@ a")
 
             @torch.jit.script_method
             def forward(self):
-                return (self.dict, self.float, self.int, self.bool, self.tuple, \
-                        self.list, self.int_list, self.tensor_list, self.bool_list, \
+                return (self.dict, self.float, self.int, self.bool, self.tuple,
+                        self.list, self.int_list, self.tensor_list, self.bool_list,
                         self.float_list, self.str_list)
 
         m = M()
@@ -11999,8 +11999,8 @@ a")
 
             @torch.jit.script_method
             def forward(self):
-                return (self.dict, self.float, self.int, self.bool, self.tuple, \
-                        self.list, self.int_list, self.tensor_list, self.bool_list, \
+                return (self.dict, self.float, self.int, self.bool, self.tuple,
+                        self.list, self.int_list, self.tensor_list, self.bool_list,
                         self.float_list, self.str_list)
 
         with TemporaryFileName() as fname:
