@@ -135,7 +135,6 @@
     MkldnnCPU: mkldnn_add
 
 - func: add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
-  cpu_half: True
   variants: method
   dispatch:
     CPU: add_
@@ -2438,7 +2437,6 @@
 
 
 - func: coalesce(Tensor self) -> Tensor
-  cpu_half: True
   variants: method
   dispatch:
     SparseCPU: coalesce_sparse_cpu

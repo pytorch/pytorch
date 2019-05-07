@@ -234,7 +234,9 @@ class TestSparse(TestCase):
             [0, 0, 0, 3],
             [0, 0, 1, 4],
         ])
-        for dtype in [torch.float16, torch.int, torch.float64]:
+        # we don't have to_dense for half types on CPU because it is implemented
+        # with a slower add_ operation
+        for dtype in [torch.float16, torch.float64] if self.device == 'cuda' else [torch.float64]:
             v = self.value_tensor([2, 1, 3, 4]).to(dtype=dtype)
             x = self.sparse_tensor(i, v, torch.Size([3, 4, 5]))
             res = self.value_tensor([
@@ -264,6 +266,13 @@ class TestSparse(TestCase):
             res = self.value_empty(3, 4, 5, 0).to(dtype=dtype)
             test_tensor(x, res)
 
+    # half tesnors on cpu don't implement to_dense, so need to convert to float
+    def _half_safe_to_dense(self, tensor):
+        if(tensor.dtype == torch.half and tensor.device.type == 'cpu'):
+            return tensor.to(torch.float).to_dense().to(torch.half)
+        else:
+            return tensor.to_dense()
+
     def test_to_sparse(self):
         shape = [10, 5, 19, 8]
         max_nnz = 1
@@ -274,9 +283,10 @@ class TestSparse(TestCase):
                 for dtype in [torch.float16, torch.float64, torch.int]:
                     expected, _, _ = self._gen_sparse(dim, nnz, shape)
                     expected = expected.to(dtype)
-                    d = expected.to_dense()
+
+                    d = self._half_safe_to_dense(expected)
                     result = d.to_sparse(dim)
-                    self.assertEqual(d, result.to_dense())  # == not implemented for sparse tensors yet
+                    self.assertEqual(d, self._half_safe_to_dense(result))  # == not implemented for sparse tensors yet
                     self.assertEqual(expected.size(), result.size())
                     self.assertEqual(dim, result.sparse_dim())
 
