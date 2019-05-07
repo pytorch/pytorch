@@ -4,6 +4,7 @@
 #include <ATen/CPUApplyUtils.h>
 
 #define EPSILON 1e-12
+#define _USE_MATH_DEFINES
 
 namespace {
   static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
