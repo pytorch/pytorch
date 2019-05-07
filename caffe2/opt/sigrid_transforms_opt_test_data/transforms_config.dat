@@ -1,0 +1,62 @@
+{
+  "transforms": [
+  {
+    "name": "F0_AUTO_FIRST_X",
+    "params": {
+      "firstX": {
+        "inputName": "F0",
+        "elements": 30,
+        "getSingleElementAsInt": false,
+        "getTopXByScore": true
+      }
+    },
+    "partOfModel": false,
+    "phase": 100
+  },
+  {
+    "name": "F0_AUTO_FIRST_X_AUTO_UNIGRAM",
+    "params": {
+      "ngram": {
+        "terms": [
+          "F0_AUTO_FIRST_X"
+        ],
+        "localityKeysToLeverage": 1,
+        "preferReversibleHash": true,
+        "maxValue": 20000000,
+        "salt": 0
+      }
+    },
+    "partOfModel": true,
+    "phase": 100
+  },
+  {
+    "name": "F1_AUTO_FIRST_X",
+    "params": {
+      "firstX": {
+        "inputName": "F1",
+        "elements": 60,
+        "getSingleElementAsInt": false,
+        "getTopXByScore": true
+      }
+    },
+    "partOfModel": false,
+    "phase": 100
+  },
+  {
+    "name": "F1_AUTO_FIRST_X_AUTO_UNIGRAM",
+    "params": {
+      "ngram": {
+        "terms": [
+          "F1_AUTO_FIRST_X"
+        ],
+        "localityKeysToLeverage": 1,
+        "preferReversibleHash": true,
+        "maxValue": 20000000,
+        "salt": 0
+      }
+    },
+    "partOfModel": true,
+    "phase": 100
+  }
+  ]
+}

@@ -42,6 +42,13 @@ void verifyShapeInfo(
 
 } // namespace
 
+std::string readStringFromFile(std::string fileName) {
+  std::ifstream is(fileName);
+  std::stringstream buffer;
+  buffer << is.rdbuf();
+  return buffer.str();
+}
+
 TEST(BoundShapeInference, SparseLengthsSum) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -390,6 +397,75 @@ TEST(BoundShapeInference, ClipRangesGatherSigridHash) {
       TensorProto_DataType_INT64);
 }
 
+TEST(BoundShapeInference, SigridTransforms) {
+  FLAGS_caffe2_extract_feature_length_for_shape_inference = true;
+  const std::string& transformsInstanceBlobName = "test_transform_instance";
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "SigridTransforms",
+      "",
+      {transformsInstanceBlobName, "R0", "V0", "O0"},
+      {"feature_preproc/sigrid_transform/range_F0_AUTO_FIRST_X_AUTO_UNIGRAM",
+       "feature_preproc/sigrid_transform/values_F0_AUTO_FIRST_X_AUTO_UNIGRAM",
+       "feature_preproc/sigrid_transform/range_F1_AUTO_FIRST_X_AUTO_UNIGRAM",
+       "feature_preproc/sigrid_transform/ids_F1_AUTO_FIRST_X_AUTO_UNIGRAM",
+       "feature_preproc/sigrid_transform/scores_F1_AUTO_FIRST_X_AUTO_UNIGRAM"}));
+
+  caffe2::Workspace ws;
+  std::string specFolder = "caffe2/caffe2/opt/sigrid_transforms_opt_test_data/";
+  std::string transformsConfig =
+      readStringFromFile(specFolder + "transforms_config.dat");
+  std::string outputSpec = readStringFromFile(specFolder + "output_spec.dat");
+  std::string inputSpec = readStringFromFile(specFolder + "input_spec.dat");
+
+  auto transformsInstanceOpDef = caffe2::CreateOperatorDef(
+      "SigridTransformsCreate",
+      "",
+      {},
+      {transformsInstanceBlobName},
+      {caffe2::MakeArgument("transforms_config", transformsConfig),
+       caffe2::MakeArgument("input_spec", inputSpec),
+       caffe2::MakeArgument("output_spec", outputSpec)});
+  ws.RunOperatorOnce(transformsInstanceOpDef);
+
+  ShapeInfoMap shape_map;
+  BoundShapeSpec spec(50, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, &ws);
+  const auto& out_shape = eng.shape_info();
+
+  verifyShapeInfo(
+      out_shape,
+      "feature_preproc/sigrid_transform/range_F0_AUTO_FIRST_X_AUTO_UNIGRAM",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape,
+      "feature_preproc/sigrid_transform/values_F0_AUTO_FIRST_X_AUTO_UNIGRAM",
+      ShapeInfo::DimType::SEQ,
+      {spec.max_batch_size * 30},
+      TensorProto_DataType_INT64);
+  verifyShapeInfo(
+      out_shape,
+      "feature_preproc/sigrid_transform/range_F1_AUTO_FIRST_X_AUTO_UNIGRAM",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape,
+      "feature_preproc/sigrid_transform/ids_F1_AUTO_FIRST_X_AUTO_UNIGRAM",
+      ShapeInfo::DimType::SEQ,
+      {spec.max_batch_size * 60},
+      TensorProto_DataType_INT64);
+  verifyShapeInfo(
+      out_shape,
+      "feature_preproc/sigrid_transform/scores_F1_AUTO_FIRST_X_AUTO_UNIGRAM",
+      ShapeInfo::DimType::SEQ,
+      {spec.max_batch_size * 60},
+      TensorProto_DataType_INT64);
+}
+
 TEST(BoundShapeInference, Combo0) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -474,3 +550,8 @@ TEST(BoundShapeInference, Combo1) {
   verifyShapeInfo(
       out_shape, "Out", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 50});
 }
+
+// TODO(yingz): Create a combo case for ClipRangesGatherSigridHash +
+// SparseLengthsWeightedSum
+// TODO(yingz): create a test case from SigridTransform all the way to
+// SparseLengthsWeightedSum or SparseLengthsSum

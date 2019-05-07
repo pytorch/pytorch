@@ -1,6 +1,8 @@
 #include "bound_shape_inferencer.h"
+#include <re2/re2.h>
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/tensor_impl.h"
+#include "caffe2/fb/transforms/SigridTransformsInstance.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
@@ -48,7 +50,8 @@ void EnsureShapeNames(std::unordered_map<std::string, ShapeInfo>* info) {
 
 void BoundShapeInferencer::InferBoundShapeAndType(
     const NetDef& net,
-    const std::unordered_map<std::string, ShapeInfo>& info) {
+    const std::unordered_map<std::string, ShapeInfo>& info,
+    caffe2::Workspace* ws) {
   const static std::unordered_set<std::string> unsupported{"Tile"};
   shape_info_ = info;
 
@@ -83,6 +86,10 @@ void BoundShapeInferencer::InferBoundShapeAndType(
         op.type() == "ClipRangesGatherSigridHash" &&
         FLAGS_caffe2_extract_feature_length_for_shape_inference) {
       InferClipRangesGatherSigridHash(op);
+    } else if (
+        op.type() == "SigridTransforms" &&
+        FLAGS_caffe2_extract_feature_length_for_shape_inference) {
+      InferSigridTransforms(op, ws);
     } else {
       InferCommonOp(op);
     }
@@ -497,6 +504,93 @@ void BoundShapeInferencer::InferClipRangesGatherSigridHash(
           {max_lengths_arg[i / 2] * spec_.max_batch_size},
           TensorProto_DataType_INT64,
           false);
+    }
+  }
+}
+
+void BoundShapeInferencer::InferSigridTransforms(
+    const OperatorDef& op,
+    caffe2::Workspace* ws) {
+  std::string transformInstanceName;
+  for (auto& input_name : op.input()) {
+    if (caffe2::EndsWith(input_name, "_transform_instance")) {
+      transformInstanceName = input_name;
+      break;
+    }
+  }
+  CAFFE_ENFORCE(
+      ws->HasBlob(transformInstanceName),
+      "In SigridTransforms, unable to find transforms instance blob in the workspace");
+  auto* blob = ws->GetBlob(transformInstanceName);
+  auto transformsInstance_ =
+      blob->GetMutable<std::unique_ptr<caffe2::fb::SigridTransformsInstance>>()
+          ->get();
+  auto& transformsConfig = transformsInstance_->getTransformsConfig();
+  std::unordered_map<std::string, int64_t> outputLengthMap;
+  for (auto& transform : transformsConfig.transforms) {
+    switch (transform.get_params().getType()) {
+      case facebook::sigrid::TransformParamsUnion::firstX: {
+        outputLengthMap[transform.get_name()] =
+            transform.get_params().get_firstX().get_elements();
+        break;
+      }
+      case facebook::sigrid::TransformParamsUnion::ngram: {
+        // TODO(yingz): Check unigram params and make sure that it's doing hash.
+        auto& terms = transform.get_params().get_ngram().get_terms();
+        if (terms.size() == 1) {
+          if (outputLengthMap.find(terms[0]) != outputLengthMap.end()) {
+            outputLengthMap[transform.get_name()] = outputLengthMap[terms[0]];
+          } else {
+            LOG(WARNING) << "When inferring " << transform.get_name()
+                         << ", shape of " << terms[0]
+                         << " hasn't been infered yet";
+          }
+        } else {
+          LOG(WARNING) << "In transform " << transform.get_name()
+                       << ", size of terms in ngram is not equal to 1";
+        }
+        break;
+      }
+      default:
+        break;
+    };
+  }
+  const re2::RE2 namePattern{
+      "(feature_preproc/sigrid_transform/)(values_|ids_|scores_)(.*)",
+      re2::RE2::Quiet};
+  for (auto& output : op.output()) {
+    if (caffe2::StartsWith(output, "feature_preproc/sigrid_transform/range_")) {
+      CheckAndSetTensorShapeAndType(
+          output,
+          ShapeInfo::DimType::BATCH,
+          {spec_.max_batch_size},
+          TensorProto_DataType_INT32,
+          false);
+    } else {
+      std::string featureName;
+      std::string nameString, prefixString, featureString;
+      if (re2::RE2::FullMatch(
+              output,
+              namePattern,
+              &nameString,
+              &prefixString,
+              &featureString)) {
+        featureName = featureString;
+      }
+      if (featureName == "") {
+        LOG(WARNING) << "In SigridTransforms, unable to infer shape for output "
+                     << output;
+      } else if (outputLengthMap.find(featureName) == outputLengthMap.end()) {
+        LOG(WARNING) << "Shape of output " << output
+                     << " hasn't been infered yet";
+      } else {
+        CheckAndSetTensorShapeAndType(
+            output,
+            ShapeInfo::DimType::SEQ,
+            {outputLengthMap[featureName] * spec_.max_batch_size},
+            TensorProto_DataType_INT64,
+            false);
+      }
     }
   }
 }

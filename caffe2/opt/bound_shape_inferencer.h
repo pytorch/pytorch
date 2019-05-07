@@ -38,7 +38,8 @@ class CAFFE2_API BoundShapeInferencer {
 
   void InferBoundShapeAndType(
       const NetDef& net,
-      const std::unordered_map<std::string, ShapeInfo>& info);
+      const std::unordered_map<std::string, ShapeInfo>& info,
+      caffe2::Workspace* ws = nullptr);
 
   const ShapeInfoMap& shape_info() const {
     return shape_info_;
@@ -84,6 +85,7 @@ class CAFFE2_API BoundShapeInferencer {
   void InferReshape(const OperatorDef& op);
   void InferLengthsRangeFill(const OperatorDef& op);
   void InferClipRangesGatherSigridHash(const OperatorDef& op);
+  void InferSigridTransforms(const OperatorDef& op, caffe2::Workspace* ws);
 
   // Standard shape/type inference using op schema registered shape inference
   // function
