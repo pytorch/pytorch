@@ -148,6 +148,7 @@ class Module(object):
             raise KeyError("parameter name can't be empty string \"\"")
         elif hasattr(self, name) and name not in self._parameters:
             raise KeyError("attribute '{}' already exists".format(name))
+
         if param is None:
             self._parameters[name] = None
         elif not isinstance(param, Parameter):
