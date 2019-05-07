@@ -1676,6 +1676,9 @@ void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THT
     grad_data[i] = THTensor_(dirichlet_grad_one)(x_data[i], alpha_data[i], total_data[i]);
   }
 
+  c10::raw::intrusive_ptr::decref(x);
+  c10::raw::intrusive_ptr::decref(alpha);
+  c10::raw::intrusive_ptr::decref(total);
   THTensor_(freeCopyTo)(grad, self);
 }
 
