@@ -1,13 +1,11 @@
 #pragma once
 
-#include <thread>
 #include <iostream>
 #include <mutex>
 #include <memory>
 #include <vector>
 #include <cstdint>
 #include <string>
-#include <list>
 #include <sstream>
 #include <forward_list>
 #include <tuple>
@@ -18,7 +16,6 @@
 #endif
 
 #include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/jit/code_template.h>
 
 typedef struct CUevent_st* CUDAEventStub;
 

@@ -2709,6 +2709,15 @@ class _TestTorchMixin(object):
         # Copying from a float Tensor
         qr[:] = x
         self.assertEqual(qr.item(), 15)
+        # we can also print a qtensor
+        self.assertEqual(str(qr),
+                         "tensor([15.], size=(1,), dtype=torch.qint8, " +
+                         "scale=1.0, zero_point=2)")
+        empty_r = torch.ones((0, 1), dtype=torch.float)
+        empty_qr = empty_r.quantize_linear(scale, zero_point)
+        self.assertEqual(str(empty_qr),
+                         "tensor([], size=(0, 1), dtype=torch.qint8, " +
+                         "scale=1.0, zero_point=2)")
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
@@ -10986,6 +10995,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_show_config(self):
         # We can't usefully test the output; just make sure this doesn't crash
         torch.__config__.show()
+
+    def test_parallel_info(self):
+        torch.__config__.parallel_info()
 
     @staticmethod
     def _test_bincount(self, device):
