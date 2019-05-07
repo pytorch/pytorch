@@ -308,6 +308,15 @@ class TestWorkspace(unittest.TestCase):
         workspace.FeedBlob('bar', z)
         workspace.RunOperatorOnce(
             core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2)))
+        # NOTE: When we call `workspace.FeedBlob('bar', z)` above, `z`'s
+        # AutogradMeta is removed, which makes `z` an invalid tensor in PyTorch.
+        # To work around this, we use `z = workspace.FetchTorch("bar")` to fetch
+        # `z` from the Caffe2 workspace, attach AutogradMeta to `z` and make it
+        # a valid PyTorch tensor again.
+        # In the near future, a PyTorch tensor without AutogradMeta will be
+        # a valid tensor, and at that point we don't need `z = workspace.FetchTorch("bar")`
+        # to fetch `z` from the Caffe2 workspace, since it will exactly be
+        # the same as the original tensor `z`.
         z = workspace.FetchTorch("bar")
         z[0,1] = 123
         np.testing.assert_array_equal(
@@ -399,6 +408,15 @@ class TestWorkspaceGPU(test_util.TestCase):
         workspace.RunOperatorOnce(
             core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2),
             device_option=core.DeviceOption(workspace.GpuDeviceType)))
+        # NOTE: When we call `workspace.FeedBlob('bar', z)` above, `z`'s
+        # AutogradMeta is removed, which makes `z` an invalid tensor in PyTorch.
+        # To work around this, we use `z = workspace.FetchTorch("bar")` to fetch
+        # `z` from the Caffe2 workspace, attach AutogradMeta to `z` and make it
+        # a valid PyTorch tensor again.
+        # In the near future, a PyTorch tensor without AutogradMeta will be
+        # a valid tensor, and at that point we don't need `z = workspace.FetchTorch("bar")`
+        # to fetch `z` from the Caffe2 workspace, since it will exactly be
+        # the same as the original tensor `z`.
         z = workspace.FetchTorch("bar")
         z[0,1] = 123
         np.testing.assert_array_equal(
