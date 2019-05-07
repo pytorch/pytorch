@@ -106,12 +106,12 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
 fi
 
 test_python_nn() {
-  time python test/run_test.py --include nn --verbose
+  time python test/run_test.py --include nn --verbose --pytest -- --junitxml=junit-xml-output1.xml
   assert_git_not_dirty
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude nn --verbose
+  time python test/run_test.py --exclude nn --verbose --pytest -- --junitxml=junit-xml-output2.xml
   assert_git_not_dirty
 }
 
