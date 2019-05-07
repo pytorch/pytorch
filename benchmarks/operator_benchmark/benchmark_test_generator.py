@@ -25,9 +25,9 @@ def generate_test(configs, map_config, ops, OperatorTestCase):
                     continue
                 shapes.update(item)
             assert run_mode is not None, "Missing mode in configs"
-            shapes_args = map_config(**shapes)
-            if shapes_args is not None:
-                for op in ops:
+            for op in ops:
+                shapes_args = map_config(test_name=op[0], **shapes)
+                if shapes_args is not None:
                     OperatorTestCase(
                         test_name=op[0],
                         op_type=op[1],
@@ -50,7 +50,7 @@ def generate_c2_test(configs, c2_map_func, c2_ops):
     generate_test(configs, c2_map_func, c2_ops, Caffe2OperatorTestCase)
 
 
-def map_c2_config_add(M, N, K):
+def map_c2_config_add(test_name, M, N, K):
     input_one = (M, N, K)
     input_two = (M, N, K)
     input_shapes = [input_one, input_two]
@@ -60,7 +60,7 @@ def map_c2_config_add(M, N, K):
 map_pt_config_add = map_c2_config_add
 
 
-def map_c2_config_matmul(M, N, K, trans_a, trans_b, contig, dtype):
+def map_c2_config_matmul(test_name, M, N, K, trans_a, trans_b, contig, dtype):
     if not contig or dtype != torch.float32:
         return None
     input_one = (N, M) if trans_a else (M, N)
@@ -70,9 +70,21 @@ def map_c2_config_matmul(M, N, K, trans_a, trans_b, contig, dtype):
     return (input_shapes, args)
 
 
-def map_pt_config_matmul(M, N, K, trans_a, trans_b, contig, dtype):
+def map_pt_config_matmul(test_name, M, N, K, trans_a, trans_b, contig, dtype):
     if trans_a or trans_b:
         return None
     input_shapes = [(M, N), (N, K)]
+    args = {'contig': contig, 'dtype': dtype}
+    return (input_shapes, args)
+
+
+def map_pt_config_intraop(test_name, N, M, contig, dtype):
+    if test_name in ['bitor', 'cbitor']:
+        if dtype.is_floating_point:
+            return None
+    if test_name in ['tanh', 'sigmoid', 'sumall']:
+        if not dtype.is_floating_point:
+            return None
+    input_shapes = [(N, M), (N, M)]
     args = {'contig': contig, 'dtype': dtype}
     return (input_shapes, args)
