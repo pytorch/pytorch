@@ -234,6 +234,19 @@ static inline bool isQIntType(ScalarType t) {
   return t == ScalarType:: QInt8 || t == ScalarType::QUInt8 || t == ScalarType::QInt32;
 }
 
+static inline ScalarType toQIntType(ScalarType t) {
+  switch (t) {
+    case ScalarType::Byte:
+      return ScalarType::QUInt8;
+    case ScalarType::Char:
+      return ScalarType::QInt8;
+    case ScalarType::Int:
+      return ScalarType::QInt32;
+    default:
+      return t;
+  }
+}
+
 static inline ScalarType toUnderlying(ScalarType t) {
   switch (t) {
     case ScalarType::QUInt8:
