@@ -44,7 +44,7 @@ smoke_mac_test: &smoke_mac_test
     - run:
         <<: *binary_populate_env
     - run:
-        <<: *macos_brew_update
+        <<: *binary_macos_brew_update
     - run:
         name: Build
         no_output_timeout: "1h"
