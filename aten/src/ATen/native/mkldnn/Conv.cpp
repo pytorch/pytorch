@@ -42,6 +42,10 @@ using namespace mkldnn;
 
 namespace at { namespace native {
 
+#define GET_MKLDNN_TENSOR(tensor)                  \
+  tensor.is_mkldnn() ? itensor_from_mkldnn(tensor) \
+                     : itensor_view_from_dense(tensor);
+
 ideep::tensor _mkldnn_conv2d(
     const ideep::tensor& x,
     const ideep::tensor& w,
@@ -111,42 +115,25 @@ at::Tensor mkldnn_convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  if (input.is_mkldnn()) {
-    AT_ASSERTM(weight.is_mkldnn(), "weight is supposed to be a mkldnn tenser");
-    if (bias.defined()) {
-      AT_ASSERTM(bias.is_mkldnn(), "bias is supposed to be a mkldnn tensor");
-    }
+  const ideep::tensor mkldnn_input = GET_MKLDNN_TENSOR(input);
+  const ideep::tensor mkldnn_weight = GET_MKLDNN_TENSOR(weight);
+  c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+  if (bias.defined()) {
+    mkldnn_bias = GET_MKLDNN_TENSOR(bias);
+  }
 
-    const ideep::tensor& mkldnn_input = itensor_from_mkldnn(input);
-    const ideep::tensor& mkldnn_weight = itensor_from_mkldnn(weight);
-    c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
-    if (bias.defined()) {
-      mkldnn_bias = itensor_from_mkldnn(bias);
-    }
-    ideep::tensor mkldnn_output = _mkldnn_conv2d(
-        mkldnn_input,
-        mkldnn_weight,
-        mkldnn_bias,
-        padding,
-        stride,
-        dilation,
-        groups);
+  ideep::tensor mkldnn_output = _mkldnn_conv2d(
+      mkldnn_input,
+      mkldnn_weight,
+      mkldnn_bias,
+      padding,
+      stride,
+      dilation,
+      groups);
+
+  if (input.is_mkldnn()) {
     return new_with_itensor_mkldnn(std::move(mkldnn_output), input.options());
   } else {
-    const ideep::tensor mkldnn_input = itensor_view_from_dense(input);
-    const ideep::tensor mkldnn_weight = itensor_view_from_dense(weight);
-    c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
-    if (bias.defined()) {
-      mkldnn_bias = itensor_view_from_dense(bias);
-    }
-    ideep::tensor mkldnn_output = _mkldnn_conv2d(
-        mkldnn_input,
-        mkldnn_weight,
-        mkldnn_bias,
-        padding,
-        stride,
-        dilation,
-        groups);
     return mkldnn_to_dense(
         new_with_itensor_mkldnn(std::move(mkldnn_output), input.options()));
   }
@@ -416,6 +403,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
+#undef GET_MKLDNN_TENSOR
 }}  // namespace at::native
 
 #endif
