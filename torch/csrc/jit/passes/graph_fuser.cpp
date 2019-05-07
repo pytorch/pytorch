@@ -572,19 +572,6 @@ struct GraphFuser {
     return group;
   }
 
-  bool isFusableDevice(Value* v) {
-    auto tensor_type = v->type()->cast<DimensionedTensorType>();
-    if (!tensor_type) {
-      return true;
-    }
-    if (tensor_type->device().is_cpu()) {
-      return canFuseOnCPU();
-    } else if (tensor_type->device().is_cuda()) {
-      return canFuseOnGPU();
-    }
-    throw std::runtime_error("Unknown device");
-  }
-
   at::optional<Node*> tryFuse(Node* consumer, Value* producer) {
     // this handles cases where producer can be moved _into_ the fusion group of
     // consumer.
