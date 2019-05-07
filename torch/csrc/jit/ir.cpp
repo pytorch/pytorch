@@ -26,6 +26,7 @@ void printQuotedString(std::ostream& stmt, const std::string& str);
 static constexpr topo_position_t kLowerBound = INT64_MIN;
 static constexpr topo_position_t kUpperBound = INT64_MAX;
 static constexpr topo_position_t kMidPoint = 0;
+
 // How far away to space nodes that are appended to the graph.
 // should be 2^n, where:
 //   - n is the maximum number of repeated insertions without a re-index
@@ -535,9 +536,15 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
 
 Block::Block(Graph* graph_, Node* node_)
     : graph_(graph_),
-      output_(initOutput(graph_->create(prim::Return, 0))),
+      output_(graph_->create(prim::Return, 0)),
       input_(graph_->create(prim::Param, 0)),
       owning_node_(node_) {
+
+  input_->next() = output_;
+  input_->prev() = output_;
+  output_->next() = input_;
+  output_->prev() = input_;
+
   graph_->all_blocks.emplace(this);
   output_->owning_block_ = this;
   output_->topo_position_ = kUpperBound;
@@ -870,13 +877,15 @@ bool Node::hasSideEffects() const {
 // If we ever run out of space (by, e.g. inserting too much in place), we
 // reindex by spreading out all the nodes again.
 void Node::assignTopoPosition() {
-  auto returnNode = owningBlock()->return_node();
+  bool is_first = prev() == owningBlock()->param_node();
+  bool is_last = next() == owningBlock()->return_node();
+
   const auto prevPos = prev()->topo_position_;
   const auto nextPos = next()->topo_position_;
 
   // Append to the end of the graph
-  if (next() == returnNode) {
-    if (next() == prev()) {
+  if (is_last) {
+    if (is_first) {
       // the node list is empty, assign the first position
       topo_position_ = kMidPoint;
       return;
@@ -891,14 +900,13 @@ void Node::assignTopoPosition() {
     topo_position_ = prevPos + kAppendInterval;
 
     // Prepend to the graph
-  } else if (prev() == returnNode) {
+  } else if (is_first) {
     // next() is the first element in the block list
     if (nextPos <= (kLowerBound + kAppendInterval)) {
       // we're running off the edge
       owningBlock()->reIndexTopology();
       return;
     }
-
     topo_position_ = nextPos - kAppendInterval;
 
     // insert between two existing nodes
@@ -1098,6 +1106,7 @@ Node* Node::insertBefore(Node* n) {
 Node* Node::insertAfter(Node* n) {
   AT_ASSERT(!inBlockList() && n->inBlockList());
   AT_ASSERT(n->owningBlock());
+  AT_ASSERTM(n->kind() != prim::Return, "Attempting to insert a Node after the Return node or before the Param node");
   this->owning_block_ = n->owningBlock();
   Node* next = n->next();
   n->next() = this;
