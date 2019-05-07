@@ -123,7 +123,7 @@ class Pickler {
   void pushSpecializedList(
       const IValue& ivalue,
       PicklerClass cls,
-      std::function<void(const IValue&)> item_pusher);
+      const std::function<void(const IValue&)>& item_pusher);
   const void* getPointer(const IValue& ivalue);
 
   // These convert values to bytes and add them to the stack (NB: since T is to

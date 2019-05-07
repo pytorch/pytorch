@@ -131,7 +131,7 @@ void Pickler::addIValue(const IValue& ivalue) {
     pushSpecializedList(
         ivalue, PicklerClass::BOOLLIST, [=](const IValue& ivalue) {
           for (const auto& item : ivalue.toBoolListRef()) {
-            addIValue(item);
+            addIValue(bool(item));
           }
         });
   } else {
@@ -239,7 +239,7 @@ void Pickler::pushTensor(const IValue& ivalue) {
 void Pickler::pushSpecializedList(
     const IValue& ivalue,
     PicklerClass cls,
-    std::function<void(const IValue&)> item_pusher) {
+    const std::function<void(const IValue&)>& item_pusher) {
   pushClass(cls);
 
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
@@ -468,6 +468,9 @@ OpCode Unpickler::readInstruction() {
     case OpCode::NEWFALSE: {
       stack_.emplace_back(false);
     } break;
+    case OpCode::NONE: {
+      stack_.emplace_back(IValue());
+    } break;
     case OpCode::BININT1: {
       int8_t value = read<int8_t>();
       stack_.emplace_back(int64_t(value));
@@ -587,6 +590,7 @@ OpCode Unpickler::readInstruction() {
           break;
         case PicklerClass::BOOLLIST:
           stack_.emplace_back(data->elements().at(0).toBoolListRef());
+          break;
         default:
           AT_ERROR("Unknown pickler class id");
       }
