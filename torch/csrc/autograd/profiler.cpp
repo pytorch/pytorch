@@ -1,8 +1,12 @@
 #include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/jit/code_template.h>
 
-#include <sstream>
 #include <fstream>
+#include <list>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <vector>
 
 namespace torch { namespace autograd { namespace profiler {
 
