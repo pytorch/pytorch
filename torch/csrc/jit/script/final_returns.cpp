@@ -64,15 +64,25 @@ struct EarlyReturns {
     block->registerOutput(sent);
   }
 
-  void addReturnAndHasReturned(Block* block) {
-    switch (block_status_[block]) {
+  ReturnStatus getBlockStatus(Block* block) {
+    auto v = block_has_returned_val_[block];
+    if (v == false_val) {
+      return WONT_RETURN;
+    } else if (v == true_val) {
+      return WILL_RETURN;
+    } else {
+      return MIGHT_RETURN;
+    }
+  }
+
+  void addReturnAndHasReturnedOutputs(Block* block) {
+    switch (getBlockStatus(block)) {
       case WONT_RETURN: {
-        return registerReturnAndHasReturned(
-            block, bottom_val, getBoolVal(false));
+        return registerReturnAndHasReturned(block, bottom_val, false_val);
       } break;
       case WILL_RETURN: {
         registerReturnAndHasReturned(
-            block, block_return_vals_[block], getBoolVal(true));
+            block, block_return_vals_[block], true_val);
       } break;
       case MIGHT_RETURN: {
         registerReturnAndHasReturned(
@@ -96,8 +106,8 @@ struct EarlyReturns {
       return WONT_RETURN;
     }
 
-    addReturnAndHasReturned(true_block);
-    addReturnAndHasReturned(false_block);
+    addReturnAndHasReturnedOutputs(true_block);
+    addReturnAndHasReturnedOutputs(false_block);
 
     auto out_type = unifyTypes(
         getReturnVal(true_block)->type(), getReturnVal(false_block)->type());
@@ -107,11 +117,11 @@ struct EarlyReturns {
         node->addOutput()->setType(BoolType::get())->setUniqueName("__did_ret");
 
     block_return_vals_[node->owningBlock()] = out;
-    block_has_returned_val_[node->owningBlock()] = sent;
-
     if (true_status == WILL_RETURN && false_status == WILL_RETURN) {
+      block_has_returned_val_[node->owningBlock()] = true_val;
       return WILL_RETURN;
     }
+    block_has_returned_val_[node->owningBlock()] = sent;
     return MIGHT_RETURN;
   }
 
@@ -128,9 +138,9 @@ struct EarlyReturns {
     auto return_block = new_if->addBlock();
     auto guard_block = new_if->addBlock();
 
-    // NB: need to set return_block status and return value before recursing
-    // or an empty block will appear to be a WONT_RETURN block
-    block_status_[return_block] = WILL_RETURN;
+    // NB: need to set return_block has_returned and return value before
+    // recursing or an empty block will appear to be a WONT_RETURN block
+    block_has_returned_val_[return_block] = true_val;
     block_return_vals_[return_block] = ret;
 
     // Move all remaining nodes into the guard block
@@ -186,6 +196,15 @@ struct EarlyReturns {
   }
 
   ReturnStatus makeReturnsFinal(Block* block) {
+    if (block_has_returned_val_.count(block)) {
+      // if a node might return, we guard its return value in a return
+      // block, which will have their status set prior to this call
+      AT_ASSERT(
+          getBlockStatus(block) == WILL_RETURN &&
+          block->nodes().begin() == block->nodes().end());
+      return WILL_RETURN;
+    }
+
     auto ret_status = WONT_RETURN;
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       Node* node = *it;
@@ -194,6 +213,7 @@ struct EarlyReturns {
         case prim::ReturnStmt: {
           ret_status = WILL_RETURN;
           block_return_vals_[block] = node->input();
+          block_has_returned_val_[block] = true_val;
           node->destroy();
         } break;
         case prim::If: {
@@ -215,26 +235,16 @@ struct EarlyReturns {
         break;
       }
     }
-    if (block_status_.count(block) == 0) {
-      block_status_[block] = ret_status;
-      return ret_status;
-    } else {
-      // Guarded return blocks have their status set prior
-      AT_ASSERT(
-          block_status_[block] == WILL_RETURN &&
-          block->nodes().begin() == block->nodes().end());
-      return WILL_RETURN;
+    if (ret_status == WONT_RETURN) {
+      block_has_returned_val_[block] = false_val;
     }
-  }
-
-  Value* getBoolVal(bool val) {
-    return val ? true_val : false_val;
+    return ret_status;
   }
 
   void setGraphOutput() {
     // compiler ensures that the graph always returns
     auto block = graph->block();
-    AT_ASSERT(block_status_[block] == WILL_RETURN);
+    AT_ASSERT(getBlockStatus(block) == WILL_RETURN);
     block->registerOutput(block_return_vals_[block]);
   }
 
@@ -243,11 +253,8 @@ struct EarlyReturns {
     setGraphOutput();
   }
 
-  // After a call to makeReturnsFinal, a block will have set its return status
-  std::unordered_map<Block*, ReturnStatus> block_status_;
-
-  // Blocks that might return need a has_returned value to indicate if they
-  // returned or not
+  // After a call to makeReturnsFinal, a block will have its has_returned value
+  // set.
   std::unordered_map<Block*, Value*> block_has_returned_val_;
 
   // Blocks that might return or will return have a return value
