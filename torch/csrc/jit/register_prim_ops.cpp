@@ -2228,7 +2228,7 @@ void checkSortSchema(const Node* node, const c10::TypePtr& list_element_type) {
   }
 
   auto error_msg = script::ErrorReport(node->getSourceLocation());
-  error_msg << error_str;
+  error_msg << error_str.str();
   throw error_msg;
 }
 
