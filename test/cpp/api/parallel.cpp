@@ -20,25 +20,36 @@ using namespace torch::nn;
 struct ParallelTest : torch::test::SeedingFixture {};
 
 TEST_F(ParallelTest, DifferentiableScatter_MultiCUDA) {
+  std::cout << "here1" << std::endl;
   Scatter scatter(
       {torch::Device(torch::kCUDA, 0), torch::Device(torch::kCUDA, 1)});
+  std::cout << "here2" << std::endl;
 
+  std::cout << "here3" << std::endl;
   auto input = torch::ones(10, torch::requires_grad(true));
+  std::cout << "here4" << std::endl;
   auto output = scatter.apply({input});
+  std::cout << "here5" << std::endl;
 
+  std::cout << "here6" << std::endl;
   ASSERT_EQ(output.size(), 2);
   ASSERT_EQ(output[0].size(0), 5);
   ASSERT_EQ(output[1].size(0), 5);
+  std::cout << "here7" << std::endl;
 
+  std::cout << "here8" << std::endl;
   ASSERT_TRUE(torch::cat({output[0].to(torch::kCPU), output[1].to(torch::kCPU)})
                   .allclose(input));
+  std::cout << "here9" << std::endl;
 
   torch::Tensor sum = output[0].to({torch::kCUDA, 1}) + output[1];
   sum.backward();
+  std::cout << "here10" << std::endl;
 
   ASSERT_TRUE(input.grad().defined());
   ASSERT_TRUE(input.grad().device().is_cpu());
   ASSERT_EQ(input.grad().sum().item<int32_t>(), 10);
+  std::cout << "here11" << std::endl;
 }
 
 TEST_F(ParallelTest, DifferentiableGather_MultiCUDA) {
