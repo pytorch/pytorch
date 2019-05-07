@@ -90,7 +90,7 @@ void Variable::set_data(const at::Tensor &new_data) {
   // type of TensorImpl as `var`.
   AT_CHECK(
     typeid(*this->unsafeGetTensorImpl()) == typeid(*new_data.unsafeGetTensorImpl()),
-    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` contain different types of TensorImpl.");
+    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have different types of TensorImpl.");
 
   // Resets gradient accumulator if metadata is out of date
   Variable::AutogradMeta* autograd_meta = get_autograd_meta();
