@@ -308,7 +308,7 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
 		//Get all the weight parameters.
 		for(int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
 			FilterDescriptor lin_linear_mat_desc;
-			void* matrix_pointer;
+			void* matrix_pointer = nullptr;
 			size_t param_size;
 			MIOPEN_CHECK(miopenGetRNNLayerParamSize(handle, rnn_desc.desc(), layer, x_desc.desc(), linear_id, &param_size));
 			MIOPEN_CHECK(miopenGetRNNLayerParam(handle, rnn_desc.desc(), layer, x_desc.desc(), w_desc.desc(), weight_buf.data_ptr(), 
@@ -345,7 +345,7 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
 		//Get all the bias parameters.
 		for(int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
 			FilterDescriptor lin_linear_mat_desc;
-			void* matrix_pointer;
+			void* matrix_pointer = nullptr;
 			size_t param_size;
 			MIOPEN_CHECK(miopenGetRNNLayerBiasSize(handle, rnn_desc.desc(), layer, linear_id, &param_size));
 			MIOPEN_CHECK(miopenGetRNNLayerBias(handle, rnn_desc.desc(), layer, x_desc.desc(), w_desc.desc(), weight_buf.data_ptr(), 
@@ -767,6 +767,33 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
     }
     return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{dx, dhx, dcx, dw};
 }
+
+void lstm_miopen(Tensor& output, Tensor& hy, Tensor& cy,
+      const Tensor& input, TensorList hx,
+      TensorList params, bool has_biases,
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+  AT_ERROR("lstm_miopen : Didn't implement it yet.");
+//  auto result = _miopen_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
+//      miopenLSTM, num_layers, dropout_p, train, bidirectional, batch_first);
+//  output = result.first;
+//  hy = std::get<0>(result.second);
+//  cy = std::get<1>(result.second);
+}
+
+void lstm_packed_miopen(Tensor& output, Tensor& hy, Tensor& cy,
+      const Tensor& data, const Tensor& batch_sizes, TensorList hx,
+      TensorList params, bool has_biases,
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
+  AT_ERROR("lstm_packed_miopen: didn't implement yet.");
+//  auto result = _miopen_impl(data, batch_sizes, std::make_tuple(hx[0], hx[1]),
+//      params, has_biases, miopenLSTM, num_layers, dropout_p, train, bidirectional);
+//  output = result.first;
+//  hy = std::get<0>(result.second);
+//  cy = std::get<1>(result.second);
+}
+
+REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen);
+REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen);
 
 }} //namespace native.
 
