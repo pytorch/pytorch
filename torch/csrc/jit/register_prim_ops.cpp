@@ -91,6 +91,15 @@ static int64_t floordiv(int64_t a, int64_t b) {
   }
 }
 
+static int gcd(int a, int b) {
+    while (b != 0) {
+        int r = a % b;
+        a = b;
+        b = r;
+    }
+    return a;
+}
+
 // reference function THPVariable_to in python_variable_methods.cpp
 static at::Tensor to_dispatch(
     at::Tensor self,
@@ -2085,7 +2094,7 @@ RegisterOperators reg2({
           return 0;
         }),
 
-    DEFINE_INT_OP(aten::gcd, std::__gcd(a, b)),
+    DEFINE_INT_OP(aten::gcd, gcd(a, b)),
 
     DEFINE_GENERIC_OP(aten::copysign, std::copysign(a, b), std::copysign(a, b), float, float),
     DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a,b), float),
