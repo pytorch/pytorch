@@ -3325,8 +3325,8 @@ class TestNN(NNTestCase):
                 Q = np.expand_dims(decoder_state, 1)
                 attn_mask = np.random.randint(0 , 2, size=(1, seq_len))
                 attn_mask_tensor = torch.from_numpy(attn_mask).float()
-                attn_mask_tensor.masked_fill_(attn_mask_tensor==0, float('-inf'))
-                attn_mask_tensor.masked_fill_(attn_mask_tensor>0, float('0.0'))
+                attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('-inf'))
+                attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
                 attn_mask_tensor = attn_mask_tensor.double()
 
                 decoder_state_tensor = torch.from_numpy(decoder_state).double()
@@ -3381,8 +3381,8 @@ class TestNN(NNTestCase):
 
                 if add_zero_attn:
                     dims[1] += 1
-                    K_split = np.concatenate((K_split, np.zeros([K_split.shape[0], K_split.shape[1], 1, K_split.shape[3],])), axis=2)
-                    V_split = np.concatenate((V_split, np.zeros([V_split.shape[0], V_split.shape[1], 1, V_split.shape[3],])), axis=2)
+                    K_split = np.concatenate((K_split, np.zeros([K_split.shape[0], K_split.shape[1], 1, K_split.shape[3]])), axis=2)
+                    V_split = np.concatenate((V_split, np.zeros([V_split.shape[0], V_split.shape[1], 1, V_split.shape[3]])), axis=2)
                     attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
 
                 attn_heads, ref_attn_weight = _scaled_dot_attn_ref(
@@ -3423,8 +3423,8 @@ class TestNN(NNTestCase):
         def test_multihead_attn_key_padding_mask():
             _multihead_attn_test_helper(add_key_padding_mask=True)
 
-        test_multihead_attn_add_zero_attn() # Test MultiheadAttention with add_zero_attn
-        test_multihead_attn_add_bias_kv() # Test MultiheadAttention with add_bias_kv
+        test_multihead_attn_add_zero_attn()  # Test MultiheadAttention with add_zero_attn
+        test_multihead_attn_add_bias_kv()  # Test MultiheadAttention with add_bias_kv
         test_multihead_attn_no_masking()   # Test MultiheadAttention without masking
         test_multihead_attn_key_padding_mask()  # Test MultiheadAttention with src lengths
 
