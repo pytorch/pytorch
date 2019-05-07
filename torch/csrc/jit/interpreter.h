@@ -40,6 +40,8 @@ struct TORCH_API Code {
     return pImpl != nullptr;
   }
 
+  void exportInstructions(std::ostream& os) const;
+
  private:
   std::shared_ptr<CodeImpl> pImpl;
   friend struct InterpreterStateImpl;

@@ -22,7 +22,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <ostream>
+#include <fstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -84,6 +84,28 @@ struct TORCH_API Method {
     // use run rather than operator() to skip the second schema check.
     function_->run(std::move(stack));
     return stack.front();
+  }
+
+  void saveInstructions(
+      std::vector<IValue> stack,
+      const std::string& fileName,
+      const Kwargs& kwargs = Kwargs()) {
+    std::ofstream ofs(fileName, std::ofstream::out);
+    saveInstructions(stack, ofs, kwargs);
+  }
+
+    void saveInstructions(
+      std::vector<IValue> stack,
+      std::ostream& out,
+      const Kwargs& kwargs = Kwargs()) {
+    getSchema().checkAndNormalizeInputs(stack, kwargs);
+    // TODO: for non-initial inputs, build the connection between inputs
+    // and parameters. T44033049
+    for (auto input : initial_ivalues_) {
+      push(stack, input.value());
+    }
+    // use run rather than operator() to skip the second schema check.
+    function_->saveInstructions(std::move(stack), out);
   }
 
   const std::vector<Slot>& initial_ivalues() const {
@@ -399,6 +421,16 @@ struct TORCH_API Module {
   void save(
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap());
+
+  void save_method(
+      const std::string& method_name,
+      const std::vector<IValue>& inputs,
+      std::ostream& out);
+
+  void save_method(
+      const std::string& method_name,
+      const std::vector<IValue>& inputs,
+      const std::string& filename);
 
   void copy_into(
       const ModuleLookup& module_lookup,

@@ -56,6 +56,14 @@ struct TORCH_API Function {
     run(stack);
   }
 
+  void saveInstructions(Stack& stack, std::ostream& out) {
+    get_executor().saveInstructions(stack, out);
+  }
+
+  void saveInstructions(Stack&& stack, std::ostream& out) {
+    saveInstructions(stack, out);
+  }
+
   IValue operator()(
       std::vector<IValue> stack,
       const Kwargs& kwargs = Kwargs()) {

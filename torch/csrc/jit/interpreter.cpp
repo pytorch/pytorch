@@ -534,6 +534,12 @@ struct CodeImpl {
     return inst;
   }
 
+  void exportInstructions(std::ostream& os) {
+    // Demonstration only.
+    // TODO: Implement the serializer and deserializer.
+    dump(os);
+  }
+
   // helpers to build/access RegList objects
   int get(const ListHandle<int>& list, int i) const {
     return int_data[list.start + i];
@@ -831,6 +837,10 @@ Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
+}
+
+void Code::exportInstructions(std::ostream& os) const {
+  pImpl->exportInstructions(os);
 }
 
 InterpreterState::InterpreterState(const Code& code)

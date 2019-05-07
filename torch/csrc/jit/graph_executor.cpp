@@ -40,6 +40,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <ostream>
 
 namespace torch {
 namespace jit {
@@ -77,6 +78,10 @@ struct ExecutionPlan {
   void run(Stack& stack) const {
     InterpreterState(code).run(stack);
     last_executed_optimized_graph = graph;
+  }
+
+  void saveInstructions(std::ostream& os) const {
+    code.exportInstructions(os);
   }
 
   operator bool() const {
@@ -509,12 +514,7 @@ struct GraphExecutorImpl {
 
   // entry point where execution begins
   void run(Stack& stack) {
-    AT_CHECK(
-        stack.size() >= num_inputs,
-        "expected ",
-        num_inputs,
-        " inputs, but got only ",
-        stack.size());
+    checkInputNumber(stack);
 
     logging::getLogger()->addStatValue(
         logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
@@ -526,6 +526,14 @@ struct GraphExecutorImpl {
     auto& execution_plan =
         optimize ? getOrCompile(stack) : getOrCompileFallback();
     return execution_plan.run(stack);
+  }
+
+  void saveInstructions(Stack& stack, std::ostream& os) {
+    checkInputNumber(stack);
+
+    auto& execution_plan =
+        optimize ? getOrCompile(stack) : getOrCompileFallback();
+    return execution_plan.saveInstructions(os);
   }
 
   GraphExecutorState getDebugState() {
@@ -551,6 +559,15 @@ struct GraphExecutorImpl {
       fallback = ExecutionPlan(graph_);
     }
     return fallback;
+  }
+
+  void checkInputNumber(const Stack& stack) {
+    AT_CHECK(
+        stack.size() >= num_inputs,
+        "expected ",
+        num_inputs,
+        " inputs, but got only ",
+        stack.size());
   }
 
   const ExecutionPlan& getOrCompile(const Stack& stack) {
@@ -741,6 +758,10 @@ GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
+}
+
+void GraphExecutor::saveInstructions(Stack& inputs, std::ostream& os) {
+  return pImpl->saveInstructions(inputs, os);
 }
 
 std::shared_ptr<Graph> GraphExecutor::graph() const {

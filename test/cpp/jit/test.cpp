@@ -30,6 +30,7 @@
 #include <test/cpp/jit/test_qualified_name.h>
 #include <test/cpp/jit/test_subgraph_matcher.h>
 #include <test/cpp/jit/test_subgraph_utils.h>
+#include <test/cpp/jit/test_lite_executor.h>
 
 using namespace torch::jit::script;
 using namespace torch::jit::test;
@@ -37,6 +38,7 @@ using namespace torch::jit::test;
 namespace torch {
 namespace jit {
 #define TH_FORALL_TESTS(_)         \
+  _(LiteExecutor)                  \
   _(ADFormulas)                    \
   _(Attributes)                    \
   _(Blocks)                        \
