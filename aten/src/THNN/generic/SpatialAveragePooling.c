@@ -5,6 +5,8 @@
 #include <THNN/generic/pooling_shape.h>
 #include <algorithm>
 
+#include <ATen/Parallel.h>
+
 static inline void THNN_(SpatialAveragePooling_shapeCheck)(
         THTensor *input, THTensor *gradOutput,
         int kH, int kW, int dH, int dW, int padH, int padW,
@@ -81,8 +83,6 @@ void THNN_(SpatialAveragePooling_updateOutput)(
   int64_t outputHeight;
   int64_t nInputPlane; // number of channels (or colors)
 
-  int64_t k;
-
   THNN_(SpatialAveragePooling_shapeCheck)
     (input, NULL, kH, kW, dH, dW, padH, padW, ceil_mode);
 
@@ -110,56 +110,57 @@ void THNN_(SpatialAveragePooling_updateOutput)(
   input_data = input->data<scalar_t>();
   output_data = output->data<scalar_t>();
 
-#pragma omp parallel for private(k)
-  for(k = 0; k < nInputPlane; k++)
-  {
-    int64_t p;
-    for(p = 0; p < nbatch; p++)
+  at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
+    for (auto k = start; k < end; k++)
     {
-      int64_t xx, yy;
-      /* For all output pixels... */
-      scalar_t *ptr_output = output_data + p*nInputPlane*outputWidth*outputHeight + k*outputWidth*outputHeight;
-      scalar_t *ptr_input = input_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
-      int64_t i;
-      for(i = 0; i < outputWidth*outputHeight; i++)
-        ptr_output[i] = 0;
-
-      for(yy = 0; yy < outputHeight; yy++)
+      int64_t p;
+      for(p = 0; p < nbatch; p++)
       {
-        for(xx = 0; xx < outputWidth; xx++)
+        int64_t xx, yy;
+        /* For all output pixels... */
+        scalar_t *ptr_output = output_data + p*nInputPlane*outputWidth*outputHeight + k*outputWidth*outputHeight;
+        scalar_t *ptr_input = input_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
+        int64_t i;
+        for(i = 0; i < outputWidth*outputHeight; i++)
+          ptr_output[i] = 0;
+
+        for(yy = 0; yy < outputHeight; yy++)
         {
-          /* Compute the mean of the input image... */
-          int64_t hstart = yy * dH - padH;
-          int64_t wstart = xx * dW - padW;
-          int64_t hend = std::min(hstart + kH, inputHeight + padH);
-          int64_t wend = std::min(wstart + kW, inputWidth + padW);
-          int pool_size = (hend - hstart) * (wend - wstart);
-          hstart = std::max(hstart, (int64_t) 0);
-          wstart = std::max(wstart, (int64_t) 0);
-          hend = std::min(hend, inputHeight);
-          wend = std::min(wend, inputWidth);
-
-          scalar_t sum = 0;
-
-          int divide_factor;
-          if(count_include_pad)
-            divide_factor = pool_size;
-          else
-            divide_factor = (hend - hstart) * (wend - wstart);
-
-          int64_t kx, ky;
-
-          for(ky = hstart; ky < hend; ky++)
+          for(xx = 0; xx < outputWidth; xx++)
           {
-            for(kx = wstart; kx < wend; kx++)
-              sum += ptr_input[ky*inputWidth + kx];
+            /* Compute the mean of the input image... */
+            int64_t hstart = yy * dH - padH;
+            int64_t wstart = xx * dW - padW;
+            int64_t hend = std::min(hstart + kH, inputHeight + padH);
+            int64_t wend = std::min(wstart + kW, inputWidth + padW);
+            int pool_size = (hend - hstart) * (wend - wstart);
+            hstart = std::max(hstart, (int64_t) 0);
+            wstart = std::max(wstart, (int64_t) 0);
+            hend = std::min(hend, inputHeight);
+            wend = std::min(wend, inputWidth);
+
+            scalar_t sum = 0;
+
+            int divide_factor;
+            if(count_include_pad)
+              divide_factor = pool_size;
+            else
+              divide_factor = (hend - hstart) * (wend - wstart);
+
+            int64_t kx, ky;
+
+            for(ky = hstart; ky < hend; ky++)
+            {
+              for(kx = wstart; kx < wend; kx++)
+                sum += ptr_input[ky*inputWidth + kx];
+            }
+            /* Update output */
+            *ptr_output++ += sum/divide_factor;
           }
-          /* Update output */
-          *ptr_output++ += sum/divide_factor;
         }
       }
     }
-  }
+  });
   c10::raw::intrusive_ptr::decref(input);
 }
 
@@ -192,8 +193,6 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   scalar_t *gradOutput_data;
   scalar_t *gradInput_data;
 
-  int64_t k;
-
   THNN_(SpatialAveragePooling_shapeCheck)
     (input, gradOutput, kH, kW, dH, dW, padH, padW, ceil_mode);
 
@@ -224,54 +223,55 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   gradInput_data = gradInput->data<scalar_t>();
   gradOutput_data = gradOutput->data<scalar_t>();
 
-#pragma omp parallel for private(k)
-  for(k = 0; k < nInputPlane; k++)
-  {
-    int64_t p;
-    for(p = 0; p < nbatch; p++)
+  at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
+    for (auto k = start; k < end; k++)
     {
-      scalar_t *ptr_gradOutput = gradOutput_data + p*nInputPlane*outputHeight*outputWidth + k*outputWidth*outputHeight;
-      int64_t xx, yy;
-
-      scalar_t* ptr_gi = gradInput_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
-      scalar_t *ptr_gradInput = gradInput_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
-
-      int64_t i;
-      for(i=0; i<inputWidth*inputHeight; i++)
-        ptr_gi[i] = 0.0;
-
-      for(yy = 0; yy < outputHeight; yy++)
+      int64_t p;
+      for(p = 0; p < nbatch; p++)
       {
-        for(xx = 0; xx < outputWidth; xx++)
+        scalar_t *ptr_gradOutput = gradOutput_data + p*nInputPlane*outputHeight*outputWidth + k*outputWidth*outputHeight;
+        int64_t xx, yy;
+
+        scalar_t* ptr_gi = gradInput_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
+        scalar_t *ptr_gradInput = gradInput_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
+
+        int64_t i;
+        for(i=0; i<inputWidth*inputHeight; i++)
+          ptr_gi[i] = 0.0;
+
+        for(yy = 0; yy < outputHeight; yy++)
         {
-          int64_t hstart = yy * dH - padH;
-          int64_t wstart = xx * dW - padW;
-          int64_t hend = std::min(hstart + kH, inputHeight + padH);
-          int64_t wend = std::min(wstart + kW, inputWidth + padW);
-          int pool_size = (hend - hstart) * (wend - wstart);
-          hstart = std::max(hstart, (int64_t) 0);
-          wstart = std::max(wstart, (int64_t) 0);
-          hend = std::min(hend, inputHeight);
-          wend = std::min(wend, inputWidth);
-
-          scalar_t z = *ptr_gradOutput++;
-
-          int divide_factor;
-          if(count_include_pad)
-            divide_factor = pool_size;
-          else
-            divide_factor = (hend - hstart) * (wend - wstart);
-
-          int64_t kx, ky;
-          for(ky = hstart ; ky < hend; ky++)
+          for(xx = 0; xx < outputWidth; xx++)
           {
-            for(kx = wstart; kx < wend; kx++)
-              ptr_gradInput[ky*inputWidth + kx] += z/divide_factor;
+            int64_t hstart = yy * dH - padH;
+            int64_t wstart = xx * dW - padW;
+            int64_t hend = std::min(hstart + kH, inputHeight + padH);
+            int64_t wend = std::min(wstart + kW, inputWidth + padW);
+            int pool_size = (hend - hstart) * (wend - wstart);
+            hstart = std::max(hstart, (int64_t) 0);
+            wstart = std::max(wstart, (int64_t) 0);
+            hend = std::min(hend, inputHeight);
+            wend = std::min(wend, inputWidth);
+
+            scalar_t z = *ptr_gradOutput++;
+
+            int divide_factor;
+            if(count_include_pad)
+              divide_factor = pool_size;
+            else
+              divide_factor = (hend - hstart) * (wend - wstart);
+
+            int64_t kx, ky;
+            for(ky = hstart ; ky < hend; ky++)
+            {
+              for(kx = wstart; kx < wend; kx++)
+                ptr_gradInput[ky*inputWidth + kx] += z/divide_factor;
+            }
           }
         }
       }
     }
-  }
+  });
 
   c10::raw::intrusive_ptr::decref(gradOutput);
 }
