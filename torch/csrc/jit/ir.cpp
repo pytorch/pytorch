@@ -10,7 +10,6 @@
 #include <iostream>
 #include <set>
 #include <sstream>
-#include <stack>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -624,9 +623,9 @@ void Block::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
       if (node->kindOf(name) == AttributeKind::g) {
         node->g(name)->remapTypes(type_map);
       } else if (node->kindOf(name) == AttributeKind::gs) {
-          for(const auto& g : node->gs(name)) {
-            g->remapTypes(type_map);
-          }
+        for (const auto& g : node->gs(name)) {
+          g->remapTypes(type_map);
+        }
       }
     }
   }
@@ -1244,11 +1243,12 @@ Node* Graph::createTupleUnpack(Value* v) {
   return n;
 }
 
-Node* Graph::createTupleIndex(Value* tup, int64_t index) {
-  auto n = create(prim::TupleIndex, {tup});
-  n->i_(attr::index, index);
-  auto tuple_type = tup->type()->expect<TupleType>();
-  n->output()->setType(tuple_type->elements().at(index));
+Node* Graph::createTupleIndex(
+    Value* tup,
+    Value* idx,
+    const TypePtr& output_type) {
+  auto n = create(prim::TupleIndex, {tup, idx});
+  n->output()->setType(output_type);
   return n;
 }
 
@@ -1479,6 +1479,5 @@ Node* ProfileOp::allocNewInstance(Graph* g) {
 }
 
 constexpr Symbol ProfileOp::Kind;
-
 } // namespace jit
 } // namespace torch
