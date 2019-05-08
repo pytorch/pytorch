@@ -500,6 +500,10 @@ struct CAFFE2_API IValue final {
   // this is a shallow comparison of two IValues to test the object identity
   bool isSameIdentity(IValue& rhs);
 
+  bool isSameType(const IValue& other) const {
+    return this->tag == other.tag;
+  }
+
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const IValue& v);
@@ -724,19 +728,6 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return slots_.at(slot);
   }
 
-  /**
-   * Attribute API.
-   *
-   * Wrappers around the slot stuff so that users can access attributes
-   * directly. Use this API if you are a user.
-   *
-   * Note: Unlike in Python, TorchScript must make a distinction between
-   * attributes (which are IValues) and methods (which are Methods). If you
-   * want a method, use `obj.type()->getMethod()`
-   */
-  IValue getAttr(const std::string& name) const;
-  void setAttr(const std::string& name, IValue v);
-
   std::string name() const;
 
   const std::vector<IValue>& slots() const {
@@ -751,6 +742,25 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::shared_ptr<ClassType> type_;
   std::vector<IValue> slots_;
 };
+
+/**
+ * Attribute API for Objects.
+ *
+ * Wrappers around the slot stuff so that users can access attributes
+ * directly, modeled after the Python builtins. Use if you are not a
+ * compiler.
+ *
+ * Note: Unlike in Python, TorchScript must make a distinction between
+ * attributes (which are IValues) and methods (which are Methods). If you
+ * want a method, use `obj.type()->getMethod()`
+ */
+IValue getattr(
+    c10::intrusive_ptr<const ivalue::Object> obj,
+    const std::string& name);
+void setattr(
+    c10::intrusive_ptr<ivalue::Object> obj,
+    const std::string& name,
+    IValue v);
 
 struct C10_EXPORT ivalue::GenericDict : c10::intrusive_ptr_target {
  private:

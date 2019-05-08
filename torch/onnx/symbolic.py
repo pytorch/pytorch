@@ -1477,7 +1477,8 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
     assert len(all_weights) == num_layers * weights_per_layer * (1 + bidirectional)
     layer_weights = [all_weights[i:i + weights_per_layer] for i in range(0, len(all_weights), weights_per_layer)]
     if batch_first:
-        return _unimplemented("RNN/GRU/LSTM", "batch_first")
+        # batch, seq, feat -> seq, batch, feat
+        input = g.op('Transpose', input, perm_i=[1, 0, 2])
     if dropout and train:
         return _unimplemented("RNN/GRU/LSTM", "dropout in training mode")
 
@@ -1579,6 +1580,9 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         h_outs.append(h_out)
         if variant == 'LSTM':
             c_outs.append(c_out)
+    if batch_first:
+        # seq, batch, num_directions * hidden_size -> batch, seq, num_directions * hidden_size
+        prev_output = g.op('Transpose', prev_output, perm_i=[1, 0, 2])
     h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
     if variant == 'RNN' or variant == 'GRU':
         return prev_output, h_outs

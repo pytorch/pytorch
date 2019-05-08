@@ -113,14 +113,30 @@ std::string ivalue::Object::name() const {
   return this->type_->qualname();
 }
 
-IValue ivalue::Object::getAttr(const std::string& name) const {
-  const size_t slot = type_->getAttributeSlot(name);
-  return getSlot(slot);
+CAFFE2_API IValue getattr(
+    c10::intrusive_ptr<const ivalue::Object> obj,
+    const std::string& name) {
+  const size_t slot = obj->type()->getAttributeSlot(name);
+  return obj->getSlot(slot);
 }
 
-void ivalue::Object::setAttr(const std::string& name, IValue v) {
-  const size_t slot = type_->getAttributeSlot(name);
-  setSlot(slot, std::move(v));
+CAFFE2_API void setattr(
+    c10::intrusive_ptr<ivalue::Object> obj,
+    const std::string& name,
+    IValue v) {
+  const auto& curAttr = getattr(obj, name);
+  // TODO: this sort of runtime type check is a bit of a misuse of the IValue
+  // API. But this is a valid time when you actually would want to
+  if (!curAttr.isSameType(v)) {
+    AT_ERROR(
+        "Wrong for attribute assignment. Expected: '",
+        curAttr.tagKind(),
+        "', got: '",
+        v.tagKind(),
+        "'");
+  }
+  const size_t slot = obj->type()->getAttributeSlot(name);
+  obj->setSlot(slot, std::move(v));
 }
 
 void ivalue::Object::resizeObject(size_t slot) {

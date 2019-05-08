@@ -80,13 +80,18 @@ void testScriptObject() {
       constantTable,
       nullptr);
 
-  // Incorrect arguments for constructor should throow
+  // Incorrect arguments for constructor should throw
   c10::QualifiedName base("__torch__");
   ASSERT_ANY_THROW(m1.create_class(c10::QualifiedName(base, "FooTest"), {1}));
   auto x = torch::ones({2, 3});
   auto obj = m2.create_class(c10::QualifiedName(base, "FooTest"), x).toObject();
-  auto dx = obj->getAttr("dx");
+  auto dx = c10::getattr(obj, "dx");
   ASSERT_TRUE(test::almostEqual(x, dx.toTensor()));
+
+  auto new_x = torch::rand({2, 3});
+  c10::setattr(obj, "dx", new_x);
+  auto new_dx = c10::getattr(obj, "dx");
+  ASSERT_TRUE(test::almostEqual(new_x, new_dx.toTensor()));
 }
 
 } // namespace script
