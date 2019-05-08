@@ -69,6 +69,8 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 #undef IS_NONZERO
 }
 
+#if !defined(TH_REAL_IS_HALF) /* non bool or half only part */
+
 accreal THTensor_(sumall)(THTensor *tensor)
 {
   accreal sum = 0;
@@ -88,8 +90,7 @@ accreal THTensor_(sumall)(THTensor *tensor)
   }
   return sum;
 }
-
-#if !defined(TH_REAL_IS_BOOL) && !defined(TH_REAL_IS_HALF) /* non bool or half only part */
+#if !defined(TH_REAL_IS_BOOL)
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 {
@@ -1030,6 +1031,8 @@ void THTensor_(bitand)(THTensor *r_, THTensor *t, scalar_t value)
   }
 #endif
 }
+
+#endif
 
 #endif
 

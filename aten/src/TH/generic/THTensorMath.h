@@ -4,6 +4,8 @@
 
 TH_API void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor);
 
+#ifndef TH_REAL_IS_HALF
+
 TH_API void THTensor_(ltValue)(THByteTensor *r_, THTensor* t, scalar_t value);
 TH_API void THTensor_(leValue)(THByteTensor *r_, THTensor* t, scalar_t value);
 TH_API void THTensor_(gtValue)(THByteTensor *r_, THTensor* t, scalar_t value);
@@ -181,5 +183,6 @@ TH_API accreal THTensor_(normall)(THTensor *t, scalar_t value);
 TH_API void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THTensor *total);
 #endif
 
+#endif
 #endif
 #endif

@@ -1705,7 +1705,6 @@
     SparseCUDA: add_out_sparse_cuda
 
 - func: _sparse_dense_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  cpu_half: True
   dispatch:
     CPU: add_out_dense_sparse_cpu
     CUDA: add_out_dense_sparse_cuda
