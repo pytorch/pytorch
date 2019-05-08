@@ -129,35 +129,57 @@ bool isBefore(Node* n1, Node* n2) {
   }
 }
 
+bool isBefore(const Use& a, const Use& b) {
+  // If two uses are the same node, we order on offset
+  if (a.user == b.user) {
+    return a.offset < b.offset;
+  }
+
+  return isBefore(a.user, b.user);
+}
+
+std::vector<c10::optional<Use>> gatherFirstUses(at::ArrayRef<Value*> values) {
+  return fmap(values, [](Value* v) -> c10::optional<Use> {
+    if (v->uses().size() == 0) {
+      return c10::nullopt;
+    }
+    Use first_use = v->uses()[0];
+    for (size_t i = 1; i < v->uses().size(); ++i) {
+      auto n_use = v->uses()[i];
+      if (!isBefore(first_use, n_use)) {
+        first_use = n_use;
+      }
+    }
+
+    return first_use;
+  });
+}
+
 std::vector<size_t> sort_indexes(at::ArrayRef<Value*> values) {
   // initialize original index locations
   std::vector<size_t> idx(values.size());
   std::iota(idx.begin(), idx.end(), 0);
 
+  std::vector<c10::optional<Use>> first_uses = gatherFirstUses(values);
+
   // Sort values based on canonical ordering of their first usage
-  std::sort(idx.begin(), idx.end(), [&values](size_t i1, size_t i2) {
+  std::sort(idx.begin(), idx.end(), [&first_uses](size_t i1, size_t i2) {
     // if neither has any uses, use original ordering. Since the
-    // only values that jitter are ones added by the compiler which are
-    // guaranteed to not be loop carried dependencies (the only control outputs
-    // which can have 0 uses) original ordering is fine
-    if (values[i1]->uses().size() == 0 && values[i2]->uses().size() == 0) {
+    // only values that jitter are ones added by the compiler and are guaranteed
+    // to have uses, original ordering is fine.
+    if (first_uses[i1] == c10::nullopt && first_uses[i2] == c10::nullopt) {
       return i1 < i2;
     }
-    if (values[i1]->uses().size() == 0) {
+    if (first_uses[i1] == c10::nullopt) {
       return false;
-    } else if (values[i2]->uses().size() == 0) {
+    } else if (first_uses[i2] == c10::nullopt) {
       return true;
     }
 
-    auto fst_v1 = values[i1]->uses()[0];
-    auto fst_v2 = values[i2]->uses()[0];
+    auto fst_v1 = *first_uses[i1];
+    auto fst_v2 = *first_uses[i2];
 
-    // If two values first usage is the same node, we order on offset
-    if (fst_v1.user == fst_v2.user) {
-      return fst_v1.offset < fst_v2.offset;
-    }
-
-    return isBefore(fst_v1.user, fst_v2.user);
+    return isBefore(fst_v1, fst_v2);
   });
 
   return idx;

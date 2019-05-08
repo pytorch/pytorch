@@ -86,9 +86,21 @@ struct LoopView {
     return node_;
   }
 
+  void permuteLoopCarried(const std::vector<size_t>& new_output_order) {
+    node_->permuteOutputs(new_output_order);
+    // skip trip count and cond
+    node_->permuteInputs(adjustIndices(2, new_output_order));
+    auto adjusted_block_order = adjustIndices(1, new_output_order);
+    bodyBlock()->permuteOutputs(adjusted_block_order);
+    bodyBlock()->permuteInputs(adjusted_block_order);
+  }
+
+ private:
+  Node* node_;
+
   // adjust index_ordering by adding indices 0 - thorugh adjust, and
   // incrementing all existing inputs by adjust
-  std::vector<size_t> adjustIndices(
+  static std::vector<size_t> adjustIndices(
       size_t adjust,
       const std::vector<size_t>& index_ordering) {
     std::vector<size_t> adjusted;
@@ -101,18 +113,6 @@ struct LoopView {
     }
     return adjusted;
   }
-
-  void permuteLoopCarried(const std::vector<size_t>& new_output_order) {
-    node_->permuteOutputs(new_output_order);
-    // skip trip count and cond
-    node_->permuteInputs(adjustIndices(2, new_output_order));
-    auto adjusted_block_order = adjustIndices(1, new_output_order);
-    bodyBlock()->permuteOutputs(adjusted_block_order);
-    bodyBlock()->permuteInputs(adjusted_block_order);
-  }
-
- private:
-  Node* node_;
 };
 } // namespace jit
 } // namespace torch

@@ -1145,9 +1145,11 @@ void Node::permuteInputs(const std::vector<size_t>& new_order) {
   std::vector<Value*> new_inputs;
   new_inputs.reserve(new_order.size());
   for (size_t i = 0; i < new_order.size(); ++i) {
-    new_inputs.push_back(inputs_[new_order[i]]);
+    AT_ASSERTM(inputs_.at(new_order[i]) != nullptr, "Repeated index");
+    new_inputs.push_back(inputs_.at(new_order[i]));
     auto it = findUseForInput(new_order[i]);
     it->offset = i;
+    inputs_.at(new_order[i]) = nullptr;
   }
   inputs_ = std::move(new_inputs);
 }
@@ -1158,8 +1160,10 @@ void Node::permuteOutputs(const std::vector<size_t>& new_order) {
   std::vector<Value*> new_outputs;
   new_outputs.reserve(new_order.size());
   for (size_t i = 0; i < new_order.size(); ++i) {
-    new_outputs.push_back(outputs_[new_order[i]]);
-    outputs_[new_order[i]]->setOffset(i);
+    AT_ASSERTM(outputs_.at(new_order[i]) != nullptr, "Repeated index");
+    new_outputs.push_back(outputs_.at(new_order[i]));
+    outputs_.at(new_order[i])->setOffset(i);
+    outputs_.at(new_order[i]) = nullptr;
   }
   outputs_ = std::move(new_outputs);
 }

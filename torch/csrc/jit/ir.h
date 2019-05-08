@@ -558,6 +558,7 @@ struct TORCH_API Node {
   // Given: %3 = f(%1, %2)
   // Execute: %3.permuteInputs({1, 0})
   // Result: %3 = f(%2, %1)
+  // Each index must appear exactly once
   void permuteInputs(const std::vector<size_t>& new_inputs);
   void permuteOutputs(const std::vector<size_t>& new_inputs);
 
