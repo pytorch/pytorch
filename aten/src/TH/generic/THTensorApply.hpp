@@ -304,7 +304,6 @@ if (std::isnan(val)) break;
   } \
 }
 
-#ifdef INTRA_OP_PARALLEL
 #define TH_TENSOR_APPLY_CONTIG(TYPE, TENSOR, CODE) \
 { \
   auto code_fn = [&](int64_t begin, int64_t end) { \
@@ -320,16 +319,7 @@ if (std::isnan(val)) break;
     code_fn(0, TH_TENSOR_size); \
   } \
 }
-#else
-#define TH_TENSOR_APPLY_CONTIG(TYPE, TENSOR, CODE) \
-{ \
-  TYPE *TENSOR##_data = TENSOR->data<scalar_t>(); \
-  ptrdiff_t TENSOR##_len = THTensor_(nElement)(TENSOR); \
-  CODE \
-}
-#endif
 
-#ifdef INTRA_OP_PARALLEL
 #define TH_TENSOR_APPLY2_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
 { \
   auto code_fn = [&](int64_t begin, int64_t end) { \
@@ -346,17 +336,7 @@ if (std::isnan(val)) break;
     code_fn(0, TH_TENSOR_size); \
   } \
 }
-#else
-#define TH_TENSOR_APPLY2_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
-{ \
-  TYPE1 *TENSOR1##_data = TENSOR1->data<scalar_t>(); \
-  TYPE2 *TENSOR2##_data = TENSOR2->data<scalar_t>(); \
-  ptrdiff_t TENSOR1##_len = THTensor_(nElement)(TENSOR1); \
-  CODE \
-}
-#endif
 
-#ifdef INTRA_OP_PARALLEL
 #define TH_TENSOR_APPLY3_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, CODE) \
 { \
   auto code_fn = [&](int64_t begin, int64_t end) { \
@@ -374,13 +354,3 @@ if (std::isnan(val)) break;
     code_fn(0, TH_TENSOR_size); \
   } \
 }
-#else
-#define TH_TENSOR_APPLY3_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, CODE) \
-{ \
-  TYPE1 *TENSOR1##_data = TENSOR1->data<scalar_t>(); \
-  TYPE2 *TENSOR2##_data = TENSOR2->data<scalar_t>(); \
-  TYPE3 *TENSOR3##_data = TENSOR3->data<scalar_t>(); \
-  ptrdiff_t TENSOR1##_len = THTensor_(nElement)(TENSOR1); \
-  CODE \
-}
-#endif

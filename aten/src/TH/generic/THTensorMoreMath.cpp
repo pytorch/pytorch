@@ -312,49 +312,36 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
   dim[dimension] = 1;
   THTensor_(resize)(r_, dim, {});
 
-  int serial_path = 0;
-#ifdef INTRA_OP_PARALLEL
-  if (at::in_parallel_region()) {
-    serial_path = 1;
-  } else {
-    int r_Contig = THTensor_(isContiguous)(r_);
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    if (r_Contig && (tp != rp)) {
-      ptrdiff_t r_Size = THTensor_(nElement)(r_);
-      int r_Dim = THTensor_nDimensionLegacyAll(r_);
-      at::parallel_for(0, r_Size, HYPER_TH_OMP_OVERHEAD_THRESHOLD,
-          [&](int64_t begin, int64_t end) {
-        for (auto iter = begin; iter < end; iter++) {
-          int j;
-          int64_t quot;
-          int64_t rem = iter;
-          ptrdiff_t tBasicIndex = 0;
+  int r_Contig = THTensor_(isContiguous)(r_);
+  scalar_t *tp = t->data<scalar_t>();
+  scalar_t *rp = r_->data<scalar_t>();
+  if (r_Contig && (tp != rp)) {
+    ptrdiff_t r_Size = THTensor_(nElement)(r_);
+    int r_Dim = THTensor_nDimensionLegacyAll(r_);
+    at::parallel_for(0, r_Size, HYPER_TH_OMP_OVERHEAD_THRESHOLD,
+        [&](int64_t begin, int64_t end) {
+      for (auto iter = begin; iter < end; iter++) {
+        int j;
+        int64_t quot;
+        int64_t rem = iter;
+        ptrdiff_t tBasicIndex = 0;
 
-          for (j = 0; j < r_Dim; ++j) {
-            if (j != dimension) {
-              quot = rem/r_->stride(j);
-              rem = rem%r_->stride(j);
-              tBasicIndex += quot*t->stride(j);
-            }
-          }
-          scalar_t *t_data = tp+tBasicIndex;
-          scalar_t *r__data = rp+iter;
-          *r__data = 1;
-          for (j=0; j < THTensor_sizeLegacyNoScalars(t, dimension); ++j) {
-            *r__data *= *(t_data + j*THTensor_strideLegacyNoScalars(t, dimension));
+        for (j = 0; j < r_Dim; ++j) {
+          if (j != dimension) {
+            quot = rem/r_->stride(j);
+            rem = rem%r_->stride(j);
+            tBasicIndex += quot*t->stride(j);
           }
         }
-      });
-    } else {
-      serial_path = 1;
-    }
-  }
-#else
-  serial_path = 1;
-#endif
-
-  if(serial_path) {
+        scalar_t *t_data = tp+tBasicIndex;
+        scalar_t *r__data = rp+iter;
+        *r__data = 1;
+        for (j=0; j < THTensor_sizeLegacyNoScalars(t, dimension); ++j) {
+          *r__data *= *(t_data + j*THTensor_strideLegacyNoScalars(t, dimension));
+        }
+      }
+    });
+  } else {
     // two implementations optimized for data locality
     if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
       TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
@@ -1036,8 +1023,6 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
   }
 }
 
-#ifdef INTRA_OP_PARALLEL
-
 #define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, THRESHOLD) \
   void THTensor_(NAME)(THTensor *r_, THTensor *t) \
   { \
@@ -1045,11 +1030,7 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
     ptrdiff_t r_Size = THTensor_(nElement)(r_); \
     int r_Contig = THTensor_(isContiguous)(r_); \
     int tContig = THTensor_(isContiguous)(t); \
-    if (!at::in_parallel_region()) { \
-      TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, THRESHOLD); \
-    } else { \
-      TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);); \
-    } \
+    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, THRESHOLD); \
   }
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC) \
@@ -1065,47 +1046,12 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
     if (r_Contig && tContig) { \
       TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(NAME)(r__data, t_data, r__len);); \
     } else { \
-      if (!at::in_parallel_region()) { \
-        TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, THRESHOLD); \
-      } \
-      else { \
-        TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);); \
-      } \
+      TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, THRESHOLD); \
     } \
   }
 
 #define LAB_IMPLEMENT_VECTORIZED_FUNCTION_2_ARGS(NAME, CFUNC) \
   LAB_IMPLEMENT_VECTORIZED_FUNCTION_3_ARGS(NAME, CFUNC, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD)
-
-#else
-
-#define LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC) \
-  void THTensor_(NAME)(THTensor *r_, THTensor *t) \
-  { \
-    THTensor_(resizeAs)(r_, t); \
-    TH_TENSOR_APPLY2(scalar_t, t, scalar_t, r_, *r__data = CFUNC(*t_data);); \
-  } \
-
-#define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, PSEUDO_THRESHOLD) \
-  LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC)
-
-#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_2_ARGS(NAME, CFUNC) \
-  void THTensor_(NAME)(THTensor *r_, THTensor *t) \
-  { \
-    THTensor_(resizeAs)(r_, t); \
-    int r_Contig = THTensor_(isContiguous)(r_); \
-    int tContig = THTensor_(isContiguous)(t); \
-    if (r_Contig && tContig) { \
-      TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(NAME)(r__data, t_data, r__len);); \
-    } else { \
-      TH_TENSOR_APPLY2(scalar_t, t, scalar_t, r_, *r__data = CFUNC(*t_data);); \
-    } \
-  }
-
-#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_3_ARGS(NAME, CFUNC, PSEUDO_THRESHOLD) \
-  LAB_IMPLEMENT_VECTORIZED_FUNCTION_2_ARGS(NAME, CFUNC)
-
-#endif
 
 #define EXPAND(...) __VA_ARGS__
 
