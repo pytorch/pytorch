@@ -45,6 +45,9 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero
 
 template <typename T>
 Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t zero_point) {
+  AT_CHECK(
+      rtensor.scalar_type() == kFloat,
+      "quantize only works on Float Tensor.");
   const auto* qd = reinterpret_cast<const typename T::underlying*>(qtensor.data<T>());
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale;
@@ -110,12 +113,8 @@ template CAFFE2_API Tensor dequantize_tensor<qint32>(Tensor rtensor, Tensor qten
 QuantizerPtr make_per_tensor_affine_quantizer(
     double scale,
     int64_t zero_point,
-    optional<ScalarType> scalar_type_opt = c10::nullopt) {
-  auto scalar_type = scalar_type_opt;
-  if (scalar_type == c10::nullopt) {
-    scalar_type = c10::kQInt8;
-  }
-  return c10::make_intrusive<PerTensorAffineQuantizer>(scalar_type.value(),
+    ScalarType scalar_type) {
+  return c10::make_intrusive<PerTensorAffineQuantizer>(scalar_type,
       static_cast<float>(scale), static_cast<int32_t>(zero_point));
 }
 
@@ -155,14 +154,16 @@ inline Tensor new_qtensor_cpu(
 }
 
 Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
-  IntArrayRef sizes = rtensor.sizes();
+  AT_CHECK(
+      rtensor.scalar_type() == kFloat,
+      "quantize only works on Float Tensor.");
+  AT_CHECK(
+      rtensor.device() == kCPU,
+      "quantize only works for CPU backend right now.");
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
-  AT_CHECK(
-      rtensor.options().device() == kCPU,
-      "quantize only works for CPU backend right now.");
   Tensor qtensor = new_qtensor_cpu(
-      sizes,
+      rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
 
@@ -174,10 +175,12 @@ Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
 }
 
 Tensor PerTensorAffineQuantizer::dequantize(Tensor qtensor) {
-  std::vector<int64_t> sizes = qtensor.sizes().vec();
-  at::TensorOptions options = qtensor.options().dtype(at::kFloat);
-
-  Tensor rtensor = at::empty(sizes, options);
+  AT_CHECK(qtensor.is_quantized(),
+           "dequantize is only supported in quantized Tensor.");
+  AT_CHECK(
+      qtensor.device() == kCPU,
+      "dequantize only works for CPU backend right now.");
+  Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
   qtensor = qtensor.contiguous();
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_tensor", [&]() {

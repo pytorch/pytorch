@@ -14,6 +14,7 @@ class QSumReLUInt8 final : public c10::OperatorKernel {
   Tensor operator()(at::Tensor qa, at::Tensor qb,
                      double scale, int64_t zero_point) {
     AT_ASSERTM(qa.numel() == qb.numel(), "Sum operands must be the same size!");
+    AT_CHECK(qa.scalar_type() == qb.scalar_type(), "Sum operands should have same data type.");
     auto a = qa.dequantize();
     auto b = qb.dequantize();
     auto c = at::empty_like(a);
@@ -21,7 +22,8 @@ class QSumReLUInt8 final : public c10::OperatorKernel {
     binary_kernel(*iter, [&](float a_val, float b_val) -> float {
       return std::max<float>(a_val + b_val, 0);
     });
-    return c.quantize_linear(scale, zero_point);  // Requantize
+    // FIXME: add a ScalarType argument for result
+    return c.quantize_linear(scale, zero_point, qa.scalar_type());  // Requantize
   }
 };
 

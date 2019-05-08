@@ -248,7 +248,7 @@ CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale,
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
 CAFFE2_API QuantizerPtr
-make_per_tensor_affine_quantizer(double scale, int64_t zero_point, optional<ScalarType> dtype);
+make_per_tensor_affine_quantizer(double scale, int64_t zero_point, ScalarType scalar_type);
 
 // Create a Quantized Tensor given arguments for normal Tensor and a quantizer
 CAFFE2_API Tensor new_qtensor_cpu(
