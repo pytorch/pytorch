@@ -129,8 +129,7 @@ class TestCaffe2Backend(unittest.TestCase):
         return cuda_model, cuda_input
 
     def run_debug_test(self, model, train, batch_size, state_dict=None,
-                       input=None, use_gpu=True, example_outputs=None,
-                       do_constant_folding=False):
+                       input=None, use_gpu=True, example_outputs=None):
         """
         # TODO: remove this from the final release version
         This test is for our debugging only for the case where
@@ -149,7 +148,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
         onnxir, torch_out = do_export(model, input, export_params=self.embed_params, verbose=False,
                                       example_outputs=example_outputs,
-                                      do_constant_folding=do_constant_folding)
+                                      do_constant_folding=False)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -183,8 +182,12 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                       example_outputs=None, do_constant_folding=False):
+                       example_outputs=None, do_constant_folding=True):
         use_gpu_ = torch.cuda.is_available() and use_gpu
+        # NOTE: do_constant_folding is turned on only when model has
+        # parameters embedded (which are needed for constant folding),
+        # i.e. for self.embed_params=True case. self.embed_params=True
+        # for the TestCaffe2BackendEmbed class defined at the bottom.
         if self.embed_params:
             self.run_actual_test(model, train, batch_size, state_dict, input,
                                  use_gpu=use_gpu_, rtol=rtol, atol=atol,
@@ -192,8 +195,7 @@ class TestCaffe2Backend(unittest.TestCase):
                                  do_constant_folding=do_constant_folding)
         else:
             self.run_debug_test(model, train, batch_size, state_dict, input,
-                                use_gpu=use_gpu_, example_outputs=example_outputs,
-                                do_constant_folding=do_constant_folding)
+                                use_gpu=use_gpu_, example_outputs=example_outputs)
 
     def test_linear(self):
         class MyModel(torch.nn.Module):
