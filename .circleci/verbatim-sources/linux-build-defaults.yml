@@ -48,6 +48,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
       at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
+  - checkout
   - run:
       <<: *setup_ci_environment
   - run:

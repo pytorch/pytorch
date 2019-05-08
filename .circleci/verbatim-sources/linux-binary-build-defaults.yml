@@ -73,6 +73,8 @@ binary_linux_upload: &binary_linux_upload
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
+  - attach_workspace:
+      at: /home/circleci/project
   - run:
       <<: *binary_populate_env
   - run:
