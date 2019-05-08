@@ -164,7 +164,7 @@ void adaptive_max_pool3d_out_cpu_template(
   AT_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
 
-  // the jit sometimes passes output_size.size() == 1
+  // Issue #20215: the JIT sometimes passes output_size.size() == 1.
   AT_CHECK(output_size.size() == 1 || output_size.size() == 3,
     "adaptive_max_pool3d: internal error: output_size.size() must be 1 or 3");
 
