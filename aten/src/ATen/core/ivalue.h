@@ -491,7 +491,7 @@ struct CAFFE2_API IValue final {
   optional<T> toOptional();
 
   // this is a shallow comparison of two IValues to test the object identity
-  bool isSameIdentity(IValue& rhs);
+  bool isSameIdentity(const IValue& rhs) const;
 
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
@@ -950,7 +950,7 @@ inline optional<T> IValue::toOptional() {
   return this->to<T>();
 }
 
-inline bool IValue::isSameIdentity(IValue& rhs) {
+inline bool IValue::isSameIdentity(const IValue& rhs) const {
   // We choose to not use memcmp for payload check due to potential random padding characters on union type
 
   // Semantics:

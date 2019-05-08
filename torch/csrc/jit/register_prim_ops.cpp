@@ -2249,7 +2249,14 @@ RegisterOperators regSort({
             std::sort(
                 g_list->elements().begin(),
                 g_list->elements().end(),
-                [func, reverse, &sort_stack](const IValue& a, const IValue& b) {
+                [func, reverse, &sort_stack](
+                    const IValue& a, const IValue& b) -> bool {
+                  // FBCode errors without this check - "strict weak ordering"
+                  // TODO: remove when possible, since it just slows down
+                  // sorting and doesn't do anything useful
+                  if (a.isSameIdentity(b)) {
+                    return false;
+                  }
                   sort_stack.push_back(a);
                   sort_stack.push_back(b);
                   func->run(sort_stack);
