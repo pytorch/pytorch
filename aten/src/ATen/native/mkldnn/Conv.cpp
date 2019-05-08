@@ -40,11 +40,22 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
 
 using namespace mkldnn;
 
-namespace at { namespace native {
+namespace {
+// Helper function for getting an ideep tensor out of an aten Tensor.
+// Note in case the aten Tensor is a dense tensor, the retured ideep
+// tensor is just a view of the storage of the aten dense tensor, so
+// caller needs to make sure the aten dense tensor's lifetime is
+// longer than the ideep tensor.
+inline ideep::tensor get_mkldnn_tensor(const at::Tensor& tensor) {
+  if (tensor.is_mkldnn()) {
+    return at::native::itensor_from_mkldnn(tensor);
+  } else {
+    return at::native::itensor_view_from_dense(tensor);
+  }
+}
+}
 
-#define GET_MKLDNN_TENSOR(tensor)                  \
-  tensor.is_mkldnn() ? itensor_from_mkldnn(tensor) \
-                     : itensor_view_from_dense(tensor);
+namespace at { namespace native {
 
 ideep::tensor _mkldnn_conv2d(
     const ideep::tensor& x,
@@ -115,11 +126,11 @@ at::Tensor mkldnn_convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  const ideep::tensor mkldnn_input = GET_MKLDNN_TENSOR(input);
-  const ideep::tensor mkldnn_weight = GET_MKLDNN_TENSOR(weight);
+  const ideep::tensor mkldnn_input = get_mkldnn_tensor(input);
+  const ideep::tensor mkldnn_weight = get_mkldnn_tensor(weight);
   c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = GET_MKLDNN_TENSOR(bias);
+    mkldnn_bias = get_mkldnn_tensor(bias);
   }
 
   ideep::tensor mkldnn_output = _mkldnn_conv2d(
@@ -403,7 +414,6 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
-#undef GET_MKLDNN_TENSOR
 }}  // namespace at::native
 
 #endif

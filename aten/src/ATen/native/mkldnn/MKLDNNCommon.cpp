@@ -71,6 +71,8 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   AT_ASSERTM(
       tensor.type_id() == CPUTensorId(),
       "itensor_view_from_dense expects dense CPU tensor input");
+  AT_ASSERTM(tensor.scalar_type() == ScalarType::Float,
+             "itensor_view_from_dense expects float tensor input");
   AT_ASSERTM(
       !tensor.is_variable(),
       "itensor_view_from_dense: should not be a variable");
