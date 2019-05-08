@@ -21,6 +21,6 @@ steps:
     export AWS_SECRET_ACCESS_KEY=${SECRET}
     eval $(aws ecr get-login --region us-east-1 --no-include-email)
   env:
-    ACCESS_KEY_ID: ${ECR_ACCESS_KEY_ID}
-    SECRET: ${ECR_SECRET}
+    ACCESS_KEY_ID: $(ECR_ACCESS_KEY_ID)
+    SECRET: $(ECR_SECRET)
   displayName: 'try aws stuff'
