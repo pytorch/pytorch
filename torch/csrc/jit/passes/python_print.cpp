@@ -1142,7 +1142,6 @@ void PythonPrint(
     std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   pp.printCompilationUnit(cu);
   pp.print(out);
 }
