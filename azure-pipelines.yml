@@ -18,6 +18,9 @@ steps:
   displayName: 'Run a one-line script'
 
 - script: |
-    echo Add other tasks to build, test, and deploy your project.
-    echo See https://aka.ms/yaml
+    set +x
+    export AWS_ACCESS_KEY_ID=${ECR_ACCESS_KEY}
+    export AWS_SECRET_ACCESS_KEY=${ECR_SECRET}
+    eval $(aws ecr get-login --region us-east-1 --no-include-email)
+    
   displayName: 'Run a multi-line script'
