@@ -234,9 +234,9 @@ class TestQuantizedFC(unittest.TestCase):
         W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp + 128)
         b_q = torch.round(torch.rand(output_channels) * 10 - 10).to(dtype=torch.int32)
 
-        # Make sure X_scale * W_scale * input_channels * X_value_max * W_value_max
-        # matches Y_scale * 255 (max for uint8).
-        Y_scale = 1235.1234
+        # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
+        # Y_scale * 255 (max for uint8).
+        Y_scale = 125.1234
         Y_zp = 5
 
         # Reference quantized FC operator
@@ -311,9 +311,9 @@ class TestQuantizedFC(unittest.TestCase):
         W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp + 128)
         b_q = torch.round(torch.rand(output_channels) * 10 - 10).to(dtype=torch.int32)
 
-        # Make sure X_scale * W_scale * input_channels * X_value_max * W_value_max
-        # matches Y_scale * 255 (max for uint8).
-        Y_scale = 1235.1234
+        # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
+        # Y_scale * 255 (max for uint8).
+        Y_scale = 125.1234
         Y_zp = 5
 
         # Reference quantized FC operator
