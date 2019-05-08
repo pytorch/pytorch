@@ -10,7 +10,7 @@ from cimodel.data.caffe2_build_data import CONFIG_TREE_DATA, TopLevelNode
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 
-DOCKER_IMAGE_VERSION = 266
+DOCKER_IMAGE_VERSION = 273
 
 
 class Conf(object):
@@ -157,10 +157,12 @@ def get_caffe2_workflows():
 
     x = []
     for conf_options in filtered_configs:
-        item = conf_options.get_name()
+
+        requires = ["setup"]
 
         if conf_options.phase == "test":
-            item = {conf_options.get_name(): {"requires": [conf_options.construct_phase_name("build")]}}
-        x.append(item)
+            requires.append(conf_options.construct_phase_name("build"))
+
+        x.append({conf_options.get_name(): {"requires": requires}})
 
     return x

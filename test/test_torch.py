@@ -10996,6 +10996,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         # We can't usefully test the output; just make sure this doesn't crash
         torch.__config__.show()
 
+    def test_parallel_info(self):
+        torch.__config__.parallel_info()
+
     @staticmethod
     def _test_bincount(self, device):
         # negative input throws

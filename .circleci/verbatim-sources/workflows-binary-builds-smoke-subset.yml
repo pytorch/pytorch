@@ -1,27 +1,42 @@
 
       # Binary builds (subset, to smoke test that they'll work)
-      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build
-      - binary_linux_manywheel_3.7m_cu100_devtoolset3_build
-      - binary_linux_conda_2.7_cpu_build
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.7m_cu100_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_conda_2.7_cpu_build:
+          requires:
+            - setup
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3.6_cu90_build
       # TODO we should test a libtorch cuda build, but they take too long
       # - binary_linux_libtorch_2.7m_cu90_devtoolset3_build
-      - binary_macos_wheel_3.6_cpu_build
-      - binary_macos_conda_2.7_cpu_build
-      - binary_macos_libtorch_2.7_cpu_build
+      - binary_macos_wheel_3.6_cpu_build:
+          requires:
+            - setup
+      - binary_macos_conda_2.7_cpu_build:
+          requires:
+            - setup
+      - binary_macos_libtorch_2.7_cpu_build:
+          requires:
+            - setup
 
       - binary_linux_manywheel_2.7mu_cpu_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build
       - binary_linux_manywheel_3.7m_cu100_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.7m_cu100_devtoolset3_build
       - binary_linux_conda_2.7_cpu_test:
           requires:
+            - setup
             - binary_linux_conda_2.7_cpu_build
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3.6_cu90_test:
       #     requires:
+      #       - setup
       #       - binary_linux_conda_3.6_cu90_build
-
