@@ -91,12 +91,14 @@ TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
  * \param method_name whose graph is instrumented for quant-dequant nodes.
  * \param param_name parameter for which the nodes are inserted.
  * \param getQParamFunc function to compute qparams.
+ * \at::ScalarType t Datatype for param
  */
- template <typename Fn>
- TORCH_API void InsertQuantDequantNodesForParam(
-   std::shared_ptr<script::Module>& moduleObj,
-   const std::string& method_name,
-   const std::string& param_name,
-   const Fn& getQParamFunc);
+template <typename Fn>
+TORCH_API void InsertQuantDequantNodesForParam(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::string& param_name,
+    const Fn& getQParamFunc,
+    at::ScalarType t);
 } // namespace jit
 } // namespace torch
