@@ -1363,6 +1363,18 @@
     CPU: batch_norm_update_stats_cpu
     CUDA: batch_norm_update_stats_cuda
 
+- func: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int[] normalized_shape, float eps) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: layer_norm_forward_cpu
+
+- func: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int[] normalized_shape, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: layer_norm_backward_cpu
+
+- func: native_layer_norm_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int[] normalized_shape, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: layer_norm_double_backward_cpu
+
 - func: _nnpack_available() -> bool
 
 - func: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] padding) -> Tensor

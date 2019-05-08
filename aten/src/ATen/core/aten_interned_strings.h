@@ -493,6 +493,9 @@ _(aten, native_pow) \
 _(aten, native_resize_as) \
 _(aten, native_tensor) \
 _(aten, native_zero) \
+_(aten, naitve_layer_norm) \
+_(aten, native_layer_norm_backward) \
+_(aten, native_layer_norm_double_backward) \
 _(aten, ne) \
 _(aten, neg) \
 _(aten, nll_loss) \

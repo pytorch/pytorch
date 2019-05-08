@@ -13569,6 +13569,12 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'binary_cross_entropy_size_average',
     'ctc_loss',
     'grid_sample',
+    # Currently we only implemented fused layer_norm on CPU, once the GPU
+    # version is finished, we will enable fused layer_norm in jit and enable the
+    # second order gradient tests for weight or bias.
+    'layer_norm_with_only_weight',
+    'layer_norm_with_only_bias',
+    'layer_norm_with_weight_and_bias',
 ])
 
 # additional modules test

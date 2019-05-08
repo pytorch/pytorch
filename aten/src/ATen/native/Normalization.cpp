@@ -5,9 +5,11 @@
 #include <ATen/Parallel.h>
 #include <ATen/Config.h>
 
+#include <tuple>
+#include <vector>
+
 #include <ATen/detail/CUDAHooksInterface.h>
 
-#include <vector>
 
 static const int MIOPEN_DIM_MAX = 4;
 
@@ -465,6 +467,15 @@ Tensor instance_norm(
 Tensor layer_norm(const Tensor& input, IntArrayRef normalized_shape,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     double eps, bool cudnn_enabled) {
+
+    if (input.device().is_cpu()) {
+      return std::get<0>(native_layer_norm(
+          input.contiguous(),
+          weight.contiguous(),
+          bias.contiguous(),
+          normalized_shape,
+          eps));
+    }
 
     int64_t normalized_ndim = normalized_shape.size();
 
