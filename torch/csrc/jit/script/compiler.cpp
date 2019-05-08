@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -5,7 +6,6 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -396,7 +396,7 @@ struct Environment {
           // or we have implicit conversion that can convert numbers to tensors
           {"_to_tensor",
            std::make_shared<CastValue>(TensorType::get(), prim::NumToTensor)},
-          {"len", std::make_shared<BuiltinFunction>(aten::len, at::nullopt)},
+          {"len", std::make_shared<OperatorOverload>(aten::len, "__len__")},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
@@ -2036,6 +2036,45 @@ struct to_ir {
     }
   }
 
+  std::string getOperatorOverload(int kind, int ninputs) {
+    switch (kind) {
+      case '+':
+        return "__add__";
+      case '-':
+        return "__sub__";
+      case TK_UNARY_MINUS:
+        return "__neg__";
+      case '*':
+        return "__mul__";
+      case TK_POW:
+        return "__pow__";
+      case '/':
+        return "__truediv__";
+      case '%':
+        return "__mod__";
+      case TK_NE:
+        return "__ne__";
+      case TK_EQ:
+        return "__eq__";
+      case '<':
+        return "__lt__";
+      case '>':
+        return "__gt__";
+      case TK_LE:
+        return "__le__";
+      case TK_GE:
+        return "__ge__";
+      case '&':
+        return "__and__";
+      case '|':
+        return "__or__";
+      case '^':
+        return "__xor__";
+      default:
+        throw std::runtime_error("unknown kind " + std::to_string(kind));
+    }
+  }
+
   std::vector<NamedValue> getNamedValues(
       const TreeList& trees,
       bool maybe_unpack) {
@@ -2302,17 +2341,16 @@ struct to_ir {
   Value* emitNegate(const TreeRef& tree) {
     const auto& inputs = tree->trees();
     auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-
-    auto neg_val = emitBuiltinCall(
-        tree->range(),
-        *method.graph(),
-        aten::neg,
-        c10::nullopt,
-        named_values,
-        {},
-        /*required=*/true);
+    auto neg_val =
+        asSimple(OperatorOverload(aten::neg, "__neg__")
+                     .call(tree->range(), method, named_values, {}, 0));
 
     // constant fold the input if possible
+
+    // can occur with desugared class type __neg__ function
+    if (neg_val->node()->inputs().size() == 0) {
+      return neg_val;
+    }
     auto maybe_constant_input = toIValue(neg_val->node()->input());
     if (!maybe_constant_input) {
       return neg_val;
@@ -2358,10 +2396,23 @@ struct to_ir {
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr) {
     switch (tree->kind()) {
-      case '@':
-      case TK_POW:
       case TK_IS:
       case TK_ISNOT:
+      case TK_FLOOR_DIV:
+      case '@': {
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+        return emitBuiltinCall(
+            tree->range(),
+            *method.graph(),
+            kind,
+            c10::nullopt,
+            named_values,
+            {},
+            /*required=*/true);
+      }
+      case TK_POW:
       case TK_NE:
       case TK_EQ:
       case '<':
@@ -2375,19 +2426,13 @@ struct to_ir {
       case '%':
       case '&':
       case '|':
-      case '^':
-      case TK_FLOOR_DIV: {
+      case '^': {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto overload = getOperatorOverload(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-        return emitBuiltinCall(
-            tree->range(),
-            *method.graph(),
-            kind,
-            c10::nullopt,
-            named_values,
-            {},
-            /*required=*/true);
+        return asSimple(OperatorOverload(kind, overload)
+                            .call(tree->range(), method, named_values, {}, 0));
       }
       case TK_NOT: {
         Value* input = emitCond(Expr(tree->trees()[0]));
