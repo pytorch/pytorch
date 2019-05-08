@@ -35,11 +35,7 @@ class FileWriter(object):
     training.
     """
 
-    def __init__(self,
-                 logdir,
-                 max_queue=10,
-                 flush_secs=120,
-                 filename_suffix=''):
+    def __init__(self, logdir, max_queue=10, flush_secs=120, filename_suffix=''):
         """Creates a `FileWriter` and an event file.
         On construction the writer creates a new event file in `logdir`.
         The other arguments to the constructor control the asynchronous writes to
@@ -51,8 +47,8 @@ class FileWriter(object):
             summaries before one of the 'add' calls forces a flush to disk.
           flush_secs: Number. How often, in seconds, to flush the
             pending events and summaries to disk.
-          filename_suffix: A string. Suffix added to all event filenames.
-            More details on event filename construction in
+          filename_suffix: A string. Suffix added to all event filenames
+            in the logdir directory. More details on filename construction in
             tensorboard.summary.writer.event_file_writer.EventFileWriter.
         """
         # Sometimes PosixPath is passed in and we need to coerce it to
@@ -150,7 +146,7 @@ class FileWriter(object):
 
 
 class SummaryWriter(object):
-    """Writes entries directly to event files in the log_dir to be
+    """Writes entries directly to event files in the logdir to be
     consumed by TensorBoard.
 
     The `SummaryWriter` class provides a high-level API to create an event file
@@ -160,28 +156,31 @@ class SummaryWriter(object):
     training.
     """
 
-    def __init__(self, log_dir=None, comment='', **kwargs):
+    def __init__(self, logdir=None, comment='', purge_step=None, max_queue=10,
+                 flush_secs=120, filename_suffix=''):
         """Creates a `SummaryWriter` that will write out events and summaries
         to the event file.
 
         Args:
-            log_dir (string): save location, default is: runs/**CURRENT_DATETIME_HOSTNAME**, which changes after each
-              run. Use hierarchical folder structure to compare between runs easily. e.g. pass in
-              'runs/exp1', 'runs/exp2', etc. for each new experiment to compare across. Defaults
-              to ``./runs/``.
-            comment (string): comment that appends to the default ``log_dir``. If ``log_dir`` is assigned,
-              this argument will no effect.
+            logdir (string): Save directory location. Default is
+              runs/**CURRENT_DATETIME_HOSTNAME**, which changes after each run.
+              Use hierarchical folder structure to compare
+              between runs easily. e.g. pass in 'runs/exp1', 'runs/exp2', etc.
+              for each new experiment to compare across them.
+            comment (string): Comment logdir suffix appended to the default
+              ``logdir``. If ``logdir`` is assigned, this argument has no effect.
             purge_step (int):
-              When logging crashes at step :math:`T+X` and restarts at step :math:`T`, any events
-              whose global_step larger or equal to :math:`T` will be purged and hidden from TensorBoard.
-              Note that the resumed experiment and crashed experiment should have the same ``log_dir``.
-            filename_suffix (string):
-              Every event file's name is suffixed with suffix. Example: ``SummaryWriter(filename_suffix='.123')``
-              More details on event filename construction in
+              When logging crashes at step :math:`T+X` and restarts at step :math:`T`,
+              any events whose global_step larger or equal to :math:`T` will be
+              purged and hidden from TensorBoard.
+              Note that crashed and resumed experiments should have the same ``logdir``.
+            max_queue (int): Size of the queue for pending events and
+              summaries before one of the 'add' calls forces a flush to disk.
+            flush_secs (int): How often, in seconds, to flush the
+              pending events and summaries to disk.
+            filename_suffix (string): Suffix added to all event filenames in
+              the logdir directory. More details on filename construction in
               tensorboard.summary.writer.event_file_writer.EventFileWriter.
-            kwargs: extra keyword arguments for FileWriter (e.g. 'flush_secs'
-              controls how often to flush pending events). For more arguments
-              please refer to docs for 'tf.summary.FileWriter'.
 
         Examples::
 
@@ -200,14 +199,17 @@ class SummaryWriter(object):
             # folder location: runs/May04_22-14-54_s-MacBook-Pro.localLR_0.1_BATCH_16/
 
         """
-        if not log_dir:
+        if not logdir:
             import socket
             from datetime import datetime
             current_time = datetime.now().strftime('%b%d_%H-%M-%S')
-            log_dir = os.path.join(
+            logdir = os.path.join(
                 'runs', current_time + '_' + socket.gethostname() + comment)
-        self.log_dir = log_dir
-        self.kwargs = kwargs
+        self.logdir = logdir
+        self.purge_step = purge_step
+        self.max_queue = max_queue
+        self.flush_secs = flush_secs
+        self.filename_suffix = filename_suffix
 
         # Initialize the file writers, but they can be cleared out on close
         # and recreated later as needed.
@@ -242,16 +244,16 @@ class SummaryWriter(object):
     def _get_file_writer(self):
         """Returns the default FileWriter instance. Recreates it if closed."""
         if self.all_writers is None or self.file_writer is None:
-            if 'purge_step' in self.kwargs.keys():
-                most_recent_step = self.kwargs.pop('purge_step')
-                self.file_writer = FileWriter(logdir=self.log_dir, **self.kwargs)
+            self.file_writer = FileWriter(self.logdir, self.max_queue,
+                                          self.flush_secs, self.filename_suffix)
+            self.all_writers = {self.file_writer.get_logdir(): self.file_writer}
+            if self.purge_step is not None:
+                most_recent_step = self.purge_step
                 self.file_writer.add_event(
                     Event(step=most_recent_step, file_version='brain.Event:2'))
                 self.file_writer.add_event(
                     Event(step=most_recent_step, session_log=SessionLog(status=SessionLog.START)))
-            else:
-                self.file_writer = FileWriter(logdir=self.log_dir, **self.kwargs)
-            self.all_writers = {self.file_writer.get_logdir(): self.file_writer}
+                self.purge_step = None
         return self.file_writer
 
     def add_scalar(self, tag, scalar_value, global_step=None, walltime=None):
@@ -322,7 +324,8 @@ class SummaryWriter(object):
             if fw_tag in self.all_writers.keys():
                 fw = self.all_writers[fw_tag]
             else:
-                fw = FileWriter(logdir=fw_tag)
+                fw = FileWriter(fw_tag, self.max_queue, self.flush_secs,
+                                self.filename_suffix)
                 self.all_writers[fw_tag] = fw
             if self._check_caffe2_blob(scalar_value):
                 scalar_value = workspace.FetchBlob(scalar_value)
