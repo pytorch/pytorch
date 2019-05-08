@@ -9,7 +9,6 @@ namespace {
 /* Fake-quantizes the 'inputs' tensor.
 Args:
   X: Forward input tensor.
-  dY: Backward input tensor (_backward op only).
   scale: scale of per tensor affine quantization
   zero_point: zero_point of per tensor affine quantization
   num_bits: Number of quantization bits.
@@ -69,7 +68,7 @@ class FakeQuantizePerTensorAffineOp_forward : public c10::OperatorKernel {
         [=] __device__ (
             const float& input_val,
             float& result_val) {
-          result_val = (fminf(quant_max, fmaxf(quant_min, (std::floor(input_val * inv_scale + 0.5f) + zero_point))) - zero_point) * scale;
+          result_val = (fminf(quant_max, fmaxf(quant_min, (std::round(input_val * inv_scale + zero_point)))) - zero_point) * scale;
         });
     return Y;
   }
@@ -144,7 +143,7 @@ class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
         [=] __device__ (
             const float& input_val,
             float& result_val) {
-          float Xq = std::floor(input_val * inv_scale + 0.5) + zero_point;
+          float Xq = std::round(input_val * inv_scale + zero_point);
           result_val = float(Xq >= quant_min && Xq <= quant_max);
         });
     dX = mask * dY;
