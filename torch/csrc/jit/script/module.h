@@ -567,10 +567,6 @@ struct TORCH_API Module {
 
   mutable std::recursive_mutex create_method_guard_;
   friend struct Method;
-
-  // TEMPRORARY: this should only be non-empty on the root module. Represents
-  // all class types used by this module hierarchy.
-  std::unordered_map<QualifiedName, ClassTypePtr> classes_;
 };
 
 } // namespace script
