@@ -392,8 +392,8 @@ const std::vector<std::string> functions = {
                 else:
                     grad_bias = None
                 if input.dim() == 2:
-                    grad_input = AD_mm_backward_self(grad_output, weight.t())
-                    grad_weight = AD_mm_backward_mat2(grad_output, input)
+                    grad_input = grad_output.mm(weight)
+                    grad_weight = input.t().mm(grad_output)
                 else:
                     grad_input, grad_weight = AD_matmul_backward(grad_output, input, weight.t())
                 return grad_input, grad_weight.t(), grad_bias
