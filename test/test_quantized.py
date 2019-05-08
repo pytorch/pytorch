@@ -215,9 +215,9 @@ class TestQuantizedFC(unittest.TestCase):
 
         b_q = np.round(np.random.randn(output_channels) * 10 - 10).astype(np.int32)
 
-        # Make sure X_scale * W_scale * input_channels * X_value_max * W_value_max
-        # matches Y_scale * 255 (max for uint8).
-        Y_scale = 1345.1234
+        # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
+        # Y_scale * 255 (max for uint8).
+        Y_scale = 125.1234
         Y_zp = 5
 
         avoid_vpmaddubsw_overflow_fc(
