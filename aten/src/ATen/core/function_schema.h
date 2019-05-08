@@ -124,14 +124,14 @@ struct FunctionSchema {
 
 private:
   OperatorName name_;
-  const std::vector<Argument> arguments_;
-  const std::vector<Argument> returns_;
+  std::vector<Argument> arguments_;
+  std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
   // after the argument specified in arguments
   // currently this is used primarily to represent 'primtive' operators whose
   // arguments are not checked by schema
-  const bool is_vararg_;
-  const bool is_varret_;
+  bool is_vararg_;
+  bool is_varret_;
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
 public:

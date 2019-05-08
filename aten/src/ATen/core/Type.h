@@ -565,5 +565,3 @@ protected:
 };
 
 } // namespace at
-
-#include <ATen/core/Tensor.h>
