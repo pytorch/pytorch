@@ -42,6 +42,9 @@
 #   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
+#   MKLDNN_THREADING
+#     MKL-DNN threading mode (https://github.com/intel/mkl-dnn/)
+#
 #   USE_NNPACK=0
 #     disables NNPACK build
 #
@@ -63,6 +66,9 @@
 #
 #   USE_OPENCV
 #     enables use of OpenCV for additional operators
+#
+#   USE_OPENMP=0
+#     disables use of OpenMP for parallelization
 #
 #   USE_FFMPEG
 #     enables use of ffmpeg for additional operators
@@ -95,6 +101,9 @@
 #     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, or OpenBLAS. If set
 #     then the build will fail if the requested BLAS is not found, otherwise
 #     the BLAS will be chosen based on what is found on your system.
+#
+#   MKL_SEQ=1
+#     chooses a sequential version of MKL library (in case of BLAS=MKL)
 #
 #   USE_FBGEMM
 #     Enables use of FBGEMM
@@ -790,6 +799,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/*.h',
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
+                'include/torch/csrc/jit/passes/utils/*.h',
                 'include/torch/csrc/jit/script/*.h',
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/onnx/*.h',
