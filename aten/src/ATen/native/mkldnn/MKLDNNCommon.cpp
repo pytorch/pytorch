@@ -67,6 +67,19 @@ ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
 
+ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
+  AT_ASSERTM(
+      tensor.type_id() == CPUTensorId(),
+      "itensor_view_from_dense expects dense CPU tensor input");
+  AT_ASSERTM(tensor.scalar_type() == ScalarType::Float,
+             "itensor_view_from_dense expects float tensor input");
+  AT_ASSERTM(
+      !tensor.is_variable(),
+      "itensor_view_from_dense: should not be a variable");
+  return {{{tensor.sizes().cbegin(), tensor.sizes().cend()},
+           ideep::tensor::data_type::f32},
+          tensor.template data<float>()};
+}
 }}
 
 #endif // AT_MKLDNN_ENABLED()
