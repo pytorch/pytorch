@@ -180,24 +180,18 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_custom_pattern_based_rewrite",
           [](const std::string& pattern,
              const std::string& fused_node_name,
-             std::vector<std::string> inputs,
-             std::vector<std::string> outputs,
              std::shared_ptr<script::Module> m) {
             SubgraphRewriter subgraph_rewriter;
-            subgraph_rewriter.RegisterRewritePattern(
-                pattern, fused_node_name, inputs, outputs);
+            subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
             subgraph_rewriter.runOnModule(m);
           })
       .def(
           "_jit_pass_custom_pattern_based_rewrite_graph",
           [](const std::string& pattern,
              const std::string& fused_node_name,
-             std::vector<std::string> inputs,
-             std::vector<std::string> outputs,
              std::shared_ptr<Graph> g) {
             SubgraphRewriter subgraph_rewriter;
-            subgraph_rewriter.RegisterRewritePattern(
-                pattern, fused_node_name, inputs, outputs);
+            subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
             subgraph_rewriter.runOnGraph(g);
           })
       .def(
