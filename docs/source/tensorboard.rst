@@ -75,6 +75,8 @@ Expected result:
 .. image:: _static/img/tensorboard/hier_tags.png
     :scale: 75 %
 
+|
+|
 
 .. currentmodule:: torch.utils.tensorboard.writer
 

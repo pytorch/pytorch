@@ -45,8 +45,9 @@ class FileWriter(object):
           logdir: A string. Directory where event file will be written.
           max_queue: Integer. Size of the queue for pending events and
             summaries before one of the 'add' calls forces a flush to disk.
+            Default is ten items.
           flush_secs: Number. How often, in seconds, to flush the
-            pending events and summaries to disk.
+            pending events and summaries to disk. Default is every two minutes.
           filename_suffix: A string. Suffix added to all event filenames
             in the logdir directory. More details on filename construction in
             tensorboard.summary.writer.event_file_writer.EventFileWriter.
@@ -176,8 +177,9 @@ class SummaryWriter(object):
               Note that crashed and resumed experiments should have the same ``logdir``.
             max_queue (int): Size of the queue for pending events and
               summaries before one of the 'add' calls forces a flush to disk.
+              Default is ten items.
             flush_secs (int): How often, in seconds, to flush the
-              pending events and summaries to disk.
+              pending events and summaries to disk. Default is every two minutes.
             filename_suffix (string): Suffix added to all event filenames in
               the logdir directory. More details on filename construction in
               tensorboard.summary.writer.event_file_writer.EventFileWriter.
@@ -339,7 +341,7 @@ class SummaryWriter(object):
             tag (string): Data identifier
             values (torch.Tensor, numpy.array, or string/blobname): Values to build histogram
             global_step (int): Global step value to record
-            bins (string): one of {'tensorflow','auto', 'fd', ...}, this determines how the bins are made. You can find
+            bins (string): One of {'tensorflow','auto', 'fd', ...}. This determines how the bins are made. You can find
               other options in: https://docs.scipy.org/doc/numpy/reference/generated/numpy.histogram.html
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
@@ -517,7 +519,7 @@ class SummaryWriter(object):
 
         Args:
             tag (string): Data identifier
-            figure (matplotlib.pyplot.figure) or list of figures: figure or a list of figures
+            figure (matplotlib.pyplot.figure) or list of figures: Figure or a list of figures
             global_step (int): Global step value to record
             close (bool): Flag to automatically close the figure
             walltime (float): Optional override default walltime (time.time())
@@ -590,14 +592,14 @@ class SummaryWriter(object):
         """Add graph data to summary.
 
         Args:
-            model (torch.nn.Module): model to draw.
-            input_to_model (torch.Tensor or list of torch.Tensor): a variable or a tuple of
+            model (torch.nn.Module): Model to draw.
+            input_to_model (torch.Tensor or list of torch.Tensor): A variable or a tuple of
                 variables to be fed.
             verbose (bool): Whether to print graph structure in console.
             omit_useless_nodes (bool): Default to ``true``, which eliminates unused nodes.
             operator_export_type (string): One of: ``"ONNX"``, ``"RAW"``. This determines
                 the optimization level of the graph. If error happens during exporting
-                the graph, use ``"RAW"`` may help.
+                the graph, using ``"RAW"`` might help.
 
         """
         if hasattr(model, 'forward'):
