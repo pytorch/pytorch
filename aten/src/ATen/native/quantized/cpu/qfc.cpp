@@ -11,6 +11,7 @@ namespace at {
 namespace native {
 namespace {
 
+template <bool ReluFused>
 class QFCInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
@@ -99,7 +100,7 @@ class QFCInt8 final : public c10::OperatorKernel {
     // does:
     //  1) Add in row and column offsets to the rows and columns, respectively.
     //  2) Add in the bias term.
-    fbgemm::ReQuantizeOutput<false /* FUSE_RELU*/> outputProcObj(
+    fbgemm::ReQuantizeOutput<ReluFused> outputProcObj(
         /*nextop=*/doNothingObj,
         /*C_multiplier=*/&output_multiplier_float,
         /*C_zero_point=*/output_zero_point_int32,
@@ -148,10 +149,14 @@ class QFCInt8 final : public c10::OperatorKernel {
 #endif // USE_FBGEMM
 };
 
-static auto registry = c10::RegisterOperators().op(
-    "quantized::fbgemm_linear(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
-    c10::kernel<QFCInt8>(),
-    c10::dispatchKey(QuantizedCPUTensorId()));
+static auto registry =
+    c10::RegisterOperators()
+        .op("quantized::fbgemm_linear(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+            c10::kernel<QFCInt8<false>>(),
+            c10::dispatchKey(QuantizedCPUTensorId()))
+        .op("quantized::fbgemm_linear_relu(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
+            c10::kernel<QFCInt8<true>>(),
+            c10::dispatchKey(QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at

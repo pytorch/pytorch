@@ -264,5 +264,84 @@ class TestQuantizedFC(unittest.TestCase):
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
 
+    """Tests the correctness of the quantized::fc op."""
+    def test_qfcrelu(self):
+        qfc_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qfcrelu = torch.ops.quantized.fbgemm_linear_relu
+
+        batch_size = 4
+        input_channels = 16
+        output_channels = 8
+
+        X_scale = 1.5
+        X_zp = 5
+        X_value_min = 0
+        X_value_max = 225
+        X_q0 = np.round(
+            np.random.rand(batch_size, input_channels) * (X_value_max - X_value_min)
+            + X_value_min
+        ).astype(np.uint8)
+
+        W_scale = 0.4
+        W_zp = 2
+        W_value_min = -128
+        W_value_max = 127
+        W_q0 = np.round(
+            np.random.rand(output_channels, input_channels)
+            * (W_value_max - W_value_min)
+            + W_value_min
+        ).astype(np.int8)
+
+        avoid_vpmaddubsw_overflow_fc(
+            batch_size,
+            input_channels,
+            output_channels,
+            X_q0,
+            X_value_min,
+            X_value_max,
+            W_q0,
+            W_value_min,
+            W_value_max,
+        )
+
+        X = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
+        W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
+
+        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zp)
+        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp + 128)
+        b_q = torch.round(torch.rand(output_channels) * 10 - 10).to(dtype=torch.int32)
+
+        # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
+        # Y_scale * 255 (max for uint8).
+        Y_scale = 125.1234
+        Y_zp = 5
+
+        # Reference quantized FC operator
+        Y_q_ref = qfc_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q.numpy(), Y_scale, Y_zp)
+        Y_q_ref[Y_q_ref < Y_zp] = Y_zp
+
+        # Weight prepacking operator for quantized FC
+        W_prepack = qfc_prepack(W_q)
+        # Quantized FC operator with prepacked weight
+        Y_q = qfcrelu(X_q, W_prepack, b_q, Y_scale, Y_zp)
+
+        # Y_q_ref_real = _dequantize(Y_q_ref, Y_scale, Y_zp)
+        # Y_q_real = Y_q.dequantize()
+
+        # Assert equal
+        np.testing.assert_equal(Y_q_ref, Y_q.int_repr().numpy())
+
+        # Reference quantized result from PyTorch Linear operator
+        W_fp32 = W_q.dequantize().to(dtype=torch.float)
+        X_fp32 = X_q.dequantize().to(dtype=torch.float)
+        b_fp32 = torch.from_numpy(_dequantize(b_q.numpy(), W_scale * X_scale, 0).astype(np.float)).to(dtype=torch.float)
+        Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
+        Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
+        Y_q_ref2 = Y_fp32_ref.quantize_linear(Y_scale, Y_zp)
+
+        # Assert equal
+        np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
+
+
 if __name__ == "__main__":
     run_tests()
