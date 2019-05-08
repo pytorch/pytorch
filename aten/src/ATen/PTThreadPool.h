@@ -7,7 +7,7 @@ namespace at {
 class CAFFE2_API PTThreadPool : public c10::ThreadPool {
  public:
   explicit PTThreadPool(
-      std::size_t pool_size,
+      int pool_size,
       int numa_node_id = -1)
     : c10::ThreadPool(pool_size, numa_node_id) {}
 

@@ -219,9 +219,8 @@ def run_cmake(version,
         cmake_defines(cmake_args, MKLDNN_THREADING=mkldnn_threading)
 
     parallel_backend = os.getenv('PARALLEL_BACKEND')
-    if not parallel_backend:
-        parallel_backend = 'OPENMP'
-    cmake_defines(cmake_args, PARALLEL_BACKEND=parallel_backend)
+    if parallel_backend:
+        cmake_defines(cmake_args, PARALLEL_BACKEND=parallel_backend)
 
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
