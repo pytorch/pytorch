@@ -90,8 +90,8 @@ TEST(DictTest, whenInsertOrAssigningExistingKey_thenDoesModifyDict) {
 }
 
 TEST(DictTest, givenEmptyDict_whenIterating_thenBeginIsEnd) {
-  Dict<int, string> dict;
-  const Dict<int, string> cdict;
+  Dict<int, string> dict{};
+  const Dict<int, string> cdict{};
   EXPECT_EQ(dict.begin(), dict.end());
   EXPECT_EQ(dict.cbegin(), dict.cend());
   EXPECT_EQ(cdict.begin(), cdict.end());

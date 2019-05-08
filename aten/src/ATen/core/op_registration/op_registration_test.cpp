@@ -9,6 +9,7 @@
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
+#include <functional>
 
 using c10::RegisterOperators;
 using c10::OperatorKernel;
@@ -456,7 +457,7 @@ struct testArgTypes final {
 
     // Test taking argument and returning multiple outputs
     ArgTypeTestKernel<InputType, std::tuple<int64_t, OutputType>>::test(
-      input, inputExpectation, {3, output}, [&] (const c10::Stack& output) {
+      input, inputExpectation, std::tuple<int64_t, OutputType>{3, output}, [&] (const c10::Stack& output) {
         EXPECT_EQ(2, output.size());
         EXPECT_EQ(3, output[0].toInt());
         outputExpectation(output[1]);
