@@ -35,12 +35,12 @@ static void WarnIfFeatureUnused(
     const bool cpu_has_feature, const string& feature) {
   VLOG(1) << "Caffe2 not built with " << feature << ".";
   if (cpu_has_feature) {
-#ifdef CAFFE2_NO_CROSS_ARCH_WARNING
+#ifdef CAFFE2_CROSS_ARCH_WARNING
+    LOG(ERROR)
+#else
     // When cross-compiling single binary for multiple archs - turns off the
     // annoying warning
     VLOG(1)
-#else
-    LOG(ERROR)
 #endif
         << "CPU feature " << feature
         << " is present on your machine, "
