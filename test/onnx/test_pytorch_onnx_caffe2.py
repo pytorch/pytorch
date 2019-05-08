@@ -1604,13 +1604,26 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
         self.run_model_test(Log2Model(), train=False, input=x, batch_size=BATCH_SIZE)
 
-    def test_sample_dirichlet(self):
+    def test__sample_dirichlet(self):
         class DirichletModel(torch.nn.Module):
             def forward(self, input):
                 return torch._sample_dirichlet(input)
 
         x = torch.randn(2, 3, 4, requires_grad=False)
         model = DirichletModel()
+        onnxir, _ = do_export(model, x)
+        onnx_model = onnx.ModelProto.FromString(onnxir)
+        prepared = c2.prepare(onnx_model)
+        caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
+        self.assertEqual(caffe2_out[0].shape, x.shape)
+
+    def test__standard_gamma(self):
+        class GammaModel(torch.nn.Module):
+            def forward(self, input):
+                return torch._standard_gamma(input)
+
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        model = GammaModel()
         onnxir, _ = do_export(model, x)
         onnx_model = onnx.ModelProto.FromString(onnxir)
         prepared = c2.prepare(onnx_model)
