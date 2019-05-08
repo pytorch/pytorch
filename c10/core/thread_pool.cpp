@@ -2,8 +2,8 @@
 
 namespace c10 {
 
-ThreadPool::ThreadPool(std::size_t pool_size, int numa_node_id)
-    : threads_(pool_size),
+ThreadPool::ThreadPool(int pool_size, int numa_node_id)
+    : threads_(pool_size < 0 ? defaultNumThreads() : pool_size),
       running_(true),
       complete_(true),
       available_(threads_.size()),
@@ -48,6 +48,9 @@ bool ThreadPool::inThreadPool() const {
 }
 
 void ThreadPool::run(const std::function<void()>& func) {
+  if (threads_.size() == 0) {
+    throw std::runtime_error("No threads to run a task");
+  }
   std::unique_lock<std::mutex> lock(mutex_);
 
   // Set task and signal condition variable so that a worker thread will
