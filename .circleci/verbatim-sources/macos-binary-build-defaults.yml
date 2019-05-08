@@ -7,6 +7,8 @@ binary_mac_build: &binary_mac_build
   macos:
     xcode: "9.0"
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *binary_checkout
   - run:
@@ -42,6 +44,8 @@ binary_mac_upload: &binary_mac_upload
   macos:
     xcode: "9.0"
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *binary_checkout
   - run:
@@ -50,7 +54,7 @@ binary_mac_upload: &binary_mac_upload
       <<: *binary_macos_brew_update
   - run:
       <<: *binary_install_miniconda
-  - attach_workspace:
+  - attach_workspace: # TODO - we can `cp` from ~/workspace
       at: /Users/distiller/project
   - run:
       name: Upload
