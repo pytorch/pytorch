@@ -16,6 +16,18 @@
 struct FBGEMM_API PackedFCWeight {
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
   std::vector<int32_t> col_offsets;
+  float w_scale;
+  int w_zp;
 };
+
+// Convert the weight from uint8 to int8.
+static void convert_uint8_int8(int K, int N, const uint8_t* src_uint8, int8_t* dst_int8) {
+  for (size_t i = 0; i < N; ++i) {
+    for (size_t j = 0; j < K; ++j) {
+      dst_int8[i * K + j] =
+          static_cast<int8_t>(static_cast<int32_t>(src_uint8[i * K + j]) - 128);
+    }
+  }
+}
 
 #endif // USE_FBGEMM
