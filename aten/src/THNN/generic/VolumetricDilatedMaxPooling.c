@@ -5,6 +5,8 @@
 #include <THNN/generic/pooling_shape.h>
 #include <algorithm>
 
+#include <ATen/Parallel.h>
+
 static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
                          THNNState *state,
                          THTensor *input,
@@ -104,73 +106,73 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
           int dilationW,
           int dilationH)
 {
-  int64_t k;
-#pragma omp parallel for private(k)
-  for (k = 0; k < nslices; k++)
-  {
-    /* loop over output */
-    int64_t i, j, ti;
-    scalar_t *ip = input_p + k * itime * iwidth * iheight;
-    for (ti = 0; ti < otime; ti++)
+  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    for (auto k = start; k < end; k++)
     {
-      for (i = 0; i < oheight; i++)
+      /* loop over output */
+      int64_t i, j, ti;
+      scalar_t *ip = input_p + k * itime * iwidth * iheight;
+      for (ti = 0; ti < otime; ti++)
       {
-        for (j = 0; j < owidth; j++)
+        for (i = 0; i < oheight; i++)
         {
-          /* local pointers */
-
-          int64_t start_t = ti * dT - pT;
-          int64_t start_h = i * dH - pH;
-          int64_t start_w = j * dW - pW;
-
-          int64_t end_t = std::min(start_t + (kT - 1) * dilationT + 1, itime);
-          int64_t end_h = std::min(start_h + (kH - 1) * dilationH + 1, iheight);
-          int64_t end_w = std::min(start_w + (kW - 1) * dilationW + 1, iwidth);
-
-          while(start_t < 0)
-            start_t += dilationT;
-          while(start_h < 0)
-            start_h += dilationH;
-          while(start_w < 0)
-            start_w += dilationW;
-
-          scalar_t *op = output_p + k * otime * owidth * oheight
-            + ti * owidth * oheight + i * owidth + j;
-          THIndex_t *indzp = indz_p + k * otime * owidth * oheight
-            + ti * owidth * oheight + i * owidth + j;
-
-          /* compute local max: */
-          int64_t maxindex = -1;
-          scalar_t maxval = -THInf;
-          int64_t x,y,z;
-          int64_t index = 0;
-
-          for (z = start_t; z < end_t; z += dilationT)
+          for (j = 0; j < owidth; j++)
           {
-            for (y = start_h; y < end_h; y += dilationH)
+            /* local pointers */
+
+            int64_t start_t = ti * dT - pT;
+            int64_t start_h = i * dH - pH;
+            int64_t start_w = j * dW - pW;
+
+            int64_t end_t = std::min(start_t + (kT - 1) * dilationT + 1, itime);
+            int64_t end_h = std::min(start_h + (kH - 1) * dilationH + 1, iheight);
+            int64_t end_w = std::min(start_w + (kW - 1) * dilationW + 1, iwidth);
+
+            while(start_t < 0)
+              start_t += dilationT;
+            while(start_h < 0)
+              start_h += dilationH;
+            while(start_w < 0)
+              start_w += dilationW;
+
+            scalar_t *op = output_p + k * otime * owidth * oheight
+              + ti * owidth * oheight + i * owidth + j;
+            THIndex_t *indzp = indz_p + k * otime * owidth * oheight
+              + ti * owidth * oheight + i * owidth + j;
+
+            /* compute local max: */
+            int64_t maxindex = -1;
+            scalar_t maxval = -THInf;
+            int64_t x,y,z;
+            int64_t index = 0;
+
+            for (z = start_t; z < end_t; z += dilationT)
             {
-              for (x = start_w; x < end_w; x += dilationW)
+              for (y = start_h; y < end_h; y += dilationH)
               {
-                index = z * iwidth * iheight + y * iwidth + x;
-                scalar_t val = ip[index];
-                if ((val > maxval) || std::isnan(val))
+                for (x = start_w; x < end_w; x += dilationW)
                 {
-                  maxval = val;
-                  maxindex = index;
+                  index = z * iwidth * iheight + y * iwidth + x;
+                  scalar_t val = ip[index];
+                  if ((val > maxval) || std::isnan(val))
+                  {
+                    maxval = val;
+                    maxindex = index;
+                  }
                 }
               }
             }
+
+            // store location of max
+            *indzp = maxindex;
+
+            /* set output to local max */
+            *op = maxval;
           }
-
-          // store location of max
-          *indzp = maxindex;
-
-          /* set output to local max */
-          *op = maxval;
         }
       }
     }
-  }
+  });
 }
 
 void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
@@ -260,7 +262,6 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   }
   else /* batch mode */
   {
-    int64_t p;
     int64_t nBatch = input->size(0);
 
     int64_t istride = nslices * itime * iwidth * iheight;
@@ -275,22 +276,23 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     output_data = output->data<scalar_t>();
     indices_data = THIndexTensor_(data)(indices);
 
-#pragma omp parallel for private(p)
-    for (p=0; p < nBatch; p++)
-    {
-      THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
-        input_data   + p * istride,
-        output_data  + p * ostride,
-        indices_data + p * ostride,
-        nslices,
-        itime, iwidth, iheight,
-        otime, owidth, oheight,
-        kT, kW, kH,
-        dT, dW, dH,
-        pT, pW, pH,
-        dilationT, dilationW, dilationH
-      );
-    }
+    at::parallel_for(0, nBatch, 0, [&](int64_t start, int64_t end) {
+      for (auto p = start; p < end; p++)
+      {
+        THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
+          input_data   + p * istride,
+          output_data  + p * ostride,
+          indices_data + p * ostride,
+          nslices,
+          itime, iwidth, iheight,
+          otime, owidth, oheight,
+          kT, kW, kH,
+          dT, dW, dH,
+          pT, pW, pH,
+          dilationT, dilationW, dilationH
+        );
+      }
+    });
   }
 
   /* cleanup */
@@ -318,34 +320,34 @@ static void THNN_(VolumetricDilatedMaxPooling_updateGradInput_frame)(
           int dilationW,
           int dilationH)
 {
-  int64_t k;
-#pragma omp parallel for private(k)
-  for (k = 0; k < nslices; k++)
-  {
-    scalar_t *gradInput_p_k  = gradInput_p  + k * itime * iwidth * iheight;
-    scalar_t *gradOutput_p_k = gradOutput_p + k * otime * owidth * oheight;
-    THIndex_t *indz_p_k = indz_p + k * otime * owidth * oheight;
-
-    /* calculate max points */
-    int64_t ti, i, j;
-    for (ti = 0; ti < otime; ti++)
+  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    for (auto k = start; k < end; k++)
     {
-      for (i = 0; i < oheight; i++)
-      {
-        for (j = 0; j < owidth; j++)
-        {
-          /* retrieve position of max */
-          int64_t index = ti * oheight * owidth + i * owidth + j;
-          int64_t maxp = indz_p_k[index];
+      scalar_t *gradInput_p_k  = gradInput_p  + k * itime * iwidth * iheight;
+      scalar_t *gradOutput_p_k = gradOutput_p + k * otime * owidth * oheight;
+      THIndex_t *indz_p_k = indz_p + k * otime * owidth * oheight;
 
-          if (maxp != -1) {
-            /* update gradient */
-            gradInput_p_k[maxp] += gradOutput_p_k[index];
+      /* calculate max points */
+      int64_t ti, i, j;
+      for (ti = 0; ti < otime; ti++)
+      {
+        for (i = 0; i < oheight; i++)
+        {
+          for (j = 0; j < owidth; j++)
+          {
+            /* retrieve position of max */
+            int64_t index = ti * oheight * owidth + i * owidth + j;
+            int64_t maxp = indz_p_k[index];
+
+            if (maxp != -1) {
+              /* update gradient */
+              gradInput_p_k[maxp] += gradOutput_p_k[index];
+            }
           }
         }
       }
     }
-  }
+  });
 }
 
 void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
@@ -436,27 +438,27 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   }
   else /* batch mode */
   {
-    int64_t p;
     int64_t nBatch = input->size(0);
 
     int64_t istride = nslices * itime * iwidth * iheight;
     int64_t ostride = nslices * otime * owidth * oheight;
 
-#pragma omp parallel for private(p)
-    for (p = 0; p < nBatch; p++)
-    {
-      THNN_(VolumetricDilatedMaxPooling_updateGradInput_frame)(
-        gradInput_data + p * istride,
-        gradOutput_data + p * ostride,
-        indices_data + p * ostride,
-        nslices,
-        itime, iwidth, iheight,
-        otime, owidth, oheight,
-        dT, dW, dH,
-        pT, pW, pH,
-        dilationT, dilationW, dilationH
-      );
-    }
+    at::parallel_for(0, nBatch, 0, [&](int64_t start, int64_t end) {
+      for (auto p = start; p < end; p++)
+      {
+        THNN_(VolumetricDilatedMaxPooling_updateGradInput_frame)(
+          gradInput_data + p * istride,
+          gradOutput_data + p * ostride,
+          indices_data + p * ostride,
+          nslices,
+          itime, iwidth, iheight,
+          otime, owidth, oheight,
+          dT, dW, dH,
+          pT, pW, pH,
+          dilationT, dilationW, dilationH
+        );
+      }
+    });
   }
 
   /* cleanup */
