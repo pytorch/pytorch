@@ -208,6 +208,16 @@ def run_cmake(version,
         USE_GFLAGS=os.getenv('USE_GFLAGS'),
         WERROR=os.getenv('WERROR'))
 
+    if os.getenv('USE_OPENMP'):
+        cmake_defines(cmake_args, USE_OPENMP=check_env_flag('USE_OPENMP'))
+
+    if os.getenv('MKL_SEQ'):
+        cmake_defines(cmake_args, INTEL_MKL_SEQUENTIAL=check_env_flag('MKL_SEQ'))
+
+    mkldnn_threading = os.getenv('MKLDNN_THREADING')
+    if mkldnn_threading:
+        cmake_defines(cmake_args, MKLDNN_THREADING=mkldnn_threading)
+
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
 

@@ -469,46 +469,10 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
   return *this == *rhs;
 }
 
-namespace {
-class ClassTypeRegistry {
- public:
-  void registerType(QualifiedName name, ClassTypePtr type) {
-    std::lock_guard<std::mutex> g(mutex_);
-    // TODO: new type registrations will override the old ones. Is this safe?
-    reg_[std::move(name)] = type;
-  }
-
-  ClassTypePtr getType(const QualifiedName& name) {
-    std::lock_guard<std::mutex> g(mutex_);
-    if (reg_.count(name)) {
-      return reg_.at(name);
-    }
-    return nullptr;
-  }
-
-  void clear() {
-    std::lock_guard<std::mutex> g(mutex_);
-    reg_.clear();
-  }
-
- private:
-  std::mutex mutex_;
-  std::unordered_map<QualifiedName, ClassTypePtr> reg_;
-};
-
-ClassTypeRegistry& getRegistry() {
-  static ClassTypeRegistry r;
-  return r;
-}
-} // namespace
-
 ClassTypePtr ClassType::create(
     QualifiedName qualifiedName,
     std::shared_ptr<CompilationUnit> cu) {
-  auto ptr =
-      ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
-  getRegistry().registerType(std::move(qualifiedName), ptr);
-  return ptr;
+  return ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
 }
 
 ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
@@ -524,14 +488,6 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
     ptr->addAttribute(attributeNames_[i], refined_slots[i]);
   }
   return ptr;
-}
-
-ClassTypePtr ClassType::get(const QualifiedName& name) {
-  return getRegistry().getType(name);
-}
-
-void ClassType::clearRegistry() {
-  getRegistry().clear();
 }
 
 std::string ProfiledTensorType::str() const {
