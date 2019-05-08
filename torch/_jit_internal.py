@@ -179,7 +179,7 @@ def _parameter_list(parameter_names_fn):
 
 try:
     import typing
-    from typing import Tuple, List, Dict, Optional, Union
+    from typing import Tuple, List, Dict, Optional
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
