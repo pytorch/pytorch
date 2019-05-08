@@ -24,7 +24,7 @@ T quantize_val(float scale, int32_t zero_point, float value) {
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
   int32_t qvalue;
   qvalue = fbgemm::Quantize<typename T::underlying>(value, zero_point, scale,
-                                     /*result_precision=*/8);
+                                                    /*result_precision=*/std::numeric_limits<typename T::underlying>::digits);
   return static_cast<T>(qvalue);
 }
 
@@ -35,7 +35,7 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale;
   qparams.zero_point = zero_point;
-  qparams.precision = 8;
+  qparams.precision = std::numeric_limits<typename T::underlying>::digits;
   fbgemm::Quantize<typename T::underlying>(/*src=*/rd,
                              /*dst=*/qd,
                              /*len=*/rtensor.numel(),
@@ -49,7 +49,7 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t ze
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale;
   qparams.zero_point = zero_point;
-  qparams.precision = 8;
+  qparams.precision = std::numeric_limits<typename T::underlying>::digits;
   float* rd = rtensor.data<float>();
   fbgemm::Dequantize<typename T::underlying>(/*src=*/qd,
                               /*dst=*/rd,
