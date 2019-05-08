@@ -11334,7 +11334,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         class Foo2(torch.Tensor):
             def foo(self):
                 return 5
-        f = Foo()
+        f = Foo2()
         self.assertEqual(f.foo(), 5)
 
 # Functions to test negative dimension wrapping
