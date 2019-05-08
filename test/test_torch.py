@@ -9288,19 +9288,23 @@ class _TestTorchMixin(object):
     def test_serialization_offset(self):
         a = torch.randn(5, 5)
         b = torch.randn(2, 2)
+        m = torch.nn.Conv2d(1, 1, (1, 3))
         i, j = 41, 43
         with tempfile.NamedTemporaryFile() as f:
             pickle.dump(i, f)
             torch.save(a, f)            
             pickle.dump(j, f)
             torch.save(b, f)
+            torch.save(m, f)
             f.seek(0)
             i_loaded = pickle.load(f)
             a_loaded = torch.load(f)            
             j_loaded = pickle.load(f)
             b_loaded = torch.load(f)                
+            m_loaded = torch.load(f)                
         self.assertTrue(torch.equal(a, a_loaded))
         self.assertTrue(torch.equal(b, b_loaded))
+        self.assertTrue(m.kernel_size == m_loaded.kernel_size)
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
