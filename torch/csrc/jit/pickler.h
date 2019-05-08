@@ -139,6 +139,9 @@ class Pickler {
   void pushString(const std::string& string);
   void pushTensorData(const at::Tensor& tensor);
 
+  // Add a BINPUT op and return the memoization id used
+  size_t pushNextBinPut();
+
   const void* getPointer(const IValue& ivalue);
 
   // These convert values to bytes and add them to the stack (NB: since T is to
@@ -167,7 +170,7 @@ class Pickler {
 
   // TODO: only use this if necessary (add a pass to find all shared ivalues,
   // and only memoize those)
-  uint32_t memo_id = 0;
+  uint32_t memo_id_ = 0;
 
   // When arbitrary (maybe temporary) values are saved, keep them here so they
   // can be memoized correctly
