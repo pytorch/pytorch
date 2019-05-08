@@ -431,7 +431,7 @@ TEST(DictTest, givenEqualMutableIterators_thenAreEqual) {
   EXPECT_FALSE(iter1 != iter2);
 }
 
-TEST(DictTest, givenDifferentMutableIterators_thenAreEqual) {
+TEST(DictTest, givenDifferentMutableIterators_thenAreNotEqual) {
   Dict<int, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");
@@ -455,7 +455,7 @@ TEST(DictTest, givenEqualConstIterators_thenAreEqual) {
   EXPECT_FALSE(iter1 != iter2);
 }
 
-TEST(DictTest, givenDifferentConstIterators_thenAreEqual) {
+TEST(DictTest, givenDifferentConstIterators_thenAreNotEqual) {
   Dict<int, string> dict;
   dict.insert(3, "3");
   dict.insert(4, "4");

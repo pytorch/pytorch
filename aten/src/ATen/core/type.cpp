@@ -224,12 +224,11 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   if (ivalue.isGenericDict()) {
     auto dict_type = type->expect<DictType>();
     const auto& dict = ivalue.toGenericDictRef();
-    for (const auto& elem: dict) {
-      if (!isSubvalueOf(elem.key(), dict_type->getKeyType()) || !isSubvalueOf(elem.value(), dict_type->getValueType())) {
-        return false;
-      }
-    }
-    return true;
+    return std::all_of(
+        dict.begin(), dict.end(), [=](const c10::impl::GenericDict::const_iterator::value_type& item) {
+          return isSubvalueOf(item.key(), dict_type->getKeyType()) &&
+              isSubvalueOf(item.value(), dict_type->getValueType());
+        });
   }
   return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
 }
