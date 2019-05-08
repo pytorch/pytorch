@@ -58,7 +58,7 @@ class ScriptModuleDeserializer final {
   void convertModule(const torch::ModuleDef& module_def);
 
   void loadTensorTable(torch::ModelDef* model_def);
-  void loadAttributeTable();
+  std::vector<IValue> loadPickleArchive(const std::string& name);
   void importCallback(const std::string& qualifier);
 
   caffe2::serialize::PyTorchStreamReader reader_;
@@ -70,6 +70,9 @@ class ScriptModuleDeserializer final {
 
   std::vector<at::Tensor> tensor_table_;
   std::vector<IValue> attribute_table_;
+
+  // Results from __getstate__ to be passed to __setstate__ methods
+  std::vector<IValue> state_table_;
   std::unordered_set<std::string> imported_libs_;
 };
 
@@ -136,7 +139,10 @@ void ScriptModuleDeserializer::deserialize(
 
   loadTensorTable(&model_def);
   if (model_def.proto_version() >= 2) {
-    loadAttributeTable();
+    attribute_table_ = loadPickleArchive("attributes.pkl");
+  }
+  if (model_def.proto_version() >= 3) {
+    state_table_ = loadPickleArchive("states.pkl");
   }
 
   // TODO: this can be simplified when C++/Python interop lands,
@@ -151,13 +157,13 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   }
 }
 
-void ScriptModuleDeserializer::loadAttributeTable() {
+std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::string& name) {
   at::DataPtr attributes_ptr;
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) =
-      reader_.getRecord("attributes.pkl");
+      reader_.getRecord(name);
   Unpickler unpickler(attributes_ptr.get(), attributes_size, &tensor_table_);
-  attribute_table_ = unpickler.parse_ivalue_list();
+  return unpickler.parse_ivalue_list();
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(
@@ -289,6 +295,12 @@ void ScriptModuleDeserializer::convertModule(
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
     script::import_methods(module, data_str, tensor_table_, import_callback);
+  }
+
+  // TODO: get the correct index so this works for submodules
+  size_t module_num = 0;
+  if (module_num <= state_table_.size()) {
+    module->setstate(state_table_.at(module_num));
   }
 }
 

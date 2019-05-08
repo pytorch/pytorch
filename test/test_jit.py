@@ -11520,6 +11520,32 @@ a")
         s = u'\u00a3'.encode('utf8')[:1]
         self.checkScript(index_str_to_tensor, (s,))
 
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    def test_get_set_state(self):
+        with self.disableEmitHook():
+            class M(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(M, self).__init__()
+                    self.register_buffer('buffer', torch.ones(2, 2))
+
+                @torch.jit.script_method
+                def __getstate__(self):
+                    # type: () -> Tuple[int, int, int]
+                    return (1, 2, 3)
+
+                @torch.jit.script_method
+                def __setstate__(self, state):
+                    # type: (Tuple[int, int, int]) -> None
+                    self.buffer += state[2]
+
+            with TemporaryFileName() as fname:
+                m = M()
+                m.save(fname)
+                loaded = torch.jit.load(fname)
+
+            self.assertEqual(m.buffer, torch.ones(2, 2))
+            self.assertEqual(loaded.buffer, torch.ones(2, 2) + 3)
+
     def test_string_slicing(self):
         def fn1(x):
             # type: (str) -> str

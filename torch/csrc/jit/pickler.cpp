@@ -414,6 +414,9 @@ OpCode Unpickler::readInstruction() {
     case OpCode::NEWFALSE: {
       stack_.emplace_back(false);
     } break;
+    case OpCode::NONE: {
+      stack_.emplace_back(IValue());
+    } break;
     case OpCode::BININT1: {
       int8_t value = read<int8_t>();
       stack_.emplace_back(int64_t(value));

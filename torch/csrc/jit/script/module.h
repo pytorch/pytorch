@@ -143,7 +143,7 @@ struct TORCH_API Module {
   ~Module() {
     // ClassType own the compilation unit of their Functions, but each
     // Function has a self argument which owns the ClassType, created a
-    // referernce cycle. By dropping all the methods of the module's class
+    // reference cycle. By dropping all the methods of the module's class
     // here we break the cycle.
     class_compilation_unit().drop_all_functions();
   }
@@ -328,6 +328,92 @@ struct TORCH_API Module {
 
     return nullptr;
   }
+
+  void validateGetSetStateSchema() const {
+    // Check that the schemas for __getstate__ and __setstate__ are correct
+    //   __getstate__ is expected to be (self) -> T
+    //   __setstate__ is expected to be (self, T) -> None
+
+    auto get_schema =
+        module_object()->type()->getMethod("__getstate__")->getSchema();
+
+    // Check __getstate__
+    AT_CHECK(
+        get_schema.arguments().size() == 1,
+        "'__getstate__' must have 'self' as its only argument, but found ",
+        get_schema.arguments().size(),
+        " arguments");
+    AT_CHECK(
+        get_schema.returns().size() == 1,
+        "'__getstate__' must return 1 value, but found ",
+        get_schema.returns().size());
+
+    // Check __setstate__ if the method exists
+    auto getstate = module_object()->type()->getMethod("__setstate__");
+    if (getstate == nullptr) {
+      return;
+    }
+    auto set_schema = getstate->getSchema();
+
+    AT_CHECK(
+        set_schema.arguments().size() == 2,
+        "'__setstate__' must have 'self' and the state as its "
+        "only arguments, but found ",
+        set_schema.arguments().size(),
+        " arguments");
+    AT_CHECK(
+        set_schema.returns().size() == 1,
+        "'__setstate__' must return None, but found ",
+        set_schema.returns().size(),
+        " return values");
+    AT_CHECK(
+        set_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
+        "'__setstate__' must return None, but found value of type",
+        set_schema.returns().at(0).type()->python_str());
+
+    // Check that the return type of __getstate__ matches the input to
+    // __setstate__
+    if (auto getstate = module_object()->type()->getMethod("__getstate__")) {
+      auto get_type = get_schema.returns().at(0).type();
+      auto set_type = set_schema.arguments().at(1).type();
+
+      AT_CHECK(
+          set_type->isSubtypeOf(get_type),
+          "'__getstate__'s return type (",
+          get_type->python_str(),
+          " does not match '__setstate__'s argument type (",
+          set_type->python_str(),
+          "))");
+    }
+  }
+
+  IValue getstate() const {
+    if (find_method("__getstate__") == nullptr) {
+      return IValue();
+    }
+    auto getstate = module_object()->type()->getMethod("__getstate__");
+
+    validateGetSetStateSchema();
+
+    Stack stack;
+    stack.emplace_back(module_object());
+    getstate->run(stack);
+    return stack.at(0);
+  }
+
+  void setstate(IValue state) {
+    auto setstate = module_object()->type()->getMethod("__setstate__");
+    if (setstate == nullptr) {
+      return;
+    }
+    validateGetSetStateSchema();
+
+    Stack stack;
+    stack.emplace_back(module_object());
+    stack.emplace_back(std::move(state));
+    setstate->run(stack);
+  }
+
   void apply(std::function<void(Module&)> fn) {
     for (auto& submod : get_modules()) {
       submod->apply(fn);
