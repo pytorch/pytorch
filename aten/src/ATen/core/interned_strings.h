@@ -10,7 +10,7 @@
 
 namespace c10 {
 
-#ifndef C10_MOBILE
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 #define FORALL_NS_SYMBOLS(_)       \
   _(namespaces, prim)              \
   _(namespaces, aten)              \
@@ -63,6 +63,7 @@ namespace c10 {
   _(prim, Bool)                    \
   _(prim, Int)                     \
   _(prim, Float)                   \
+  _(prim, str)                     \
   _(prim, device)                  \
   _(prim, dtype)                   \
   _(prim, shape)                   \
