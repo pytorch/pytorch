@@ -53,7 +53,7 @@ struct NativeResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name) const override {
-    return ClassType::get(c10::QualifiedName(name));
+    return nullptr;
   }
 };
 
