@@ -28,12 +28,10 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/logging.h>
 
 #include <cstdint>
@@ -100,7 +98,8 @@ struct ExecutionPlan {
 struct CaptureList {
   CaptureList(size_t capture_size) {
     capture_types_.reserve(capture_size);
-    var_captures_.reserve(capture_size); // var_captures_.size() might be greater than capture_size
+    var_captures_.reserve(capture_size); // var_captures_.size() might be
+                                         // greater than capture_size
     ivalue_captures_.reserve(capture_size);
   }
 
@@ -121,7 +120,7 @@ struct CaptureList {
       const std::vector<at::Tensor>& tensors = val.toTensorListRef();
       sizes_.push_back(tensors.size());
 
-      for (const at::Tensor& tensor: tensors) {
+      for (const at::Tensor& tensor : tensors) {
         captureTensor(tensor, is_output);
       }
     } else {
@@ -134,12 +133,14 @@ struct CaptureList {
     return capture_types_.size();
   }
 
-  void unpack(Stack & stack, const std::shared_ptr<autograd::Function>& saved_for) {
+  void unpack(
+      Stack& stack,
+      const std::shared_ptr<autograd::Function>& saved_for) {
     auto var_capture_it = var_captures_.begin();
     auto ivalue_capture_it = ivalue_captures_.begin();
     auto size_it = sizes_.begin();
     for (Capture capture_type : capture_types_) {
-      switch(capture_type) {
+      switch (capture_type) {
         case CAPTURE_TENSOR: {
           stack.emplace_back(var_capture_it->unpack(saved_for));
           ++var_capture_it;
@@ -159,8 +160,9 @@ struct CaptureList {
       }
     }
   }
-private:
-  enum Capture: uint8_t {
+
+ private:
+  enum Capture : uint8_t {
     CAPTURE_TENSOR,
     CAPTURE_LIST,
     CAPTURE_IVALUE,
@@ -188,8 +190,8 @@ struct UnpackInstructions {
   void unpack(variable_list&& inputs, Stack& stack) {
     auto input_it = std::make_move_iterator(inputs.begin());
     auto sizes_it = sizes_.begin();
-    for(Inst inst : insts_) {
-      switch(inst) {
+    for (Inst inst : insts_) {
+      switch (inst) {
         case PUSH_TENSOR: {
           at::Tensor t = *input_it++;
           stack.emplace_back(std::move(t));
@@ -201,7 +203,8 @@ struct UnpackInstructions {
       }
     }
   }
-private:
+
+ private:
   enum Inst : uint8_t {
     PUSH_TENSOR,
     PUSH_LIST, // consumes one size
@@ -211,10 +214,13 @@ private:
 };
 
 struct DifferentiableGraphBackward : public autograd::Function {
-  DifferentiableGraphBackward(GraphExecutor executor, size_t input_size, size_t capture_size)
-      : executor(std::move(executor))
-      , captures_(capture_size)
-      , input_instructions_(input_size) {}
+  DifferentiableGraphBackward(
+      GraphExecutor executor,
+      size_t input_size,
+      size_t capture_size)
+      : executor(std::move(executor)),
+        captures_(capture_size),
+        input_instructions_(input_size) {}
 
   variable_list apply(variable_list&& inputs) override {
     Stack stack;
@@ -240,7 +246,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     size_t output_index = 0;
     for (IValue& v : stack) {
       if (v.isTensorList()) {
-        for(at::Tensor tensor : v.toTensorListRef()) {
+        for (at::Tensor tensor : v.toTensorListRef()) {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
       } else if (v.isTensor()) {
@@ -258,15 +264,13 @@ struct DifferentiableGraphBackward : public autograd::Function {
     captures_.capture(val, is_output);
   }
 
-
   void addOutputForTensor(const at::Tensor& tensor) {
     auto v = Variable(tensor);
-    add_next_edge(
-        v.defined() ? v.gradient_edge() : autograd::Edge{});
+    add_next_edge(v.defined() ? v.gradient_edge() : autograd::Edge{});
   }
   void addOutputForIValue(const IValue& value) {
-    if (value.isTensorList()){
-      for(const at::Tensor& tensor : value.toTensorListRef()) {
+    if (value.isTensorList()) {
+      for (const at::Tensor& tensor : value.toTensorListRef()) {
         addOutputForTensor(tensor);
       }
     } else {
@@ -299,8 +303,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     }
   }
 
-private:
-
+ private:
   void produceOutput(size_t i, at::Tensor output, variable_list& outputs) {
     if (should_compute_output(i)) {
       const auto& edge = next_edge(i);
@@ -388,13 +391,13 @@ struct DifferentiableGraphOp {
   }
 
   void detach(IValue& v) const {
-    if(v.isTensor()) {
+    if (v.isTensor()) {
       auto t = std::move(v).toTensor();
       detach(t);
       v = IValue{t};
-    } else if(v.isTensorList()) {
+    } else if (v.isTensorList()) {
       std::vector<at::Tensor> lst = v.toTensorListRef();
-      for(at::Tensor& t : lst) {
+      for (at::Tensor& t : lst) {
         detach(t);
       }
       v = TensorList::create(std::move(lst));
@@ -574,7 +577,7 @@ struct GraphExecutorImpl {
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
-    arg_spec_creator_.setInputTypes(*opt_graph, spec);
+    arg_spec_creator_.specializeTypes(*opt_graph, spec);
 
     // Phase 1. Specialize to input definedness (this is very important for
     //          gradient graphs), and run required passes to bring the graph
@@ -591,9 +594,8 @@ struct GraphExecutorImpl {
     PropagateRequiresGrad(opt_graph);
 
     // Phase 3. Run differentiable optimizations (i.e. simple graph rewrites
-    // that
-    //          we can still execute using autograd).
-    runOptimization(opt_graph, spec);
+    //          that we can still execute using autograd).
+    runOptimization(opt_graph);
 
     // Phase 4. If this graph will be differentiated, we need to slice out the
     //          symbolically differentiable subgraphs for further optimizations.
@@ -606,7 +608,13 @@ struct GraphExecutorImpl {
       for (Node* dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
-        runPostdiffOptimization(gradient.f);
+        // Run post differentiation optimizations, Autodiff will replace some 
+        // parts of graph with new graph, these new graphs usually consists of
+        // control flows and miss shape information on nodes, so we run shape
+        // prop and differentiable optimizations to ensure the graph is optimized
+        PropagateInputShapes(gradient.f);
+        runOptimization(gradient.f);
+        // run non diff optimization on the forward graph
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
@@ -622,8 +630,7 @@ struct GraphExecutorImpl {
   }
 
   void runOptimization(
-      std::shared_ptr<Graph>& graph,
-      const ArgumentSpec& spec) {
+      std::shared_ptr<Graph>& graph) {
     // Basic graph preprocessing to eliminate noise.
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
@@ -638,18 +645,6 @@ struct GraphExecutorImpl {
     EliminateCommonSubexpression(graph);
 
     CheckInplace(graph);
-  }
-
-  void runPostdiffOptimization(std::shared_ptr<Graph>& graph){
-    // Run post differentiation optimization passes, Autodiff will replace some parts of graph with new graph 
-    // these new graphs usually consists of control flow and miss shape information on nodes, so we run shape
-    // prop and constant prop, as well as loop unrolling in some cases
-    PropagateInputShapes(graph);
-    ConstantPropagation(graph);
-
-    // Unroll small loops, and eliminate expressions that are the same at every
-    // iteration.
-    UnrollLoops(graph);
   }
 
   void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
@@ -714,7 +709,7 @@ struct GraphExecutorImpl {
     // tracing and so we only do the type propgation if no concrete types have
     // been set.
     auto local_graph = this->graph->copy();
-    arg_spec_creator_.setInputTypes(*local_graph, spec);
+    arg_spec_creator_.specializeTypes(*local_graph, spec);
     PropagateInputShapes(local_graph);
     auto output_values =
         inlineCallTo(*state->graph, *local_graph, input_values);
