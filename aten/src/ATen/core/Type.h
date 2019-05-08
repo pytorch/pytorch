@@ -184,7 +184,6 @@ struct CAFFE2_API Type {
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;
   virtual Tensor & clamp_min_(Tensor & self, Scalar min) const = 0;
   virtual Tensor contiguous(const Tensor & self, MemoryFormat memory_format) const = 0;
-  virtual Tensor contiguous(const Tensor & self) const = 0;
   virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
   virtual Tensor cos(const Tensor & self) const = 0;
   virtual Tensor & cos_(Tensor & self) const = 0;

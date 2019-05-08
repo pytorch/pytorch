@@ -112,6 +112,16 @@ RegisterOperators reg({
           return 0;
       }
   ),
+  Operator(
+      "aten::contiguous(Tensor self) -> Tensor",
+      [](Stack & stack) {
+          RECORD_FUNCTION("contiguous", std::vector<c10::IValue>());
+          auto result_ = ((std::move(peek(stack, 0, 1))).toTensor()).contiguous();
+          drop(stack, 1);
+          pack(stack, std::move(result_));
+          return 0;
+      }
+  ),
 
   // Generated operators
   ${constructors}

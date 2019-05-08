@@ -160,7 +160,7 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObjec
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   auto memory_format = r.toMemoryFormat(0);
   // avoids touching the GIL or current device if self is already contiguous
-  if (self_.is_contiguous() && memory_format == MemoryFormat::Contiguous) {
+  if (self_.is_contiguous(memory_format)) {
     // NOTE: this logic is duplicated from VariableType.cpp. Since we need to
     // record this call to contiguous() in the trace regardless of whether
     // we actually call contiguous here, we need to record this information
@@ -170,6 +170,7 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObjec
       auto node = tracer_state->graph->create(jit::aten::contiguous, /*num_outputs=*/0);
       jit::tracer::recordSourceLocation(node);
       jit::tracer::addInputs(node, "self", self_);
+      jit::tracer::addInputs(node, "memory_format", memory_format);
       tracer_state->graph->insertNode(node);
       jit::tracer::addOutput(node, self_);
     }
