@@ -48,6 +48,9 @@ class Transformer(Module):
 
         self._reset_parameters()
 
+        self.d_model = d_model
+        self.nhead = nhead
+
     def forward(self, src, tgt, src_mask=None, tgt_mask=None, memory_mask=None):
         r"""Take in and process masked source/target sequences.
 
@@ -79,6 +82,12 @@ class Transformer(Module):
         Examples:
             >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
         """
+
+        if src.size(1) != tgt.size(1):
+            raise RuntimeError("the batch number of src and tgt must be equal")
+
+        if src.size(2) != self.d_model or tgt.size(2) != self.d_model:
+            raise RuntimeError("the feature number of src and tgt must be equal to d_model")
 
         memory = self.encoder(src, src_mask)
         output = self.decoder(tgt, memory, tgt_mask, memory_mask)
