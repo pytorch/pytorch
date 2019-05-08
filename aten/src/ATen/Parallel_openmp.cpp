@@ -33,8 +33,7 @@ void init_num_threads() {
 
 void set_num_threads(int nthreads) {
   if (nthreads <= 0) {
-    throw std::runtime_error(
-      "Expected positive number of threads");
+    throw std::runtime_error("Expected positive number of threads");
   }
   num_threads.store(nthreads);
 #ifdef _OPENMP
