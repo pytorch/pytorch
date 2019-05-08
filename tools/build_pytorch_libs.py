@@ -219,9 +219,8 @@ def run_cmake(version,
         cmake_defines(cmake_args, MKLDNN_THREADING=mkldnn_threading)
 
     parallel_backend = os.getenv('PARALLEL_BACKEND')
-    if not parallel_backend:
-        parallel_backend = 'OPENMP'
-    cmake_defines(cmake_args, PARALLEL_BACKEND=parallel_backend)
+    if parallel_backend:
+        cmake_defines(cmake_args, PARALLEL_BACKEND=parallel_backend)
 
     use_eigen_threadpool = os.getenv('USE_EIGEN_THREADPOOL')
     if use_eigen_threadpool:

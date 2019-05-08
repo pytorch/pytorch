@@ -19,16 +19,6 @@ std::atomic<int> num_interop_threads{-1};
 
 // thread pool global instance is hidden,
 // users should use at::launch ang get/set_num_interop_threads interface
-TaskThreadPoolBase& get_pool() {
-  static std::shared_ptr<TaskThreadPoolBase> pool =
-      ThreadPoolRegistry()->Create(
-          "C10",
-          /* device_id */ 0,
-          /* pool_size */ num_interop_threads.exchange(-2),
-          /* create_new */ false);
-  return *pool;
-}
-
 std::shared_ptr<TaskThreadPoolBase> get_shared_threadpool(int pool_size) {
   static std::shared_ptr<TaskThreadPoolBase> pool =
       std::make_shared<PTThreadPool>(pool_size);
@@ -60,8 +50,7 @@ C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, create_c10_threadpool);
 
 void set_num_interop_threads(int nthreads) {
   if (nthreads <= 0) {
-    throw std::runtime_error(
-      "Expected positive number of threads");
+    throw std::runtime_error("Expected positive number of threads");
   }
 
   int no_value = -1;
