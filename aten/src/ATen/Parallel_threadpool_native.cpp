@@ -19,6 +19,16 @@ std::atomic<int> num_interop_threads{-1};
 
 // thread pool global instance is hidden,
 // users should use at::launch ang get/set_num_interop_threads interface
+TaskThreadPoolBase& get_pool() {
+  static std::shared_ptr<TaskThreadPoolBase> pool =
+      ThreadPoolRegistry()->Create(
+          "C10",
+          /* device_id */ 0,
+          /* pool_size */ num_interop_threads.exchange(-2),
+          /* create_new */ false);
+  return *pool;
+}
+
 std::shared_ptr<TaskThreadPoolBase> get_shared_threadpool(int pool_size) {
   static std::shared_ptr<TaskThreadPoolBase> pool =
       std::make_shared<PTThreadPool>(pool_size);
@@ -27,7 +37,7 @@ std::shared_ptr<TaskThreadPoolBase> get_shared_threadpool(int pool_size) {
   return pool;
 }
 
-// Factory method for ThreadPoolRegistry
+ // Factory function for ThreadPoolRegistry
 std::shared_ptr<TaskThreadPoolBase> create_c10_threadpool(
     int device_id,
     int pool_size,
@@ -56,8 +66,8 @@ void set_num_interop_threads(int nthreads) {
   int no_value = -1;
   if (!num_interop_threads.compare_exchange_strong(no_value, nthreads)) {
     throw std::runtime_error(
-      "Error: cannot set number of interop threads "
-      "after parallel work has started or after set_num_interop_threads call");
+      "Error: cannot set number of interop threads after parallel work "
+      "has started or set_num_interop_threads called");
   }
 }
 
