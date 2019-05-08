@@ -5,6 +5,7 @@
 #include <ATen/LegacyTHFunctions.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/Parallel.h>
 
 #include <TH/TH.h>  // for USE_LAPACK
 
@@ -476,32 +477,33 @@ static void apply_triu_tril_single(
     int64_t self_row_stride, int64_t self_col_stride) {
 
   constexpr int64_t zero = 0;
-  int64_t i;
 
   if (upper) {
-    #pragma omp parallel for private(i)
-    for (i = 0; i < n; i++) {
-      for (int64_t j = 0; j < std::min(m, i + k); j++) {
-        result[i * res_row_stride + j * res_col_stride] = 0;
-      }
-      if (!inplace) {  // copy the rest of the self if not inplace
-        for (int64_t j = std::max(zero, i + k); j < m; j++) {
-          result[i * res_row_stride + j * res_col_stride] = self[i * self_row_stride + j * self_col_stride];
+    at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+      for (auto i = start; i < end; i++) {
+        for (int64_t j = 0; j < std::min(m, i + k); j++) {
+          result[i * res_row_stride + j * res_col_stride] = 0;
+        }
+        if (!inplace) {  // copy the rest of the self if not inplace
+          for (int64_t j = std::max(zero, i + k); j < m; j++) {
+            result[i * res_row_stride + j * res_col_stride] = self[i * self_row_stride + j * self_col_stride];
+          }
         }
       }
-    }
+    });
   } else {
-    #pragma omp parallel for private(i)
-    for (i = 0; i < n; i++) {
-      for (int64_t j = std::max(zero, i + k + 1); j < m; j++) {
-        result[i * res_row_stride + j * res_col_stride] = 0;
-      }
-      if (!inplace) {  // copy the rest of the self if not inplace
-        for (int64_t j = zero; j < std::min(m, i + k + 1); j++) {
-          result[i * res_row_stride + j * res_col_stride] = self[i * self_row_stride + j * self_col_stride];
+    at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+      for (auto i = start; i < end; i++) {
+        for (int64_t j = std::max(zero, i + k + 1); j < m; j++) {
+          result[i * res_row_stride + j * res_col_stride] = 0;
+        }
+        if (!inplace) {  // copy the rest of the self if not inplace
+          for (int64_t j = zero; j < std::min(m, i + k + 1); j++) {
+            result[i * res_row_stride + j * res_col_stride] = self[i * self_row_stride + j * self_col_stride];
+          }
         }
       }
-    }
+    });
   }
 }
 
@@ -527,15 +529,15 @@ void apply_triu_tril(Tensor& result, const Tensor& self, bool inplace, int64_t k
     result_column_stride = self_column_stride;
   }
 
-  int64_t b;
-  #pragma omp parallel for private(b)
-  for (b = 0; b < batchsize; b++) {
-    scalar_t* self_batch = &self_data[b * self_stride];
-    scalar_t* result_batch = &result_data[b * result_stride];
-    apply_triu_tril_single<scalar_t, upper>(
-        result_batch, self_batch, inplace, k, n, m,
-        result_row_stride, result_column_stride, self_row_stride, self_column_stride);
-  }
+  at::parallel_for(0, batchsize, 0, [&](int64_t start, int64_t end) {
+    for (auto b = start; b < end; b++) {
+      scalar_t* self_batch = &self_data[b * self_stride];
+      scalar_t* result_batch = &result_data[b * result_stride];
+      apply_triu_tril_single<scalar_t, upper>(
+          result_batch, self_batch, inplace, k, n, m,
+          result_row_stride, result_column_stride, self_row_stride, self_column_stride);
+    }
+  });
 }
 
 Tensor tril(const Tensor& self, int64_t k) {

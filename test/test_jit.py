@@ -3084,6 +3084,15 @@ graph(%a, %b, %c, %d):
                 self.assertTrue(type(block.paramNode()) == torch._C.Node)
         self.assertTrue(tested_blocks)
 
+    def test_pytorch_jit_env_off(self):
+        import subprocess
+        env = os.environ.copy()
+        env['PYTORCH_JIT'] = '0'
+        try:
+            subprocess.check_output([sys.executable, '-c', 'import torch'], env=env)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError("Could not 'import torch' with PYTORCH_JIT=0")
+
 
 def execWrapper(code, glob, loc):
     if PY2:
@@ -3152,6 +3161,30 @@ class TestScript(JitTestCase):
         with self.assertRaisesRegex(exception, regex):
             ge = torch.jit.script(script, optimize)
             ge(*inputs)
+
+    def test_sequence_parsing(self):
+        tests = [
+            ("return [x, x,]", True),
+            ("return [x x]", "expected ]"),
+            ("return x, x,", True),
+            ("return bar(x, x,)", True),
+            ("return bar()", "argument x not provided"),
+            ("for a, b, in x, x,:\n        pass", "List of iterables"),
+            ("a, b, = x, x,\n    return a + b", True)
+        ]
+        for exp, result in tests:
+            cu = torch.jit.CompilationUnit()
+            full = """
+def bar(x, y):
+    return x + y
+def foo(x):
+    {}
+            """.format(exp)
+            if isinstance(result, str):
+                with self.assertRaisesRegex(RuntimeError, result):
+                    cu.define(full)
+            else:
+                cu.define(full)
 
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
@@ -5180,6 +5213,14 @@ a")
         out = Variable(torch.IntTensor([1, 2]), requires_grad=True)
         self.checkScript(script, [x], optimize=True, outputs=[out], func='to_int')
 
+    def test_str_cast(self):
+        @torch.jit.script
+        def to_str(x):
+            # type: (int) -> str
+            return str((x, x))
+
+        self.assertEqual("(1, 1)", to_str(1))
+
     def test_python_frontend(self):
         def fn(x, y, z):
             q = None
@@ -5556,6 +5597,89 @@ a")
                 x_none = x is not None
                 if y is not None and x_none:
                     print(x + y)  # noqa: T484
+
+    def test_optional_tensor(self):
+        @torch.jit.script
+        def fn(x, y):
+            # type: (Optional[Tensor], int) -> int
+            if x is None:
+                return y
+            else:
+                return 0
+
+        res = fn(None, 1)
+        self.assertEqual(res, 1)
+        g = torch.jit.last_executed_optimized_graph()
+        first_input = next(g.inputs())
+        # check if input is disconnected
+        self.assertEqual(first_input.type().kind(), 'OptionalType')
+        self.assertEqual(first_input.uses(), [])
+        t = torch.ones(1)
+        res = fn(t, 1)
+        self.assertEqual(res, 0)
+        g = torch.jit.last_executed_optimized_graph()
+        self.assertEqual(next(g.inputs()).type().kind(), 'DimensionedTensorType')
+
+        @torch.jit.script
+        def fn(x, y, b):
+            # type: (Optional[Tensor], Tensor, bool) -> Tensor
+            if b:
+                res = y
+            else:
+                res = torch.jit._unwrap_optional(x)
+            return res
+
+        t2 = torch.zeros(1)
+        res = fn(t, t2, True)
+        self.assertEqual(res, t2)
+        with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
+            res = fn(None, t2, False)
+        res = fn(None, t2, True)
+        g = torch.jit.last_executed_optimized_graph()
+        self.assertEqual(next(g.outputs()).type().str(), "Tensor")
+
+    def test_optional_list(self):
+        @torch.jit.script
+        def fn(x, y):
+            # type: (Optional[List[int]], int) -> int
+            if x is None:
+                return y
+            else:
+                res = 0
+                for d in x:
+                    res += d
+                return res
+
+        res = fn(None, 1)
+        self.assertEqual(res, 1)
+        g = torch.jit.last_executed_optimized_graph()
+        first_input = next(g.inputs())
+        # check if input is disconnected
+        self.assertEqual(first_input.type().kind(), 'OptionalType')
+        self.assertEqual(first_input.uses(), [])
+        l = [2, 3]
+        res = fn(l, 1)
+        self.assertEqual(res, 5)
+        g = torch.jit.last_executed_optimized_graph()
+        self.assertEqual(next(g.inputs()).type().kind(), 'ListType')
+
+        @torch.jit.script
+        def fn(x, y, b):
+            # type: (Optional[List[int]], List[int], bool) -> List[int]
+            if b:
+                l = torch.jit._unwrap_optional(x)
+            else:
+                l = y
+            return l
+
+        l2 = [0, 1]
+        res = fn(l, l2, True)
+        self.assertEqual(res, l)
+        with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
+            res = fn(None, l2, True)
+        res = fn(None, l2, False)
+        g = torch.jit.last_executed_optimized_graph()
+        self.assertEqual(next(g.outputs()).type().str(), "int[]")
 
     def test_while_write_outer_then_read(self):
         def func(a, b):
@@ -14625,6 +14749,166 @@ class TestClassType(JitTestCase):
         input = torch.rand(2, 3)
         output = m_loaded(input)
         self.assertEqual(3 * input, output)
+
+    def test_overloaded_fn(self):
+        @torch.jit.script
+        class Foo(object):
+            def __init__(self, x):
+                self.x = x
+
+            def __len__(self):
+                # type: () -> int
+                return len(self.x)
+
+            def __neg__(self):
+                self.x = -self.x
+                return self
+
+            def __mul__(self, other):
+                # type: (Tensor) -> Tensor
+                return self.x * other
+
+        def test_overload():
+            a = Foo(torch.ones([3, 3]))
+            return len(a), -a * torch.zeros([3, 3])
+
+        self.checkScript(test_overload, ())
+        # unary ops tested above
+
+        # TODO - support compiling classes from strings in jit.CompilationUnit
+        @torch.jit.script
+        class BinOps(object):
+            def __init__(self, x):
+                # type: (int) -> None
+                self.x = x
+
+            def __add__(self, other):
+                # type: (int) -> int
+                return self.x + other
+
+            def __sub__(self, other):
+                # type: (int) -> int
+                return self.x - other
+
+            def __mul__(self, other):
+                # type: (int) -> int
+                return self.x * other
+
+            def __pow__(self, other):
+                # type: (int) -> int
+                return self.x ** other
+
+            def __truediv__(self, other):
+                # type: (int) -> float
+                return self.x / other
+
+            def __mod__(self, other):
+                # type: (int) -> int
+                return self.x % other
+
+            def __ne__(self, other):
+                # type: (int) -> bool
+                return self.x != other
+
+            def __eq__(self, other):
+                # type: (int) -> bool
+                return self.x == other
+
+            def __lt__(self, other):
+                # type: (int) -> bool
+                return self.x < other
+
+            def __gt__(self, other):
+                # type: (int) -> bool
+                return self.x > other
+
+            def __le__(self, other):
+                # type: (int) -> bool
+                return self.x <= other
+
+            def __ge__(self, other):
+                # type: (int) -> bool
+                return self.x >= other
+
+            def __and__(self, other):
+                # type: (int) -> int
+                return self.x & other
+
+            def __or__(self, other):
+                # type: (int) -> int
+                return self.x | other
+
+            def __xor__(self, other):
+                # type: (int) -> int
+                return self.x ^ other
+
+        def add():
+            return BinOps(4) + 3
+        def sub():  # noqa: E306
+            return BinOps(4) - 3
+        def mul():  # noqa: E306
+            return BinOps(4) * 3
+        def pow():  # noqa: E306
+            return BinOps(4) ** 3
+        def truediv():  # noqa: E306
+            return BinOps(4) / 3
+        def ne():  # noqa: E306
+            return BinOps(4) != 3
+        def eq():  # noqa: E306
+            return BinOps(4) == 3
+        def lt():  # noqa: E306
+            return BinOps(4) < 3
+        def gt():  # noqa: E306
+            return BinOps(4) > 3
+        def le():  # noqa: E306
+            return BinOps(4) <= 3
+        def ge():  # noqa: E306
+            return BinOps(4) >= 3
+        def _and():  # noqa: E306
+            return BinOps(4) & 3
+        def _or():  # noqa: E306
+            return BinOps(4) | 3
+        def _xor():  # noqa: E306
+            return BinOps(4) ^ 3
+
+        for func in [add, sub, mul, pow, truediv, ne, eq, lt, gt, le, ge, _and,
+                     _or, _xor]:
+            self.checkScript(func, ())
+
+        with self.assertRaisesRegex(RuntimeError, "because it does not  define a __add__"):
+            @torch.jit.script
+            def test():
+                return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
+
+    def test_init_compiled_first(self):
+        @torch.jit.script  # noqa: B903
+        class Foo(object):
+            def __before_init__(self):
+                # accessing this field should not throw, since __init__ should be compiled
+                return self.x
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+    def test_class_constructs_itself(self):
+        @torch.jit.script  # noqa: B903
+        class LSTMStateStack(object):
+            def __init__(self, num_layers, hidden_size):
+                # type: (int, int) -> None
+                self.num_layers = num_layers
+                self.hidden_size = hidden_size
+                self.last_state = (
+                    torch.zeros(num_layers, 1, hidden_size),
+                    torch.zeros(num_layers, 1, hidden_size),
+                )
+                self.stack = [(self.last_state[0][-1], self.last_state[0][-1])]
+
+            def copy(self):
+                # should be able to construct a class inside its own methods
+                other = LSTMStateStack(self.num_layers, self.hidden_size)
+                other.stack = list(self.stack)
+                return other
 
 
 class TestLogging(JitTestCase):
