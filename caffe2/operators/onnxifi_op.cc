@@ -48,9 +48,10 @@ void SetInputTensorDescriptorTypeAndBuffer(
     CAFFE_THROW(
         "Unsupported Int8Tensor type in ONNXIFI: ", cpu_tensor.dtype().name());
   }
-  desc->is_quantized = true;
-  desc->scale = cpu_int8tensor.scale;
-  desc->bias = cpu_int8tensor.zero_point;
+  desc->quantizationParams = 1;
+  desc->quantizationAxis = 1;
+  desc->scales = &cpu_int8tensor.scale;
+  desc->biases = &cpu_int8tensor.zero_point;
 }
 
 TypeMeta OnnxifiTypeToDataType(uint64_t onnxifi_type) {
@@ -89,9 +90,10 @@ void SetOutputTensorDescriptorTypeAndBuffer(
 
   desc->buffer = reinterpret_cast<onnxPointer>(
       cpu_tensor->raw_mutable_data(OnnxifiTypeToDataType(onnxifi_type)));
-  desc->is_quantized = true;
-  desc->scale = cpu_int8tensor->scale;
-  desc->bias = cpu_int8tensor->zero_point;
+  desc->quantizationParams = 1;
+  desc->quantizationAxis = 1;
+  desc->scales = &cpu_int8tensor->scale;
+  desc->biases = &cpu_int8tensor->zero_point;
 }
 void BlobToTensorDescriptor(
     const std::string& name,
@@ -131,14 +133,14 @@ void BlobToTensorDescriptor(
     desc->dimensions = shape.size();
     shapes->emplace_back(shape.cbegin(), shape.cend());
     desc->shape = shapes->back().data();
-    desc->is_quantized = 0;
+    desc->quantizationParams = 0;
   }
 }
 } // namespace
 
 template <>
 std::vector<onnxTensorDescriptorV1>
-OnnxifiOp<float, CPUContext>::buildInitializationList(
+OnnxifiOp<CPUContext>::buildInitializationList(
     Workspace* ws,
     const std::vector<std::string>& initializers,
     std::vector<std::string>* weight_names,
@@ -167,24 +169,100 @@ OnnxifiOp<float, CPUContext>::buildInitializationList(
 }
 
 template <>
-bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
+std::vector<int> OnnxifiOp<CPUContext>::extractOutputBatchSizes() const {
+  if (!adjust_output_batch_) {
+    return std::vector<int>();
+  }
+
+  CAFFE_ENFORCE_EQ(
+      input_shapes_.size(),
+      InputSize(),
+      "Input shapes and input size don't match. ",
+      input_shapes_.size(),
+      " vs ",
+      InputSize());
+  CAFFE_ENFORCE_EQ(
+      output_shapes_.size(),
+      OutputSize(),
+      "Output shapes and output size don't match. ",
+      output_shapes_.size(),
+      " vs ",
+      OutputSize());
+
+  std::vector<int> adjusted_output_batch;
+  for (const auto& shape : output_shapes_) {
+    if (shape.empty()) {
+      adjusted_output_batch.push_back(0);
+    } else {
+      const auto max_output_batch_size = shape.front();
+      const auto it = batch_pos_map_.find(max_output_batch_size);
+      if (it == batch_pos_map_.end()) {
+        if (use_onnx_) {
+          // For ONNX path, it's possible that we have output batch size that is
+          // unknown, because we handle the second outout of Concat and Split in
+          // ONNX. But for C2 path, we should not meet with this condition.
+          adjusted_output_batch.push_back(0);
+          continue;
+        } else {
+          if (permit_unknown_output_batch_size_) {
+            adjusted_output_batch.push_back(0);
+            continue;
+          } else {
+            CAFFE_THROW(
+                "Unknow output max batch size: ", max_output_batch_size);
+          }
+        }
+      }
+      auto idx = it->second;
+      CAFFE_ENFORCE_LT(idx, input_shapes_.size(), "index out of bound");
+      const auto& input_shape = input_shapes_[idx];
+      // If input real batch size and output max size is the same, we don't need
+      // to adjust max batch size of the output
+      if (input_shape.empty() || input_shape.front() == max_output_batch_size) {
+        adjusted_output_batch.push_back(0);
+      } else {
+        adjusted_output_batch.push_back(input_shape.front());
+      }
+    }
+  }
+
+  return adjusted_output_batch;
+}
+
+template <>
+void OnnxifiOp<CPUContext>::maybeAdjustOutputBatchSizes(
+    const std::vector<int>& real_output_batch_sizes) {
+  CAFFE_ENFORCE_EQ(real_output_batch_sizes.size(), output_shapes_.size());
+  for (int i = 0; i < real_output_batch_sizes.size(); ++i) {
+    if (!real_output_batch_sizes[i]) {
+      continue;
+    }
+    auto* output_tensor = Output(i);
+    output_tensor->ShrinkTo(real_output_batch_sizes[i]);
+  }
+}
+
+template <>
+bool OnnxifiOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
-  input_shapes_.clear();
   for (unsigned i = 0U; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
-    const auto tensor_dims = input_tensor.sizes();
+    const at::IntArrayRef tensor_dims = input_tensor.sizes();
     auto& tensor_descriptor = input_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
-    input_shapes_.emplace_back(tensor_dims.cbegin(), tensor_dims.cend());
-    tensor_descriptor.shape = input_shapes_.back().data();
+    auto& input_shape = input_shapes_[i];
+    input_shape.clear();
+    input_shape.insert(
+        input_shape.begin(), tensor_dims.cbegin(), tensor_dims.cend());
+    tensor_descriptor.shape = input_shape.data();
     SetInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
   }
 
   CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
-  output_shapes_.clear();
   for (unsigned i = 0U; i < OutputSize(); ++i) {
+    tensor_dims_int64_.clear();
     std::vector<size_t> tensor_dims;
     uint64_t type = SetOutputShapeAndType(i, &tensor_dims);
     auto& tensor_descriptor = output_desc_[i];
@@ -195,13 +273,18 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
         tensor_descriptor.dimensions != 0,
         tensor_descriptor.name,
         " has 0 dim");
-    output_shapes_.emplace_back(tensor_dims.cbegin(), tensor_dims.cend());
-    tensor_descriptor.shape = output_shapes_.back().data();
-    std::vector<int64_t> tensor_dims_int64;
-    std::copy(tensor_dims.cbegin(), tensor_dims.cend(), std::back_inserter(tensor_dims_int64));
+    auto& output_shape = output_shapes_[i];
+    output_shape.clear();
+    output_shape.insert(
+        output_shape.begin(), tensor_dims.cbegin(), tensor_dims.cend());
+    tensor_descriptor.shape = output_shape.data();
+    std::copy(
+        tensor_dims.cbegin(),
+        tensor_dims.cend(),
+        std::back_inserter(tensor_dims_int64_));
     auto* output_tensor = Output(
         i,
-        tensor_dims_int64,
+        tensor_dims_int64_,
         at::dtype(OnnxifiTypeToDataType(type)).device(CPU));
     SetOutputTensorDescriptorTypeAndBuffer(
         type, output_tensor, &tensor_descriptor);
@@ -209,6 +292,7 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
   bool ext_supported = false;
   onnxMemoryFenceV1 input_fence;
   onnxMemoryFenceV1 output_fence;
+  std::vector<int> output_batch_sizes;
 #ifdef ONNXIFI_ENABLE_EXT
   /**
    * If onnxifi extension mode is enabled,
@@ -220,6 +304,18 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
     ext_supported = true;
     output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
     output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
+    if (enable_tracing_) {
+      traces_.reset();
+      traces_ = std::shared_ptr<onnxTraceEventList>(
+          new onnxTraceEventList(), [this](onnxTraceEventList* p) {
+            if (p && onnxReleaseTraceEventsPointer_) {
+              CAFFE_ENFORCE_EQ(
+                  (*onnxReleaseTraceEventsPointer_)(p), ONNXIFI_STATUS_SUCCESS);
+            }
+            delete p;
+          });
+      traces_->numEvents = 0;
+    }
     CAFFE_ENFORCE_EQ(
         (*onnxSetIOAndRunGraphPointer_)(
             graph_,
@@ -228,8 +324,9 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
             output_desc_.size(),
             output_desc_.data(),
             &output_fence,
-            /* traceEvents */ nullptr),
+            traces_.get()),
         ONNXIFI_STATUS_SUCCESS);
+    output_batch_sizes = extractOutputBatchSizes();
     CAFFE_ENFORCE_EQ(
         lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
@@ -261,6 +358,7 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
+    output_batch_sizes = extractOutputBatchSizes();
     CAFFE_ENFORCE_EQ(
         lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
 
@@ -270,10 +368,15 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(
         lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
   }
+
+  if (adjust_output_batch_) {
+    maybeAdjustOutputBatchSizes(output_batch_sizes);
+  }
+  enable_tracing_ = false;
   return true;
 }
 
-REGISTER_CPU_OPERATOR(Onnxifi, OnnxifiOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(Onnxifi, OnnxifiOp<CPUContext>);
 OPERATOR_SCHEMA(Onnxifi)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
@@ -285,5 +388,8 @@ OPERATOR_SCHEMA(Onnxifi)
         "(string default=\"\") Serialized ONNX model to be converted to backend representation")
     .Arg(
         "initializers",
-        "Initialization pair indicating the mapping of the name between NetDef and ONNX model");
+        "Initialization pair indicating the mapping of the name between NetDef and ONNX model")
+    .Arg(
+        "output_resize_hints",
+        "A list of key/value pairs indicating which input index to look up for real batch size for the given max output batch size");
 } // namespace caffe2

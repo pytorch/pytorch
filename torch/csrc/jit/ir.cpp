@@ -10,7 +10,6 @@
 #include <iostream>
 #include <set>
 #include <sstream>
-#include <stack>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -27,15 +26,12 @@ void printQuotedString(std::ostream& stmt, const std::string& str);
 static constexpr topo_position_t kLowerBound = INT64_MIN;
 static constexpr topo_position_t kUpperBound = INT64_MAX;
 static constexpr topo_position_t kMidPoint = 0;
+
 // How far away to space nodes that are appended to the graph.
 // should be 2^n, where:
 //   - n is the maximum number of repeated insertions without a re-index
 //   - 2^(64-n) is the maximum number of appends to the end without reindex
 static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
-
-// Sigh, see
-// https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
-constexpr Symbol PythonOp::Kind;
 
 static void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->uniqueName();
@@ -286,19 +282,6 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
   }
   */
   return out;
-}
-
-std::ostream& Graph::prettyPrint(std::ostream& out) {
-  std::vector<at::Tensor> tensor_table;
-  std::vector<ClassTypePtr> class_table;
-  PythonPrint(out, *this, tensor_table, class_table);
-  return out;
-}
-
-void Graph::dumpPretty() {
-  std::vector<at::Tensor> tensor_table;
-  std::vector<ClassTypePtr> class_table;
-  PythonPrint(std::cout, *this, tensor_table, class_table);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -553,9 +536,15 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
 
 Block::Block(Graph* graph_, Node* node_)
     : graph_(graph_),
-      output_(initOutput(graph_->create(prim::Return, 0))),
+      output_(graph_->create(prim::Return, 0)),
       input_(graph_->create(prim::Param, 0)),
       owning_node_(node_) {
+
+  input_->next() = output_;
+  input_->prev() = output_;
+  output_->next() = input_;
+  output_->prev() = input_;
+
   graph_->all_blocks.emplace(this);
   output_->owning_block_ = this;
   output_->topo_position_ = kUpperBound;
@@ -624,6 +613,33 @@ std::shared_ptr<Graph> Graph::copy() {
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
+}
+
+void Block::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
+  for (Value* input : inputs()) {
+    input->setType(type_map(input->type()));
+  }
+  for (Node* node : nodes()) {
+    for (Value* output : node->outputs()) {
+      output->setType(type_map(output->type()));
+    }
+    for (Block* sub_block : node->blocks()) {
+      sub_block->remapTypes(type_map);
+    }
+    for (Symbol name : node->attributeNames()) {
+      if (node->kindOf(name) == AttributeKind::g) {
+        node->g(name)->remapTypes(type_map);
+      } else if (node->kindOf(name) == AttributeKind::gs) {
+        for (const auto& g : node->gs(name)) {
+          g->remapTypes(type_map);
+        }
+      }
+    }
+  }
+}
+
+void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
+  block()->remapTypes(type_map);
 }
 
 bool Value::mustBeNone() const {
@@ -833,6 +849,7 @@ bool Node::hasSideEffects() const {
     case prim::RaiseException:
     case prim::SetAttr:
     case aten::warn:
+    case aten::manual_seed:
     case prim::AddStatValue:
     case prim::TimePoint:
       return true;
@@ -860,13 +877,15 @@ bool Node::hasSideEffects() const {
 // If we ever run out of space (by, e.g. inserting too much in place), we
 // reindex by spreading out all the nodes again.
 void Node::assignTopoPosition() {
-  auto returnNode = owningBlock()->return_node();
+  bool is_first = prev() == owningBlock()->param_node();
+  bool is_last = next() == owningBlock()->return_node();
+
   const auto prevPos = prev()->topo_position_;
   const auto nextPos = next()->topo_position_;
 
   // Append to the end of the graph
-  if (next() == returnNode) {
-    if (next() == prev()) {
+  if (is_last) {
+    if (is_first) {
       // the node list is empty, assign the first position
       topo_position_ = kMidPoint;
       return;
@@ -881,14 +900,13 @@ void Node::assignTopoPosition() {
     topo_position_ = prevPos + kAppendInterval;
 
     // Prepend to the graph
-  } else if (prev() == returnNode) {
+  } else if (is_first) {
     // next() is the first element in the block list
     if (nextPos <= (kLowerBound + kAppendInterval)) {
       // we're running off the edge
       owningBlock()->reIndexTopology();
       return;
     }
-
     topo_position_ = nextPos - kAppendInterval;
 
     // insert between two existing nodes
@@ -1088,6 +1106,7 @@ Node* Node::insertBefore(Node* n) {
 Node* Node::insertAfter(Node* n) {
   AT_ASSERT(!inBlockList() && n->inBlockList());
   AT_ASSERT(n->owningBlock());
+  AT_ASSERTM(n->kind() != prim::Return, "Attempting to insert a Node after the Return node or before the Param node");
   this->owning_block_ = n->owningBlock();
   Node* next = n->next();
   n->next() = this;
@@ -1208,8 +1227,8 @@ Node* Graph::createNone(TypePtr typ) {
   return n;
 }
 
-Node* Graph::createFusionGroup() {
-  auto n = create(prim::FusionGroup, 0);
+Node* Graph::createWithSubgraph(Symbol kind) {
+  auto n = create(kind, 0);
   n->g_(attr::Subgraph, std::make_shared<Graph>(current_scope()));
   return n;
 }
@@ -1233,11 +1252,12 @@ Node* Graph::createTupleUnpack(Value* v) {
   return n;
 }
 
-Node* Graph::createTupleIndex(Value* tup, int64_t index) {
-  auto n = create(prim::TupleIndex, {tup});
-  n->i_(attr::index, index);
-  auto tuple_type = tup->type()->expect<TupleType>();
-  n->output()->setType(tuple_type->elements().at(index));
+Node* Graph::createTupleIndex(
+    Value* tup,
+    Value* idx,
+    const TypePtr& output_type) {
+  auto n = create(prim::TupleIndex, {tup, idx});
+  n->output()->setType(output_type);
   return n;
 }
 
@@ -1458,5 +1478,15 @@ std::vector<Value*> inlineCallTo(
   return outputs;
 }
 
+void ProfileOp::cloneFrom(Node* other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<ProfileOp>();
+  this->callback_ = other->getCallback();
+}
+Node* ProfileOp::allocNewInstance(Graph* g) {
+  return new ProfileOp(g, {nullptr});
+}
+
+constexpr Symbol ProfileOp::Kind;
 } // namespace jit
 } // namespace torch

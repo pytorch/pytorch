@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/jit/script/resolver.h>
 
 namespace torch {
 namespace jit {
@@ -64,7 +65,7 @@ struct BuiltinFunctionRegistry {
   void loadSource(const std::string& source) {
     std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
     modules.emplace_back(cu);
-    cu->define(source, script::nativeResolver, /*self=*/nullptr);
+    cu->define(source, script::nativeResolver(), /*self=*/nullptr);
     for (auto& method : cu->get_functions()) {
       builtins_by_name[Symbol::fromQualString("aten::" + method->name())]
           .push_back(method.get());
@@ -100,7 +101,7 @@ struct BuiltinFunctionRegistry {
   std::unordered_map<Symbol, std::vector<Function*>> builtins_by_name;
 };
 
-TORCH_API const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
+const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
   static BuiltinFunctionRegistry registry;
   return registry.getAllBuiltinFunctionsFor(name);
 }

@@ -50,6 +50,10 @@ struct Argument {
     return alias_info_;
   }
 
+  Argument cloneWithType(TypePtr new_type) const {
+    return Argument(name_, new_type, N_, default_value_, kwarg_only_, alias_info_);
+  }
+
 private:
   std::string name_;
   TypePtr type_;
@@ -84,6 +88,11 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
           && lhs.alias_info() == rhs.alias_info();
 }
 
+struct OperatorName final {
+  std::string name;
+  std::string overload_name;
+};
+
 struct FunctionSchema {
   FunctionSchema(
       std::string name,
@@ -92,8 +101,7 @@ struct FunctionSchema {
       std::vector<Argument> returns,
       bool is_vararg = false,
       bool is_varret = false)
-      : name_(std::move(name)),
-        overload_name_(std::move(overload_name)),
+      : name_({std::move(name), std::move(overload_name)}),
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
@@ -105,8 +113,7 @@ struct FunctionSchema {
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
-      bool is_varret = false,
-      std::vector<std::string> writes = {})
+      bool is_varret = false)
       : FunctionSchema(
             name.toQualString(),
             std::move(overload_name),
@@ -116,24 +123,23 @@ struct FunctionSchema {
             is_varret) {}
 
 private:
-  const std::string name_;
-  const std::string overload_name_;
-  const std::vector<Argument> arguments_;
-  const std::vector<Argument> returns_;
+  OperatorName name_;
+  std::vector<Argument> arguments_;
+  std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
   // after the argument specified in arguments
   // currently this is used primarily to represent 'primtive' operators whose
   // arguments are not checked by schema
-  const bool is_vararg_;
-  const bool is_varret_;
+  bool is_vararg_;
+  bool is_varret_;
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
 public:
   const std::string& name() const {
-    return name_;
+    return name_.name;
   }
   const std::string& overload_name() const {
-    return overload_name_;
+    return name_.overload_name;
   }
   const std::vector<Argument>& arguments() const {
     return arguments_;
@@ -149,7 +155,7 @@ public:
   }
   bool is_mutable() const {
     // see [custom operator aliasing]
-    const auto kind = Symbol::fromQualString(name_);
+    const auto kind = Symbol::fromQualString(name_.name);
     const auto is_custom_op = !kind.is_aten() && !kind.is_prim();
     return is_custom_op ||
         std::any_of(
@@ -175,6 +181,8 @@ public:
         is_vararg(),
         is_varret());
   }
+
+  FunctionSchema cloneWithRemappedTypes(const std::function<TypePtr(TypePtr)> type_map) const;
 
   // Check that inputs have the correct types and appends any missing default
   // values.
