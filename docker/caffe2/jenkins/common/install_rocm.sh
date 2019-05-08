@@ -76,8 +76,8 @@ install_centos() {
                    rocsparse \
                    hipsparse \
                    rocrand \
-                   rccl \
-                   Thrust
+                   hip-thrust \
+                   rccl
 }
  
 # Install Python packages depending on the base OS
