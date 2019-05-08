@@ -244,7 +244,6 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
 
 void PeepholeOptimize(Block* block, bool addmm_fusion_enabled) {
   PeepholeOptimizeImpl(block, addmm_fusion_enabled);
-  // Eliminate dead code created by any peephole passes we've just done
   EliminateDeadCode(block);
 }
 
