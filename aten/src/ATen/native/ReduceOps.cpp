@@ -119,21 +119,16 @@ static std::unique_ptr<TensorIterator> make_reduction(
     bool keepdim, ScalarType dtype)
 {
   // check that result type and dtype match if provided
-  AT_CHECK(
-      !result1.defined() || result1.type().scalarType() == dtype,
-      name, ": provided dtype must match dtype of result. Got ",
-      toString(result1.type().scalarType()),
-      " and ",
-      toString(dtype),
-      ".");
-
-  AT_CHECK(
-      !result2.defined() || result2.type().scalarType() == dtype,
-      name, ": provided dtype must match dtype of result. Got ",
-      toString(result2.type().scalarType()),
-      " and ",
-      toString(dtype),
-      ".");
+  for (const Tensor *t: {&result1, &result2}) {
+    const Tensor& result = *t;
+    AT_CHECK(
+        !result.defined() || result.type().scalarType() == dtype,
+        name, ": provided dtype must match dtype of result. Got ",
+        toString(result.type().scalarType()),
+        " and ",
+        toString(dtype),
+        ".");
+  }
 
   int64_t ndim = self.dim();
   DimMask mask = make_dim_mask(dim, ndim);
@@ -145,7 +140,7 @@ static std::unique_ptr<TensorIterator> make_reduction(
 
   // special case for type promotion in mixed precision, improves computational
   // efficiency.
-  // not generalize this to common mismatched input/output types to avoid cross
+  // We don't generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
   if (self.type().scalarType() == dtype ||
       (self.is_cuda() && self.type().scalarType() == kHalf && dtype == kFloat)) {

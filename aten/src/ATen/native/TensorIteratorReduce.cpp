@@ -117,8 +117,8 @@ static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop) {
 }
 
 void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop, bool parallelize) {
-  AT_ASSERT(ntensors() - num_outputs_ == 1); //Number of inputs = 1
-  AT_ASSERT(num_outputs_ >= 1);
+  AT_ASSERT(ninputs() == 1);
+  AT_ASSERT(noutputs() >= 1);
 
   auto shape = this->shape();
   if (output(0).numel() == 0) {

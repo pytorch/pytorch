@@ -154,6 +154,7 @@ struct CAFFE2_API TensorIterator {
   int64_t numel() const;
   int ntensors() const { return operands_.size(); }
   int noutputs() const { return num_outputs_; }
+  int ninputs() const { return ntensors() - noutputs(); }
 
   /// number of elements in the output operand. this is the same as numel() for
   /// operations that are not reductions.

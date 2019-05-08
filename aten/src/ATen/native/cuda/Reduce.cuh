@@ -281,7 +281,7 @@ struct ReduceOp {
   InputCalculator input_calc;
   OutputCalculator output_calc;
   const void* src;
-  const char* dst[2]; //TODO: make it accept more then two destinations
+  const char* dst[2]; //it accepts at most two destinations
   // acc_buf used for accumulation among sub Tensor Iterator when accumulation on
   // output is not permissible
   void* acc_buf;
