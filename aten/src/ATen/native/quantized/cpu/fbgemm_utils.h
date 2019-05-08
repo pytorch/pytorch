@@ -21,7 +21,11 @@ struct FBGEMM_API PackedFCWeight {
 };
 
 // Convert the weight from uint8 to int8.
-static void convert_uint8_int8(int K, int N, const uint8_t* src_uint8, int8_t* dst_int8) {
+static void convert_uint8_int8(
+    int K,
+    int N,
+    const uint8_t* src_uint8,
+    int8_t* dst_int8) {
   for (size_t i = 0; i < N; ++i) {
     for (size_t j = 0; j < K; ++j) {
       dst_int8[i * K + j] =
