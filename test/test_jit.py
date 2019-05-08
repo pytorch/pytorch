@@ -689,7 +689,7 @@ class JitTestCase(TestCase):
 
 
 # has to be at top level or Pickle complains
-class FooToPickle(torch.nn.Module):
+class FooToPickle(torch.nn.Module):  # noqa T484
     def __init__(self):
         super(FooToPickle, self).__init__()
         self.bar = torch.jit.ScriptModule()
@@ -3685,7 +3685,7 @@ a")
             @torch.jit.script
             def func(a, b):
                 # type: (float, Tensor) -> Tensor
-                return a ** (b * 2 + 1)
+                return a ** (b * 2 + 1)  # noqa T484
 
             a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
             func(2, a).backward()
@@ -4204,7 +4204,7 @@ a")
         @torch.jit.script
         def func(x, y):
             # type: (Tensor, int) -> List[Tensor]
-            return torch.unbind(x, y)
+            return torch.unbind(x, y)  # noqa T484
         with disable_autodiff_subgraph_inlining():
             x = torch.rand([2, 2]).requires_grad_()
             y = 0
@@ -4222,7 +4222,7 @@ a")
         @torch.jit.script
         def func(a):
             # type: (List[Tensor]) -> List[Tensor]
-            return torch.meshgrid(a)
+            return torch.meshgrid(a)  # noqa T484
         with disable_autodiff_subgraph_inlining():
             a = torch.tensor([1.0, 2, 3]).requires_grad_()
             b = torch.tensor([1.0, 2, 3, 4]).requires_grad_()
@@ -6310,7 +6310,7 @@ a")
         def test_dtype(inp_dtype):
             # type: (int) -> Tuple[Tensor, Tensor]
             a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
-            return a, torch.tensor(1.0, dtype=inp_dtype)
+            return a, torch.tensor(1.0, dtype=inp_dtype)  # noqa T484
 
         test_dtype(5)
         g = test_dtype.graph_for(5)
@@ -6322,9 +6322,9 @@ a")
         def test(b):
             # type: (bool) -> Tuple[Tensor, Tensor, Tensor]
             a = torch.tensor(1., requires_grad=b)
-            b = torch.tensor(1., requires_grad=True)
+            b = torch.tensor(1., requires_grad=True)  # noqa T484
             c = torch.tensor(1., requires_grad=False)
-            return a, b, c
+            return a, b, c  # noqa T484
 
         g = test.graph_for(True)
         out = next(g.outputs())
@@ -7516,7 +7516,7 @@ a")
         v = torch.zeros(1, 1)
         self.assertEqual(torch.cat([v, v, v], dim=1), M()(v))
 
-    class StarTestSumStarred(torch.nn.Module):
+    class StarTestSumStarred(torch.nn.Module):  # noqa T484
         def __init__(self):
             super(TestScript.StarTestSumStarred, self).__init__()
 
@@ -7526,7 +7526,7 @@ a")
                 output += inputs[i]
             return output
 
-    class StarTestReturnThree(torch.nn.Module):
+    class StarTestReturnThree(torch.nn.Module):  # noqa T484
         def __init__(self):
             super(TestScript.StarTestReturnThree, self).__init__()
 
@@ -7567,7 +7567,7 @@ a")
         m = M2()
         self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
 
-    class StarTestSumAndReturnThree(torch.nn.Module):
+    class StarTestSumAndReturnThree(torch.nn.Module):  # noqa T484
         def __init__(self):
             super(TestScript.StarTestSumAndReturnThree, self).__init__()
 
@@ -8809,7 +8809,7 @@ a")
     def test_ellipsis_mid(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[2, ..., 0:4, 4:8].size()
+            return x[2, ..., 0:4, 4:8].size()  # noqa T484
 
         dummy = torch.zeros(8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
@@ -8817,7 +8817,7 @@ a")
     def test_ellipsis_mid_select(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[2, ..., 4, 4, 4:8, 2].size()
+            return x[2, ..., 4, 4, 4:8, 2].size()  # noqa T484
 
         dummy = torch.zeros(8, 8, 8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
@@ -8825,14 +8825,14 @@ a")
     def test_ellipsis_start(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[..., 0:4, 4:8].size()
+            return x[..., 0:4, 4:8].size()  # noqa T484
         dummy = torch.zeros(8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
 
     def test_ellipsis_end(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[0:4, 2, ...].size()
+            return x[0:4, 2, ...].size()  # noqa T484
         dummy = torch.zeros(8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
 
@@ -11547,7 +11547,7 @@ a")
 
         def index_str_to_tensor(s):
             # type: (str) -> int
-            return torch.tensor(ord(s))
+            return torch.tensor(ord(s))  # noqa T484
 
         s = u'\u00a3'.encode('utf8')[:1]
         self.checkScript(index_str_to_tensor, (s,))
@@ -14806,11 +14806,11 @@ class TestClassType(JitTestCase):
                 # type: (int) -> int
                 return self.x % other
 
-            def __ne__(self, other):
+            def __ne__(self, other):  # noqa T484
                 # type: (int) -> bool
                 return self.x != other
 
-            def __eq__(self, other):
+            def __eq__(self, other):  # noqa T484
                 # type: (int) -> bool
                 return self.x == other
 
