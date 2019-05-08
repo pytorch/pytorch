@@ -260,8 +260,16 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
     return (PyObject *) self;
   }
 
-  // file is backed by a fd
-  int fd = PyObject_AsFileDescriptor(file);
+  // file is backed by a fd, flush python-side handle first
+  const auto flush_return = PyObject_CallMethod(file, "flush", "");
+    if (flush_return == nullptr) {
+        return nullptr;
+    }
+  Py_DECREF(flush_return);
+  const int fd = PyObject_AsFileDescriptor(file);
+  // store incoming position of file handle, this
+  // is likely to differ from 0 and offset due to buffering
+  const auto original_pos = lseek(fd, 0, SEEK_CUR);
   if (offset != Py_None) {
     lseek(fd, THPUtils_unpackLong(offset), SEEK_SET);
   }
@@ -271,6 +279,17 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
   if (storage == nullptr)
     return nullptr;
   Py_INCREF(self);
+
+  // the file descriptor is returned to original position
+  const auto current_pos = lseek(fd, 0, SEEK_CUR);
+  lseek(fd, original_pos, SEEK_SET);
+  // the file handle at python call-site needs updating to the
+  // advanced postion
+  const auto seek_return = PyObject_CallMethod(file, "seek", "li", current_pos, 0);
+  if (seek_return == nullptr) {
+      return nullptr;
+  }
+  Py_DECREF(seek_return);
 
   return (PyObject *) self;
   END_HANDLE_TH_ERRORS
