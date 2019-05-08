@@ -56,22 +56,15 @@ class TORCH_API SubgraphRewriter {
 
   /** Register a custom rewrite pattern.
    *
-   * The method takes four parameters specifying the pattern:
-   * \p PATTERN - IR string with representing the pattern subgraph.
-   * \p FUSED_NODE_NAME - name of the node that will be created to replace
-   * matches of the pattern. This will later be generalized to support arbitrary
-   * replacement subgraphs, not just a single-node graphs.
-   * \p INPUTS - a list of names of the values from the pattern IR string that
-   * should be used as inputs of the new subgraph nodes.
-   * \p OUTPUT - similar list for outputs.
+   * The method takes two parameters specifying the pattern:
+   * \p PATTERN - IR string representing the pattern subgraph.
+   * \p REPLACEMENT - IR stringn representing the replacement subgraph.
    *
    * See examples of pattern registering in `RegisterDefaultPatterns`.
    */
   void RegisterRewritePattern(
       const std::string& pattern,
-      const std::string& fused_node_name,
-      std::vector<std::string> inputs,
-      std::vector<std::string> outputs);
+      const std::string& replacement);
 
  private:
   std::vector<RewritePatternDescr> patterns_;
@@ -90,10 +83,7 @@ class TORCH_API SubgraphRewriter {
  */
 struct RewritePatternDescr {
   std::string pattern;
-  std::string fused_node_name; // TODO: generalize it to handle arbitrary
-                               // subgraphs rather than a single node
-  std::vector<std::string> inputs;
-  std::vector<std::string> outputs;
+  std::string replacement;
 };
 
 } // namespace jit
