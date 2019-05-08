@@ -9,23 +9,12 @@
 namespace torch {
 namespace jit {
 
-static bool DecomposeOps(Block* block) {
-  static script::CompilationUnit decompose_funcs(R"SCRIPT(
-      def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]):
-          output = input.matmul(weight.t())
-          if bias is not None:
-              output += bias
-          return output
-
-      def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: number = 1.0, alpha: number = 1.0):
-          return self + mat1.mm(mat2)
-      )SCRIPT");
-
+bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
   bool decomposed = false;
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
       ++it) {
     for (auto sub : it->blocks()) {
-      DecomposeOps(sub);
+      DecomposeOps(sub, decompose_funcs);
     }
     if (it->matches("aten::linear(Tensor input, Tensor weight, Tensor? bias) -> Tensor")) {
       Value* input = it->namedInput(attr::input);
@@ -87,7 +76,17 @@ static bool DecomposeOps(Block* block) {
 }
 
 void DecomposeOps(std::shared_ptr<Graph>& graph) {
-  bool is_decomposed = DecomposeOps(graph->block());
+  static script::CompilationUnit decompose_funcs(R"SCRIPT(
+      def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+          output = input.matmul(weight.t())
+          if bias is not None:
+              output += bias
+          return output
+
+      def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: number = 1.0, alpha: number = 1.0):
+          return self + mat1.mm(mat2)
+      )SCRIPT");
+  bool is_decomposed = DecomposeOps(graph->block(), decompose_funcs);
   if (is_decomposed) {
     // we only re-run those passes when the graph get decomposed
     PropagateInputShapes(graph);

@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include <torch/csrc/jit/script/lexer.h>
