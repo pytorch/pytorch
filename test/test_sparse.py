@@ -267,7 +267,7 @@ class TestSparse(TestCase):
             test_tensor(x, res)
 
     # half tensors on cpu don't implement to_dense, so need to convert to float
-    def _half_to_dense_safe(self, tensor):
+    def _to_dense_half_safe(self, tensor):
         if(tensor.dtype == torch.half and tensor.device.type == 'cpu'):
             return tensor.to(torch.float).to_dense().to(torch.half)
         else:
@@ -284,9 +284,9 @@ class TestSparse(TestCase):
                     expected, _, _ = self._gen_sparse(dim, nnz, shape)
                     expected = expected.to(dtype)
 
-                    d = self._half_to_dense_safe(expected)
+                    d = self._to_dense_half_safe(expected)
                     result = d.to_sparse(dim)
-                    self.assertEqual(d, self._half_to_dense_safe(result))  # == not implemented for sparse tensors yet
+                    self.assertEqual(d, self._to_dense_half_safe(result))  # == not implemented for sparse tensors yet
                     self.assertEqual(expected.size(), result.size())
                     self.assertEqual(dim, result.sparse_dim())
 
