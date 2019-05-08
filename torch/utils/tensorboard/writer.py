@@ -710,16 +710,19 @@ class SummaryWriter(object):
     def add_pr_curve(self, tag, labels, predictions, global_step=None,
                      num_thresholds=127, weights=None, walltime=None):
         """Adds precision recall curve.
-        Plotting a precision-recall curve lets you understand you model's performance under different
-        threshold settings. With this function, you provide the ground truth labeling (T/F) and
-        prediction confidence (usually the output of your model) for each target. The TensorBoard UI
+        Plotting a precision-recall curve lets you understand your model's
+        performance under different threshold settings. With this function,
+        you provide the ground truth labeling (T/F) and prediction confidence
+        (usually the output of your model) for each target. The TensorBoard UI
         will let you choose the threshold interactively.
 
         Args:
             tag (string): Data identifier
-            labels (torch.Tensor, numpy.array, or string/blobname): Ground truth data. Binary label for each element.
+            labels (torch.Tensor, numpy.array, or string/blobname):
+              Ground truth data. Binary label for each element.
             predictions (torch.Tensor, numpy.array, or string/blobname):
-            The probability that an element be classified as true. Value should in [0, 1]
+              The probability that an element be classified as true.
+              Value should in [0, 1]
             global_step (int): Global step value to record
             num_thresholds (int): Number of thresholds used to draw the curve.
             walltime (float): Optional override default walltime (time.time())
