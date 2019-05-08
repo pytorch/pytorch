@@ -1,6 +1,5 @@
 #pragma once
 #include <ATen/ATen.h>
-#include <ATen/Parallel.h>
 
 #include <cstddef>
 #include <exception>

@@ -36,6 +36,10 @@ class C10_API TaskThreadPoolBase {
   virtual bool inThreadPool() const = 0;
 
   virtual ~TaskThreadPoolBase() noexcept {}
+
+  static size_t defaultNumThreads() {
+    return std::thread::hardware_concurrency();
+  }
 };
 
 class C10_API ThreadPool : public c10::TaskThreadPoolBase {
@@ -66,7 +70,7 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
   ThreadPool() = delete;
 
   explicit ThreadPool(
-      std::size_t pool_size,
+      int pool_size,
       int numa_node_id = -1);
 
   ~ThreadPool();
