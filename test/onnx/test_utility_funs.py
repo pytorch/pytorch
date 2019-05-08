@@ -39,7 +39,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         x = torch.ones(3, 2)
-        graph, _, __ = utils._model_to_graph(TransposeModule(), (x, ), None,
+        graph, _, __ = utils._model_to_graph(TransposeModule(), (x, ),
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
@@ -57,7 +57,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         x = torch.ones(1, 3)
-        graph, _, __ = utils._model_to_graph(SliceModule(), (x, ), None,
+        graph, _, __ = utils._model_to_graph(SliceModule(), (x, ),
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
@@ -75,7 +75,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         x = torch.ones(1, 2, 3)
-        graph, _, __ = utils._model_to_graph(UnsqueezeModule(), (x, ), None,
+        graph, _, __ = utils._model_to_graph(UnsqueezeModule(), (x, ),
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
@@ -94,7 +94,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         x = torch.ones(2, 3)
-        graph, _, __ = utils._model_to_graph(ConcatModule(), (x, ), None,
+        graph, _, __ = utils._model_to_graph(ConcatModule(), (x, ),
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
@@ -115,7 +115,7 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(9)
         input = torch.randn(5, 3, 7)
         h0 = torch.randn(1, 3, 3)
-        graph, _, __ = utils._model_to_graph(GruNet(), (input, h0), None,
+        graph, _, __ = utils._model_to_graph(GruNet(), (input, h0),
                                              do_constant_folding=True)
         for node in graph.nodes():
             assert node.kind() != "onnx::Slice"
@@ -134,7 +134,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         A = torch.randn(2, 3)
-        graph, _, __ = utils._model_to_graph(MatMulNet(), (A), None,
+        graph, _, __ = utils._model_to_graph(MatMulNet(), (A),
                                              do_constant_folding=True)
         for node in graph.nodes():
             assert node.kind() != "onnx::Transpose"

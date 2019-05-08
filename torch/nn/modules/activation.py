@@ -53,14 +53,14 @@ class Threshold(Module):
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'threshold={}, value={}{}'.format(
             self.threshold, self.value, inplace_str
         )
 
 
 @weak_module
-class ReLU(Threshold):
+class ReLU(Module):
     r"""Applies the rectified linear unit function element-wise:
 
     :math:`\text{ReLU}(x)= \max(0, x)`
@@ -88,12 +88,18 @@ class ReLU(Threshold):
         >>> input = torch.randn(2).unsqueeze(0)
         >>> output = torch.cat((m(input),m(-input)))
     """
+    __constants__ = ['inplace']
 
     def __init__(self, inplace=False):
-        super(ReLU, self).__init__(0., 0., inplace)
+        super(ReLU, self).__init__()
+        self.inplace = inplace
+
+    @weak_script_method
+    def forward(self, input):
+        return F.relu(input, inplace=self.inplace)
 
     def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
@@ -150,7 +156,7 @@ class RReLU(Module):
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'lower={}, upper={}{}'.format(self.lower, self.upper, inplace_str)
 
 
@@ -212,7 +218,7 @@ class Hardtanh(Module):
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'min_val={}, max_val={}{}'.format(
             self.min_val, self.max_val, inplace_str
         )
@@ -246,7 +252,7 @@ class ReLU6(Hardtanh):
         super(ReLU6, self).__init__(0., 6., inplace)
 
     def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
@@ -339,7 +345,7 @@ class ELU(Module):
         return F.elu(input, self.alpha, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
@@ -384,7 +390,7 @@ class CELU(Module):
         return F.celu(input, self.alpha, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
@@ -429,7 +435,7 @@ class SELU(Module):
         return F.selu(input, self.inplace)
 
     def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
@@ -555,7 +561,7 @@ class LeakyReLU(Module):
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
 
 
@@ -683,8 +689,11 @@ class MultiheadAttention(Module):
         \text{where} head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)
 
     Args:
-        embed_dim: total dimension of the model
-        num_heads: parallel attention layers, or heads
+        embed_dim: total dimension of the model.
+        num_heads: parallel attention heads.
+        add_bias_kv: add bias to the key and value sequences at dim=0.
+        add_zero_attn: add a new batch of zeros to the key and 
+                       value sequences at dim=1.
 
     Examples::
 
@@ -735,19 +744,37 @@ class MultiheadAttention(Module):
     @weak_script_method
     def forward(self, query, key, value, key_padding_mask=None, incremental_state=None,
                 need_weights=True, static_kv=False, attn_mask=None):
-        """
-        Inputs of forward function
-            query: [target length, batch size, embed dim]
-            key: [sequence length, batch size, embed dim]
-            value: [sequence length, batch size, embed dim]
-            key_padding_mask: if True, mask padding based on batch size
-            incremental_state: if provided, previous time steps are cashed
-            need_weights: output attn_output_weights
-            static_kv: key and value are static
+        r"""
+    Args:
+        query, key, value: map a query and a set of key-value pairs to an output. 
+            See "Attention Is All You Need" for more details. 
+        key_padding_mask: if provided, specified padding elements in the key will 
+            be ignored by the attention.
+        incremental_state: if provided, previous time steps are cached.
+        need_weights: output attn_output_weights.
+        static_kv: if true, key and value are static. The key and value in previous 
+            states will be used.
+        attn_mask: mask that prevents attention to certain positions.
 
-        Outputs of forward function
-            attn_output: [target length, batch size, embed dim]
-            attn_output_weights: [batch size, target length, sequence length]
+    Shape:
+        - Inputs:
+
+        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is 
+          the embedding dimension.
+        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is 
+          the embedding dimension.
+        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is 
+          the embedding dimension.
+        - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
+        - incremental_state: a dictionary used for storing states.
+        - attn_mask: :math:`(L, L)` where L is the target sequence length.
+
+        - Outputs:
+
+        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, 
+          E is the embedding dimension.
+        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
+          L is the target sequence length, S is the source sequence length.
         """
         qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
         kv_same = key.data_ptr() == value.data_ptr()
@@ -1100,6 +1127,9 @@ class Softmax(Module):
     @weak_script_method
     def forward(self, input):
         return F.softmax(input, self.dim, _stacklevel=5)
+
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)
 
 
 @weak_module

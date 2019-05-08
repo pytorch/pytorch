@@ -59,12 +59,19 @@ void InputArchive::read(
     "'");
 }
 
-void InputArchive::read(const std::string& key, InputArchive& archive) {
+bool InputArchive::try_read(const std::string& key, InputArchive& archive) {
   if (auto named_module = module_->find_module(key)) {
     archive.module_ = std::move(named_module);
+    return true;
   } else {
-    AT_ERROR("No such serialized submodule: '", key, "'");
+    return false;
   }
+}
+
+void InputArchive::read(const std::string& key, InputArchive& archive) {
+  AT_CHECK(
+    try_read(key, archive),
+    "No such serialized submodule: '", key, "'");
 }
 
 void InputArchive::load_from(const std::string& filename,

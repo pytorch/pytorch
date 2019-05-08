@@ -350,6 +350,39 @@ void testATenNativeBatchNorm() {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
+void testCustomFusion() {
+  auto graph = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto c = a * b;
+  auto d = c * a;
+  graph->registerOutput(d.value());
+
+  torch::jit::overrideCanFuseOnCPU(true);
+  CustomFuseGraph(
+      graph,
+      [](Node* n) { return n->kind() != prim::Param; },
+      Symbol::fromQualString("prim::FusionGroup"));
+  torch::jit::overrideCanFuseOnCPU(false);
+
+  const auto& nodes = graph->nodes();
+  auto fusion_group =
+      std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
+        return node->kind() == Symbol::fromQualString("prim::FusionGroup");
+      });
+  AT_ASSERT(fusion_group != nodes.end());
+
+  auto subgraph = fusion_group->g(attr::Subgraph);
+  auto hits = 0;
+  // two multiplications
+  for (const auto& n : subgraph->nodes()) {
+    hits++;
+  }
+  AT_ASSERT(hits == 2);
+}
+
 static const auto cf_examples = R"JIT(
   def if_test(a, b):
       # FIXME: use 0 instead of a.
@@ -758,6 +791,30 @@ void testModuleDefine() {
   AT_ASSERT(result.toTensor().item<float>() == 6)
 }
 
+void testModuleConversion() {
+  auto m = std::make_shared<script::Module>();
+  {
+    // test cuda to cpu for params and buffers
+    m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
+    m->register_buffer("bar", torch::ones({}, at::kCUDA));
+    
+    m->to(at::kCUDA);
+    m->to(at::kCPU);
+    AT_ASSERT(m->get_parameter("foo").data().device().is_cpu());
+    AT_ASSERT(m->get_buffer("bar").data().device().is_cpu());
+  }
+  {
+    // test cpu to cuda for params and buffers
+    m->register_parameter("foo", torch::ones({}), false);
+    m->register_buffer("bar", torch::ones({}));
+    
+    m->to(at::kCUDA);
+    AT_ASSERT(m->get_parameter("foo").data().device().is_cuda());
+    AT_ASSERT(m->get_buffer("bar").data().device().is_cuda());
+  }
+}
+
+
 static int testPassValue = 0;
 void fakePass(std::shared_ptr<Graph>& g) {
   testPassValue++;
@@ -811,7 +868,7 @@ void testProfiler() {
   ArgumentSpecCreator arg_spec_creator(opt_graph);
   ArgumentSpec spec =
       arg_spec_creator.create(autograd::GradMode::is_enabled(), stack);
-  arg_spec_creator.setInputTypes(opt_graph, spec);
+  arg_spec_creator.specializeTypes(opt_graph, spec);
   auto pr = ProfilingRecord::instrumentGraph(g);
   Code cd(pr->profiled_graph_);
   InterpreterState is{cd};

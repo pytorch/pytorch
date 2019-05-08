@@ -15,6 +15,7 @@
 #include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
+#include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 
@@ -36,6 +37,7 @@ namespace script {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
+using ::c10::QualifiedName;
 // Map which stores filename to content.
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
