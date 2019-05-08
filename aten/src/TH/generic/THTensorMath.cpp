@@ -40,7 +40,6 @@ void THTensor_(bitor)(THTensor *r_, THTensor *t, scalar_t value)
   int64_t r_Size = THTensor_(nElement)(r_);
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
-  int serial_path = 0;
   if (r_Contig && tContig) {
     scalar_t *tp = t->data<scalar_t>();
     scalar_t *rp = r_->data<scalar_t>();
@@ -51,18 +50,7 @@ void THTensor_(bitor)(THTensor *r_, THTensor *t, scalar_t value)
       }
     });
   } else {
-#ifdef INTRA_OP_PARALLEL
-    if (at::in_parallel_region()) {
-      serial_path = 1;
-    } else {
-      TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data | value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-#else
-    serial_path = 1;
-#endif
-  }
-  if (serial_path) {
-    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = *t_data | value;);
+    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data | value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
   }
 #endif
 }
@@ -79,7 +67,6 @@ void THTensor_(bitxor)(THTensor *r_, THTensor *t, scalar_t value)
   int64_t r_Size = THTensor_(nElement)(r_);
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
-  int serial_path = 0;
   if (r_Contig && tContig) {
     scalar_t *tp = t->data<scalar_t>();
     scalar_t *rp = r_->data<scalar_t>();
@@ -90,18 +77,7 @@ void THTensor_(bitxor)(THTensor *r_, THTensor *t, scalar_t value)
       }
     });
   } else {
-#ifdef INTRA_OP_PARALLEL
-    if (at::in_parallel_region()) {
-      serial_path = 1;
-    } else {
-      TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data ^ value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-#else
-    serial_path = 1;
-#endif
-  }
-  if (serial_path) {
-    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = *t_data ^ value;);
+    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data ^ value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
   }
 #endif
 }
@@ -112,7 +88,6 @@ void THTensor_(clamp)(THTensor *r_, THTensor *t, scalar_t min_value, scalar_t ma
   int64_t r_Size = THTensor_(nElement)(r_);
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
-  int serial_path = 0;
   if (r_Contig && tContig) {
     scalar_t *tp = t->data<scalar_t>();
     scalar_t *rp = r_->data<scalar_t>();
@@ -124,18 +99,7 @@ void THTensor_(clamp)(THTensor *r_, THTensor *t, scalar_t min_value, scalar_t ma
       }
     });
   } else {
-#ifdef INTRA_OP_PARALLEL
-    if (at::in_parallel_region()) {
-      serial_path = 1;
-    } else {
-      TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (*t_data < min_value) ? min_value : (*t_data > max_value ? max_value : *t_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-#else
-    serial_path = 1;
-#endif
-  }
-  if (serial_path) {
-    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = (*t_data < min_value) ? min_value : (*t_data > max_value ? max_value : *t_data););
+    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (*t_data < min_value) ? min_value : (*t_data > max_value ? max_value : *t_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
   }
 }
 
@@ -147,8 +111,7 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
   int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
-  if (srcSize == r_Size){
+  if (srcSize == r_Size) {
     if (r_Contig && tContig && srcContig) {
       if(r_ == t) {
         THBlas_(axpy)(THTensor_(nElement)(t), value, src->data<scalar_t>(), 1, r_->data<scalar_t>(), 1);
@@ -156,20 +119,9 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
         TH_TENSOR_APPLY3_CONTIG(scalar_t, r_, scalar_t, t, scalar_t, src, THVector_(cadd)(r__data, t_data, src_data, value, r__len););
       }
     } else {
-#ifdef INTRA_OP_PARALLEL
-      if (at::in_parallel_region()) {
-        serial_path = 1;
-      } else {
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data + value * *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-      }
-#else
-      serial_path = 1;
-#endif
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data + value * *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data + value * *src_data;);
   }
 }
@@ -187,25 +139,13 @@ void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
   int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
       TH_TENSOR_APPLY3_CONTIG(scalar_t, r_, scalar_t, t, scalar_t, src, THVector_(cmul)(r__data, t_data, src_data, r__len););
     } else {
-#ifdef INTRA_OP_PARALLEL
-      if (at::in_parallel_region()) {
-        serial_path = 1;
-      } else {
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-      }
-#else
-      serial_path = 1;
-#endif
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * *src_data;);
   }
 }
@@ -281,7 +221,6 @@ void THTensor_(cpow)(THTensor *r_, THTensor *t, THTensor *src)
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
   int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
       scalar_t *tp = t->data<scalar_t>();
@@ -294,20 +233,9 @@ void THTensor_(cpow)(THTensor *r_, THTensor *t, THTensor *src)
         }
       });
     } else {
-#ifdef INTRA_OP_PARALLEL
-      if (at::in_parallel_region()) {
-        serial_path = 1;
-      } else {
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = THTensor_(powOne)(*t_data, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-      }
-#else
-      serial_path = 1;
-#endif
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = THTensor_(powOne)(*t_data, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = THTensor_(powOne)(*t_data, *src_data););
   }
 }
@@ -320,25 +248,13 @@ void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
   int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
       TH_TENSOR_APPLY3_CONTIG(scalar_t, r_, scalar_t, t, scalar_t, src, THVector_(cdiv)(r__data, t_data, src_data, r__len););
     } else {
-#ifdef INTRA_OP_PARALLEL
-      if (at::in_parallel_region()) {
-        serial_path = 1;
-      } else {
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data / *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-      }
-#else
-      serial_path = 1;
-#endif
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data / *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data / *src_data;);
   }
 }
@@ -354,7 +270,6 @@ void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src)
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
   int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
       scalar_t *tp = t->data<scalar_t>();
@@ -375,28 +290,17 @@ void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src)
         }
       });
     } else {
-#ifdef INTRA_OP_PARALLEL
-      if (at::in_parallel_region()) {
-        serial_path = 1;
-      } else {
 #if defined(TH_REAL_IS_FLOAT)
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * powf(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * powf(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #elif defined(TH_REAL_IS_DOUBLE)
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * pow(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * pow(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #elif defined(TH_REAL_IS_BYTE)
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((scalar_t)*t_data) << *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((scalar_t)*t_data) << *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((ureal)*t_data) << *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#endif
-      }
-#else
-      serial_path = 1;
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((ureal)*t_data) << *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
     }
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
 #if defined(TH_REAL_IS_FLOAT)
       TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * powf(2, *src_data););
 #elif defined(TH_REAL_IS_DOUBLE)
@@ -420,7 +324,6 @@ void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src)
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
   int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
       scalar_t *tp = t->data<scalar_t>();
@@ -441,28 +344,17 @@ void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src)
         }
       });
     } else {
-#ifdef INTRA_OP_PARALLEL
-      if (at::in_parallel_region()) {
-        serial_path = 1;
-      } else {
 #if defined(TH_REAL_IS_FLOAT)
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data / powf(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data / powf(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #elif defined(TH_REAL_IS_DOUBLE)
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data / pow(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data / pow(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #elif defined(TH_REAL_IS_BYTE)
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((scalar_t)*t_data) >> *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((scalar_t)*t_data) >> *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((ureal)*t_data) >> *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#endif
-      }
-#else
-      serial_path = 1;
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((ureal)*t_data) >> *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
     }
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
 #if defined(TH_REAL_IS_FLOAT)
       TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data / powf(2, *src_data););
 #elif defined(TH_REAL_IS_DOUBLE)
@@ -483,7 +375,6 @@ void THTensor_(cfmod)(THTensor *r_, THTensor *t, THTensor *src)
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
   int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
       scalar_t *tp = t->data<scalar_t>();
@@ -500,24 +391,14 @@ void THTensor_(cfmod)(THTensor *r_, THTensor *t, THTensor *src)
         }
       });
     } else {
-#ifdef INTRA_OP_PARALLEL
-      if (at::in_parallel_region()) {
-        serial_path = 1;
-      } else {
+
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig,scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = fmod(*t_data, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig,scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = fmod(*t_data, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = (*t_data % *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#endif
-      }
-#else
-      serial_path = 1;
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = (*t_data % *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
     }
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = fmod(*t_data, *src_data););
 #else
@@ -534,7 +415,6 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
   int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
       scalar_t *tp = t->data<scalar_t>();
@@ -554,25 +434,14 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
         }
       });
     } else {
-#ifdef INTRA_OP_PARALLEL
-      if (at::in_parallel_region()) {
-        serial_path = 1;
-      } else {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data % *src_data;
-                                                     if (modulo_wrap(*r__data, *src_data)) *r__data += *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#endif
-      }
-#else
-      serial_path = 1;
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data % *src_data;
+                                                    if (modulo_wrap(*r__data, *src_data)) *r__data += *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
     }
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data););
 #else
@@ -598,7 +467,6 @@ void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src)
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
   int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
       scalar_t *tp = t->data<scalar_t>();
@@ -611,21 +479,10 @@ void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src)
         }
       });
     } else {
-#ifdef INTRA_OP_PARALLEL
-      if (at::in_parallel_region()) {
-        serial_path = 1;
-      } else {
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data & *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-      }
-#else
-      serial_path = 1;
-#endif
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data & *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
-      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data & *src_data;);
+    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data & *src_data;);
   }
 #endif
 }
@@ -644,7 +501,6 @@ void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src)
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
   int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
       scalar_t *tp = t->data<scalar_t>();
@@ -657,21 +513,10 @@ void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src)
         }
       });
     } else {
-#ifdef INTRA_OP_PARALLEL
-      if (at::in_parallel_region()) {
-        serial_path = 1;
-      } else {
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data | *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-      }
-#else
-      serial_path = 1;
-#endif
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data | *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
-      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data | *src_data;);
+    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data | *src_data;);
   }
 #endif
 }
@@ -690,7 +535,6 @@ void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src)
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
   int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
   if (srcSize == r_Size){
     if (r_Contig && tContig && srcContig) {
       scalar_t *tp = t->data<scalar_t>();
@@ -703,21 +547,10 @@ void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src)
         }
       });
     } else {
-#ifdef INTRA_OP_PARALLEL
-      if (at::in_parallel_region()) {
-        serial_path = 1;
-      } else {
-        TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data ^ *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-      }
-#else
-      serial_path = 1;
-#endif
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data ^ *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
-      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data ^ *src_data;);
+    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data ^ *src_data;);
   }
 #endif
 }
@@ -728,7 +561,6 @@ void THTensor_(tpow)(THTensor *r_, scalar_t value, THTensor *t)
   int64_t r_Size = THTensor_(nElement)(r_);
   int r_Contig = THTensor_(isContiguous)(r_);
   int tContig = THTensor_(isContiguous)(t);
-  int serial_path = 0;
   if (r_Contig && tContig) {
     scalar_t *tp = t->data<scalar_t>();
     scalar_t *rp = r_->data<scalar_t>();
@@ -739,18 +571,7 @@ void THTensor_(tpow)(THTensor *r_, scalar_t value, THTensor *t)
       }
     });
   } else {
-#ifdef INTRA_OP_PARALLEL
-    if (at::in_parallel_region()) {
-      serial_path = 1;
-    } else {
-      TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = THTensor_(powOne)(value, *t_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-#else
-    serial_path = 1;
-#endif
-  }
-  if (serial_path) {
-    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = THTensor_(powOne)(value, *t_data););
+    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = THTensor_(powOne)(value, *t_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
   }
 }
 
@@ -769,24 +590,9 @@ void THTensor_(addcmul)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src
   int r_Contig = THTensor_(isContiguous)(r_);
   int src1Contig = THTensor_(isContiguous)(src1);
   int src2Contig = THTensor_(isContiguous)(src2);
-  int serial_path = 0;
   if( (src1Size == src2Size) && (src1Size == r_Size) ){
-#ifdef INTRA_OP_PARALLEL
-    if (at::in_parallel_region()) {
-      serial_path = 1;
-    } else {
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, src1Contig, src2Contig, scalar_t, r_, scalar_t, src1, scalar_t, src2, *r__data += value * *src1_data * *src2_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-#else
-    (void)r_Contig;
-    (void)src1Contig;
-    (void)src2Contig;
-    serial_path = 1;
-#endif
+    TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, src1Contig, src2Contig, scalar_t, r_, scalar_t, src1, scalar_t, src2, *r__data += value * *src1_data * *src2_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, src1, scalar_t, src2, *r__data += value * *src1_data * *src2_data;);
   }
 }
@@ -806,24 +612,9 @@ void THTensor_(addcdiv)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src
   int r_Contig = THTensor_(isContiguous)(r_);
   int src1Contig = THTensor_(isContiguous)(src1);
   int src2Contig = THTensor_(isContiguous)(src2);
-  int serial_path = 0;
   if( (src1Size == src2Size) && (src1Size == r_Size) ){
-#ifdef INTRA_OP_PARALLEL
-    if (at::in_parallel_region()) {
-      serial_path = 1;
-    } else {
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, src1Contig, src2Contig, scalar_t, r_, scalar_t, src1, scalar_t, src2, *r__data += value * *src1_data / *src2_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-#else
-    (void)r_Contig;
-    (void)src1Contig;
-    (void)src2Contig;
-    serial_path = 1;
-#endif
+    TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, src1Contig, src2Contig, scalar_t, r_, scalar_t, src1, scalar_t, src2, *r__data += value * *src1_data / *src2_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
   } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, src1, scalar_t, src2, *r__data += value * *src1_data / *src2_data;);
   }
 }
