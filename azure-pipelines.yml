@@ -16,11 +16,11 @@ steps:
 - bash: |
     set +x
     sudo pip -q install awscli==1.16.35
-    echo $ECR_ACCESSKEY
-    export AWS_ACCESS_KEY_ID=${ECR_ACCESSKEY}
-    export AWS_SECRET_ACCESS_KEY=${ECR_SECRET}
+    echo $ACCESS_KEY_ID
+    export AWS_ACCESS_KEY_ID=${ACCESS_KEY_ID}
+    export AWS_SECRET_ACCESS_KEY=${SECRET}
     eval $(aws ecr get-login --region us-east-1 --no-include-email)
   env:
-    ACCESS_KEY_ID: $ECR_ACCESSKEY
-    SECRET: $ECR_SECRET
+    ACCESS_KEY_ID: $(ECR_ACCESSKEY)
+    SECRET: $(ECR_SECRET)
   displayName: 'try aws stuff'
