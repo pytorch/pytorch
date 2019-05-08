@@ -105,8 +105,10 @@ class Conf(object):
 
     def gen_workflow_yaml_item(self, phase):
 
+        # All jobs require the setup job
+        parameters = OrderedDict({"requires": ["setup"]})
+
         if phase == "test":
-            val = OrderedDict()
 
             # TODO When merging the caffe2 and pytorch jobs, it might be convenient for a while to make a
             #  caffe2 test job dependent on a pytorch build job. This way we could quickly dedup the repeated
@@ -114,11 +116,9 @@ class Conf(object):
             #  pytorch build job (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259452641)
 
             dependency_build = self.parent_build or self
-            val["requires"] = [dependency_build.gen_build_name("build")]
+            parameters["requires"].append(dependency_build.gen_build_name("build"))
 
-            return {self.gen_build_name(phase): val}
-        else:
-            return self.gen_build_name(phase)
+        return {self.gen_build_name(phase): parameters}
 
 
 # TODO This is a hack to special case some configs just for the workflow list
@@ -279,7 +279,7 @@ def get_workflow_list():
 
     config_list = instantiate_configs()
 
-    x = []
+    x = ["setup"]
     for conf_options in config_list:
 
         phases = conf_options.restrict_phases or dimensions.PHASES
