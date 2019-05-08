@@ -1343,12 +1343,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   virtual void set_memory_format_tag(MemoryFormat memory_format);
+
   virtual void reset_memory_format_tag() {
     memory_format_tag_ = MemoryFormat::Any;
   }
 
-
   virtual bool maybe_as_channels_last();
+
 private:
 
   // The Caffe2 Resize() method supports being called both as Resize({2,2}) as

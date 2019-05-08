@@ -1640,7 +1640,7 @@ def detach(g, input):
     return input
 
 
-def contiguous(g, input):
+def contiguous(g, input, _memory_format):
     return input
 
 
