@@ -5391,7 +5391,7 @@ a")
             return math.pow(x, y)
 
         def test_gcd(x, y):
-            # type (int, int) -> int
+            # type: (int, int) -> int
             return math.gcd(x, y)
 
         self.checkScript(test_floor, (1.5,))
