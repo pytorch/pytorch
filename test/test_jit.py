@@ -1440,56 +1440,63 @@ graph(%x : Tensor,
                    .run(str(trace.graph))
 
     def test_pattern_based_rewrite(self):
-        class testModule(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x, y, z):
-                t = x * y
-                p = t * z
-                u = p * x
-                o = u * y
-                return o
-        m = testModule()
-        torch._C._jit_pass_custom_pattern_based_rewrite("""
+        # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
+        # --> mulmul(mulmul(x,y,z), x, y)
+        input_str = """
+graph(%x, %y, %z):
+    # CHECK-NOT: aten::mul
+    # CHECK: my::fused_mulmul
+    %t = aten::mul(%x, %y)
+    %p = aten::mul(%t, %z)
+    # CHECK: my::fused_mulmul
+    %u = aten::mul(%p, %x)
+    %o = aten::mul(%u, %y)
+    return (%o)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
 graph(%a, %b, %c):
   %q = aten::mul(%a, %b)
   %r = aten::mul(%q, %c)
-  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], m._c)
-        FileCheck().check_not("aten::mul").check("my::fused_mulmul") \
-                   .check_next("my::fused_mulmul").run(str(m.graph))
+  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], graph)
+        FileCheck().run(input_str, graph)
 
         # Check that overlapping matches are handled correctly
-        class testModule2(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x, y, z):
-                t = x * y
-                p = t * z
-                u = p * x
-                return u
-        m = testModule2()
-        torch._C._jit_pass_custom_pattern_based_rewrite("""
+        # mul(mul(mul(x,y),z),x) --> mul(mulmul(x,y,z), x)
+        input_str = """
+graph(%x, %y, %z):
+    # CHECK-NOT: aten::mul
+    # CHECK: my::fused_mulmul
+    %t = aten::mul(%x, %y)
+    %p = aten::mul(%t, %z)
+    # CHECK-NEXT: aten::mul
+    %u = aten::mul(%p, %x)
+    return (%u)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
 graph(%a, %b, %c):
   %q = aten::mul(%a, %b)
   %r = aten::mul(%q, %c)
-  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], m._c)
+  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], graph)
+        FileCheck().run(input_str, graph)
 
-        FileCheck().check_not("aten::mul").check("my::fused_mulmul") \
-                   .check_next("aten::mul").run(str(m.graph))
-
-        class testModule3(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x, y, z):
-                t = x * y
-                p = t + z
-                return p
-        m = testModule3()
-        torch._C._jit_pass_custom_pattern_based_rewrite("""
+        # Check add(mul(x,y),z) --> muladd(x,y,z) replacement
+        input_str = """
+graph(%x, %y, %z):
+    # CHECK-NOT: aten::mul
+    # CHECK-NOT: aten::add
+    %c = prim::Const[value=1]()
+    %t = aten::mul(%x, %y)
+    %p = aten::add(%t, %z, %c)
+    # CHECK: my::muladd
+    # CHECK-NEXT: return
+    return (%p)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
 graph(%a, %b, %c, %d):
   %q = aten::mul(%a, %b)
   %r = aten::add(%q, %c, %d)
-  return (%r)""", "my::muladd", ["a", "b", "c", "d"], ["r"], m._c)
-        FileCheck().check_not("aten::add").check_not("aten::mul") \
-                   .check("my::muladd").check_next("return")      \
-                   .run(str(m.graph))
+  return (%r)""", "my::muladd", ["a", "b", "c", "d"], ["r"], graph)
+        FileCheck().run(input_str, graph)
 
     def test_expand_quantlint(self):
         pass

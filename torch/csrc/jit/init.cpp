@@ -189,6 +189,18 @@ void initJITBindings(PyObject* module) {
             subgraph_rewriter.runOnModule(m);
           })
       .def(
+          "_jit_pass_custom_pattern_based_rewrite_graph",
+          [](const std::string& pattern,
+             const std::string& fused_node_name,
+             std::vector<std::string> inputs,
+             std::vector<std::string> outputs,
+             std::shared_ptr<Graph> g) {
+            SubgraphRewriter subgraph_rewriter;
+            subgraph_rewriter.RegisterRewritePattern(
+                pattern, fused_node_name, inputs, outputs);
+            subgraph_rewriter.runOnGraph(g);
+          })
+      .def(
           "_jit_pass_fold_quant_inputs",
           [](std::shared_ptr<Graph>& g) {
             return FoldQuantNodesIntoInputsOutputs(g);
