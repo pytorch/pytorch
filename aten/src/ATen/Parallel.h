@@ -7,6 +7,8 @@
 #include <exception>
 
 #ifdef _OPENMP
+#define INTRA_OP_PARALLEL
+
 #include <omp.h>
 #endif
 
