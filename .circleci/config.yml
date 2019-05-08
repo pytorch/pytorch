@@ -216,7 +216,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
           # distinguish between these two so the test can pick up the correct image.
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
-            export COMMIT_DOCKER_IMAGE=namedtensor-$output_image
+            export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
@@ -243,7 +243,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         # See Note [namedtensor build image]
         output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
         if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
-          export COMMIT_DOCKER_IMAGE=namedtensor-$output_image
+          export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
         else
           export COMMIT_DOCKER_IMAGE=$output_image
         fi
