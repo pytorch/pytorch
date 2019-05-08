@@ -123,15 +123,19 @@ template<typename scalar_t,
          typename dist_t,
          typename transform_t>
 void distribution_nullary_kernel(at::TensorIterator& iter,
-                                 std::pair<uint64_t, uint64_t> seeds,
+                                 at::Generator* gen,
                                  const dist_t& dist_func,
-                                 const transform_t transform_func,
-                                 dim3 grid,
-                                 dim3 block) {
+                                 const transform_t transform_func) {
+  auto execution_policy = calc_execution_policy(iter.numel());
+  auto counter_offset = std::get<0>(execution_policy);
+  auto grid = std::get<1>(execution_policy);
+  auto block = std::get<2>(execution_policy);
+  auto seeds = next_philox_seed(gen, counter_offset);
+
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
       distribution_nullary_kernel<scalar_t, accscalar_t, unroll_factor>(sub_iter,
-        seeds, dist_func, transform_func, grid, block);
+        gen, dist_func, transform_func);
     }
     return;
   }
@@ -396,11 +400,6 @@ Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
 }
 
 static void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generator* gen) {
-  auto execution_policy = calc_execution_policy(iter.numel());
-  auto counter_offset = std::get<0>(execution_policy);
-  auto grid = std::get<1>(execution_policy);
-  auto block = std::get<2>(execution_policy);
-  auto seeds = next_philox_seed(gen, counter_offset);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "uniform_cuda", [&] {
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);
@@ -425,18 +424,14 @@ static void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, 
     };
     if (std::is_same<scalar_t, double>::value) {
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
-        seeds,
+        gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
-        uniform_func,
-        grid,
-        block);
+        uniform_func);
     } else {
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
-        seeds,
+        gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
-        uniform_func,
-        grid,
-        block);
+        uniform_func);
     }
    });
 }
