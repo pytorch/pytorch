@@ -1,5 +1,6 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
+#include <ATen/Parallel.h>
 
 #include <tuple>
 #include <vector>
@@ -37,68 +38,68 @@ static void fractional_max_pool3d_out_single_batch_frame(
   int64_t inputT, int64_t inputH, int64_t inputW,
   int64_t outputT, int64_t outputH, int64_t outputW,
   int64_t poolSizeT, int64_t poolSizeH, int64_t poolSizeW) {
-  int64_t plane;
-#pragma omp parallel for private(plane)
-  for (plane = 0; plane < numPlanes; ++plane) {
-    /* each plane contains 3 random samples,
-       one for T, one for W, and one for H */
-    scalar_t* randomSamplesForPlane = randomSamples + plane * 3;
 
-    /* Generate interval sequence */
-    auto sequenceT = generate_intervals<scalar_t>(
-        randomSamplesForPlane[0], inputT, outputT, poolSizeT);
-    auto sequenceH = generate_intervals<scalar_t>(
-        randomSamplesForPlane[1], inputH, outputH, poolSizeH);
-    auto sequenceW = generate_intervals<scalar_t>(
-        randomSamplesForPlane[2], inputW, outputW, poolSizeW);
+  at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
+    for (auto plane = start; plane < end; ++plane) {
+      /* each plane contains 3 random samples,
+         one for T, one for W, and one for H */
+      scalar_t* randomSamplesForPlane = randomSamples + plane * 3;
 
-    /* loop over output */
-    int64_t t, h, w;
+      /* Generate interval sequence */
+      auto sequenceT = generate_intervals<scalar_t>(
+          randomSamplesForPlane[0], inputT, outputT, poolSizeT);
+      auto sequenceH = generate_intervals<scalar_t>(
+          randomSamplesForPlane[1], inputH, outputH, poolSizeH);
+      auto sequenceW = generate_intervals<scalar_t>(
+          randomSamplesForPlane[2], inputW, outputW, poolSizeW);
 
-    scalar_t* inputForPlane = input + plane * inputT * inputH * inputW;
-    scalar_t* outputForPlane = output + plane * outputT * outputH * outputW;
-    int64_t* indicesForPlane = indices + plane * outputT * outputH * outputW;
+      /* loop over output */
+      int64_t t, h, w;
 
-    for (t = 0; t < outputT; ++t) {
-      int64_t inputTStart = sequenceT[t];
+      scalar_t* inputForPlane = input + plane * inputT * inputH * inputW;
+      scalar_t* outputForPlane = output + plane * outputT * outputH * outputW;
+      int64_t* indicesForPlane = indices + plane * outputT * outputH * outputW;
 
-      for (h = 0; h < outputH; ++h) {
-        int64_t inputHStart = sequenceH[h];
+      for (t = 0; t < outputT; ++t) {
+        int64_t inputTStart = sequenceT[t];
 
-        for (w = 0; w < outputW; ++w) {
-          int64_t inputWStart = sequenceW[w];
+        for (h = 0; h < outputH; ++h) {
+          int64_t inputHStart = sequenceH[h];
 
-          scalar_t maxVal = -std::numeric_limits<scalar_t>::infinity();
-          int64_t maxIndex = -1;
+          for (w = 0; w < outputW; ++w) {
+            int64_t inputWStart = sequenceW[w];
 
-          int64_t t2, h2, w2;
-          for (t2 = inputTStart; t2 < inputTStart + poolSizeT; ++t2) {
-            for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
-              for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
-                AT_ASSERT(t2 >= 0 && t2 < inputT);
-                AT_ASSERT(h2 >= 0 && h2 < inputH);
-                AT_ASSERT(w2 >= 0 && w2 < inputW);
+            scalar_t maxVal = -std::numeric_limits<scalar_t>::infinity();
+            int64_t maxIndex = -1;
 
-                int64_t planeIndex = t2 * inputH * inputW + h2 * inputW + w2;
-                scalar_t val = inputForPlane[planeIndex];
-                if (val > maxVal) {
-                  maxVal = val;
-                  maxIndex = planeIndex;
+            int64_t t2, h2, w2;
+            for (t2 = inputTStart; t2 < inputTStart + poolSizeT; ++t2) {
+              for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
+                for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
+                  AT_ASSERT(t2 >= 0 && t2 < inputT);
+                  AT_ASSERT(h2 >= 0 && h2 < inputH);
+                  AT_ASSERT(w2 >= 0 && w2 < inputW);
+
+                  int64_t planeIndex = t2 * inputH * inputW + h2 * inputW + w2;
+                  scalar_t val = inputForPlane[planeIndex];
+                  if (val > maxVal) {
+                    maxVal = val;
+                    maxIndex = planeIndex;
+                  }
                 }
               }
             }
+
+            AT_ASSERT(maxVal != -std::numeric_limits<scalar_t>::infinity());
+            AT_ASSERT(maxIndex != -1);
+
+            outputForPlane[t * outputH * outputW + h * outputW + w] = maxVal;
+            indicesForPlane[t * outputH * outputW + h * outputW + w] = maxIndex;
           }
-
-          AT_ASSERT(maxVal != -std::numeric_limits<scalar_t>::infinity());
-          AT_ASSERT(maxIndex != -1);
-
-          outputForPlane[t * outputH * outputW + h * outputW + w] = maxVal;
-          indicesForPlane[t * outputH * outputW + h * outputW + w] = maxIndex;
         }
       }
     }
-
-  }
+  });
 }
 
 template<typename scalar_t>
@@ -121,20 +122,21 @@ static void fractional_max_pool3d_out_frame(
       );
       return;
     }
-    int64_t batch;
-#pragma omp parallel for private(batch)
-    for(batch = 0; batch < numBatch; ++batch) {
-      fractional_max_pool3d_out_single_batch_frame<scalar_t>(
-        input + batch * numPlanes * inputW * inputH * inputT,
-        output + batch * numPlanes * outputW * outputH * outputT,
-        indices + batch * numPlanes * outputW * outputH * outputT,
-        randomSamples + batch * numPlanes * 3,
-        numPlanes,
-        inputT, inputH, inputW,
-        outputT, outputH, outputW,
-        poolSizeT, poolSizeH, poolSizeW
-      );
-    }
+
+    at::parallel_for(0, numBatch, 0, [&](int64_t start, int64_t end) {
+      for (auto batch = start; batch < end; ++batch) {
+        fractional_max_pool3d_out_single_batch_frame<scalar_t>(
+          input + batch * numPlanes * inputW * inputH * inputT,
+          output + batch * numPlanes * outputW * outputH * outputT,
+          indices + batch * numPlanes * outputW * outputH * outputT,
+          randomSamples + batch * numPlanes * 3,
+          numPlanes,
+          inputT, inputH, inputW,
+          outputT, outputH, outputW,
+          poolSizeT, poolSizeH, poolSizeW
+        );
+      }
+    });
   }
 
 void fractional_max_pool3d_out_cpu_template(
@@ -226,26 +228,27 @@ static void fractional_max_pool3d_backward_out_single_batch_frame(
   int64_t numPlanes,
   int64_t inputT, int64_t inputH, int64_t inputW,
   int64_t outputT, int64_t outputH, int64_t outputW) {
-  int64_t plane;
-#pragma omp parallel for private(plane)
-  for (plane = 0; plane < numPlanes; plane++) {
-    scalar_t* gradInputForPlane = gradInput + plane * inputT * inputH * inputW;
-    scalar_t* gradOutputForPlane = gradOutput +
-                plane * outputT * outputH * outputW;
-    int64_t* indicesForPlane = indices + plane * outputT * outputH * outputW;
 
-    int64_t h, w, t;
-    for (t = 0; t < outputT; ++t) {
-      for (h = 0; h < outputH; ++h) {
-        for (w = 0; w < outputW; ++w) {
-          int64_t outputIndex = t * outputH * outputW + h * outputW + w;
-          int64_t index = indicesForPlane[outputIndex];
-          AT_ASSERT(index >= 0 && index < inputT * inputH * inputW);
-          gradInputForPlane[index] += gradOutputForPlane[outputIndex];
+  at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
+    for (auto plane = start; plane < end; plane++) {
+      scalar_t* gradInputForPlane = gradInput + plane * inputT * inputH * inputW;
+      scalar_t* gradOutputForPlane = gradOutput +
+                  plane * outputT * outputH * outputW;
+      int64_t* indicesForPlane = indices + plane * outputT * outputH * outputW;
+
+      int64_t h, w, t;
+      for (t = 0; t < outputT; ++t) {
+        for (h = 0; h < outputH; ++h) {
+          for (w = 0; w < outputW; ++w) {
+            int64_t outputIndex = t * outputH * outputW + h * outputW + w;
+            int64_t index = indicesForPlane[outputIndex];
+            AT_ASSERT(index >= 0 && index < inputT * inputH * inputW);
+            gradInputForPlane[index] += gradOutputForPlane[outputIndex];
+          }
         }
       }
     }
-  }
+  });
 }
 
 template<typename scalar_t>
@@ -265,18 +268,19 @@ static void fractional_max_pool3d_backward_out_frame(
       );
       return;
     }
-    int64_t batch;
-#pragma omp parallel for private(batch)
-    for(batch = 0; batch < numBatch; ++ batch) {
-      fractional_max_pool3d_backward_out_single_batch_frame<scalar_t>(
-        gradInput + batch * numPlanes * inputW * inputH * inputT,
-        gradOutput + batch * numPlanes * outputW * outputH * outputT,
-        indices + batch * numPlanes * outputW * outputH * outputT,
-        numPlanes,
-        inputT, inputH, inputW,
-        outputT, outputH, outputW
-      );
-    }
+
+    at::parallel_for(0, numBatch, 0, [&](int64_t start, int64_t end) {
+      for (auto batch = start; batch < end; ++batch) {
+        fractional_max_pool3d_backward_out_single_batch_frame<scalar_t>(
+          gradInput + batch * numPlanes * inputW * inputH * inputT,
+          gradOutput + batch * numPlanes * outputW * outputH * outputT,
+          indices + batch * numPlanes * outputW * outputH * outputT,
+          numPlanes,
+          inputT, inputH, inputW,
+          outputT, outputH, outputW
+        );
+      }
+    });
   }
 
 
