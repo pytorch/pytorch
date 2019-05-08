@@ -172,7 +172,7 @@ class CAFFE2_API Tensor final {
   }
 
   at::Device GetDevice() const {
-    return impl_.get()->GetDevice();
+    return impl_.get()->device();
   }
 
   /**

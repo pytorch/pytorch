@@ -218,7 +218,7 @@ void testDifferentiateWithRequiresGrad() {
       at::empty_strided(2, 2, at::CPU(at::kFloat).options()), false);
 
   ArgumentSpecCreator asc(*graph);
-  asc.setInputTypes(*graph, asc.create(true, {a_var, b_var}));
+  asc.specializeTypes(*graph, asc.create(true, {a_var, b_var}));
 
   PropagateInputShapes(graph);
   PropagateRequiresGrad(graph);
