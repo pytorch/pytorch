@@ -8,6 +8,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   exit 0
 fi
 
+if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
+  # TODO: add this to docker image
+  export HCC_LAZYINIT=ON
+fi
+
 # Find where cpp tests and Caffe2 itself are installed
 if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
   # For cmake only build we install everything into /usr/local
