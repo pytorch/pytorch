@@ -465,7 +465,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(2, captured_input_list_size);
+  EXPECT_EQ(2, captured_dict_size);
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
@@ -523,7 +523,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedM
   dict.emplace("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(2, captured_input_list_size);
+  EXPECT_EQ(2, captured_dict_size);
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedMapInput_withOutput_whenRegistered_thenCanBeCalled) {
