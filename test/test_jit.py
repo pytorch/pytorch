@@ -11956,7 +11956,8 @@ a")
                 ('tensor_list', [torch.ones(2, 2) + i for i in range(4)], List[torch.Tensor]),
                 ('bool_list', [True, True, False, True], List[bool]),
                 ('float_list', [1., 2., 3., 4.], List[float]),
-                ('str_list', ['hello', 'bye'], List[str]),)
+                ('str_list', ['hello', 'bye'], List[str]),
+                ('none', None, Optional[int]),)
 
     def test_attribute_serialization(self):
         tester = self
@@ -11971,7 +11972,7 @@ a")
             def forward(self):
                 return (self.dict, self.float, self.int, self.bool, self.tuple,
                         self.list, self.int_list, self.tensor_list, self.bool_list,
-                        self.float_list, self.str_list)
+                        self.float_list, self.str_list, self.none)
 
         m = M()
         imported_m = self.getExportImportCopy(m)
@@ -12001,7 +12002,7 @@ a")
             def forward(self):
                 return (self.dict, self.float, self.int, self.bool, self.tuple,
                         self.list, self.int_list, self.tensor_list, self.bool_list,
-                        self.float_list, self.str_list)
+                        self.float_list, self.str_list, self.none)
 
         with TemporaryFileName() as fname:
             M().save(fname)
