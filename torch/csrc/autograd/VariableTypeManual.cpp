@@ -175,16 +175,16 @@ Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, in
   return as_variable_ref(t);
 }
 
-const Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos);
+Tensor VariableType::unpack(const Tensor & t, const char * name, int pos) {
+  return checked_cast_variable(t, name, pos).tensor_data();
 }
 
-Tensor & VariableType::unpack(Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos);
+Tensor VariableType::unpack(Tensor & t, const char * name, int pos) {
+  return checked_cast_variable(t, name, pos).tensor_data();
 }
 
 SparseTensorRef VariableType::unpack(SparseTensorRef t, const char * name, int pos) {
-  return SparseTensorRef(checked_cast_variable(t.tref, name, pos));
+  return SparseTensorRef(checked_cast_variable(t.tref, name, pos).tensor_data());
 }
 
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
@@ -205,7 +205,7 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
       AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " at position #", i, " "
                     "for iterable argument #", pos, " '", name, "'");
     }
-    ret[i] = static_cast<const Variable&>(t);
+    ret[i] = static_cast<const Variable&>(t).tensor_data();
   }
   return ret;
 }
@@ -245,8 +245,8 @@ Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blockin
   }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
-  auto& self_ = unpack(self, "self", 0);
-  auto& src_ = unpack(src, "src", 1);
+  auto self_ = unpack(self, "self", 0);
+  auto src_ = unpack(src, "src", 1);
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
@@ -261,6 +261,7 @@ Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blockin
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     baseType->copy_(self_, src_, non_blocking);
   }
+  as_variable_ref(self).set_data(self_);
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
   if(torch::jit::tracer::isTracing()) {
@@ -270,7 +271,7 @@ Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blockin
 }
 
 Tensor & VariableType::resize_(Tensor & self, IntArrayRef size) const {
-  auto& self_ = unpack(self, "self", 0);
+  auto self_ = unpack(self, "self", 0);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
@@ -283,12 +284,13 @@ Tensor & VariableType::resize_(Tensor & self, IntArrayRef size) const {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     baseType->resize_(self_, size);
   }
+  as_variable_ref(self).set_data(self_);
   return self;
 }
 
 Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) const {
-  auto& self_ = unpack(self, "self", 0);
-  auto& the_template_ = unpack(the_template, "the_template", 1);
+  auto self_ = unpack(self, "self", 0);
+  auto the_template_ = unpack(the_template, "the_template", 1);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
@@ -300,6 +302,7 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     baseType->resize_as_(self_, the_template_);
   }
+  as_variable_ref(self).set_data(self_);
   return self;
 }
 
@@ -343,77 +346,6 @@ Tensor & VariableType::detach_(Tensor & self) const {
     jit::tracer::addOutput(node, self);
   }
   return self;
-}
-
-Tensor VariableType::_sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, const TensorOptions & options) const {
-  RECORD_FUNCTION("_sparse_coo_tensor_with_dims_and_tensors", std::vector<c10::IValue>({indices, values}), Function::peek_at_next_sequence_nr());
-
-  // SparseTensorImpl's `set_indices_and_values_unsafe(indices, values)` function expects
-  // `indices` and `values` to not require grad. The `unpack()` function calls in the
-  // auto-generated version of this function doesn't always return `indices_` and `values_`
-  // with requires_grad=false, and we need another way to create non-requires-grad `indices_`
-  // and `values_` tensors that contains the same data as `indices` and `values`, which is
-  // achieved by using `indices`'s and `values`'s `tensor_data()`.
-  auto indices_ = as_variable_ref(indices).tensor_data();
-  auto values_ = as_variable_ref(values).tensor_data();
-  auto options_ = TensorOptions(options).is_variable(false);
-  check_no_requires_grad(indices, "indices");
-  std::shared_ptr<SparseCooTensorWithDimsAndTensorsBackward> grad_fn;
-  if (compute_requires_grad( values )) {
-    grad_fn = std::shared_ptr<SparseCooTensorWithDimsAndTensorsBackward>(new SparseCooTensorWithDimsAndTensorsBackward(), deleteFunction);
-    grad_fn->set_next_edges(collect_next_edges( values ));
-    grad_fn->indices_ = SavedVariable(indices, false);
-    grad_fn->values_sizes = values.sizes().vec();
-  }
-  torch::jit::Node* node = nullptr;
-  std::shared_ptr<jit::tracer::TracingState> tracer_state;
-  if (jit::tracer::isTracing()) {
-    tracer_state = jit::tracer::getTracingState();
-    at::Symbol op_name;
-    op_name = jit::Symbol::fromQualString("aten::_sparse_coo_tensor_with_dims_and_tensors");
-    node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
-    jit::tracer::recordSourceLocation(node);
-    jit::tracer::addInputs(node, "sparse_dim", sparse_dim);
-    jit::tracer::addInputs(node, "dense_dim", dense_dim);
-    jit::tracer::addInputs(node, "size", size);
-    jit::tracer::addInputs(node, "indices", indices);
-    jit::tracer::addInputs(node, "values", values);
-    jit::tracer::addInputs(node, "options", options);
-    tracer_state->graph->insertNode(node);
-
-    jit::tracer::setTracingState(nullptr);
-  }
-  #ifndef NDEBUG
-  c10::optional<Storage> indices__storage_saved =
-    indices_.has_storage() ? c10::optional<Storage>(indices_.storage()) : c10::nullopt;
-  c10::intrusive_ptr<TensorImpl> indices__impl_saved;
-  if (indices_.defined()) indices__impl_saved = indices_.getIntrusivePtr();
-  c10::optional<Storage> values__storage_saved =
-    values_.has_storage() ? c10::optional<Storage>(values_.storage()) : c10::nullopt;
-  c10::intrusive_ptr<TensorImpl> values__impl_saved;
-  if (values_.defined()) values__impl_saved = values_.getIntrusivePtr();
-  #endif
-  auto tmp = ([&]() {
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return baseType->_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices_, values_, options_);
-  })();
-  auto result = as_variable(tmp);
-  #ifndef NDEBUG
-  if (indices__storage_saved.has_value())
-    AT_ASSERT(indices__storage_saved.value().is_alias_of(indices_.storage()));
-  if (indices__impl_saved) AT_ASSERT(indices__impl_saved == indices_.getIntrusivePtr());
-  if (values__storage_saved.has_value())
-    AT_ASSERT(values__storage_saved.value().is_alias_of(values_.storage()));
-  if (values__impl_saved) AT_ASSERT(values__impl_saved == values_.getIntrusivePtr());
-  #endif
-  if (grad_fn) {
-      set_history(flatten_tensor_args( result ), grad_fn);
-  }
-  if (tracer_state) {
-    jit::tracer::setTracingState(std::move(tracer_state));
-    jit::tracer::addOutput(node, result);
-  }
-  return result;
 }
 
 }} // namespace torch::autograd

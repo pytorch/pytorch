@@ -29,8 +29,12 @@ from .gen_autograd_functions import uses_single_grad
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_',
-    '_sparse_coo_tensor_with_dims_and_tensors'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_'
+}
+
+# yf225 TODO: find a better name?
+SHOULD_USE_SET_DATA = {
+    '_cudnn_rnn_flatten_weight'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -152,7 +156,14 @@ ${return_type} VariableType::${method_prefix_derived}${api_name}(${type_method_f
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
-auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
+auto ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
+
+TENSOR_SET_DATA = CodeTemplate("""\
+as_variable_ref(${tensor_name}).set_data(${tensor_name}_);""")
+
+TENSORLIST_SET_DATA = CodeTemplate("""\
+for (size_t i=0; i<${tensorlist_name}.size(); i++)
+  as_variable_ref(${tensorlist_name}[i]).set_data(${tensorlist_name}_[i]);""")
 
 UNPACK_OPTIONS = CodeTemplate("""\
 auto ${arg_name}_ = TensorOptions(${arg_name}).is_variable(false);""")
@@ -878,6 +889,25 @@ def emit_body(declaration):
 
     body.append(pre_record_trace)
     body.append(emit_call(env))
+
+    # We always use tensor_data() in unpack(), and use set_data(...) at the end to assign the values back to original tensors?
+    # In this way can we maintain the invariant that "ATen doesn't operate on Variables"?
+    # (and of course we only do this for in-place ops and out-variant ops)
+    if strategy != 'use_type':
+        is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
+        if is_inplace or is_out_overload(declaration) or declaration['api_name'] in SHOULD_USE_SET_DATA:
+            unpacked_args = env['unpacked_args']
+            for arg in env.get('unpacked_args', []):
+                if arg.endswith('_') and not 'const' in env['unpacked_args_type'][arg]:
+                    simple_type = env['unpacked_args_simple_type'][arg]
+                    if simple_type == 'Tensor':
+                        body.append(TENSOR_SET_DATA.substitute(tensor_name=arg[:-1]))
+                    # yf225 TODO: since set_data() is not called on TensorList, might need to manually implement _cudnn_rnn_flatten_weight
+                    # if simple_type == 'TensorList':
+                    #     body.append(TENSORLIST_SET_DATA.substitute(tensorlist_name=arg[:-1]))
+                    # elif simple_type == 'Tensor':
+                    #     body.append(TENSOR_SET_DATA.substitute(tensor_name=arg[:-1]))
+
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
@@ -899,6 +929,7 @@ def unpack_args(env, declaration):
 
     body = []
     unpacked_args = []
+    unpacked_args_type = {}
     unpacked_args_simple_type = {}
     for i, arg in enumerate(declaration['arguments']):
         if not requires_unpack(arg):
@@ -909,14 +940,12 @@ def unpack_args(env, declaration):
         dynamic_type = arg['dynamic_type']
         if 'TensorOptions' not in dynamic_type:
             is_nullable = arg.get('is_nullable', False)
-            ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensorRef']
             suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
 
             body.append(UNPACK_TENSOR.substitute(
                 arg_name=arg['name'],
                 arg_pos=i,
                 suffix=suffix,
-                ref='&' if ref else '',
             ))
         else:
             # Okay, we are abusing the definition of 'unpack' here a bit,
@@ -925,9 +954,11 @@ def unpack_args(env, declaration):
             body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
 
         unpacked_args.append(arg['name'] + '_')
+        unpacked_args_type[arg['name'] + '_'] = arg['type']
         unpacked_args_simple_type[arg['name'] + '_'] = arg['simple_type']
 
     env['unpacked_args'] = unpacked_args
+    env['unpacked_args_type'] = unpacked_args_type
     env['unpacked_args_simple_type'] = unpacked_args_simple_type
     return body
 
