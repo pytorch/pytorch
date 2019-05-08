@@ -9792,10 +9792,10 @@ a")
     def test_bad_multiline_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Return type line"):
             @torch.jit.script
-            def fn(a, # type: Tensor
-                   b, # type: Tensor
-                   c  # type: Tensor
-                   ):
+            def bad_type_line(a,  # type: Tensor
+                              b,  # type: Tensor
+                              c   # type: Tensor
+                              ):
                 # type: (int, int, int) -> Tensor
                 # type: bad type line
 
@@ -9803,24 +9803,22 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "Return type line"):
             @torch.jit.script
-            def fn(a, # type: Tensor
-                   b,
-                   c  # type: Tensor
-                   ):
+            def bad_return_line(a,  # type: Tensor
+                                b,
+                                c   # type: Tensor
+                                ):
                 # type: (int, int, int) -> Tensor
                 return a + b + c
 
         # TODO: this should be supported but is difficult to parse
         with self.assertRaisesRegex(RuntimeError, "Number of type annotations"):
             @torch.jit.script
-            def fn(a, # type: Tensor
-                   b,
-                   c  # type: Tensor
-                   ):
+            def missing_type(a,  # type: Tensor
+                             b,
+                             c   # type: Tensor
+                             ):
                 # type: (...) -> Tensor
                 return a + b + c
-
-
 
     #  Python AST Frontend , Python 3-style type annotations , Script method
     @unittest.skipIf(not PY35, "Python 3.5 needed")
