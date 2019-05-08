@@ -236,7 +236,7 @@ class TestSparse(TestCase):
         ])
         # we don't have to_dense for half types on CPU because it is implemented
         # with a slower add_ operation
-        for dtype in [torch.float16, torch.float64] if self.device == 'cuda' else [torch.float64]:
+        for dtype in [torch.float16, torch.float64] if self.device != 'cpu' else [torch.float64]:
             v = self.value_tensor([2, 1, 3, 4]).to(dtype=dtype)
             x = self.sparse_tensor(i, v, torch.Size([3, 4, 5]))
             res = self.value_tensor([
@@ -266,8 +266,8 @@ class TestSparse(TestCase):
             res = self.value_empty(3, 4, 5, 0).to(dtype=dtype)
             test_tensor(x, res)
 
-    # half tesnors on cpu don't implement to_dense, so need to convert to float
-    def _half_safe_to_dense(self, tensor):
+    # half tensors on cpu don't implement to_dense, so need to convert to float
+    def _half_to_dense_safe(self, tensor):
         if(tensor.dtype == torch.half and tensor.device.type == 'cpu'):
             return tensor.to(torch.float).to_dense().to(torch.half)
         else:
@@ -284,9 +284,9 @@ class TestSparse(TestCase):
                     expected, _, _ = self._gen_sparse(dim, nnz, shape)
                     expected = expected.to(dtype)
 
-                    d = self._half_safe_to_dense(expected)
+                    d = self._half_to_dense_safe(expected)
                     result = d.to_sparse(dim)
-                    self.assertEqual(d, self._half_safe_to_dense(result))  # == not implemented for sparse tensors yet
+                    self.assertEqual(d, self._half_to_dense_safe(result))  # == not implemented for sparse tensors yet
                     self.assertEqual(expected.size(), result.size())
                     self.assertEqual(dim, result.sparse_dim())
 
@@ -1546,7 +1546,7 @@ class TestSparse(TestCase):
                                     torch.device(torch.cuda.device_count() - 1)
                                 indices = torch.tensor(([0], [2]), dtype=long_dtype) if use_tensor_idx else ([0], [2])
                                 if test_empty_tensor:
-                                    values = self.value_empty(1, 0)
+                                    values = self.value_empty(1, 0).to(dtype)
                                 else:
                                     if use_tensor_val:
                                         values = torch.tensor([1.], dtype=dtype)
