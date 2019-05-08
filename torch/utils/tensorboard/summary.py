@@ -306,10 +306,9 @@ def make_video(tensor, fps):
 
     # encode sequence of images into gif string
     clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
-    with tempfile.NamedTemporaryFile() as f:
-        filename = f.name + '.gif'
 
-    try:
+    filename = tempfile.NamedTemporaryFile(suffix='.gif', delete=False).name
+    try:  # older version of moviepy does not support progress_bar argument.
         clip.write_gif(filename, verbose=False, progress_bar=False)
     except TypeError:
         clip.write_gif(filename, verbose=False)
@@ -320,7 +319,7 @@ def make_video(tensor, fps):
     try:
         os.remove(filename)
     except OSError:
-        pass
+        logging.warning('The temporary file used by moviepy cannot be deleted.')
 
     return Summary.Image(height=h, width=w, colorspace=c, encoded_image_string=tensor_string)
 
