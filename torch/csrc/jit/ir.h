@@ -842,10 +842,10 @@ struct Block {
     return static_cast<const Node*>(output_)->inputs();
   }
   graph_node_list nodes() {
-    return {output_, kNextDirection};
+    return {input_, kNextDirection};
   }
   const_graph_node_list nodes() const {
-    return {output_, kNextDirection};
+    return {input_, kNextDirection};
   }
   Node* return_node() {
     return output_;
@@ -904,7 +904,7 @@ struct Block {
   }
   Node* prependNode(Node* n) {
     AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
-    n->insertAfter(output_);
+    n->insertAfter(input_);
     return n;
   }
   // clone all inputs, nodes, and outputs from src and append them
@@ -916,13 +916,6 @@ struct Block {
 
  private:
   void reIndexTopology();
-
-  // should only be called in the constructor
-  Node* initOutput(Node* p) {
-    p->next() = p;
-    p->prev() = p;
-    return p;
-  }
 
   // get rid of all nodes
   // destroys in reverse order so that uses internal to this block
