@@ -9,6 +9,8 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - checkout
@@ -42,6 +44,8 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - run:
@@ -71,6 +75,8 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - checkout
@@ -130,6 +136,8 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - run:
@@ -187,4 +195,3 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
 
         export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
