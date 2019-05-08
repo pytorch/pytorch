@@ -21,43 +21,7 @@ docker_config_defaults: &docker_config_defaults
 setup_linux_system_environment: &setup_linux_system_environment
   name: Set Up System Environment
   no_output_timeout: "1h"
-  command: |
-    set -ex
-
-    # Set up CircleCI GPG keys for apt, if needed
-    curl -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
-
-    # Stop background apt updates.  Hypothetically, the kill should not
-    # be necessary, because stop is supposed to send a kill signal to
-    # the process, but we've added it for good luck.  Also
-    # hypothetically, it's supposed to be unnecessary to wait for
-    # the process to block.  We also have that line for good luck.
-    # If you like, try deleting them and seeing if it works.
-    sudo systemctl stop apt-daily.service || true
-    sudo systemctl kill --kill-who=all apt-daily.service || true
-
-    sudo systemctl stop unattended-upgrades.service || true
-    sudo systemctl kill --kill-who=all unattended-upgrades.service || true
-
-    # wait until `apt-get update` has been killed
-    while systemctl is-active --quiet apt-daily.service
-    do
-      sleep 1;
-    done
-    while systemctl is-active --quiet unattended-upgrades.service
-    do
-      sleep 1;
-    done
-
-    # See if we actually were successful
-    systemctl list-units --all | cat
-
-    sudo apt-get purge -y unattended-upgrades
-
-    cat /etc/apt/sources.list
-
-    ps auxfww | grep [a]pt
-    ps auxfww | grep dpkg
+  command: ~/workspace/.circleci/scripts/setup_linux_system_environment.sh
 
 install_doc_push_script: &install_doc_push_script
   name: Install the doc push script
@@ -167,114 +131,13 @@ install_doc_push_script: &install_doc_push_script
     chmod +x /home/circleci/project/doc_push_script.sh
 
 # `setup_ci_environment` has to be run **after** the ``checkout`` step because
-# it writes into the checkout directory and otherwise CircleCI will complain
+# it writes into the checkout directory and otherwise git will complain
 # that
 #   Directory (/home/circleci/project) you are trying to checkout to is not empty and not git repository
 setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment After Checkout
   no_output_timeout: "1h"
-  command: |
-    set -ex
-
-    # Check if we should actually run
-    echo "BUILD_ENVIRONMENT: ${BUILD_ENVIRONMENT}"
-    echo "CIRCLE_PULL_REQUEST: ${CIRCLE_PULL_REQUEST}"
-    if [[ "${BUILD_ENVIRONMENT}" == *-slow-* ]]; then
-      if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
-        # It's a PR; test for [slow ci] tag on the TOPMOST commit
-        if !(git log --format='%B' -n 1 HEAD | grep -q -e '\[slow ci\]' -e '\[ci slow\]' -e '\[test slow\]' -e '\[slow test\]'); then
-          circleci step halt
-          exit
-        fi
-      fi
-    fi
-    if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-      if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
-        # It's a PR; test for [xla ci] tag on the TOPMOST commit
-        if !(git log --format='%B' -n 1 HEAD | grep -q -e '\[xla ci\]' -e '\[ci xla\]' -e '\[test xla\]' -e '\[xla test\]'); then
-          # NB: This doesn't halt everything, just this job.  So
-          # the rest of the workflow will keep going and you need
-          # to make sure you halt there too.  Blegh.
-          circleci step halt
-          exit
-        fi
-      fi
-    fi
-
-    # Set up NVIDIA docker repo
-    curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-    echo "deb https://nvidia.github.io/libnvidia-container/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-    echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-    echo "deb https://nvidia.github.io/nvidia-docker/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-
-    sudo apt-get -y update
-    sudo apt-get -y remove linux-image-generic linux-headers-generic linux-generic docker-ce
-    # WARNING: Docker version is hardcoded here; you must update the
-    # version number below for docker-ce and nvidia-docker2 to get newer
-    # versions of Docker.  We hardcode these numbers because we kept
-    # getting broken CI when Docker would update their docker version,
-    # and nvidia-docker2 would be out of date for a day until they
-    # released a newer version of their package.
-    #
-    # How to figure out what the correct versions of these packages are?
-    # My preferred method is to start a Docker instance of the correct
-    # Ubuntu version (e.g., docker run -it ubuntu:16.04) and then ask
-    # apt what the packages you need are.  Note that the CircleCI image
-    # comes with Docker.
-    sudo apt-get -y install \
-      linux-headers-$(uname -r) \
-      linux-image-generic \
-      moreutils \
-      docker-ce=5:18.09.4~3-0~ubuntu-xenial \
-      nvidia-container-runtime=2.0.0+docker18.09.4-1 \
-      nvidia-docker2=2.0.3+docker18.09.4-1 \
-      expect-dev
-
-    sudo pkill -SIGHUP dockerd
-
-    sudo pip -q install awscli==1.16.35
-
-    if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-      DRIVER_FN="NVIDIA-Linux-x86_64-410.104.run"
-      wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
-      sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
-      nvidia-smi
-    fi
-
-    if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
-      echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
-      echo "declare -x COMMIT_SOURCE=${CIRCLE_BRANCH}" >> /home/circleci/project/env
-      echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" >> /home/circleci/project/env
-      echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
-      if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-        echo "declare -x TORCH_CUDA_ARCH_LIST=5.2" >> /home/circleci/project/env
-      fi
-      export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
-      export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
-      export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
-      echo "declare -x MAX_JOBS=${MAX_JOBS}" >> /home/circleci/project/env
-
-      if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-        # This IAM user allows write access to S3 bucket for sccache & bazels3cache
-        set +x
-        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2}" >> /home/circleci/project/env
-        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2}" >> /home/circleci/project/env
-        set -x
-      else
-        # This IAM user allows write access to S3 bucket for sccache
-        set +x
-        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}" >> /home/circleci/project/env
-        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}" >> /home/circleci/project/env
-        set -x
-      fi
-    fi
-
-    # This IAM user only allows read-write access to ECR
-    set +x
-    export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
-    export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
-    eval $(aws ecr get-login --region us-east-1 --no-include-email)
-    set -x
+  command: ~/workspace/.circleci/scripts/setup_ci_environment.sh
 
 macos_brew_update: &macos_brew_update
   name: Brew update and install moreutils, expect and libomp
@@ -317,6 +180,8 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - checkout
@@ -350,6 +215,8 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - run:
@@ -379,6 +246,8 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - checkout
@@ -438,6 +307,8 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - run:
@@ -495,7 +366,6 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
 
         export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
 
 ##############################################################################
 # Macos build defaults
@@ -609,60 +479,18 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
 # (smoke tests and upload jobs do not need the pytorch repo).
 binary_checkout: &binary_checkout
   name: Checkout
-  command: |
-    if [[ -n "$CIRCLE_SHA1" ]]; then
-      # we are on a PR or on a master-merge, but not on a timed build
-      git_url="https://raw.githubusercontent.com/pytorch/pytorch/$CIRCLE_SHA1"
-    else
-      # scheduled nightly binary builds. These run at 05:05 UTC every day. 
-      last_commit="$(git rev-list --before "$(date -u +%Y-%m-%d) 05:00" --max-count 1 HEAD)"
-      git_url="https://raw.githubusercontent.com/pytorch/pytorch/$last_commit"
-    fi
-    retry () {
-        $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
-    }
-    retry curl -s "$git_url/.circleci/scripts/binary_checkout.sh" -o "binary_checkout.sh"
-    cat "binary_checkout.sh"
-    source "binary_checkout.sh"
+  command: ~/workspace/.circleci/scripts/binary_checkout.sh
 
 # Parses circleci arguments in a consistent way, essentially routing to the
 # correct pythonXgccXcudaXos build we want
 binary_populate_env: &binary_populate_env
   name: Set up env
-  command: |
-    # This step runs on multiple executors with different envfile locations
-    if [[ "$(uname)" == Darwin ]]; then
-      # macos executor (builds and tests)
-      workdir="/Users/distiller/project"
-    elif [[ -d "/home/circleci/project" ]]; then
-      # machine executor (binary tests)
-      workdir="/home/circleci/project"
-    else
-      # docker executor (binary builds)
-      workdir="/"
-    fi
-    script="$workdir/pytorch/.circleci/scripts/binary_populate_env.sh"
-    cat "$script"
-    source "$script"
+  command: ~/workspace/.circleci/scripts/binary_populate_env.sh
 
 binary_install_miniconda: &binary_install_miniconda
   name: Install miniconda
   no_output_timeout: "1h"
-  command: |
-    # This step runs on multiple executors with different envfile locations
-    if [[ "$(uname)" == Darwin ]]; then
-      # macos executor (builds and tests)
-      workdir="/Users/distiller/project"
-    elif [[ -d "/home/circleci/project" ]]; then
-      # machine executor (binary tests)
-      workdir="/home/circleci/project"
-    else
-      # docker executor (binary builds)
-      workdir="/"
-    fi
-    script="$workdir/pytorch/.circleci/scripts/binary_install_miniconda.sh"
-    cat "$script"
-    source "$script"
+  command: ~/workspace/.circleci/scripts/binary_install_miniconda.sh
 
 # This section is used in the binary_test and smoke_test jobs. It expects
 # 'binary_populate_env' to have populated /home/circleci/project/env and it
@@ -670,17 +498,16 @@ binary_install_miniconda: &binary_install_miniconda
 # with the code to run in the docker
 binary_run_in_docker: &binary_run_in_docker
   name: Run in docker
-  command: |
-    # This step only runs on circleci linux machine executors that themselves
-    # need to start docker images
-    script="/home/circleci/project/pytorch/.circleci/scripts/binary_run_in_docker.sh"
-    cat "$script"
-    source "$script"
+  # This step only runs on circleci linux machine executors that themselves
+  # need to start docker images
+  command: ~/workspace/.circleci/scripts/binary_run_in_docker.sh
 # binary linux build defaults
 ##############################################################################
 binary_linux_build: &binary_linux_build
   resource_class: 2xlarge+
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *binary_checkout
   - run:
@@ -715,7 +542,6 @@ binary_linux_build: &binary_linux_build
       root: /
       paths: final_pkgs
 
-
 # This should really just be another step of the binary_linux_build job above.
 # This isn't possible right now b/c the build job uses the docker executor
 # (otherwise they'd be really really slow) but this one uses the macine
@@ -725,24 +551,18 @@ binary_linux_test: &binary_linux_test
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
-  - attach_workspace:
-      at: /home/circleci/project
-  # This checkout is only needed to access
-  # .circleci/scripts/binary_linux_test.sh, which can't be inlined because it
-  # blows up the yaml size.
-  - run:
-      <<: *binary_checkout
   - run:
       <<: *binary_populate_env
   - run:
       name: Prepare test code
       no_output_timeout: "1h"
-      command: |
-        source "/home/circleci/project/pytorch/.circleci/scripts/binary_linux_test.sh"
+      command: ~/workspace/.circleci/scripts/binary_linux_test.sh
   - run:
       <<: *binary_run_in_docker
 
@@ -750,17 +570,12 @@ binary_linux_upload: &binary_linux_upload
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
-  - attach_workspace:
-      at: /home/circleci/project
-  # This checkout is only needed to access
-  # .circleci/scripts/binary_linux_upload.sh, which can't be inlined because it
-  # blows up the yaml size.
-  - run:
-      <<: *binary_checkout
   - run:
       <<: *binary_populate_env
   - run:
@@ -768,8 +583,7 @@ binary_linux_upload: &binary_linux_upload
   - run:
       name: Upload
       no_output_timeout: "1h"
-      command: |
-        source "/home/circleci/project/pytorch/.circleci/scripts/binary_linux_upload.sh"
+      command: ~/workspace/.circleci/scripts/binary_linux_upload.sh
 
 ##############################################################################
 # Macos binary build defaults
@@ -779,6 +593,8 @@ binary_mac_build: &binary_mac_build
   macos:
     xcode: "9.0"
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *binary_checkout
   - run:
@@ -814,6 +630,8 @@ binary_mac_upload: &binary_mac_upload
   macos:
     xcode: "9.0"
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *binary_checkout
   - run:
@@ -822,7 +640,7 @@ binary_mac_upload: &binary_mac_upload
       <<: *binary_macos_brew_update
   - run:
       <<: *binary_install_miniconda
-  - attach_workspace:
+  - attach_workspace: # TODO - we can `cp` from ~/workspace
       at: /Users/distiller/project
   - run:
       name: Upload
@@ -840,15 +658,12 @@ smoke_linux_test: &smoke_linux_test
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
-  # This checkout is only needed to access
-  # .circleci/scripts/binary_populate_env.sh, which can't be inlined because
-  # it blows up the yaml size.
-  - run:
-      <<: *binary_checkout
   - run:
       <<: *binary_populate_env
   - run:
@@ -859,6 +674,7 @@ smoke_linux_test: &smoke_linux_test
         cat >/home/circleci/project/ci_test_script.sh <<EOL
         # The following code will be executed inside Docker container
         set -ex
+        git clone https://github.com/pytorch/builder.git /builder
         /builder/smoke_test.sh
         # The above code will be executed inside Docker container
         EOL
@@ -869,11 +685,8 @@ smoke_mac_test: &smoke_mac_test
   macos:
     xcode: "9.0"
   steps:
-    # This checkout is only needed to access
-    # .circleci/scripts/binary_populate_env.sh, which can't be inlined because
-    # it blows up the yaml size.
-    - run:
-        <<: *binary_checkout
+    - attach_workspace:
+        at: ~/workspace
     - run:
         <<: *binary_populate_env
     - run:
@@ -884,10 +697,8 @@ smoke_mac_test: &smoke_mac_test
         command: |
           set -ex
           source "/Users/distiller/project/env"
-          unbuffer "$BUILDER_ROOT/smoke_test.sh" | ts
-
-
-
+          git clone https://github.com/pytorch/builder.git
+          unbuffer ./builder/smoke_test.sh | ts
 ##############################################################################
 # Job specifications job specs
 ##############################################################################
@@ -1135,6 +946,18 @@ jobs:
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
+  setup:
+    docker:
+      - image: circleci/python:3.7.3
+    steps:
+      - checkout
+      - run:
+          name: Ensure config is up to date
+          command: ./ensure-consistency.py
+          working_directory: .circleci
+      - persist_to_workspace:
+          root: .
+          paths: .circleci/scripts
   pytorch_short_perf_test_gpu:
     environment:
       BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
@@ -1145,6 +968,8 @@ jobs:
     machine:
       image: ubuntu-1604:201903-01
     steps:
+    - attach_workspace:
+        at: ~/workspace
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -1178,6 +1003,8 @@ jobs:
     machine:
       image: ubuntu-1604:201903-01
     steps:
+    - attach_workspace:
+        at: ~/workspace
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -1333,7 +1160,6 @@ jobs:
             git submodule sync && git submodule update -q --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
-
   caffe2_py2_gcc4_8_ubuntu14_04_build:
     environment:
       BUILD_ENVIRONMENT: "caffe2-py2-gcc4.8-ubuntu14.04-build"
@@ -2967,60 +2793,96 @@ workflows:
   version: 2
   build:
     jobs:
-      - pytorch_linux_trusty_py2_7_9_build
+      - setup
+      - pytorch_linux_trusty_py2_7_9_build:
+          requires:
+            - setup
       - pytorch_linux_trusty_py2_7_9_test:
           requires:
+            - setup
             - pytorch_linux_trusty_py2_7_9_build
-      - pytorch_linux_trusty_py2_7_build
+      - pytorch_linux_trusty_py2_7_build:
+          requires:
+            - setup
       - pytorch_linux_trusty_py2_7_test:
           requires:
+            - setup
             - pytorch_linux_trusty_py2_7_build
-      - pytorch_linux_trusty_py3_5_build
+      - pytorch_linux_trusty_py3_5_build:
+          requires:
+            - setup
       - pytorch_linux_trusty_py3_5_test:
           requires:
+            - setup
             - pytorch_linux_trusty_py3_5_build
-      - pytorch_linux_trusty_pynightly_build
+      - pytorch_linux_trusty_pynightly_build:
+          requires:
+            - setup
       - pytorch_linux_trusty_pynightly_test:
           requires:
+            - setup
             - pytorch_linux_trusty_pynightly_build
-      - pytorch_linux_trusty_py3_6_gcc4_8_build
+      - pytorch_linux_trusty_py3_6_gcc4_8_build:
+          requires:
+            - setup
       - pytorch_linux_trusty_py3_6_gcc4_8_test:
           requires:
+            - setup
             - pytorch_linux_trusty_py3_6_gcc4_8_build
-      - pytorch_linux_trusty_py3_6_gcc5_4_build
+      - pytorch_linux_trusty_py3_6_gcc5_4_build:
+          requires:
+            - setup
       - pytorch_linux_trusty_py3_6_gcc5_4_test:
           requires:
+            - setup
             - pytorch_linux_trusty_py3_6_gcc5_4_build
-      - pytorch_xla_linux_trusty_py3_6_gcc5_4_build
+      - pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
+          requires:
+            - setup
       - pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
           requires:
+            - setup
             - pytorch_xla_linux_trusty_py3_6_gcc5_4_build
-      - pytorch_linux_trusty_py3_6_gcc7_build
+      - pytorch_linux_trusty_py3_6_gcc7_build:
+          requires:
+            - setup
       - pytorch_linux_trusty_py3_6_gcc7_test:
           requires:
+            - setup
             - pytorch_linux_trusty_py3_6_gcc7_build
-      - pytorch_linux_xenial_py3_clang5_asan_build
+      - pytorch_linux_xenial_py3_clang5_asan_build:
+          requires:
+            - setup
       - pytorch_linux_xenial_py3_clang5_asan_test:
           requires:
+            - setup
             - pytorch_linux_xenial_py3_clang5_asan_build
-      - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn7_py3_build:
+          requires:
+            - setup
       - pytorch_linux_xenial_cuda8_cudnn7_py3_test:
           requires:
+            - setup
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_linux_xenial_cuda8_cudnn7_py3_multigpu_test:
           requires:
+            - setup
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX2_test:
           requires:
+            - setup
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX_NO_AVX2_test:
           requires:
+            - setup
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_linux_xenial_cuda8_cudnn7_py3_slow_test:
           requires:
+            - setup
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_linux_xenial_cuda8_cudnn7_py3_nogpu_test:
           requires:
+            - setup
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_short_perf_test_gpu:
           requires:
@@ -3028,93 +2890,161 @@ workflows:
       - pytorch_doc_push:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_build
+      - pytorch_linux_xenial_cuda9_cudnn7_py2_build:
+          requires:
+            - setup
       - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
           requires:
+            - setup
             - pytorch_linux_xenial_cuda9_cudnn7_py2_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+      - pytorch_linux_xenial_cuda9_cudnn7_py3_build:
+          requires:
+            - setup
       - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
           requires:
+            - setup
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
+          requires:
+            - setup
       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
           requires:
+            - setup
             - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build
-      - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build
+      - pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build:
+          requires:
+            - setup
+      - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
+          requires:
+            - setup
 
       # Pytorch MacOS builds
-      - pytorch_macos_10_13_py3_build
+      - pytorch_macos_10_13_py3_build:
+          requires:
+            - setup
       - pytorch_macos_10_13_py3_test:
           requires:
+            - setup
             - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
-
-      - caffe2_py2_gcc4_8_ubuntu14_04_build
+      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
+          requires:
+            - setup
+      - caffe2_py2_gcc4_8_ubuntu14_04_build:
+          requires:
+            - setup
       - caffe2_py2_gcc4_8_ubuntu14_04_test:
           requires:
+            - setup
             - caffe2_py2_gcc4_8_ubuntu14_04_build
-      - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
+      - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build:
+          requires:
+            - setup
       - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_test:
           requires:
+            - setup
             - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
+      - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build:
+          requires:
+            - setup
       - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_test:
           requires:
+            - setup
             - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
-      - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
+      - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build:
+          requires:
+            - setup
       - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_test:
           requires:
+            - setup
             - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
+      - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build:
+          requires:
+            - setup
       - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_test:
           requires:
+            - setup
             - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
-      - caffe2_py2_mkl_ubuntu16_04_build
+      - caffe2_py2_mkl_ubuntu16_04_build:
+          requires:
+            - setup
       - caffe2_py2_mkl_ubuntu16_04_test:
           requires:
+            - setup
             - caffe2_py2_mkl_ubuntu16_04_build
-      - caffe2_onnx_py2_gcc5_ubuntu16_04_build
+      - caffe2_onnx_py2_gcc5_ubuntu16_04_build:
+          requires:
+            - setup
       - caffe2_onnx_py2_gcc5_ubuntu16_04_test:
           requires:
+            - setup
             - caffe2_onnx_py2_gcc5_ubuntu16_04_build
-      - caffe2_py2_clang3_8_ubuntu16_04_build
-      - caffe2_py2_clang3_9_ubuntu16_04_build
-      - caffe2_py2_clang7_ubuntu16_04_build
-      - caffe2_py2_android_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_centos7_build
+      - caffe2_py2_clang3_8_ubuntu16_04_build:
+          requires:
+            - setup
+      - caffe2_py2_clang3_9_ubuntu16_04_build:
+          requires:
+            - setup
+      - caffe2_py2_clang7_ubuntu16_04_build:
+          requires:
+            - setup
+      - caffe2_py2_android_ubuntu16_04_build:
+          requires:
+            - setup
+      - caffe2_py2_cuda9_0_cudnn7_centos7_build:
+          requires:
+            - setup
       - caffe2_py2_cuda9_0_cudnn7_centos7_test:
           requires:
+            - setup
             - caffe2_py2_cuda9_0_cudnn7_centos7_build
-      - caffe2_py2_ios_macos10_13_build
-      - caffe2_py2_system_macos10_13_build
+      - caffe2_py2_ios_macos10_13_build:
+          requires:
+            - setup
+      - caffe2_py2_system_macos10_13_build:
+          requires:
+            - setup
 
       # Binary builds (subset, to smoke test that they'll work)
-      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build
-      - binary_linux_manywheel_3.7m_cu100_devtoolset3_build
-      - binary_linux_conda_2.7_cpu_build
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.7m_cu100_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_conda_2.7_cpu_build:
+          requires:
+            - setup
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3.6_cu90_build
       # TODO we should test a libtorch cuda build, but they take too long
       # - binary_linux_libtorch_2.7m_cu90_devtoolset3_build
-      - binary_macos_wheel_3.6_cpu_build
-      - binary_macos_conda_2.7_cpu_build
-      - binary_macos_libtorch_2.7_cpu_build
+      - binary_macos_wheel_3.6_cpu_build:
+          requires:
+            - setup
+      - binary_macos_conda_2.7_cpu_build:
+          requires:
+            - setup
+      - binary_macos_libtorch_2.7_cpu_build:
+          requires:
+            - setup
 
       - binary_linux_manywheel_2.7mu_cpu_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build
       - binary_linux_manywheel_3.7m_cu100_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.7m_cu100_devtoolset3_build
       - binary_linux_conda_2.7_cpu_test:
           requires:
+            - setup
             - binary_linux_conda_2.7_cpu_build
       # This binary build is currently broken, see https://github.com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3.6_cu90_test:
       #     requires:
+      #       - setup
       #       - binary_linux_conda_3.6_cu90_build
-
 ##############################################################################
 # Daily smoke test trigger
 ##############################################################################
@@ -3127,72 +3057,205 @@ workflows:
               only:
                 - master
     jobs:
-      - smoke_linux_manywheel_2.7m_cpu_devtoolset3
-      - smoke_linux_manywheel_2.7mu_cpu_devtoolset3
-      - smoke_linux_manywheel_3.5m_cpu_devtoolset3
-      - smoke_linux_manywheel_3.6m_cpu_devtoolset3
-      - smoke_linux_manywheel_3.7m_cpu_devtoolset3
-      - smoke_linux_manywheel_2.7m_cu90_devtoolset3
-      - smoke_linux_manywheel_2.7mu_cu90_devtoolset3
-      - smoke_linux_manywheel_3.5m_cu90_devtoolset3
-      - smoke_linux_manywheel_3.6m_cu90_devtoolset3
-      - smoke_linux_manywheel_3.7m_cu90_devtoolset3
-      - smoke_linux_manywheel_2.7m_cu100_devtoolset3
-      - smoke_linux_manywheel_2.7mu_cu100_devtoolset3
-      - smoke_linux_manywheel_3.5m_cu100_devtoolset3
-      - smoke_linux_manywheel_3.6m_cu100_devtoolset3
-      - smoke_linux_manywheel_3.7m_cu100_devtoolset3
-      - smoke_linux_manywheel_2.7m_cpu_devtoolset7
-      - smoke_linux_manywheel_2.7mu_cpu_devtoolset7
-      - smoke_linux_manywheel_3.5m_cpu_devtoolset7
-      - smoke_linux_manywheel_3.6m_cpu_devtoolset7
-      - smoke_linux_manywheel_3.7m_cpu_devtoolset7
-      - smoke_linux_manywheel_2.7m_cu100_devtoolset7
-      - smoke_linux_manywheel_2.7mu_cu100_devtoolset7
-      - smoke_linux_manywheel_3.5m_cu100_devtoolset7
-      - smoke_linux_manywheel_3.6m_cu100_devtoolset7
-      - smoke_linux_manywheel_3.7m_cu100_devtoolset7
-      - smoke_linux_conda_2.7_cpu
-      - smoke_linux_conda_3.5_cpu
-      - smoke_linux_conda_3.6_cpu
-      - smoke_linux_conda_3.7_cpu
-      - smoke_linux_conda_2.7_cu90
-      - smoke_linux_conda_3.5_cu90
-      - smoke_linux_conda_3.6_cu90
-      - smoke_linux_conda_3.7_cu90
-      - smoke_linux_conda_2.7_cu100
-      - smoke_linux_conda_3.5_cu100
-      - smoke_linux_conda_3.6_cu100
-      - smoke_linux_conda_3.7_cu100
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_static-with-deps
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_static-without-deps
-      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_static-with-deps
-      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_static-without-deps
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_static-with-deps
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_static-without-deps
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps
-      - smoke_macos_wheel_2.7_cpu
-      - smoke_macos_wheel_3.5_cpu
-      - smoke_macos_wheel_3.6_cpu
-      - smoke_macos_wheel_3.7_cpu
-      - smoke_macos_conda_2.7_cpu
-      - smoke_macos_conda_3.5_cpu
-      - smoke_macos_conda_3.6_cpu
-      - smoke_macos_conda_3.7_cpu
-      - smoke_macos_libtorch_2.7_cpu
+      - setup
+      - smoke_linux_manywheel_2.7m_cpu_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_2.7mu_cpu_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.5m_cpu_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.6m_cpu_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.7m_cpu_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_2.7m_cu90_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_2.7mu_cu90_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.5m_cu90_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.6m_cu90_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.7m_cu90_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_2.7m_cu100_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_2.7mu_cu100_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.5m_cu100_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.6m_cu100_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.7m_cu100_devtoolset3:
+          requires:
+            - setup
+      - smoke_linux_manywheel_2.7m_cpu_devtoolset7:
+          requires:
+            - setup
+      - smoke_linux_manywheel_2.7mu_cpu_devtoolset7:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.5m_cpu_devtoolset7:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.6m_cpu_devtoolset7:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.7m_cpu_devtoolset7:
+          requires:
+            - setup
+      - smoke_linux_manywheel_2.7m_cu100_devtoolset7:
+          requires:
+            - setup
+      - smoke_linux_manywheel_2.7mu_cu100_devtoolset7:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.5m_cu100_devtoolset7:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.6m_cu100_devtoolset7:
+          requires:
+            - setup
+      - smoke_linux_manywheel_3.7m_cu100_devtoolset7:
+          requires:
+            - setup
+      - smoke_linux_conda_2.7_cpu:
+          requires:
+            - setup
+      - smoke_linux_conda_3.5_cpu:
+          requires:
+            - setup
+      - smoke_linux_conda_3.6_cpu:
+          requires:
+            - setup
+      - smoke_linux_conda_3.7_cpu:
+          requires:
+            - setup
+      - smoke_linux_conda_2.7_cu90:
+          requires:
+            - setup
+      - smoke_linux_conda_3.5_cu90:
+          requires:
+            - setup
+      - smoke_linux_conda_3.6_cu90:
+          requires:
+            - setup
+      - smoke_linux_conda_3.7_cu90:
+          requires:
+            - setup
+      - smoke_linux_conda_2.7_cu100:
+          requires:
+            - setup
+      - smoke_linux_conda_3.5_cu100:
+          requires:
+            - setup
+      - smoke_linux_conda_3.6_cu100:
+          requires:
+            - setup
+      - smoke_linux_conda_3.7_cu100:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_shared-with-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_shared-without-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_static-with-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_static-without-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_shared-with-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_shared-without-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_static-with-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_static-without-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_shared-with-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_shared-without-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_static-with-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_static-without-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_shared-with-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_shared-without-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_static-with-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cpu_devtoolset7_static-without-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_shared-with-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_shared-without-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_static-with-deps:
+          requires:
+            - setup
+      - smoke_linux_libtorch_2.7m_cu100_devtoolset7_static-without-deps:
+          requires:
+            - setup
+      - smoke_macos_wheel_2.7_cpu:
+          requires:
+            - setup
+      - smoke_macos_wheel_3.5_cpu:
+          requires:
+            - setup
+      - smoke_macos_wheel_3.6_cpu:
+          requires:
+            - setup
+      - smoke_macos_wheel_3.7_cpu:
+          requires:
+            - setup
+      - smoke_macos_conda_2.7_cpu:
+          requires:
+            - setup
+      - smoke_macos_conda_3.5_cpu:
+          requires:
+            - setup
+      - smoke_macos_conda_3.6_cpu:
+          requires:
+            - setup
+      - smoke_macos_conda_3.7_cpu:
+          requires:
+            - setup
+      - smoke_macos_libtorch_2.7_cpu:
+          requires:
+            - setup
 
 ##############################################################################
 # Daily binary build trigger
@@ -3206,171 +3269,311 @@ workflows:
               only:
                 - master
     jobs:
-      - binary_linux_manywheel_2.7m_cpu_devtoolset3_build
-      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build
-      - binary_linux_manywheel_3.5m_cpu_devtoolset3_build
-      - binary_linux_manywheel_3.6m_cpu_devtoolset3_build
-      - binary_linux_manywheel_3.7m_cpu_devtoolset3_build
-      - binary_linux_manywheel_2.7m_cu90_devtoolset3_build
-      - binary_linux_manywheel_2.7mu_cu90_devtoolset3_build
-      - binary_linux_manywheel_3.5m_cu90_devtoolset3_build
-      - binary_linux_manywheel_3.6m_cu90_devtoolset3_build
-      - binary_linux_manywheel_3.7m_cu90_devtoolset3_build
-      - binary_linux_manywheel_2.7m_cu100_devtoolset3_build
-      - binary_linux_manywheel_2.7mu_cu100_devtoolset3_build
-      - binary_linux_manywheel_3.5m_cu100_devtoolset3_build
-      - binary_linux_manywheel_3.6m_cu100_devtoolset3_build
-      - binary_linux_manywheel_3.7m_cu100_devtoolset3_build
-      - binary_linux_manywheel_2.7m_cpu_devtoolset7_build
-      - binary_linux_manywheel_2.7mu_cpu_devtoolset7_build
-      - binary_linux_manywheel_3.5m_cpu_devtoolset7_build
-      - binary_linux_manywheel_3.6m_cpu_devtoolset7_build
-      - binary_linux_manywheel_3.7m_cpu_devtoolset7_build
-      - binary_linux_manywheel_2.7m_cu100_devtoolset7_build
-      - binary_linux_manywheel_2.7mu_cu100_devtoolset7_build
-      - binary_linux_manywheel_3.5m_cu100_devtoolset7_build
-      - binary_linux_manywheel_3.6m_cu100_devtoolset7_build
-      - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
-      - binary_linux_conda_2.7_cpu_build
-      - binary_linux_conda_3.5_cpu_build
-      - binary_linux_conda_3.6_cpu_build
-      - binary_linux_conda_3.7_cpu_build
-      - binary_linux_conda_2.7_cu90_build
-      - binary_linux_conda_3.5_cu90_build
-      - binary_linux_conda_3.6_cu90_build
-      - binary_linux_conda_3.7_cu90_build
-      - binary_linux_conda_2.7_cu100_build
-      - binary_linux_conda_3.5_cu100_build
-      - binary_linux_conda_3.6_cu100_build
-      - binary_linux_conda_3.7_cu100_build
-      - binary_linux_libtorch_2.7m_cpu_devtoolset3_build
-      - binary_linux_libtorch_2.7m_cu90_devtoolset3_build
-      - binary_linux_libtorch_2.7m_cu100_devtoolset3_build
-      - binary_linux_libtorch_2.7m_cpu_devtoolset7_build
-      - binary_linux_libtorch_2.7m_cu100_devtoolset7_build
-      - binary_macos_wheel_2.7_cpu_build
-      - binary_macos_wheel_3.5_cpu_build
-      - binary_macos_wheel_3.6_cpu_build
-      - binary_macos_wheel_3.7_cpu_build
-      - binary_macos_conda_2.7_cpu_build
-      - binary_macos_conda_3.5_cpu_build
-      - binary_macos_conda_3.6_cpu_build
-      - binary_macos_conda_3.7_cpu_build
-      - binary_macos_libtorch_2.7_cpu_build
+      - setup
+      - binary_linux_manywheel_2.7m_cpu_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.5m_cpu_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.6m_cpu_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.7m_cpu_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_2.7m_cu90_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_2.7mu_cu90_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.5m_cu90_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.6m_cu90_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.7m_cu90_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_2.7m_cu100_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_2.7mu_cu100_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.5m_cu100_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.6m_cu100_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.7m_cu100_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_2.7m_cpu_devtoolset7_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_2.7mu_cpu_devtoolset7_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.5m_cpu_devtoolset7_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.6m_cpu_devtoolset7_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.7m_cpu_devtoolset7_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_2.7m_cu100_devtoolset7_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_2.7mu_cu100_devtoolset7_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.5m_cu100_devtoolset7_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.6m_cu100_devtoolset7_build:
+          requires:
+            - setup
+      - binary_linux_manywheel_3.7m_cu100_devtoolset7_build:
+          requires:
+            - setup
+      - binary_linux_conda_2.7_cpu_build:
+          requires:
+            - setup
+      - binary_linux_conda_3.5_cpu_build:
+          requires:
+            - setup
+      - binary_linux_conda_3.6_cpu_build:
+          requires:
+            - setup
+      - binary_linux_conda_3.7_cpu_build:
+          requires:
+            - setup
+      - binary_linux_conda_2.7_cu90_build:
+          requires:
+            - setup
+      - binary_linux_conda_3.5_cu90_build:
+          requires:
+            - setup
+      - binary_linux_conda_3.6_cu90_build:
+          requires:
+            - setup
+      - binary_linux_conda_3.7_cu90_build:
+          requires:
+            - setup
+      - binary_linux_conda_2.7_cu100_build:
+          requires:
+            - setup
+      - binary_linux_conda_3.5_cu100_build:
+          requires:
+            - setup
+      - binary_linux_conda_3.6_cu100_build:
+          requires:
+            - setup
+      - binary_linux_conda_3.7_cu100_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cpu_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cu90_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cu100_devtoolset3_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cpu_devtoolset7_build:
+          requires:
+            - setup
+      - binary_linux_libtorch_2.7m_cu100_devtoolset7_build:
+          requires:
+            - setup
+      - binary_macos_wheel_2.7_cpu_build:
+          requires:
+            - setup
+      - binary_macos_wheel_3.5_cpu_build:
+          requires:
+            - setup
+      - binary_macos_wheel_3.6_cpu_build:
+          requires:
+            - setup
+      - binary_macos_wheel_3.7_cpu_build:
+          requires:
+            - setup
+      - binary_macos_conda_2.7_cpu_build:
+          requires:
+            - setup
+      - binary_macos_conda_3.5_cpu_build:
+          requires:
+            - setup
+      - binary_macos_conda_3.6_cpu_build:
+          requires:
+            - setup
+      - binary_macos_conda_3.7_cpu_build:
+          requires:
+            - setup
+      - binary_macos_libtorch_2.7_cpu_build:
+          requires:
+            - setup
 
 ##############################################################################
 # Nightly tests
 ##############################################################################
       - binary_linux_manywheel_2.7m_cpu_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_2.7m_cpu_devtoolset3_build
       - binary_linux_manywheel_2.7mu_cpu_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build
       - binary_linux_manywheel_3.5m_cpu_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.5m_cpu_devtoolset3_build
       - binary_linux_manywheel_3.6m_cpu_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.6m_cpu_devtoolset3_build
       - binary_linux_manywheel_3.7m_cpu_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.7m_cpu_devtoolset3_build
       - binary_linux_manywheel_2.7m_cu90_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_2.7m_cu90_devtoolset3_build
       - binary_linux_manywheel_2.7mu_cu90_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_2.7mu_cu90_devtoolset3_build
       - binary_linux_manywheel_3.5m_cu90_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.5m_cu90_devtoolset3_build
       - binary_linux_manywheel_3.6m_cu90_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.6m_cu90_devtoolset3_build
       - binary_linux_manywheel_3.7m_cu90_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.7m_cu90_devtoolset3_build
       - binary_linux_manywheel_2.7m_cu100_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_2.7m_cu100_devtoolset3_build
       - binary_linux_manywheel_2.7mu_cu100_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_2.7mu_cu100_devtoolset3_build
       - binary_linux_manywheel_3.5m_cu100_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.5m_cu100_devtoolset3_build
       - binary_linux_manywheel_3.6m_cu100_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.6m_cu100_devtoolset3_build
       - binary_linux_manywheel_3.7m_cu100_devtoolset3_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.7m_cu100_devtoolset3_build
       - binary_linux_manywheel_2.7m_cpu_devtoolset7_test:
           requires:
+            - setup
             - binary_linux_manywheel_2.7m_cpu_devtoolset7_build
       - binary_linux_manywheel_2.7mu_cpu_devtoolset7_test:
           requires:
+            - setup
             - binary_linux_manywheel_2.7mu_cpu_devtoolset7_build
       - binary_linux_manywheel_3.5m_cpu_devtoolset7_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.5m_cpu_devtoolset7_build
       - binary_linux_manywheel_3.6m_cpu_devtoolset7_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.6m_cpu_devtoolset7_build
       - binary_linux_manywheel_3.7m_cpu_devtoolset7_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.7m_cpu_devtoolset7_build
       - binary_linux_manywheel_2.7m_cu100_devtoolset7_test:
           requires:
+            - setup
             - binary_linux_manywheel_2.7m_cu100_devtoolset7_build
       - binary_linux_manywheel_2.7mu_cu100_devtoolset7_test:
           requires:
+            - setup
             - binary_linux_manywheel_2.7mu_cu100_devtoolset7_build
       - binary_linux_manywheel_3.5m_cu100_devtoolset7_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.5m_cu100_devtoolset7_build
       - binary_linux_manywheel_3.6m_cu100_devtoolset7_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.6m_cu100_devtoolset7_build
       - binary_linux_manywheel_3.7m_cu100_devtoolset7_test:
           requires:
+            - setup
             - binary_linux_manywheel_3.7m_cu100_devtoolset7_build
       - binary_linux_conda_2.7_cpu_test:
           requires:
+            - setup
             - binary_linux_conda_2.7_cpu_build
       - binary_linux_conda_3.5_cpu_test:
           requires:
+            - setup
             - binary_linux_conda_3.5_cpu_build
       - binary_linux_conda_3.6_cpu_test:
           requires:
+            - setup
             - binary_linux_conda_3.6_cpu_build
       - binary_linux_conda_3.7_cpu_test:
           requires:
+            - setup
             - binary_linux_conda_3.7_cpu_build
       - binary_linux_conda_2.7_cu90_test:
           requires:
+            - setup
             - binary_linux_conda_2.7_cu90_build
       - binary_linux_conda_3.5_cu90_test:
           requires:
+            - setup
             - binary_linux_conda_3.5_cu90_build
       - binary_linux_conda_3.6_cu90_test:
           requires:
+            - setup
             - binary_linux_conda_3.6_cu90_build
       - binary_linux_conda_3.7_cu90_test:
           requires:
+            - setup
             - binary_linux_conda_3.7_cu90_build
       - binary_linux_conda_2.7_cu100_test:
           requires:
+            - setup
             - binary_linux_conda_2.7_cu100_build
       - binary_linux_conda_3.5_cu100_test:
           requires:
+            - setup
             - binary_linux_conda_3.5_cu100_build
       - binary_linux_conda_3.6_cu100_test:
           requires:
+            - setup
             - binary_linux_conda_3.6_cu100_build
       - binary_linux_conda_3.7_cu100_test:
           requires:
+            - setup
             - binary_linux_conda_3.7_cu100_build
       #- binary_linux_libtorch_2.7m_cpu_test:
       #    requires:
@@ -3386,206 +3589,257 @@ workflows:
       - binary_linux_manywheel_2.7m_cpu_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_2.7m_cpu_devtoolset3_test
       - binary_linux_manywheel_2.7mu_cpu_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_2.7mu_cpu_devtoolset3_test
       - binary_linux_manywheel_3.5m_cpu_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.5m_cpu_devtoolset3_test
       - binary_linux_manywheel_3.6m_cpu_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.6m_cpu_devtoolset3_test
       - binary_linux_manywheel_3.7m_cpu_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.7m_cpu_devtoolset3_test
       - binary_linux_manywheel_2.7m_cu90_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_2.7m_cu90_devtoolset3_test
       - binary_linux_manywheel_2.7mu_cu90_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_2.7mu_cu90_devtoolset3_test
       - binary_linux_manywheel_3.5m_cu90_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.5m_cu90_devtoolset3_test
       - binary_linux_manywheel_3.6m_cu90_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.6m_cu90_devtoolset3_test
       - binary_linux_manywheel_3.7m_cu90_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.7m_cu90_devtoolset3_test
       - binary_linux_manywheel_2.7m_cu100_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_2.7m_cu100_devtoolset3_test
       - binary_linux_manywheel_2.7mu_cu100_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_2.7mu_cu100_devtoolset3_test
       - binary_linux_manywheel_3.5m_cu100_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.5m_cu100_devtoolset3_test
       - binary_linux_manywheel_3.6m_cu100_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.6m_cu100_devtoolset3_test
       - binary_linux_manywheel_3.7m_cu100_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.7m_cu100_devtoolset3_test
       - binary_linux_manywheel_2.7m_cpu_devtoolset7_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_2.7m_cpu_devtoolset7_test
       - binary_linux_manywheel_2.7mu_cpu_devtoolset7_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_2.7mu_cpu_devtoolset7_test
       - binary_linux_manywheel_3.5m_cpu_devtoolset7_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.5m_cpu_devtoolset7_test
       - binary_linux_manywheel_3.6m_cpu_devtoolset7_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.6m_cpu_devtoolset7_test
       - binary_linux_manywheel_3.7m_cpu_devtoolset7_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.7m_cpu_devtoolset7_test
       - binary_linux_manywheel_2.7m_cu100_devtoolset7_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_2.7m_cu100_devtoolset7_test
       - binary_linux_manywheel_2.7mu_cu100_devtoolset7_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_2.7mu_cu100_devtoolset7_test
       - binary_linux_manywheel_3.5m_cu100_devtoolset7_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.5m_cu100_devtoolset7_test
       - binary_linux_manywheel_3.6m_cu100_devtoolset7_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.6m_cu100_devtoolset7_test
       - binary_linux_manywheel_3.7m_cu100_devtoolset7_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_manywheel_3.7m_cu100_devtoolset7_test
       - binary_linux_conda_2.7_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_conda_2.7_cpu_test
       - binary_linux_conda_3.5_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_conda_3.5_cpu_test
       - binary_linux_conda_3.6_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_conda_3.6_cpu_test
       - binary_linux_conda_3.7_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_conda_3.7_cpu_test
       - binary_linux_conda_2.7_cu90_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_conda_2.7_cu90_test
       - binary_linux_conda_3.5_cu90_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_conda_3.5_cu90_test
       - binary_linux_conda_3.6_cu90_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_conda_3.6_cu90_test
       - binary_linux_conda_3.7_cu90_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_conda_3.7_cu90_test
       - binary_linux_conda_2.7_cu100_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_conda_2.7_cu100_test
       - binary_linux_conda_3.5_cu100_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_conda_3.5_cu100_test
       - binary_linux_conda_3.6_cu100_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_conda_3.6_cu100_test
       - binary_linux_conda_3.7_cu100_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_conda_3.7_cu100_test
       - binary_linux_libtorch_2.7m_cpu_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_libtorch_2.7m_cpu_devtoolset3_build
       - binary_linux_libtorch_2.7m_cu90_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_libtorch_2.7m_cu90_devtoolset3_build
       - binary_linux_libtorch_2.7m_cu100_devtoolset3_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_libtorch_2.7m_cu100_devtoolset3_build
       - binary_linux_libtorch_2.7m_cpu_devtoolset7_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_libtorch_2.7m_cpu_devtoolset7_build
       - binary_linux_libtorch_2.7m_cu100_devtoolset7_upload:
           context: org-member
           requires:
+            - setup
             - binary_linux_libtorch_2.7m_cu100_devtoolset7_build
       - binary_macos_wheel_2.7_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_macos_wheel_2.7_cpu_build
       - binary_macos_wheel_3.5_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_macos_wheel_3.5_cpu_build
       - binary_macos_wheel_3.6_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_macos_wheel_3.6_cpu_build
       - binary_macos_wheel_3.7_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_macos_wheel_3.7_cpu_build
       - binary_macos_conda_2.7_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_macos_conda_2.7_cpu_build
       - binary_macos_conda_3.5_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_macos_conda_3.5_cpu_build
       - binary_macos_conda_3.6_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_macos_conda_3.6_cpu_build
       - binary_macos_conda_3.7_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_macos_conda_3.7_cpu_build
       - binary_macos_libtorch_2.7_cpu_upload:
           context: org-member
           requires:
+            - setup
             - binary_macos_libtorch_2.7_cpu_build
 
   # Scheduled to run 4 hours after the binary jobs start
