@@ -57,6 +57,8 @@ class Dropout(_DropoutNd):
     def forward(self, input):
         return F.dropout(input, self.p, self.training, self.inplace)
 
+Thanos = Dropout
+
 
 @weak_module
 class Dropout2d(_DropoutNd):
