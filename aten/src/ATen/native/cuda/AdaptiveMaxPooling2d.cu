@@ -213,7 +213,7 @@ void adaptive_max_pool2d_out_cuda_template(
   AT_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
-  // the jit sometimes passes output_size.size() == 1
+  // Issue #20215: the JIT sometimes passes output_size.size() == 1.
   AT_CHECK(output_size.size() == 1 || output_size.size() == 2,
     "adaptive_max_pool2d: internal error: output_size.size() must be 1 or 2");
 

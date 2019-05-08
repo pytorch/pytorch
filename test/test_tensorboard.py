@@ -15,6 +15,13 @@ try:
 except ImportError:
     TEST_TENSORBOARD = False
 
+HAS_TORCHVISION = True
+try:
+    import torchvision
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
 TEST_MATPLOTLIB = True
 try:
     import matplotlib
@@ -414,6 +421,28 @@ if TEST_TENSORBOARD:
                 model = torch.nn.Linear(3, 5)
                 with SummaryWriter(comment='expect_error') as w:
                     w.add_graph(model, dummy_input)  # error
+
+        @skipIfNoTorchVision
+        def test_torchvision_smoke(self):
+            model_input_shapes = {
+                'alexnet': (2, 3, 224, 224),
+                'resnet34': (2, 3, 224, 224),
+                'resnet152': (2, 3, 224, 224),
+                'densenet121': (2, 3, 224, 224),
+                'vgg16': (2, 3, 224, 224),
+                'vgg19': (2, 3, 224, 224),
+                'vgg16_bn': (2, 3, 224, 224),
+                'vgg19_bn': (2, 3, 224, 224),
+                'mobilenet_v2': (2, 3, 224, 224),  # will fail optimize_graph
+            }
+            for model_name, input_shape in model_input_shapes.items():
+                with SummaryWriter(comment=model_name) as w:
+                    model = getattr(torchvision.models, model_name)()
+                    # ValueError: only one element tensors can be converted to Python scalars
+                    if model_name == 'mobilenet_v2':
+                        w.add_graph(model, torch.zeros(input_shape), operator_export_type="RAW")
+                    else:
+                        w.add_graph(model, torch.zeros(input_shape))
 
     class TestTensorBoardFigure(BaseTestCase):
         @skipIfNoMatplotlib
