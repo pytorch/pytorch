@@ -1,13 +1,13 @@
-#include <torch/csrc/jit/passes/pattern_fusion.h>
+#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/subgraph_matcher.h>
 
 namespace torch {
 namespace jit {
 
-void PatternFuser::RegisterDefaultPatterns() {
+void SubgraphRewriter::RegisterDefaultPatterns() {
   // TODO: Add actual patterns (like Conv-Relu).
-  RegisterFusionPattern(
+  RegisterRewritePattern(
       R"IR(
 graph(%x, %w, %b):
   %c = aten::conv(%x, %w, %b)
@@ -18,16 +18,16 @@ graph(%x, %w, %b):
       /*outputs=*/{"r"});
 }
 
-void PatternFuser::RegisterFusionPattern(
+void SubgraphRewriter::RegisterRewritePattern(
     const std::string& pattern,
     const std::string& fused_node_name,
     std::vector<std::string> inputs,
     std::vector<std::string> outputs) {
-  FusionPatternDescr d = {pattern, fused_node_name, inputs, outputs};
+  RewritePatternDescr d = {pattern, fused_node_name, inputs, outputs};
   patterns_.push_back(d);
 }
 
-std::shared_ptr<script::Module> PatternFuser::runOnModule(
+std::shared_ptr<script::Module> SubgraphRewriter::runOnModule(
     std::shared_ptr<script::Module> module) {
   nodes_to_delete_.clear();
   const auto& methods = module->get_methods();
@@ -38,15 +38,15 @@ std::shared_ptr<script::Module> PatternFuser::runOnModule(
   return module;
 }
 
-void PatternFuser::runOnGraph(std::shared_ptr<Graph>& graph) {
-  for (const FusionPatternDescr& pattern : patterns_) {
-    fuseSinglePatternOnGraph(graph, pattern);
+void SubgraphRewriter::runOnGraph(std::shared_ptr<Graph>& graph) {
+  for (const RewritePatternDescr& pattern : patterns_) {
+    rewriteSinglePatternOnGraph(graph, pattern);
   }
 }
 
-void PatternFuser::fuseSinglePatternOnGraph(
+void SubgraphRewriter::rewriteSinglePatternOnGraph(
     std::shared_ptr<Graph>& graph,
-    FusionPatternDescr pattern) {
+    RewritePatternDescr pattern) {
   std::unordered_map<Value*, Value*> rewrite_map;
   std::vector<Value*> values_to_rewrite;
 
@@ -113,7 +113,7 @@ void PatternFuser::fuseSinglePatternOnGraph(
   }
 }
 
-bool PatternFuser::overlapsWithPreviousMatches(const Match* match) {
+bool SubgraphRewriter::overlapsWithPreviousMatches(const Match* match) {
   for (auto n : match->nodes_map) {
     if (nodes_to_delete_.count(const_cast<Node*>(n.second))) {
       return true;
@@ -122,12 +122,12 @@ bool PatternFuser::overlapsWithPreviousMatches(const Match* match) {
   return false;
 }
 
-std::shared_ptr<script::Module> PatternBasedFusion(
-    std::shared_ptr<script::Module> module) {
+std::shared_ptr<script::Module> PatternBasedRewrite(
+    std::shared_ptr<script::Module>& module) {
   // TODO: Deep-copy the module
-  PatternFuser pattern_fuser;
-  pattern_fuser.RegisterDefaultPatterns();
-  return pattern_fuser.runOnModule(module);
+  SubgraphRewriter subgraph_rewriter;
+  subgraph_rewriter.RegisterDefaultPatterns();
+  return subgraph_rewriter.runOnModule(module);
 }
 
 } // namespace jit
