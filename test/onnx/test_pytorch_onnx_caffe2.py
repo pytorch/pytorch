@@ -176,6 +176,7 @@ class TestCaffe2Backend(unittest.TestCase):
                                 do_constant_folding=do_constant_folding,
                                 opset_version=opset_version)
 
+
 if __name__ == '__main__':
     from test_pytorch_onnx_caffe2_opset9 import TestCaffe2Backend_opset9
     from test_pytorch_onnx_caffe2_opset10 import TestCaffe2Backend_opset10
