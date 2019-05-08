@@ -11,7 +11,7 @@ pool:
 
 container:
   image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:300
-  endpoint: pytorch_aws
+  endpoint: aws_docker
 
 steps:
 - script: echo Hello, world!
