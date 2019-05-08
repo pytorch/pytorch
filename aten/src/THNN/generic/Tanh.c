@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "THNN/generic/Tanh.c"
 #else
 
+#include <ATen/Parallel.h>
+
 void THNN_(Tanh_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -34,14 +36,14 @@ void THNN_(Tanh_updateGradInput)(
     scalar_t* ptr_gradOutput = gradOutput->data<scalar_t>();
     scalar_t* ptr_gradInput  = gradInput->data<scalar_t>();
     scalar_t* ptr_output     = output->data<scalar_t>();
-    int64_t i;
 
-#pragma omp parallel for private(i)
-    for (i = 0; i < THTensor_(nElement)(gradInput); i++)
-    {
-      scalar_t z = ptr_output[i];
-      ptr_gradInput[i] = ptr_gradOutput[i] * (1. - z*z);
-    }
+    at::parallel_for(0, THTensor_(nElement)(gradInput), 0, [&](int64_t start, int64_t end) {
+      for (auto i = start; i < end; i++)
+      {
+        scalar_t z = ptr_output[i];
+        ptr_gradInput[i] = ptr_gradOutput[i] * (1. - z*z);
+      }
+    });
   }
 }
 

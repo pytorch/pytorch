@@ -24,7 +24,7 @@
 #include <vector>
 
 // Forward declare, the real meat is in python_ir.cpp
-template<class T>
+template <class T>
 class THPPointer;
 using THPObjectPtr = THPPointer<PyObject>;
 using pyobj_list = std::vector<THPObjectPtr>;
@@ -842,10 +842,10 @@ struct Block {
     return static_cast<const Node*>(output_)->inputs();
   }
   graph_node_list nodes() {
-    return {output_, kNextDirection};
+    return {input_, kNextDirection};
   }
   const_graph_node_list nodes() const {
-    return {output_, kNextDirection};
+    return {input_, kNextDirection};
   }
   Node* return_node() {
     return output_;
@@ -904,7 +904,7 @@ struct Block {
   }
   Node* prependNode(Node* n) {
     AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
-    n->insertAfter(output_);
+    n->insertAfter(input_);
     return n;
   }
   // clone all inputs, nodes, and outputs from src and append them
@@ -913,15 +913,9 @@ struct Block {
   // in src to look up its corresponding value
   TORCH_API void cloneFrom(Block* src, std::function<Value*(Value*)> value_map);
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
+
  private:
   void reIndexTopology();
-
-  // should only be called in the constructor
-  Node* initOutput(Node* p) {
-    p->next() = p;
-    p->prev() = p;
-    return p;
-  }
 
   // get rid of all nodes
   // destroys in reverse order so that uses internal to this block
@@ -1048,13 +1042,16 @@ struct Graph {
   TORCH_API Node* createNone(
       TypePtr typ); // value of None with type Optional[typ]
   TORCH_API Node* createAutogradZero();
-  TORCH_API Node* createFusionGroup();
+  TORCH_API Node* createWithSubgraph(Symbol kind);
   TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(
       at::ArrayRef<Value*> values,
       c10::OptNameList field_names = c10::nullopt);
   TORCH_API Node* createTupleUnpack(Value* v);
-  TORCH_API Node* createTupleIndex(Value* tup, int64_t index);
+  TORCH_API Node* createTupleIndex(
+      Value* tup,
+      Value* idx,
+      const TypePtr& output_type);
   TORCH_API Node* createTupleSlice(Value* tup, int64_t beg, int64_t end);
   TORCH_API Node* createList(
       const TypePtr& elem_type,
@@ -1292,6 +1289,5 @@ TORCH_API std::vector<Value*> inlineCallTo(
     Graph& callee,
     ArrayRef<Value*> inputs,
     bool unpack_outputs = false);
-
 } // namespace jit
 } // namespace torch
