@@ -1,7 +1,9 @@
 #include <ATen/ATen.h>
+#include <ATen/core/Type.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/quantized/Quantizer.h>
 
 #include <algorithm>
 #include <vector>
@@ -20,7 +22,7 @@ namespace {
 class QFCPackWeightInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
-  // Calculate the column offsets
+  // Calculate the column offsets.
   // Note this includes the sum of the columns as well as the scalar term
   // B_zero_point * K, whereas the row_offsets created by
   // PackAWithQuantRowOffset is only the sum of the A rows.
@@ -39,15 +41,20 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     }
   }
 
-  at::Tensor operator()(at::Tensor weight, int64_t weight_zero_point) {
+  at::Tensor operator()(at::Tensor weight) {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
-    int32_t weight_zero_point_int32 = static_cast<int32_t>(weight_zero_point);
+    int32_t weight_zero_point_int32 = weight.q_zero_point().toInt() - 128;
 
     // TODO: contiguous is called for further JIT optimizations.
     auto weight_contig = weight.contiguous();
-    auto weight_ptr_int8 = weight_contig.data<int8_t>();
+
+    std::vector<int8_t> weight_int8(K * N);
+    int8_t* weight_ptr_int8 = weight_int8.data();
+    uint8_t* weight_ptr_uint8 =
+        reinterpret_cast<uint8_t*>(weight_contig.data<c10::qint8>());
+    convert_uint8_int8(K, N, weight_ptr_uint8, weight_ptr_int8);
 
     std::vector<int32_t> col_offsets(N);
     calc_col_offsets_transpose(
@@ -66,16 +73,16 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
             /*ld=*/K,
             /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
             /*groups=*/1),
-        col_offsets});
+        col_offsets,
+        weight.q_scale().toFloat(),
+        weight_zero_point_int32});
 
     // TODO: we will need to replace this with torchscript classes at a later
     // point.
     return cpp_custom_type_hack::create(std::move(ret_ptr), weight.options());
   }
 #else // USE_FBGEMM
-  at::Tensor operator()(
-      at::Tensor /* weight */,
-      int64_t /* weight_zero_point */
+  at::Tensor operator()(at::Tensor /* weight */
   ) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
@@ -87,9 +94,9 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    "quantized::fbgemm_linear_prepack(Tensor W, int W_zero_point) -> Tensor W_prepack",
+    "quantized::fbgemm_linear_prepack(Tensor W) -> Tensor W_prepack",
     c10::kernel<QFCPackWeightInt8>(),
-    c10::dispatchKey(CPUTensorId()));
+    c10::dispatchKey(QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at
