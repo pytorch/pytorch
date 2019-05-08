@@ -17,8 +17,9 @@ steps:
     export AWS_SECRET_ACCESS_KEY=${SECRET}
     eval $(aws ecr get-login --region us-east-1 --no-include-email)
     echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-    docker pull ${DOCKER_IMAGE} >/dev/null
+    docker pull ${DOCKER_IMAGE}
     export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+
     echo "id: "$id
   env:
     ACCESS_KEY_ID: $(ECR_ACCESS_KEY_ID)
