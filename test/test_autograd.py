@@ -2459,16 +2459,19 @@ class TestAutograd(TestCase):
             layer2(layer1(input))
 
         # type conversion
-        assert(prof.function_events[0].input_shapes == [[30, 20]])
-        # fc (addmm)
         assert(
-            prof.function_events[1].input_shapes ==
+            prof.function_events[0].input_shapes ==
+            [[128, 20], [30, 20], [30]]
+        )
+        # fc (addmm)
+        assert(prof.function_events[1].input_shapes == [[30, 20]])
+        assert(
+            prof.function_events[2].input_shapes ==
             [[30], [128, 20], [20, 30], [], []]
         )
-        assert(prof.function_events[2].input_shapes == [[40, 30]])
         assert(
             prof.function_events[3].input_shapes ==
-            [[40], [128, 30], [30, 40], [], []]
+            [[128, 30], [40, 30], [40]]
         )
         print(prof.table())
         print(prof.key_averages(group_by_input_shape=True).table())
