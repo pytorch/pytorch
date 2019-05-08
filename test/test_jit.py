@@ -3084,6 +3084,15 @@ graph(%a, %b, %c, %d):
                 self.assertTrue(type(block.paramNode()) == torch._C.Node)
         self.assertTrue(tested_blocks)
 
+    def test_pytorch_jit_env_off(self):
+        import subprocess
+        env = os.environ.copy()
+        env['PYTORCH_JIT'] = '0'
+        try:
+            subprocess.check_output([sys.executable, '-c', 'import torch'], env=env)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError("Could not 'import torch' with PYTORCH_JIT=0")
+
 
 def execWrapper(code, glob, loc):
     if PY2:
@@ -5179,6 +5188,14 @@ a")
         x = Variable(torch.FloatTensor([1.1, 2.3]), requires_grad=True)
         out = Variable(torch.IntTensor([1, 2]), requires_grad=True)
         self.checkScript(script, [x], optimize=True, outputs=[out], func='to_int')
+
+    def test_str_cast(self):
+        @torch.jit.script
+        def to_str(x):
+            # type: (int) -> str
+            return str((x, x))
+
+        self.assertEqual("(1, 1)", to_str(1))
 
     def test_python_frontend(self):
         def fn(x, y, z):
@@ -14708,6 +14725,136 @@ class TestClassType(JitTestCase):
         input = torch.rand(2, 3)
         output = m_loaded(input)
         self.assertEqual(3 * input, output)
+
+    def test_overloaded_fn(self):
+        @torch.jit.script
+        class Foo(object):
+            def __init__(self, x):
+                self.x = x
+
+            def __len__(self):
+                # type: () -> int
+                return len(self.x)
+
+            def __neg__(self):
+                self.x = -self.x
+                return self
+
+            def __mul__(self, other):
+                # type: (Tensor) -> Tensor
+                return self.x * other
+
+        def test_overload():
+            a = Foo(torch.ones([3, 3]))
+            return len(a), -a * torch.zeros([3, 3])
+
+        self.checkScript(test_overload, ())
+        # unary ops tested above
+
+        # TODO - support compiling classes from strings in jit.CompilationUnit
+        @torch.jit.script
+        class BinOps(object):
+            def __init__(self, x):
+                # type: (int) -> None
+                self.x = x
+
+            def __add__(self, other):
+                # type: (int) -> int
+                return self.x + other
+
+            def __sub__(self, other):
+                # type: (int) -> int
+                return self.x - other
+
+            def __mul__(self, other):
+                # type: (int) -> int
+                return self.x * other
+
+            def __pow__(self, other):
+                # type: (int) -> int
+                return self.x ** other
+
+            def __truediv__(self, other):
+                # type: (int) -> float
+                return self.x / other
+
+            def __mod__(self, other):
+                # type: (int) -> int
+                return self.x % other
+
+            def __ne__(self, other):
+                # type: (int) -> bool
+                return self.x != other
+
+            def __eq__(self, other):
+                # type: (int) -> bool
+                return self.x == other
+
+            def __lt__(self, other):
+                # type: (int) -> bool
+                return self.x < other
+
+            def __gt__(self, other):
+                # type: (int) -> bool
+                return self.x > other
+
+            def __le__(self, other):
+                # type: (int) -> bool
+                return self.x <= other
+
+            def __ge__(self, other):
+                # type: (int) -> bool
+                return self.x >= other
+
+            def __and__(self, other):
+                # type: (int) -> int
+                return self.x & other
+
+            def __or__(self, other):
+                # type: (int) -> int
+                return self.x | other
+
+            def __xor__(self, other):
+                # type: (int) -> int
+                return self.x ^ other
+
+        def add():
+            return BinOps(4) + 3
+        def sub():  # noqa: E306
+            return BinOps(4) - 3
+        def mul():  # noqa: E306
+            return BinOps(4) * 3
+        def pow():  # noqa: E306
+            return BinOps(4) ** 3
+        def truediv():  # noqa: E306
+            return BinOps(4) / 3
+        def ne():  # noqa: E306
+            return BinOps(4) != 3
+        def eq():  # noqa: E306
+            return BinOps(4) == 3
+        def lt():  # noqa: E306
+            return BinOps(4) < 3
+        def gt():  # noqa: E306
+            return BinOps(4) > 3
+        def le():  # noqa: E306
+            return BinOps(4) <= 3
+        def ge():  # noqa: E306
+            return BinOps(4) >= 3
+        def _and():  # noqa: E306
+            return BinOps(4) & 3
+        def _or():  # noqa: E306
+            return BinOps(4) | 3
+        def _xor():  # noqa: E306
+            return BinOps(4) ^ 3
+
+        for func in [add, sub, mul, pow, truediv, ne, eq, lt, gt, le, ge, _and,
+                     _or, _xor]:
+            self.checkScript(func, ())
+
+        with self.assertRaisesRegex(RuntimeError, "because it does not  define a __add__"):
+            @torch.jit.script
+            def test():
+                return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
 
     def test_init_compiled_first(self):
         @torch.jit.script  # noqa: B903
