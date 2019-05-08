@@ -10,7 +10,7 @@ pool:
   vmImage: 'ubuntu-latest'
 
 container:
-  image: pytorch-linux-trusty-py3.5
+  image: pytorch.azurecr.io/pytorch-linux-trusty-py3.5:300
   endpoint: pytorch
 
 steps:
