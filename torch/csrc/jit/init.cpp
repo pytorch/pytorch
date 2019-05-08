@@ -170,22 +170,25 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_insert_quantdequant_for_param",
           [](std::shared_ptr<script::Module>& moduleObj,
-            const std::string& method_name,
-            const std::string& param_name,
-            py::function pyGetQParamFunc) {
-
+             const std::string& method_name,
+             const std::string& param_name,
+             py::function pyGetQParamFunc) {
             if (param_name == std::string("weight")) {
               auto getQParamFunc =
-                py::cast<std::function<std::tuple<std::string, float,
-                  int>(at::Tensor)>>(pyGetQParamFunc);
+                  py::cast<std::function<std::tuple<std::string, float, int>(
+                      at::Tensor)>>(pyGetQParamFunc);
               InsertQuantDequantNodesForParam(
-                moduleObj, method_name, param_name, getQParamFunc);
+                  moduleObj,
+                  method_name,
+                  param_name,
+                  getQParamFunc,
+                  at::ScalarType::Char);
             } else if (param_name == std::string("bias")) {
               auto getQParamFunc =
-                py::cast<std::function<std::tuple<std::string, float,
-                  int>(float, float)>>(pyGetQParamFunc);
-              InsertQuantDequantNodesForParam(
-                moduleObj, method_name, param_name, getQParamFunc);
+                  py::cast<std::function<std::tuple<std::string, float, int>(
+                      float, float)>>(pyGetQParamFunc);
+              InsertQuantDequantNodesForBias(
+                  moduleObj, method_name, getQParamFunc);
             }
           })
       .def(

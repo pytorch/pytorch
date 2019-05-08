@@ -91,12 +91,32 @@ TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
  * \param method_name whose graph is instrumented for quant-dequant nodes.
  * \param param_name parameter for which the nodes are inserted.
  * \param getQParamFunc function to compute qparams.
+ * \at::ScalarType t Datatype for param
  */
- template <typename Fn>
- TORCH_API void InsertQuantDequantNodesForParam(
-   std::shared_ptr<script::Module>& moduleObj,
-   const std::string& method_name,
-   const std::string& param_name,
-   const Fn& getQParamFunc);
+template <typename Fn>
+TORCH_API void InsertQuantDequantNodesForParam(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::string& param_name,
+    const Fn& getQParamFunc,
+    at::ScalarType t);
+
+/** \brief Inserts quant-dequant nodes for bias.
+ *
+ * This pass inserts quant-dequant nodes for bias. Bias q-dq is made an
+ * explicit pass because qparam calculation depend on other qparams and logic
+ * is not generic to be reused for other params in future. This pass also
+ * changes the numerical semantics of the original model and thus we only run
+ * it when user explicitly wants that.
+ * \moduleObj is the module object whose containing methods are modified.
+ * \param method_name whose graph is instrumented for quant-dequant nodes.
+ * \param getQParamFunc function to compute qparams.
+ */
+TORCH_API void InsertQuantDequantNodesForBias(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::function<std::tuple<std::string, float, int>(float, float)>&
+        getQParamFunc);
+
 } // namespace jit
 } // namespace torch

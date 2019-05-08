@@ -1504,6 +1504,7 @@ graph(%x : Tensor,
 
         # This is negation test. We dont expect to see q-dq terms because
         # activation and weight pass to insert q-dq nodes is not run
+        # TODO: Add positive testcase once dequantize_linear exposed to python
         FileCheck().check_not("quantize_linear").check_not("int_repr") \
                    .check_not("dequantize_linear") \
                    .check("conv2d").run(str(scriptModule.graph))
