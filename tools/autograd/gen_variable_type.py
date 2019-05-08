@@ -40,7 +40,7 @@ MANUAL_IMPLEMENTATIONS = {
 DONT_RECORD_TRACE = {
     'convolution', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d',
     'conv_transpose2d', 'conv_transpose3d', 'lstm_cell', 'gru_cell',
-    'rnn_tanh_cell', 'rnn_relu_cell', 'linear',
+    'rnn_tanh_cell', 'rnn_relu_cell',
     # FIXME: figure out a better way when we support sparse tensors in jit
     '_coalesced_',
 }
