@@ -22,16 +22,22 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
     # check the schema with the onnx checker
     onnx.checker.check_model(model)
 
-    # check target type and attributes
+    # check target type and attributes 
     graph = model.graph
+    # ops should contain an object for each node
+    # in graph.node, in the right order.
+    # At least the op_name should be specified,
+    # but the op's attributes can optionally be
+    # specifies as well 
     assert len(ops) == len(graph.node)
     for i in range(0, len(ops)):
         assert graph.node[i].op_type == ops[i]['op_name']
-        attributes = ops[i]['attributes']
-        assert len(attributes) == len(graph.node[i].attribute)
-        for j in range(0, len(attributes)):
-            for attribute_field in attributes[j].keys():
-                assert attributes[j][attribute_field] == getattr(graph.node[i].attribute[j], attribute_field)
+        if "attributes" in ops[i] :
+            attributes = ops[i]['attributes']
+            assert len(attributes) == len(graph.node[i].attribute)
+            for j in range(0, len(attributes)):
+                for attribute_field in attributes[j].keys():
+                    assert attributes[j][attribute_field] == getattr(graph.node[i].attribute[j], attribute_field)
 
 
 def check_onnx_opsets_operator(module, x, ops, opset_versions):
@@ -43,6 +49,17 @@ def check_onnx_opsets_operator(module, x, ops, opset_versions):
 
 
 class TestONNXOpset(TestCase):
+
+    def test_opset_fallback(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return torch.isnan(x)
+
+        ops = [{"op_name" : "IsNaN"},
+               {"op_name" : "Cast", "attributes" : [{"name" : "to", "i" : 2, "type" : 2}]}]
+        ops = {9 : ops, 10 : ops}
+        x = torch.tensor([1.0, float('nan'), 2.0])
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
     def test_topk(self):
         class MyModule(Module):

@@ -1,5 +1,6 @@
 import warnings
 import importlib
+from inspect import getmembers, isfunction
 
 _registry = {}
 
@@ -24,14 +25,15 @@ def register_ops_in_version(domain, version):
     iter_version = version
     while iter_version >= 9:
         version_ops = get_ops_in_version(iter_version)
-        for opname in version_ops:
-            if not is_registered_op(opname, domain, version):
-                register_op(opname, version_ops[opname], domain, version)
+        for op in version_ops:
+            if isfunction(op[1]) and \
+               not is_registered_op(op[0], domain, version):
+                register_op(op[0], op[1], domain, version)
         iter_version = iter_version - 1
 
 
 def get_ops_in_version(version):
-    return _symbolic_versions[version].__dict__
+    return getmembers(_symbolic_versions[version])
 
 
 def is_registered_version(domain, version):
@@ -60,30 +62,3 @@ def get_registered_op(opname, domain, version):
         warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
     global _registry
     return _registry[(domain, version)][opname]
-
-def is_registered_custom_version(domain, version):
-    while version > 0:
-        if is_registered_version(domain, version):
-            return True
-        version = version - 1
-    return False
-
-def is_registered_custom_op(opname, domain, version):
-    if domain is None or version is None:
-        warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
-    while version > 0:
-        if is_registered_op(opname, domain, version):
-            return True
-        version = version - 1
-    return False
-
-def get_registered_custom_op(opname, domain, version):
-    if domain is None or version is None:
-        warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
-    while version > 0:
-        if is_registered_custom_op(opname, domain, version):
-            get_registered_op(opname, domain, version)
-        version = version - 1
-    warnings.warn("ONNX export failed. "
-                  "The registered op {} does not exist for domain {} and version {}."
-                  .format(opname, domain, version))

@@ -171,6 +171,12 @@ def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
 
 
+def _black_list_in_opset(name):
+    def symbolic_fn(*args, **kwargs):
+        warnings.warn("ONNX export failed on {}, which is not yet implemented for opset 10. Try exporting with a previous opset version.".format(name))
+    return symbolic_fn
+
+
 def _try_get_scalar_type(*args):
     for arg in args:
         try:

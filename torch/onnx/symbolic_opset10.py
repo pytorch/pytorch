@@ -4,7 +4,7 @@ import torch.onnx
 # ONNX symbolics
 import torch.onnx.utils
 
-from torch.onnx.symbolic_helper import parse_args, _unimplemented
+from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset
 import torch.onnx.symbolic_opset9
 
 
@@ -14,6 +14,17 @@ import torch.onnx.symbolic_opset9
 # This file exports ONNX ops for opset 10
 # Opset 10 is supported by ONNX release 1.5.0
 # release on 04/24/19
+
+
+# Blacklist operators for this opset version.
+# These operators have been updated in ONNX but not re-implemented here.
+# It is very important to blacklist these operators to avoid exporting
+# models with mixed versions of operators.
+# TODO : add support for the blacklisted operators in black_listed_operators
+black_listed_operators = ["flip", "slice", "upsample_nearest2d", "upsample_bilinear2d"]
+
+for black_listed_op in black_listed_operators:
+    vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
 
 
 # Add new operator here

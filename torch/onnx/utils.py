@@ -627,20 +627,22 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 return symbolic_fn(g, *inputs, **attrs)
 
         # custom ops
-        elif sym_registry.is_registered_custom_version(ns, opset_version):
-            if not sym_registry.is_registered_custom_op(op_name, ns, opset_version):
+        elif sym_registry.is_registered_version(ns, opset_version):
+            if not sym_registry.is_registered_op(op_name, ns, opset_version):
                 warnings.warn("ONNX export failed on custom operator {}::{} because "
                               "torch.onnx.symbolic_opset{}.{} does not exist. "
                               "Have you registered your symbolic function with "
                               "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
                               .format(ns, op_name, opset_version, op_name))
-            symbolic_fn = sym_registry.get_registered_custom_op(symbolic_name, ns, opset_version)
+            symbolic_fn = sym_registry.get_registered_op(symbolic_name, ns, opset_version)
             attrs = {k: n[k] for k in n.attributeNames()}
             return symbolic_fn(g, *inputs, **attrs)
 
         else:
             warnings.warn("ONNX export failed on an operator with unrecognized namespace {}::{}; "
-                          "please report a bug".format(ns, op_name))
+                          "If you are trying to export a custom operator, make sure you registered "
+                          "it with the right domain and version."
+                          "Otherwise please report a bug".format(ns, op_name))
             return None
 
     except TypeError as e:
