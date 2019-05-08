@@ -11,6 +11,7 @@ pool:
 
 container:
   image: pytorch.azurecr.io/pytorch-linux-trusty-py3.5:300
+  registryServer: pytorch.azurecr.io
   endpoint: pytorch
 
 steps:
