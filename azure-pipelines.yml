@@ -9,6 +9,10 @@ trigger:
 pool:
   vmImage: 'ubuntu-latest'
 
+container:
+  image: pytorch-linux-trusty-py3.5
+  endpoint: pytorch
+
 steps:
 - script: echo Hello, world!
   displayName: 'Run a one-line script'
