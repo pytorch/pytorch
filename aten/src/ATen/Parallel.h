@@ -143,6 +143,9 @@ inline scalar_t parallel_reduce(
   }
 }
 
+// Returns a detailed string describing parallelization settings
+CAFFE2_API std::string get_parallel_info();
+
 class CAFFE2_API PTThreadPool : public c10::ThreadPool {
  public:
   explicit PTThreadPool(
