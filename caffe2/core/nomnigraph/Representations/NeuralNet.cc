@@ -309,21 +309,26 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
   // Finally we reconcile any data dependency issues (if we can).
   for (auto& bbNode : m->controlFlow.getMutableNodes()) {
     auto bb = bbNode->mutableData();
-    std::unordered_set<repr::NNGraph::NodeRef> seen;
-    for (auto instr_iter = bb->getMutableInstructions()->begin();
-         instr_iter != bb->getMutableInstructions()->end();
-         ++instr_iter) {
-      // This cannot be auto& because *iter is pure R-ref
-      auto instr = *instr_iter;
-      for (auto& output : getOutputs(instr)) {
-        for (auto& consumer : getConsumers(output)) {
-          if (seen.count(consumer)) {
-            bb->moveInstructionBefore(instr, consumer);
+    int permutation;
+    do {
+      permutation = 0;
+      std::unordered_set<repr::NNGraph::NodeRef> seen;
+      for (auto instr_iter = bb->getMutableInstructions()->begin();
+           instr_iter != bb->getMutableInstructions()->end();
+           ++instr_iter) {
+        // This cannot be auto& because *iter is pure R-ref
+        auto instr = *instr_iter;
+        for (auto& output : getOutputs(instr)) {
+          for (auto& consumer : getConsumers(output)) {
+            if (seen.count(consumer)) {
+              bb->moveInstructionBefore(instr, consumer);
+              ++permutation;
+            }
           }
         }
+        seen.insert(instr);
       }
-      seen.insert(instr);
-    }
+    } while (permutation);
   }
 }
 

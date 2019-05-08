@@ -56,6 +56,9 @@ class ConvDNNLowPPackWeightOp final
   bool TakeDepthWise3x3x3FastPath_();
   bool TakeGConvFastPath_();
 
+  // Save quantized weights right after quantization before layout packing for
+  // performance purpose
+  bool save_unpacked_weights_;
   bool quantize_groupwise_;
   int nbits_in_non_outlier_; // only for DNNLOWP_ACC16
 

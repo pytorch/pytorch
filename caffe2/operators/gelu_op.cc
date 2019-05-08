@@ -123,9 +123,5 @@ REGISTER_GRADIENT(Gelu, GetGeluGradient);
 
 C10_REGISTER_CAFFE2_OPERATOR_CPU(
     Gelu,
-    (std::vector<c10::Argument>{
-        c10::Argument("input"),
-        c10::Argument("fast_gelu", BoolType::get(), c10::nullopt, false),
-    }),
-    (std::vector<c10::Argument>{c10::Argument("output")}),
+    "_caffe2::Gelu(Tensor input, bool fast_gelu = False) -> (Tensor output)",
     caffe2::GeluOp<caffe2::CPUContext>);

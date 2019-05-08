@@ -16,7 +16,8 @@ static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop);
 void TensorIterator::parallel_reduce(const loop2d_t& loop) {
   AT_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
   int64_t numel = this->numel();
-  if (numel < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region()) {
+  if (numel < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
+      at::in_parallel_region()) {
     serial_for_each(loop, {0, numel});
   } else if (use_two_pass_reduction(*this)) {
     two_pass_reduction(*this, loop);
@@ -30,7 +31,7 @@ static bool use_two_pass_reduction(TensorIterator& iter) {
 }
 
 static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
-  int max_threads = at::get_max_threads();
+  int max_threads = at::get_num_threads();
 
   auto& dst = iter.tensor(0);
   auto buffer_shape = DimVector(dst.sizes());
@@ -65,7 +66,7 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
 /// Chooses a dimension over which to parallelize. Prefers the outer-most
 /// dimension thats larger than the number of available threads.
 static int find_split_dim(TensorIterator& iter) {
-  int num_threads = at::get_max_threads();
+  int num_threads = at::get_num_threads();
   auto shape = iter.shape();
 
   // start with the outer-most dimension
@@ -125,7 +126,8 @@ void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop, bool parall
   if (tensor(0).numel() == 1) {
     loop(*this);
   }
-  else if (numel() < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region() || !parallelize) {
+  else if (numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
+      at::in_parallel_region() || !parallelize) {
     auto reduce_dims = num_reduce_dims();
 
     auto non_reduced_shape = shape.slice(reduce_dims, shape.size() - reduce_dims);
@@ -154,7 +156,7 @@ void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop, bool parall
 
       sub_iter.narrow(dim, begin, end - begin);
       // On some broken setups, `#ifdef _OPENMP` is true,
-      // and `get_max_threads` returns > 1, but
+      // and `get_num_threads` returns > 1, but
       // `#pragma omp parallel` is ignored.
       // There is no API to check for this, so we need to explicitly
       // stop trying to parallelize if we've already gotten here.

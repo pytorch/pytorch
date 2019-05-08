@@ -140,6 +140,26 @@ def skipIfNoLapack(fn):
     return wrapper
 
 
+def skipIfNotRegistered(op_name, message):
+    """Wraps the decorator to hide the import of the `core`.
+
+    Args:
+        op_name: Check if this op is registered in `core._REGISTERED_OPERATORS`.
+        message: mesasge to fail with.
+
+    Usage:
+        @skipIfNotRegistered('MyOp', 'MyOp is not linked!')
+            This will check if 'MyOp' is in the caffe2.python.core
+    """
+    try:
+        from caffe2.python import core
+        skipper = unittest.skipIf(op_name not in core._REGISTERED_OPERATORS,
+                                  message)
+    except ImportError:
+        skipper = unittest.skip("Cannot import `caffe2.python.core`")
+    return skipper
+
+
 def slowTest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -899,11 +919,6 @@ def set_running_script_path():
 
 def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
-        return
-    if TEST_WITH_ROCM:
-        # In ROCm CI, to avoid forking after HIP is initialized, we
-        # indeed load test module from test/run_test.py and run all
-        # tests in the same process.
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
     assert test_case_class_file == running_script_path, "Class of loaded TestCase \"{}\" " \

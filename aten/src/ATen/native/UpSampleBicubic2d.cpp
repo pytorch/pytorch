@@ -35,9 +35,9 @@ static void upsample_bicubic2d_out_frame(
   }
 
   // Bicubic interpolation
-  const scalar_t height_scale = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
       input_height, output_height, align_corners);
-  const scalar_t width_scale = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
       input_width, output_width, align_corners);
 
   for (int64_t output_y = 0; output_y < output_height; output_y++) {
@@ -45,12 +45,12 @@ static void upsample_bicubic2d_out_frame(
       scalar_t* in = idata;
       scalar_t* out = odata;
 
-      const scalar_t real_x = width_scale * output_x;
-      int64_t input_x = real_x;
+      const scalar_t real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
+      int64_t input_x = floorf(real_x);
       const scalar_t t_x = real_x - input_x;
 
-      const scalar_t real_y = height_scale * output_y;
-      int64_t input_y = real_y;
+      const scalar_t real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
+      int64_t input_y = floorf(real_y);
       const scalar_t t_y = real_y - input_y;
 
       for (int64_t c = 0; c < channels * nbatch; c++) {
@@ -115,9 +115,9 @@ static void upsample_bicubic2d_backward_out_frame(
     return;
   }
 
-  const scalar_t height_scale = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
       input_height, output_height, align_corners);
-  const scalar_t width_scale = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
       input_width, output_width, align_corners);
 
   for (int64_t output_y = 0; output_y < output_height; output_y++) {
@@ -125,12 +125,12 @@ static void upsample_bicubic2d_backward_out_frame(
       scalar_t* in = idata;
       scalar_t* out = odata;
 
-      scalar_t real_x = width_scale * output_x;
-      int64_t input_x = real_x;
+      const scalar_t real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
+      int64_t input_x = floorf(real_x);
       scalar_t t_x = real_x - input_x;
 
-      scalar_t real_y = height_scale * output_y;
-      int64_t input_y = real_y;
+      const scalar_t real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
+      int64_t input_y = floorf(real_y);
       scalar_t t_y = real_y - input_y;
 
       scalar_t x_coeffs[4];

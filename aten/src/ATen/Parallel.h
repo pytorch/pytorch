@@ -1,10 +1,14 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <c10/core/thread_pool.h>
+
 #include <atomic>
 #include <cstddef>
 #include <exception>
 
 #ifdef _OPENMP
+#define INTRA_OP_PARALLEL
+
 #include <omp.h>
 #endif
 
@@ -22,14 +26,17 @@ inline int64_t divup(int64_t x, int64_t y) {
   return (x + y - 1) / y;
 }
 
-inline int get_max_threads() {
-#ifdef _OPENMP
-  return omp_get_max_threads();
-#else
-  return 1;
-#endif
-}
+// Called during new thread initialization
+CAFFE2_API void init_num_threads();
 
+// Sets the number of threads to be used in parallel region
+CAFFE2_API void set_num_threads(size_t);
+
+// Returns the number of threads used in parallel region
+CAFFE2_API size_t get_num_threads();
+
+// Returns the current thread number (starting from 0)
+// in the current parallel region, or 0 in the sequential region
 inline int get_thread_num() {
 #ifdef _OPENMP
   return omp_get_thread_num();
@@ -122,7 +129,7 @@ inline scalar_t parallel_reduce(
     const scalar_t ident,
     const F f,
     const SF sf) {
-  if (get_num_threads() == 1) {
+  if (in_parallel_region() || get_num_threads() == 1) {
     return f(begin, end, ident);
   } else {
     const int64_t num_results = divup((end - begin), grain_size);
@@ -137,5 +144,17 @@ inline scalar_t parallel_reduce(
         results_data, results_data + results.size(), ident, sf);
   }
 }
+
+// Returns a detailed string describing parallelization settings
+CAFFE2_API std::string get_parallel_info();
+
+class CAFFE2_API PTThreadPool : public c10::ThreadPool {
+ public:
+  explicit PTThreadPool(
+      std::size_t pool_size,
+      int numa_node_id = -1);
+
+  void init_thread() override;
+};
 
 } // namespace at

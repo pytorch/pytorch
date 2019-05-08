@@ -6,6 +6,13 @@
 
 namespace at {
 
+/**
+ * QTensorImpl is a TensorImpl for Quantized Tensors, it stores Quantizer which
+ * specifies the quantization scheme and parameters, for more information please
+ * see ATen/quantized/Quantizer.h
+ *
+ * We'll use QTensor in code or documentation to refer to a Tensor with QTensorImpl.
+ */
 struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
  public:
   QTensorImpl(

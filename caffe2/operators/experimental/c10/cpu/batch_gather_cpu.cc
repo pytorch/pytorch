@@ -15,9 +15,9 @@ void batch_gather_op_cpu_impl(
     const at::Tensor& data_,
     const at::Tensor& indices_,
     const at::Tensor& output_) {
-  Tensor data{C10Tensor(data_)};
-  Tensor indices{C10Tensor(indices_)};
-  Tensor output{C10Tensor(output_)};
+  Tensor data(data_);
+  Tensor indices(indices_);
+  Tensor output(output_);
   CPUContext context;
 
   CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");

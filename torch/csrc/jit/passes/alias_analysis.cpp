@@ -1,7 +1,10 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/utils/memory.h>
+
+#include <list>
 
 namespace torch {
 namespace jit {
@@ -21,6 +24,16 @@ bool AliasDb::shouldAnnotate(const TypePtr& type) {
 // mutable types.
 bool AliasDb::shouldAnnotate(const Value* v) {
   return shouldAnnotate(v->type());
+}
+
+bool AliasDb::isContainerType(const TypePtr& type) {
+  if (type->kind() == TypeKind::FutureType) {
+    return isContainerType(type->cast<FutureType>()->getElementType());
+  } else if (type->kind() == TypeKind::OptionalType) {
+    return isContainerType(type->cast<OptionalType>()->getElementType());
+  } else {
+    return type->containedTypes().size() > 0;
+  }
 }
 
 AliasDb::~AliasDb() = default;
@@ -237,6 +250,13 @@ void AliasDb::dump() const {
       }
       std::cout << "\n";
     }
+    if (element->contained_elements.size() > 0) {
+      std::cout << element->value->uniqueName() << " contains: ";
+      for (const auto contained : element->contained_elements) {
+        std::cout << contained->value->uniqueName() << ", ";
+      }
+      std::cout << "\n";
+    }
   }
 
   std::cout << "\n===3. WILDCARDS===\n";
@@ -346,6 +366,21 @@ void AliasDb::analyze(Node* node) {
   }
 }
 
+// Returns true if analysis was run using
+// the registered analyzer.
+bool AliasDb::tryRegisteredAnalysis(Node* node) {
+  const Operator& op = getOperatorFor(node);
+  auto analysis = op.options().aliasAnalysis();
+  switch (analysis) {
+    case AliasAnalysisKind::PURE:
+      analyzeCreator(node);
+      return true;
+    case AliasAnalysisKind::DEFAULT:
+      return false;
+  }
+  return false;
+}
+
 // The basic strategy is:
 //   1. Retrieve alias information for every input.
 //   2. Use the node's schema's alias annotations to propgagate alias/write
@@ -365,11 +400,15 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
+    case prim::TupleConstruct:
+      return analyzeTupleConstruct(node);
+    case prim::GradOf:
+      return analyzeGradOf(node);
     case prim::Constant:
     case prim::DictConstruct:
     case prim::ListConstruct:
-    case prim::TupleConstruct:
     case prim::AutogradZero:
+    case prim::AutogradAdd:
     case prim::FusedConcat:
     case prim::MMTreeReduce:
     case prim::MMBatchSide:
@@ -409,6 +448,9 @@ void AliasDb::analyzeImpl(Node* node) {
       // These ops do nothing
       return;
     default:
+      if (tryRegisteredAnalysis(node)) {
+        return;
+      }
       AT_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
   }
 
@@ -576,6 +618,12 @@ void AliasDb::analyzeLoop(Node* node) {
   mapAliases(node->outputs(), blockOutputs);
 }
 
+void AliasDb::analyzeGradOf(Node* node) {
+  const auto grad_of_block = node->blocks().at(0);
+  analyze(grad_of_block);
+  mapAliases(node->outputs(), grad_of_block->outputs());
+}
+
 void AliasDb::analyzeSubgraph(Node* node) {
   const auto subgraph = node->g(attr::Subgraph).get();
 
@@ -685,6 +733,19 @@ void AliasDb::analyzeWait(Node* node) {
   }
 }
 
+void AliasDb::analyzeTupleConstruct(Node* node) {
+  // Because we currently mark all Tuples as needing annotation
+  // (even those containing just prmitive types), an element needs to be created
+  // for TupleConstruct. When that changes we can create an element
+  // only if it contains elements which need annotation
+  getOrCreateElement(node->output());
+  for (const auto& input : node->inputs()) {
+    if (shouldAnnotate(input)) {
+      addToContainedElements(input, node->output());
+    }
+  }
+}
+
 // SetAttr: writes to the `self` field
 void AliasDb::analyzeSetAttr(Node* node) {
   const auto self = node->inputs().at(0);
@@ -749,27 +810,96 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
-  if (!isTracked(from)) {
-    giveFreshAlias(from);
-  }
-  if (!isTracked(to)) {
-    giveFreshAlias(to);
-  }
-  auto fromEl = elementMap_.at(from);
-  auto toEl = elementMap_.at(to);
+  auto fromEl = getOrCreateElement(from);
+  auto toEl = getOrCreateElement(to);
+
   memoryDAG_->makePointerTo(fromEl, toEl);
 }
 
+void AliasDb::addToContainedElements(
+    const Value* elem,
+    const Value* container) {
+  if (!shouldAnnotate(elem)) {
+    return;
+  }
+
+  // wildcards tracked separately
+  if (isWildcard(elem)) {
+    return;
+  }
+
+  AT_ASSERT(isContainerType(container->type()));
+
+  auto elemEl = getOrCreateElement(elem);
+  auto contEl = getOrCreateElement(container);
+
+  memoryDAG_->addToContainedElements(elemEl, contEl);
+}
+
 bool AliasDb::mayAlias(const Value* a, const Value* b) const {
+  if (!shouldAnnotate(a) || !shouldAnnotate(b)) {
+    return false;
+  }
+
   if (isWildcard(a) || isWildcard(b)) {
     return true;
   }
 
-  if (!elementMap_.count(a) || !elementMap_.count(b)) {
+  return memoryDAG_->mayAlias(elementMap_.at(a), elementMap_.at(b));
+}
+
+bool AliasDb::cannotCheckAliasContainment(const Value* elem) const {
+  if (isWildcard(elem)) {
+    return true;
+  }
+
+  if (isContainerType(elem->type())) {
+    if (elem->node()->kind() != prim::TupleConstruct) {
+      return true;
+    }
+    auto inps = elem->node()->inputs();
+    return std::any_of(inps.begin(), inps.end(), [&](const Value* v) {
+      return cannotCheckAliasContainment(v);
+    });
+  }
+
+  return false;
+}
+
+bool AliasDb::mayContainAlias(Value* a, Value* b) const {
+  const std::vector<Value*> a_vec = {a};
+  const std::vector<Value*> b_vec = {b};
+
+  return mayContainAlias(a_vec, b_vec);
+}
+
+bool AliasDb::mayContainAlias(
+    const at::ArrayRef<Value*>& a,
+    const at::ArrayRef<Value*>& b) const {
+  std::vector<Element*> a_elements;
+  for (const auto& val : a) {
+    if (cannotCheckAliasContainment(val)) {
+      return true;
+    }
+    if (shouldAnnotate(val)) {
+      a_elements.push_back(elementMap_.at(val));
+    }
+  }
+
+  if (a_elements.size() == 0) {
     return false;
   }
 
-  return memoryDAG_->mayAlias(elementMap_.at(a), elementMap_.at(b));
+  std::vector<Element*> b_elements;
+  for (const auto& val : b) {
+    if (cannotCheckAliasContainment(val)) {
+      return true;
+    }
+    if (shouldAnnotate(val)) {
+      b_elements.push_back(elementMap_.at(val));
+    }
+  }
+  return memoryDAG_->mayContainAlias(a_elements, b_elements);
 }
 
 // Make each value in the `from` list point to its partner in the `to` list
@@ -792,6 +922,13 @@ void AliasDb::giveFreshAlias(const Value* value) {
   }
 
   elementMap_[value] = memoryDAG_->makeFreshValue(value);
+}
+
+Element* AliasDb::getOrCreateElement(const Value* value) {
+  if (!isTracked(value)) {
+    giveFreshAlias(value);
+  }
+  return elementMap_.at(value);
 }
 
 bool AliasDb::isTracked(const Value* v) const {
@@ -1149,7 +1286,7 @@ c10::optional<const Node*> AliasDb::getLastWildcard() const {
   }
 }
 
-TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
+bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
   // WARNING: by adding a case to this list, you are asserting that you have
   // added a case for the unschematized node in AliasDb::analyze
   const static std::unordered_set<Symbol> handled = {
@@ -1163,6 +1300,7 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::TupleConstruct,
       prim::AutogradZero,
       prim::FusedConcat,
+      prim::GradOf,
       prim::MMTreeReduce,
       prim::MMBatchSide,
       prim::BroadcastSizes,
@@ -1178,6 +1316,7 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::BroadcastingChunk,
       prim::fork,
       prim::CreateObject,
+      prim::AutogradAdd,
       prim::GetAttr,
       prim::SetAttr,
       aten::wait,

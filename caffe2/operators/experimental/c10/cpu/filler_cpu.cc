@@ -1,5 +1,4 @@
 #include <ATen/core/op_registration/op_registration.h>
-#include <c10/core/Tensor.h>
 #include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
@@ -18,7 +17,7 @@ void filler_init(
     ArrayRef<int64_t> shape,
     ArrayRef<int64_t> extra_shape,
     bool input_as_shape) {
-  Tensor output{C10Tensor(output_)};
+  Tensor output(output_);
   if (inputs.size()) {
     auto real_shape = vector<int64_t>{};
     if (input_as_shape) {
@@ -52,8 +51,8 @@ void given_tensor_fill_op_cpu_impl(
     ArrayRef<int64_t> extra_shape,
     bool input_as_shape,
     const at::Tensor& values_) {
-  Tensor output{C10Tensor(output_)};
-  Tensor values{C10Tensor(values_)};
+  Tensor output(output_);
+  Tensor values(values_);
   CPUContext context;
 
   filler_init(inputs, output_, shape, extra_shape, input_as_shape);
@@ -78,7 +77,7 @@ void constant_fill_op_cpu_impl(
     bool input_as_shape,
     int64_t dtype,
     c10::Scalar value) {
-  Tensor output{C10Tensor(output_)};
+  Tensor output(output_);
   CPUContext context;
 
   filler_init(inputs, output_, shape, extra_shape, input_as_shape);
@@ -118,7 +117,7 @@ void uniform_fill_op_cpu_impl(
     bool input_as_shape,
     double min,
     double max) {
-  Tensor output{C10Tensor(output_)};
+  Tensor output(output_);
   CPUContext context;
 
   filler_init(inputs, output_, shape, extra_shape, input_as_shape);

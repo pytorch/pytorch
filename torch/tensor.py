@@ -252,6 +252,12 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
+    def pstrf(self, upper=True):
+        r"""See :func:`torch.pstrf`"""
+        warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
+                      "in the next release.", stacklevel=2)
+        return super(Tensor, self).pstrf(upper=upper)
+
     def potrf(self, upper=True):
         r"""See :func:`torch.cholesky`"""
         warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed "
@@ -259,11 +265,13 @@ class Tensor(torch._C._TensorBase):
                       ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky(upper=upper)
 
-    def pstrf(self, upper=True):
-        r"""See :func:`torch.pstrf`"""
-        warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
-                      "in the next release.", stacklevel=2)
-        return super(Tensor, self).pstrf(upper=upper)
+    def potri(self, upper=True):
+        r"""See :func:`torch.cholesky_inverse`"""
+        warnings.warn("torch.potri is deprecated in favour of torch.cholesky_inverse and will be "
+                      "removed in the next release. Please use torch.cholesky_inverse instead and "
+                      "note that the :attr:`upper` argument in torch.cholesky_inverse defaults to "
+                      "``False``.", stacklevel=2)
+        return super(Tensor, self).cholesky_inverse(upper=upper)
 
     def potrs(self, u, upper=True):
         r"""See :func:`torch.cholesky_solve`"""
@@ -345,28 +353,12 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
-    def unique(self, sorted=True, return_inverse=False, dim=None):
-        r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
+    def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
+        r"""Returns the unique elements of the input tensor.
 
         See :func:`torch.unique`
         """
-        if dim is not None:
-            output, inverse_indices = torch._unique_dim(
-                self,
-                sorted=sorted,
-                return_inverse=return_inverse,
-                dim=dim
-            )
-        else:
-            output, inverse_indices = torch._unique(
-                self,
-                sorted=sorted,
-                return_inverse=return_inverse
-            )
-        if return_inverse:
-            return output, inverse_indices
-        else:
-            return output
+        return torch.unique(self, sorted=sorted, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
     def unique_consecutive(self, return_inverse=False, return_counts=False, dim=None):
         r"""Eliminates all but the first element from every consecutive group of equivalent elements.

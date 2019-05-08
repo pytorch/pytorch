@@ -25,9 +25,9 @@ class batch_matmul_cpu final : public c10::OperatorKernel {
       int64_t trans_a,
       int64_t trans_b,
       int64_t broadcast) {
-    Tensor A{C10Tensor(A_)};
-    Tensor B{C10Tensor(B_)};
-    Tensor Y{C10Tensor(Y_)};
+    Tensor A(A_);
+    Tensor B(B_);
+    Tensor Y(Y_);
     CPUContext context;
     using Engine = caffe2::DefaultEngine;
 
@@ -265,7 +265,7 @@ class batch_matmul_cpu final : public c10::OperatorKernel {
   }
 
  private:
-  at::Tensor scratch = at::Tensor(C10Tensor(empty({}, CPU)));
+  at::Tensor scratch = at::Tensor(empty({}, CPU));
 };
 
 static auto registry = c10::RegisterOperators().op(

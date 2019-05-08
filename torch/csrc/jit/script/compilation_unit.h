@@ -8,6 +8,7 @@
 #include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
+#include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 
@@ -27,13 +28,11 @@ namespace script {
 struct Def;
 struct SugaredValue;
 struct Function;
-using Kwargs = std::unordered_map<std::string, IValue>;
+struct Resolver;
 
-using Resolver = std::function<std::shared_ptr<SugaredValue>(
-    const std::string& name,
-    Function& f,
-    const SourceRange& loc)>;
+using ResolverPtr = std::shared_ptr<Resolver>;
 using Self = std::function<std::shared_ptr<SugaredValue>(Value*)>;
+using Kwargs = std::unordered_map<std::string, IValue>;
 
 // A Function is a pure Graph with no implicit `self` object bound.
 // It contains schema information, and the executor that manages the
@@ -64,10 +63,6 @@ struct TORCH_API Function {
     getSchema().checkAndNormalizeInputs(stack, kwargs);
     run(stack);
     return stack.front();
-  }
-
-  std::shared_ptr<Graph> graph_for(Stack inputs) {
-    return get_executor().graphFor(inputs);
   }
 
   std::shared_ptr<Graph> graph() const {
@@ -213,25 +208,25 @@ struct TORCH_API CompilationUnit {
   // for historic reasons, these are defined in compiler.cpp
   void define(
       const std::vector<Def>& definitions,
-      const std::vector<Resolver>& resolvers, /* determines how we handle free
-                                                 variables in each definition*/
+      const std::vector<ResolverPtr>&
+          resolvers, /* determines how we handle free
+                     variables in each definition*/
       // if non-null, the first argument to each def, is bound to this value
       const Self& self);
 
   // same as above but parse the definitions from source
   void define(
       const std::string& source,
-      const Resolver& resolver,
+      const ResolverPtr& resolver,
       const Self& self);
 
-  void clone_function(const Function& remote) {
-    create_function(remote.name(), remote.graph()->copy());
-  }
-
-  Function& create_function(std::string name, std::shared_ptr<Graph> graph) {
+  std::shared_ptr<Function> create_function(
+      std::string name,
+      std::shared_ptr<Graph> graph) {
     auto fn = std::make_shared<Function>(
         std::move(name), is_optimized(), std::move(graph), nullptr);
-    return register_function(std::move(fn));
+    register_function(fn);
+    return fn;
   }
 
   const std::vector<std::shared_ptr<Function>>& get_functions() const {
@@ -261,6 +256,41 @@ struct TORCH_API CompilationUnit {
     functions_.clear();
   }
 
+  /**
+   * Register a class as being owned by this compilation unit.
+   */
+  void register_class(ClassTypePtr classType) {
+    classes_.push_back(std::move(classType));
+  };
+
+  ClassTypePtr get_class(const c10::QualifiedName& name) const {
+    for (const auto& cls : classes_) {
+      if (cls->qualname() == name.qualifiedName()) {
+        return cls;
+      }
+    }
+    return nullptr;
+  }
+
+  /**
+   * Python compilation unit methods
+   *
+   * Right now there is a single compilation unit that owns all ScriptClasses
+   * defined in Python. Below are accessors methods for it.
+   */
+  static const CompilationUnit& _get_python_cu_const() {
+    return _get_python_cu();
+  }
+  static CompilationUnit& _get_python_cu() {
+    static CompilationUnit pyCu;
+    return pyCu;
+  }
+  // For testing: clear all Python-defined classes to ensure that unit tests
+  // have isolation.
+  static void _clear_python_cu() {
+    _get_python_cu().classes_.clear();
+  }
+
  private:
   Function& register_function(std::shared_ptr<Function> fn) {
     AT_CHECK(
@@ -276,6 +306,13 @@ struct TORCH_API CompilationUnit {
   // for fast lookup
   std::unordered_map<std::string, size_t> dict_;
   bool optimized_ = true;
+
+  // [class owernship] Right now there aree two relationships between classes
+  // and compilation units:
+  // 1. Classes have compilation units internally that hold their methods.
+  // 2. On load, the TypePtrs of any imported classes are owned by the main
+  // module's compilation unit.
+  std::vector<ClassTypePtr> classes_;
 };
 
 } // namespace script

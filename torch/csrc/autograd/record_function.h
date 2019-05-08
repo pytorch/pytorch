@@ -26,31 +26,36 @@ struct TORCH_API StringView {
   const char* str_ptr_;
 };
 
-using GetPackedInputsCallback = std::function<std::vector<c10::IValue>()>;
-
 struct TORCH_API RecordFunction {
-  explicit RecordFunction(Function* fn, GetPackedInputsCallback cb = nullptr);
+  // Default constructor is used with before function called afterwards
+  RecordFunction() {}
 
-  explicit RecordFunction(
-      std::string name,
-      int64_t current_sequence_nr = -1,
-      GetPackedInputsCallback cb = nullptr);
+  // before function initializes RecordFunction members and calls
+  // start callbacks
+  void before(const char* name, int64_t sequence_nr = -1);
+  void before(std::string name, int64_t sequence_nr = -1);
+  void before(Function* fn, int64_t sequence_nr = -1);
 
-  explicit RecordFunction(
-      const char* name,
-      int64_t current_sequence_nr = -1,
-      GetPackedInputsCallback cb = nullptr);
+  template<typename F>
+  void before(
+      F fn,
+      c10::ArrayRef<c10::IValue> args,
+      int64_t current_sequence_nr = -1) {
+    inputs_ = args.vec();
+    before(fn, current_sequence_nr);
+  }
 
-  explicit RecordFunction(
-      std::string name,
-      GetPackedInputsCallback cb) : RecordFunction(name, -1, cb) {}
+  template<typename F>
+  void before(
+      F fn,
+      std::vector<c10::IValue>&& args,
+      int64_t current_sequence_nr = -1) {
+    inputs_ = std::move(args);
+    before(fn, current_sequence_nr);
+  }
 
-  explicit RecordFunction(
-      const char* name,
-      GetPackedInputsCallback cb) : RecordFunction(name, -1, cb) {}
-
+  // Destructor calls end callbacks
   virtual ~RecordFunction();
-
 
   inline Function* func() const {
     return fn_;
@@ -65,10 +70,6 @@ struct TORCH_API RecordFunction {
   }
 
   const std::vector<c10::IValue>& inputs() const {
-    if (inputs_cb_ && !inputs_initialized_) {
-      inputs_ = inputs_cb_();
-      inputs_initialized_ = true;
-    }
     return inputs_;
   }
 
@@ -82,20 +83,33 @@ struct TORCH_API RecordFunction {
   Function* fn_ = nullptr;
   StringView name_;
   int64_t sequence_nr_ = -1;
-
+  std::vector<c10::IValue> inputs_;
   RecordFunction* parent_ = nullptr;
 
-  GetPackedInputsCallback inputs_cb_ = nullptr;
-  mutable bool inputs_initialized_ = false;
-  // initialized lazily by inputs_cb_
-  mutable std::vector<c10::IValue> inputs_;
+  bool initialized_ = false;
 };
+
+TORCH_API bool hasCallbacks();
+TORCH_API bool needsInputs();
+
+// optional argument - function's seq_no
+#define RECORD_FUNCTION(fn, inputs, ...) \
+  torch::autograd::profiler::RecordFunction guard; \
+  if (torch::autograd::profiler::hasCallbacks()) { \
+    if (torch::autograd::profiler::needsInputs()) { \
+      guard.before(fn, inputs, ##__VA_ARGS__); \
+    } else { \
+      guard.before(fn, ##__VA_ARGS__); \
+    } \
+  }
 
 // WARNING: all calls to pushCallback/popCallback are not thread safe and
 // must not overlap with other code execution
 using RecordFunctionCallback = std::function<void(const RecordFunction&)>;
-TORCH_API void pushCallback(RecordFunctionCallback, RecordFunctionCallback);
-TORCH_API void pushCallback(RecordFunctionCallback);
+TORCH_API void pushCallback(
+    RecordFunctionCallback start,
+    RecordFunctionCallback end = [](const RecordFunction&){},
+    bool needs_inputs = false);
 TORCH_API void popCallback();
 
 } // namespace profiler

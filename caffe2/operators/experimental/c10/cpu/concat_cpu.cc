@@ -18,8 +18,8 @@ void concat_op_cpu_impl(
     const at::Tensor& split_,
     int64_t axis,
     int64_t add_axis) {
-  Tensor output{C10Tensor(output_)};
-  Tensor split{C10Tensor(split_)};
+  Tensor output(output_);
+  Tensor split(split_);
   CPUContext context;
 
   split.Resize(vector<int64_t>(1, inputs.size()));

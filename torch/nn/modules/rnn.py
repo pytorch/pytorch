@@ -132,8 +132,11 @@ class RNNBase(Module):
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
 
-    @_parameter_list
-    def get_flat_weights(self):
+    def _get_flat_weights_names(self):
+        return [weight for weights in self._all_weights for weight in weights]
+
+    @_parameter_list(_get_flat_weights_names)
+    def _get_flat_weights(self):
         return self._flat_weights
 
     @weak_script_method
@@ -204,10 +207,10 @@ class RNNBase(Module):
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
-            result = _impl(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
+            result = _impl(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
                            self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _impl(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
+            result = _impl(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
                            self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1]
@@ -515,10 +518,10 @@ class LSTM(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
-            result = _VF.lstm(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
+            result = _VF.lstm(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _VF.lstm(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
+            result = _VF.lstm(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
                               self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:]

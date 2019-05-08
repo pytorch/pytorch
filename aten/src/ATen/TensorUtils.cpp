@@ -202,9 +202,37 @@ void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
     "(while checking arguments for ", c, ")");
 }
 
-void checkBackend(CheckedFrom c, ArrayRef<Tensor> tensors, at::Backend backend) {
+void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Backend backend) {
   for (auto &t : tensors) {
     checkBackend(c, t, backend);
+  }
+}
+
+void checkDeviceType(CheckedFrom c, const Tensor& t, DeviceType device_type) {
+  AT_CHECK(
+      !t.defined() || t.type().device_type() == device_type,
+      "Expected tensor to have ", device_type,
+      " DeviceType, but got tensor with ", t.type().device_type(), " DeviceType ",
+      "(while checking arguments for ", c, ")");
+}
+
+void checkDeviceType(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::DeviceType device_type) {
+  for (auto &t : tensors) {
+    checkDeviceType(c, t, device_type);
+  }
+}
+
+void checkLayout(CheckedFrom c, const Tensor& t, Layout layout) {
+  AT_CHECK(
+    !t.defined() || t.layout() == layout,
+    "Expected tensor to have ", layout,
+    " Layout, but got tensor with ", t.layout(), " Layout ",
+    "(while checking arguments for ", c, ")");
+}
+
+void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout) {
+  for (auto &t : tensors) {
+    checkLayout(c, t, layout);
   }
 }
 

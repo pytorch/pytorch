@@ -47,6 +47,11 @@ struct ScatterOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
+struct ReduceScatterOptions {
+  ReduceOp reduceOp = ReduceOp::SUM;
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+};
+
 struct BarrierOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };

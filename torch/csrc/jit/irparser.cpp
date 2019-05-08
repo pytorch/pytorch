@@ -15,10 +15,17 @@ struct VarWithType;
 struct ParsedLiteral;
 
 class IRParser {
-  friend void parseIR(const std::string& str, torch::jit::Graph* graph);
-  IRParser(const std::string& str, torch::jit::Graph* graph)
+  friend void parseIR(
+      const std::string& str,
+      torch::jit::Graph* graph,
+      std::unordered_map<std::string, Value*>& vmap);
+  IRParser(
+      const std::string& str,
+      torch::jit::Graph* graph,
+      std::unordered_map<std::string, Value*>& vmap)
       : L(str),
         g(graph),
+        vmap(vmap),
         type_parser(L, /*parse_complete_tensor_types*/ true) {}
 
   std::string parseVar();
@@ -50,7 +57,7 @@ class IRParser {
 
   torch::jit::script::Lexer L;
   torch::jit::Graph* g = nullptr;
-  std::unordered_map<std::string, Value*> vmap;
+  std::unordered_map<std::string, Value*>& vmap;
   SchemaTypeParser type_parser;
 };
 
@@ -73,9 +80,17 @@ struct VarWithType {
   TypePtr type;
 };
 
-void parseIR(const std::string& str, torch::jit::Graph* graph) {
-  torch::jit::script::IRParser p(str, graph);
+void parseIR(
+    const std::string& str,
+    torch::jit::Graph* graph,
+    std::unordered_map<std::string, Value*>& vmap) {
+  torch::jit::script::IRParser p(str, graph, vmap);
   p.parse();
+}
+
+void parseIR(const std::string& str, torch::jit::Graph* graph) {
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(str, graph, vmap);
 }
 
 VarWithType IRParser::parseVarWithType() {

@@ -297,8 +297,8 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   }
 
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
-    return (t.stride(2) == 1 && t.stride(1) == t.size(2))
-            || (t.stride(1) == 1 && t.stride(2) == t.size(1));
+    return (t.stride(2) == 1 && t.stride(1) >= t.size(2))
+            || (t.stride(1) == 1 && t.stride(2) >= t.size(1));
   };
 
   if (contraction_size * res_rows * res_cols < 400) {

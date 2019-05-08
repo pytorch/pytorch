@@ -1,8 +1,11 @@
 #pragma once
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/strtod.h>
 #include <torch/csrc/jit/script/tree.h>
 
 #include <functional>
+#include <iostream>
 #include <string>
 
 namespace torch {
@@ -295,6 +298,7 @@ struct Expr : public TreeView {
       case '^':
       case '|':
       case TK_LIST_COMP:
+      case TK_DOTS:
         return;
       default:
         throw ErrorReport(tree)
@@ -499,7 +503,7 @@ struct For : public Stmt {
   }
 };
 
-//TODO: supports only single comprehension for now
+// TODO: supports only single comprehension for now
 struct ListComp : public Expr {
   explicit ListComp(const TreeRef& tree) : Expr(tree) {
     tree->match(TK_LIST_COMP);
@@ -642,6 +646,15 @@ struct Pass : public Stmt {
   }
 };
 
+struct Dots : public Expr {
+  explicit Dots(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_DOTS);
+  }
+  static Dots create(const SourceRange& range) {
+    return Dots(Compound::create(TK_DOTS, range, {}));
+  }
+};
+
 struct ExprStmt : public Stmt {
   explicit ExprStmt(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_EXPR_STMT);
@@ -736,11 +749,12 @@ struct Const : public Expr {
     return !isFloatingPoint();
   }
   int64_t asIntegral() const {
-    return std::stoll(subtree(0)->stringValue());
+    return c10::stoll(subtree(0)->stringValue());
   }
   double asFloatingPoint() const {
-    return SharedParserData::strtod_c(
-        subtree(0)->stringValue().c_str(), nullptr);
+    char* dummy;
+    return torch::jit::script::strtod_c(
+        subtree(0)->stringValue().c_str(), &dummy);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();

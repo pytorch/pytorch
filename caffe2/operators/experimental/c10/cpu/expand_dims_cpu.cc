@@ -15,8 +15,8 @@ class expand_dims_cpu final : public c10::OperatorKernel {
       const at::Tensor& input_,
       const at::Tensor& output_,
       ArrayRef<int64_t> dims) {
-    Tensor input{C10Tensor(input_)};
-    Tensor output{C10Tensor(output_)};
+    Tensor input(input_);
+    Tensor output(output_);
 
     if (!initialized_) {
       dims_ = dims.vec();

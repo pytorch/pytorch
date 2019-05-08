@@ -21,14 +21,16 @@
   } catch (const std::exception& e) {                                    \
     ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
   }
-#define ASSERT_ANY_THROW(statement)   \
-  bool threw = false;                 \
-  try {                               \
-    (void)statement;                  \
-  } catch (const std::exception& e) { \
-    threw = true;                     \
-  }                                   \
-  ASSERT_TRUE(threw);
+#define ASSERT_ANY_THROW(statement)     \
+  {                                     \
+    bool threw = false;                 \
+    try {                               \
+      (void)statement;                  \
+    } catch (const std::exception& e) { \
+      threw = true;                     \
+    }                                   \
+    ASSERT_TRUE(threw);                 \
+  }
 
 #endif // defined(USE_GTEST)
 

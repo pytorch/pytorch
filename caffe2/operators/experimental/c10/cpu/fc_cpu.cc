@@ -22,10 +22,10 @@ class fc_op_cpu final : public c10::OperatorKernel {
       const at::Tensor& Y_,
       int64_t axis,
       int64_t axis_w) {
-    Tensor X{C10Tensor(X_)};
-    Tensor W{C10Tensor(W_)};
-    Tensor b{C10Tensor(b_)};
-    Tensor Y{C10Tensor(Y_)};
+    Tensor X(X_);
+    Tensor W(W_);
+    Tensor b(b_);
+    Tensor Y(Y_);
     CPUContext context;
 
     constexpr bool TransposeWeight = true;
@@ -125,7 +125,7 @@ class fc_op_cpu final : public c10::OperatorKernel {
 
  private:
   vector<int64_t> Y_shape_cache_;
-  at::Tensor bias_multiplier_ = at::Tensor(C10Tensor(Tensor()));
+  at::Tensor bias_multiplier_ = at::Tensor(Tensor());
 };
 
 static auto registry = c10::RegisterOperators().op(

@@ -35,43 +35,84 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
 #else // AT_MKLDNN_EBABLED
 
 #include <ATen/mkldnn/Runtime.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 using namespace mkldnn;
 
 namespace at { namespace native {
 
-constexpr int input_batch_size_dim = 0;  // also grad_input
-constexpr int input_channels_dim = 1;
-constexpr int output_batch_size_dim = 0;  // also grad_output
-constexpr int output_channels_dim = 1;
-constexpr int weight_output_channels_dim = 0;
-constexpr int weight_input_channels_dim = 1;
+Tensor _mkldnn_conv2d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    at::IntArrayRef padding, at::IntArrayRef stride, at::IntArrayRef dilation, int64_t groups) {
+  const ideep::tensor& x = itensor_from_mkldnn(input);
+  const ideep::tensor& w = itensor_from_mkldnn(weight);
 
-// Often written as 2 + max_dim (extra dims for batch size and channels)
-constexpr int max_dim = 3;
-
-static std::vector<int64_t> conv_output_size(
-    IntArrayRef input_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
-{
-  auto dim = input_size.size();
-  std::vector<int64_t> output_size(dim);
-  output_size[0] = input_size[input_batch_size_dim];
-  output_size[1] = weight_size[weight_output_channels_dim];
-  for (size_t d = 2; d < dim; ++d) {
-    auto kernel = dilation[d - 2] * (weight_size[d] - 1) + 1;
-    output_size[d] = (input_size[d] + (2 * padding[d - 2])
-                        - kernel) / stride[d - 2] + 1;
+  std::vector<int64_t> kernel_size(input.dim());
+  // mkldnn conv2d weights could have been re-ordered to 5d by
+  // mkldnn_reorder_conv2d_weight
+  if (weight.dim() == input.dim() + 1) {
+    AT_ASSERTM(
+        groups > 1,
+        "Only group _mkldnn_conv2d weights could have been reordered to 5d");
+    kernel_size[0] = weight.size(0) * weight.size(1);
+    std::copy_n(
+        weight.sizes().cbegin() + 2, input.dim() - 1, kernel_size.begin() + 1);
+  } else {
+    std::copy_n(
+        weight.sizes().cbegin(), input.dim(), kernel_size.begin());
   }
-  return output_size;
+
+  std::vector<int64_t> output_sizes = conv_output_size(
+    input.sizes(), kernel_size, padding, stride, dilation);
+
+  ideep::tensor y;
+  if (bias.defined()) {
+    const ideep::tensor& b = itensor_from_mkldnn(bias);
+    ideep::convolution_forward::compute<AllocForMKLDNN>(
+      x,
+      w,
+      b,
+      {output_sizes.cbegin(), output_sizes.cend()},
+      y,
+      {stride.begin(), stride.end()},
+      {dilation.begin(), dilation.end()},
+      {padding.begin(), padding.end()},
+      {padding.begin(), padding.end()},
+      groups,
+      ideep::descriptor_group::attr_t{},
+      ideep::algorithm::convolution_direct,
+      ideep::prop_kind::forward);
+  } else {
+    ideep::convolution_forward::compute<AllocForMKLDNN>(
+      x,
+      w,
+      {output_sizes.cbegin(), output_sizes.cend()},
+      y,
+      {stride.begin(), stride.end()},
+      {dilation.begin(), dilation.end()},
+      {padding.begin(), padding.end()},
+      {padding.begin(), padding.end()},
+      groups,
+      ideep::descriptor_group::attr_t{},
+      ideep::algorithm::convolution_direct,
+      ideep::prop_kind::forward);
+  }
+  return new_with_itensor_mkldnn(std::move(y), input.options());
 }
 
 at::Tensor mkldnn_convolution(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
 {
-  auto output = at::empty(conv_output_size(
-    input.sizes(), weight.sizes(), padding, stride, dilation, groups), input.options());
+  if (input.is_mkldnn()) {
+    return _mkldnn_conv2d(input, weight, bias, padding, stride, dilation, groups);
+  }
+
+  auto output = at::empty(
+      conv_output_size(
+          input.sizes(), weight.sizes(), padding, stride, dilation),
+      input.options());
 
   auto cpu_engine = CpuEngine::Instance().get_engine();
 

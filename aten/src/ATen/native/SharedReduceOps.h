@@ -22,7 +22,7 @@
 #endif
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
-#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
 #include <c10/cuda/CUDAMathCompat.h>
 #define compat_pow c10::cuda::compat::pow
 #else
