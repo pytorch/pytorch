@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "THNN/generic/ClassNLLCriterion.c"
 #else
 
+#include <ATen/Parallel.h>
+
 void THNN_(ClassNLLCriterion_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -32,24 +34,24 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     int batch_size = THTensor_(size)(input, 0);
     THTensor_(resize1d)(output, batch_size);
 
-    std::atomic<int> invalid_target(-1);  // We cannot throw an exception inside omp parallel
-    int i;
-    #pragma omp parallel for private(i)
-    for (i = 0; i < batch_size; i++) {
-      int cur_target = THLongTensor_fastGetLegacy1dNoScalars(target, i);
+    std::atomic<int> invalid_target(-1);  // We cannot throw an exception inside parallel section
+    at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+      for (auto i = start; i < end; i++) {
+        int cur_target = THLongTensor_fastGetLegacy1dNoScalars(target, i);
 
-      if (cur_target == ignore_index) {
-        THTensor_(fastSet1d)(output, i, 0.0f);
-        continue;
+        if (cur_target == ignore_index) {
+          THTensor_(fastSet1d)(output, i, 0.0f);
+          continue;
+        }
+        if (cur_target >= 0 && cur_target < n_classes) {
+            scalar_t cur_weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
+            THTensor_(fastSet1d)(output, i, -THTensor_(fastGet2d)(input, i, cur_target) * cur_weight);
+        } else {
+          int tmp = -1;
+          invalid_target.compare_exchange_strong(tmp, cur_target);
+        }
       }
-      if (cur_target >= 0 && cur_target < n_classes) {
-          scalar_t cur_weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
-          THTensor_(fastSet1d)(output, i, -THTensor_(fastGet2d)(input, i, cur_target) * cur_weight);
-      } else {
-        int tmp = -1;
-        invalid_target.compare_exchange_strong(tmp, cur_target);
-      }
-    }
+    });
 
     if (invalid_target.load() >= 0) {
         THError("Target %d out of bounds", invalid_target.load());
@@ -146,16 +148,16 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     int batch_size = THTensor_(size)(input, 0);
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, batch_size);
 
-    int i;
-    #pragma omp parallel for private(i)
-    for (i = 0; i < batch_size; i++) {
-      int cur_target = THLongTensor_fastGetLegacy1dNoScalars(target, i);
-      if (cur_target == ignore_index) {
-        continue;
+    at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+      for (auto i = start; i < end; i++) {
+        int cur_target = THLongTensor_fastGetLegacy1dNoScalars(target, i);
+        if (cur_target == ignore_index) {
+          continue;
+        }
+        scalar_t weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
+        THTensor_(fastSet2d)(gradInput, i, cur_target, -weight * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, i));
       }
-      scalar_t weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
-      THTensor_(fastSet2d)(gradInput, i, cur_target, -weight * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, i));
-    }
+    });
     return;
   }
 
