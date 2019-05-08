@@ -451,7 +451,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithDictInput_with
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(2, captured_input_list_size);
+  EXPECT_EQ(2, captured_dict_size);
 }
 
 string kernelWithDictInputWithOutput(Dict<string, string> input1) {
