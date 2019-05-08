@@ -689,7 +689,7 @@ class JitTestCase(TestCase):
 
 
 # has to be at top level or Pickle complains
-class FooToPickle(torch.nn.Module):
+class FooToPickle(torch.nn.Module):  # noqa T484
     def __init__(self):
         super(FooToPickle, self).__init__()
         self.bar = torch.jit.ScriptModule()
@@ -1439,57 +1439,117 @@ graph(%x : Tensor,
                    .check_next("int_repr").check("dequantize_linear") \
                    .run(str(trace.graph))
 
-    def test_pattern_based_fusion(self):
-        class testModule(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x, y, z):
-                t = x * y
-                p = t * z
-                u = p * x
-                o = u * y
-                return o
-        m = testModule()
-        torch._C._jit_pass_custom_pattern_based_fusion("""
+    def test_pattern_based_rewrite(self):
+        # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
+        # --> mulmul(mulmul(x,y,z), x, y)
+        input_str = """
+graph(%x, %y, %z):
+    # CHECK-NOT: aten::mul
+    # CHECK: my::fused_mulmul
+    %t = aten::mul(%x, %y)
+    %p = aten::mul(%t, %z)
+    # CHECK: my::fused_mulmul
+    %u = aten::mul(%p, %x)
+    %o = aten::mul(%u, %y)
+    return (%o)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
 graph(%a, %b, %c):
   %q = aten::mul(%a, %b)
   %r = aten::mul(%q, %c)
-  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], m._c)
-        FileCheck().check_not("aten::mul").check("my::fused_mulmul") \
-                   .check_next("my::fused_mulmul").run(str(m.graph))
+  return (%r)""", """
+graph(%a, %b, %c):
+  %r = my::fused_mulmul(%a, %b, %c)
+  return (%r)""", graph)
+        FileCheck().run(input_str, graph)
 
         # Check that overlapping matches are handled correctly
-        class testModule2(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x, y, z):
-                t = x * y
-                p = t * z
-                u = p * x
-                return u
-        m = testModule2()
-        torch._C._jit_pass_custom_pattern_based_fusion("""
+        # mul(mul(mul(x,y),z),x) --> mul(mulmul(x,y,z), x)
+        input_str = """
+graph(%x, %y, %z):
+    # CHECK-NOT: aten::mul
+    # CHECK: my::fused_mulmul
+    %t = aten::mul(%x, %y)
+    %p = aten::mul(%t, %z)
+    # CHECK-NEXT: aten::mul
+    %u = aten::mul(%p, %x)
+    return (%u)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
 graph(%a, %b, %c):
   %q = aten::mul(%a, %b)
   %r = aten::mul(%q, %c)
-  return (%r)""", "my::fused_mulmul", ["a", "b", "c"], ["r"], m._c)
+  return (%r)""", """
+graph(%a, %b, %c):
+  %r = my::fused_mulmul(%a, %b, %c)
+  return (%r)""", graph)
+        FileCheck().run(input_str, graph)
 
-        FileCheck().check_not("aten::mul").check("my::fused_mulmul") \
-                   .check_next("aten::mul").run(str(m.graph))
-
-        class testModule3(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x, y, z):
-                t = x * y
-                p = t + z
-                return p
-        m = testModule3()
-        torch._C._jit_pass_custom_pattern_based_fusion("""
+        # Check add(mul(x,y),z) --> muladd(x,y,z) replacement
+        input_str = """
+graph(%x, %y, %z):
+    # CHECK-NOT: aten::mul
+    # CHECK-NOT: aten::add
+    %c = prim::Const[value=1]()
+    %t = aten::mul(%x, %y)
+    %p = aten::add(%t, %z, %c)
+    # CHECK: my::muladd
+    # CHECK-NEXT: return
+    return (%p)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
 graph(%a, %b, %c, %d):
   %q = aten::mul(%a, %b)
   %r = aten::add(%q, %c, %d)
-  return (%r)""", "my::muladd", ["a", "b", "c", "d"], ["r"], m._c)
-        FileCheck().check_not("aten::add").check_not("aten::mul") \
-                   .check("my::muladd").check_next("return")      \
-                   .run(str(m.graph))
+  return (%r)""", """
+graph(%a, %b, %c, %d):
+  %r = my::muladd(%a, %b, %c, %d)
+  return (%r)""", graph)
+        FileCheck().run(input_str, graph)
+
+        # Check add(mul(x,y),z) --> sub(add(x,y),z) replacement
+        input_str = """
+graph(%x, %y, %z):
+    # CHECK-NOT: aten::mul
+    %c = prim::Const[value=1]()
+    # CHECK: aten::add
+    %t = aten::mul(%x, %y)
+    # CHECK-NEXT: aten::sub
+    %p = aten::add(%t, %z, %c)
+    # CHECK-NOT: aten::add
+    # CHECK-NEXT: return
+    return (%p)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+graph(%a, %b, %c, %d):
+  %q = aten::mul(%a, %b)
+  %r = aten::add(%q, %c, %d)
+  return (%r)""", """
+graph(%a, %b, %c, %d):
+  %q = aten::add(%a, %b, %d)
+  %r = aten::sub(%q, %c, %d)
+  return (%r)""", graph)
+        FileCheck().run(input_str, graph)
+
+        # Check mul(x,y) --> x replacement
+        input_str = """
+graph(%x, %y, %z):
+    %c = prim::Const[value=1]()
+    # CHECK-NOT: aten::mul
+    %t = aten::mul(%x, %y)
+    # CHECK: aten::add(%x, %z
+    %p = aten::add(%t, %z, %c)
+    # CHECK-NEXT: return
+    return (%p)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+graph(%Pa, %Pb):
+  %Pq = aten::mul(%Pa, %Pb)
+  return (%Pq)""", """
+graph(%Ra, %Rb):
+  return (%Ra)""", graph)
+        print(graph)
+        FileCheck().run(input_str, graph)
 
     def test_expand_quantlint(self):
         pass
@@ -3162,6 +3222,30 @@ class TestScript(JitTestCase):
             ge = torch.jit.script(script, optimize)
             ge(*inputs)
 
+    def test_sequence_parsing(self):
+        tests = [
+            ("return [x, x,]", True),
+            ("return [x x]", "expected ]"),
+            ("return x, x,", True),
+            ("return bar(x, x,)", True),
+            ("return bar()", "argument x not provided"),
+            ("for a, b, in x, x,:\n        pass", "List of iterables"),
+            ("a, b, = x, x,\n    return a + b", True)
+        ]
+        for exp, result in tests:
+            cu = torch.jit.CompilationUnit()
+            full = """
+def bar(x, y):
+    return x + y
+def foo(x):
+    {}
+            """.format(exp)
+            if isinstance(result, str):
+                with self.assertRaisesRegex(RuntimeError, result):
+                    cu.define(full)
+            else:
+                cu.define(full)
+
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
@@ -3661,7 +3745,7 @@ a")
             @torch.jit.script
             def func(a, b):
                 # type: (float, Tensor) -> Tensor
-                return a ** (b * 2 + 1)
+                return a ** (b * 2 + 1)  # noqa T484
 
             a = torch.rand(1, requires_grad=True, device='cuda', dtype=dtype)
             func(2, a).backward()
@@ -4180,7 +4264,7 @@ a")
         @torch.jit.script
         def func(x, y):
             # type: (Tensor, int) -> List[Tensor]
-            return torch.unbind(x, y)
+            return torch.unbind(x, y)  # noqa T484
         with disable_autodiff_subgraph_inlining():
             x = torch.rand([2, 2]).requires_grad_()
             y = 0
@@ -4198,7 +4282,7 @@ a")
         @torch.jit.script
         def func(a):
             # type: (List[Tensor]) -> List[Tensor]
-            return torch.meshgrid(a)
+            return torch.meshgrid(a)  # noqa T484
         with disable_autodiff_subgraph_inlining():
             a = torch.tensor([1.0, 2, 3]).requires_grad_()
             b = torch.tensor([1.0, 2, 3, 4]).requires_grad_()
@@ -5188,6 +5272,14 @@ a")
         x = Variable(torch.FloatTensor([1.1, 2.3]), requires_grad=True)
         out = Variable(torch.IntTensor([1, 2]), requires_grad=True)
         self.checkScript(script, [x], optimize=True, outputs=[out], func='to_int')
+
+    def test_str_cast(self):
+        @torch.jit.script
+        def to_str(x):
+            # type: (int) -> str
+            return str((x, x))
+
+        self.assertEqual("(1, 1)", to_str(1))
 
     def test_python_frontend(self):
         def fn(x, y, z):
@@ -6278,7 +6370,7 @@ a")
         def test_dtype(inp_dtype):
             # type: (int) -> Tuple[Tensor, Tensor]
             a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
-            return a, torch.tensor(1.0, dtype=inp_dtype)
+            return a, torch.tensor(1.0, dtype=inp_dtype)  # noqa T484
 
         test_dtype(5)
         g = test_dtype.graph_for(5)
@@ -6290,9 +6382,9 @@ a")
         def test(b):
             # type: (bool) -> Tuple[Tensor, Tensor, Tensor]
             a = torch.tensor(1., requires_grad=b)
-            b = torch.tensor(1., requires_grad=True)
+            b = torch.tensor(1., requires_grad=True)  # noqa T484
             c = torch.tensor(1., requires_grad=False)
-            return a, b, c
+            return a, b, c  # noqa T484
 
         g = test.graph_for(True)
         out = next(g.outputs())
@@ -7484,7 +7576,7 @@ a")
         v = torch.zeros(1, 1)
         self.assertEqual(torch.cat([v, v, v], dim=1), M()(v))
 
-    class StarTestSumStarred(torch.nn.Module):
+    class StarTestSumStarred(torch.nn.Module):  # noqa T484
         def __init__(self):
             super(TestScript.StarTestSumStarred, self).__init__()
 
@@ -7494,7 +7586,7 @@ a")
                 output += inputs[i]
             return output
 
-    class StarTestReturnThree(torch.nn.Module):
+    class StarTestReturnThree(torch.nn.Module):  # noqa T484
         def __init__(self):
             super(TestScript.StarTestReturnThree, self).__init__()
 
@@ -7535,7 +7627,7 @@ a")
         m = M2()
         self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
 
-    class StarTestSumAndReturnThree(torch.nn.Module):
+    class StarTestSumAndReturnThree(torch.nn.Module):  # noqa T484
         def __init__(self):
             super(TestScript.StarTestSumAndReturnThree, self).__init__()
 
@@ -8777,7 +8869,7 @@ a")
     def test_ellipsis_mid(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[2, ..., 0:4, 4:8].size()
+            return x[2, ..., 0:4, 4:8].size()  # noqa T484
 
         dummy = torch.zeros(8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
@@ -8785,7 +8877,7 @@ a")
     def test_ellipsis_mid_select(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[2, ..., 4, 4, 4:8, 2].size()
+            return x[2, ..., 4, 4, 4:8, 2].size()  # noqa T484
 
         dummy = torch.zeros(8, 8, 8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
@@ -8793,14 +8885,14 @@ a")
     def test_ellipsis_start(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[..., 0:4, 4:8].size()
+            return x[..., 0:4, 4:8].size()  # noqa T484
         dummy = torch.zeros(8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
 
     def test_ellipsis_end(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
-            return x[0:4, 2, ...].size()
+            return x[0:4, 2, ...].size()  # noqa T484
         dummy = torch.zeros(8, 8, 8, 8, 8)
         self.checkScript(ellipsize, (dummy,), optimize=True)
 
@@ -11515,7 +11607,7 @@ a")
 
         def index_str_to_tensor(s):
             # type: (str) -> int
-            return torch.tensor(ord(s))
+            return torch.tensor(ord(s))  # noqa T484
 
         s = u'\u00a3'.encode('utf8')[:1]
         self.checkScript(index_str_to_tensor, (s,))
@@ -14717,6 +14809,136 @@ class TestClassType(JitTestCase):
         input = torch.rand(2, 3)
         output = m_loaded(input)
         self.assertEqual(3 * input, output)
+
+    def test_overloaded_fn(self):
+        @torch.jit.script
+        class Foo(object):
+            def __init__(self, x):
+                self.x = x
+
+            def __len__(self):
+                # type: () -> int
+                return len(self.x)
+
+            def __neg__(self):
+                self.x = -self.x
+                return self
+
+            def __mul__(self, other):
+                # type: (Tensor) -> Tensor
+                return self.x * other
+
+        def test_overload():
+            a = Foo(torch.ones([3, 3]))
+            return len(a), -a * torch.zeros([3, 3])
+
+        self.checkScript(test_overload, ())
+        # unary ops tested above
+
+        # TODO - support compiling classes from strings in jit.CompilationUnit
+        @torch.jit.script
+        class BinOps(object):
+            def __init__(self, x):
+                # type: (int) -> None
+                self.x = x
+
+            def __add__(self, other):
+                # type: (int) -> int
+                return self.x + other
+
+            def __sub__(self, other):
+                # type: (int) -> int
+                return self.x - other
+
+            def __mul__(self, other):
+                # type: (int) -> int
+                return self.x * other
+
+            def __pow__(self, other):
+                # type: (int) -> int
+                return self.x ** other
+
+            def __truediv__(self, other):
+                # type: (int) -> float
+                return self.x / other
+
+            def __mod__(self, other):
+                # type: (int) -> int
+                return self.x % other
+
+            def __ne__(self, other):  # noqa T484
+                # type: (int) -> bool
+                return self.x != other
+
+            def __eq__(self, other):  # noqa T484
+                # type: (int) -> bool
+                return self.x == other
+
+            def __lt__(self, other):
+                # type: (int) -> bool
+                return self.x < other
+
+            def __gt__(self, other):
+                # type: (int) -> bool
+                return self.x > other
+
+            def __le__(self, other):
+                # type: (int) -> bool
+                return self.x <= other
+
+            def __ge__(self, other):
+                # type: (int) -> bool
+                return self.x >= other
+
+            def __and__(self, other):
+                # type: (int) -> int
+                return self.x & other
+
+            def __or__(self, other):
+                # type: (int) -> int
+                return self.x | other
+
+            def __xor__(self, other):
+                # type: (int) -> int
+                return self.x ^ other
+
+        def add():
+            return BinOps(4) + 3
+        def sub():  # noqa: E306
+            return BinOps(4) - 3
+        def mul():  # noqa: E306
+            return BinOps(4) * 3
+        def pow():  # noqa: E306
+            return BinOps(4) ** 3
+        def truediv():  # noqa: E306
+            return BinOps(4) / 3
+        def ne():  # noqa: E306
+            return BinOps(4) != 3
+        def eq():  # noqa: E306
+            return BinOps(4) == 3
+        def lt():  # noqa: E306
+            return BinOps(4) < 3
+        def gt():  # noqa: E306
+            return BinOps(4) > 3
+        def le():  # noqa: E306
+            return BinOps(4) <= 3
+        def ge():  # noqa: E306
+            return BinOps(4) >= 3
+        def _and():  # noqa: E306
+            return BinOps(4) & 3
+        def _or():  # noqa: E306
+            return BinOps(4) | 3
+        def _xor():  # noqa: E306
+            return BinOps(4) ^ 3
+
+        for func in [add, sub, mul, pow, truediv, ne, eq, lt, gt, le, ge, _and,
+                     _or, _xor]:
+            self.checkScript(func, ())
+
+        with self.assertRaisesRegex(RuntimeError, "because it does not  define a __add__"):
+            @torch.jit.script
+            def test():
+                return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
 
     def test_init_compiled_first(self):
         @torch.jit.script  # noqa: B903

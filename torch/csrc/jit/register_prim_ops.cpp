@@ -1861,6 +1861,14 @@ RegisterOperators reg2({
           return 0;
         }),
     Operator(
+      "prim::str(t elem) -> str",
+      [](Stack& stack) {
+        std::stringstream ss;
+        ss << pop(stack);
+        push(stack, ss.str());
+        return 0;
+      }),
+    Operator(
         "aten::ord(str string) -> int",
         [](Stack& stack) {
           auto string = pop(stack).toStringRef();
