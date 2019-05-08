@@ -141,11 +141,13 @@ class TestCaffe2Backend_opset9(TestCaffe2Backend):
 
     def _elman_rnn_test(self, layers, nonlinearity, bidirectional,
                         initial_state, packed_sequence, dropout):
+        batch_first = True if packed_sequence == 2 else False
         model = nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE,
                        layers,
                        nonlinearity=nonlinearity,
                        bidirectional=bidirectional,
-                       dropout=dropout)
+                       dropout=dropout,
+                       batch_first=batch_first)
 
         if packed_sequence == 1:
             model = RnnModelWithPackedSequence(model, False)
@@ -156,9 +158,7 @@ class TestCaffe2Backend_opset9(TestCaffe2Backend):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
-            inputs = rnn_utils.pad_sequence(inputs)
-            if packed_sequence == 2:
-                inputs = inputs.transpose(0, 1)
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
 
             directions = 2 if bidirectional else 1
@@ -184,9 +184,10 @@ class TestCaffe2Backend_opset9(TestCaffe2Backend):
 
     def _lstm_test(self, layers, bidirectional, initial_state,
                    packed_sequence, dropout):
+        batch_first = True if packed_sequence == 2 else False
         model = LstmFlatteningResult(
             RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
-            bidirectional=bidirectional, dropout=dropout)
+            bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
         if packed_sequence == 1:
             model = RnnModelWithPackedSequence(model, False)
         if packed_sequence == 2:
@@ -196,9 +197,7 @@ class TestCaffe2Backend_opset9(TestCaffe2Backend):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
-            inputs = rnn_utils.pad_sequence(inputs)
-            if packed_sequence == 2:
-                inputs = inputs.transpose(0, 1)
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
 
             directions = 2 if bidirectional else 1
@@ -225,8 +224,9 @@ class TestCaffe2Backend_opset9(TestCaffe2Backend):
 
     def _gru_test(self, layers, bidirectional, initial_state,
                   packed_sequence, dropout):
+        batch_first = True if packed_sequence == 2 else False
         model = nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
-                       bidirectional=bidirectional, dropout=dropout)
+                       bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
         if packed_sequence == 1:
             model = RnnModelWithPackedSequence(model, False)
         if packed_sequence == 2:
@@ -236,9 +236,7 @@ class TestCaffe2Backend_opset9(TestCaffe2Backend):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
-            inputs = rnn_utils.pad_sequence(inputs)
-            if packed_sequence == 2:
-                inputs = inputs.transpose(0, 1)
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
 
             directions = 2 if bidirectional else 1
@@ -1190,6 +1188,19 @@ class TestCaffe2Backend_opset9(TestCaffe2Backend):
         x = torch.randn(3, 3, requires_grad=True)
         TestCaffe2Backend.run_model_test(self, NarrowModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_randn_like(self):
+        class RandNLikeModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.randn_like(input)
+
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        model = RandNLikeModel()
+        onnxir, _ = do_export(model, x)
+        onnx_model = onnx.ModelProto.FromString(onnxir)
+        prepared = c2.prepare(onnx_model)
+        caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
+        unittest.TestCase.assertEqual(self, caffe2_out[0].shape, x.shape)
+
     def test_traced_ints(self):
         A = 4
         H = 10
@@ -1429,6 +1440,14 @@ class TestCaffe2Backend_opset9(TestCaffe2Backend):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         TestCaffe2Backend.run_model_test(self, CeilModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test__dim_arange(self):
+        class DimArange(torch.nn.Module):
+            def forward(self, input):
+                return torch._dim_arange(input, 1)
+
+        x = torch.ones(5, 6)
+        TestCaffe2Backend.run_model_test(self, DimArange(), train=False, input=x, batch_size=BATCH_SIZE)
+
     def test_log2(self):
         class Log2Model(torch.nn.Module):
             def forward(self, input):
@@ -1436,6 +1455,32 @@ class TestCaffe2Backend_opset9(TestCaffe2Backend):
 
         x = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
         TestCaffe2Backend.run_model_test(self, Log2Model(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test__sample_dirichlet(self):
+        class DirichletModel(torch.nn.Module):
+            def forward(self, input):
+                return torch._sample_dirichlet(input)
+
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        model = DirichletModel()
+        onnxir, _ = do_export(model, x)
+        onnx_model = onnx.ModelProto.FromString(onnxir)
+        prepared = c2.prepare(onnx_model)
+        caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
+        unittest.TestCase.assertEqual(self, caffe2_out[0].shape, x.shape)
+
+    def test__standard_gamma(self):
+        class GammaModel(torch.nn.Module):
+            def forward(self, input):
+                return torch._standard_gamma(input)
+
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        model = GammaModel()
+        onnxir, _ = do_export(model, x)
+        onnx_model = onnx.ModelProto.FromString(onnxir)
+        prepared = c2.prepare(onnx_model)
+        caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
+        unittest.TestCase.assertEqual(self, caffe2_out[0].shape, x.shape)
 
     def test_prim_shape(self):
         x = torch.randn(4, 5, requires_grad=True)

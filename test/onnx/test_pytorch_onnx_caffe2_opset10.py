@@ -6,7 +6,7 @@ from test_pytorch_onnx_caffe2 import BATCH_SIZE
 
 class TestCaffe2Backend_opset10(TestCaffe2Backend):
 
-    def test_isnan(self):
+    def test_opset_fallback(self):
         class IsNanModel(torch.nn.Module):
             def forward(self, input):
                 return torch.isnan(input)
