@@ -63,6 +63,7 @@ namespace c10 {
   _(prim, Bool)                    \
   _(prim, Int)                     \
   _(prim, Float)                   \
+  _(prim, str)                     \
   _(prim, device)                  \
   _(prim, dtype)                   \
   _(prim, shape)                   \
