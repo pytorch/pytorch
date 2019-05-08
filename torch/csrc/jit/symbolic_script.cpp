@@ -402,11 +402,11 @@ const std::vector<std::string> functions = {
 
             return torch._dim_arange(like, dim), backward
 
-        def contiguous(self):
+        def contiguous(self, *, memory_format: int=0):
             def backward(grad_output):
-                return grad_output
+                return grad_output, None
 
-            return self.contiguous(), backward
+            return self.contiguous(memory_format=memory_format), backward
 
         def dot(self, tensor):
             def backward(grad_output):
@@ -1405,7 +1405,7 @@ c10::optional<GradientPair> gradientInfoForSchema(
 }
 
 bool hasGradientInfoForSchema(const FunctionSchema& schema) {
-  return gradientInfoForSchema(schema).has_value();
+  return  gradientInfoForSchema(schema).has_value();
 }
 
 } // namespace jit
