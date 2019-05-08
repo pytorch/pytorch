@@ -157,10 +157,12 @@ def get_caffe2_workflows():
 
     x = []
     for conf_options in filtered_configs:
-        item = conf_options.get_name()
+
+        requires = ["setup"]
 
         if conf_options.phase == "test":
-            item = {conf_options.get_name(): {"requires": [conf_options.construct_phase_name("build")]}}
-        x.append(item)
+            requires.append(conf_options.construct_phase_name("build"))
+
+        x.append({conf_options.get_name(): {"requires": requires}})
 
     return x
