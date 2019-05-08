@@ -231,7 +231,13 @@ static void Caffe2InitializeCuda() {
         // Note: just for future reference, the 0 here is not a gpu id, it is
         // a reserved flag for cudaDeviceEnablePeerAccess that should always be
         // zero currently.
-        CUDA_ENFORCE(cudaDeviceEnablePeerAccess(j, 0));
+        // It is ok if peer access is already enabled...
+        cudaError_t err = cudaDeviceEnablePeerAccess(j, 0);
+        if ((err != cudaErrorPeerAccessAlreadyEnabled) &&
+            (err != cudaSuccess)) {
+          CAFFE_THROW(cudaGetErrorString(err));
+        }
+        cudaGetLastError(); // reset cuda error code
       }
     }
   }

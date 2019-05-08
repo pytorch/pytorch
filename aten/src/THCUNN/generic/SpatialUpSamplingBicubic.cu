@@ -58,8 +58,8 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
   THAssert(inputHeight > 0 && inputWidth > 0 && outputHeight > 0 && outputWidth > 0);
 
   // Get scaling factors
-  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
-  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const accreal rheight = area_pixel_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth = area_pixel_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
 
   const int num_output_elements = outputHeight * outputWidth;
   const int max_threads =
@@ -72,7 +72,7 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
     max_threads,
     0,
     stream
-  >>>(num_output_elements, rheight, rwidth, idata, odata);
+  >>>(num_output_elements, rheight, rwidth, align_corners, idata, odata);
   THCudaCheck(cudaGetLastError());
 }
 
@@ -100,8 +100,8 @@ void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
   THCTensor_(zero)(state, gradInput);
   THCDeviceTensor<scalar_t, 4> in_data = toDeviceTensor<scalar_t, 4>(state, gradInput);
   THCDeviceTensor<scalar_t, 4> out_data = toDeviceTensor<scalar_t, 4>(state, gradOutput);
-  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
-  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const accreal rheight = area_pixel_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth = area_pixel_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputHeight * outputWidth;
   const int num_threads =
     at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;

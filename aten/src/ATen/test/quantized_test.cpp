@@ -9,6 +9,7 @@
 #include <type_traits>
 // For quantize_uint8
 #include <ATen/quantized/Quantizer.h>
+#include <c10/core/ScalarType.h>
 
 using namespace at;
 
@@ -46,10 +47,52 @@ TEST(TestQTensor, QuantDequantAPIs) {
   }
 }
 
+TEST(TestQTensor, RoundingMode) {
+  // We assume that quantization is defined as:
+  //   qx = clamp(round(x / scale + zero_point))
+  // If the zero_point is added after rounding, the result will be wrong.
+  int32_t zero_point = 5;
+  std::vector<float> x_values{
+    -5.5, -4.5, -3.5, -2.5, -1.5, -0.5,
+    0.5, 1.5, 2.5, 3.5, 4.5, 5.5};
+  std::vector<uint8_t> qx_expect{
+    0, 0, 2, 2, 4, 4,
+    6, 6, 8, 8, 10, 10};  // scale = 1.0
+
+  Tensor x = from_blob(x_values.data(), x_values.size());
+  Tensor qx = x.quantize_linear(/*scale=*/1.0, zero_point);
+
+  auto qx_data = qx.data<qint8>();
+  for (int idx = 0; idx < x_values.size(); ++idx) {
+    ASSERT_EQ(qx_expect[idx], qx_data[idx].val_)
+      << "Tie breaking during rounding element " << idx << " failed!";
+  }
+}
+
 TEST(TestQTensor, Item) {
   Tensor r = at::ones({1});
   const float scale = 1;
   const int32_t zero_point = 2;
   Tensor qr = r.quantize_linear(scale, zero_point);
   ASSERT_EQ(r.item().to<float>(), qr.item().to<float>());
+}
+
+TEST(TestQTensor, EmptyQuantized) {
+  float scale = 0.5;
+  int zero_point = 10;
+  int val = 100;
+  int numel = 10;
+  Tensor q = at::_empty_affine_quantized({numel}, at::device(at::kCPU).dtype(kQInt8), scale, zero_point);
+  // Assigning to QTensor
+  auto* q_data = q.data<qint8>();
+  for (int i = 0; i < numel; ++i) {
+    q_data[i].val_ = val;
+  }
+
+  // dequantize
+  auto r = q.dequantize();
+  auto* r_data = r.data<float>();
+  for (int i = 0; i < numel; ++i) {
+    ASSERT_EQ(r_data[i], (val - zero_point) * scale);
+  }
 }

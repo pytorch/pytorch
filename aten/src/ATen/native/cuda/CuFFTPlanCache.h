@@ -373,6 +373,18 @@ public:
     _set_max_size(max_size);
   }
 
+  CuFFTParamsLRUCache(CuFFTParamsLRUCache&& other) noexcept :
+    _usage_list(std::move(other._usage_list)),
+    _cache_map(std::move(other._cache_map)),
+    _max_size(other._max_size) {}
+
+  CuFFTParamsLRUCache& operator=(CuFFTParamsLRUCache&& other) noexcept {
+    _usage_list = std::move(other._usage_list);
+    _cache_map = std::move(other._cache_map);
+    _max_size = other._max_size;
+    return *this;
+  }
+
   // If key is in this cache, return the cached config. Otherwise, emplace the
   // config in this cache using value_args and return it.
   // Return const reference because CuFFTConfig shouldn't be tampered with once
@@ -431,6 +443,8 @@ public:
 
   size_t max_size() const noexcept { return _max_size; }
 
+  std::mutex mutex;
+
 private:
   // Only sets size and does value check. Does not resize the data structures.
   void _set_max_size(int64_t new_size) {
@@ -455,9 +469,9 @@ private:
 // native function counterparts (at native/SpectralOps.cpp), i.e.,
 // _cufft_get_plan_cache_max_size, _cufft_set_plan_cache_max_size
 // _cufft_get_plan_cache_size, and _cufft_clear_plan_cache.
-int64_t cufft_get_plan_cache_max_size_impl();
-void cufft_set_plan_cache_max_size_impl(int64_t max_size);
-int64_t cufft_get_plan_cache_size_impl();
-void cufft_clear_plan_cache_impl();
+int64_t cufft_get_plan_cache_max_size_impl(int64_t device_index);
+void cufft_set_plan_cache_max_size_impl(int64_t device_index, int64_t max_size);
+int64_t cufft_get_plan_cache_size_impl(int64_t device_index);
+void cufft_clear_plan_cache_impl(int64_t device_index);
 
 }}} // namespace at::native::detail

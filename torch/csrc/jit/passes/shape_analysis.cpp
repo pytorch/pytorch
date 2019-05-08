@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
@@ -157,10 +156,9 @@ class ShapePropagator {
       return *iv;
     }
     if (CompleteTensorTypePtr type = type_->cast<CompleteTensorType>()) {
-      auto backend =
-          type->device().is_cpu() ? at::Backend::CPU : at::Backend::CUDA;
+      auto attype = type->device().is_cpu() ? at::CPU(type->scalarType())
+                                            : at::CUDA(type->scalarType());
       at::DeviceGuard device_guard(type->device());
-      auto& attype = at::getNonVariableType(backend, type->scalarType());
       auto t =
           at::empty_strided(type->sizes(), type->strides(), attype.options())
               .zero_();
@@ -419,6 +417,41 @@ class ShapePropagator {
     setUnshapedType(cat_node);
   }
 
+  void propagateTorchTensorShape(Node* node) {
+    auto input_type = node->inputs().at(0)->type();
+
+    size_t dims = 0;
+    auto input_base_type = input_type;
+    auto list_type = input_type->cast<ListType>();
+    while (list_type) {
+      dims++;
+      input_base_type = list_type->getElementType();
+      list_type = input_base_type->cast<ListType>();
+    }
+
+    at::ScalarType default_type = scalarTypeFromJitType(input_base_type);
+    if (auto grad_index = node->schema().argumentIndexWithName("dtype")) {
+      auto inp = toIValue(node->inputs().at(*grad_index));
+      if (inp == c10::nullopt) {
+        return;
+      } else if (!inp->isNone()) {
+        default_type = inp->toScalarType();
+      }
+    }
+
+    at::Device default_device = at::kCPU;
+    if (auto device_index = node->schema().argumentIndexWithName("device")) {
+      auto inp = toIValue(node->inputs().at(*device_index));
+      if (inp == c10::nullopt) {
+        return;
+      } else if (!inp->isNone()) {
+        default_device = inp->toDevice();
+      }
+    }
+    node->output()->setType(
+        DimensionedTensorType::create(default_type, default_device, dims));
+  }
+
   bool mayAliasResizedSet(at::ArrayRef<Value*> vs) {
     bool in_resize = false;
     for (auto v : vs) {
@@ -494,6 +527,9 @@ class ShapePropagator {
         }
         return;
       }
+      case aten::tensor: {
+        return propagateTorchTensorShape(node);
+      }
       case prim::TupleConstruct: {
         // We refresh the tuple type, because the input types could have been
         // refined.
@@ -515,6 +551,15 @@ class ShapePropagator {
       case prim::Constant: {
         if (node->output()->type()->isSubtypeOf(TensorType::get())) {
           node->output()->inferTypeFrom(node->t(attr::value));
+        }
+        return;
+      }
+      case prim::unchecked_unwrap_optional: {
+        // If we have specialized the optional type to the element type,
+        // we want to pass it down. We write this as input.isSubtypeOf(output)
+        // to be sure that we don't screw up nested optionals.
+        if (node->input()->type()->isSubtypeOf(node->output()->type())) {
+          node->output()->setType(node->input()->type());
         }
         return;
       }
@@ -540,10 +585,13 @@ class ShapePropagator {
         return;
       }
       case aten::_unwrap_optional: {
-        auto input_ivalue = toIValue(node->input());
-        if (input_ivalue && input_ivalue->isNone()) {
-          return;
+        // If we have specialized the optional type to the element type,
+        // we want to pass it down. We write this as input.isSubtypeOf(output)
+        // to be sure that we don't screw up nested optionals.
+        if (node->input()->type()->isSubtypeOf(node->output()->type())) {
+          node->output()->setType(node->input()->type());
         }
+        return;
       }
       default:
         break; // fall-through

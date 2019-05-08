@@ -469,6 +469,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
     const Tensor& grad,
     const Tensor& weight,  // NB: embedding table, not per_sample_weights
     const Tensor& indices,
+    const Tensor& offsets,
     const Tensor& offset2bag,
     int64_t mode) {
   AT_CHECK(

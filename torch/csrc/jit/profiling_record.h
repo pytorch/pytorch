@@ -1,10 +1,11 @@
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <torch/csrc/jit/ir.h>
 
 #include <list>
 #include <vector>
@@ -21,7 +22,7 @@ struct ProfilingRecord {
   ProfilingRecord(const ProfilingRecord&) = delete;
   ProfilingRecord(ProfilingRecord&&) noexcept = delete;
   static ProfiledTensorTypePtr toProfiledTensorTypePtr(const IValue& ival);
-  static std::unique_ptr<ProfilingRecord> instrumentGraph(
+  TORCH_API static std::unique_ptr<ProfilingRecord> instrumentGraph(
       const std::shared_ptr<Graph>& graph);
 
   std::shared_ptr<Graph> profiled_graph_;
@@ -34,11 +35,7 @@ struct ProfilingRecord {
       at::ArrayRef<Value*> inputs);
   void instrumentBlock(Block* block);
   ProfilingRecord(std::shared_ptr<Graph> g);
-  // N.B. list is used to make sure that std::function objs
-  // aren't moved anywhere since we are stashing pointers
-  // to those in nodes' attributes
-  std::list<std::function<void(Stack&)>> callbacks_;
 };
 
-} // jit
-} // torch
+} // namespace jit
+} // namespace torch

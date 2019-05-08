@@ -22,6 +22,8 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba
 )
 pip install -q ninja future hypothesis "librosa>=0.6.2" psutil
+:: No need to install faulthandler since we only test Python >= 3.6 on Windows
+:: faulthandler is builtin since Python 3.3
 
 pushd .
 call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvarsall.bat" x86_amd64

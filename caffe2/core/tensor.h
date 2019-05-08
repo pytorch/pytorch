@@ -115,8 +115,8 @@ class CAFFE2_API Tensor final {
    * The tensor will share the same instance (data, strides, sizes, etc) but
    * a different subset of APIs would be available
    */
-  explicit Tensor(const at::Tensor& tensor)
-      : impl_(std::move(tensor.getIntrusivePtr())) {
+  explicit Tensor(at::Tensor tensor)
+      : impl_(std::move(tensor.impl_)) {
     enforce_invariants();
   }
 
@@ -172,11 +172,11 @@ class CAFFE2_API Tensor final {
   }
 
   at::Device GetDevice() const {
-    return impl_.get()->GetDevice();
+    return impl_.get()->device();
   }
 
   /**
-   * @brief Copies the data from a source tensor, with a contex provided to
+   * @brief Copies the data from a source tensor, with a context provided to
    * carry out the underlying memcpy operation.  This method respects
    * caffe2_keep_on_shrink.
    *

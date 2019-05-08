@@ -26,7 +26,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SmoothL1Criterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftMarginCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftPlus.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftShrink.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialAdaptiveMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialClassNLLCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialConvolutionLocal.cu
@@ -52,7 +51,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/TemporalRowConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalUpSamplingLinear.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalUpSamplingNearest.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAdaptiveAveragePooling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAdaptiveMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricDilatedConvolution.cu

@@ -499,41 +499,4 @@ inline void CPU_tensor_apply4(
   }
 }
 
-template <typename scalar1, typename scalar2, typename Op>
-inline void CPU_tensor_parallel_apply2(
-    Tensor tensor1,
-    Tensor tensor2,
-    const Op op,
-    int64_t grain_size = internal::GRAIN_SIZE) {
-  if (!_apply_preamble({tensor1, tensor2}))
-    return;
-  if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        grain_size,
-        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
-          apply_op(
-              end - begin,
-              begin,
-              op,
-              strided_tensor_iter_fixed<scalar1, 8>(tensor1),
-              strided_tensor_iter_fixed<scalar2, 8>(tensor2));
-        });
-  } else {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        grain_size,
-        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
-          apply_op(
-              end - begin,
-              begin,
-              op,
-              strided_tensor_iter<scalar1>(tensor1),
-              strided_tensor_iter<scalar2>(tensor2));
-        });
-  }
-}
-
 } // namespace at

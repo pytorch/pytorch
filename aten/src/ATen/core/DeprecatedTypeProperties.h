@@ -4,6 +4,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Layout.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/core/Storage.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/Generator.h>
 
@@ -114,7 +115,14 @@ class CAFFE2_API DeprecatedTypeProperties {
     return options();
   }
 
+  int64_t id() const {
+    return static_cast<int64_t>(backend()) *
+        static_cast<int64_t>(ScalarType::NumOptions) +
+        static_cast<int64_t>(scalarType());
+  }
+
   Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const;
+  Storage unsafeStorageFromTH(void * th_pointer, bool retain) const;
   Tensor copy(const Tensor & src, bool non_blocking=false, c10::optional<Device> to_device={}) const;
   std::unique_ptr<Generator> generator() const;
 

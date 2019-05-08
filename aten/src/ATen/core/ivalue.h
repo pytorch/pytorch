@@ -326,6 +326,7 @@ struct CAFFE2_API IValue final {
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
+  IValue(const char* v): IValue(std::string(v)) {}
   bool isString() const { return Tag::String == tag; }
   c10::intrusive_ptr<ivalue::ConstantString> toString() && {
     AT_ASSERT(isString());
@@ -717,7 +718,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return slots_.at(slot);
   }
 
-  const std::string& name() const;
+  std::string name() const;
 
   const std::vector<IValue>& slots() const {
     return slots_;
@@ -756,6 +757,9 @@ struct C10_EXPORT ivalue::GenericDict : c10::intrusive_ptr_target {
   operator UnorderedMap&() {
     return elements();
   }
+
+  using IterationOrder = std::vector<std::pair<IValue, IValue>>;
+  const IterationOrder iterationOrder() const;
 };
 
 #undef TORCH_FORALL_TAGS

@@ -9,7 +9,6 @@
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 
-#include <list>
 #include <memory>
 #include <mutex>
 #include <stdexcept>

@@ -26,10 +26,13 @@
 #include "caffe2/utils/proto_utils.h"
 
 #include <ATen/core/Tensor.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
+
+namespace c10 {
+struct FunctionSchema;
+}
 
 namespace caffe2 {
 
@@ -52,7 +55,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       std::vector<c10::IValue> inputs,
       std::vector<at::Tensor> outputs);
 
-  virtual ~OperatorBase() noexcept {}
+  virtual ~OperatorBase() noexcept;
 
   /** @brief Return true if the operator was instantiated with OperatorDef
    * New operators should be instantiated with FunctionSchema
@@ -73,7 +76,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       CAFFE_ENFORCE(operator_def_, "operator_def was null!");
       return ArgumentHelper::HasArgument(*operator_def_, name);
     }
-    return getFunctionSchema().argumentIndexWithName(name).has_value();
+    return argumentIndexWithName(name).has_value();
   }
 
   // Functions that deal with arguments. Basically, this allows us to map an
@@ -85,7 +88,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return ArgumentHelper::GetSingleArgument<OperatorDef, T>(
           *operator_def_, name, default_value);
     }
-    auto index = getFunctionSchema().argumentIndexWithName(name);
+    auto index = argumentIndexWithName(name);
     CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
     const auto& value = newstyle_inputs_[index.value()];
     return value.template to<T>();
@@ -111,7 +114,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return ArgumentHelper::GetRepeatedArgument<OperatorDef, T>(
           *operator_def_, name, default_value);
     }
-    auto index = getFunctionSchema().argumentIndexWithName(name);
+    auto index = argumentIndexWithName(name);
     CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
     const auto& value = newstyle_inputs_[index.value()];
     return GetVectorFromIValueList<T>(value);
@@ -553,7 +556,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
   // Preferrably use c10::optional, but nvcc doesn't work
-  std::unique_ptr<const c10::FunctionSchema> fn_schema_ = nullptr;
+  std::unique_ptr<const c10::FunctionSchema> fn_schema_;
   vector<c10::IValue> newstyle_inputs_;
   vector<at::Tensor> newstyle_outputs_;
   // HACK
@@ -593,6 +596,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return "Error from operator: no op def";
     }
   }
+
+  c10::optional<int> argumentIndexWithName(const std::string& name) const;
 
   // An event used by asynchronous execution.
   std::unique_ptr<Event> event_;
@@ -1372,6 +1377,5 @@ std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 }  // namespace caffe2
 
-#include "caffe2/core/c10_operator.h"
 
 #endif  // CAFFE2_CORE_OPERATOR_H_

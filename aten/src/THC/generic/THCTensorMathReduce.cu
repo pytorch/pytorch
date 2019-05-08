@@ -2,6 +2,23 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathReduce.cu"
 #else
 
+accreal THCTensor_(sumall)(THCState *state, THCTensor *self) {
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
+  accreal val;
+  if (!THC_reduceAll<scalar_t>(state, self,
+                           thrust::identity<accreal>{},
+                           ReduceAdd<accreal>{},
+                           scalar_cast<accreal>(0),
+                           &val, 0)) {
+    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
+  }
+
+  THCudaCheck(cudaGetLastError());
+  return val;
+}
+
+#if !defined(THC_REAL_IS_BOOL)
+
 void THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dimension, int keepdim) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   if (!THC_reduceDim<scalar_t>(state, self, src,
@@ -279,21 +296,6 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
 
 #endif
 
-accreal THCTensor_(sumall)(THCState *state, THCTensor *self) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  accreal val;
-  if (!THC_reduceAll<scalar_t>(state, self,
-                           thrust::identity<accreal>{},
-                           ReduceAdd<accreal>{},
-                           scalar_cast<accreal>(0),
-                           &val, 0)) {
-    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-  return val;
-}
-
 accreal THCTensor_(meanall)(THCState *state, THCTensor *self)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
@@ -363,5 +365,7 @@ void THCTensor_(min)(THCState *state,
     state, values, indices, src, dimension, keepdim, init,
     MinValuePair<scalar_t, int64_t>());
 }
+
+#endif
 
 #endif

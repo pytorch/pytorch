@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
 
@@ -112,14 +111,24 @@ static at::Tensor to_dispatch(
   }
 }
 
+// Convert an python index (which may be negative) into an index usable for a
+// C++ container
+int64_t normalizeIndex(int64_t idx, int64_t list_size) {
+  if (idx < 0) {
+    // Handle negative indexing
+    idx = list_size + idx;
+  }
+  return idx;
+}
+
 RegisterOperators reg(
     {Operator(
          "prim::profile(...) -> ()",
          [](const Node* node) {
-           return [node](Stack& stack) {
-             auto addr = node->i(attr::data);
-             std::function<void(Stack&)>& callback =
-                 *reinterpret_cast<std::function<void(Stack&)>*>(addr);
+           // TODO: figure out why cast isn't marked as const
+           auto n = const_cast<Node*>(node); // NOLINT
+           auto callback = n->cast<ProfileOp>()->getCallback();
+           return [callback](Stack& stack) {
              callback(stack);
              return 0;
            };
@@ -270,7 +279,7 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Int(Scalar a) -> float",
+         "prim::Int(Scalar a) -> int",
          [](Stack& stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -400,6 +409,14 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.cpu());
+           return 0;
+         }),
+     Operator(
+         // TODO return generator object when torchscript supports RNG
+         // first-class
+         "aten::manual_seed(int seed) -> ()",
+         [](Stack& stack) {
+           at::manual_seed(pop(stack).toInt());
            return 0;
          }),
      Operator(
@@ -641,12 +658,16 @@ RegisterOperators reg(
      Operator(
          prim::TupleIndex,
          [](const Node* node) {
-           auto index = node->i(attr::index);
-           return [=](Stack& stack) {
+           return [](Stack& stack) {
+             int64_t index = pop(stack).toInt();
              auto tup = pop(stack).toTuple();
              const auto& elems = tup->elements();
-             // index is normalized to be positive at compile time
-             stack.emplace_back(elems.at(index));
+             auto norm_index = normalizeIndex(index, elems.size());
+             if (norm_index < 0 ||
+                 norm_index > static_cast<int64_t>(elems.size())) {
+               throw std::out_of_range("Tuple list index out of range");
+             }
+             stack.emplace_back(elems.at(norm_index));
              return 0;
            };
          }),
@@ -1008,16 +1029,6 @@ RegisterOperators logging_operators(
     push(stack, op);                                               \
     return 0;                                                      \
   })
-
-// Convert an python index (which may be negative) into an index usable for a
-// C++ container
-int64_t normalizeIndex(int64_t idx, int64_t list_size) {
-  if (idx < 0) {
-    // Handle negative indexing
-    idx = list_size + idx;
-  }
-  return idx;
-}
 
 int stringSlice(Stack& stack) {
   auto step = pop(stack).toInt();
@@ -1490,6 +1501,29 @@ int listSlice(Stack& stack) {
   return 0;
 }
 
+template <typename TList>
+int listSort(Stack& stack) {
+  TList list;
+
+  pop(stack, list);
+  std::sort(list->elements().begin(), list->elements().end());
+  return 0;
+}
+
+// Specialization for at::Tensor
+template <>
+int listSort<Shared<TensorList>>(Stack& stack) {
+  Shared<TensorList> list;
+  pop(stack, list);
+  std::sort(
+      list->elements().begin(),
+      list->elements().end(),
+      [](const at::Tensor& a, const at::Tensor& b) {
+        return a.lt(b).is_nonzero();
+      });
+  return 0;
+}
+
 template <typename TList, typename TElement>
 int listSetItem(Stack& stack) {
   TList list;
@@ -1548,15 +1582,34 @@ int dictKeys(Stack& stack) {
   return 0;
 }
 
-int dictValues(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
-  std::vector<IValue> values;
-  values.reserve(dict.size());
-  for (auto item : dict) {
-    values.push_back(item.second);
+template <typename Elem>
+std::vector<Elem> makeListForDictValues(
+    const c10::ivalue::GenericDict::IterationOrder& order) {
+  std::vector<Elem> values;
+  values.reserve(order.size());
+  for (auto item : order) {
+    values.push_back(item.second.to<Elem>());
   }
-  push(stack, IValue(values));
-  return 0;
+  return values;
+}
+
+Operation dictValues(const Node* n) {
+  auto outputType = n->output()->type()->expect<ListType>();
+  return [=](Stack& stack) -> int {
+    const auto& order = pop(stack).toGenericDict()->iterationOrder();
+    if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
+      push(stack, makeListForDictValues<at::Tensor>(order));
+    } else if (outputType->getElementType() == IntType::get()) {
+      push(stack, makeListForDictValues<int64_t>(order));
+    } else if (outputType->getElementType() == FloatType::get()) {
+      push(stack, makeListForDictValues<double>(order));
+    } else if (outputType->getElementType() == BoolType::get()) {
+      push(stack, makeListForDictValues<bool>(order));
+    } else {
+      push(stack, makeListForDictValues<IValue>(order));
+    }
+    return 0;
+  };
 }
 
 int dictIndex(Stack& stack) {
@@ -1778,6 +1831,14 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("Tensor", TensorList),
     CREATE_LIST_OPS("t", GenericList),
 #undef CREATE_LIST_OPS
+    Operator("aten::sort(int[](a!) self) -> ()", listSort<Shared<IntList>>),
+    Operator(
+        "aten::sort(float[](a!) self) -> ()",
+        listSort<Shared<DoubleList>>),
+    Operator(
+        "aten::sort(Tensor[](a!) self) -> ()",
+        listSort<Shared<TensorList>>),
+    Operator("aten::sort(bool[](a!) self) -> ()", listSort<Shared<BoolList>>),
 
     Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
     Operator(
@@ -1808,6 +1869,14 @@ RegisterOperators reg2({
           return 0;
         }),
     Operator(
+      "prim::str(t elem) -> str",
+      [](Stack& stack) {
+        std::stringstream ss;
+        ss << pop(stack);
+        push(stack, ss.str());
+        return 0;
+      }),
+    Operator(
         "aten::ord(str string) -> int",
         [](Stack& stack) {
           auto string = pop(stack).toStringRef();
@@ -1815,7 +1884,8 @@ RegisterOperators reg2({
               string.size() == 1,
               "String for ord() must be 1 character, found",
               string.size());
-          push(stack, int64_t(string.at(0)));
+          uint8_t ord = string.at(0);
+          push(stack, int64_t(ord));
           return 0;
         }),
 #define CREATE_COPY_OP(other_type, c_type)                                 \

@@ -50,6 +50,11 @@ static void check_out_type_matches(Tensor result,
   if (scalarType_is_none && layout_is_none && device_is_none) {  // common case
     return;
   }
+  if (!scalarType_is_none && result.scalar_type() != scalarType) {
+    AT_ERROR(
+        "dtype ", scalarType,
+        " does not match dtype of out parameter (", result.scalar_type(), ")");
+  }
   auto scalarType_arg = scalarType_is_none ? result.scalar_type() : scalarType;
   auto layout_arg = layout_is_none ? *torch::getLayout(result.type().backend()) : layout;
   auto device_type_arg = device_is_none ? result.device().type() : device.type();

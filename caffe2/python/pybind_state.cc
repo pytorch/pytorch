@@ -32,6 +32,8 @@
 #include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/script/module_python.h"
+
 
 // Because of CMake setup, we can't depend on script module here just yet -
 // it pulls in generated files from a different directory and it
@@ -244,9 +246,9 @@ bool feedBlob(
     return true;
   }
 #ifdef FBCODE_CAFFE2
-  if (py::isinstance<torch::jit::script::Module>(arg)) {
+  if (auto module = torch::jit::script::as_module(arg)) {
     *blob->GetMutable<std::shared_ptr<torch::jit::script::Module>>() =
-        arg.cast<std::shared_ptr<torch::jit::script::Module>>();
+        module;
     return true;
   }
 #endif
@@ -1677,6 +1679,7 @@ void addGlobalMethods(py::module& m) {
          const std::vector<int>& black_list,
          int max_batch_size,
          int max_seq_size,
+         bool adjust_batch,
          bool debug_builder,
          bool use_onnx) -> py::bytes {
         caffe2::NetDef pred_net;
@@ -1692,6 +1695,7 @@ void addGlobalMethods(py::module& m) {
         OnnxifiTransformerOptions opts;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
         opts.bound_shape_spec.max_seq_size = max_seq_size;
+        opts.adjust_batch = adjust_batch;
         opts.debug = debug_builder;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);

@@ -25,7 +25,8 @@ TORCH_API std::tuple<std::string, RawDataExportMap> export_onnx(
     int64_t onnx_opset_version,
     bool defer_weight_export = false,
     ::torch::onnx::OperatorExportTypes operator_export_type =
-        ::torch::onnx::OperatorExportTypes::ONNX);
+        ::torch::onnx::OperatorExportTypes::ONNX,
+    bool strip_doc_string = true);
 
 // For testing purposes
 TORCH_API std::string pretty_print_onnx(
