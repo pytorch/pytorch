@@ -768,6 +768,48 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
     return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{dx, dhx, dcx, dw};
 }
 
+namespace {
+
+template<typename hidden_type>
+std::pair<Tensor, hidden_type> _miopen_impl(
+	const Tensor& input, const Tensor& _batch_sizes, const hidden_type& hidden,
+	TensorList params, bool has_biases, miopenRNNMode_t mode,
+	int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
+	AT_ERROR("_miopen_impl : Didn't implement it yet.");
+}
+
+template<typename hidden_type>
+std::pair<Tensor, hidden_type> _miopen_impl(
+	const Tensor& input, const hidden_type& hidden,
+	TensorList params, bool has_biases, miopenRNNMode_t mode,
+	int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+	AT_ERROR("_miopen_impl : Didn't implement it yet.");
+}
+
+#define ONE_HIDDEN_RNN(NAME, MODE)                                             \
+void NAME##_miopen(Tensor& output, Tensor& hy,                                 \
+      const Tensor& input, const Tensor& hx,                                   \
+      TensorList params, bool has_biases,                                      \
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) { \
+  std::tie(output, hy) = _miopen_impl(input, hx, params, has_biases,           \
+      MODE, num_layers, dropout_p, train, bidirectional, batch_first);         \
+}                                                                              \
+                                                                               \
+void NAME##_packed_miopen(Tensor& output, Tensor& hy,                          \
+      const Tensor& data, const Tensor& batch_sizes, const Tensor& hx,         \
+      TensorList params, bool has_biases,                                      \
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {  \
+  std::tie(output, hy) = _miopen_impl(data, batch_sizes, hx, params,           \
+      has_biases, MODE, num_layers, dropout_p, train, bidirectional);          \
+}                                                                              \
+                                                                               \
+REGISTER_CUDA_DISPATCH(NAME##_miopen_stub, &NAME##_miopen);                    \
+REGISTER_CUDA_DISPATCH(NAME##_packed_miopen_stub, &NAME##_packed_miopen);
+
+ONE_HIDDEN_RNN(gru, miopenGRU)
+ONE_HIDDEN_RNN(rnn_tanh, miopenRNNTANH)
+ONE_HIDDEN_RNN(rnn_relu, miopenRNNRELU)
+
 void lstm_miopen(Tensor& output, Tensor& hy, Tensor& cy,
       const Tensor& input, TensorList hx,
       TensorList params, bool has_biases,
@@ -795,6 +837,7 @@ void lstm_packed_miopen(Tensor& output, Tensor& hy, Tensor& cy,
 REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen);
 REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen);
 
+} // anonymous namepsace
 }} //namespace native.
 
 #endif 
