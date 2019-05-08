@@ -3,6 +3,8 @@
 binary_linux_build: &binary_linux_build
   resource_class: 2xlarge+
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *binary_checkout
   - run:
@@ -37,7 +39,6 @@ binary_linux_build: &binary_linux_build
       root: /
       paths: final_pkgs
 
-
 # This should really just be another step of the binary_linux_build job above.
 # This isn't possible right now b/c the build job uses the docker executor
 # (otherwise they'd be really really slow) but this one uses the macine
@@ -47,24 +48,18 @@ binary_linux_test: &binary_linux_test
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
-  - attach_workspace:
-      at: /home/circleci/project
-  # This checkout is only needed to access
-  # .circleci/scripts/binary_linux_test.sh, which can't be inlined because it
-  # blows up the yaml size.
-  - run:
-      <<: *binary_checkout
   - run:
       <<: *binary_populate_env
   - run:
       name: Prepare test code
       no_output_timeout: "1h"
-      command: |
-        source "/home/circleci/project/pytorch/.circleci/scripts/binary_linux_test.sh"
+      command: ~/workspace/.circleci/scripts/binary_linux_test.sh
   - run:
       <<: *binary_run_in_docker
 
@@ -72,17 +67,12 @@ binary_linux_upload: &binary_linux_upload
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
-  - attach_workspace:
-      at: /home/circleci/project
-  # This checkout is only needed to access
-  # .circleci/scripts/binary_linux_upload.sh, which can't be inlined because it
-  # blows up the yaml size.
-  - run:
-      <<: *binary_checkout
   - run:
       <<: *binary_populate_env
   - run:
@@ -90,5 +80,4 @@ binary_linux_upload: &binary_linux_upload
   - run:
       name: Upload
       no_output_timeout: "1h"
-      command: |
-        source "/home/circleci/project/pytorch/.circleci/scripts/binary_linux_upload.sh"
+      command: ~/workspace/.circleci/scripts/binary_linux_upload.sh
