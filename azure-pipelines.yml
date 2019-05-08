@@ -13,10 +13,13 @@ steps:
 - script: echo Hello, world!
   displayName: 'Run a one-line script'
 
-- script: |
+- bash: |
     set +x
     sudo pip -q install awscli==1.16.35
-    export AWS_ACCESS_KEY_ID=${ECR_ACCESS_KEY}
+    export AWS_ACCESS_KEY_ID=${ECR_ACCESSKEY}
     export AWS_SECRET_ACCESS_KEY=${ECR_SECRET}
     eval $(aws ecr get-login --region us-east-1 --no-include-email)
-  displayName: 'Run a multi-line script'
+  env:
+    ACCESS_KEY_ID: $(ECR_ACCESSKEY)
+    SECRET: $(ECR_SECRET)
+  displayName: 'try aws stuff'
