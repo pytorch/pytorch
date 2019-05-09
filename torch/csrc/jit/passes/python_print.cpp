@@ -531,7 +531,7 @@ struct PythonPrintPass {
       // this must be a while loop, but check that there isn't _also_ a trip
       // count
       if (trip_count_is_specified) {
-        throw script::ErrorReport(stmt.node()->getSourceLocation())
+        throw script::ErrorReport(stmt.node()->sourceRange())
             << "loop cannot be printed as python "
             << "because it has gone through an optimization "
             << "that combined while and for loops. File a bug.";
@@ -678,7 +678,7 @@ struct PythonPrintPass {
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
               << "Normal use of ScriptMethods should enforce this.";
         }
@@ -733,7 +733,7 @@ struct PythonPrintPass {
       } break;
       case prim::Function: {
         if (enforce_importable_) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(node->sourceRange())
               << "closures are not exportable";
         }
         assignValuesToTheirUniqueNames(node->outputs());
@@ -850,7 +850,7 @@ struct PythonPrintPass {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(node->sourceRange())
               << "could not export python function call " << value->name()
               << ". Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "
