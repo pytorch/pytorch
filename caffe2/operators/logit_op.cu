@@ -54,7 +54,11 @@ bool LogitGradientOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      n, X.data<float>(), dY.data<float>(), eps_, dX->mutable_data<float>());
+      n,
+      X.data<float>(),
+      dY.data<float>(),
+      eps_,
+      dX->template mutable_data<float>());
   return true;
 }
 

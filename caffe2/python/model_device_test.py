@@ -124,7 +124,7 @@ class TestMiniAlexNet(test_util.TestCase):
         cpu_device = caffe2_pb2.DeviceOption()
         cpu_device.device_type = caffe2_pb2.CPU
         gpu_device = caffe2_pb2.DeviceOption()
-        gpu_device.device_type = caffe2_pb2.CUDA
+        gpu_device.device_type = workspace.GpuDeviceType
 
         checker = device_checker.DeviceChecker(0.05, [cpu_device, gpu_device])
         ret = checker.CheckNet(

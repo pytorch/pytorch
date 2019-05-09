@@ -19,24 +19,22 @@ void NetObserverReporterPrint::report(
   for (auto& p : info) {
     if ((p.first == "NET_DELAY") && (info.size() == 1)) {
       // for Net_delay perf
-      caffe2_perf.push_back(
-          {{"type", "NET"},
-           {"value", caffe2::to_string(p.second.latency * 1000)},
-           {"unit", "us"},
-           {"metric", "latency"}});
+      caffe2_perf.push_back({{"type", "NET"},
+                             {"value", c10::to_string(p.second.latency * 1000)},
+                             {"unit", "us"},
+                             {"metric", "latency"}});
     } else if (p.first != "NET_DELAY") {
       // for operator perf
       std::string shape_str = get_tensor_shapes(p.second);
       std::string args_str = get_op_args(p.second);
 
-      caffe2_perf.push_back(
-          {{"type", p.first},
-           {"value", caffe2::to_string(p.second.latency * 1000)},
-           {"unit", "us"},
-           {"metric", "latency"}});
+      caffe2_perf.push_back({{"type", p.first},
+                             {"value", c10::to_string(p.second.latency * 1000)},
+                             {"unit", "us"},
+                             {"metric", "latency"}});
       if (p.second.flops > 0) {
         caffe2_perf.push_back({{"type", p.first},
-                               {"value", caffe2::to_string(p.second.flops)},
+                               {"value", c10::to_string(p.second.flops)},
                                {"unit", "flop"},
                                {"metric", "flops"}});
       }

@@ -8,8 +8,9 @@ namespace caffe2 {
 
 class StatRegistryCreateOp : public Operator<CPUContext> {
  public:
-  StatRegistryCreateOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit StatRegistryCreateOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<StatRegistry>>(0) =
@@ -20,8 +21,9 @@ class StatRegistryCreateOp : public Operator<CPUContext> {
 
 class StatRegistryExportOp : public Operator<CPUContext> {
  public:
-  StatRegistryExportOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit StatRegistryExportOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         reset_(GetSingleArgument<bool>("reset", true)) {}
 
   bool RunOnDevice() override {
@@ -35,9 +37,9 @@ class StatRegistryExportOp : public Operator<CPUContext> {
     keys->Resize(data.size());
     values->Resize(data.size());
     timestamps->Resize(data.size());
-    auto* pkeys = keys->mutable_data<std::string>();
-    auto* pvals = values->mutable_data<int64_t>();
-    auto* ptimestamps = timestamps->mutable_data<int64_t>();
+    auto* pkeys = keys->template mutable_data<std::string>();
+    auto* pvals = values->template mutable_data<int64_t>();
+    auto* ptimestamps = timestamps->template mutable_data<int64_t>();
     int i = 0;
     for (const auto& stat : data) {
       pkeys[i] = std::move(stat.key);
@@ -55,8 +57,9 @@ class StatRegistryExportOp : public Operator<CPUContext> {
 
 class StatRegistryUpdateOp : public Operator<CPUContext> {
  public:
-  StatRegistryUpdateOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit StatRegistryUpdateOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     const auto& keys = Input(0);
@@ -64,8 +67,8 @@ class StatRegistryUpdateOp : public Operator<CPUContext> {
     auto registry = InputSize() == 3
         ? OperatorBase::Input<std::unique_ptr<StatRegistry>>(2).get()
         : &StatRegistry::get();
-    CAFFE_ENFORCE_EQ(keys.size(), values.size());
-    ExportedStatList data(keys.size());
+    CAFFE_ENFORCE_EQ(keys.numel(), values.numel());
+    ExportedStatList data(keys.numel());
     auto* pkeys = keys.data<std::string>();
     auto* pvals = values.data<int64_t>();
     int i = 0;
@@ -118,7 +121,7 @@ class TimerInstance {
 };
 
 struct TimerBeginOp : public Operator<CPUContext> {
-  TimerBeginOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit TimerBeginOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
         given_name_(GetSingleArgument<std::string>(
             "counter_name",
@@ -137,8 +140,8 @@ struct TimerBeginOp : public Operator<CPUContext> {
 };
 
 struct TimerEndOp : public Operator<CPUContext> {
-  TimerEndOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit TimerEndOp(Args&&... args) : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     OperatorBase::Input<TimerInstance*>(0)->end();
@@ -147,13 +150,14 @@ struct TimerEndOp : public Operator<CPUContext> {
 };
 
 struct TimerGetAndEndOp : public Operator<CPUContext> {
-  TimerGetAndEndOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit TimerGetAndEndOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     int64_t nanos = OperatorBase::Input<TimerInstance*>(0)->get_ns();
     OperatorBase::Input<TimerInstance*>(0)->end();
-    auto* res = OperatorBase::Output<TensorCPU>(0);
+    auto* res = Output(0);
     res->Resize(1);
     res->template mutable_data<int64_t>()[0] = nanos;
     return true;
@@ -161,12 +165,12 @@ struct TimerGetAndEndOp : public Operator<CPUContext> {
 };
 
 struct TimerGetOp : public Operator<CPUContext> {
-  TimerGetOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit TimerGetOp(Args&&... args) : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     int64_t nanos = OperatorBase::Input<TimerInstance*>(0)->get_ns();
-    auto* res = OperatorBase::Output<TensorCPU>(0);
+    auto* res = Output(0);
     res->Resize();
     res->template mutable_data<int64_t>()[0] = nanos;
     return true;
@@ -290,7 +294,7 @@ timergetandend_op = core.CreateOperator(
     ["nanos"]
 )
 
-# Test TimerBegin/TimerGet/TimerEnd
+// Test TimerBegin/TimerGet/TimerEnd
 workspace.RunOperatorOnce(timerbegin_op)
 print("timer:", workspace.FetchBlob("timer"))
 workspace.RunOperatorOnce(timerget_op)
@@ -298,7 +302,7 @@ print("nanos:", workspace.FetchBlob("nanos"))
 workspace.RunOperatorOnce(timerend_op)
 
 
-# Test TimerBegin/TimerGetAndEnd
+// Test TimerBegin/TimerGetAndEnd
 workspace.RunOperatorOnce(timerbegin_op)
 print("timer:", workspace.FetchBlob("timer"))
 workspace.RunOperatorOnce(timergetandend_op)

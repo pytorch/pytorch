@@ -1,10 +1,8 @@
-#define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "ATen/CPUApplyUtils.h"
-#include "test_assert.h"
-#include "test_seed.h"
+#include <ATen/ATen.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/test/test_assert.h>
 
 #include <iostream>
 using namespace std;
@@ -25,11 +23,11 @@ void fill_tensor(int64_t scalar, Tensor& t_) {
 // write the same type as we read (using a0, ..., aX-1) and we once write to
 // double (using a4 as a target). We also exercise on a zero_dim and empty
 // tensor.
-void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
+void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int64_t b = 1) {
   auto zero_dim = at::empty({}, type);
   zero_dim.fill_(2);
   zero_dim.exp_();
-  AT_DISPATCH_FLOATING_TYPES(zero_dim.type(), "test0", [&] {
+  AT_DISPATCH_FLOATING_TYPES(zero_dim.scalar_type(), "test0", [&] {
     ASSERT(zero_dim.data<scalar_t>()[0] == std::exp(2));
   });
 
@@ -37,11 +35,11 @@ void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
   empty_t.fill_(3);
   empty_t.exp_();
 
-  auto a0 = type.tensor();
-  auto a1 = type.tensor();
-  auto a2 = type.tensor();
-  auto a3 = type.tensor();
-  auto a4 = CPU(kDouble).tensor();
+  auto a0 = at::empty({0}, type.options());
+  auto a1 = at::empty({0}, type.options());
+  auto a2 = at::empty({0}, type.options());
+  auto a3 = at::empty({0}, type.options());
+  auto a4 = at::empty({0}, at::TensorOptions(kCPU).dtype(kDouble));
 
   std::vector<Tensor> tensors({a0, a1, a2, a3, a4});
   for (size_t i = 0; i < tensors.size(); i++) {
@@ -52,7 +50,7 @@ void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
     }
   }
 
-  AT_DISPATCH_FLOATING_TYPES(a0.type(), "test1", [&] {
+  AT_DISPATCH_FLOATING_TYPES(a0.scalar_type(), "test1", [&] {
     CPU_tensor_apply2<scalar_t, scalar_t>(
         a0, a1, [](scalar_t& y, const scalar_t& x) { y = x * x; });
     CPU_tensor_apply2<double, scalar_t>(
@@ -64,7 +62,7 @@ void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
     }
   });
 
-  AT_DISPATCH_FLOATING_TYPES(a0.type(), "test2", [&] {
+  AT_DISPATCH_FLOATING_TYPES(a0.scalar_type(), "test2", [&] {
     CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
         a0, a1, a2, [](scalar_t& y, const scalar_t& x, const scalar_t& z) {
           y = x * x + z;
@@ -81,7 +79,7 @@ void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
     }
   });
 
-  AT_DISPATCH_FLOATING_TYPES(a0.type(), "test3", [&] {
+  AT_DISPATCH_FLOATING_TYPES(a0.scalar_type(), "test3", [&] {
     CPU_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(
         a0,
         a1,
@@ -108,32 +106,38 @@ void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
   });
 }
 
-TEST_CASE("apply utils test 2-dim small contiguous", "[cpu]") {
-  manual_seed(123, at::Backend::CPU);
+// apply utils test 2-dim small contiguous
+TEST(ApplyUtilsTest, Contiguous2D) {
+  manual_seed(123);
   test(CPU(kDouble), {2, 1}, -1, -1);
 }
 
-TEST_CASE("apply utils test 2-dim small", "[cpu]") {
-  manual_seed(123, at::Backend::CPU);
+// apply utils test 2-dim small
+TEST(ApplyUtilsTest, Small2D) {
+  manual_seed(123);
   test(CPU(kDouble), {2, 1});
 }
 
-TEST_CASE("apply utils test 2-dim", "[cpu]") {
-  manual_seed(123, at::Backend::CPU);
+// apply utils test 2-dim
+TEST(ApplyUtilsTest, _2D) {
+  manual_seed(123);
   test(CPU(kDouble), {20, 10});
 }
 
-TEST_CASE("apply utils test 3-dim", "[cpu]") {
-  manual_seed(123, at::Backend::CPU);
+// apply utils test 3-dim
+TEST(ApplyUtilsTest, _3D) {
+  manual_seed(123);
   test(CPU(kDouble), {3, 4, 2});
 }
 
-TEST_CASE("apply utils test 3-dim medium", "[cpu]") {
-  manual_seed(123, at::Backend::CPU);
+// apply utils test 3-dim medium
+TEST(ApplyUtilsTest, Medium3D) {
+  manual_seed(123);
   test(CPU(kDouble), {3, 40, 2});
 }
 
-TEST_CASE("apply utils test 10-dim", "[cpu]") {
-  manual_seed(123, at::Backend::CPU);
+// apply utils test 10-dim
+TEST(ApplyUtilsTest, _10D) {
+  manual_seed(123);
   test(CPU(kDouble), {3, 4, 2, 5, 2, 1, 3, 4, 2, 3});
 }

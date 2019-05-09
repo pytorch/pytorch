@@ -11,11 +11,12 @@ template <typename T, class Context>
 class InstanceNormOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  InstanceNormOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<T>("epsilon", 1e-5f)),
+  template <class... Args>
+  explicit InstanceNormOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-5f)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(epsilon_ >= 0, "Must pass a nonnegative epsilon.");
   }
   ~InstanceNormOp() {}
@@ -40,8 +41,8 @@ class InstanceNormOp : public Operator<Context> {
   StorageOrder order_;
 
   // temp results that get passed to the gradient, but are otherwise stored here
-  Tensor<Context> mean_;
-  Tensor<Context> inv_stdev_;
+  Tensor mean_{Context::GetDeviceType()};
+  Tensor inv_stdev_{Context::GetDeviceType()};
 
   INPUT_TAGS(INPUT, SCALE, BIAS);
   OUTPUT_TAGS(OUTPUT, MEAN, INV_STDEV);
@@ -51,11 +52,12 @@ template <typename T, class Context>
 class InstanceNormGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  InstanceNormGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<T>("epsilon", 1e-5f)),
+  template <class... Args>
+  explicit InstanceNormGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-5f)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(epsilon_ >= 0, "Must pass a nonnegative epsilon.");
   }
   ~InstanceNormGradientOp() {}
@@ -81,8 +83,8 @@ class InstanceNormGradientOp : public Operator<Context> {
 
   // temp results that could get passed through to this gradient, but if not,
   // are stored here
-  Tensor<Context> mean_;
-  Tensor<Context> inv_stdev_;
+  Tensor mean_;
+  Tensor inv_stdev_;
 
   INPUT_TAGS(INPUT, SCALE, BIAS, OUTPUT_GRAD, MEAN, INV_STDEV);
   OUTPUT_TAGS(INPUT_GRAD, SCALE_GRAD, BIAS_GRAD);

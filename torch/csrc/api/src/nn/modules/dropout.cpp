@@ -1,10 +1,11 @@
 #include <torch/nn/modules/dropout.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 
-#include <ATen/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstddef>
+#include <ostream>
 #include <vector>
 
 namespace torch {
@@ -20,31 +21,26 @@ DropoutImplBase<Derived>::DropoutImplBase(DropoutOptions options_)
 template <typename Derived>
 void DropoutImplBase<Derived>::reset() {}
 
-template <typename Derived>
-Tensor DropoutImplBase<Derived>::forward(Tensor input) {
-  if (options.rate_ == 0 || !this->is_training()) {
-    return input;
-  }
-
-  auto scale = 1.0f / (1.0f - options.rate_);
-  auto boolean_mask = noise_mask(input).uniform_(0, 1) > options.rate_;
-  auto noise = boolean_mask.to(input.dtype()).mul_(scale);
-
-  return input * noise;
-}
-
 template class DropoutImplBase<DropoutImpl>;
-template class DropoutImplBase<Dropout2dImpl>;
+template class DropoutImplBase<FeatureDropoutImpl>;
 } // namespace detail
 
 DropoutOptions::DropoutOptions(double rate) : rate_(rate) {}
 
-Tensor DropoutImpl::noise_mask(Tensor input) const {
-  return torch::empty_like(input);
+Tensor DropoutImpl::forward(const Tensor& input) {
+  return torch::dropout(input, options.rate_, this->is_training());
 }
 
-Tensor Dropout2dImpl::noise_mask(Tensor input) const {
-  return torch::empty({input.size(0), input.size(1), 1, 1}, input.options());
+void DropoutImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Dropout(rate=" << options.rate_ << ")";
+}
+
+Tensor FeatureDropoutImpl::forward(const Tensor& input) {
+  return torch::feature_dropout(input, options.rate_, this->is_training());
+}
+
+void FeatureDropoutImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::FeatureDropout(rate=" << options.rate_ << ")";
 }
 } // namespace nn
 } // namespace torch

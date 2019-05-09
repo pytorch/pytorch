@@ -9,10 +9,10 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_simple_net_benchmark_run_whole_net,
     true,
     "If false, whole net passes won't be performed");

@@ -1,12 +1,11 @@
 #pragma once
 
 #include <torch/nn/module.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
+#include <torch/utils.h>
 
-#include <ATen/Error.h>
-#include <ATen/OptionsGuard.h>
-#include <ATen/TensorOptions.h>
-#include <ATen/optional.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/Exception.h>
 
 #include <memory>
 #include <utility>
@@ -21,7 +20,7 @@ namespace nn {
 /// `clone()` method. We do not want to use this pattern in the base class,
 /// because then storing a module would always require templatizing it.
 template <typename Derived>
-class Cloneable : public Module {
+class Cloneable : public virtual Module {
  public:
   using Module::Module;
 
@@ -33,10 +32,8 @@ class Cloneable : public Module {
   /// and submodules in the cloned module are different from those in the
   /// original module.
   std::shared_ptr<Module> clone(
-      at::optional<Device> device = at::nullopt) const override {
-    auto options = DefaultTensorOptions::get();
-    OptionsGuard options_guard(
-        options.device(device.value_or(options.device())));
+      const optional<Device>& device = nullopt) const override {
+    NoGradGuard no_grad;
 
     const auto& self = static_cast<const Derived&>(*this);
     auto copy = std::make_shared<Derived>(self);
@@ -51,13 +48,9 @@ class Cloneable : public Module {
         "Are you sure you called register_parameter() inside reset() "
         "and not the constructor?");
     for (const auto& parameter : parameters_) {
-      if (device) {
-        copy->parameters_[parameter.key].data().copy_(
-            parameter->data(), /*non_blocking=*/true);
-      } else {
-        at::detail::set_data(
-            copy->parameters_[parameter.key], parameter->data().clone());
-      }
+      auto data = autograd::Variable(*parameter).data().clone();
+      copy->parameters_[parameter.key()].set_data(
+          device ? data.to(*device) : data);
     }
     AT_CHECK(
         copy->buffers_.size() == buffers_.size(),
@@ -66,13 +59,8 @@ class Cloneable : public Module {
         "Are you sure you called register_buffer() inside reset() "
         "and not the constructor?");
     for (const auto& buffer : buffers_) {
-      if (device) {
-        copy->buffers_[buffer.key].data().copy_(
-            buffer->data(), /*non_blocking=*/true);
-      } else {
-        at::detail::set_data(
-            copy->buffers_[buffer.key], buffer->data().clone());
-      }
+      auto data = autograd::Variable(*buffer).data().clone();
+      copy->buffers_[buffer.key()].set_data(device ? data.to(*device) : data);
     }
     AT_CHECK(
         copy->children_.size() == children_.size(),
@@ -81,13 +69,13 @@ class Cloneable : public Module {
         "Are you sure you called register_module() inside reset() "
         "and not the constructor?");
     for (const auto& child : children_) {
-      copy->children_[child.key]->clone_(*child.value, device);
+      copy->children_[child.key()]->clone_(*child.value(), device);
     }
     return copy;
   }
 
  private:
-  void clone_(Module& other, at::optional<Device> device) final override {
+  void clone_(Module& other, const optional<Device>& device) final {
     // Here we are *pretty* certain that `other's` type is `Derived` (because it
     // was registered under the same name as `this`), but you never know what
     // crazy things `reset()` does, so `dynamic_cast` just to be safe.

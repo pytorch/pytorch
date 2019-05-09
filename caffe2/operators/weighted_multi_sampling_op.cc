@@ -6,23 +6,24 @@ namespace caffe2 {
 template <class Context>
 bool WeightedMultiSamplingOp<Context>::RunOnDevice() {
   const auto& weight = Input(0);
-  CAFFE_ENFORCE_EQ(weight.ndim(), 1, "Input should be 1-D vector");
-  auto dims = weight.dims();
+  CAFFE_ENFORCE_EQ(weight.dim(), 1, "Input should be 1-D vector");
+  auto dims = weight.sizes().vec();
   size_t data_size = weight.dim32(0);
-  auto* indices = Output(0);
 
+  std::vector<int64_t> indices_sizes;
   auto num_samples = num_samples_;
   if (InputSize() == 2) {
     CAFFE_ENFORCE(
         !OperatorBase::HasArgument("num_samples"),
         "New shape is specified by the input blob, do not pass in "
         "the argument `num_samples`.");
-    num_samples = Input(1).size();
-    indices->ResizeLike(Input(1));
+    num_samples = Input(1).numel();
+    indices_sizes = Input(1).sizes().vec();
   } else {
-    indices->Resize(num_samples);
+    indices_sizes = {num_samples};
   }
 
+  auto* indices = Output(0, indices_sizes, at::dtype<int>());
   int* indices_data = indices->template mutable_data<int>();
   if (data_size == 0) {
     indices->Resize(0);
@@ -84,14 +85,14 @@ OPERATOR_SCHEMA(WeightedMultiSampling)
     .SetDoc(R"DOC(
 The operator performs sampling based on the input sampling weights.
 All weights are cummulative probability thus sorted. The output is
-a 1-D tensor (Tensor<int>). If two inputs are given, the second input
+a 1-D tensor (Tensor). If two inputs are given, the second input
 is used to provide shape of the output sample tensor. Otherwise, we use
 argument `num_samples` to determine the number of samples to generate.
 )DOC")
     .Input(
         0,
         "sampling_cdf",
-        "An optional 1-D Tensor<float>."
+        "An optional 1-D Tensor."
         "Input cumulative sampling probability (such as [0.2, 0.5, 0.8, 1.5])."
         " All weights must be non-negative numbers. Note that the last value of"
         " CDF is not necessary 1. If the last value is not 1, all values in"
@@ -105,7 +106,7 @@ argument `num_samples` to determine the number of samples to generate.
         "sampled_indexes",
         "The output tensor contains indices sampled from distribution given"
         "by the weight vector in the input tensor"
-        "The output is a 1-D Tensor<int> of size determined by argument"
+        "The output is a 1-D Tensor of size determined by argument"
         "`num_samples` or the second input tensor.")
     .Arg("num_samples", "number of samples to sample from the input data");
 

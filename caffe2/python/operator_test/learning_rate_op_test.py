@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 from hypothesis import given
 import hypothesis.strategies as st
@@ -15,8 +16,8 @@ import math
 import numpy as np
 
 
-class TestLearningRate(hu.HypothesisTestCase):
-    @given(**hu.gcs_cpu_only)
+class TestLearningRate(serial.SerializedTestCase):
+    @serial.given(**hu.gcs_cpu_only)
     def test_alter_learning_rate_op(self, gc, dc):
         iter = np.random.randint(low=1, high=1e5, size=1)
         active_period = int(np.random.randint(low=1, high=1e3, size=1))
@@ -79,6 +80,36 @@ class TestLearningRate(hu.HypothesisTestCase):
             power=power,
             end_multiplier=end_multiplier,
         )
+        self.assertReferenceChecks(gc, op, [iter], ref)
+
+    @given(
+        **hu.gcs_cpu_only
+    )
+    def test_gate_learningrate(self, gc, dc):
+        iter = np.random.randint(low=1, high=1e5, size=1)
+        num_iter = int(np.random.randint(low=1e2, high=1e3, size=1))
+        base_lr = float(np.random.uniform(-1, 1))
+        multiplier_1 = float(np.random.uniform(-1, 1))
+        multiplier_2 = float(np.random.uniform(-1, 1))
+
+        def ref(iter):
+            iter = float(iter)
+            if iter < num_iter:
+                return (np.array(multiplier_1 * base_lr), )
+            else:
+                return (np.array(multiplier_2 * base_lr), )
+
+        op = core.CreateOperator(
+            'LearningRate',
+            'data',
+            'out',
+            policy="gate",
+            num_iter=num_iter,
+            multiplier_1=multiplier_1,
+            multiplier_2=multiplier_2,
+            base_lr=base_lr,
+        )
+
         self.assertReferenceChecks(gc, op, [iter], ref)
 
     @given(gc=hu.gcs['gc'],

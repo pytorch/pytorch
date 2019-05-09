@@ -1,12 +1,14 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SpatialDilatedConvolution.c"
+#define TH_GENERIC_FILE "THNN/generic/SpatialDilatedConvolution.c"
 #else
 
+#include <ATen/div_rtn.h>
+
 static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
-	THTensor *input, THTensor *gradOutput,
-	THTensor *weight, THTensor *bias,
-	int kH, int kW, int dH, int dW, int padH, int padW,
-	int dilationH, int dilationW, int weight_nullable) {
+        THTensor *input, THTensor *gradOutput,
+        THTensor *weight, THTensor *bias,
+        int kH, int kW, int dH, int dW, int padH, int padW,
+        int dilationH, int dilationW, int weight_nullable) {
   THArgCheck(kW > 0 && kH > 0, 9,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
@@ -38,13 +40,13 @@ static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
   }
 
   THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
-		"non-empty 3D or 4D input tensor expected but got: %s");
+                "non-empty 3D or 4D input tensor expected but got: %s");
 
   int64_t inputHeight  = input->size(dimh);
   int64_t inputWidth   = input->size(dimw);
 
-  int64_t outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
-  int64_t outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+  int64_t outputHeight = div_rtn<int64_t>(inputHeight + 2*padH - (dilationH * (kH - 1) + 1), dH) + 1;
+  int64_t outputWidth  = div_rtn<int64_t>(inputWidth + 2*padW - (dilationW * (kW - 1) + 1), dW) + 1;
 
   if (outputWidth < 1 || outputHeight < 1) {
     THError("Given input size per channel: (%ld x %ld). "
@@ -62,7 +64,7 @@ static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
       int64_t nOutputPlane = weight->size(0);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      int64_t nOutputPlane = bias->size(0);
+      int64_t nOutputPlane = THTensor_sizeLegacyNoScalars(bias, 0);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     }
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
@@ -152,10 +154,10 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
         't', 'n',
         n_, m_, k_,
         1,
-        THTensor_(data)(ones), k_,
-        THTensor_(data)(bias), k_,
+        ones->data<scalar_t>(), k_,
+        bias->data<scalar_t>(), k_,
         0,
-        THTensor_(data)(output_n), n_
+        output_n->data<scalar_t>(), n_
       );
     } else {
       THTensor_(zero)(output_n);
@@ -163,12 +165,12 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
 
     // Extract columns:
     THNN_(im2col)(
-      THTensor_(data)(input_n),
+      input_n->data<scalar_t>(),
       nInputPlane, inputHeight, inputWidth,
       outputHeight, outputWidth,
       kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
-      THTensor_(data)(columns)
+      columns->data<scalar_t>()
     );
 
     // M,N,K are dims of matrix A and B
@@ -181,16 +183,16 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
       'n', 'n',
       n, m, k,
       1,
-      THTensor_(data)(columns), n,
-      THTensor_(data)(weight), k,
+      columns->data<scalar_t>(), n,
+      weight->data<scalar_t>(), k,
       1,
-      THTensor_(data)(output_n), n
+      output_n->data<scalar_t>(), n
     );
   }
 
   // Free
-  THTensor_(free)(input_n);
-  THTensor_(free)(output_n);
+  c10::raw::intrusive_ptr::decref(input_n);
+  c10::raw::intrusive_ptr::decref(output_n);
 
   // Resize output
   if (is_batch == 0) {
@@ -198,9 +200,9 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
     THTensor_(resize3d)(input, nInputPlane, inputHeight, inputWidth);
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(weight);
-  if (bias) THTensor_(free)(bias);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(weight);
+  if (bias) c10::raw::intrusive_ptr::decref(bias);
 }
 
 void THNN_(SpatialDilatedConvolution_updateGradInput)(
@@ -233,7 +235,7 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
     is_batch = 0;
     THTensor_(resize4d)(input, 1, input->size(0), input->size(1), input->size(2));
     THTensor_(resize4d)(gradOutput, 1, gradOutput->size(0), gradOutput->size(1),
-			gradOutput->size(2));
+                        gradOutput->size(2));
   }
 
   int64_t inputWidth   = input->size(3);
@@ -271,25 +273,25 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
         'n', 't',
         n, m, k,
         1,
-        THTensor_(data)(gradOutput_n), n,
-        THTensor_(data)(weight), m,
+        gradOutput_n->data<scalar_t>(), n,
+        weight->data<scalar_t>(), m,
         0,
-        THTensor_(data)(gradColumns), n
+        gradColumns->data<scalar_t>(), n
     );
 
     // Unpack columns back into input:
     THNN_(col2im)(
-      THTensor_(data)(gradColumns),
+      gradColumns->data<scalar_t>(),
       nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
       kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
-      THTensor_(data)(gradInput_n)
+      gradInput_n->data<scalar_t>()
     );
   }
 
   // Free
-  THTensor_(free)(gradInput_n);
-  THTensor_(free)(gradOutput_n);
+  c10::raw::intrusive_ptr::decref(gradInput_n);
+  c10::raw::intrusive_ptr::decref(gradOutput_n);
 
   // Resize output
   if (is_batch == 0) {
@@ -298,9 +300,9 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
     THTensor_(resize3d)(gradInput, nInputPlane, inputHeight, inputWidth);
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
-  THTensor_(free)(weight);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
+  c10::raw::intrusive_ptr::decref(weight);
 }
 
 
@@ -318,7 +320,7 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     int dilationW, int dilationH,
     accreal scale_)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THNN_(SpatialDilatedConvolution_shapeCheck)
     (input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW,
      dilationH, dilationW, 1);
@@ -340,7 +342,7 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     is_batch = 0;
     THTensor_(resize4d)(input, 1, input->size(0), input->size(1), input->size(2));
     THTensor_(resize4d)(gradOutput, 1, gradOutput->size(0),
-			gradOutput->size(1), gradOutput->size(2));
+                        gradOutput->size(1), gradOutput->size(2));
   }
 
   int64_t nInputPlane = input->size(1);
@@ -372,12 +374,12 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
 
       // Extract columns:
       THNN_(im2col)(
-        THTensor_(data)(input_n),
+        input_n->data<scalar_t>(),
         nInputPlane, inputHeight, inputWidth,
         outputHeight, outputWidth,
         kH, kW, padH, padW, dH, dW,
         dilationH, dilationW,
-        THTensor_(data)(columns)
+        columns->data<scalar_t>()
       );
 
       // M,N,K are dims of matrix A and B
@@ -390,10 +392,10 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
           't', 'n',
           n, m, k,
           scale,
-          THTensor_(data)(columns), k,
-          THTensor_(data)(gradOutput_n), k,
+          columns->data<scalar_t>(), k,
+          gradOutput_n->data<scalar_t>(), k,
           1,
-          THTensor_(data)(gradWeight), n
+          gradWeight->data<scalar_t>(), n
       );
     }
 
@@ -414,17 +416,17 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
           't',
           k_, m_,
           scale,
-          THTensor_(data)(gradOutput_n), k_,
-          THTensor_(data)(ones), 1,
+          gradOutput_n->data<scalar_t>(), k_,
+          ones->data<scalar_t>(), 1,
           1,
-          THTensor_(data)(gradBias), 1
+          gradBias->data<scalar_t>(), 1
       );
     }
   }
 
   // Free
-  THTensor_(free)(input_n);
-  THTensor_(free)(gradOutput_n);
+  c10::raw::intrusive_ptr::decref(input_n);
+  c10::raw::intrusive_ptr::decref(gradOutput_n);
 
   // Resize
   if (is_batch == 0) {
@@ -432,8 +434,8 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     THTensor_(resize3d)(input, nInputPlane, inputHeight, inputWidth);
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

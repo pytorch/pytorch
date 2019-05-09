@@ -1,8 +1,7 @@
 #ifndef THP_PTR_WRAPPER_H
 #define THP_PTR_WRAPPER_H
 
-#include "torch/csrc/python_headers.h"
-#include <functional>
+#include <torch/csrc/python_headers.h>
 
 /**
  * Python wrapper around arbitrary opaque C++ class

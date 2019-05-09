@@ -2,7 +2,6 @@
 #include "caffe2/sgd/adagrad_op.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/utils/mixed_utils.h"
 
 namespace caffe2 {
 
@@ -59,12 +58,11 @@ __global__ void SparseAdagradKernel(
     const SIndex index = indices[i / grad_slice_sz];
     const size_t paramIdx = index * grad_slice_sz + (i % grad_slice_sz);
 
-    float mom_new =
-        mixed_add(grad[gradIdx] * grad[gradIdx], param_mom[paramIdx]);
-    mixed_store(&mom_new, &(param_mom[paramIdx]));
-    float param_new = mixed_add(
-        LR * grad[gradIdx] / (sqrtf(mom_new) + epsilon), param[paramIdx]);
-    mixed_store(&param_new, &(param[paramIdx]));
+    float mom_new = grad[gradIdx] * grad[gradIdx] + param_mom[paramIdx];
+    param_mom[paramIdx] = mom_new;
+    float param_new =
+        LR * grad[gradIdx] / (sqrtf(mom_new) + epsilon) + param[paramIdx];
+    param[paramIdx] = param_new;
   }
 }
 
@@ -120,8 +118,8 @@ class CUDASparseAdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   CUDASparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {
-    const T decay = OperatorBase::GetSingleArgument<T>("decay", 1.0f);
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {
+    const T decay = this->template GetSingleArgument<T>("decay", 1.0f);
     CAFFE_ENFORCE_EQ(decay, 1.0, "Decay is not supported for SparseAdagradOp");
   }
 
@@ -143,7 +141,7 @@ class CUDASparseAdagradOp final : public Operator<Context> {
     if (n == 0) {
       return true;
     }
-    return DispatchHelper<TensorTypes2<float, float16>, IndexType>::call(
+    return DispatchHelper<TensorTypes2<float, at::Half>, IndexType>::call(
         this, Input(PARAM));
   }
 

@@ -8,11 +8,11 @@
 #include <thread>
 #include <vector>
 
-#include <mpi.h>
-
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
+
+#include <mpi.h>
 
 namespace c10d {
 
@@ -21,10 +21,17 @@ namespace c10d {
 // The actual run function that will operate either on src or dst or both.
 struct WorkEntry {
   explicit WorkEntry(
-      std::vector<at::Tensor>* src,
-      std::vector<at::Tensor>* dst,
+      std::vector<at::Tensor>* srcPtr,
+      std::vector<at::Tensor>* dstPtr,
       std::function<void(std::unique_ptr<WorkEntry>&)> run)
-      : src(src), dst(dst), run(run) {}
+      : run(run) {
+    if (srcPtr) {
+      src = *srcPtr;
+    }
+    if (dstPtr) {
+      dst = *dstPtr;
+    }
+  }
 
   // Not copyable
   WorkEntry(const WorkEntry&) = delete;
@@ -32,8 +39,10 @@ struct WorkEntry {
   WorkEntry& operator=(const WorkEntry&) = delete;
 
   // For input and output tensors (in-place), we will always use src
-  std::vector<at::Tensor>* src;
-  std::vector<at::Tensor>* dst;
+  std::vector<at::Tensor> src;
+  std::vector<at::Tensor> dst;
+  // src rank returned, for recv only
+  int* srcRank = nullptr;
   std::function<void(std::unique_ptr<WorkEntry>&)> run;
 };
 
@@ -64,42 +73,33 @@ struct WorkEntry {
 class ProcessGroupMPI : public ProcessGroup {
  public:
   class WorkMPI : public ProcessGroup::Work {
-   public:
-    WorkMPI();
-    virtual ~WorkMPI();
-
-    // Checks if request has completed. Non-blocking operation.
-    bool isCompleted() const override;
-
-    // Returns if the work completed successfully
-    // if false, the exception function can be called to get details.
-    bool isSuccess() const override;
-
-    // No op for the case of MPI
-    virtual void synchronize() override;
-
-    // Waits until request completes. Blocking operation
-    // Returns false if the work completed with an exception
-    bool wait() override;
-
-    // Return the exception if wait() returned false.
-    const std::exception& exception() const override;
-
    protected:
-    void finish();
-    void finishWithException(std::exception_ptr caughtWorkException);
-
-    std::mutex workMutex_;
-    std::condition_variable workCV_;
-    std::atomic<bool> completed_;
-
-    std::exception_ptr workException_;
-
     friend class ProcessGroupMPI;
   };
 
+  class AsyncWork : public ProcessGroup::Work {
+   public:
+    AsyncWork(at::Tensor tensor, MPI_Request request);
+    virtual ~AsyncWork();
+
+    bool isCompleted() override;
+
+    bool isSuccess() const override;
+
+    int sourceRank() const override;
+
+    void wait() override;
+
+   protected:
+    void populateException();
+
+    at::Tensor tensor_;
+    MPI_Request request_;
+    MPI_Status status_;
+  };
+
   // Constructor will spawn up the worker thread loop
-  explicit ProcessGroupMPI(int rank, int size);
+  explicit ProcessGroupMPI(int rank, int size, MPI_Comm pgComm);
 
   virtual ~ProcessGroupMPI();
 
@@ -114,8 +114,50 @@ class ProcessGroupMPI : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
+  std::shared_ptr<ProcessGroup::Work> reduce(
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allgather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> gather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const GatherOptions& opts = GatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ScatterOptions& opts = ScatterOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> reduce_scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors,
+      int dstRank,
+      int tag);
+
+  std::shared_ptr<ProcessGroup::Work> recv(
+      std::vector<at::Tensor>& tensors,
+      int srcRank,
+      int tag);
+
+  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+      std::vector<at::Tensor>& tensor,
+      int tag);
+
+  std::shared_ptr<ProcessGroup::Work> barrier(
+      const BarrierOptions& opts = BarrierOptions()) override;
+
   // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
-  static std::shared_ptr<ProcessGroupMPI> createProcessGroupMPI();
+  static std::shared_ptr<ProcessGroupMPI> createProcessGroupMPI(
+      std::vector<int> ranks = {});
 
  protected:
   using WorkType =
@@ -138,11 +180,13 @@ class ProcessGroupMPI : public ProcessGroup {
 
   // Global states
   static void initMPIOnce();
+  static void mpiExit();
   static std::once_flag onceFlagInitMPI;
 
   static std::mutex pgGlobalMutex_;
-  static int numProcessGroups_;
   static int mpiThreadSupport_;
+
+  MPI_Comm pgComm_;
 };
 
 } // namespace c10d

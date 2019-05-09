@@ -39,6 +39,8 @@ fi
 if [[ "$image" == *rocm* ]]; then
   ROCM_VERSION="$(echo "${image}" | perl -n -e'/rocm(\d+\.\d+\.\d+|nightly)/ && print $1')"
   DOCKERFILE="${OS}-rocm/Dockerfile"
+  # newer cmake version needed
+  CMAKE_VERSION=3.6.3
 fi
 
 if [[ "$image" == *conda* ]]; then
@@ -56,6 +58,10 @@ if [[ "$image" == *-android-* ]]; then
   # The Android NDK requires CMake 3.6 or higher.
   # See https://github.com/caffe2/caffe2/pull/1740 for more info.
   CMAKE_VERSION=3.6.3
+
+  if [[ "$image" == *-ndk-* ]]; then
+    ANDROID_NDK_VERSION="$(echo "${image}" | perl -n -e'/-ndk-([^-]+)/ && print $1')"
+  fi
 fi
 
 if [[ "$image" == *-gcc* ]]; then
@@ -64,6 +70,15 @@ fi
 
 if [[ "$image" == *-clang* ]]; then
   CLANG_VERSION="$(echo "${image}" | perl -n -e'/clang(\d+(\.\d+)?)/ && print $1')"
+fi
+
+
+if [[ "$image" == *-devtoolset* ]]; then
+  DEVTOOLSET_VERSION="$(echo "${image}" | perl -n -e'/devtoolset(\d+(\.\d+)?)/ && print $1')"
+fi
+
+if [[ "$image" == *-glibc* ]]; then
+  GLIBC_VERSION="$(echo "${image}" | perl -n -e'/glibc(\d+(\.\d+)?)/ && print $1')"
 fi
 
 # Copy over common scripts to directory containing the Dockerfile to build
@@ -84,12 +99,15 @@ docker build \
        --build-arg "JENKINS_GID=${JENKINS_GID:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
        --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
+       --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
+       --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
        --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
        --build-arg "ANACONDA_VERSION=${ANACONDA_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
        --build-arg "MKL=${MKL}" \
        --build-arg "ANDROID=${ANDROID}" \
+       --build-arg "ANDROID_NDK=${ANDROID_NDK_VERSION}" \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \

@@ -9,9 +9,9 @@
 
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_handle_executor_threads_exceptions,
     false,
     "If used we will handle exceptions in executor threads. "
@@ -100,12 +100,12 @@ std::function<bool(int64_t)> getContinuationTest(
 
 // if the blob doesn't exist or is not initiaized, return false
 inline bool getShouldStop(const Blob* b) {
-  if (!b || b->meta().id() == CaffeTypeId::uninitialized()) { // not exist or uninitialized
+  if (!b || b->meta().id() == TypeIdentifier::uninitialized()) { // not exist or uninitialized
     return false;
   }
 
   const auto& t = b->Get<TensorCPU>();
-  CAFFE_ENFORCE(t.IsType<bool>() && t.size() == 1, "expects a scalar boolean");
+  CAFFE_ENFORCE(t.IsType<bool>() && t.numel() == 1, "expects a scalar boolean");
   return *(t.template data<bool>());
 }
 
@@ -132,7 +132,7 @@ struct WorkspaceIdInjector {
       int32_t global_ws_id = (seq_++) + (static_cast<int32_t>(node_id) << 16);
       Blob* global_ws_id_blob = workspace->CreateLocalBlob(GLOBAL_WORKSPACE_ID);
       TensorCPU* global_ws_id_tensor =
-          global_ws_id_blob->template GetMutable<TensorCPU>();
+          BlobGetMutableTensor(global_ws_id_blob, CPU);
       global_ws_id_tensor->Resize();
       global_ws_id_tensor->template mutable_data<int32_t>()[0] = global_ws_id;
       VLOG(1) << "Adding " << GLOBAL_WORKSPACE_ID << " = " << global_ws_id;
@@ -418,7 +418,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
           } catch (const std::exception& ex) {
             std::lock_guard<std::mutex> guard(exception_mutex);
             if (!first_exception.size()) {
-              first_exception = GetExceptionString(ex);
+              first_exception = c10::GetExceptionString(ex);
               LOG(ERROR) << "Parallel worker exception:\n" << first_exception;
             }
             compiledStep->gotFailure = true;
@@ -479,17 +479,19 @@ bool RunPlanOnWorkspace(
     Workspace* ws,
     const PlanDef& plan,
     ShouldContinue shouldContinue) {
-  LOG(INFO) << "Started executing plan.";
+  LOG(INFO) << "Started executing plan " << plan.name();
   if (plan.execution_step_size() == 0) {
     LOG(WARNING) << "Nothing to run - did you define a correct plan?";
     // We will do nothing, but the plan is still legal so we will return true.
     return true;
   }
-  LOG(INFO) << "Initializing networks.";
+  LOG(INFO) << "Initializing networks for plan " << plan.name();
 
   NetDefMap net_defs;
   for (const NetDef& net_def : plan.network()) {
-    LOG(INFO) << "Processing net '" << net_def.name() << "'";
+    LOG(INFO) << "Processing net '" << net_def.name() << "', type: '"
+              << net_def.type() << "', #ops: " << net_def.op_size()
+              << ", num_workers: " << net_def.num_workers();
     CAFFE_ENFORCE(
         net_defs.count(net_def.name()) == 0,
         "Your plan contains networks of the same name \"",
@@ -509,11 +511,12 @@ bool RunPlanOnWorkspace(
       LOG(ERROR) << "Failed initializing step " << step.name();
       return false;
     }
-    LOG(INFO) << "Step " << step.name() << " took " << step_timer.Seconds()
-              << " seconds.";
+    LOG(INFO) << "Step " << step.name() << " in plan " << plan.name()
+              << " took " << step_timer.Seconds() << " seconds.";
   }
-  LOG(INFO) << "Total plan took " << plan_timer.Seconds() << " seconds.";
-  LOG(INFO) << "Plan executed successfully.";
+  LOG(INFO) << "Total plan " << plan.name() << " took " << plan_timer.Seconds()
+            << " seconds.";
+  LOG(INFO) << "Plan " << plan.name() << " executed successfully.";
   return true;
 }
 }

@@ -1,39 +1,39 @@
 #ifndef THC_TENSOR_MODE_CUH
 #define THC_TENSOR_MODE_CUH
 
-#include "THCNumerics.cuh"
-#include "THCSortUtils.cuh"
-#include "THCScanUtils.cuh"
+#include <THC/THCNumerics.cuh>
+#include <THC/THCSortUtils.cuh>
+#include <THC/THCScanUtils.cuh>
 
 struct ThrustHalfLess
 {
-  __host__ __device__ inline bool operator()(const half& lhs, const half& rhs) {
-    return THCNumerics<half>::lt(lhs, rhs);
+  __host__ __device__ inline bool operator()(const at::Half& lhs, const at::Half& rhs) {
+    return THCNumerics<at::Half>::lt(lhs, rhs);
   }
 };
 
 struct ThrustHalfNotEqualTo
 {
-  __host__ __device__ inline bool operator()(const half& lhs, const half& rhs) {
-    return THCNumerics<half>::ne(lhs, rhs);
+  __host__ __device__ inline bool operator()(const at::Half& lhs, const at::Half& rhs) {
+    return THCNumerics<at::Half>::ne(lhs, rhs);
   }
 };
 
 struct ThrustHalfEqualTo
 {
-  __host__ __device__ inline bool operator()(const half& lhs, const half& rhs) {
-    return THCNumerics<half>::eq(lhs, rhs);
+  __host__ __device__ inline bool operator()(const at::Half& lhs, const at::Half& rhs) {
+    return THCNumerics<at::Half>::eq(lhs, rhs);
   }
 };
 
 struct ThrustHalfEqualToPredicate
 {
-  ThrustHalfEqualToPredicate(half val): val_(val) {}
-  __host__ __device__ inline bool operator()(half x) {
-    return THCNumerics<half>::eq(val_, x);
+  ThrustHalfEqualToPredicate(at::Half val): val_(val) {}
+  __host__ __device__ inline bool operator()(at::Half x) {
+    return THCNumerics<at::Half>::eq(val_, x);
   }
 
-  half val_;
+  at::Half val_;
 };
 
 template <typename T>
@@ -271,7 +271,7 @@ __global__ void computeMode(
   // Finally, we have the mode, and an index where it occurs. We use a single thread
   // to place this in the appropriate output position
   if (tidx == 0) {
-    int64_t index = TH_INDEX_BASE + match.val;
+    int64_t index = match.val;
 
     unsigned int outputOffset = IndexToOffset<T, unsigned int, -1>::get(blockId, values);
     values.data[outputOffset] = mode;

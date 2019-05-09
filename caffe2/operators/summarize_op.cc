@@ -5,7 +5,7 @@ namespace caffe2 {
 template <>
 bool SummarizeOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  const auto N = X.size();
+  const auto N = X.numel();
   CAFFE_ENFORCE_GT(N, 0);
 
   const float* Xdata = X.data<float>();
@@ -31,9 +31,8 @@ bool SummarizeOp<float, CPUContext>::RunOnDevice() {
                  << standard_deviation << std::endl;
   }
   if (OutputSize()) {
-    auto* Y = Output(0);
-    Y->Resize(NUM_STATS);
-    float* Ydata = Y->mutable_data<float>();
+    auto* Y = Output(0, {NUM_STATS}, at::dtype<float>());
+    float* Ydata = Y->template mutable_data<float>();
     Ydata[MIN_IDX] = min;
     Ydata[MAX_IDX] = max;
     Ydata[MEAN_IDX] = static_cast<float>(mean);
@@ -50,7 +49,7 @@ OPERATOR_SCHEMA(Summarize)
     .NumInputs(1)
     .NumOutputs(0, 1)
     .SetDoc(R"DOC(
-Summarize computes four statistics of the input tensor (Tensor<float>)- min,
+Summarize computes four statistics of the input tensor (Tensor)- min,
 max, mean and standard deviation. The output will be written to a 1-D tensor of
 size 4 if an output tensor is provided. Else, if the argument 'to_file' is
 greater than 0, the values are written to a log file in the root folder.
@@ -59,11 +58,11 @@ greater than 0, the values are written to a log file in the root folder.
         "to_file",
         "(int, default 0) flag to indicate if the summarized "
         "statistics have to be written to a log file.")
-    .Input(0, "data", "The input data as Tensor<float>.")
+    .Input(0, "data", "The input data as Tensor.")
     .Output(
         0,
         "output",
-        "1-D tensor (Tensor<float>) of size 4 containing min, "
+        "1-D tensor (Tensor) of size 4 containing min, "
         "max, mean and standard deviation");
 
 SHOULD_NOT_DO_GRADIENT(Summarize);

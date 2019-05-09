@@ -1,9 +1,10 @@
 #pragma once
 
-#include <ATen/Allocator.h>
-#include <ATen/Error.h>
-#include <ATen/Generator.h>
-#include <ATen/Registry.h>
+#include <c10/core/Allocator.h>
+#include <ATen/core/Generator.h>
+#include <c10/util/Exception.h>
+
+#include <c10/util/Registry.h>
 
 #include <cstddef>
 #include <functional>
@@ -47,7 +48,7 @@ constexpr const char* CUDA_HELP =
 // TODO: Consider putting the stub definitions in another class, so that one
 // never forgets to implement each virtual function in the real implementation
 // in CUDAHooks.  This probably doesn't buy us much though.
-struct AT_API CUDAHooksInterface {
+struct CAFFE2_API CUDAHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   virtual ~CUDAHooksInterface() {}
@@ -62,6 +63,10 @@ struct AT_API CUDAHooksInterface {
   }
 
   virtual bool hasCUDA() const {
+    return false;
+  }
+
+  virtual bool hasMAGMA() const {
     return false;
   }
 
@@ -85,6 +90,10 @@ struct AT_API CUDAHooksInterface {
     return false;
   }
 
+  virtual bool compiledWithMIOpen() const {
+    return false;
+  }
+
   virtual bool supportsDilatedConvolutionWithCuDNN() const {
     return false;
   }
@@ -93,24 +102,28 @@ struct AT_API CUDAHooksInterface {
     AT_ERROR("Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }
 
+  virtual std::string showConfig() const {
+    AT_ERROR("Cannot query detailed CUDA version without ATen_cuda library. ", CUDA_HELP);
+  }
+
   virtual double batchnormMinEpsilonCuDNN() const {
     AT_ERROR(
         "Cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheMaxSize() const {
+  virtual int64_t cuFFTGetPlanCacheMaxSize(int64_t device_index) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
+  virtual void cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheSize() const {
+  virtual int64_t cuFFTGetPlanCacheSize(int64_t device_index) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTClearPlanCache() const {
+  virtual void cuFFTClearPlanCache(int64_t device_index) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
@@ -121,25 +134,13 @@ struct AT_API CUDAHooksInterface {
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
 // for the "..." in a variadic macro"
-struct AT_API CUDAHooksArgs {};
+struct CAFFE2_API CUDAHooksArgs {};
 
-AT_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
+C10_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
 #define REGISTER_CUDA_HOOKS(clsname) \
-  AT_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
+  C10_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 
 namespace detail {
-AT_API const CUDAHooksInterface& getCUDAHooks();
-
-/// This class exists to let us access `cudaSetDevice`, `cudaGetDevice` and CUDA
-/// error handling functions, when CUDA is available. These functions will first
-/// default to no-ops. When the `ATen` GPU library is loaded, they will be set to
-/// the `cudaSetDevice`/`cudaGetDevice` functions. This allows us to access them
-/// with only a single pointer indirection, while virtual dispatch would require
-/// two (one for the virtual call, one for `cudaSetDevice`/`cudaGetDevice`).
-struct AT_API DynamicCUDAInterface {
-  static void (*set_device)(int32_t);
-  static void (*get_device)(int32_t*);
-  static void (*unchecked_set_device)(int32_t);
-};
+CAFFE2_API const CUDAHooksInterface& getCUDAHooks();
 } // namespace detail
 } // namespace at

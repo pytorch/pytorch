@@ -5,19 +5,22 @@ from __future__ import unicode_literals
 
 import numpy as np
 
-from hypothesis import given
+from hypothesis import given, assume
 import hypothesis.strategies as st
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.mkl_test_util as mu
+import caffe2.python.serialized_test.serialized_test_util as serial
+
+from scipy.stats import norm
 
 import unittest
 
 
-class TestActivations(hu.HypothesisTestCase):
-    @given(X=hu.tensor(), in_place=st.booleans(),
-           engine=st.sampled_from(["", "CUDNN"]), **mu.gcs)
+class TestActivations(serial.SerializedTestCase):
+    @serial.given(X=hu.tensor(), in_place=st.booleans(),
+                  engine=st.sampled_from(["", "CUDNN"]), **mu.gcs)
     def test_relu(self, X, in_place, engine, gc, dc):
         if gc == mu.mkl_do:
             in_place = False
@@ -40,11 +43,31 @@ class TestActivations(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
+    @given(N=st.integers(1, 10), M=st.integers(1, 10), in_place=st.booleans(),
+           **hu.gcs)
+    def test_relu_empty_input(self, N, M, in_place, gc, dc):
+        op = core.CreateOperator(
+            "Relu",
+            ["X"],
+            ["X"] if in_place else ["Y"],
+        )
+
+        def relu_ref(X):
+            return [np.maximum(X, 0.0)]
+
+        X = np.random.randn(0, N, M).astype(np.float32)
+
+        self.assertReferenceChecks(gc, op, [X], relu_ref)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
     @unittest.skipIf(not workspace.has_gpu_support,
                      "Relu for float16 can only run on GPU now.")
     @given(X=hu.tensor(dtype=np.float16), in_place=st.booleans(),
-           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs_gpu_only)
+           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
     def test_relu_fp16(self, X, in_place, engine, gc, dc):
+        # fp16 is only supported on CUDA/HIP
+        assume(core.IsGPUDeviceType(gc.device_type))
         op = core.CreateOperator(
             "Relu",
             ["X"],
@@ -67,16 +90,16 @@ class TestActivations(hu.HypothesisTestCase):
         X[X == 0.0] += 0.02
 
         self.assertReferenceChecks(
-            hu.gpu_do,
+            gc,
             op,
             [X],
             relu_ref,
             output_to_grad="X" if in_place else "Y",
             grad_reference=relu_grad_ref)
 
-    @given(X=hu.tensor(elements=st.floats(-3.0, 3.0)),
-           n=st.floats(min_value=0.5, max_value=2.0),
-           in_place=st.booleans(), **hu.gcs)
+    @serial.given(X=hu.tensor(elements=st.floats(-3.0, 3.0)),
+                  n=st.floats(min_value=0.5, max_value=2.0),
+                  in_place=st.booleans(), **hu.gcs)
     def test_relu_n(self, X, n, in_place, gc, dc):
         op = core.CreateOperator(
             "ReluN",
@@ -100,10 +123,10 @@ class TestActivations(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=0.005)
 
-    @given(X=hu.tensor(),
-           alpha=st.floats(min_value=0.1, max_value=2.0),
-           in_place=st.booleans(), engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs)
+    @serial.given(X=hu.tensor(),
+                  alpha=st.floats(min_value=0.1, max_value=2.0),
+                  in_place=st.booleans(), engine=st.sampled_from(["", "CUDNN"]),
+                  **hu.gcs)
     def test_elu(self, X, alpha, in_place, engine, gc, dc):
         op = core.CreateOperator(
             "Elu",
@@ -169,10 +192,10 @@ class TestActivations(hu.HypothesisTestCase):
             # Gradient check wrt W
             self.assertGradientChecks(gc, op, [X, W], 1, [0], stepsize=1e-2)
 
-    @given(X=hu.tensor(),
-           alpha=st.floats(min_value=0.1, max_value=2.0),
-           inplace=st.booleans(),
-           **hu.gcs)
+    @serial.given(X=hu.tensor(),
+                  alpha=st.floats(min_value=0.1, max_value=2.0),
+                  inplace=st.booleans(),
+                  **hu.gcs)
     def test_leaky_relu(self, X, alpha, inplace, gc, dc):
         # go away from the origin point to avoid kink problems
         X += 0.04 * np.sign(X)
@@ -212,3 +235,26 @@ class TestActivations(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [X], leaky_relu_ref)
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X], [0])
+
+    @given(X=hu.tensor(),
+           fast_gelu=st.booleans(),
+           **hu.gcs)
+    def test_gelu(self, X, fast_gelu, gc, dc):
+        op = core.CreateOperator(
+            "Gelu",
+            ["X"],
+            ["Y"],
+            fast_gelu=fast_gelu,
+        )
+
+        def gelu_ref(X):
+            return (X * norm.cdf(X),)
+
+        tol = 1e-3 if fast_gelu else 1e-4
+        self.assertReferenceChecks(gc, op, [X], gelu_ref, threshold=tol)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
+
+if __name__ == "__main__":
+    unittest.main()

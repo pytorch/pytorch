@@ -96,6 +96,7 @@ from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import LowRankMultivariateNormal
 from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
+from .negative_binomial import NegativeBinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -123,12 +124,16 @@ __all__ = [
     'Gamma',
     'Geometric',
     'Gumbel',
+    'HalfCauchy',
+    'HalfNormal',
     'Independent',
     'Laplace',
     'LogNormal',
     'LogisticNormal',
+    'LowRankMultivariateNormal',
     'Multinomial',
     'MultivariateNormal',
+    'NegativeBinomial',
     'Normal',
     'OneHotCategorical',
     'Pareto',

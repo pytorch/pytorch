@@ -14,7 +14,7 @@ from six import binary_type, string_types, text_type
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils, workspace
 from caffe2.python.control_ops_grad import \
-    gen_do_gradient, gen_if_gradient, gen_while_gradient
+    gen_do_gradient, gen_if_gradient, gen_while_gradient, disambiguate_grad_if_op_output
 
 import caffe2.python._import_c_extension as C
 
@@ -82,9 +82,13 @@ def IsOperatorWithEngine(op_type, engine):
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
 
 
+def IsGPUDeviceType(device_type):
+    return device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP}
+
+
 def DeviceOption(
     device_type,
-    cuda_gpu_id=0,
+    device_id=0,
     random_seed=None,
     node_name=None,
     numa_node_id=None,
@@ -92,7 +96,7 @@ def DeviceOption(
 ):
     option = caffe2_pb2.DeviceOption()
     option.device_type = device_type
-    option.cuda_gpu_id = cuda_gpu_id
+    option.device_id = device_id
     if node_name is not None:
         option.node_name = node_name
     if random_seed is not None:
@@ -115,7 +119,7 @@ def device_option_equal(opt1, opt2, ignore_node_name=True, ignore_random_seed=Tr
     if not opt1.device_type or not opt2.device_type:
         # At least one option is for CPU, check if both are for CPU.
         return not opt1.device_type and not opt2.device_type
-    return opt1.cuda_gpu_id == opt2.cuda_gpu_id
+    return opt1.device_id == opt2.device_id
 
 
 def InferBlobDevices(net):
@@ -235,6 +239,9 @@ class BlobReference(object):
     def GetNameScope(self):
         return self._name[:self._name.rfind(scope._NAMESCOPE_SEPARATOR) + 1]
 
+    def GetUnscopedName(self):
+        return self._name[self._name.rfind(scope._NAMESCOPE_SEPARATOR) + 1:]
+
     def _CreateAndAddToNet(self, op_type, inputs=None, *args, **kwargs):
         """Internal function that routes the operator generation to the
         network's __getattr__ function.
@@ -335,6 +342,7 @@ def CreateOperator(
     device_option=None,
     arg=None,
     engine=None,
+    debug_info=None,
     **kwargs
 ):
     """A function wrapper that allows one to create operators based on the
@@ -367,6 +375,8 @@ def CreateOperator(
         operator.device_option.CopyFrom(scope.CurrentDeviceScope())
     if engine is not None:
         operator.engine = engine
+    if debug_info is not None:
+        operator.debug_info = debug_info
     # random seed is defined in the device option, so we need to do special
     # care.
 
@@ -704,6 +714,8 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
 
         return input_name + '_grad'
 
+    IS_AUTO_GEN_SUM_OPS_TAG = "is_auto_gen_sum_ops"
+
     def _SetSumOpsDeviceOption(self, sum_ops, generators):
         # we already checked that device options are consistent so we can just
         # use the first one we find
@@ -714,11 +726,18 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                 if grad_op.HasField('device_option'):
                     for op in sum_ops:
                         op.device_option.CopyFrom(grad_op.device_option)
+                        op.device_option.extra_info.extend([
+                            "{}:1".format(IR.IS_AUTO_GEN_SUM_OPS_TAG)
+                        ])
                 break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
-        grad_op.output[idx] = (
+        new_grad_output = (
             '_' + grad_op.output[idx] + '_autosplit_{}'.format(cnt))
+        if grad_op.type == "If":
+            disambiguate_grad_if_op_output(grad_op, idx, new_grad_output)
+        else:
+            grad_op.output[idx] = new_grad_output
         return grad_op.output[idx], cnt + 1
 
     def _CheckSumOpsConflict(self, out_base_name, g):
@@ -1613,7 +1632,8 @@ class Net(object):
         blob_remap=None,
         op_id_mask=None,
         remap_funcs=None,
-        keep_schema=True
+        keep_schema=True,
+        update_external_list=False,
     ):
         """
         Clone this net.
@@ -1687,6 +1707,24 @@ class Net(object):
                 )
 
         new_net._attr_dict.update(self._attr_dict)
+        if update_external_list:
+            # external input list
+            existing_outputs = set()
+            used_outputs = set()
+            del new_net.Proto().external_input[:]
+            del new_net.Proto().external_output[:]
+            for op in new_net.Proto().op:
+                for ib in op.input:
+                    if ib not in existing_outputs:
+                        new_net.Proto().external_input.extend([ib])
+                    else:
+                        used_outputs.add(ib)
+                for ob in op.output:
+                    existing_outputs.add(ob)
+            # external outputs
+            for ob in existing_outputs:
+                if ob not in used_outputs:
+                    new_net.Proto().external_output.extend([ob])
         return new_net
 
     def ClonePartial(self, name, inputs, outputs, remap_funcs=None):
@@ -1757,6 +1795,71 @@ class Net(object):
     def Proto(self):
         self._InvalidateLookupTables()
         return self._net
+
+    def insert_op_at_idx(self, op, op_idx):
+        r""" inserting operator at index. Will update external blob list.
+        """
+        assert op_idx >= 0
+        temp_ops = self.Proto().op[op_idx:]
+        del self.Proto().op[op_idx:]
+        self.Proto().op.extend([op])
+        self.Proto().op.extend(temp_ops)
+        self.external_outputs.extend(op.output)
+        self.external_inputs.extend(op.input)
+
+    def reroute_tensor(self, tensor, new_producer, can_modify=None):
+        r""" reroute tensor to new_producer. And feed new tensor to consumers
+        and interseciton with can_modify if provided.
+        Inputs:
+            tensor: str or blob_reference the tensor to reroute
+            new_producer: an op takes in tensor gives new_tesnor
+            can_modify: a list/set of operators that consumes tensor and can be
+            modified
+
+        Returns:
+            reroute_cnt: how many consumer op has been changed
+
+        Note: assume no inplace blob in net
+        """
+        def _find_tensor_input_op(tensor):
+            if tensor in self.external_inputs:
+                op_idx = -1
+            else:
+                assert tensor in new_producer.input, \
+                    "new producer {} is not taking in {}".format(
+                        new_producer.type, tensor)
+                # assuming that the net has no inplace blob
+                op_idx = -2
+                for index, op in enumerate(self.Proto().op):
+                    if_found = False
+                    for o in op.output:
+                        if o == tensor:
+                            # tensor should not be modified yet.
+                            if_found = True
+                            op_idx = index
+                            break
+                    if if_found:
+                        break
+            return op_idx
+
+        # the place to inject new_producer is not just determined by tensor
+        op_idx = max(_find_tensor_input_op(t) for t in new_producer.input)
+        self.insert_op_at_idx(new_producer, op_idx + 1)
+        new_tensor = new_producer.output[0]
+        # modify external outputs
+        if tensor in self.external_outputs:
+            new_list = [new_tensor if b == tensor else b for b in self.external_outputs]
+            del self.Proto().external_output[:]
+            self.Proto().external_output.extend(new_list)
+
+        # modify consumers
+        reroute_cnt = 0
+        if can_modify:
+            for op in self.Proto().op:
+                if op in can_modify:  # this is not necessarily true
+                    remap_input(op, {tensor: new_tensor})
+                    reroute_cnt = reroute_cnt + 1
+        return reroute_cnt
 
     def PopulateProtoWithFileName(self):
         net_tb = workspace.operator_tracebacks.get(self.Name(), None)
@@ -2019,15 +2122,28 @@ class Net(object):
             raise ValueError('{} is not supported'.format(aggregator))
         return GradientSlice(indices=unique, values=new_g)
 
+    @staticmethod
+    def _RunAllOnGPU(net, gpu_id=0, use_cudnn=False):
+        device_option = caffe2_pb2.DeviceOption()
+        device_option.device_type = workspace.GpuDeviceType
+        device_option.device_id = gpu_id
+        net.device_option.CopyFrom(device_option)
+        if use_cudnn:
+            for op in net.op:
+                op.engine = "CUDNN"
+        # Move RecurrentNetwork operators on GPU as well
+        for op in net.op:
+            if op.type != "RecurrentNetwork":
+                continue
+            for arg in op.arg:
+                if arg.name == "step_net":
+                    Net._RunAllOnGPU(arg.n, gpu_id, use_cudnn)
+
     def RunAllOnGPU(self, gpu_id=0, use_cudnn=False):
         """A convenient function to run everything on the GPU."""
-        device_option = caffe2_pb2.DeviceOption()
-        device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = gpu_id
-        self._net.device_option.CopyFrom(device_option)
-        if use_cudnn:
-            for op in self._net.op:
-                op.engine = "CUDNN"
+        self._RunAllOnGPU(self._net, gpu_id, use_cudnn)
+
+
 
     def RunAllOnMKL(self):
         """A convenient function to run everything using MKLDNN."""
@@ -2184,15 +2300,22 @@ class Net(object):
         return self._ExtendOps(new_ops)
 
 
+def remap_input(op, blob_name_remapping):
+    new_list = [blob_name_remapping.get(b, b) for b in op.input]
+    del op.input[:]
+    op.input.extend(new_list)
+
+
 def copy_func_between_devices(src, dst):
     CPU = caffe2_pb2.CPU
-    CUDA = caffe2_pb2.CUDA
+    is_src_gpu = IsGPUDeviceType(src.device_type)
+    is_dst_gpu = IsGPUDeviceType(dst.device_type)
 
     if src.device_type == CPU and dst.device_type == CPU:
         return None
 
-    if src.device_type == CUDA and dst.device_type == CUDA:
-        if src.cuda_gpu_id == dst.cuda_gpu_id:
+    if is_src_gpu and is_dst_gpu:
+        if src.device_id == dst.device_id:
             return None
         else:
             def fun(net, *args, **kw):
@@ -2200,13 +2323,13 @@ def copy_func_between_devices(src, dst):
                     return net.Copy(*args, **kw)
             return fun
 
-    if src.device_type == CUDA and dst.device_type == CPU:
+    if is_src_gpu and dst.device_type == CPU:
         def fun(net, *args, **kw):
             with DeviceScope(src):
                 return net.CopyGPUToCPU(*args, **kw)
         return fun
 
-    if src.device_type == CPU and dst.device_type == CUDA:
+    if src.device_type == CPU and is_dst_gpu:
         def fun(net, *args, **kw):
             with DeviceScope(dst):
                 return net.CopyCPUToGPU(*args, **kw)
@@ -2218,10 +2341,10 @@ def copy_func_between_devices(src, dst):
 def device_equal(src, dst):
     '''
     We are using this fucntion instead of == operator because optional-value
-    comparison between empty device_options and {device_type:0, cuda_gpu_id:0}
+    comparison between empty device_options and {device_type:0, device_id:0}
     returns not equal in some cases.
     '''
-    return src.device_type == dst.device_type and src.cuda_gpu_id == dst.cuda_gpu_id
+    return src.device_type == dst.device_type and src.device_id == dst.device_id
 
 
 def update_placeholder_op_output(op, blob_to_device):
@@ -2331,11 +2454,10 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
 
                     def _gen_new_name(blob, device_option):
                         CPU = caffe2_pb2.CPU
-                        CUDA = caffe2_pb2.CUDA
                         if device_option.device_type == CPU:
                             suffix = '_cpu'
-                        elif device_option.device_type == CUDA:
-                            suffix = '_cuda_' + str(device_option.cuda_gpu_id)
+                        elif IsGPUDeviceType(device_option.device_type):
+                            suffix = '_gpu_' + str(device_option.device_id)
                         else:
                             raise RuntimeError(
                                 "Unknown device type: {}".

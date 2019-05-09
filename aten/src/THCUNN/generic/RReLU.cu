@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/RReLU.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/RReLU.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 void THNN_(RReLU_updateOutput)(
            THCState *state,
@@ -16,14 +16,14 @@ void THNN_(RReLU_updateOutput)(
            void *generator)
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
-  struct curandStateMtgp32* gen_states = THCRandom_generatorStates(state);
+  curandStateMtgp32* gen_states = THCRandom_generatorStates(state);
 
   if (train)
   {
     input = THCTensor_(newContiguous)(state, input);
     THCTensor_(resizeAs)(state, noise, input);
-    real *input_data = THCTensor_(data)(state, input);
-    real *noise_data = THCTensor_(data)(state, noise);
+    scalar_t *input_data = THCTensor_(data)(state, input);
+    scalar_t *noise_data = THCTensor_(data)(state, noise);
     ptrdiff_t n = THCTensor_(nElement)(state, input);
     if (inplace)
     {
@@ -34,7 +34,7 @@ void THNN_(RReLU_updateOutput)(
     else
     {
       THCTensor_(resizeAs)(state, output, input);
-      real *output_data = THCTensor_(data)(state, output);
+      scalar_t *output_data = THCTensor_(data)(state, output);
       rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
         n, gen_states, input_data, noise_data, output_data, lower, upper);
     }
@@ -43,16 +43,16 @@ void THNN_(RReLU_updateOutput)(
   }
   else
   {
-    const real negSlope = ScalarConvert<double, real>::to((lower + upper) / 2);
+    const scalar_t negSlope = ScalarConvert<double, scalar_t>::to((lower + upper) / 2);
     if (inplace)
     {
-      THC_pointwiseApply1<real>(state, input, RReLUUpdateOutputEvalIP_functor<real>(negSlope));
+      THC_pointwiseApply1<scalar_t>(state, input, RReLUUpdateOutputEvalIP_functor<scalar_t>(negSlope));
       THCTensor_(set)(state, output, input);
     }
     else
     {
       THCTensor_(resizeAs)(state, output, input);
-      THC_pointwiseApply2<real, real>(state, output, input, RReLUUpdateOutputEval_functor<real>(negSlope));
+      THC_pointwiseApply2<scalar_t, scalar_t>(state, output, input, RReLUUpdateOutputEval_functor<scalar_t>(negSlope));
     }
   }
 }
@@ -90,16 +90,16 @@ void THNN_(RReLU_updateGradInput)(
   else
   {
     // use constant factor for negative input values
-    const real negSlope = ScalarConvert<double, real>::to((lower + upper) / 2);
+    const scalar_t negSlope = ScalarConvert<double, scalar_t>::to((lower + upper) / 2);
     if (inplace)
     {
-      THC_pointwiseApply2<real, real>(state, gradOutput, input, RReLUupdateGradInputEvalIP_functor<real>(negSlope));
+      THC_pointwiseApply2<scalar_t, scalar_t>(state, gradOutput, input, RReLUupdateGradInputEvalIP_functor<scalar_t>(negSlope));
       THCTensor_(set)(state, gradInput, gradOutput);
     }
     else
     {
       THCTensor_(resizeAs)(state, gradInput, input);
-      THC_pointwiseApply3<real, real, real>(state, gradInput, gradOutput, input, RReLUupdateGradInputEval_functor<real>(negSlope));
+      THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, gradInput, gradOutput, input, RReLUupdateGradInputEval_functor<scalar_t>(negSlope));
     }
   }
 

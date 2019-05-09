@@ -16,8 +16,8 @@ namespace {
 const std::string& GetStringFromBlob(Blob* blob) {
   if (blob->template IsType<string>()) {
     return blob->template Get<string>();
-  } else if (blob->template IsType<Tensor<CPUContext>>()) {
-    return *blob->template Get<Tensor<CPUContext>>().template data<string>();
+  } else if (blob->template IsType<Tensor>()) {
+    return *blob->template Get<Tensor>().template data<string>();
   } else {
     CAFFE_THROW("Unsupported Blob type");
   }

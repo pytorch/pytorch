@@ -10,11 +10,12 @@ template <class Context>
 class CTCBeamSearchDecoderOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CTCBeamSearchDecoderOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
-    beam_width_ = OperatorBase::GetSingleArgument<int32_t>("beam_width", 10);
+  template <class... Args>
+  explicit CTCBeamSearchDecoderOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
+    beam_width_ = this->template GetSingleArgument<int32_t>("beam_width", 10);
     prune_threshold_ =
-        OperatorBase::GetSingleArgument<float>("prune_threshold", 0.001);
+        this->template GetSingleArgument<float>("prune_threshold", 0.001);
   }
 
   bool RunOnDevice() override;

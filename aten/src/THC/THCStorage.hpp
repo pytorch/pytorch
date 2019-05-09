@@ -3,22 +3,17 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THCStorage.h"
+#include <THC/THCStorage.h>
 // Should work with THStorageClass
 #include <TH/THStorageFunctions.hpp>
 
-#include "ATen/ScalarType.h"
-#include "ATen/ScalarTypeUtils.h"
-#include <atomic>
+#include <c10/core/ScalarType.h>
 
-namespace at {
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <cuda_fp16.h>
 
-template <>
-struct CTypeToScalarType<__half> : public CTypeToScalarType<Half> {};
-
-}
-
-THC_API THCStorage* THCStorage_new(THCState* state, at::ScalarType);
+THC_API THCStorage* THCStorage_new(THCState* state, caffe2::TypeMeta);
 
 THC_API void THCStorage_retain(THCState *state, THCStorage *storage);
 

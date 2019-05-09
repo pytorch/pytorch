@@ -54,8 +54,8 @@ class GHMarkdown(Markdown):
 
 def getCodeLink(formatter, schema):
     formatter = formatter.clone()
-    path = os.path.join("caffe2", os.path.relpath(schema.file, "caffe2"))
-    schemaLink = ('https://github.com/caffe2/caffe2/blob/master/{path}'
+    path = os.path.relpath(schema.file, "caffe2")
+    schemaLink = ('https://github.com/pytorch/pytorch/blob/master/{path}'
                   .format(path=path))
     formatter.addLink('{path}'.format(path=path), schemaLink)
     return formatter.dump()

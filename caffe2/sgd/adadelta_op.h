@@ -40,9 +40,9 @@ class AdadeltaOp final : public Operator<Context> {
         OP_SINGLE_ARG(float, "decay", decay_, 0.95f) {}
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENT_GRAD).size());
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENT_DELTA).size());
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(PARAM).size());
+    CAFFE_ENFORCE(Input(GRAD).numel() == Input(MOMENT_GRAD).numel());
+    CAFFE_ENFORCE(Input(GRAD).numel() == Input(MOMENT_DELTA).numel());
+    CAFFE_ENFORCE(Input(GRAD).numel() == Input(PARAM).numel());
     CAFFE_ENFORCE_GE(epsilon_, 0.0f);
     CAFFE_ENFORCE_GT(decay_, 0.0f);
     CAFFE_ENFORCE_LT(decay_, 1.0f);
@@ -51,7 +51,7 @@ class AdadeltaOp final : public Operator<Context> {
     Output(OUTPUT_MOMENT_GRAD)->ResizeLike(Input(MOMENT_GRAD));
     Output(OUTPUT_MOMENT_DELTA)->ResizeLike(Input(MOMENT_DELTA));
     AdadeltaUpdate<Context>(
-        Input(GRAD).size(),
+        Input(GRAD).numel(),
         Input(PARAM).template data<float>(),
         Input(GRAD).template data<float>(),
         Input(MOMENT_GRAD).template data<float>(),
@@ -84,12 +84,12 @@ class SparseAdadeltaOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     // Enforce shapes
-    CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENT_GRAD).size());
-    CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENT_DELTA).size());
-    CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
+    CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENT_GRAD).numel());
+    CAFFE_ENFORCE_EQ(Input(PARAM).numel(), Input(MOMENT_DELTA).numel());
+    CAFFE_ENFORCE_EQ(Input(LR).numel(), 1);
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
-        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+        Input(GRAD).size_from_dim(Input(INDICES).dim()));
 
     // Enforce domain constraints for attributes
     CAFFE_ENFORCE_GE(epsilon_, 0.0f);
@@ -114,12 +114,12 @@ class SparseAdadeltaOp final : public Operator<Context> {
     auto* momentDeltaOut =
         Output(OUTPUT_MOMENT_DELTA)->template mutable_data<float>();
 
-    auto n = Input(INDICES).size();
+    auto n = Input(INDICES).numel();
     if (n == 0) {
       return true;
     }
 
-    auto block_size = Input(GRAD).size() / n;
+    auto block_size = Input(GRAD).numel() / n;
     for (int i = 0; i < n; ++i) {
       auto idx = indices[i];
       if (block_size == 1) {
@@ -136,7 +136,7 @@ class SparseAdadeltaOp final : public Operator<Context> {
 
 #ifndef NDEBUG
         CAFFE_ENFORCE_GE(
-            Input(PARAM).size(),
+            Input(PARAM).numel(),
             block_size + offsetIdx,
             this->debug_def().input(PARAM),
             ", out of bound,  idx:",
@@ -146,7 +146,7 @@ class SparseAdadeltaOp final : public Operator<Context> {
             " and block size:",
             block_size);
         CAFFE_ENFORCE_GE(
-            Input(GRAD).size(),
+            Input(GRAD).numel(),
             block_size + offsetI,
             this->debug_def().input(GRAD),
             ", out of bound idx, idx:",

@@ -22,10 +22,10 @@ template <>
 bool StumpFuncOp<float, float, CPUContext>::RunOnDevice() {
   auto& in = Input(0);
   const float* in_data = in.template data<float>();
-  auto* out = Output(0);
-  out->ResizeLike(in);
+
+  auto* out = Output(0, in.sizes(), at::dtype<float>());
   float* out_data = out->template mutable_data<float>();
-  for (int i = 0; i < in.size(); i++) {
+  for (int i = 0; i < in.numel(); i++) {
     out_data[i] = (in_data[i] <= threshold_) ? low_value_ : high_value_;
   }
   return true;
@@ -35,19 +35,18 @@ template <>
 bool StumpFuncIndexOp<float, int64_t, CPUContext>::RunOnDevice() {
   auto& in = Input(0);
   const float* in_data = in.template data<float>();
-  auto* out_lo = Output(0);
-  auto* out_hi = Output(1);
+
   int lo_cnt = 0;
-  for (int i = 0; i < in.size(); i++) {
+  for (int i = 0; i < in.numel(); i++) {
     lo_cnt += (in_data[i] <= threshold_);
   }
-  out_lo->Resize(lo_cnt);
-  out_hi->Resize(in.size() - lo_cnt);
+  auto* out_lo = Output(0, {lo_cnt}, at::dtype<int64_t>());
+  auto* out_hi = Output(1, {in.numel() - lo_cnt}, at::dtype<int64_t>());
   int64_t* lo_data = out_lo->template mutable_data<int64_t>();
   int64_t* hi_data = out_hi->template mutable_data<int64_t>();
   int lidx = 0;
   int hidx = 0;
-  for (int i = 0; i < in.size(); i++) {
+  for (int i = 0; i < in.numel(); i++) {
     if (in_data[i] <= threshold_) {
       lo_data[lidx++] = i;
     } else {

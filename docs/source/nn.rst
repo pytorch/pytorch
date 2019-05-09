@@ -308,6 +308,11 @@ Non-linear activations (weighted sum, nonlinearity)
 .. autoclass:: LogSigmoid
     :members:
 
+:hidden:`MultiheadAttention`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autoclass:: MultiheadAttention
+    :members:
+
 :hidden:`PReLU`
 ~~~~~~~~~~~~~~~
 
@@ -336,6 +341,12 @@ Non-linear activations (weighted sum, nonlinearity)
 ~~~~~~~~~~~~~~
 
 .. autoclass:: SELU
+    :members:
+
+:hidden:`CELU`
+~~~~~~~~~~~~~~
+
+.. autoclass:: CELU
     :members:
 
 :hidden:`Sigmoid`
@@ -440,6 +451,12 @@ Normalization layers
 .. autoclass:: GroupNorm
     :members:
 
+:hidden:`SyncBatchNorm`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: SyncBatchNorm
+    :members:
+
 :hidden:`InstanceNorm1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -511,6 +528,12 @@ Recurrent layers
 
 Linear layers
 ----------------------------------
+
+:hidden:`Identity`
+~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Identity
+    :members:
 
 :hidden:`Linear`
 ~~~~~~~~~~~~~~~~
@@ -602,6 +625,12 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: CrossEntropyLoss
+    :members:
+
+:hidden:`CTCLoss`
+~~~~~~~~~~~~~~~~~
+
+.. autoclass:: CTCLoss
     :members:
 
 :hidden:`NLLLoss`
@@ -730,6 +759,12 @@ DataParallel layers (multi-GPU, distributed)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: torch.nn.parallel.DistributedDataParallel
+    :members:
+
+:hidden:`DistributedDataParallelCPU`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: torch.nn.parallel.DistributedDataParallelCPU
     :members:
 
 
@@ -984,6 +1019,11 @@ Non-linear activation functions
 
 .. autofunction:: selu
 
+:hidden:`celu`
+~~~~~~~~~~~~~~
+
+.. autofunction:: celu
+
 :hidden:`leaky_relu`
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -1103,7 +1143,7 @@ Linear functions
 .. autofunction:: linear
 
 :hidden:`bilinear`
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: bilinear
 
@@ -1143,6 +1183,11 @@ Sparse functions
 
 .. autofunction:: embedding_bag
 
+:hidden:`one_hot`
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: one_hot
+
 Distance functions
 ----------------------------------
 
@@ -1156,6 +1201,11 @@ Distance functions
 
 .. autofunction:: cosine_similarity
 
+:hidden:`pdist`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pdist
+
 
 Loss functions
 --------------
@@ -1164,6 +1214,11 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: binary_cross_entropy
+
+:hidden:`binary_cross_entropy_with_logits`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: binary_cross_entropy_with_logits
 
 :hidden:`poisson_nll_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1179,6 +1234,11 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: cross_entropy
+
+:hidden:`ctc_loss`
+~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: ctc_loss
 
 :hidden:`hinge_embedding_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1224,11 +1284,6 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: nll_loss
-
-:hidden:`binary_cross_entropy_with_logits`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: binary_cross_entropy_with_logits
 
 :hidden:`smooth_l1_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~

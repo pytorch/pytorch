@@ -2,14 +2,16 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+
 from caffe2.python import core, workspace
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestPairWiseLossOps(hu.HypothesisTestCase):
+class TestPairWiseLossOps(serial.SerializedTestCase):
     @given(X=hu.arrays(dims=[2, 1],
                        elements=st.floats(min_value=0.0, max_value=10.0)),
            label=hu.arrays(dims=[2, 1],
@@ -98,7 +100,7 @@ class TestPairWiseLossOps(hu.HypothesisTestCase):
                 (up_output_pred[0] - down_output_pred[0]) / delta),
             rtol=1e-2, atol=1e-2)
 
-    @given(n=st.integers(0, 10), k=st.integers(1, 5), **hu.gcs_cpu_only)
+    @serial.given(n=st.integers(0, 10), k=st.integers(1, 5), **hu.gcs_cpu_only)
     def test_pair_wise_loss_batch(self, n, k, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         X = np.random.rand(sum(lengths)).astype(np.float32)

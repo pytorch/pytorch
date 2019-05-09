@@ -1,6 +1,7 @@
 #ifndef CAFFE2_OPERATORS_TOP_K_RADIX_SELECTION_H_
 #define CAFFE2_OPERATORS_TOP_K_RADIX_SELECTION_H_
 
+#include "caffe2/core/common_gpu.h"
 #include "caffe2/utils/GpuDefs.cuh"
 #include "caffe2/utils/GpuScanUtils.cuh"
 #include "caffe2/utils/math.h"
@@ -75,7 +76,7 @@ struct TopKTypeConfig<short> {
   typedef unsigned int RadixType;
 
   static inline __device__ RadixType convert(short v) {
-    assert(sizeof(short) == 2);
+    CUDA_KERNEL_ASSERT(sizeof(short) == 2);
     return 32768u + v;
   }
 
@@ -89,7 +90,7 @@ struct TopKTypeConfig<int> {
   typedef unsigned int RadixType;
 
   static inline __device__ RadixType convert(int v) {
-    assert(sizeof(int) == 4);
+    CUDA_KERNEL_ASSERT(sizeof(int) == 4);
     return 2147483648u + v;
   }
 
@@ -103,7 +104,7 @@ struct TopKTypeConfig<long> {
   typedef unsigned long long int RadixType;
 
   static inline __device__ RadixType convert(long v) {
-    assert(sizeof(long) == 8);
+    CUDA_KERNEL_ASSERT(sizeof(long) == 8);
     return 9223372036854775808ull + v;
   }
 
@@ -167,11 +168,15 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
 #pragma unroll
     for (unsigned int j = 0; j < RadixSize; ++j) {
       bool vote = hasVal && (digitInRadix == j);
+#if defined(__HIP_PLATFORM_HCC__)
+      counts[j] += __popcll(__ballot(vote));
+#else
 #if CUDA_VERSION >= 9000
       counts[j] += __popc(__ballot_sync(__activemask(), vote));
 #else
       counts[j] += __popc(__ballot(vote));
 #endif
+#endif  // __HIP_PLATFORM_HCC__
     }
   }
 
@@ -207,13 +212,13 @@ __device__ DataType findPattern(DataType* smem,
                                 int sliceSize,
                                 BitDataType desired,
                                 BitDataType desiredMask) {
-  if (threadIdx.x < 32) {
+  if (threadIdx.x < kWarpSize) {
     smem[threadIdx.x] = (DataType) 0;
   }
   __syncthreads();
 
   // All threads participate in the loop, in order to sync on the flag
-  int numIterations = math::roundUp(sliceSize, (int) blockDim.x);
+  int numIterations = math::RoundUp(sliceSize, (int) blockDim.x);
   for (int i = threadIdx.x; i < numIterations; i += blockDim.x) {
     bool inRange = (i < sliceSize);
     DataType v = inRange ? data[i] : (DataType)0;
@@ -240,7 +245,7 @@ __device__ DataType findPattern(DataType* smem,
   }
 
   // should not get here
-  assert(false);
+  CUDA_KERNEL_ASSERT(false);
   return (DataType)0;
 }
 
@@ -350,7 +355,7 @@ __global__ void gatherTopK(const T* inputPtr,
                            int numInputSlices,
                            T* topKPtr,
                            IndicesType* indicesPtr) {
-  __shared__ int smem[32]; // one per each warp, up to warp limit
+  __shared__ int smem[kWarpSize]; // one per each warp, up to warp limit
 
   int slice = blockIdx.x;
   if (slice >= numInputSlices) {
@@ -383,7 +388,7 @@ __global__ void gatherTopK(const T* inputPtr,
   // All threads need to participate in the loop and the prefix sum,
   // but not necessarily in the load; hence loop bounds being rounded
   // up to a multiple of the block dim.
-  int numIterations = math::roundUp(inputSliceSize, (int) blockDim.x);
+  int numIterations = math::RoundUp(inputSliceSize, (int) blockDim.x);
   int writeIndexStart = 0;
 
   for (int i = threadIdx.x; i < numIterations; i += blockDim.x) {
@@ -402,7 +407,7 @@ __global__ void gatherTopK(const T* inputPtr,
 
     if (hasTopK) {
       int writeIndex = writeIndexStart + index;
-      assert(writeIndex < outputSliceSize);
+      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
 
       int topKOffset = writeIndex;
       int indexOffset = writeIndex;
@@ -419,7 +424,7 @@ __global__ void gatherTopK(const T* inputPtr,
   // writeIndexStart. There might be more than that number available,
   // in which case we have to choose the first seen set. We do this
   // via a prefix sum to calculate indices for writing results.
-  assert(outputSliceSize >= writeIndexStart);
+  CUDA_KERNEL_ASSERT(outputSliceSize >= writeIndexStart);
   int topKRemaining = (outputSliceSize - writeIndexStart);
 
   for (int i = threadIdx.x; i < numIterations; i += blockDim.x) {
@@ -433,7 +438,7 @@ __global__ void gatherTopK(const T* inputPtr,
 
     if (hasTopK && index < topKRemaining) {
       int writeIndex = writeIndexStart + index;
-      assert(writeIndex < outputSliceSize);
+      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
 
       int topKOffset = writeIndex;
       int indexOffset = writeIndex;

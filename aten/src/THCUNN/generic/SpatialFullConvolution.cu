@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialFullConvolution.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialFullConvolution.cu"
 #else
 
 void THNN_(SpatialFullConvolution_updateOutput)(

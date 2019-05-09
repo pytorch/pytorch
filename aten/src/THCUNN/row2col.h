@@ -1,8 +1,8 @@
 #ifndef THCUNN_ROW2COL_H
 #define THCUNN_ROW2COL_H
 
-#include "THCNumerics.cuh"
-#include "common.h"
+#include <THC/THCNumerics.cuh>
+#include <THCUNN/common.h>
 
 // Kernel for fast unfold+copy on rows
 template <typename Dtype>

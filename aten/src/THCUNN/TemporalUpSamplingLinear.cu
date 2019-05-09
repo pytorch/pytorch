@@ -1,17 +1,20 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "common.h"
-#include "linear_upsampling.h"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCDeviceUtils.cuh"
-#include "THCHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <THCUNN/common.h>
+#include <THCUNN/upsampling.h>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
 
 template<typename Dtype, typename Acctype>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void caffe_gpu_interp2_kernel(const int n,
     const Acctype rwidth, const bool align_corners,
     const THCDeviceTensor<Dtype, 3> data1, THCDeviceTensor<Dtype, 3> data2) {
@@ -35,7 +38,7 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
       return;
     }
     //
-    const Acctype w1r = linear_upsampling_compute_source_index<Acctype>(rwidth, w2, align_corners);
+    const Acctype w1r = area_pixel_compute_source_index<Acctype>(rwidth, w2, align_corners, /*cubic=*/false);
     const int w1 = w1r;
     const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const Acctype w1lambda = w1r - w1;
@@ -53,6 +56,9 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename Dtype, typename Acctype>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void caffe_gpu_interp2_kernel_backward(const int n,
     const Acctype rwidth, const bool align_corners,
     THCDeviceTensor<Dtype, 3> data1, const THCDeviceTensor<Dtype, 3> data2){
@@ -75,7 +81,7 @@ __global__ void caffe_gpu_interp2_kernel_backward(const int n,
       return;
     }
     //
-    const Acctype w1r = linear_upsampling_compute_source_index<Acctype>(rwidth, w2, align_corners);
+    const Acctype w1r = area_pixel_compute_source_index<Acctype>(rwidth, w2, align_corners, /*cubic=*/false);
     const int w1 = w1r;
     const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const Acctype w1lambda = w1r - w1;
@@ -94,5 +100,5 @@ __global__ void caffe_gpu_interp2_kernel_backward(const int n,
 }
 
 
-#include "generic/TemporalUpSamplingLinear.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/TemporalUpSamplingLinear.cu>
+#include <THC/THCGenerateFloatTypes.h>

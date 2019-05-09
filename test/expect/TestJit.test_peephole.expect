@@ -1,4 +1,0 @@
-graph(%0 : Double(1)
-      %1 : Double(1)) {
-  return (%0);
-}

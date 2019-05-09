@@ -1,8 +1,8 @@
-#include "ATen/ATen.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/Error.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/AccumulateType.h"
+#include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/util/Exception.h>
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -17,8 +17,13 @@ namespace at { namespace native {
 
 namespace {
 
+#ifdef __HIP_PLATFORM_HCC__
+static const int WARP_SIZE = 64;
+static const int BLOCKDIMY = 16;
+#else
 static const int WARP_SIZE = 32;
 static const int BLOCKDIMY = 32;
+#endif
 
 template
   <typename scalar_t,
@@ -47,14 +52,18 @@ __global__ void embedding_backward_feature_kernel
     if(batch_start + tid < n)
       indices_batch[tid] = (int)indices[batch_start + tid];
 
+    int batch_end = batch_start + blockDim.x*blockDim.y < n ?
+                    batch_start + blockDim.x*blockDim.y : n;
+
     // Loop over the batch of <= 1024 loaded indices in chunks of blockDim.y = 32
-    for(int chunk_start = batch_start; chunk_start < n; chunk_start += blockDim.y)
+    for(int chunk_start = batch_start; chunk_start < batch_end; chunk_start += blockDim.y)
     {
       // This does double duty:  it makes sure indices_batch is ready, and it makes sure match-group
       // leaders are done with their accumulates before other warps start loading again.
       __syncthreads();
 
-      int n_this_chunk = (n - chunk_start) < blockDim.y ? (n - chunk_start) : blockDim.y;
+      int n_this_chunk = (batch_end - chunk_start) < blockDim.y ?
+                         (batch_end - chunk_start) : blockDim.y;
 
       int src_row = chunk_start + threadIdx.y;
       int dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight
@@ -76,16 +85,24 @@ __global__ void embedding_backward_feature_kernel
           (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
         if(threadIdx.x >= n_this_chunk)
           match_found_this_thread = 0;
+#ifdef __HIP_PLATFORM_HCC__
+        unsigned long long int matchmask = WARP_BALLOT(match_found_this_thread);
+        int first_remaining_peer = __ffsll(matchmask) - 1;
+#else
         unsigned int matchmask = WARP_BALLOT(match_found_this_thread);
-
         int first_remaining_peer = __ffs(matchmask) - 1;
+#endif
 
         if(threadIdx.y == first_remaining_peer) // Nominate lowest-indexed warp as the leader
         {
           matchmask ^= (1 << first_remaining_peer);
           while(matchmask)
           {
+#ifdef __HIP_PLATFORM_HCC__
+            first_remaining_peer = __ffsll(matchmask) - 1;
+#else
             first_remaining_peer = __ffs(matchmask) - 1;
+#endif
             my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
             matchmask ^= (1 << first_remaining_peer);
           }
@@ -226,7 +243,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     dim3 block(WARP_SIZE, BLOCKDIMY);
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF
-      (grad.type(),
+      (grad.scalar_type(),
        "embedding_backward",
        [&]
        {
@@ -239,9 +256,9 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
            (indices_contig.data<int64_t>(),
             grad.data<scalar_t>(),
             grad_weight.data<scalar_t>(),
-            num_indices,
-            stride,
-            padding_idx);
+            static_cast<int>(num_indices),
+            static_cast<int64_t>(stride),
+            static_cast<int>(padding_idx));
        });
 
     THCudaCheck(cudaGetLastError());
@@ -309,7 +326,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   dim3 grid(THCCeilDiv(num_indices, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.scalar_type(), "embedding_backward", [&] {
     embedding_backward_kernel<<<grid, block, 0, stream>>>(
       sorted_indices.data<int64_t>(),
       orig_indices.data<int64_t>(),
@@ -345,7 +362,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   // FIXME: thrust::unique only removes consecutive elements that are equal.
   // We have race conditions when indices contain duplicates which are not
   // adjacent
-  auto unique_indices = indices.type().tensor(indices.numel());
+  auto unique_indices = at::empty(indices.numel(), indices.options());
   auto unique_data = device_ptr(unique_indices.data<int64_t>());
   auto end = thrust::unique_copy(policy, indices_data, indices_data + num_indices, unique_data);
   auto num_unique_indices = static_cast<int>(end - unique_data);
@@ -354,7 +371,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   dim3 block(128);
   int dim = self.stride(0);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "embedding_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "embedding_backward", [&] {
     using accscalar_t = acc_type<scalar_t, true>;
     renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
       self.data<scalar_t>(),
@@ -367,5 +384,6 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 
   return self;
 }
+
 
 }}  // namespace at::native

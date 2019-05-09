@@ -19,21 +19,21 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
-CAFFE2_DEFINE_string(
+C10_DEFINE_string(
     caffe2_net_async_tracing_filepath,
     "/tmp",
     "Path to save tracing information");
 
-CAFFE2_DEFINE_string(
+C10_DEFINE_string(
     caffe2_net_async_names_to_trace,
     "",
     "Comma-separated list of net names to trace");
 
-CAFFE2_DEFINE_int(caffe2_net_async_tracing_nth, 100, "Trace every Nth batch");
+C10_DEFINE_int(caffe2_net_async_tracing_nth, 100, "Trace every Nth batch");
 
 // For every Nth iterations, we will dump the tracing results to a json file
 // The file is appended with the iteration number.
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_net_async_tracing_dumping_nth,
     10000,
     "Dump profiling result file every Nth batch");
@@ -53,11 +53,18 @@ int getCounterForNetName(const std::string& net_name) {
   return counter;
 }
 
-Tracer::Tracer(const NetBase* net, const std::string& net_name)
-    : net_(net), filename_(net_name), iter_(0) {
+Tracer::Tracer(
+    const NetBase* net,
+    const std::string& net_name,
+    TracingConfig config)
+    : net_(net),
+      filename_(net_name),
+      iter_(0),
+      dumping_iter_(0),
+      config_(config) {
   std::replace(filename_.begin(), filename_.end(), '/', '_');
-  filename_ = FLAGS_caffe2_net_async_tracing_filepath + "/" + filename_ +
-      +"_id_" + caffe2::to_string(getCounterForNetName(net_name));
+  filename_ = this->config().filepath + "/" + filename_ + "_id_" +
+      c10::to_string(getCounterForNetName(net_name));
   timer_.Start();
 }
 
@@ -74,7 +81,7 @@ std::string Tracer::opTraceName(const OperatorBase* op) {
   int unique_shard_id =
       op->has_debug_def() ? getUniqueShardId(op->debug_def()) : -1;
   if (unique_shard_id != -1) {
-    return op->type() + ":" + caffe2::to_string(unique_shard_id);
+    return op->type() + ":" + c10::to_string(unique_shard_id);
   } else {
     return op->type();
   }
@@ -216,10 +223,11 @@ void Tracer::renameThreads() {
       continue;
     }
     auto* op = net_->GetOperators().at(event.op_id_);
-    int numa_node_id = DeviceId(op->device_option());
-    if (numa_node_id < 0) {
+    if (!op->device_option().has_numa_node_id()) {
       continue;
     }
+    int numa_node_id = op->device_option().numa_node_id();
+    CAFFE_ENFORCE_GE(numa_node_id, 0, "Invalid NUMA node id: ", numa_node_id);
     long tid = hasher(event.tid_);
 
     if (!tid_to_numa.count(tid)) {
@@ -248,6 +256,10 @@ bool Tracer::isEnabled() const {
 
 int Tracer::bumpIter() {
   return iter_++;
+}
+
+int Tracer::bumpDumpingIter() {
+  return dumping_iter_++;
 }
 
 void Tracer::dumpTracingResultAndClearEvents(const std::string& file_suffix) {
@@ -293,7 +305,9 @@ void TracerGuard::addArgument(TracingField field, const char* value) {
       event_.category_ = value;
       break;
     }
-    default: { CAFFE_THROW("Unexpected tracing string field ", field); }
+    default: {
+      CAFFE_THROW("Unexpected tracing string field ", field);
+    }
   }
 }
 
@@ -315,7 +329,9 @@ void TracerGuard::addArgument(TracingField field, int value) {
       event_.thread_label_ = value;
       break;
     }
-    default: { CAFFE_THROW("Unexpected tracing int field ", field); }
+    default: {
+      CAFFE_THROW("Unexpected tracing int field ", field);
+    }
   }
 }
 
@@ -350,7 +366,7 @@ int extractShardId(const std::string& name) {
     while (right_pos < name.length() && isdigit(name[right_pos])) {
       right_pos++;
     }
-    return caffe2::stoi(name.substr(left_pos, right_pos - left_pos));
+    return c10::stoi(name.substr(left_pos, right_pos - left_pos));
   } else {
     return -1;
   }
@@ -387,6 +403,31 @@ bool hasEnableTracingFlag(const NetBase* net) {
   return GetFlagArgument(net->debug_def(), "enable_tracing", false);
 }
 
+TracingConfig getTracingConfigFromNet(const NetBase* net) {
+  ArgumentHelper arg_helper(net->debug_def());
+  TracingConfig cfg;
+
+  cfg.mode = (arg_helper.GetSingleArgument<std::string>("tracing_mode", "") ==
+              "GLOBAL_TIMESLICE")
+      ? TracingMode::GLOBAL_TIMESLICE
+      : TracingMode::EVERY_K_ITERATIONS;
+
+  cfg.filepath = arg_helper.GetSingleArgument<std::string>(
+      "tracing_filepath", FLAGS_caffe2_net_async_tracing_filepath);
+
+  cfg.trace_every_nth_batch = arg_helper.GetSingleArgument<int>(
+      "trace_every_nth_batch", FLAGS_caffe2_net_async_tracing_nth);
+  cfg.dump_every_nth_batch = arg_helper.GetSingleArgument<int>(
+      "dump_every_nth_batch", FLAGS_caffe2_net_async_tracing_dumping_nth);
+
+  cfg.trace_for_n_ms =
+      arg_helper.GetSingleArgument<int>("trace_for_n_ms", cfg.trace_for_n_ms);
+  cfg.trace_every_n_ms = arg_helper.GetSingleArgument<int>(
+      "trace_every_n_ms", cfg.trace_every_n_ms);
+
+  return cfg;
+};
+
 std::shared_ptr<Tracer> create(
     const NetBase* net,
     const std::string& net_name) {
@@ -394,7 +435,9 @@ std::shared_ptr<Tracer> create(
   // if the command line option includes the net name option in the list of
   // tracable nets.
   bool trace_net = hasEnableTracingFlag(net) || isTraceableNetName(net_name);
-  return trace_net ? std::make_shared<Tracer>(net, net_name) : nullptr;
+  return trace_net
+      ? std::make_shared<Tracer>(net, net_name, getTracingConfigFromNet(net))
+      : nullptr;
 }
 
 bool startIter(const std::shared_ptr<Tracer>& tracer) {
@@ -402,11 +445,25 @@ bool startIter(const std::shared_ptr<Tracer>& tracer) {
     return false;
   }
   auto iter = tracer->bumpIter();
-  auto is_enabled = iter % FLAGS_caffe2_net_async_tracing_nth == 0;
+  bool is_enabled;
+  bool should_dump;
+  if (tracer->config().mode == TracingMode::EVERY_K_ITERATIONS) {
+    is_enabled = iter % tracer->config().trace_every_nth_batch == 0;
+    should_dump = iter % tracer->config().dump_every_nth_batch == 0;
+  } else {
+    using namespace std::chrono;
+    auto ms =
+        duration_cast<milliseconds>(system_clock::now().time_since_epoch())
+            .count();
+    is_enabled = (ms % tracer->config().trace_every_n_ms) <
+        tracer->config().trace_for_n_ms;
+    // dump just after disabled tracing
+    should_dump = tracer->isEnabled() && !is_enabled;
+  }
   tracer->setEnabled(is_enabled);
-  if (iter % FLAGS_caffe2_net_async_tracing_dumping_nth == 0) {
-    int dumping_iter = iter / FLAGS_caffe2_net_async_tracing_dumping_nth;
-    tracer->dumpTracingResultAndClearEvents(caffe2::to_string(dumping_iter));
+  if (should_dump) {
+    int dumping_iter = tracer->bumpDumpingIter();
+    tracer->dumpTracingResultAndClearEvents(c10::to_string(dumping_iter));
   }
   return is_enabled;
 }

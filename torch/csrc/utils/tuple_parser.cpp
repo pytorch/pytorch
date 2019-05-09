@@ -1,10 +1,10 @@
-#include "tuple_parser.h"
+#include <torch/csrc/utils/tuple_parser.h>
 
 
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "python_strings.h"
-#include "python_numbers.h"
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/python_numbers.h>
 
 #include <string>
 #include <stdexcept>

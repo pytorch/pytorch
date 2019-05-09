@@ -1,25 +1,10 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THVectorDefault.cpp"
+#define TH_GENERIC_FILE "TH/generic/THVectorDefault.cpp"
 #else
 
-#include "../THRandom.h"
+#include <TH/THRandom.h>
 
-void THVector_(copy_DEFAULT)(real *x, const real *y, const ptrdiff_t n) {
-  ptrdiff_t i = 0;
-
-  for(; i <n-4; i+=4)
-  {
-    x[i] = y[i];
-    x[i+1] = y[i+1];
-    x[i+2] = y[i+2];
-    x[i+3] = y[i+3];
-  }
-
-  for(; i < n; i++)
-    x[i] = y[i];
-}
-
-void THVector_(fill_DEFAULT)(real *x, const real c, const ptrdiff_t n) {
+void THVector_(fill_DEFAULT)(scalar_t *x, const scalar_t c, const ptrdiff_t n) {
   ptrdiff_t i = 0;
 
   for(; i <n-4; i+=4)
@@ -34,7 +19,24 @@ void THVector_(fill_DEFAULT)(real *x, const real c, const ptrdiff_t n) {
     x[i] = c;
 }
 
-void THVector_(cadd_DEFAULT)(real *z, const real *x, const real *y, const real c, const ptrdiff_t n)
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+
+void THVector_(copy_DEFAULT)(scalar_t *x, const scalar_t *y, const ptrdiff_t n) {
+  ptrdiff_t i = 0;
+
+  for(; i <n-4; i+=4)
+  {
+    x[i] = y[i];
+    x[i+1] = y[i+1];
+    x[i+2] = y[i+2];
+    x[i+3] = y[i+3];
+  }
+
+  for(; i < n; i++)
+    x[i] = y[i];
+}
+
+void THVector_(cadd_DEFAULT)(scalar_t *z, const scalar_t *x, const scalar_t *y, const scalar_t c, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
 
@@ -50,7 +52,7 @@ void THVector_(cadd_DEFAULT)(real *z, const real *x, const real *y, const real c
     z[i] = x[i] + c * y[i];
 }
 
-void THVector_(adds_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_t n)
+void THVector_(adds_DEFAULT)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
 
@@ -66,7 +68,7 @@ void THVector_(adds_DEFAULT)(real *y, const real *x, const real c, const ptrdiff
     y[i] = x[i] + c;
 }
 
-void THVector_(cmul_DEFAULT)(real *z, const real *x, const real *y, const ptrdiff_t n)
+void THVector_(cmul_DEFAULT)(scalar_t *z, const scalar_t *x, const scalar_t *y, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
 
@@ -82,7 +84,7 @@ void THVector_(cmul_DEFAULT)(real *z, const real *x, const real *y, const ptrdif
     z[i] = x[i] * y[i];
 }
 
-void THVector_(muls_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_t n)
+void THVector_(muls_DEFAULT)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
 
@@ -98,7 +100,7 @@ void THVector_(muls_DEFAULT)(real *y, const real *x, const real c, const ptrdiff
     y[i] = x[i] * c;
 }
 
-void THVector_(cdiv_DEFAULT)(real *z, const real *x, const real *y, const ptrdiff_t n)
+void THVector_(cdiv_DEFAULT)(scalar_t *z, const scalar_t *x, const scalar_t *y, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
 
@@ -114,7 +116,7 @@ void THVector_(cdiv_DEFAULT)(real *z, const real *x, const real *y, const ptrdif
     z[i] = x[i] / y[i];
 }
 
-void THVector_(divs_DEFAULT)(real *y, const real *x, const real c, const ptrdiff_t n)
+void THVector_(divs_DEFAULT)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
 
@@ -130,47 +132,29 @@ void THVector_(divs_DEFAULT)(real *y, const real *x, const real c, const ptrdiff
     y[i] = x[i] / c;
 }
 
-#ifndef TH_REAL_IS_INT
-void THVector_(cvtFromInt_DEFAULT)(real *y, const int *x, const ptrdiff_t n)
-{
-  ptrdiff_t i = 0;
-
-  for(; i<n-4; i+=4)
-  {
-    y[i] = (real)x[i];
-    y[i+1] = (real)x[i+1];
-    y[i+2] = (real)x[i+2];
-    y[i+3] = (real)x[i+3];
-  }
-
-  for(; i < n; i++)
-    y[i] = (real)x[i];
-}
-#endif
-
 // Fills 16 normally distributed samples into data, interleaved with a
 // stride of 8, i.e. in order of ([0], [8]), ([1], [9]), ...
-static void THVector_(interleaved_normal_fill_16)(real *data,
-                                                  const real mean,
-                                                  const real stddev)
+static void THVector_(interleaved_normal_fill_16)(scalar_t *data,
+                                                  const scalar_t mean,
+                                                  const scalar_t stddev)
 {
   for (int j = 0; j < 8; ++j) {
-    const real u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
-    const real u2 = data[j + 8];
+    const scalar_t u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
+    const scalar_t u2 = data[j + 8];
 
-    const real radius = sqrt(-2 * log(u1));
-    const real theta = 2.0f * M_PI * u2;
+    const scalar_t radius = sqrt(-2 * log(u1));
+    const scalar_t theta = 2.0f * M_PI * u2;
 
     data[j] = radius * cos(theta) * stddev + mean;
     data[j + 8] = radius * sin(theta) * stddev + mean;
   }
 }
 
-void THVector_(normal_fill_DEFAULT)(real *data,
+void THVector_(normal_fill_DEFAULT)(scalar_t *data,
                                     int64_t size,
                                     THGenerator *generator,
-                                    const real mean,
-                                    const real stddev)
+                                    const scalar_t mean,
+                                    const scalar_t stddev)
 {
   THAssert(size >= 16 && "Size must be >= 16 for normal fill");
 
@@ -201,7 +185,7 @@ void THVector_(normal_fill_DEFAULT)(real *data,
 }
 
 #define VECTOR_IMPLEMENT_FUNCTION(NAME, CFUNC)  \
-  void THVector_(NAME)(real *y, const real *x, const ptrdiff_t n) \
+  void THVector_(NAME)(scalar_t *y, const scalar_t *x, const ptrdiff_t n) \
   { \
     ptrdiff_t i = 0;  \
     for(; i<n-4; i+=4)  \
@@ -216,7 +200,7 @@ void THVector_(normal_fill_DEFAULT)(real *data,
   } \
 
 #define VECTOR_IMPLEMENT_FUNCTION_VALUE(NAME, CFUNC)  \
-  void THVector_(NAME)(real *y, const real *x, const real c, const ptrdiff_t n) \
+  void THVector_(NAME)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n) \
   { \
     ptrdiff_t i = 0;  \
     for(; i<n-4; i+=4)  \
@@ -231,12 +215,16 @@ void THVector_(normal_fill_DEFAULT)(real *data,
   } \
 
 #if defined(TH_REAL_IS_LONG)
-VECTOR_IMPLEMENT_FUNCTION(abs,labs)
+VECTOR_IMPLEMENT_FUNCTION(abs,std::abs)
 #endif /* long only part */
 
-#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
+#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_CHAR)
 VECTOR_IMPLEMENT_FUNCTION(abs,abs)
 #endif /* int only part */
+
+#if defined(TH_REAL_IS_BYTE)
+VECTOR_IMPLEMENT_FUNCTION(abs,)
+#endif /* unsigned, so identity */
 
 
 /* floating point only now */
@@ -275,7 +263,7 @@ VECTOR_IMPLEMENT_FUNCTION(sqrt,TH_MATH_NAME(sqrt))
 VECTOR_IMPLEMENT_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt))
 VECTOR_IMPLEMENT_FUNCTION(ceil,TH_MATH_NAME(ceil))
 VECTOR_IMPLEMENT_FUNCTION(floor,TH_MATH_NAME(floor))
-VECTOR_IMPLEMENT_FUNCTION(round,TH_MATH_NAME(round))
+VECTOR_IMPLEMENT_FUNCTION(round,TH_MATH_NAME(nearbyint))
 VECTOR_IMPLEMENT_FUNCTION(abs,TH_MATH_NAME(fabs))
 VECTOR_IMPLEMENT_FUNCTION(trunc,TH_MATH_NAME(trunc))
 VECTOR_IMPLEMENT_FUNCTION(frac,TH_MATH_NAME(TH_frac))
@@ -285,5 +273,7 @@ VECTOR_IMPLEMENT_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 #endif /* floating point only part */
 
 VECTOR_IMPLEMENT_FUNCTION(neg,-)
+
+#endif /* non bool only part */
 
 #endif

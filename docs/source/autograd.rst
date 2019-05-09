@@ -65,7 +65,7 @@ Variable (deprecated)
 Tensor autograd functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 .. autoclass:: torch.Tensor
-    :members: backward, detach, detach_, register_hook, retain_grad
+   :members: grad, requires_grad, is_leaf, backward, detach, detach_, register_hook, retain_grad
 
 :hidden:`Function`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,11 +1,15 @@
+#include "caffe2/operators/fully_connected_op.h"
+
 #include <functional>
 
-#include "caffe2/operators/fully_connected_op.h"
+#include "caffe2/operators/fc_inference.h"
 
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(FC, FullyConnectedOp<CPUContext>);
-REGISTER_CPU_OPERATOR(FCGradient, FullyConnectedGradientOp<CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    FCGradient,
+    FullyConnectedGradientOp<CPUContext>);
 
 REGISTER_CPU_OPERATOR(
     FCTransposed,
@@ -13,7 +17,7 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         DefaultEngine,
         false /* don't transpose weight */>);
-REGISTER_CPU_OPERATOR(
+REGISTER_CPU_GRADIENT_OPERATOR(
     FCTransposedGradient,
     FullyConnectedGradientOp<
         CPUContext,
@@ -21,63 +25,6 @@ REGISTER_CPU_OPERATOR(
         false /* don't transpose weight */>);
 
 namespace {
-std::vector<TensorShape> FCShapeInference(
-    const OperatorDef& def,
-    const vector<TensorShape>& in,
-    bool pretransposed_weight) {
-  vector<TensorShape> out(1);
-
-  if (in[0].unknown_shape() || in[1].unknown_shape()) {
-      out[0].set_unknown_shape(true);
-      return out;
-  }
-
-  ArgumentHelper helper(def);
-
-  auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
-  const auto canonical_axis = canonical_axis_index_(axis, in[0].dims().size());
-  auto axis_w = helper.GetSingleArgument<int32_t>("axis_w", 1);
-  const int canonical_axis_w =
-      canonical_axis_index_(axis_w, in[1].dims().size());
-  const int N = pretransposed_weight
-      ? size_from_dim_(canonical_axis_w, GetDimsVector(in[1]))
-      : size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
-
-  vector<int> y_shape(in[0].dims().begin(), in[0].dims().end());
-  CAFFE_ENFORCE_LE(canonical_axis + 1, y_shape.size());
-  y_shape.resize(canonical_axis + 1);
-  y_shape[canonical_axis] = N;
-  out[0] = CreateTensorShape(y_shape, in[0].data_type());
-  return out;
-}
-
-OpSchema::Cost CostInferenceForFC(
-    const OperatorDef& def,
-    const vector<TensorShape>& in,
-    bool pretransposed_weight) {
-  CAFFE_ENFORCE_EQ(in.size(), 3, "FC requires three inputs");
-  struct OpSchema::Cost c;
-  ArgumentHelper helper(def);
-
-  auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
-  const auto canonical_axis = canonical_axis_index_(axis, in[0].dims().size());
-  const uint64_t M = size_to_dim_(canonical_axis, GetDimsVector(in[0]));
-  const uint64_t K = size_from_dim_(canonical_axis, GetDimsVector(in[0]));
-  auto axis_w = helper.GetSingleArgument<int32_t>("axis_w", 1);
-  const int canonical_axis_w =
-      canonical_axis_index_(axis_w, in[1].dims().size());
-  const uint64_t N = pretransposed_weight
-      ? size_from_dim_(canonical_axis_w, GetDimsVector(in[1]))
-      : size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
-
-  const auto& X = in[0];
-  c.flops = M * N * (2 * K + 1);
-  c.bytes_read = (K * (M + N) + N) * sizeof(X.data_type());
-  c.bytes_written = M * N * sizeof(X.data_type());
-  c.params_bytes = (K * N + N) * sizeof(X.data_type());
-  return c;
-}
-
 std::vector<TensorShape> FCGradientShapeInference(
     const OperatorDef& def,
     const vector<TensorShape>& in,
@@ -154,7 +101,8 @@ OPERATOR_SCHEMA(FCTransposed)
     .SetDoc(R"DOC(
 Same as FC, but weight matrix is supposed to be already pretransposed.
 FCTransposed stands for calling blass with no noTrans, noTrans
-)DOC");
+)DOC")
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(FC)
     .NumInputs(3)
@@ -182,9 +130,9 @@ Github Links:
 
 ```
 
-# In this example, our batch size is 1 (M=1), the input observation will have
-#   6 features (K=6), and the layer will have one hidden node (N=1). The
-#   expected output is Y=7.
+// In this example, our batch size is 1 (M=1), the input observation will have
+//   6 features (K=6), and the layer will have one hidden node (N=1). The
+//   expected output is Y=7.
 workspace.ResetWorkspace()
 
 op = core.CreateOperator(
@@ -193,23 +141,23 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X: MxK
+// Create X: MxK
 data = np.array([1,2,3,4,5,6]).astype(np.float32)
 data = data[np.newaxis,:]
 
-# Create W: NxK
+// Create W: NxK
 weights = np.array(np.array([1,1/2.,1/3.,1/4.,1/5.,1/6.])).astype(np.float32)
 weights = weights[np.newaxis,:]
 
-# Create b: N
+// Create b: N
 bias = np.array([1.]).astype(np.float32)
 
-# Put the inputs into the workspace
+// Put the inputs into the workspace
 workspace.FeedBlob("X", data)
 workspace.FeedBlob("W", weights)
 workspace.FeedBlob("b", bias)
 
-# Run the operator
+// Run the operator
 workspace.RunOperatorOnce(op)
 print("Y:\n", workspace.FetchBlob("Y"))
 
@@ -251,16 +199,16 @@ Y:
     .Output(
         0,
         "Y",
-        "Ouput blob containing a 2D output matrix of shape $(M,N)$, where $M$ is the batch size and $N$ is the number of nodes in the layer. The ouput is calculated as $Y=XW^T+b$.")
+        "Output blob containing a 2D output matrix of shape $(M,N)$, where $M$ is the batch size and $N$ is the number of nodes in the layer. The output is calculated as $Y=XW^T+b$.")
     .InheritOnnxSchema("Gemm");
 
-OPERATOR_SCHEMA(FCGradient)
+GRADIENT_OPERATOR_SCHEMA(FCGradient)
     .NumInputs(3)
     .NumOutputs(2, 3)
     .TensorInferenceFunction(std::bind(FCGradientShapeInference, _1, _2, false))
     .CostInferenceFunction(
         std::bind(CostInferenceForFCGradient, _1, _2, false));
-OPERATOR_SCHEMA(FCTransposedGradient)
+GRADIENT_OPERATOR_SCHEMA(FCTransposedGradient)
     .NumInputs(3)
     .NumOutputs(2, 3)
     .TensorInferenceFunction(std::bind(FCGradientShapeInference, _1, _2, false))

@@ -157,25 +157,21 @@ old_shape: [6]
 </details>
 
 )DOC")
-    .Arg("shape", "*(type: Tuple(int))* New shape. Do not set if using "
-    "`new_shape` input.")
-    .Input(
-        0,
-        "data",
-        "*(type: Tensor)* Input tensor.")
+    .Arg(
+        "shape",
+        "*(type: Tuple(int))* New shape. Do not set if using "
+        "`new_shape` input.")
+    .Input(0, "data", "*(type: Tensor)* Input tensor.")
     .Input(
         1,
         "new_shape",
         "*(type: Tensor`<int>`)* [OPTIONAL] Tensor containing new shape.")
-    .Output(
-        0,
-        "reshaped",
-        "*(type: Tensor)* Reshaped output tensor.")
+    .Output(0, "reshaped", "*(type: Tensor)* Reshaped output tensor.")
     .Output(
         1,
         "old_shape",
         "*(type: Tensor`<int>`)* Tensor containing old shape of `data`.")
-    .InheritOnnxSchema("Reshape");
+    .InheritOnnxSchema();
 
 class GetReshapeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

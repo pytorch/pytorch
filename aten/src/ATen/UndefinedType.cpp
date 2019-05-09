@@ -1,34 +1,24 @@
-#include "ATen/UndefinedType.h"
-#include "ATen/Error.h"
+#include <ATen/UndefinedType.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 
-UndefinedType::UndefinedType(Context* context)
-    : Type(context, /*is_variable=*/false, /*is_undefined=*/true) {}
-ScalarType UndefinedType::scalarType() const {
-  return ScalarType::Undefined;
-}
+UndefinedType::UndefinedType()
+    : TypeDefault(UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
 Backend UndefinedType::backend() const {
   return Backend::Undefined;
 }
-bool UndefinedType::is_cuda() const { return false; }
-bool UndefinedType::is_sparse() const { return false; }
-bool UndefinedType::is_distributed() const { return false; }
 
-std::unique_ptr<Storage> UndefinedType::storage() const {
-  AT_ERROR("storage not defined for UndefinedType");
+Allocator* UndefinedType::allocator() const {
+  AT_ERROR("allocator not defined for UndefinedType");
 }
-std::unique_ptr<Storage> UndefinedType::storage(size_t size) const {
-  AT_ERROR("storage(size_t) not defined for UndefinedType");
+
+Device UndefinedType::getDeviceFromPtr(void*) const {
+  AT_ERROR("getDeviceFromPtr not defined for UndefinedType");
 }
-std::unique_ptr<Storage> UndefinedType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-  AT_ERROR("storageFromBlob not defined for UndefinedType");
-}
-std::unique_ptr<Storage> UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+
+Storage UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeStorageFromTH not defined for UndefinedType");
-}
-std::unique_ptr<Storage> UndefinedType::storageWithAllocator(int64_t size, Allocator* allocator) const {
-  AT_ERROR("storageWithAllocator not defined for UndefinedType");
 }
 Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeTensorFromTH not defined for UndefinedType");
@@ -38,39 +28,24 @@ std::unique_ptr<Generator> UndefinedType::generator() const {
 }
 
 const char * UndefinedType::toString() const {
-  return UndefinedType::typeString();
+  return "UndefinedType";
 }
+
 TypeID UndefinedType::ID() const {
   return TypeID::Undefined;
 }
 
-size_t UndefinedType::elementSizeInBytes() const {
-  AT_ERROR("elementSizeInBytes not defined for UndefinedType");
-}
-
 Type & UndefinedType::toBackend(Backend b) const {
   if (b == Backend::Undefined) {
-    return Type::toBackend(b);
+    return TypeDefault::toBackend(b);
   }
   AT_ERROR("toBackend not implemented for UndefinedType to non-UndefinedType");
 }
 Type & UndefinedType::toScalarType(ScalarType s) const {
   if (s == ScalarType::Undefined) {
-    return Type::toScalarType(s);
+    return TypeDefault::toScalarType(s);
   }
   AT_ERROR("toScalarType not implemented for UndefinedType to non-UndefinedType");
-}
-
-const char * UndefinedType::typeString() {
-  return "UndefinedType";
-}
-
-Tensor & UndefinedType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
-  AT_ERROR("s_copy not defined for UndefinedType");
-}
-
-Tensor & UndefinedType::_s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const {
-  AT_ERROR("_s_copy_from not defined for UndefinedType");
 }
 
 }

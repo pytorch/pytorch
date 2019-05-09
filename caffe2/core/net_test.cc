@@ -1,13 +1,11 @@
 #include <gtest/gtest.h>
+#include "c10/util/StringUtil.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/net_async_scheduling.h"
-#include "caffe2/core/net_dag.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
 
 #include <google/protobuf/text_format.h>
-
-CAFFE2_DECLARE_bool(caffe2_disable_chaining);
 
 namespace caffe2 {
 
@@ -36,11 +34,11 @@ class NetTestDummyOp final : public OperatorBase {
 
   // Simulate CUDA operator behavior
   bool HasAsyncPart() const override {
-    return debug_def().device_option().device_type() == CUDA;
+    return debug_def().device_option().device_type() == PROTO_CUDA;
   }
 
   bool SupportsAsyncScheduling() const override {
-    return debug_def().device_option().device_type() == CUDA;
+    return debug_def().device_option().device_type() == PROTO_CUDA;
   }
 
  protected:
@@ -147,13 +145,9 @@ void checkChainingAndRun(
   ws.CreateBlob("in");
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
-    auto old = FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
-    FLAGS_caffe2_disable_chaining = false;
-
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
     CHECK_NOTNULL(dag);
@@ -168,7 +162,7 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
   net_def.set_num_workers(4);
 
   // Create all external inputs
@@ -177,10 +171,6 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
   }
 
   {
-    auto old = FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
-    FLAGS_caffe2_disable_chaining = false;
-
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
     CHECK_NOTNULL(dag);
@@ -568,14 +558,10 @@ TEST(NetTest, DISABLED_FailingOperator) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     net_def.set_num_workers(4);
-    auto old = FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
-    FLAGS_caffe2_disable_chaining = false;
-
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     for (int i = 0; i < 10; i++) {
       counter.exchange(0);
@@ -627,7 +613,7 @@ TEST(NetTest, OperatorWithExecutorHelper) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   Workspace ws;
   net_def.set_num_workers(kTestPoolSize);
@@ -656,7 +642,7 @@ TEST(NetTest, DISABLED_OperatorWithDisabledEvent) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -680,7 +666,7 @@ TEST(NetTest, ExecutorOverride) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     Workspace ws;
@@ -704,7 +690,7 @@ TEST(NetTest, AsyncEmptyNet) {
   Workspace ws;
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -738,7 +724,7 @@ TEST(NetTest, DISABLED_RunAsyncFailure) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -761,7 +747,7 @@ TEST(NetTest, NoTypeNet) {
   Workspace ws;
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -806,13 +792,313 @@ TEST(NetTest, PendingOpsAndNetFailure) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   Workspace ws;
   std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
 
   // net is not stuck and returns false
   ASSERT_FALSE(net->Run());
+}
+
+class AsyncErrorOp final : public Operator<CPUContext> {
+ public:
+  AsyncErrorOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        throw_(OperatorBase::GetSingleArgument<bool>("throw", false)),
+        fail_in_sync_(
+            OperatorBase::GetSingleArgument<bool>("fail_in_sync", false)),
+        sleep_time_s_(OperatorBase::GetSingleArgument<int>("sleep_time", 1)),
+        error_msg_(OperatorBase::GetSingleArgument<std::string>(
+            "error_msg",
+            "Error")) {}
+
+  bool RunOnDevice() override {
+    if (fail_in_sync_) {
+      if (throw_) {
+        throw std::logic_error(error_msg_);
+      } else {
+        return false;
+      }
+    } else {
+      if (thread_) {
+        thread_->join();
+      }
+      thread_ = caffe2::make_unique<std::thread>([this]() {
+        try {
+          std::this_thread::sleep_for(std::chrono::seconds(sleep_time_s_));
+          if (throw_) {
+            throw std::logic_error(error_msg_);
+          } else {
+            event().SetFinished(error_msg_.c_str());
+          }
+        } catch (...) {
+          event().SetFinishedWithException(error_msg_.c_str());
+        }
+      });
+      return true;
+    }
+  }
+
+  bool HasAsyncPart() const override {
+    return true;
+  }
+
+  ~AsyncErrorOp() override {
+    if (thread_) {
+      thread_->join();
+    }
+  }
+
+ private:
+  std::unique_ptr<std::thread> thread_;
+  bool throw_;
+  bool fail_in_sync_;
+  int sleep_time_s_;
+  std::string error_msg_;
+};
+
+REGISTER_CPU_OPERATOR(AsyncErrorOp, AsyncErrorOp);
+OPERATOR_SCHEMA(AsyncErrorOp);
+
+std::unique_ptr<NetBase> AsyncErrorNet(
+    Workspace* ws,
+    const std::string& net_name,
+    bool throw_,
+    bool fail_in_sync) {
+  std::string spec_template = R"DOC(
+        name: "<NET_NAME>"
+        type: "async_scheduling"
+        op {
+          type: "AsyncErrorOp"
+          arg {
+            name: "throw"
+            i: <THROW>
+          }
+          arg {
+            name: "fail_in_sync"
+            i: <FAIL_IN_SYNC>
+          }
+        }
+  )DOC";
+
+  std::string spec = spec_template;
+  ReplaceAll(spec, "<NET_NAME>", net_name.c_str());
+  ReplaceAll(spec, "<THROW>", throw_ ? "1" : "0");
+  ReplaceAll(spec, "<FAIL_IN_SYNC>", fail_in_sync ? "1" : "0");
+
+  NetDef net_def;
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
+  return CreateNet(net_def, ws);
+}
+
+TEST(NetTest, AsyncErrorOpTest) {
+  Workspace ws;
+
+  // Throw in sync part
+  auto net = AsyncErrorNet(&ws, "net1", /*throw_*/ true, /*fail_in_sync*/ true);
+  ASSERT_THROW(net->Run(), std::logic_error);
+
+  // Return false in sync part
+  net = AsyncErrorNet(&ws, "net2", /*throw_*/ false, /*fail_in_sync*/ true);
+  ASSERT_FALSE(net->Run());
+
+  // SetFinishedWithException in async part
+  net = AsyncErrorNet(&ws, "net3", /*throw_*/ true, /*fail_in_sync*/ false);
+  ASSERT_THROW(net->Run(), std::logic_error);
+
+  // SetFinished(err) in async part
+  net = AsyncErrorNet(&ws, "net4", /*throw_*/ false, /*fail_in_sync*/ false);
+  ASSERT_FALSE(net->Run());
+}
+
+TEST(NetTest, AsyncErrorTimingsTest) {
+  Workspace ws;
+  std::string spec = R"DOC(
+        name: "net"
+        type: "async_scheduling"
+        op {
+          type: "AsyncErrorOp"
+          arg {
+            name: "throw"
+            i: 1
+          }
+          arg {
+            name: "fail_in_sync"
+            i: 0
+          }
+          arg {
+            name: "sleep_time"
+            i: 2
+          }
+          arg {
+            name: "error_msg"
+            s: "Error1"
+          }
+        }
+        op {
+          type: "AsyncErrorOp"
+          arg {
+            name: "throw"
+            i: 1
+          }
+          arg {
+            name: "fail_in_sync"
+            i: 0
+          }
+          arg {
+            name: "sleep_time"
+            i: 1
+          }
+          arg {
+            name: "error_msg"
+            s: "Error2"
+          }
+        }
+  )DOC";
+
+  NetDef net_def;
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
+  auto net = CreateNet(net_def, &ws);
+
+  try {
+    net->Run();
+  } catch (const std::logic_error& e) {
+    ASSERT_TRUE(std::string(e.what()) == "Error2");
+  } catch (...) {
+    FAIL() << "Expected std::logic_error thrown";
+  }
+}
+
+class SyncErrorOp final : public Operator<CPUContext> {
+ public:
+  SyncErrorOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        fail_(OperatorBase::GetSingleArgument<bool>("fail", true)),
+        throw_(OperatorBase::GetSingleArgument<bool>("throw", false)) {}
+
+  bool RunOnDevice() override {
+    if (fail_) {
+      if (throw_) {
+        throw std::logic_error("Error");
+      } else {
+        return false;
+      }
+    } else {
+      return true;
+    }
+  }
+
+  ~SyncErrorOp() override {}
+
+ private:
+  bool fail_;
+  bool throw_;
+};
+
+REGISTER_CPU_OPERATOR(SyncErrorOp, SyncErrorOp);
+OPERATOR_SCHEMA(SyncErrorOp);
+
+std::unique_ptr<NetBase>
+ChainErrorNet(Workspace* ws, const std::string& net_name, bool throw_) {
+  std::string spec_template = R"DOC(
+        name: "<NET_NAME>"
+        type: "async_scheduling"
+        op {
+          type: "SyncErrorOp"
+          arg {
+            name: "fail"
+            i: 1
+          }
+          arg {
+            name: "throw"
+            i: <THROW>
+          }
+        }
+        op {
+          type: "SyncErrorOp"
+          arg {
+            name: "fail"
+            i: 0
+          }
+        }
+  )DOC";
+
+  std::string spec = spec_template;
+  ReplaceAll(spec, "<NET_NAME>", net_name.c_str());
+  ReplaceAll(spec, "<THROW>", throw_ ? "1" : "0");
+
+  NetDef net_def;
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
+  return CreateNet(net_def, ws);
+}
+
+TEST(NetTest, ChainErrorTest) {
+  Workspace ws;
+
+  auto net = ChainErrorNet(&ws, "net1", /*throw_*/ true);
+  ASSERT_THROW(net->Run(), std::logic_error);
+
+  net = ChainErrorNet(&ws, "net2", /*throw_*/ false);
+  ASSERT_FALSE(net->Run());
+}
+
+void testProfDAGNetErrorCase(bool test_error) {
+  std::string spec_template = R"DOC(
+        name: "prof_dag_error_test_net"
+        type: "prof_dag"
+        external_input: "in"
+        op {
+          input: "in"
+          output: "hidden"
+          type: "SyncErrorOp"
+          arg {
+            name: "fail"
+            i: <FAIL>
+          }
+          arg {
+            name: "throw"
+            i: 0
+          }
+        }
+        op {
+          input: "hidden"
+          output: "out"
+          type: "SyncErrorOp"
+          arg {
+            name: "fail"
+            i: 0
+          }
+        }
+  )DOC";
+
+  Workspace ws;
+  ws.CreateBlob("in");
+
+  NetDef net_def;
+  std::string net_spec = spec_template;
+  ReplaceAll(net_spec, "<FAIL>", test_error ? "1" : "0");
+  CAFFE_ENFORCE(TextFormat::ParseFromString(net_spec, &net_def));
+  auto net = CreateNet(net_def, &ws);
+
+  // with failing op - net runs return false, without - true
+  for (auto num_runs = 0; num_runs < 10; ++num_runs) {
+    auto ret = net->Run();
+    ASSERT_TRUE(test_error ? !ret : ret);
+  }
+
+  // with failing op - prof_dag handles invalid runs and returns empty stats,
+  // without - returns stats for each op
+  auto* prof_dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
+  CHECK_NOTNULL(prof_dag);
+  auto stats_proto = prof_dag->GetPerOperatorCost();
+  ASSERT_EQ(
+      stats_proto.stats_size(), test_error ? 0 : net->GetOperators().size());
+}
+
+TEST(NetTest, ProfDAGNetErrorTest) {
+  testProfDAGNetErrorCase(/*test_error=*/false);
+  testProfDAGNetErrorCase(/*test_error=*/true);
 }
 
 } // namespace caffe2

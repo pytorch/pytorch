@@ -16,18 +16,32 @@ net->Run();
 LOG(INFO) << "av time children: " << ob->average_time_children();
 LOG(INFO) << "av time: " << ob->average_time();
 ```
-  
+
 ### Python
 
 ```
-model.net.AttachTimeObserver()
+model.net.AttachObserver("TimeObserver")
 ws.RunNet(model.net)
-ob = model.net.GetObserver()
+ob = model.net.GetObserver("TimeObserver")
 
 print("av time children:", ob.average_time_children())
 print("av time:", ob.average_time())
 ```
 
+### Histogram Observer
+
+Creates a histogram for the values of weights and activations
+
+```
+model.net.AddObserver("HistogramObserver",
+                      "histogram.txt", # filename
+                      2014, # number of bins in histogram
+                      32 # Dumping frequency
+                      )
+ws.RunNet(model.net)
+```
+
+This will generate a histogram for the activations and store it in histogram.txt
 
 ## Implementing An Observer
 

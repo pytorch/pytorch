@@ -16,8 +16,8 @@ class AlgorithmsCache {
   // combination of tensor dimensions & compute data type.
   //
   TAlgorithm getAlgorithm(
-      const std::vector<TIndex>& tensorDimensions1,
-      const std::vector<TIndex>& tensorDimensions2,
+      at::IntArrayRef tensorDimensions1,
+      at::IntArrayRef tensorDimensions2,
       int algorithmFlags, // Differentiate between algorithms with different
                           // parameters in a generic way
       std::function<TAlgorithm()> generatingFunc);
@@ -28,14 +28,14 @@ class AlgorithmsCache {
 
 template <typename TAlgorithm>
 TAlgorithm AlgorithmsCache<TAlgorithm>::getAlgorithm(
-    const std::vector<TIndex>& tensorDimensions1,
-    const std::vector<TIndex>& tensorDimensions2,
+    at::IntArrayRef tensorDimensions1,
+    at::IntArrayRef tensorDimensions2,
     int algorithmFlags,
     std::function<TAlgorithm()> generatingFunc) {
   int64_t seed = 0;
   // Hash all of the inputs, which we wiill then use to try and look up
   // a previously discovered algorithm, or fall back to generating a new one.
-  std::hash<TIndex> hashFn;
+  std::hash<int64_t> hashFn;
   for (const auto num : tensorDimensions1) {
     // Copied from boost::hash_combine.
     // Adding 1 to differentiate between first and second vector.

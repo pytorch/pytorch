@@ -1,4 +1,4 @@
-#include "THLogAdd.h"
+#include <TH/THLogAdd.h>
 
 #include <float.h>
 

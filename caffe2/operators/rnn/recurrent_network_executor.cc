@@ -31,6 +31,11 @@ std::unique_ptr<RecurrentNetworkExecutorBase> createRNNExecutor<CPUContext>(
  * Run forwardpass with T timesteps.
  */
 bool ThreadedRecurrentNetworkExecutor::Run(int T) {
+  CAFFE_ENFORCE_GE(T, 0, "Negative number of steps");
+  if (T == 0) {
+    return true;
+  }
+
   CAFFE_ENFORCE(timestep_ops_.size() >= T);
   countdown_ = T * timestep_ops_[0].size();
   finished_timesteps_ = 0;
@@ -52,6 +57,11 @@ bool ThreadedRecurrentNetworkExecutor::Run(int T) {
  * Run backward pass with T timesteps.
  */
 bool ThreadedRecurrentNetworkExecutor::RunBackwards(int T) {
+  CAFFE_ENFORCE_GE(T, 0, "Negative number of steps");
+  if (T == 0) {
+    return true;
+  }
+
   CAFFE_ENFORCE(timestep_ops_.size() >= T);
   countdown_ = T * timestep_ops_[0].size();
   finished_timesteps_ = 0;

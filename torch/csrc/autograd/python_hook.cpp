@@ -1,13 +1,13 @@
-#include "torch/csrc/autograd/python_hook.h"
+#include <torch/csrc/autograd/python_hook.h>
 
 #include <sstream>
 
-#include "THP.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/Exceptions.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/Exceptions.h>
 
 using torch::autograd::variable_list;
 using torch::autograd::Variable;
@@ -51,7 +51,7 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   }
 
   variable_list results(values);
-  results[value_idx] = ((THPVariable*)value.get())->cdata;
+  if (value != Py_None) results[value_idx] = ((THPVariable*)value.get())->cdata;
   return results;
 }
 
@@ -160,7 +160,7 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
   auto& original = ((THPVariable*)_original)->cdata.data();
   auto& result = ((THPVariable*)_result)->cdata.data();
 
-  if (original.type().ID() != result.type().ID()) {
+  if (original.type() != result.type()) {
     std::stringstream ss;
     auto name = hook_name(hook);
     ss << "hook '" << name << "' has changed the type of value (";
@@ -169,11 +169,11 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw std::runtime_error(ss.str());
   }
 
-  if (original.type().is_cuda() != result.type().is_cuda()) {
+  if (original.is_cuda() != result.is_cuda()) {
     std::stringstream ss;
     auto name = hook_name(hook);
     ss << "hook '" << name << "' has changed the type of value";
-    if (original.type().is_cuda()) {
+    if (original.is_cuda()) {
       ss << " (was CUDA tensor got CPU tensor)";
     } else {
       ss << " (was CPU tensor got CUDA tensor)";

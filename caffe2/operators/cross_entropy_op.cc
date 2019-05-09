@@ -41,9 +41,9 @@ template <>
 bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
-  auto* Y = Output(0);
+
   int N, D;
-  if (X.ndim() > 1) {
+  if (X.dim() > 1) {
     N = X.dim32(0);
     D = X.size_from_dim(1);
   } else {
@@ -51,12 +51,12 @@ bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
     D = X.dim32(0);
   }
   CAFFE_ENFORCE(
-      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  Y->Resize(N);
+  auto* Y = Output(0, {N}, at::dtype<float>());
   const auto* Xdata = X.data<float>();
   const auto* labelData = label.data<int>();
-  auto* Ydata = Y->mutable_data<float>();
+  auto* Ydata = Y->template mutable_data<float>();
   CAFFE_ENFORCE(
       (ConstEigenVectorArrayMap<int>(labelData, N) < D).all() &&
           (ConstEigenVectorArrayMap<int>(labelData, N) >= 0).all(),
@@ -74,18 +74,17 @@ template <>
 bool SigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
   auto& logits = Input(0);
   auto& targets = Input(1);
-  CAFFE_ENFORCE_EQ(logits.dims(), targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
+  CAFFE_ENFORCE_EQ(logits.sizes(), targets.sizes());
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
+  const auto outer_size = logits.numel() / inner_size;
 
-  auto* out = Output(0);
-  if (logits.ndim() == 0) {
-    out->Resize(std::vector<TIndex>{});
-  } else {
-    std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
-    out->Resize(dims);
+  std::vector<int64_t> dims;
+  if (logits.dim() != 0) {
+    dims =
+        std::vector<int64_t>(logits.sizes().begin(), logits.sizes().end() - 1);
   }
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out = Output(0, dims, at::dtype<float>());
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -116,14 +115,13 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::RunOnDevice() {
   auto& g = Input(0);
   auto& logits = Input(1);
   auto& targets = Input(2);
-  CAFFE_ENFORCE(logits.dims() == targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
-  CAFFE_ENFORCE(g.size() == outer_size);
+  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
+  const auto outer_size = logits.numel() / inner_size;
+  CAFFE_ENFORCE(g.numel() == outer_size);
 
-  auto* out = Output(0);
-  out->ResizeLike(logits);
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out = Output(0, logits.sizes(), at::dtype<float>());
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -155,19 +153,19 @@ bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
   auto& logits = Input(0);
   auto& targets = Input(1);
   auto& weights = Input(2);
-  CAFFE_ENFORCE(logits.dims() == targets.dims());
-  CAFFE_ENFORCE(weights.dims() == targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
+  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
+  CAFFE_ENFORCE(weights.sizes() == targets.sizes());
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
+  const auto outer_size = logits.numel() / inner_size;
 
-  auto* out = Output(0);
-  if (logits.ndim() == 0) {
-    out->Resize(std::vector<TIndex>{});
-  } else {
-    std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
-    out->Resize(dims);
+  std::vector<int64_t> dims;
+  if (logits.dim() != 0) {
+    dims =
+        std::vector<int64_t>(logits.sizes().begin(), logits.sizes().end() - 1);
   }
-  auto* out_ptr = out->mutable_data<float>();
+
+  auto* out = Output(0, dims, at::dtype<float>());
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -193,15 +191,14 @@ bool WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::
   auto& logits = Input(1);
   auto& targets = Input(2);
   auto& weights = Input(3);
-  CAFFE_ENFORCE(logits.dims() == targets.dims());
-  CAFFE_ENFORCE(weights.dims() == targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
-  CAFFE_ENFORCE(g.size() == outer_size);
+  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
+  CAFFE_ENFORCE(weights.sizes() == targets.sizes());
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
+  const auto outer_size = logits.numel() / inner_size;
+  CAFFE_ENFORCE(g.numel() == outer_size);
 
-  auto* out = Output(0);
-  out->ResizeLike(logits);
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out = Output(0, logits.sizes(), at::dtype<float>());
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -226,9 +223,9 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
+
   int N, D;
-  if (X.ndim() > 1) {
+  if (X.dim() > 1) {
     N = X.dim32(0);
     D = X.size_from_dim(1);
   } else {
@@ -236,17 +233,17 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
     D = X.dim32(0);
   }
   CAFFE_ENFORCE(
-      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  CAFFE_ENFORCE_EQ(dY.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dY.dim(), 1);
   CAFFE_ENFORCE_EQ(dY.dim32(0), N);
-  dX->ResizeLike(X);
-  math::Set<float, CPUContext>(dX->size(), 0.f, dX->mutable_data<float>(),
-                               &context_);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
+  math::Set<float, CPUContext>(
+      dX->numel(), 0.f, dX->template mutable_data<float>(), &context_);
   const float* Xdata = X.data<float>();
   const float* dYdata = dY.data<float>();
   const int* labelData = label.data<int>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   for (int i = 0; i < N; ++i) {
     dXdata[i * D + labelData[i]] =
         - dYdata[i] / std::max(Xdata[i * D + labelData[i]], kLOG_THRESHOLD());
@@ -257,14 +254,14 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
 template <>
 bool MakeTwoClassOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  auto shape = X.dims();
+
+  auto shape = X.sizes().vec();
   shape.push_back(2);
-  TIndex N = X.size();
-  Y->Resize(shape);
+  int64_t N = X.numel();
+  auto* Y = Output(0, shape, at::dtype<float>());
   const auto* Xdata = X.data<float>();
-  auto* Ydata = Y->mutable_data<float>();
-  for (TIndex i = 0; i < N; ++i) {
+  auto* Ydata = Y->template mutable_data<float>();
+  for (int64_t i = 0; i < N; ++i) {
     DCHECK_GE(Xdata[i], 0.0);
     DCHECK_LE(Xdata[i], 1.0);
     Ydata[i * 2] = 1.0 - Xdata[i];
@@ -276,17 +273,17 @@ bool MakeTwoClassOp<float, CPUContext>::RunOnDevice() {
 template <>
 bool MakeTwoClassGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  auto shape = dY.dims();
+
+  auto shape = dY.sizes().vec();
   CAFFE_ENFORCE_GE(shape.size(), 1);
   CAFFE_ENFORCE_EQ(shape.back(), 2);
   shape.pop_back();
-  dX->Resize(shape);
+  auto* dX = Output(0, shape, at::dtype<float>());
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
-  TIndex N = dX->size();
+  float* dXdata = dX->template mutable_data<float>();
+  int64_t N = dX->numel();
   // use eigen?
-  for (TIndex i = 0; i < N; ++i) {
+  for (int64_t i = 0; i < N; ++i) {
     dXdata[i] = dYdata[i * 2 + 1] - dYdata[i * 2];
   }
   return true;
@@ -296,9 +293,9 @@ template <>
 bool CrossEntropyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
-  auto* Y = Output(0);
+
   int N, D;
-  if (X.ndim() > 1) {
+  if (X.dim() > 1) {
     N = X.dim32(0);
     D = X.size_from_dim(1);
   } else {
@@ -306,12 +303,12 @@ bool CrossEntropyOp<float, CPUContext>::RunOnDevice() {
     D = X.dim32(0);
   }
   CAFFE_ENFORCE(
-      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == D));
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == D));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  Y->Resize(vector<TIndex>{N});
+  auto* Y = Output(0, vector<int64_t>{N}, at::dtype<float>());
   const float* Xdata = X.data<float>();
   const float* labelData = label.data<float>();
-  auto* Ydata = Y->mutable_data<float>();
+  auto* Ydata = Y->template mutable_data<float>();
   CAFFE_ENFORCE(
       (ConstEigenArrayMap<float>(labelData, D, N) <= 1.0f).all() &&
           (ConstEigenArrayMap<float>(labelData, D, N) >= 0.0f).all(),
@@ -334,9 +331,9 @@ bool CrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
+
   int N, D;
-  if (X.ndim() > 1) {
+  if (X.dim() > 1) {
     N = X.dim32(0);
     D = X.size_from_dim(1);
   } else {
@@ -344,17 +341,17 @@ bool CrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
     D = X.dim32(0);
   }
   CAFFE_ENFORCE(
-      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == D));
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == D));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  CAFFE_ENFORCE_EQ(dY.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dY.dim(), 1);
   CAFFE_ENFORCE_EQ(dY.dim32(0), N);
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   math::Set<float, CPUContext>(
-    dX->size(), 0.f, dX->mutable_data<float>(), &context_);
+      dX->numel(), 0.f, dX->template mutable_data<float>(), &context_);
   const float* Xdata = X.data<float>();
   const float* dYdata = dY.data<float>();
   const float* labelData = label.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   EigenArrayMap<float>(dXdata, D, N) =
       (ConstEigenArrayMap<float>(labelData, D, N) /
        ConstEigenArrayMap<float>(Xdata, D, N).cwiseMax(kLOG_THRESHOLD()))
@@ -401,22 +398,22 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X: Sample softmax output for 5-class model
+// Create X: Sample softmax output for 5-class model
 X = np.array([[.01, .05, .02, .02, .9],[.03, .1, .42, .05, .4]])
 print("X:\n",X)
 
-# Create label: Sample 1-hot ground truth label vectors
+// Create label: Sample 1-hot ground truth label vectors
 label = np.array([4,2])
 print("label:\n",label)
 
-# Feed X & label into workspace
+// Feed X & label into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("label", label.astype(np.int32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Y:\n", workspace.FetchBlob("Y"))
 
 ```
@@ -635,22 +632,22 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X: Sample softmax output for 5-class model
+// Create X: Sample softmax output for 5-class model
 X = np.array([[.01, .05, .02, .02, .9],[.03, .1, .42, .05, .4]])
 print("X:\n",X)
 
-# Create label: Sample 1-hot ground truth label vectors
+// Create label: Sample 1-hot ground truth label vectors
 label = np.array([[0.,0.,0.,0.,1.],[0.,0.,1.,0.,0.]])
 print("label:\n",label)
 
-# Feed X & label into workspace
+// Feed X & label into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("label", label.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Y:\n", workspace.FetchBlob("Y"))
 
 ```

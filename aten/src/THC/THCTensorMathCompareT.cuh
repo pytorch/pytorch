@@ -1,12 +1,12 @@
 #ifndef THC_TENSORMATH_COMPARET_CUH
 #define THC_TENSORMATH_COMPARET_CUH
 
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCTensorCopy.h"
-#include "THCApply.cuh"
-#include "THCNumerics.cuh"
-#include "THCReduce.cuh"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCReduce.cuh>
 
 template <typename T, typename TOut>
 struct TensorLTOp {
@@ -56,9 +56,7 @@ void THC_logicalTensor(THCState *state,
                        TensorType *src1,
                        TensorType *src2,
                        Op op) {
-  THLongStorage* st = THCTensor_newSizeOf(state, src1);
-  THCTensor_resize(state, self_, st, NULL);
-  THLongStorage_free(st);
+  THCTensor_resize(state, self_, src1->sizes(), {});
 
   THArgCheck(THCTensor_nElement(state, src1) ==
              THCTensor_nElement(state, src2), 3,

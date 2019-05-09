@@ -13,10 +13,11 @@ class SparseToDenseOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
 
-  SparseToDenseOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SparseToDenseOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         output_first_dim_(
-            OperatorBase::GetSingleArgument<int>("output_first_dim", 0)) {}
+            this->template GetSingleArgument<int>("output_first_dim", 0)) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
@@ -34,7 +35,7 @@ class SparseToDenseOp final : public Operator<Context> {
     }
     if (InputSize() == 3) {
       auto& data_to_infer_dim = Input(DATA_TO_INFER_DIM);
-      CAFFE_ENFORCE_GE(data_to_infer_dim.ndim(), 1);
+      CAFFE_ENFORCE_GE(data_to_infer_dim.dim(), 1);
       return data_to_infer_dim.dim32(0);
     }
     if (sparse_indices_len <= 0) {
@@ -43,7 +44,7 @@ class SparseToDenseOp final : public Operator<Context> {
 
     // Awkward way to get the max element to make it work with both CUDA
     // and CPU.
-    max_element_.Resize(1);
+    ReinitializeTensor(&max_element_, {1}, at::dtype<TInd>().device(Context::GetDeviceType()));
     TInd* max_element_ptr = max_element_.template mutable_data<TInd>();
     math::ReduceMax<TInd>(sparse_indices_len, sparse_indices_vec, max_element_ptr,
           &scratch_, &context_);
@@ -65,22 +66,25 @@ class SparseToDenseOp final : public Operator<Context> {
   template <typename TInd, typename TData>
   bool DoRunWithType2() {
     auto& sparse_indices = Input(INDICES);
-    CAFFE_ENFORCE_EQ(sparse_indices.ndim(), 1);
+    CAFFE_ENFORCE_EQ(sparse_indices.dim(), 1);
     auto& sparse_values = Input(VALUES);
-    CAFFE_ENFORCE_GE(sparse_values.ndim(), 1);
-    CAFFE_ENFORCE_EQ(sparse_indices.size(), sparse_values.dim(0));
+    CAFFE_ENFORCE_GE(sparse_values.dim(), 1);
+    CAFFE_ENFORCE_EQ(sparse_indices.numel(), sparse_values.size(0));
 
     const TInd* sparse_indices_vec = sparse_indices.template data<TInd>();
     const int32_t sparse_indices_len = sparse_indices.dim32(0);
     const int output_first_dim =
         GetOutputFirstDim(sparse_indices_vec, sparse_indices_len);
 
-    auto shape = sparse_values.dims();
+    auto shape = sparse_values.sizes().vec();
     shape[0] = output_first_dim;
-    auto* output = Output(0);
-    output->Resize(shape);
+
+    auto* output = Output(0, shape, at::dtype<TData>());
 
     TData* output_data = output->template mutable_data<TData>();
+    if (!output_first_dim) {
+      return true;
+    }
     memset(output_data, 0, output->nbytes());
     const auto block_nitems = sparse_values.size_from_dim(1);
     const TData* sparse_values_vec = sparse_values.template data<TData>();
@@ -103,16 +107,17 @@ class SparseToDenseOp final : public Operator<Context> {
   bool DoRunWithOtherType2() {
     CAFFE_THROW(
         "SparseToDense is not implemented on tensor of type ",
-        Input(VALUES).meta().name(),
-        "Consider adding it a type in the list DispatchHelper or implementing "
-        "a generic version (which won't work for duplicated indices though)");
+        Input(VALUES).dtype().name(),
+        "consider adding it as a type in the DispatchHelper list or "
+        "implementing a generic version (which won't work for "
+        "duplicated indices though)");
   }
 
  private:
   int output_first_dim_;
-  Tensor<Context> scratch_;
-  Tensor<CPUContext> max_element_host_;
-  Tensor<Context> max_element_;
+  Tensor scratch_{Context::GetDeviceType()};
+  Tensor max_element_host_{CPU};
+  Tensor max_element_;
 
   INPUT_TAGS(INDICES, VALUES, DATA_TO_INFER_DIM);
 };

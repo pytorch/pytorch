@@ -13,7 +13,8 @@
 namespace caffe2 {
 
 class TimeObserver;
-class TimeCounter {
+
+class CAFFE2_API TimeCounter {
  public:
   explicit TimeCounter() {}
   inline float average_time() const {
@@ -27,8 +28,8 @@ class TimeCounter {
   int iterations_ = 0;
 };
 
-class TimeOperatorObserver final : public TimeCounter,
-                                   public ObserverBase<OperatorBase> {
+class CAFFE2_API TimeOperatorObserver final : public TimeCounter,
+                                              public ObserverBase<OperatorBase> {
  public:
   explicit TimeOperatorObserver(OperatorBase* subject) = delete;
   explicit TimeOperatorObserver(
@@ -44,7 +45,7 @@ class TimeOperatorObserver final : public TimeCounter,
   void Stop() override;
 };
 
-class TimeObserver final
+class CAFFE2_API TimeObserver final
     : public TimeCounter,
       public OperatorAttachingNetObserver<TimeOperatorObserver, TimeObserver> {
  public:

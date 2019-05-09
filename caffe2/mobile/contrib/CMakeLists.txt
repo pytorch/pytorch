@@ -1,9 +1,4 @@
 add_subdirectory(ios)
-add_subdirectory(opengl)
-if (USE_ACL)
-  add_subdirectory(arm-compute)
-endif()
-# Finally pass the src lists back to the parent
 
 if (USE_NNAPI)
   add_subdirectory(nnapi)

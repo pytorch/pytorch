@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 
 namespace caffe2 {
 

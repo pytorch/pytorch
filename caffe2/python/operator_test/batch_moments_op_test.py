@@ -2,16 +2,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+from hypothesis import given
+import hypothesis.strategies as st
 import numpy as np
 
-from caffe2.python import core
-from hypothesis import given
 
-import caffe2.python.hypothesis_test_util as hu
-import hypothesis.strategies as st
-
-
-class TestBatchMomentsOp(hu.HypothesisTestCase):
+class TestBatchMomentsOp(serial.SerializedTestCase):
     def batch_moments_nchw_ref(self, X):
         dims = X.shape
         N = dims[0]
@@ -29,9 +28,9 @@ class TestBatchMomentsOp(hu.HypothesisTestCase):
         var = np.mean(np.square(X), axis=0)
         return [mu, var]
 
-    @given(N=st.integers(1, 5), C=st.integers(1, 5), H=st.integers(1, 5),
-           W=st.integers(1, 5), order=st.sampled_from(["NCHW", "NHWC"]),
-           **hu.gcs)
+    @serial.given(N=st.integers(1, 5), C=st.integers(1, 5),
+            H=st.integers(1, 5), W=st.integers(1, 5),
+            order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
     def test_batch_moments_2d(self, N, C, H, W, order, gc, dc):
         op = core.CreateOperator(
             "BatchMoments",

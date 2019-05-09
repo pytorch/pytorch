@@ -24,20 +24,20 @@ bool SwishGradientOp<CPUContext>::DoRunWithType() {
   auto& Xin = Input(X);
   auto& Yin = Input(Y);
   auto& DYin = Input(DY);
-  auto* DXout = Output(DX);
-  CAFFE_ENFORCE_EQ(Xin.size(), Yin.size());
-  CAFFE_ENFORCE_EQ(DYin.size(), Yin.size());
-  DXout->ResizeLike(Yin);
+
+  CAFFE_ENFORCE_EQ(Xin.numel(), Yin.numel());
+  CAFFE_ENFORCE_EQ(DYin.numel(), Yin.numel());
+  auto* DXout = Output(DX, Yin.sizes(), at::dtype<float>());
 
   const float* Xdata = Xin.template data<float>();
   const float* Ydata = Yin.template data<float>();
   const float* dYdata = DYin.template data<float>();
   float* dXdata = DXout->template mutable_data<float>();
 
-  EigenVectorArrayMap<float> dXvec(dXdata, DXout->size());
-  ConstEigenVectorArrayMap<float> Xvec(Xdata, Xin.size());
-  ConstEigenVectorArrayMap<float> Yvec(Ydata, Yin.size());
-  ConstEigenVectorArrayMap<float> dYvec(dYdata, DYin.size());
+  EigenVectorArrayMap<float> dXvec(dXdata, DXout->numel());
+  ConstEigenVectorArrayMap<float> Xvec(Xdata, Xin.numel());
+  ConstEigenVectorArrayMap<float> Yvec(Ydata, Yin.numel());
+  ConstEigenVectorArrayMap<float> dYvec(dYdata, DYin.numel());
 
   // dx = dy * (y + sigmoid(x)*(1-y))
   dXvec = dYvec * (Yvec + (T(1) / (T(1) + (-Xvec).exp())) * (T(1) - Yvec));
@@ -58,8 +58,8 @@ OPERATOR_SCHEMA(Swish)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
-Swish takes one input data (Tensor<T>) and produces one output data
-(Tensor<T>) where the swish function, y = x / (1 + exp(-x)), is applied to the
+Swish takes one input data (Tensor) and produces one output data
+(Tensor) where the swish function, y = x / (1 + exp(-x)), is applied to the
 tensor elementwise.
 )DOC")
     .Input(0, "X", "1D input tensor")

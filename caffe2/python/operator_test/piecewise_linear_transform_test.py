@@ -4,15 +4,16 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+
 from hypothesis import given
 import hypothesis.strategies as st
-import caffe2.python.hypothesis_test_util as hu
 import numpy as np
-
 import unittest
 
 
-class TestPiecewiseLinearTransform(hu.HypothesisTestCase):
+class TestPiecewiseLinearTransform(serial.SerializedTestCase):
     def constrain(self, v, min_val, max_val):
         def constrain_internal(x):
             return min(max(x, min_val), max_val)
@@ -31,7 +32,7 @@ class TestPiecewiseLinearTransform(hu.HypothesisTestCase):
         y = slopes[index] * x_ + intercepts[index]
         return y
 
-    @given(n=st.integers(1, 100), **hu.gcs)
+    @serial.given(n=st.integers(1, 100), **hu.gcs)
     def test_multi_predictions_params_from_arg(self, n, gc, dc):
         slopes = np.random.uniform(-1, 1, (2, n)).astype(np.float32)
         intercepts = np.random.uniform(-1, 1, (2, n)).astype(np.float32)

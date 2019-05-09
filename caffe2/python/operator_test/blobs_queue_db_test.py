@@ -7,10 +7,10 @@ import unittest
 import numpy as np
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
-from caffe2.python import core, workspace, timeout_guard
+from caffe2.python import core, workspace, timeout_guard, test_util
 
 
-class BlobsQueueDBTest(unittest.TestCase):
+class BlobsQueueDBTest(test_util.TestCase):
     def test_create_blobs_queue_db_string(self):
         def add_blobs(queue, num_samples):
             blob = core.BlobReference("blob")

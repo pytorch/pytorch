@@ -5,28 +5,34 @@ namespace caffe2 {
 template <>
 bool PercentileOp<CPUContext>::RunOnDevice() {
   const auto& original_values = Input(X);
-  CAFFE_ENFORCE_EQ(original_values.ndim(), 2);
-  const auto num_examples = original_values.dim(0);
+  CAFFE_ENFORCE_EQ(original_values.dim(), 2);
+  const auto num_examples = original_values.size(0);
   const float* original_values_data = original_values.template data<float>();
-  const auto num_features = original_values.dim(1);
+  const auto num_features = original_values.size(1);
 
   const auto& value_pct_pairs = Input(VAL_PCT_PAIRS);
-  CAFFE_ENFORCE_EQ(value_pct_pairs.ndim(), 2);
-  CAFFE_ENFORCE_EQ(value_pct_pairs.dim(1), 2);
-  const int num_values = value_pct_pairs.dim(0);
+  CAFFE_ENFORCE_EQ(value_pct_pairs.dim(), 2);
+  CAFFE_ENFORCE_EQ(value_pct_pairs.size(1), 2);
+  const int num_values = value_pct_pairs.size(0);
   const float* value_pct_data = value_pct_pairs.template data<float>();
 
   const auto& lengths = Input(LENS);
   const int* lengths_data = lengths.template data<int>();
-  CAFFE_ENFORCE_EQ(lengths.size(), num_features);
+  CAFFE_ENFORCE_EQ(lengths.numel(), num_features);
 
   CAFFE_ENFORCE_EQ(
-      std::accumulate(lengths_data, lengths_data + lengths.size(), 0),
+      std::accumulate(lengths_data, lengths_data + lengths.numel(), 0),
       num_values,
       "Sum of lengths should be equal to the total number of samples");
 
-  values_tensor.Resize(num_values);
-  percentiles_tensor.Resize(num_values);
+  ReinitializeTensor(
+      &values_tensor,
+      {num_values},
+      at::dtype<float>().device(CPU));
+  ReinitializeTensor(
+      &percentiles_tensor,
+      {num_values},
+      at::dtype<float>().device(CPU));
   float* values_tensor_data = values_tensor.template mutable_data<float>();
   float* percentiles_tensor_data =
       percentiles_tensor.template mutable_data<float>();
@@ -35,8 +41,8 @@ bool PercentileOp<CPUContext>::RunOnDevice() {
     percentiles_tensor_data[ind] = value_pct_data[2 * ind + 1];
   }
 
-  auto* percentile_values = Output(PCT);
-  percentile_values->ResizeLike(original_values);
+  auto* percentile_values =
+      Output(PCT, original_values.sizes(), at::dtype<float>());
   float* percentile_values_data =
       percentile_values->template mutable_data<float>();
 

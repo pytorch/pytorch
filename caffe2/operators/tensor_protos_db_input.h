@@ -38,12 +38,12 @@ TensorProtosDBInput<Context>::TensorProtosDBInput(
     : PrefetchOperator<Context>(operator_def, ws),
       prefetched_blobs_(operator_def.output_size()),
       batch_size_(
-          OperatorBase::template GetSingleArgument<int>("batch_size", 0)) {}
+          this->template GetSingleArgument<int>("batch_size", 0)) {}
 
 template <class Context>
 bool TensorProtosDBInput<Context>::Prefetch() {
-  const db::DBReader& reader = OperatorBase::Input<db::DBReader>(0);
-  TensorDeserializer<CPUContext> deserializer;
+  const db::DBReader& reader = this->template Input<db::DBReader>(0);
+  TensorDeserializer deserializer;
   if (batch_size_ == 0) {
     // We do not need to construct a batch. As a result, we will simply
     // deserialize everything into the target prefetched blob.
@@ -55,39 +55,36 @@ bool TensorProtosDBInput<Context>::Prefetch() {
       if (protos.protos(i).has_device_detail()) {
         protos.mutable_protos(i)->clear_device_detail();
       }
-      deserializer.Deserialize(
-          protos.protos(i),
-          prefetched_blobs_[i].template GetMutable<TensorCPU>());
+      BlobSetTensor(
+          &prefetched_blobs_[i], deserializer.Deserialize(protos.protos(i)));
+      // deserializer.Deserialize(
+      //     protos.protos(i), BlobGetMutableTensor(&prefetched_blobs_[i],
+      //     CPU));
     }
   } else {
-    vector<TensorCPU> temp_tensors(OutputSize());
     for (int item_id = 0; item_id < batch_size_; ++item_id) {
       reader.Read(&key_, &value_);
       TensorProtos protos;
       CAFFE_ENFORCE(protos.ParseFromString(value_));
       CAFFE_ENFORCE(protos.protos_size() == OutputSize());
-      if (!shape_inferred_) {
-        // First, set the shape of all the blobs.
-        for (int i = 0; i < protos.protos_size(); ++i) {
-          vector<int> dims(
-              protos.protos(i).dims().begin(), protos.protos(i).dims().end());
-          dims.insert(dims.begin(), batch_size_);
-          prefetched_blobs_[i].template GetMutable<TensorCPU>()->Resize(dims);
-        }
-      }
+      // Note: shape_inferred_ is ignored, we'll always get dimensions from
+      // proto
       for (int i = 0; i < protos.protos_size(); ++i) {
-        TensorCPU* dst = prefetched_blobs_[i].template GetMutable<TensorCPU>();
-        TensorCPU& src = temp_tensors[i];
+        vector<int64_t> dims(
+            protos.protos(i).dims().begin(), protos.protos(i).dims().end());
+        dims.insert(dims.begin(), batch_size_);
         if (protos.protos(i).has_device_detail()) {
           protos.mutable_protos(i)->clear_device_detail();
         }
-        deserializer.Deserialize(protos.protos(i), &src);
-        DCHECK_EQ(src.size() * batch_size_, dst->size());
-        this->context_.template CopyItems<CPUContext, CPUContext>(
-            src.meta(),
-            src.size(),
+        Tensor src = deserializer.Deserialize(protos.protos(i));
+        Tensor* dst = BlobGetMutableTensor(
+            &prefetched_blobs_[i], dims, at::dtype(src.dtype()).device(CPU));
+        DCHECK_EQ(src.numel() * batch_size_, dst->numel());
+        this->context_.CopyItemsSameDevice(
+            src.dtype(),
+            src.numel(),
             src.raw_data(),
-            static_cast<char*>(dst->raw_mutable_data(src.meta())) +
+            static_cast<char*>(dst->raw_mutable_data(src.dtype())) +
                 src.nbytes() * item_id);
       }
     }
@@ -98,8 +95,9 @@ bool TensorProtosDBInput<Context>::Prefetch() {
 template <class Context>
 bool TensorProtosDBInput<Context>::CopyPrefetched() {
   for (int i = 0; i < OutputSize(); ++i) {
-    OperatorBase::Output<Tensor<Context>>(i)->CopyFrom(
-        prefetched_blobs_[i].template Get<TensorCPU>(), &this->context_);
+    OperatorBase::template Output<Tensor>(i, Context::GetDeviceType())
+        ->CopyFrom(
+            prefetched_blobs_[i].template Get<TensorCPU>(), /* async */ true);
   }
   return true;
 }

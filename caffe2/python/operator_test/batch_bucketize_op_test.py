@@ -6,13 +6,14 @@ from __future__ import unicode_literals
 import numpy as np
 
 from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from hypothesis import given
 import hypothesis.strategies as st
-import caffe2.python.hypothesis_test_util as hu
 
 
-class TestBatchBucketize(hu.HypothesisTestCase):
-    @given(**hu.gcs_cpu_only)
+class TestBatchBucketize(serial.SerializedTestCase):
+    @serial.given(**hu.gcs_cpu_only)
     def test_batch_bucketize_example(self, gc, dc):
         op = core.CreateOperator('BatchBucketize',
                                  ["FEATURE", "INDICES", "BOUNDARIES", "LENGTHS"],

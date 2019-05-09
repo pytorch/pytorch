@@ -3,10 +3,10 @@
 // Engine implements backpropagation from output variables and their gradients
 // to "root" variables (variables created by the user with requires_grad=True).
 
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/input_buffer.h"
-#include "torch/csrc/autograd/anomaly_mode.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/input_buffer.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
 
 #include <deque>
 #include <exception>
@@ -54,10 +54,11 @@ struct TORCH_API Engine {
 protected:
   void compute_dependencies(Function* root, GraphTask& task);
   void evaluate_function(FunctionTask& task);
-  ReadyQueue& ready_queue(int device);
+  ReadyQueue& ready_queue(at::Device device);
+  ReadyQueue& ready_queue_by_index(int device_index);
   void start_threads();
   virtual void thread_init(int device);
-  virtual void thread_main(GraphTask *task);
+  virtual void thread_main(GraphTask *graph_task);
   virtual void thread_on_exception(FunctionTask& task, std::exception& e);
 
   std::once_flag start_threads_flag;
@@ -67,7 +68,7 @@ protected:
 };
 
 // allow python_engine to override the default engine when it loads
-typedef Engine& (*EngineStub)(void);
+using EngineStub = Engine& (*)();
 TORCH_API void set_default_engine_stub(EngineStub stub);
 
 }} // namespace torch::autograd

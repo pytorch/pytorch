@@ -2,17 +2,6 @@
 
 namespace caffe2 {
 
-namespace {
-OpSchema::Cost CostInferenceForSum(
-    const OperatorDef& def,
-    const vector<TensorShape>& in) {
-  struct OpSchema::Cost cost = PointwiseCostInference<1>(def, in);
-  cost.flops *= (in.size() - 1);
-  cost.params_bytes = 0;
-  return cost;
-}
-} // namespace
-
 REGISTER_CPU_OPERATOR(Sum, SumOp<CPUContext>);
 
 OPERATOR_SCHEMA(Sum)
@@ -86,7 +75,7 @@ workspace.ResetWorkspace()
 op = core.CreateOperator(
     "Sum",
     ["A",  "B"],
-    ["A"],  # inplace
+    ["A"],  // inplace
 )
 
 workspace.FeedBlob("A", np.array([[1,2,5],[8,3,4]]).astype(np.float32))
@@ -114,8 +103,14 @@ A after Sum: [[10.  7. 11.]
 </details>
 
 )DOC")
-    .Input(0, "A", "*(type: Tensor`<float>`)* First tensor to be added element-wise.")
-    .Input(1, "B", "*(type: Tensor`<float>`)* Second tensor to be added element-wise.")
+    .Input(
+        0,
+        "A",
+        "*(type: Tensor`<float>`)* First tensor to be added element-wise.")
+    .Input(
+        1,
+        "B",
+        "*(type: Tensor`<float>`)* Second tensor to be added element-wise.")
     .Output(0, "C", "*(type: Tensor`<float>`)* Sum of A and B.")
-    .InheritOnnxSchema("Sum");
+    .InheritOnnxSchema();
 }

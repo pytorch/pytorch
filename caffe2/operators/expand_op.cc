@@ -24,11 +24,14 @@ OPERATOR_SCHEMA(Expand)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-	Broadcast the input tensor to a materialized new tensor using given shape.
-	Broadcast rule is similar to "numpy.array(input) * numpy.ones(shape)":
-	Dimensions are right alignment;
-	Two corresponding dimensions must have the same value, or one of them
-	equals to 1.
+        Broadcast the input tensor to a materialized new tensor using given shape.
+        Broadcast rule is similar to "numpy.array(input) * numpy.ones(shape)":
+        Dimensions are right alignment;
+        Two corresponding dimensions must have the same value, or one of them
+        equals to 1.
+        In order to align with PyTorch's `expand`, `shape` is allowed to have entries
+        equal to -1, which means to preserve the size of the corresponding dimension
+        in `X` (so it's actually equivalent to equal to 1).
 )DOC")
     .Input(0, "X", "(*Tensor`<NumericType>`*): input tensor")
     .Input(1, "shape", "(*Tensor`<int>`*): expand shape")

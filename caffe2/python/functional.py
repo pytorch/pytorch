@@ -89,6 +89,13 @@ class _Functional(object):
                     output_prefix, max_output, max_output
                 )
 
+            # There could be input-output inplace enforcement; replace the
+            # output names with input ones if such enforcements exist
+            for i in range(len(input_names)):
+                for j in range(len(output_names)):
+                    if schema.inplace_enforced(i, j):
+                        output_names[j] = input_names[i]
+
             op = core.CreateOperator(
                 op_type, input_names, output_names, **args
             )

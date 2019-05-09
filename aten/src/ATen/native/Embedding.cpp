@@ -1,15 +1,12 @@
-#include "ATen/ATen.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/NativeFunctions.h>
 
 #include <cstring>
 #include <memory>
 #include <sstream>
 #include <vector>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 
 namespace at { namespace native {
@@ -24,7 +21,7 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
     return weight.index_select(0, indices);
   }
 
-  auto size = std::vector<int64_t>(indices.sizes());
+  auto size = indices.sizes().vec();
   for (auto d : weight.sizes().slice(1)) {
     size.push_back(d);
   }
@@ -66,19 +63,18 @@ Tensor embedding_sparse_backward(
 
   int64_t num_features = grad_.size(-1);
   auto weight_size = std::array<int64_t, 2>{{ num_weights, num_features }};
-  auto& dense_type = grad.type();
-  auto& sparse_type = dense_type.toBackend(grad.is_cuda() ? kSparseCUDA : kSparseCPU);
+  auto dense_options = grad.options();
 
   // check if all our grad come from padding_idx
   if (grad.numel() == 0) {
-    // FIXME: USE_TH_SIZE_ZERO_DIM
-    return sparse_type._sparse_coo_tensor_unsafe(indices_.type().tensor(),
-                                         dense_type.tensor(), weight_size);
+    return at::_sparse_coo_tensor_unsafe(at::empty({1, 0}, indices_.options()),
+                                         at::empty({0, num_features}, dense_options),
+                                         weight_size);
   }
 
   auto index = indices.reshape({1, -1});
   auto values = grad.reshape({-1, num_features});
-  return sparse_type._sparse_coo_tensor_unsafe(index, values, weight_size);
+  return at::_sparse_coo_tensor_unsafe(index, values, weight_size);
 }
 
 Tensor embedding_dense_backward_cpu(
@@ -106,44 +102,29 @@ Tensor embedding_dense_backward_cpu(
   auto grad = grad_.contiguous().view({numel, grad_.size(-1)});
   auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
 
-#ifdef _OPENMP
+  auto parallel_section = [&](int64_t start, int64_t end) {
+    for (int64_t i = 0; i < numel; i++) {
+      if (indices_data[i] != padding_idx) {
+        int64_t k = indices_data[i];
+        if (k >= start && k < end) {
+          double scale = 1.0;
+          if (scale_grad_by_freq) {
+            scale /= counts[k];
+          }
+          grad_weight[k].add_(grad[i], scale);
+        }
+      }
+    }
+  };
+
   if (numel > 1000) {
     // The strategy is to parallelize over sections of the vocabulary, so that
     // thread 1 handles updates to gradWeight[0..nVocab/nThreads]. Every thread
     // has to traverse the entire input, but the dominating factor is the axpy
     // BLAS call.
-    #pragma omp parallel
-    {
-      int tid = omp_get_thread_num();
-      int nthreads = omp_get_num_threads();
-      int64_t start = tid * (num_weights/nthreads + 1);
-      int64_t end = start + (num_weights/nthreads + 1);
-      for (int64_t i = 0; i < numel; i++) {
-        if (indices_data[i] != padding_idx) {
-          int64_t k = indices_data[i];
-          if (k >= start && k < end) {
-            double scale = 1.0;
-            if (scale_grad_by_freq) {
-              scale /= counts[k];
-            }
-            grad_weight[k].add_(grad[i], scale);
-          }
-        }
-      }
-    }
-    return grad_weight;
-  }
-#endif
-
-  for (int64_t i = 0; i < numel; i++) {
-    if (indices_data[i] != padding_idx) {
-      int64_t k = indices_data[i];
-      double scale = 1.0;
-      if (scale_grad_by_freq) {
-        scale /= counts[k];
-      }
-      grad_weight[k].add_(grad[i], scale);
-    }
+    at::parallel_for(0, num_weights, 0, parallel_section);
+  } else {
+    parallel_section(0, num_weights);
   }
 
   return grad_weight;
@@ -163,20 +144,22 @@ Tensor & embedding_renorm_cpu_(
   auto sorted_indices = std::vector<int64_t>(data_ptr, data_ptr + num_indices);
   std::sort(sorted_indices.begin(), sorted_indices.end(), std::less<int64_t>());
 
-  #pragma omp parallel for if(num_indices > 1000)
-  for (int64_t i = 0; i < num_indices; i++) {
-    if (i > 0 && sorted_indices[i] == sorted_indices[i - 1]) {
-      continue;
+  at::parallel_for(0, num_indices, 1000, [&](int64_t start, int64_t end) {
+    for (auto i = start; i < end; i++) {
+      if (i > 0 && sorted_indices[i] == sorted_indices[i - 1]) {
+        continue;
+      }
+      auto row = self[sorted_indices[i]];
+      auto norm = row.norm(norm_type).item<double>();
+      if (norm > max_norm) {
+        auto scale = max_norm / (norm + 1e-7);
+        row *= scale;
+      }
     }
-    auto row = self[sorted_indices[i]];
-    auto norm = row.norm(norm_type).toCDouble();
-    if (norm > max_norm) {
-      auto scale = max_norm / (norm + 1e-7);
-      row *= scale;
-    }
-  }
+  });
 
   return self;
 }
+
 
 }}  // namespace at::native

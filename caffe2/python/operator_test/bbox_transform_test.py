@@ -2,9 +2,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
@@ -201,8 +203,8 @@ def generate_rois_rotated(roi_counts, im_dims):
     return rotated_rois
 
 
-class TestBBoxTransformOp(hu.HypothesisTestCase):
-    @given(
+class TestBBoxTransformOp(serial.SerializedTestCase):
+    @serial.given(
         num_rois=st.integers(1, 10),
         num_classes=st.integers(1, 10),
         im_dim=st.integers(100, 600),

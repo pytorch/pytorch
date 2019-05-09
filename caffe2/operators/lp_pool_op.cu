@@ -6,36 +6,16 @@
 
 namespace caffe2 {
 namespace {
-class LpPool {};
+struct LpPoolFunctor {
+  explicit LpPoolFunctor(const OperatorBase& /* op */) {}
+};
 } // namespace
 
 namespace {
-template <typename T>
-inline __device__ T cuda_pow(T x, T y);
 
-template <typename T>
-inline __device__ T cuda_abs(T x);
+using c10::cuda::compat::abs;
+using c10::cuda::compat::pow;
 
-template <>
-inline __device__ float cuda_pow<float>(float x, float y) {
-  return powf(x, y);
-}
-template <>
-inline __device__ double cuda_pow<double>(double x, double y) {
-  return pow(x, y);
-}
-
-template <>
-inline __device__ float cuda_abs(float x) {
-  return fabsf(x);
-}
-template <>
-inline __device__ double cuda_abs(double x) {
-  return fabs(x);
-}
-}
-
-namespace {
 template <typename T>
 __global__ void LpPoolForwardNCHW(
     const int nthreads,
@@ -72,11 +52,11 @@ __global__ void LpPoolForwardNCHW(
     int bottom_offset = (n * channels + c) * height * width;
     for (int h = hstart; h < hend; ++h) {
       for (int w = wstart; w < wend; ++w) {
-        top_data[index] += cuda_pow<T>(
-            cuda_abs(bottom_data[bottom_offset + h * width + w]), p);
+        top_data[index] +=
+            pow(abs(bottom_data[bottom_offset + h * width + w]), p);
       }
     }
-    top_data[index] = cuda_pow<T>(top_data[index], 1.0 / p);
+    top_data[index] = pow(top_data[index], static_cast<T>(1.0) / p);
   }
 }
 
@@ -113,12 +93,11 @@ __global__ void LpPoolForwardNHWC(
     int bottom_offset = n * height * width * channels + c;
     for (int h = hstart; h < hend; ++h) {
       for (int w = wstart; w < wend; ++w) {
-        output += cuda_pow<T>(
-            cuda_abs(bottom_data[bottom_offset + (h * width + w) * channels]),
-            p);
+        output += pow(
+            abs(bottom_data[bottom_offset + (h * width + w) * channels]), p);
       }
     }
-    top_data[index] = cuda_pow<T>(output, 1.0 / p);
+    top_data[index] = pow(output, static_cast<T>(1.0) / p);
   }
 }
 
@@ -169,9 +148,8 @@ __global__ void LpPoolBackwardNCHW(
         hstart = max(hstart, 0);
         wstart = max(wstart, 0);
         gradient += top_diff_slice[ph * pooled_width + pw] *
-            bottom_data[index] *
-            cuda_pow<T>(cuda_abs(bottom_data[index]), p - 2) /
-            cuda_pow<T>(top_data_slice[ph * pooled_width + pw], p - 1);
+            bottom_data[index] * pow(abs(bottom_data[index]), p - 2) /
+            pow(top_data_slice[ph * pooled_width + pw], p - 1);
       }
     }
     bottom_diff[index] = gradient;
@@ -224,10 +202,8 @@ __global__ void LpPoolBackwardNHWC(
         hstart = max(hstart, 0);
         wstart = max(wstart, 0);
         gradient += top_diff_slice[(ph * pooled_width + pw) * channels] *
-            bottom_data[index] *
-            cuda_pow<T>(cuda_abs(bottom_data[index]), p - 2) /
-            cuda_pow<T>(top_data_slice[(ph * pooled_width + pw) * channels],
-                        p - 1);
+            bottom_data[index] * pow(abs(bottom_data[index]), p - 2) /
+            pow(top_data_slice[(ph * pooled_width + pw) * channels], p - 1);
       }
     }
     bottom_diff[index] = gradient;
@@ -237,139 +213,139 @@ __global__ void LpPoolBackwardNHWC(
 } // namespace
 
 template <>
-bool PoolOp<float, CUDAContext, LpPool>::RunOnDeviceWithOrderNCHW() {
+bool PoolOp<float, CUDAContext, LpPoolFunctor>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto* Y = Output(0);
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(1));
-  int output_size = Y->size();
-  LpPoolForwardNCHW<float><<<
-      CAFFE_GET_BLOCKS(output_size),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      output_size,
-      X.data<float>(),
-      X.dim32(0),
-      X.dim32(1),
-      X.dim32(2),
-      X.dim32(3),
-      Y->dim32(2),
-      Y->dim32(3),
-      kernel_h(),
-      kernel_w(),
-      stride_h(),
-      stride_w(),
-      pad_t(),
-      pad_l(),
-      Y->mutable_data<float>(),
-      OperatorBase::GetSingleArgument<float>("p", 2.0));
+  int output_size = Y->numel();
+  LpPoolForwardNCHW<float>
+      <<<CAFFE_GET_BLOCKS(output_size),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(
+          output_size,
+          X.data<float>(),
+          X.dim32(0),
+          X.dim32(1),
+          X.dim32(2),
+          X.dim32(3),
+          Y->dim32(2),
+          Y->dim32(3),
+          kernel_h(),
+          kernel_w(),
+          stride_h(),
+          stride_w(),
+          pad_t(),
+          pad_l(),
+          Y->template mutable_data<float>(),
+          OperatorBase::GetSingleArgument<float>("p", 2.0));
   return true;
 }
 
 template <>
-bool PoolOp<float, CUDAContext, LpPool>::RunOnDeviceWithOrderNHWC() {
+bool PoolOp<float, CUDAContext, LpPoolFunctor>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto* Y = Output(0);
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(3));
-  int output_size = Y->size();
-  LpPoolForwardNHWC<float><<<
-      CAFFE_GET_BLOCKS(output_size),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      output_size,
-      X.data<float>(),
-      X.dim32(0),
-      X.dim32(1),
-      X.dim32(2),
-      X.dim32(3),
-      Y->dim32(1),
-      Y->dim32(2),
-      kernel_h(),
-      kernel_w(),
-      stride_h(),
-      stride_w(),
-      pad_t(),
-      pad_l(),
-      Y->mutable_data<float>(),
-      OperatorBase::GetSingleArgument<float>("p", 2.0));
+  int output_size = Y->numel();
+  LpPoolForwardNHWC<float>
+      <<<CAFFE_GET_BLOCKS(output_size),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(
+          output_size,
+          X.data<float>(),
+          X.dim32(0),
+          X.dim32(1),
+          X.dim32(2),
+          X.dim32(3),
+          Y->dim32(1),
+          Y->dim32(2),
+          kernel_h(),
+          kernel_w(),
+          stride_h(),
+          stride_w(),
+          pad_t(),
+          pad_l(),
+          Y->template mutable_data<float>(),
+          OperatorBase::GetSingleArgument<float>("p", 2.0));
   return true;
 }
 
 template <>
-bool PoolGradientOp<float, CUDAContext, LpPool>::
+bool PoolGradientOp<float, CUDAContext, LpPoolFunctor>::
     RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  CAFFE_ENFORCE_EQ(dY.ndim(), 4);
-  auto* dX = Output(0);
-  dX->ResizeLike(X);
+  CAFFE_ENFORCE_EQ(dY.dim(), 4);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(2), X.dim32(3)});
-  LpPoolBackwardNCHW<float><<<
-      CAFFE_GET_BLOCKS(X.size()),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      X.size(),
-      dY.data<float>(),
-      Y.data<float>(),
-      X.data<float>(),
-      X.dim32(0),
-      X.dim32(1),
-      X.dim32(2),
-      X.dim32(3),
-      dY.dim32(2),
-      dY.dim32(3),
-      kernel_h(),
-      kernel_w(),
-      stride_h(),
-      stride_w(),
-      pad_t(),
-      pad_l(),
-      dX->mutable_data<float>(),
-      OperatorBase::GetSingleArgument<float>("p", 2.0));
+  LpPoolBackwardNCHW<float>
+      <<<CAFFE_GET_BLOCKS(X.numel()),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(
+          X.numel(),
+          dY.data<float>(),
+          Y.data<float>(),
+          X.data<float>(),
+          X.dim32(0),
+          X.dim32(1),
+          X.dim32(2),
+          X.dim32(3),
+          dY.dim32(2),
+          dY.dim32(3),
+          kernel_h(),
+          kernel_w(),
+          stride_h(),
+          stride_w(),
+          pad_t(),
+          pad_l(),
+          dX->template mutable_data<float>(),
+          OperatorBase::GetSingleArgument<float>("p", 2.0));
   return true;
 }
 
 template <>
-bool PoolGradientOp<float, CUDAContext, LpPool>::
+bool PoolGradientOp<float, CUDAContext, LpPoolFunctor>::
     RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  CAFFE_ENFORCE_EQ(dY.ndim(), 4);
-  auto* dX = Output(0);
-  dX->ResizeLike(X);
+  CAFFE_ENFORCE_EQ(dY.dim(), 4);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   ConvPoolOpBase<CUDAContext>::ComputePads({X.dim32(1), X.dim32(2)});
-  LpPoolBackwardNHWC<float><<<
-      CAFFE_GET_BLOCKS(X.size()),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      X.size(),
-      dY.data<float>(),
-      Y.data<float>(),
-      X.data<float>(),
-      X.dim32(0),
-      X.dim32(1),
-      X.dim32(2),
-      X.dim32(3),
-      dY.dim32(1),
-      dY.dim32(2),
-      kernel_h(),
-      kernel_w(),
-      stride_h(),
-      stride_w(),
-      pad_t(),
-      pad_l(),
-      dX->mutable_data<float>(),
-      OperatorBase::GetSingleArgument<float>("p", 2.0));
+  LpPoolBackwardNHWC<float>
+      <<<CAFFE_GET_BLOCKS(X.numel()),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(
+          X.numel(),
+          dY.data<float>(),
+          Y.data<float>(),
+          X.data<float>(),
+          X.dim32(0),
+          X.dim32(1),
+          X.dim32(2),
+          X.dim32(3),
+          dY.dim32(1),
+          dY.dim32(2),
+          kernel_h(),
+          kernel_w(),
+          stride_h(),
+          stride_w(),
+          pad_t(),
+          pad_l(),
+          dX->template mutable_data<float>(),
+          OperatorBase::GetSingleArgument<float>("p", 2.0));
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(LpPool, PoolOp<float, CUDAContext, LpPool>);
+REGISTER_CUDA_OPERATOR(LpPool, PoolOp<float, CUDAContext, LpPoolFunctor>);
 REGISTER_CUDA_OPERATOR(
     LpPoolGradient,
-    PoolGradientOp<float, CUDAContext, LpPool>);
+    PoolGradientOp<float, CUDAContext, LpPoolFunctor>);
 }

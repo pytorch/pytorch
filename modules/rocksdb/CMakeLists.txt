@@ -37,12 +37,18 @@ endif()
 # cmake. Note that for modules that are located in the Caffe2 repository,
 # cmake related files, such as FindRocksDB in this case, should live in the
 # cmake/ folder under root.
-find_package(RocksDB)
-if(NOT ROCKSDB_FOUND)
-  message(
-     FATAL_ERROR
-     "RocksDB not found. If you do not need caffe2_rocksdb, set "
-     "-DUSE_ROCKSDB=OFF to solve this error.")
+find_package(RocksDB CONFIG)
+if((DEFINED RocksDB_DIR) AND RocksDB_DIR)
+  list(APPEND RocksDB_LIBRARIES RocksDB::rocksdb)
+else()
+  message("RocksDB config not found. Fallback to legacy find.")
+  find_package(RocksDB)
+  if(NOT ROCKSDB_FOUND)
+    message(
+       FATAL_ERROR
+       "RocksDB not found. If you do not need caffe2_rocksdb, set "
+       "-DUSE_ROCKSDB=OFF to solve this error.")
+  endif()
 endif()
 
 # ---[ Third, create the CMake target.

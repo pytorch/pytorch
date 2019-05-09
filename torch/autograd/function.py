@@ -51,7 +51,8 @@ class _ContextMethodMixin(object):
         This will mark outputs as not requiring gradients, increasing the
         efficiency of backward computation. You still need to accept a gradient
         for each output in :meth:`~Function.backward`, but it's always going to
-        be ``None``.
+        be a zero tensor with the same shape as the shape of a corresponding
+        output.
 
         This is used e.g. for indices returned from a max :class:`Function`.
         """
@@ -93,14 +94,14 @@ class FunctionMeta(type):
                 has_static_forward = isinstance(forward, staticmethod) or isinstance(forward, classmethod)
                 break
 
-        setattr(cls, '_is_legacy', not has_static_forward)
+        cls._is_legacy = not has_static_forward
 
         # old-style functions
         if not has_static_forward:
             return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
         backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
-        setattr(cls, '_backward_cls', backward_fn)
+        cls._backward_cls = backward_fn
 
         return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
@@ -254,6 +255,8 @@ def _nested_map(condition, fn, condition_msg=None):
             return None
         elif isinstance(obj, (list, tuple)):
             return type(obj)(_map(x) for x in obj)
+        elif isinstance(obj, dict):
+            return {x : _map(obj[x]) for x in obj}
         else:
             raise ValueError("Auto nesting doesn't know how to process "
                              "an input object of type " + torch.typename(obj) +
@@ -264,14 +267,28 @@ def _nested_map(condition, fn, condition_msg=None):
     return _map
 
 
-def _iter_filter(condition, allow_unknown=False, condition_msg=None):
+def _jit_unwrap_structured(obj):
+    if hasattr(obj, "_jit_unwrap"):
+        return obj._jit_unwrap()
+    return obj
+
+
+def _iter_filter(condition, allow_unknown=False, condition_msg=None,
+                 conversion=None):
     def _iter(obj):
+        if conversion is not None:
+            obj = conversion(obj)
         if condition(obj):
             yield obj
         elif obj is None:
             return
         elif isinstance(obj, (list, tuple)):
             for o in obj:
+                for var in _iter(o):
+                    yield var
+        elif isinstance(obj, dict):
+            # We only accept primitive key types, so we needn't inspect them
+            for o in obj.values():
                 for var in _iter(o):
                     yield var
         elif allow_unknown:
@@ -291,6 +308,8 @@ def _unflatten(input, proto):
     # specified by proto
     def unflatten_helper(input, proto):
         res = []
+        if hasattr(proto, "_jit_wrap"):
+            return proto._jit_wrap(input)
         if not isinstance(proto, (list, tuple)):
             return input[0], input[1:]
         for e in proto:
@@ -306,7 +325,8 @@ def _unflatten(input, proto):
 
 _iter_jit_values = _iter_filter(lambda o: o is None or isinstance(o, torch._C.Value),
                                 condition_msg="jit's Values or None")
-_iter_tensors = _iter_filter(lambda x: isinstance(x, torch.Tensor), condition_msg="Tensors")
+_iter_tensors = _iter_filter(lambda x: isinstance(x, torch.Tensor), condition_msg="Tensors",
+                             conversion=_jit_unwrap_structured)
 _iter_tensors_permissive = _iter_filter(lambda x: isinstance(x, torch.Tensor),
                                         allow_unknown=True,
                                         condition_msg="Tensors (permissive)")

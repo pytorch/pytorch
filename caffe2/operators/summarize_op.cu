@@ -75,7 +75,7 @@ struct summary_stats_binary_op
 template<>
 bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  const int N = X.size();
+  const int N = X.numel();
   DCHECK_GT(N, 0);
 
   // TODO(Yangqing): Any better way to avoid having to const cast?
@@ -96,12 +96,11 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
                  << standard_deviation << std::endl;
   }
   if (OutputSize()) {
-    auto* Y = OperatorBase::Output<TensorCUDA>(0);
-    Y->Resize(4);
+    auto* Y = Output(0, {4}, at::dtype<float>());
     float output_buffer[NUM_STATS] = {result.min, result.max, result.mean,
                                standard_deviation};
-    context_.Copy<float, CPUContext, CUDAContext>(
-        NUM_STATS, output_buffer, Y->mutable_data<float>());
+    context_.CopyFromCPU<float>(
+        NUM_STATS, output_buffer, Y->template mutable_data<float>());
   }
   return true;
 }

@@ -1,13 +1,14 @@
 #ifndef THCUNN_IM2COL_H
 #define THCUNN_IM2COL_H
 
-#include "common.h"
-#include "THCNumerics.cuh"
+#include <THCUNN/common.h>
+#include <THC/THCNumerics.cuh>
+#include <c10/macros/Macros.h>
 
 // Kernel for fast unfold+copy
 // (borrowed from Caffe: https://github.com/BVLC/caffe/blob/master/src/caffe/layers/conv_layer.cu)
 template <typename Dtype>
-__launch_bounds__(CUDA_NUM_THREADS)
+C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void im2col_kernel(const int64_t n, const Dtype* data_im,
                               const int64_t height, const int64_t width,
                               const int64_t ksize_h, const int64_t ksize_w,
@@ -59,7 +60,7 @@ void im2col(cudaStream_t stream, const Dtype* data_im, const int64_t channels,
 }
 
 template <typename Dtype, typename Acctype>
-__launch_bounds__(CUDA_NUM_THREADS)
+C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void col2im_kernel(const int64_t n, const Dtype* data_col,
                                   const int64_t height, const int64_t width, const int64_t channels,
                                   const int64_t kernel_h, const int64_t kernel_w,
@@ -100,13 +101,6 @@ __global__ void col2im_kernel(const int64_t n, const Dtype* data_col,
   }
 }
 
-template <typename Dtype, typename Acctype>
-void col2im(cudaStream_t stream, const Dtype* data_col, const int64_t channels,
-            const int64_t height, const int64_t width,
-            const int64_t output_height, const int64_t output_width,
-            const int64_t patch_h, const int64_t patch_w, const int64_t pad_h,
-            const int64_t pad_w, const int64_t stride_h, const int64_t stride_w,
-            const int64_t dilation_h, const int64_t dilation_w, Dtype* data_im);
 
 template <typename Dtype, typename Acctype>
 void col2im(cudaStream_t stream, const Dtype* data_col, const int64_t channels,

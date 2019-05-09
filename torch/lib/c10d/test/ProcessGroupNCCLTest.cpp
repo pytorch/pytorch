@@ -1,17 +1,18 @@
 #include <iostream>
 
-#include <c10d/CUDAUtils.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupNCCL.hpp>
-#include <c10d/private/CUDAUtils.hpp>
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
 
+#include <c10/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDAMultiStreamGuard.h>
+#include <c10/cuda/CUDAStream.h>
+
 using namespace c10d::test;
 
-using c10d::CUDAStream;
+using at::cuda::CUDAStream;
 using c10d::ProcessGroup;
-using c10d::THCStreamGuard;
 
 class NCCLTestBase {
  public:
@@ -27,7 +28,7 @@ class NCCLTestBase {
   }
 
   void initialize(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_);
+    auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupNCCL>(
         new ::c10d::ProcessGroupNCCL(store, rank, size));
@@ -40,18 +41,25 @@ class NCCLTestBase {
 
 class NCCLTest : public NCCLTestBase {
  public:
-  NCCLTest(const std::string& path)
+  NCCLTest(const std::string& path, int worldSize)
       : NCCLTestBase(path),
         numDevices_(cudaNumDevices()),
-        state_(::at::globalContext().lazyInitCUDA()) {
-    const auto& type = at::getType(at::kCUDA, at::kFloat);
-
+        state_(::at::globalContext().lazyInitCUDA()),
+        worldSize_(worldSize) {
     // Each device has a single tensor to perf the NCCL op
+    tensors_.resize(numDevices_);
     inputs_.resize(numDevices_);
-    at::DeviceGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
+    outputs_.resize(numDevices_);
+    at::cuda::OptionalCUDAGuard deviceGuard;
+    for (auto i = 0; i < numDevices_; ++i) {
       deviceGuard.set_index(i);
-      inputs_[i] = type.tensor({3, 3});
+      tensors_[i] = at::empty({3, 3}, at::kCUDA);
+      inputs_[i].resize(worldSize_ * numDevices_);
+      outputs_[i].resize(worldSize_ * numDevices_);
+      for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
+        inputs_[i][j] = at::empty({3, 3}, at::kCUDA);
+        outputs_[i][j] = at::empty({3, 3}, at::kCUDA);
+      }
     }
 
     // Allocate a stream per device.
@@ -61,23 +69,15 @@ class NCCLTest : public NCCLTestBase {
     // and pass this along to the collective (since it uses the THC
     // getters to retrieve the current stream).
     //
-    streams_.resize(numDevices_);
+    streams_.reserve(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
-      streams_[i] = CUDAStream::create();
+      streams_.push_back(at::cuda::getStreamFromPool());
     }
-  }
-
-  std::vector<THCStreamGuard> createStreamGuard() {
-    std::vector<THCStreamGuard> guards;
-    for (auto& stream : streams_) {
-      guards.push_back(std::move(THCStreamGuard(state_, stream)));
-    }
-    return guards;
   }
 
   void wait(std::shared_ptr<ProcessGroup::Work>& work) {
-    auto guards = createStreamGuard();
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait();
   }
 
@@ -85,38 +85,70 @@ class NCCLTest : public NCCLTestBase {
     std::vector<at::Tensor> outputs(numDevices_);
 
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Copy inputs to outputs
     for (auto i = 0; i < numDevices_; i++) {
-      cudaStreamSynchronize(streams_[i].getStream());
-      outputs[i] = inputs_[i].toBackend(at::kCPU);
+      cudaStreamSynchronize(streams_[i].stream());
+      outputs[i] = tensors_[i].cpu();
     }
 
     return outputs;
+  }
+
+  std::vector<std::vector<at::Tensor>> getInputTensors() {
+    return getTensorLists(inputs_);
+  }
+  std::vector<std::vector<at::Tensor>> getOutputTensors() {
+    return getTensorLists(outputs_);
   }
 
   int numDevices() const {
     return numDevices_;
   }
 
+ private:
+  std::vector<std::vector<at::Tensor>> getTensorLists(
+      std::vector<std::vector<at::Tensor>>& tensor_lists) {
+    std::vector<std::vector<at::Tensor>> outputs(numDevices_);
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      outputs[i] = std::vector<at::Tensor>(worldSize_ * numDevices_);
+    }
+
+    // For the duration of this function, make THC use our streams
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
+
+    // Copy inputs to outputs
+    for (auto i = 0; i < numDevices_; ++i) {
+      cudaStreamSynchronize(streams_[i].stream());
+      for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
+        outputs[i][j] = tensor_lists[i][j].cpu();
+      }
+    }
+    return outputs;
+  }
+
  protected:
   const int numDevices_;
   THCState* state_;
-  std::vector<at::Tensor> inputs_;
+  int worldSize_;
+  std::vector<at::Tensor> tensors_;
+  std::vector<std::vector<at::Tensor>> inputs_;
+  std::vector<std::vector<at::Tensor>> outputs_;
   std::vector<CUDAStream> streams_;
 };
 
 class AllreduceNCCLTest : public NCCLTest {
  public:
-  AllreduceNCCLTest(const std::string& path) : NCCLTest(path) {}
+  AllreduceNCCLTest(const std::string& path, int worldSize)
+      : NCCLTest(path, worldSize) {}
 
   std::shared_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every device
-    at::DeviceGuard deviceGuard;
+    at::cuda::OptionalCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 2000 * 1000 * 1000);
@@ -125,23 +157,24 @@ class AllreduceNCCLTest : public NCCLTest {
     // Launch value initialization for every tensor
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
-      inputs_[i].fill_(pg_->getRank() * numDevices_ + i);
+      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
     }
 
-    return pg_->allreduce(inputs_);
+    return pg_->allreduce(tensors_);
   }
 };
 
 class BroadcastNCCLTest : public NCCLTest {
  public:
-  BroadcastNCCLTest(const std::string& path) : NCCLTest(path) {}
+  BroadcastNCCLTest(const std::string& path, int worldSize)
+      : NCCLTest(path, worldSize) {}
 
   std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every device
-    at::DeviceGuard deviceGuard;
+    at::cuda::OptionalCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 2000 * 1000 * 1000);
@@ -150,18 +183,102 @@ class BroadcastNCCLTest : public NCCLTest {
     // Launch value initialization for every tensor
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
-      inputs_[i].fill_(pg_->getRank() * numDevices_ + i);
+      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
     }
 
     ::c10d::BroadcastOptions options;
     options.rootRank = rootRank;
     options.rootTensor = rootTensor;
-    return pg_->broadcast(inputs_, options);
+    return pg_->broadcast(tensors_, options);
+  }
+};
+
+class ReduceNCCLTest : public NCCLTest {
+ public:
+  ReduceNCCLTest(const std::string& path, int worldSize)
+      : NCCLTest(path, worldSize) {}
+
+  std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
+    // For the duration of this function, make THC use our streams
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
+
+    // Launch sleep on every device
+    at::cuda::OptionalCUDAGuard deviceGuard;
+    for (auto i = 0; i < numDevices_; i++) {
+      deviceGuard.set_index(i);
+      cudaSleep(streams_[i], 2000 * 1000 * 1000);
+    }
+
+    // Launch value initialization for every tensor
+    for (auto i = 0; i < numDevices_; i++) {
+      deviceGuard.set_index(i);
+      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
+    }
+
+    ::c10d::ReduceOptions options;
+    options.rootRank = rootRank;
+    options.rootTensor = rootTensor;
+    return pg_->reduce(tensors_, options);
+  }
+};
+
+class AllgatherNCCLTest : public NCCLTest {
+ public:
+  AllgatherNCCLTest(const std::string& path, int worldSize)
+      : NCCLTest(path, worldSize) {}
+
+  std::shared_ptr<c10d::ProcessGroup::Work> run() {
+    // For the duration of this function, make THC use our streams
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
+
+    // Launch sleep on every device
+    at::cuda::OptionalCUDAGuard deviceGuard;
+    for (auto i = 0; i < numDevices_; i++) {
+      deviceGuard.set_index(i);
+      cudaSleep(streams_[i], 2000 * 1000 * 1000);
+    }
+
+    // Launch value initialization for every tensor
+    for (auto i = 0; i < numDevices_; i++) {
+      deviceGuard.set_index(i);
+      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
+    }
+
+    return pg_->allgather(outputs_, tensors_);
+  }
+};
+
+struct ReduceScatterNCCLTest : NCCLTest {
+  ReduceScatterNCCLTest(const std::string& path, int worldSize)
+      : NCCLTest(path, worldSize) {}
+
+  std::shared_ptr<c10d::ProcessGroup::Work> run() {
+    // For the duration of this function, make THC use our streams
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
+
+    // Launch sleep on every device
+    at::cuda::OptionalCUDAGuard deviceGuard;
+    for (auto i = 0; i < numDevices_; i++) {
+      deviceGuard.set_index(i);
+      cudaSleep(streams_[i], 2000 * 1000 * 1000);
+    }
+
+    // Launch value initialization for every tensor
+    for (auto i = 0; i < numDevices_; i++) {
+      deviceGuard.set_index(i);
+      for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
+        inputs_[i][j].fill_(
+          pg_->getRank() * numDevices_ * worldSize_ + i * worldSize_ + j
+        );
+      }
+    }
+
+    return pg_->reduce_scatter(tensors_, inputs_);
   }
 };
 
 void testAllreduce(const std::string& path, int rank, int size) {
-  auto test = AllreduceNCCLTest(path);
+  auto test = AllreduceNCCLTest(path, size);
   test.initialize(rank, size);
   auto work = test.run();
   // Wait for work to finish
@@ -184,16 +301,16 @@ void testAllreduce(const std::string& path, int rank, int size) {
 }
 
 void testBroadcast(const std::string& path, int rank, int size) {
-  auto test = BroadcastNCCLTest(path);
+  auto test = BroadcastNCCLTest(path, size);
   test.initialize(rank, size);
 
   const int numDevices = test.numDevices();
-  // Try every permutation of root rank and root tensor
+  // try every permutation of root rank and root tensor
   for (auto rootRank = 0; rootRank < size; rootRank++) {
     for (auto rootTensor = 0; rootTensor < numDevices; rootTensor++) {
       auto work = test.run(rootRank, rootTensor);
 
-      // Wait for work to complete
+      // wait for work to complete
       test.wait(work);
 
       // Check results
@@ -213,6 +330,90 @@ void testBroadcast(const std::string& path, int rank, int size) {
   std::cout << "Broadcast test successful" << std::endl;
 }
 
+void testReduce(const std::string& path, int rank, int size) {
+  auto test = ReduceNCCLTest(path, size);
+  test.initialize(rank, size);
+
+  const int numDevices = test.numDevices();
+  // try every permutation of root rank and root tensor
+  for (auto rootRank = 0; rootRank < size; rootRank++) {
+    for (auto rootTensor = 0; rootTensor < numDevices; rootTensor++) {
+      auto work = test.run(rootRank, rootTensor);
+
+      // wait for work to complete
+      test.wait(work);
+
+      // Validation
+      const int totalNumGPUs = numDevices * size;
+      const auto expected = (totalNumGPUs * (totalNumGPUs - 1)) / 2;
+      auto tensors = test.getTensors();
+      if (rank == rootRank) {
+        auto& tensor = tensors[rootTensor];
+        auto data = tensor.data<float>();
+        for (auto k = 0; k < tensor.numel(); k++) {
+          if (data[k] != expected) {
+            throw std::runtime_error("BOOM!");
+          }
+        }
+      }
+    }
+  }
+  std::cout << "Reduce test successful" << std::endl;
+}
+
+void testAllgather(const std::string& path, int rank, int size) {
+  auto test = AllgatherNCCLTest(path, size);
+  test.initialize(rank, size);
+  auto work = test.run();
+  // Wait for work to finish
+  test.wait(work);
+
+  // Validation
+  auto tensors = test.getOutputTensors();
+  // device index
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    // rank index
+    for (size_t j = 0; j < tensors[i].size(); ++j) {
+      const auto expected = j;
+      auto& tensor = tensors[i][j];
+      auto data = tensor.data<float>();
+      for (auto k = 0; k < tensor.numel(); k++) {
+        if (data[k] != expected) {
+          throw std::runtime_error("BOOM!");
+        }
+      }
+    }
+  }
+  std::cout << "Allgather test successful" << std::endl;
+}
+
+void testReduceScatter(const std::string& path, int rank, int size) {
+  auto test = ReduceScatterNCCLTest(path, size);
+  test.initialize(rank, size);
+  auto work = test.run();
+  // Wait for work to finish
+  test.wait(work);
+
+  const auto participants = test.numDevices() * size;
+  const auto base = (participants * (participants - 1)) / 2;
+
+  // Validation
+  auto tensors = test.getTensors();
+  // device index
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    const auto modifier = participants * (rank * participants + i);
+    const auto expected = base + modifier;
+    auto& tensor = tensors[i];
+    auto data = tensor.data<float>();
+    for (auto j = 0; j < tensor.numel(); j++) {
+      if (data[j] != expected) {
+        throw std::runtime_error("BOOM!");
+      }
+    }
+  }
+  std::cout << "Reduce-scatter test successful" << std::endl;
+}
+
 int main(int argc, char** argv) {
   // Use WORLD_SIZE and RANK environmental variables to do multi-node
   // distributed testing
@@ -228,13 +429,14 @@ int main(int argc, char** argv) {
     std::cout << "Multi-node world size: " << size << " rank: " << rank
               << std::endl;
   }
-  {
-    TemporaryFile file;
-    testAllreduce(file.path, rank, size);
-  }
-  {
-    TemporaryFile file;
-    testBroadcast(file.path, rank, size);
-  }
+  // TemporaryFile file;
+  TemporaryFile file;
+
+  testAllreduce(file.path, rank, size);
+  testBroadcast(file.path, rank, size);
+  testReduce(file.path, rank, size);
+  testAllgather(file.path, rank, size);
+  testReduceScatter(file.path, rank, size);
+
   return EXIT_SUCCESS;
 }

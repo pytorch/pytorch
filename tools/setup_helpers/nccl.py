@@ -1,15 +1,12 @@
 import os
 import glob
-import warnings
-from itertools import chain
 
 from .env import IS_WINDOWS, IS_DARWIN, IS_CONDA, CONDA_DIR, check_negative_env_flag, \
     gather_paths
 
 from .cuda import USE_CUDA, CUDA_HOME
 
-
-USE_NCCL = USE_CUDA and not IS_DARWIN and not IS_WINDOWS
+USE_NCCL = USE_CUDA and not check_negative_env_flag('USE_NCCL') and not IS_DARWIN and not IS_WINDOWS
 USE_SYSTEM_NCCL = False
 NCCL_LIB_DIR = None
 NCCL_SYSTEM_LIB = None
@@ -33,9 +30,11 @@ if USE_CUDA and not check_negative_env_flag('USE_SYSTEM_NCCL'):
         os.path.join(ENV_ROOT, 'lib64') if ENV_ROOT is not None else None,
         os.path.join(CUDA_HOME, 'lib'),
         os.path.join(CUDA_HOME, 'lib64'),
+        '/usr/local/lib',
         '/usr/lib/x86_64-linux-gnu/',
         '/usr/lib/powerpc64le-linux-gnu/',
         '/usr/lib/aarch64-linux-gnu/',
+        '/usr/lib',
     ] + gather_paths([
         'LIBRARY_PATH',
     ]) + gather_paths([
@@ -45,7 +44,9 @@ if USE_CUDA and not check_negative_env_flag('USE_SYSTEM_NCCL'):
         INCLUDE_DIR,
         ENV_ROOT,
         os.path.join(ENV_ROOT, 'include') if ENV_ROOT is not None else None,
-        '/usr/include'
+        os.path.join(CUDA_HOME, 'include'),
+        '/usr/local/include',
+        '/usr/include',
     ]))
 
     if IS_CONDA:

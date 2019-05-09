@@ -14,7 +14,7 @@ class StopGradientOp : public Operator<Context> {
     const auto& in = Input(0);
     auto* out = Output(0);
     if (out != &in) {
-      out->CopyFrom(in, &context_);
+      out->CopyFrom(in, true /*async*/);
     }
     return true;
   }

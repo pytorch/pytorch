@@ -74,9 +74,10 @@ You can force synchronous computation by setting environment variable
 operation is actually executed, so the stack trace does not show where it was
 requested.)
 
-As an exception, several functions such as :meth:`~torch.Tensor.copy_` admit
-an explicit :attr:`async` argument, which lets the caller bypass synchronization
-when it is unnecessary.  Another exception is CUDA streams, explained below.
+As an exception, several functions such as :meth:`~torch.Tensor.to` and
+:meth:`~torch.Tensor.copy_` admit an explicit :attr:`non_blocking` argument,
+which lets the caller bypass synchronization when it is unnecessary.
+Another exception is CUDA streams, explained below.
 
 CUDA streams
 ^^^^^^^^^^^^
@@ -117,10 +118,38 @@ unused memory managed by the allocator will still show as if used in
 :meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
 tensors, and use :meth:`~torch.cuda.memory_cached` and
 :meth:`~torch.cuda.max_memory_cached` to monitor memory managed by the caching
-allocator. Calling :meth:`~torch.cuda.empty_cache` can release all **unused**
+allocator. Calling :meth:`~torch.cuda.empty_cache` releases all **unused**
 cached memory from PyTorch so that those can be used by other GPU applications.
 However, the occupied GPU memory by tensors will not be freed so it can not
 increase the amount of GPU memory available for PyTorch.
+
+.. _cufft-plan-cache:
+
+cuFFT plan cache
+----------------
+
+For each CUDA device, an LRU cache of cuFFT plans is used to speed up repeatedly
+running FFT methods (e.g., :func:`torch.fft`) on CUDA tensors of same geometry
+with same configuration. Because some cuFFT plans may allocate GPU memory,
+these caches have a maximum capacity.
+
+You may control and query the properties of the cache of current device with
+the following APIs:
+
+* ``torch.backends.cuda.cufft_plan_cache.max_size`` gives the capacity of the
+  cache (default is 4096 on CUDA 10 and newer, and 1023 on older CUDA versions).
+  Setting this value directly modifies the capacity.
+
+* ``torch.backends.cuda.cufft_plan_cache.size`` gives the number of plans
+  currently residing in the cache.
+
+* ``torch.backends.cuda.cufft_plan_cache.clear()`` clears the cache.
+
+To control and query plan caches of a non-default device, you can index the
+``torch.backends.cuda.cufft_plan_cache`` object with either a :class:`torch.device`
+object or a device index, and access one of the above attributes. E.g., to set
+the capacity of the cache for device ``1``, one can write
+``torch.backends.cuda.cufft_plan_cache[1].max_size = 10``.
 
 Best practices
 --------------

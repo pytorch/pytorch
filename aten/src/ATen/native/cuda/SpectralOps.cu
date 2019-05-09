@@ -1,12 +1,13 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/Config.h"
-#include "ATen/Dispatch.h"
-#include "ATen/Utils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/native/SpectralOpsUtils.h"
-#include "ATen/native/cuda/CuFFTUtils.h"
-#include "ATen/native/cuda/CuFFTPlanCache.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Utils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/SpectralOpsUtils.h>
+#include <ATen/native/cuda/CuFFTUtils.h>
+#include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
@@ -14,6 +15,7 @@
 #include <thrust/unique.h>
 #include <cufft.h>
 #include <cufftXt.h>
+#include <vector>
 #include <cmath>
 
 namespace at { namespace native {
@@ -29,13 +31,19 @@ using namespace at::native::detail;
 // counting_iterator => index to fill
 struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
 {
-  const int64_t last_dim_size;
-  const int64_t last_dim_start_slice;
-  const int64_t last_dim_to_fill_size;
+  int64_t last_dim_size;
+  int64_t last_dim_start_slice;
+  int64_t last_dim_to_fill_size;
 
   cnt_to_dst_idx_functor(int64_t last_dim_size, int64_t last_dim_start_slice) :
     last_dim_size(last_dim_size), last_dim_start_slice(last_dim_start_slice),
     last_dim_to_fill_size(last_dim_size - last_dim_start_slice) {}
+
+  // HIP wants __host__ __device__ tag, CUDA does not
+#ifdef __HIP_PLATFORM_HCC__
+  __host__ __device__
+#endif
+  cnt_to_dst_idx_functor & operator=(const cnt_to_dst_idx_functor&) = default;
 
   __host__ __device__ __forceinline__
   int64_t operator()(const int64_t& i) const
@@ -108,7 +116,7 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "_fft_fill_with_conjugate_symmetry_", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "_fft_fill_with_conjugate_symmetry_", [&] {
     typedef thrust::device_ptr<scalar_t> device_ptr;
     typedef thrust::counting_iterator<int64_t> counter;
     typedef thrust::transform_iterator<cnt_to_dst_idx_functor, counter> dst_idx_iterator;
@@ -167,8 +175,8 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
 static inline Tensor _run_cufft(
     const CuFFTConfig &config, Tensor& input, int64_t signal_ndim,
     bool complex_input, bool complex_output, bool inverse,
-    IntList checked_signal_sizes, bool normalized, bool onesided,
-    IntList output_sizes, bool input_was_cloned
+    IntArrayRef checked_signal_sizes, bool normalized, bool onesided,
+    IntArrayRef output_sizes, bool input_was_cloned
 ) {
   if (config.should_clone_input() && !input_was_cloned) {
     input = input.clone();
@@ -178,17 +186,54 @@ static inline Tensor _run_cufft(
   auto& ctx = at::globalContext();
 
   // set output
-  auto output = input.type().tensor(output_sizes);
+  auto output = at::empty(output_sizes, input.options());
 
   // set to current stream
   CUFFT_CHECK(cufftSetStream(plan, at::cuda::getCurrentCUDAStream()));
 
-  auto ws = ctx.getType(at::Backend::CUDA, at::ScalarType::Byte).tensor({ config.workspace_size() });
+  auto ws = at::empty({ config.workspace_size() }, at::device(at::kCUDA).dtype(at::kByte));
   CUFFT_CHECK(cufftSetWorkArea(plan, ws.data_ptr()));
 
   // run
+#ifdef __HIP_PLATFORM_HCC__
+  if (input.scalar_type() == ScalarType::Float) {
+      if (complex_input && complex_output) {
+        CUFFT_CHECK(hipfftExecC2C(plan, static_cast<hipfftComplex*>(input.data_ptr()),
+          static_cast<hipfftComplex*>(output.data_ptr()),
+          inverse ? HIPFFT_BACKWARD : HIPFFT_FORWARD));
+      } else if (complex_input && !complex_output) {
+        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(input.data_ptr()),
+          static_cast<hipfftReal*>(output.data_ptr())));
+      } else if (!complex_input && complex_output) {
+        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(input.data_ptr()),
+          static_cast<hipfftComplex*>(output.data_ptr())));
+      } else {
+        AT_ERROR("hipFFT doesn't support r2r (float)");
+      }
+    } else if (input.scalar_type() == ScalarType::Double) {
+      if (complex_input && complex_output) {
+        CUFFT_CHECK(hipfftExecZ2Z(plan, static_cast<hipfftDoubleComplex*>(input.data_ptr()),
+          static_cast<hipfftDoubleComplex*>(output.data_ptr()),
+          inverse ? HIPFFT_BACKWARD : HIPFFT_FORWARD));
+      } else if (complex_input && !complex_output) {
+        CUFFT_CHECK(hipfftExecZ2D(plan, static_cast<hipfftDoubleComplex*>(input.data_ptr()),
+          static_cast<hipfftDoubleReal*>(output.data_ptr())));
+      } else if (!complex_input && complex_output) {
+        CUFFT_CHECK(hipfftExecD2Z(plan, static_cast<hipfftDoubleReal*>(input.data_ptr()),
+          static_cast<hipfftDoubleComplex*>(output.data_ptr())));
+      } else {
+        AT_ERROR("hipFFT doesn't support r2r (double)");
+      }
+    } else {
+      std::ostringstream ss;
+      ss << "hipFFT doesn't support tensor of type: "
+         << toString(input.scalar_type());
+      AT_ERROR(ss.str());
+    }
+#else
   CUFFT_CHECK(cufftXtExec(plan, input.data_ptr(), output.data_ptr(),
     inverse ? CUFFT_INVERSE : CUFFT_FORWARD));
+#endif
 
   // rescale if needed by normalized flag or inverse transform
   auto size_last_signal_dim = checked_signal_sizes[signal_ndim - 1];
@@ -217,29 +262,59 @@ static inline Tensor _run_cufft(
 }
 
 // The cuFFT plan cache, defined in CuFFTUtils.h
-struct CuFFTParamsLRUCache plan_cache;
-std::mutex plan_cache_mutex;
+std::vector<optional<CuFFTParamsLRUCache>> plan_caches;
+std::mutex plan_caches_mutex;
+
+static inline
+CuFFTParamsLRUCache &cufft_get_plan_cache(int64_t device_index) {
+  std::lock_guard<std::mutex> guard(plan_caches_mutex);
+
+  AT_ASSERT(device_index >= 0);
+
+  if (device_index >= plan_caches.size()) {
+    plan_caches.resize(device_index + 1);
+  }
+
+  if (!plan_caches[device_index]) {
+    plan_caches[device_index].emplace();
+  }
+
+  return *plan_caches[device_index];
+}
+
 
 namespace detail {
 
-int64_t cufft_get_plan_cache_max_size_impl() {
-  std::lock_guard<std::mutex> guard(plan_cache_mutex);
-  return plan_cache.max_size();
+int64_t cufft_get_plan_cache_max_size_impl(int64_t device_index) {
+  AT_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
+    "cufft_get_plan_cache_max_size: expected 0 <= device_index < ",
+    at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
+    device_index);
+  return cufft_get_plan_cache(device_index).max_size();
 }
 
-void cufft_set_plan_cache_max_size_impl(int64_t max_size) {
-  std::lock_guard<std::mutex> guard(plan_cache_mutex);
-  plan_cache.resize(max_size);
+void cufft_set_plan_cache_max_size_impl(int64_t device_index, int64_t max_size) {
+  AT_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
+    "cufft_set_plan_cache_max_size: expected 0 <= device_index < ",
+    at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
+    device_index);
+  return cufft_get_plan_cache(device_index).resize(max_size);
 }
 
-int64_t cufft_get_plan_cache_size_impl() {
-  std::lock_guard<std::mutex> guard(plan_cache_mutex);
-  return plan_cache.size();
+int64_t cufft_get_plan_cache_size_impl(int64_t device_index) {
+  AT_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
+    "cufft_get_plan_cache_size: expected 0 <= device_index < ",
+    at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
+    device_index);
+  return cufft_get_plan_cache(device_index).size();
 }
 
-void cufft_clear_plan_cache_impl() {
-  std::lock_guard<std::mutex> guard(plan_cache_mutex);
-  return plan_cache.clear();
+void cufft_clear_plan_cache_impl(int64_t device_index) {
+  AT_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
+    "cufft_clear_plan_cache: expected 0 <= device_index < ",
+    at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
+    device_index);
+  return cufft_get_plan_cache(device_index).clear();
 }
 
 } // namespace at::native::detail
@@ -248,8 +323,11 @@ void cufft_clear_plan_cache_impl() {
 // Currently not utilizing multi GPUs so this can be potentially sped up.
 Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
                   bool complex_input, bool complex_output, bool inverse,
-                  IntList checked_signal_sizes, bool normalized, bool onesided,
-                  IntList output_sizes) {
+                  IntArrayRef checked_signal_sizes, bool normalized, bool onesided,
+                  IntArrayRef output_sizes) {
+
+  CuFFTParamsLRUCache& plan_cache = cufft_get_plan_cache(self.device().index());
+
   Tensor input = self;
   bool input_was_cloned = false;
 
@@ -265,10 +343,11 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   }
 
   // cuFFT requires input and output data pointers to complex type aligned.
-  // Our allocated output tensor is always 256 bytes aligned so it is fine, but
-  // we need to check input tensor to make sure that it is not unaligned, e.g.,
+  // Our newly allocated output tensor is always 512 bytes aligned so it is fine
+  // (see kRoundSmall and kRoundLarge in THCCachingAllocator.cpp), but we do
+  // need to check input tensor to make sure that it is not unaligned, e.g.,
   // from a slicing.
-  auto complex_size_bytes = 2 * input.type().elementSizeInBytes();
+  auto complex_size_bytes = 2 * input.element_size();
   if (reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0) {
     input = input.clone();
     input_was_cloned = true;
@@ -290,7 +369,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
     CuFFTParams params;
     setCuFFTParams(&params, input, signal_ndim, complex_input,
       complex_output, checked_signal_sizes, onesided);
-    std::lock_guard<std::mutex> guard(plan_cache_mutex);
+    std::lock_guard<std::mutex> guard(plan_cache.mutex);
     if (plan_cache.max_size() > 0) {  // check again after acquiring the lock
       const CuFFTConfig &config = plan_cache.try_emplace_value(std::move(params),
                                              input, signal_ndim, complex_input,

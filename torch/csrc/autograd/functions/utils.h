@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/variadic.h>
@@ -20,7 +20,7 @@ using function_constructor = std::function<std::shared_ptr<Function>(edge_list&&
  * grad_fn if necessary.
  */
 TORCH_API variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
-                                     function_constructor ctr);
+                                     const function_constructor& ctr);
 
 ///  Checks that inputs contains exactly `args` items and that the first `required_args`
 /// items are not nullptr. If not specified, `required_args` defaults to `args`.
@@ -51,14 +51,13 @@ inline bool compute_requires_grad(Args&&... args) {
 inline void set_history(
     at::Tensor& variable,
     const std::shared_ptr<Function>& grad_fn) {
-  if (grad_fn) {
-    if (variable.defined()) {
-      auto output_nr =
-          grad_fn->add_input_metadata(variable.type(), variable.sizes());
-      as_variable_ref(variable).set_gradient_edge({grad_fn, output_nr});
-    } else {
-      grad_fn->add_input_metadata(Function::undefined_input());
-    }
+  AT_ASSERT(grad_fn);
+  if (variable.defined()) {
+    auto output_nr =
+        grad_fn->add_input_metadata(variable);
+    as_variable_ref(variable).set_gradient_edge({grad_fn, output_nr});
+  } else {
+    grad_fn->add_input_metadata(Function::undefined_input());
   }
 }
 

@@ -1,6 +1,8 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricAdaptiveAveragePooling.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricAdaptiveAveragePooling.c"
 #else
+
+#include <ATen/Parallel.h>
 
 #define START_IND(a,b,c) (int)floor((float)(a * c) / b)
 #define END_IND(a,b,c) (int)ceil((float)((a + 1) * c) / b)
@@ -10,8 +12,8 @@
 // 5d tensor B x D x T x H x W
 
 static void THNN_(VolumetricAdaptiveAveragePooling_updateOutput_frame)(
-          real *input_p,
-          real *output_p,
+          scalar_t *input_p,
+          scalar_t *output_p,
           int64_t sizeD,
           int64_t isizeT,
           int64_t isizeH,
@@ -24,56 +26,56 @@ static void THNN_(VolumetricAdaptiveAveragePooling_updateOutput_frame)(
           int64_t istrideH,
           int64_t istrideW)
 {
-  int64_t d;
-#pragma omp parallel for private(d)
-  for (d = 0; d < sizeD; d++)
-  {
-    /* loop over output */
-    int64_t ot, oh, ow;
-    for(ot = 0; ot < osizeT; ot++)
+  at::parallel_for(0, sizeD, 0, [&](int64_t start, int64_t end) {
+    for (auto d = start; d < end; d++)
     {
-      int istartT = START_IND(ot, osizeT, isizeT);
-      int iendT   = END_IND(ot, osizeT, isizeT);
-      int kT = iendT - istartT;
-
-      for(oh = 0; oh < osizeH; oh++)
+      /* loop over output */
+      int64_t ot, oh, ow;
+      for(ot = 0; ot < osizeT; ot++)
       {
-        int istartH = START_IND(oh, osizeH, isizeH);
-        int iendH   = END_IND(oh, osizeH, isizeH);
-        int kH = iendH - istartH;
+        int istartT = START_IND(ot, osizeT, isizeT);
+        int iendT   = END_IND(ot, osizeT, isizeT);
+        int kT = iendT - istartT;
 
-        for(ow = 0; ow < osizeW; ow++)
+        for(oh = 0; oh < osizeH; oh++)
         {
+          int istartH = START_IND(oh, osizeH, isizeH);
+          int iendH   = END_IND(oh, osizeH, isizeH);
+          int kH = iendH - istartH;
 
-          int istartW = START_IND(ow, osizeW, isizeW);
-          int iendW   = END_IND(ow, osizeW, isizeW);
-          int kW = iendW - istartW;
-
-          /* local pointers */
-          real *ip = input_p  + d*istrideD + istartT*istrideT + istartH*istrideH + istartW*istrideW;
-          real *op = output_p + d*osizeT*osizeH*osizeW + ot*osizeH*osizeW + oh*osizeW + ow;
-
-          /* compute local average: */
-          real sum = 0;
-          int it, ih, iw;
-          for(it = 0; it < kT; it++)
+          for(ow = 0; ow < osizeW; ow++)
           {
-            for(ih = 0; ih < kH; ih++)
+
+            int istartW = START_IND(ow, osizeW, isizeW);
+            int iendW   = END_IND(ow, osizeW, isizeW);
+            int kW = iendW - istartW;
+
+            /* local pointers */
+            scalar_t *ip = input_p  + d*istrideD + istartT*istrideT + istartH*istrideH + istartW*istrideW;
+            scalar_t *op = output_p + d*osizeT*osizeH*osizeW + ot*osizeH*osizeW + oh*osizeW + ow;
+
+            /* compute local average: */
+            scalar_t sum = 0;
+            int it, ih, iw;
+            for(it = 0; it < kT; it++)
             {
-              for(iw = 0; iw < kW; iw++)
+              for(ih = 0; ih < kH; ih++)
               {
-                real val = *(ip + it*istrideT + ih*istrideH + iw*istrideW);
-                sum += val;
+                for(iw = 0; iw < kW; iw++)
+                {
+                  scalar_t val = *(ip + it*istrideT + ih*istrideH + iw*istrideW);
+                  sum += val;
+                }
               }
             }
-          }
 
-          /* set output to local average */
-          *op = sum / kT / kH / kW;
+            /* set output to local average */
+            *op = sum / kT / kH / kW;
+          }
         }
       }
     }
-  }
+  });
 }
 
 void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
@@ -100,12 +102,12 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
   int64_t istrideH = 0;
   int64_t istrideW = 0;
 
-  real *input_data = nullptr;
-  real *output_data = nullptr;
+  scalar_t *input_data = nullptr;
+  scalar_t *output_data = nullptr;
 
 
   THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
-		"non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
+                "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   if (input->dim() == 5)
   {
@@ -133,8 +135,8 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
   {
     THTensor_(resize4d)(output, sizeD, osizeT, osizeH, osizeW);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
 
     THNN_(VolumetricAdaptiveAveragePooling_updateOutput_frame)(input_data, output_data,
                                                       sizeD,
@@ -145,29 +147,28 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
   }
   else
   {
-    int64_t b;
-
     THTensor_(resize5d)(output, sizeB, sizeD, osizeT, osizeH, osizeW);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
 
-#pragma omp parallel for private(b)
-    for (b = 0; b < sizeB; b++)
-    {
-      THNN_(VolumetricAdaptiveAveragePooling_updateOutput_frame)(input_data+b*istrideB, output_data+b*sizeD*osizeT*osizeH*osizeW,
-                                                        sizeD,
-                                                        isizeT, isizeH, isizeW,
-                                                        osizeT, osizeH, osizeW,
-                                                        istrideD, istrideT,
-                                                        istrideH, istrideW);
-    }
+    at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
+      for (auto b = start; b < end; b++)
+      {
+        THNN_(VolumetricAdaptiveAveragePooling_updateOutput_frame)(input_data+b*istrideB, output_data+b*sizeD*osizeT*osizeH*osizeW,
+                                                          sizeD,
+                                                          isizeT, isizeH, isizeW,
+                                                          osizeT, osizeH, osizeW,
+                                                          istrideD, istrideT,
+                                                          istrideH, istrideW);
+      }
+    });
   }
 }
 
 static void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput_frame)(
-          real *gradInput_p,
-          real *gradOutput_p,
+          scalar_t *gradInput_p,
+          scalar_t *gradOutput_p,
           int64_t sizeD,
           int64_t isizeT,
           int64_t isizeH,
@@ -176,52 +177,52 @@ static void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput_frame)(
           int64_t osizeH,
           int64_t osizeW)
 {
-  int64_t d;
-#pragma omp parallel for private(d)
-  for (d = 0; d < sizeD; d++)
-  {
-    real *gradInput_p_d  = gradInput_p + d*isizeT*isizeW*isizeH;
-    real *gradOutput_p_d = gradOutput_p + d*osizeT*osizeW*osizeH;
-
-    /* calculate average */
-    int64_t ot, oh, ow;
-    for(ot = 0; ot < osizeT; ot++)
+  at::parallel_for(0, sizeD, 0, [&](int64_t start, int64_t end) {
+    for (auto d = start; d < end; d++)
     {
-      int istartT = START_IND(ot, osizeT, isizeT);
-      int iendT   = END_IND(ot, osizeT, isizeT);
-      int kT = iendT - istartT;
+      scalar_t *gradInput_p_d  = gradInput_p + d*isizeT*isizeW*isizeH;
+      scalar_t *gradOutput_p_d = gradOutput_p + d*osizeT*osizeW*osizeH;
 
-      for(oh = 0; oh < osizeH; oh++)
+      /* calculate average */
+      int64_t ot, oh, ow;
+      for(ot = 0; ot < osizeT; ot++)
       {
-        int istartH = START_IND(oh, osizeH, isizeH);
-        int iendH   = END_IND(oh, osizeH, isizeH);
-        int kH = iendH - istartH;
+        int istartT = START_IND(ot, osizeT, isizeT);
+        int iendT   = END_IND(ot, osizeT, isizeT);
+        int kT = iendT - istartT;
 
-        for(ow = 0; ow < osizeW; ow++)
+        for(oh = 0; oh < osizeH; oh++)
         {
+          int istartH = START_IND(oh, osizeH, isizeH);
+          int iendH   = END_IND(oh, osizeH, isizeH);
+          int kH = iendH - istartH;
 
-          int istartW = START_IND(ow, osizeW, isizeW);
-          int iendW   = END_IND(ow, osizeW, isizeW);
-          int kW = iendW - istartW;
-
-          real grad_delta = gradOutput_p_d[ot*osizeH*osizeW + oh*osizeW + ow] / kT / kH / kW;
-
-          int it, ih, iw;
-          for(it = istartT; it < iendT; it++)
+          for(ow = 0; ow < osizeW; ow++)
           {
-            for(ih = istartH; ih < iendH; ih++)
+
+            int istartW = START_IND(ow, osizeW, isizeW);
+            int iendW   = END_IND(ow, osizeW, isizeW);
+            int kW = iendW - istartW;
+
+            scalar_t grad_delta = gradOutput_p_d[ot*osizeH*osizeW + oh*osizeW + ow] / kT / kH / kW;
+
+            int it, ih, iw;
+            for(it = istartT; it < iendT; it++)
             {
-              for(iw = istartW; iw < iendW; iw++)
+              for(ih = istartH; ih < iendH; ih++)
               {
-                /* update gradient */
-                gradInput_p_d[it*isizeH*isizeW + ih*isizeW + iw] += grad_delta;
+                for(iw = istartW; iw < iendW; iw++)
+                {
+                  /* update gradient */
+                  gradInput_p_d[it*isizeH*isizeW + ih*isizeW + iw] += grad_delta;
+                }
               }
             }
           }
         }
       }
     }
-  }
+  });
 }
 
 void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
@@ -242,8 +243,8 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
   int64_t osizeT;
   int64_t osizeH;
   int64_t osizeW;
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
 
   /* get contiguous gradOutput */
   gradOutput = THTensor_(newContiguous)(gradOutput);
@@ -270,8 +271,8 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
   osizeW = gradOutput->size(dimW);
 
   /* get raw pointers */
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<scalar_t>();
+  gradOutput_data = gradOutput->data<scalar_t>();
 
   /* backprop */
   if (input->dim() == 4)
@@ -283,19 +284,19 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
   }
   else
   {
-    int64_t b;
-#pragma omp parallel for private(b)
-    for (b = 0; b < sizeB; b++)
-    {
-      THNN_(VolumetricAdaptiveAveragePooling_updateGradInput_frame)(gradInput_data+b*sizeD*isizeT*isizeH*isizeW, gradOutput_data+b*sizeD*osizeT*osizeH*osizeW,
-                                                           sizeD,
-                                                           isizeT, isizeH, isizeW,
-                                                           osizeT, osizeH, osizeW);
-    }
+    at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
+      for (auto b = start; b < end; b++)
+      {
+        THNN_(VolumetricAdaptiveAveragePooling_updateGradInput_frame)(gradInput_data+b*sizeD*isizeT*isizeH*isizeW, gradOutput_data+b*sizeD*osizeT*osizeH*osizeW,
+                                                             sizeD,
+                                                             isizeT, isizeH, isizeW,
+                                                             osizeT, osizeH, osizeW);
+      }
+    });
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

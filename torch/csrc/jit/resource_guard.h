@@ -1,19 +1,20 @@
 #pragma once
 #include <functional>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 class ResourceGuard {
   std::function<void()> _destructor;
   bool _released;
 
-public:
+ public:
   ResourceGuard(std::function<void()> destructor)
-    : _destructor(std::move(destructor))
-    , _released(false) {}
+      : _destructor(std::move(destructor)), _released(false) {}
 
   ~ResourceGuard() {
-    if (!_released) _destructor();
+    if (!_released)
+      _destructor();
   }
 
   void release() {
@@ -21,4 +22,5 @@ public:
   }
 };
 
-}}
+} // namespace jit
+} // namespace torch

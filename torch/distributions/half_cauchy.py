@@ -28,8 +28,13 @@ class HalfCauchy(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, scale, validate_args=None):
-        super(HalfCauchy, self).__init__(Cauchy(0, scale), AbsTransform(),
+        base_dist = Cauchy(0, scale)
+        super(HalfCauchy, self).__init__(base_dist, AbsTransform(),
                                          validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(HalfCauchy, _instance)
+        return super(HalfCauchy, self).expand(batch_shape, _instance=new)
 
     @property
     def scale(self):

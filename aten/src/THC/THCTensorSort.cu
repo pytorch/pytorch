@@ -1,14 +1,15 @@
-#include "THCTensorSort.cuh"
+#include <THC/THCTensorSort.cuh>
+#include <ATen/cuda/CUDAContext.h>
 
 void THCudaLongTensor_fillSliceWithIndex(THCState* state,
                                          THCudaLongTensor* t,
                                          int dim) {
-  int64_t dims = THCudaLongTensor_nDimension(state, t);
+  int64_t dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, t);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
   ptrdiff_t inElements = THCudaLongTensor_nElement(state, t);
   if (inElements > 0) {
-    int64_t sliceSize = THCudaLongTensor_size(state, t, dim);
+    int64_t sliceSize = THCudaLongTensor_sizeLegacyNoScalars(state, t, dim);
     ptrdiff_t numSlices = inElements / sliceSize;
 
     dim3 grid;
@@ -17,7 +18,7 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
     }
 
     int64_t maxThreads =
-      THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
     int64_t numThreads = sliceSize;
     if (numThreads > maxThreads) {
       numThreads = maxThreads;

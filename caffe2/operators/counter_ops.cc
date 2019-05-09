@@ -58,22 +58,22 @@ resetcounter_op = core.CreateOperator(
 )
 
 
-# Create counter
+// Create counter
 workspace.RunOperatorOnce(createcounter_op)
 print("'counter' pointer:", workspace.FetchBlob("counter"))
 
 
-# Retrieve initial counter value
+// Retrieve initial counter value
 workspace.RunOperatorOnce(retrievecount_op)
 print("Initial 'count':", workspace.FetchBlob("count"))
 
 
-# Check if counter is done
+// Check if counter is done
 workspace.RunOperatorOnce(checkcounterdone_op)
 print("Initial 'done' value:", workspace.FetchBlob("done"))
 
 
-# Test CountUp operator
+// Test CountUp operator
 print("\nTesting CountUp operator...")
 for i in range(5):
     workspace.RunOperatorOnce(countup_op)
@@ -83,7 +83,7 @@ workspace.RunOperatorOnce(retrievecount_op)
 print("'count' value after CountUp test:", workspace.FetchBlob("count"))
 
 
-# Test CountDown operator
+// Test CountDown operator
 print("\nTesting CountDown operator...")
 for i in range(11):
     workspace.RunOperatorOnce(countdown_op)
@@ -107,17 +107,17 @@ Testing CountUp operator...
 'count' value after CountUp test: 10
 
 Testing CountDown operator...
-'count' value after CountDown: 9	'done' value: False
-'count' value after CountDown: 8	'done' value: False
-'count' value after CountDown: 7	'done' value: False
-'count' value after CountDown: 6	'done' value: False
-'count' value after CountDown: 5	'done' value: False
-'count' value after CountDown: 4	'done' value: False
-'count' value after CountDown: 3	'done' value: False
-'count' value after CountDown: 2	'done' value: False
-'count' value after CountDown: 1	'done' value: False
-'count' value after CountDown: 0	'done' value: False
-'count' value after CountDown: -1	'done' value: True
+'count' value after CountDown: 9        'done' value: False
+'count' value after CountDown: 8        'done' value: False
+'count' value after CountDown: 7        'done' value: False
+'count' value after CountDown: 6        'done' value: False
+'count' value after CountDown: 5        'done' value: False
+'count' value after CountDown: 4        'done' value: False
+'count' value after CountDown: 3        'done' value: False
+'count' value after CountDown: 2        'done' value: False
+'count' value after CountDown: 1        'done' value: False
+'count' value after CountDown: 0        'done' value: False
+'count' value after CountDown: -1        'done' value: True
 ```
 
 </details>
@@ -136,13 +136,14 @@ namespace {
 class CounterSerializer : public BlobSerializerBase {
  public:
   CounterSerializer() {}
-  ~CounterSerializer() {}
+  ~CounterSerializer() override {}
 
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<std::unique_ptr<Counter<int64_t>>>());
+    CAFFE_ENFORCE(typeMeta.Match<std::unique_ptr<Counter<int64_t>>>());
 
     BlobProto blob_proto;
     blob_proto.set_name(name);
@@ -152,8 +153,9 @@ class CounterSerializer : public BlobSerializerBase {
     proto.set_data_type(TensorProto_DataType_INT64);
     proto.add_dims(1);
     proto.add_int64_data(
-        blob.template Get<std::unique_ptr<Counter<int64_t>>>()->retrieve());
-    acceptor(name, blob_proto.SerializeAsString());
+        (*static_cast<const std::unique_ptr<Counter<int64_t>>*>(pointer))
+            ->retrieve());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 };
 

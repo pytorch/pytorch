@@ -1,12 +1,16 @@
-#include "torch/csrc/autograd/engine.h"
+#include <torch/csrc/autograd/engine.h>
 
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/basic_ops.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/anomaly_mode.h"
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <ATen/DeviceGuard.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/Parallel.h>
+#include <c10/util/Exception.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -23,11 +27,6 @@
 #include <sstream>
 #include <queue>
 #include <TH/TH.h>
-
-#ifdef USE_CUDA
-#include <cuda.h>
-#include <THC/THC.h>
-#endif
 
 namespace torch { namespace autograd {
 
@@ -62,14 +61,21 @@ struct FunctionTask {
 
   FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs)
     : base(base)
-    , fn(fn)
+    , fn(std::move(fn))
     , inputs(std::move(inputs)) {}
 };
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
+// Empty FunctionTask are first.
 struct CompareFunctionTaskTime {
   bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
-    return t1.fn->sequence_nr() < t2.fn->sequence_nr();
+    if (!t1.fn) {
+      return false;
+    } else if (!t2.fn) {
+      return true;
+    } else {
+      return t1.fn->sequence_nr() < t2.fn->sequence_nr();
+    }
   }
 };
 
@@ -158,7 +164,7 @@ struct GraphTask {
   std::unordered_map<Function*, ExecInfo> exec_info;
   std::vector<Variable> captured_vars;
 
-  void init_to_execute(Function& graph_root, const edge_list& captures);
+  void init_to_execute(Function& graph_root, const edge_list& outputs);
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
@@ -169,15 +175,10 @@ struct GraphTask {
   }
 
   GraphTask(bool keep_graph, bool grad_mode)
-    : exception()
-    , has_error(false)
+    : has_error(false)
     , outstanding_tasks(0)
     , keep_graph(keep_graph)
     , grad_mode(grad_mode)
-    , mutex()
-    , not_done()
-    , not_ready()
-    , dependencies()
     , owner(NO_DEVICE) {}
 };
 
@@ -193,19 +194,59 @@ auto ReadyQueue::push(FunctionTask item) -> void {
 auto ReadyQueue::pop() -> FunctionTask {
   std::unique_lock<std::mutex> lock(mutex);
   not_empty.wait(lock, [this]{ return !heap.empty(); });
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto task = std::move(const_cast<FunctionTask&>(heap.top())); heap.pop();
   return task;
 }
 
-Engine::Engine() : ready_queues() {
-}
+Engine::Engine() = default;
 
 // This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
 auto Engine::thread_init(int device) -> void {
-  THInferNumThreads();
-  at::DeviceGuard guard(device);
+  at::init_num_threads();
+  // Note [Allocating GPUs to autograd threads]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // What's our strategy here?  Originally, the autograd engine was written
+  // with only CUDA in mind.  We allocate one thread to handle all CPU
+  // operations, and a thread per CUDA device.
+  //
+  // But what if we have OTHER devices?  There are two plausible
+  // strategies:
+  //
+  //  - We can allocate threads equal to max(num_cuda_devices, num_xla_devices,
+  //    ...) and colocate cuda device 0 with xla device 0
+  //  - We can allocate threads equal to sum(num_cuda_devices, num_xla_devices,
+  //    ...) keeping everyone separate.
+  //
+  // We don't have any good reason to prefer one or the other, so we've
+  // arbitrarily picked to colocate devices.  Maybe the other approach is
+  // better.
+  //
+  // NB: We MUST NOT construct the guard for device -1,
+  // as in some settings we compile with cuda, but
+  // have lazy stubs for CUDA functionality (so actually
+  // attempting to setup a guard(-1) will cause an
+  // error, because it will still query cudaGetDevice).
+  //
+  // NB: These are not OptionalCUDAGuard/etc because engine.cpp
+  // is built as part of the CPU-only library; so we need to
+  // dynamic dispatch.
+  //
+  // NB: We need an array here since neither DeviceGuard nor OptionalDeviceGuard
+  // are movable.
+  std::array<c10::OptionalDeviceGuard,
+             static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
+      guards;  // Guards! Guards!
+  if (device != -1) {
+    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+      auto* impl = c10::impl::device_guard_impl_registry[i].load();
+      if (impl && device < impl->deviceCount()) {
+        guards[i].reset_device(at::Device(static_cast<c10::DeviceType>(i), device));
+      }
+    }
+  }
   worker_device = device;
   thread_main(nullptr);
 }
@@ -261,7 +302,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
         if (--task.base->outstanding_tasks == 0) {
           // Synchronize outstanding_tasks with queue mutex
           std::atomic_thread_fence(std::memory_order_release);
-          ready_queue(base_owner).push(FunctionTask(task.base, nullptr, InputBuffer(0)));
+          ready_queue_by_index(base_owner).push(FunctionTask(task.base, nullptr, InputBuffer(0)));
         }
       }
     }
@@ -286,14 +327,14 @@ static variable_list call_pre_hooks(Function& fn, variable_list inputs) {
   return inputs;
 }
 
-static variable_list call_post_hooks(Function& fn, variable_list outputs, variable_list inputs) {
+static variable_list call_post_hooks(Function& fn, variable_list outputs, const variable_list& inputs) {
   for (const auto& hook : fn.post_hooks()) {
     outputs = (*hook)(outputs, inputs);
   }
   return outputs;
 }
 
-static bool is_compatible_type(const at::Type& expected, const at::Type& actual) {
+static bool is_compatible_type(const at::DeprecatedTypeProperties& expected, const at::DeprecatedTypeProperties& actual) {
   // Types are compatible if they exactly match or if the gradient is a sparse
   // version of the expected type.
   return expected == actual || (actual.is_sparse() &&
@@ -301,12 +342,12 @@ static bool is_compatible_type(const at::Type& expected, const at::Type& actual)
 }
 
 template<typename F>
-static void validate_outputs(const edge_list& edges, const variable_list& grads, const F& format_error) {
+static void validate_outputs(const edge_list& edges, variable_list& grads, const F& format_error) {
   if (grads.size() != edges.size()) {
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
     ss << edges.size() << ", but got " << grads.size();
-    throw std::runtime_error(format_error(ss.str()));
+    AT_ERROR(format_error(ss.str()));
   }
   for (size_t i = 0; i < grads.size(); i++) {
     const auto& edge = edges[i];
@@ -318,20 +359,31 @@ static void validate_outputs(const edge_list& edges, const variable_list& grads,
       // FIXME: TestJit.test_ge_optimized fails this assertion.
       // std::stringstream ss;
       // ss << "undefined gradient at index " << i;
-      // throw std::runtime_error(format_error(ss.str()));
+      // AT_ERROR(format_error(ss.str()));
       continue;
     }
     if (!grads[i].sizes().equals(metadata.shape())) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected shape ";
-      ss << metadata.shape() << " but got " << grads[i].sizes();
-      throw std::runtime_error(format_error(ss.str()));
+      if (!at::is_expandable_to(metadata.shape(), grads[i].sizes())) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - got ";
+        ss << grads[i].sizes() << " but expected shape compatible with ";
+        ss << metadata.shape();
+        AT_ERROR(format_error(ss.str()));
+      }
+      grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
     if (!is_compatible_type(metadata.type(), grads[i].type())) {
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected type ";
       ss << metadata.type() << " but got " << grads[i].type();
-      throw std::runtime_error(format_error(ss.str()));
+      AT_ERROR(format_error(ss.str()));
+    }
+    auto output_device = output.device();
+    if (output_device != metadata.device()) {
+      std::stringstream ss;
+      ss << "invalid gradient at index " << i << " - expected device ";
+      ss << metadata.device() << " but got " << output_device;
+      AT_ERROR(format_error(ss.str()));
     }
   }
 }
@@ -350,6 +402,18 @@ static variable_list call_function(FunctionTask& task) {
   variable_list outputs;
 
   if(has_post_hooks){
+    // In functions/accumulate_grad.cpp, there is some logic to check the conditions under which
+    // the incoming gradient can be stolen directly (which elides a deep copy) instead of cloned.
+    // One of these conditions is that the incoming gradient's refcount must be 1 (nothing else
+    // is referencing the same data).  Stashing inputs_copy here bumps the refcount, so if post hooks
+    // are employed, it's actually still ok for accumulate_grad.cpp to steal the gradient if the
+    // refcount is 2.
+    //
+    // "new_grad.use_count() <= 1 + !post_hooks().empty()" in accumulate_grad.cpp accounts for this,
+    // but also creates a silent dependency between engine.cpp (ie, this particular engine
+    // implementation) and accumulate_grad.cpp.
+    //
+    // If you change the logic here, make sure it's compatible with accumulate_grad.cpp.
     auto inputs_copy = inputs;
     outputs = fn(std::move(inputs_copy));
   }else{
@@ -364,7 +428,8 @@ static variable_list call_function(FunctionTask& task) {
   checkpoint_valid = prev_checkpoint_valid_state;
 
   if(has_post_hooks){
-    return call_post_hooks(fn, std::move(outputs), std::move(inputs));
+    // NOLINTNEXTLINE(bugprone-use-after-move)
+    return call_post_hooks(fn, std::move(outputs), inputs);
   }
   return outputs;
 }
@@ -397,8 +462,8 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     AutoGradMode grad_mode(false);
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
-      at::DeviceGuard guard(output);
-      if (output.defined() && output.ne(output).any().toCByte()) {
+      at::OptionalDeviceGuard guard(device_of(output));
+      if (output.defined() && output.ne(output).any().item<uint8_t>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
         throw std::runtime_error(ss.str());
@@ -466,7 +531,7 @@ auto Engine::compute_dependencies(Function* root, GraphTask& task) -> void {
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
   auto& dependencies = task.dependencies;
-  while (queue.size() > 0) {
+  while (!queue.empty()) {
     auto fn = queue.back(); queue.pop_back();
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
@@ -494,14 +559,15 @@ struct ClearCallbacks {
   std::mutex& callbacks_lock;
 };
 
-auto Engine::execute(const edge_list& input_roots,
+auto Engine::execute(const edge_list& roots,
                      const variable_list& inputs,
                      bool keep_graph,
                      bool create_graph,
                      const edge_list& outputs) -> variable_list {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
 
-  validate_outputs(input_roots, inputs, [](const std::string& msg) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
 
@@ -512,12 +578,12 @@ auto Engine::execute(const edge_list& input_roots,
   std::unique_lock<std::mutex> lock(graph_task.mutex);
 
   // Now compute the dependencies for all executable functions and queue the root
-  auto graph_root = std::make_shared<GraphRoot>(input_roots, inputs);
+  auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
   compute_dependencies(graph_root.get(), graph_task);
   if (!outputs.empty()) {
     graph_task.init_to_execute(*graph_root, outputs);
   }
-  ready_queue(-1).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
+  ready_queue(at::kCPU).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
 
   // Not a worker
   if (worker_device == NO_DEVICE) {
@@ -547,6 +613,9 @@ auto Engine::execute(const edge_list& input_roots,
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
   std::unique_lock<std::mutex> cb_lock(post_callbacks_lock);
+  // WARNING: Don't use a range-for loop here because more callbacks may be
+  // added in between callback calls, so iterators may become invalidated.
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < final_callbacks.size(); ++i) {
     cb_lock.unlock();
     final_callbacks[i]();
@@ -584,20 +653,34 @@ bool Engine::is_checkpoint_valid() {
   return checkpoint_valid;
 }
 
-auto Engine::ready_queue(int device) -> ReadyQueue& {
-  return *ready_queues.at(device + 1);
+auto Engine::ready_queue(at::Device device) -> ReadyQueue& {
+  // See Note [Allocating GPUs to autograd threads]
+  if (device.type() == at::kCPU) {
+    return *ready_queues.at(0);
+  } else {
+    return *ready_queues.at(device.index() + 1);
+  }
+}
+
+// See Note [Allocating GPUs to autograd threads]
+// NB: This would become obsolete if we truly allocated a CPU thread
+// per device, rather than colocate.
+auto Engine::ready_queue_by_index(int device_index) -> ReadyQueue& {
+  return *ready_queues.at(device_index + 1);
 }
 
 auto Engine::start_threads() -> void {
-  int num_devices = 0;
-#ifdef USE_CUDA
-  // check for case of compiled with CUDA but no available devices
-  if (cudaGetDeviceCount(&num_devices) != cudaSuccess) {
-    cudaGetLastError();
-    num_devices = 0;
+  // See Note [Allocating GPUs to autograd threads]
+  c10::DeviceIndex num_devices = 0;
+  for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
+    auto* impl = impl_atomic.load();
+    if (impl) {
+      num_devices = std::max(num_devices, impl->deviceCount());
+    }
   }
-#endif
-  // One for CPU, plus one for every GPU device
+
+  // One for CPU, plus one for every GPU device (but colocate GPUs of different
+  // types)
   int num_threads = num_devices + 1;
   ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
   for (auto& queue : ready_queues)
@@ -616,7 +699,7 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
     Function *output = output_edge.function.get();
     auto & info = exec_info[output];
     if (!info.captures)
-      info.captures.reset(new std::vector<ExecInfo::Capture>());
+      info.captures = make_unique<std::vector<ExecInfo::Capture>>();
     info.captures->emplace_back(output_edge.input_nr, output_idx++);
   }
   captured_vars.resize(output_idx);

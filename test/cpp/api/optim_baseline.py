@@ -2,13 +2,14 @@
 
 import argparse
 import math
+import sys
 
 import torch
 import torch.optim
 
 
 HEADER = """
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <vector>
 
@@ -17,13 +18,25 @@ namespace expected_parameters {
 
 FOOTER = "} // namespace expected_parameters"
 
-PARAMETERS = "static std::vector<std::vector<torch::Tensor>> {} = {{"
+PARAMETERS = "inline std::vector<std::vector<torch::Tensor>> {}() {{"
 
 OPTIMIZERS = {
-    "Adam": lambda p: torch.optim.Adam(p, 1.0, weight_decay=1e-6),
-    "Adagrad": lambda p: torch.optim.Adagrad(p, 1.0, weight_decay=1e-6, lr_decay=1e-3),
-    "RMSprop": lambda p: torch.optim.RMSprop(p, 0.1, momentum=0.9, weight_decay=1e-6),
-    "SGD": lambda p: torch.optim.SGD(p, 0.1, momentum=0.9, weight_decay=1e-6),
+    "Adam": lambda p: torch.optim.Adam(p, 1.0),
+    "Adam_with_weight_decay": lambda p: torch.optim.Adam(p, 1.0, weight_decay=1e-2),
+    "Adam_with_weight_decay_and_amsgrad": lambda p: torch.optim.Adam(p, 1.0, weight_decay=1e-6, amsgrad=True),
+    "Adagrad": lambda p: torch.optim.Adagrad(p, 1.0),
+    "Adagrad_with_weight_decay": lambda p: torch.optim.Adagrad(p, 1.0, weight_decay=1e-2),
+    "Adagrad_with_weight_decay_and_lr_decay": lambda p: torch.optim.Adagrad(p, 1.0, weight_decay=1e-6, lr_decay=1e-3),
+    "RMSprop": lambda p: torch.optim.RMSprop(p, 0.1),
+    "RMSprop_with_weight_decay": lambda p: torch.optim.RMSprop(p, 0.1, weight_decay=1e-2),
+    "RMSprop_with_weight_decay_and_centered": lambda p: torch.optim.RMSprop(p, 0.1, weight_decay=1e-6, centered=True),
+    "RMSprop_with_weight_decay_and_centered_and_momentum":
+        lambda p: torch.optim.RMSprop(p, 0.1, weight_decay=1e-6, centered=True, momentum=0.9),
+    "SGD": lambda p: torch.optim.SGD(p, 0.1),
+    "SGD_with_weight_decay": lambda p: torch.optim.SGD(p, 0.1, weight_decay=1e-2),
+    "SGD_with_weight_decay_and_momentum": lambda p: torch.optim.SGD(p, 0.1, momentum=0.9, weight_decay=1e-2),
+    "SGD_with_weight_decay_and_nesterov_momentum":
+        lambda p: torch.optim.SGD(p, 0.1, momentum=0.9, weight_decay=1e-6, nesterov=True),
 }
 
 
@@ -73,13 +86,15 @@ def emit(optimizer_parameter_map):
     print(HEADER)
     for optimizer_name, parameters in optimizer_parameter_map.items():
         print(PARAMETERS.format(optimizer_name))
+        print("  return {")
         for sample in parameters:
-            print("  {")
+            print("    {")
             for parameter in sample:
                 parameter_values = "{{{}}}".format(", ".join(map(str, parameter)))
                 print("      torch::tensor({}),".format(parameter_values))
-            print("  },")
-        print("};\n")
+            print("    },")
+        print("  };")
+        print("}\n")
     print(FOOTER)
 
 
@@ -92,7 +107,8 @@ def main():
     options = parser.parse_args()
 
     optimizer_parameter_map = {}
-    for optimizer in ["Adam", "Adagrad", "RMSprop", "SGD"]:
+    for optimizer in OPTIMIZERS.keys():
+        sys.stderr.write('Evaluating {} ...\n'.format(optimizer))
         optimizer_parameter_map[optimizer] = run(
             optimizer, options.iterations, options.sample_every
         )

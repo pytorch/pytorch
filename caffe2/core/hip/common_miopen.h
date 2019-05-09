@@ -23,7 +23,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 #define MIOPEN_VERSION 1399
 
@@ -75,6 +75,12 @@ inline const char* miopenGetErrorString(miopenStatus_t status)
 // report the version of miopen Caffe2 was compiled with
 inline size_t miopenCompiledVersion() { return MIOPEN_VERSION; }
 
+// report the runtime version of miopen
+inline size_t miopenRuntimeVersion() { return MIOPEN_VERSION; }
+
+// Check compatibility of compiled and runtime miopen versions
+inline void CheckMIOPENVersions() {}
+
 /**
  * miopenTypeWrapper is a wrapper class that allows us to refer to the miopen type
  * in a template function. The class is specialized explicitly for different
@@ -103,7 +109,7 @@ class miopenTypeWrapper<float>
 };
 
 template <>
-class miopenTypeWrapper<float16>
+class miopenTypeWrapper<at::Half>
 {
     public:
     static const miopenDataType_t type = miopenHalf;
@@ -164,7 +170,7 @@ class miopenTensorDescWrapper
     miopenTensorDescriptor_t desc_;
     miopenDataType_t type_;
     vector<int> dims_;
-    DISABLE_COPY_AND_ASSIGN(miopenTensorDescWrapper);
+    C10_DISABLE_COPY_AND_ASSIGN(miopenTensorDescWrapper);
 };
 
 } // namespace caffe2

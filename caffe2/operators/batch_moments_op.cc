@@ -29,8 +29,8 @@ bool BatchMomentsOp<float, CPUContext>::ComputeBatchMomentsNCHW(
     X_ptr += stride;
   }
   const float scale = 1.0f / static_cast<float>(N * HxW);
-  math::Scale<float, CPUContext>(C, scale, mu, mu, &context_);
-  math::Scale<float, CPUContext>(C, scale, var, var, &context_);
+  math::Scale<float, float, CPUContext>(C, scale, mu, mu, &context_);
+  math::Scale<float, float, CPUContext>(C, scale, var, var, &context_);
   return true;
 }
 
@@ -71,7 +71,7 @@ bool BatchMomentsGradientOp<float, CPUContext>::ComputeBatchMomentsGradientNCHW(
     dX_ptr += stride;
   }
   const float scale = 1.0f / static_cast<float>(N * HxW);
-  math::Scale<float, CPUContext>(N * C * HxW, scale, dX, dX, &context_);
+  math::Scale<float, float, CPUContext>(N * C * HxW, scale, dX, dX, &context_);
   return true;
 }
 
@@ -89,7 +89,7 @@ bool BatchMomentsGradientOp<float, CPUContext>::ComputeBatchMomentsGradientNHWC(
   dX_arr = ConstEigenArrayMap<float>(X, C, N * HxW).colwise() *
       ConstEigenVectorArrayMap<float>(dvar, C) * 2.0f;
   dX_arr.colwise() += ConstEigenVectorArrayMap<float>(dmu, C);
-  math::Scale<float, CPUContext>(N * C * HxW, scale, dX, dX, &context_);
+  math::Scale<float, float, CPUContext>(N * C * HxW, scale, dX, dX, &context_);
   return true;
 }
 

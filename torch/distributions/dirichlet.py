@@ -1,17 +1,8 @@
-from numbers import Number
-
 import torch
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import _finfo, broadcast_all, clamp_probs
-
-
-def _dirichlet_sample_nograd(concentration):
-    probs = torch._standard_gamma(concentration)
-    probs /= probs.sum(-1, True)
-    return clamp_probs(probs)
 
 
 # This helper is exposed for testing.
@@ -24,7 +15,7 @@ def _Dirichlet_backward(x, concentration, grad_output):
 class _Dirichlet(Function):
     @staticmethod
     def forward(ctx, concentration):
-        x = _dirichlet_sample_nograd(concentration)
+        x = torch._sample_dirichlet(concentration)
         ctx.save_for_backward(x, concentration)
         return x
 
@@ -37,7 +28,7 @@ class _Dirichlet(Function):
 
 class Dirichlet(ExponentialFamily):
     r"""
-    Creates a Dirichlet distribution parameterized by concentration `concentration`.
+    Creates a Dirichlet distribution parameterized by concentration :attr:`concentration`.
 
     Example::
 
@@ -54,16 +45,24 @@ class Dirichlet(ExponentialFamily):
     has_rsample = True
 
     def __init__(self, concentration, validate_args=None):
-        self.concentration, = broadcast_all(concentration)
+        if concentration.dim() < 1:
+            raise ValueError("`concentration` parameter must be at least one-dimensional.")
+        self.concentration = concentration
         batch_shape, event_shape = concentration.shape[:-1], concentration.shape[-1:]
         super(Dirichlet, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Dirichlet, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.concentration = self.concentration.expand(batch_shape + self.event_shape)
+        super(Dirichlet, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     def rsample(self, sample_shape=()):
         shape = self._extended_shape(sample_shape)
         concentration = self.concentration.expand(shape)
-        if isinstance(concentration, torch.Tensor):
-            return _Dirichlet.apply(concentration)
-        return _dirichlet_sample_nograd(concentration)
+        return _Dirichlet.apply(concentration)
 
     def log_prob(self, value):
         if self._validate_args:

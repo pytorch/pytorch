@@ -7,12 +7,13 @@ from caffe2.python import core
 from hypothesis import given
 from hypothesis import strategies as st
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 import numpy as np
 import unittest
 
 
-class TestMathOps(hu.HypothesisTestCase):
+class TestMathOps(serial.SerializedTestCase):
 
     @given(X=hu.tensor(),
            exponent=st.floats(min_value=2.0, max_value=3.0),
@@ -31,7 +32,7 @@ class TestMathOps(hu.HypothesisTestCase):
                                    output_to_grad="Y",
                                    grad_reference=powf_grad),
 
-    @given(X=hu.tensor(),
+    @serial.given(X=hu.tensor(),
            exponent=st.floats(min_value=-3.0, max_value=3.0),
            **hu.gcs)
     def test_sign(self, X, exponent, gc, dc):

@@ -36,12 +36,12 @@ class MPIBroadcastOp final : public Operator<Context> {
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     CAFFE_ENFORCE(
-        OperatorBase::OutputIsType<Tensor<Context>>(0),
+        OperatorBase::OutputIsTensorType(0, Context::GetDeviceType()),
         "Output is of wrong type.");
     auto* output = Output(0);
     // Make sure that output is already allocated.
     CAFFE_ENFORCE(
-        output->size() > 0,
+        output->numel() > 0,
         "Broadcast op uses in-place operation so the output "
         "should be already allocated.");
     MPI_CHECK(MPI_Bcast(
@@ -70,12 +70,11 @@ class MPIReduceOp final : public Operator<Context> {
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     auto& input = Input(1);
-    auto* output = Output(0);
-    output->ResizeLike(input);
+    auto* output = Output(0, input.sizes(), at::dtype<T>());
     MPI_CHECK(MPI_Reduce(
         const_cast<T*>(input.template data<T>()),
         output->template mutable_data<T>(),
-        input.size(),
+        input.numel(),
         MPIDataTypeWrapper<T>::type(),
         MPI_SUM,
         root_,
@@ -98,15 +97,15 @@ class MPIAllgatherOp final : public Operator<Context> {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     auto& input = Input(1);
     auto* output = Output(0);
-    vector<TIndex> output_dims = input.dims();
+    vector<int64_t> output_dims = input.sizes().vec();
     output_dims[0] *= OperatorBase::Input<MPICommonWorldWrapper>(0).size();
     output->Resize(output_dims);
     MPI_CHECK(MPI_Allgather(
         const_cast<T*>(input.template data<T>()),
-        input.size(),
+        input.numel(),
         MPIDataTypeWrapper<T>::type(),
         output->template mutable_data<T>(),
-        input.size(),
+        input.numel(),
         MPIDataTypeWrapper<T>::type(),
         comm));
     return true;
@@ -123,8 +122,7 @@ class MPIAllreduceOp final : public Operator<Context> {
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     auto& input = Input(1);
-    auto* output = Output(0);
-    output->ResizeLike(input);
+    auto* output = Output(0, input.sizes(), at::dtype<T>());
     void* source;
     if (output->template mutable_data<T>() == input.template data<T>()) {
       // We are doing in-place call. Special case handling.
@@ -136,7 +134,7 @@ class MPIAllreduceOp final : public Operator<Context> {
     MPI_CHECK(MPI_Allreduce(
         source,
         output->template mutable_data<T>(),
-        input.size(),
+        input.numel(),
         MPIDataTypeWrapper<T>::type(),
         MPI_SUM,
         comm));
@@ -168,8 +166,8 @@ class MPISendTensorOp final : public Operator<Context> {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(COMM).comm();
     auto& input = Input(INPUT);
     if (InputSize() == 4) {
-      dst_ = OperatorBase::Input<TensorCPU>(DST).template data<int>()[0];
-      tag_ = OperatorBase::Input<TensorCPU>(TAG).template data<int>()[0];
+      dst_ = OperatorBase::Input<Tensor>(DST, CPU).template data<int>()[0];
+      tag_ = OperatorBase::Input<Tensor>(TAG, CPU).template data<int>()[0];
     }
     if (raw_buffer_) {
       // We need to do a const cast to cope with the fact that, before OpenMPI
@@ -211,8 +209,8 @@ class MPIReceiveTensorOp final : public Operator<Context> {
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(COMM).comm();
     if (InputSize() == 4) {
-      src_ = OperatorBase::Input<TensorCPU>(SRC_IN).template data<int>()[0];
-      tag_ = OperatorBase::Input<TensorCPU>(TAG_IN).template data<int>()[0];
+      src_ = OperatorBase::Input<Tensor>(SRC_IN, CPU).template data<int>()[0];
+      tag_ = OperatorBase::Input<Tensor>(TAG_IN, CPU).template data<int>()[0];
     }
     MPI_Status status;
     if (raw_buffer_) {
@@ -228,10 +226,10 @@ class MPIReceiveTensorOp final : public Operator<Context> {
     } else {
       CAFFE_NOT_IMPLEMENTED;
     }
-    auto* src_out = OperatorBase::Output<TensorCPU>(SRC_OUT);
+    auto* src_out = OperatorBase::Output<Tensor>(SRC_OUT, CPU);
     src_out->Resize();
     src_out->template mutable_data<int>()[0] = status.MPI_SOURCE;
-    auto* tag_out = OperatorBase::Output<TensorCPU>(TAG_OUT);
+    auto* tag_out = OperatorBase::Output<Tensor>(TAG_OUT, CPU);
     tag_out->Resize();
     tag_out->template mutable_data<int>()[0] = status.MPI_TAG;
     return true;

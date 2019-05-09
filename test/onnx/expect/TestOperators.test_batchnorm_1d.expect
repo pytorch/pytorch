@@ -1,9 +1,9 @@
-ir_version: 3
+ir_version: 4
 producer_name: "pytorch"
-producer_version: "0.3"
+producer_version: "1.1"
 graph {
   node {
-    input: "0"
+    input: "input"
     output: "6"
     op_type: "Unsqueeze"
     attribute {
@@ -14,25 +14,20 @@ graph {
   }
   node {
     input: "6"
-    input: "1"
-    input: "2"
-    input: "3"
-    input: "4"
+    input: "weight"
+    input: "bias"
+    input: "running_mean"
+    input: "running_var"
     output: "7"
     op_type: "BatchNormalization"
     attribute {
       name: "epsilon"
-      f: 9.99999974737875e-06
+      f: 1e-05
       type: FLOAT
     }
     attribute {
-      name: "is_test"
-      i: 1
-      type: INT
-    }
-    attribute {
       name: "momentum"
-      f: 1
+      f: 0.9
       type: FLOAT
     }
   }
@@ -49,38 +44,38 @@ graph {
   name: "torch-jit-export"
   initializer {
     dims: 2
-    data_type: FLOAT
-    name: "1"
-    raw_data: "\217~,?b\265\251>"
+    data_type: 1
+    name: "bias"
+    raw_data: "\000\000\000\000\000\000\000\000"
   }
   initializer {
-    dims: 2
-    data_type: FLOAT
-    name: "2"
+    data_type: 7
+    name: "num_batches_tracked"
     raw_data: "\000\000\000\000\000\000\000\000"
   }
   initializer {
     dims: 2
-    data_type: FLOAT
-    name: "3"
+    data_type: 1
+    name: "running_mean"
     raw_data: "\000\000\000\000\000\000\000\000"
   }
   initializer {
     dims: 2
-    data_type: FLOAT
-    name: "4"
+    data_type: 1
+    name: "running_var"
     raw_data: "\000\000\200?\000\000\200?"
   }
   initializer {
-    data_type: INT64
-    name: "5"
-    raw_data: "\000\000\000\000\000\000\000\000"
+    dims: 2
+    data_type: 1
+    name: "weight"
+    raw_data: "\340e\355<\246\305\315>"
   }
   input {
-    name: "0"
+    name: "input"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 2
@@ -93,10 +88,10 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "weight"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 2
@@ -106,10 +101,10 @@ graph {
     }
   }
   input {
-    name: "2"
+    name: "bias"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 2
@@ -119,10 +114,10 @@ graph {
     }
   }
   input {
-    name: "3"
+    name: "running_mean"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 2
@@ -132,10 +127,10 @@ graph {
     }
   }
   input {
-    name: "4"
+    name: "running_var"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 2
@@ -145,10 +140,10 @@ graph {
     }
   }
   input {
-    name: "5"
+    name: "num_batches_tracked"
     type {
       tensor_type {
-        elem_type: INT64
+        elem_type: 7
         shape {
         }
       }
@@ -158,7 +153,7 @@ graph {
     name: "8"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 2
@@ -172,5 +167,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 9
 }

@@ -15,7 +15,7 @@
  */
 
 #include "caffe2/core/context_gpu.h"
-#include "sigmoid_cross_entropy_loss_op.h"
+#include "modules/detectron/sigmoid_cross_entropy_loss_op.h"
 
 namespace caffe2 {
 
@@ -69,7 +69,7 @@ template <>
 bool SigmoidCrossEntropyLossOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& T = Input(1);
-  auto* avg_loss = Output(0);
+
 
   CAFFE_ENFORCE(
       X.size() == T.size(),
@@ -79,10 +79,10 @@ bool SigmoidCrossEntropyLossOp<float, CUDAContext>::RunOnDevice() {
       " vs. ",
       T.size(),
       ")");
-  avg_loss->Resize(vector<TIndex>());
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   counts_.ResizeLike(X);
   losses_.ResizeLike(X);
-  normalizer_.Resize(vector<TIndex>());
+  ReinitializeTensor(&normalizer_, vector<int64_t>(), at::dtype<float>().device(CUDA));
   SigmoidCrossEntropyLossKernel<<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
@@ -109,7 +109,7 @@ bool SigmoidCrossEntropyLossOp<float, CUDAContext>::RunOnDevice() {
     math::Div<float, CUDAContext>(
         1, avg_loss_data, normalizer_data, avg_loss_data, &context_);
   }
-  math::Scale<float, CUDAContext>(
+  math::Scale<float, float, CUDAContext>(
       1, scale_, avg_loss_data, avg_loss_data, &context_);
 
   return true;
@@ -120,11 +120,11 @@ bool SigmoidCrossEntropyLossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& T = Input(1);
   auto& d_avg_loss = Input(2);
-  auto* dX = Output(0);
 
-  dX->ResizeLike(X);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   counts_.ResizeLike(X);
-  normalizer_.Resize(vector<TIndex>());
+  ReinitializeTensor(&normalizer_, vector<int64_t>(), at::dtype<float>().device(CUDA));
   SigmoidCrossEntropyLossGradientKernel<<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
@@ -151,22 +151,22 @@ bool SigmoidCrossEntropyLossGradientOp<float, CUDAContext>::RunOnDevice() {
         normalizer_data,
         normalizer_data,
         &context_);
-    math::Scale<float, CUDAContext>(
+    math::Scale<float, float, CUDAContext>(
         1, scale_, normalizer_data, normalizer_data, &context_);
-    math::Scale<float, CUDAContext>(
+    math::Scale<float, float, CUDAContext>(
         dX->size(),
         normalizer_data,
         dX->data<float>(),
         dX->mutable_data<float>(),
         &context_);
   } else {
-    math::Scale<float, CUDAContext>(
+    math::Scale<float, float, CUDAContext>(
         dX->size(),
         scale_,
         dX->data<float>(),
         dX->mutable_data<float>(),
         &context_);
-    math::Scale<float, CUDAContext>(
+    math::Scale<float, float, CUDAContext>(
         dX->size(),
         d_avg_loss.data<float>(),
         dX->data<float>(),

@@ -1,154 +1,191 @@
-#define CATCH_CONFIG_MAIN
-#include "catch.hpp"
 
-#include "ATen/ATen.h"
-#include "test_seed.h"
+#include <gtest/gtest.h>
+
+#include <ATen/ATen.h>
 
 using namespace at;
 
-TEST_CASE( "broadcast", "[]" ) {
+// can't expand empty tensor
+void TestEmptyTensor(DeprecatedTypeProperties& T) {
+  auto empty = randn({0}, T);
+  ASSERT_ANY_THROW(empty.expand({3}));
+}
 
-  manual_seed(123, at::Backend::CPU);
+// out-place function with 2 args
+void TestOut2Basic(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 1}, T);
+  auto b = randn({5}, T);
+  std::vector<int64_t> expanded_sizes = {3, 5};
+  ASSERT_TRUE(
+      (a + b).equal(a.expand(expanded_sizes) + b.expand(expanded_sizes)));
+}
 
-  Type & T = CPU(kFloat);
+// with scalar
+void TestOut2WithScalar(DeprecatedTypeProperties& T) {
+  auto aScalar = ones({1}, T);
+  aScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  auto b = randn({3, 5}, T);
+  ASSERT_TRUE(
+      (aScalar + b).equal(aScalar.expand(b.sizes()) + b.expand(b.sizes())));
+}
 
-  // 0) pre-req tests:
-  SECTION( "can't expand empty tensor" ) {
-    auto empty = randn({0}, T);
-    REQUIRE_THROWS(empty.expand({3}));
-  }
+// old fallback behavior yields error
+void TestOut2OldFallback(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 5}, T);
+  auto b = randn({5, 3}, T);
+  ASSERT_ANY_THROW(a + b);
+}
 
-  // 1) out-place function with 2 args
-  SECTION( "out-place function with 2 args" ) {
+// with mismatched sizes
+void TestOut2MismatchedSizes(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 5}, T);
+  auto b = randn({7, 5}, T);
+  ASSERT_ANY_THROW(a + b);
+}
 
-    SECTION( "basic" ) {
-      auto a = randn({3, 1}, T);
-      auto b = randn({5}, T);
-      std::vector<int64_t> expanded_sizes = {3, 5};
-      REQUIRE((a + b).equal(a.expand(expanded_sizes) + b.expand(expanded_sizes)));
-    }
+// out-place function with 3 args
+void TestOut3Basic(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 1, 1}, T);
+  auto b = randn({1, 2, 1}, T);
+  auto c = randn({1, 1, 5}, T);
+  std::vector<int64_t> expanded_sizes = {3, 2, 5};
+  ASSERT_TRUE((a + b + c).equal(
+      a.expand(expanded_sizes) + b.expand(expanded_sizes) +
+      c.expand(expanded_sizes)));
+}
 
-    SECTION( "with scalar" ) {
-      auto aScalar = ones({1}, T);
-      aScalar.get()->maybe_zero_dim(true);
-      auto b = randn({3, 5}, T);
-      REQUIRE((aScalar + b).equal(aScalar.expand(b.sizes()) + b.expand(b.sizes())));
-    }
+// with scalar
+void TestOut3WithScalar(DeprecatedTypeProperties& T) {
+  auto aTensorScalar = ones({1}, T);
+  aTensorScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  auto b = randn({3, 2, 1}, T);
+  auto c = randn({1, 2, 5}, T);
+  std::vector<int64_t> expanded_sizes = {3, 2, 5};
+  ASSERT_TRUE(aTensorScalar.addcmul(b, c).equal(
+      aTensorScalar.expand(expanded_sizes)
+          .addcmul(b.expand(expanded_sizes), c.expand(expanded_sizes))));
+}
 
-    SECTION( "old fallback behavior yields error" ) {
-      auto a = randn({3, 5}, T);
-      auto b = randn({5, 3}, T);
-      REQUIRE_THROWS(a + b);
-    }
+// old fallback behavior yields error
+void TestOut3OldFallback(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 2, 5}, T);
+  auto b = randn({2, 3, 5}, T);
+  auto c = randn({5, 3, 2}, T);
+  ASSERT_ANY_THROW(a.addcmul(b, c));
+}
 
-    SECTION( "with mismatched sizes" ) {
-      auto a = randn({3, 5}, T);
-      auto b = randn({7, 5}, T);
-      REQUIRE_THROWS(a + b);
-    }
-  }
+// with mismatched sizes
+void TestOut3MismatchedSizes(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 2, 5}, T);
+  auto b = randn({2, 3, 5}, T);
+  auto c = randn({5, 5, 5}, T);
+  ASSERT_ANY_THROW(a.addcmul(b, c));
+}
 
-  SECTION( "out-place function with 3 args" ) {
+// in-place function with 2 args
+void TestIn2Basic(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 5}, T);
+  auto b = randn({3, 1}, T);
+  ASSERT_TRUE((a + b).equal(a + b.expand({3, 5})));
+}
 
-    SECTION( "basic" ) {
-      auto a = randn({3, 1, 1}, T);
-      auto b = randn({1, 2, 1}, T);
-      auto c = randn({1, 1, 5}, T);
-      std::vector<int64_t> expanded_sizes = {3, 2, 5};
-      REQUIRE((a + b + c).equal(a.expand(expanded_sizes) + b.expand(expanded_sizes) + c.expand(expanded_sizes)));
-    }
+// with scalar
+void TestIn2WithScalar(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 5}, T);
+  auto bScalar = ones({1}, T);
+  bScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  ASSERT_TRUE((a + bScalar).equal(a + bScalar.expand(a.sizes())));
+}
 
-    SECTION( "with scalar" ) {
-      auto aTensorScalar = ones({1}, T);
-      aTensorScalar.get()->maybe_zero_dim(true);
-      auto b = randn({3, 2, 1}, T);
-      auto c = randn({1, 2, 5}, T);
-      std::vector<int64_t> expanded_sizes = {3, 2, 5};
-      REQUIRE(aTensorScalar.addcmul(b, c).equal(
-                aTensorScalar.expand(expanded_sizes).addcmul(b.expand(expanded_sizes), c.expand(expanded_sizes))));
-    }
+// error: would have to expand inplace arg
+void TestIn2ExpandError(DeprecatedTypeProperties& T) {
+  auto a = randn({1, 5}, T);
+  auto b = randn({3, 1}, T);
+  ASSERT_ANY_THROW(a.add_(b));
+}
 
-    SECTION( "old fallback behavior yields error" ) {
-      auto a = randn({3, 2, 5}, T);
-      auto b = randn({2, 3, 5}, T);
-      auto c = randn({5, 3, 2}, T);
-      REQUIRE_THROWS(a.addcmul(b, c));
-    }
+// in-place function with 3 args
+void TestIn3Basic(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 5, 2}, T);
+  auto b = randn({3, 1, 2}, T);
+  auto c = randn({1, 5, 1}, T);
+  auto aClone = a.clone();
+  ASSERT_TRUE(a.addcmul_(b, c).equal(
+      aClone.addcmul_(b.expand(a.sizes()), c.expand(a.sizes()))));
+}
 
-    SECTION( "with mismatched sizes" ){
-      auto a = randn({3, 2, 5}, T);
-      auto b = randn({2, 3, 5}, T);
-      auto c = randn({5, 5, 5}, T);
-      REQUIRE_THROWS(a.addcmul(b, c));
-    }
-  }
+// with scalar
+void TestIn3WithScalar(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 5, 2}, T);
+  auto b = randn({3, 1, 2}, T);
+  auto c = randn({1, 5, 1}, T);
+  auto aClone = a.clone();
+  auto bScalar = ones({1}, T);
+  bScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  ASSERT_TRUE(a.addcmul_(bScalar, c)
+                  .equal(aClone.addcmul_(
+                      bScalar.expand(a.sizes()), c.expand(a.sizes()))));
+}
 
-  SECTION( "in-place function with 2 args" ) {
-    SECTION( "basic" ) {
-      auto a = randn({3, 5}, T);
-      auto b = randn({3, 1}, T);
-      REQUIRE((a + b).equal(a + b.expand({3, 5})));
-    }
+// error: would have to expand inplace arg
+void TestIn3ExpandError(DeprecatedTypeProperties& T) {
+  auto a = randn({1, 3, 5}, T);
+  auto b = randn({4, 1, 1}, T);
+  auto c = randn({1, 3, 1}, T);
+  ASSERT_ANY_THROW(a.addcmul_(b, c));
+}
 
-    SECTION( "with scalar" ) {
-      auto a = randn({3, 5}, T);
-      auto bScalar = ones({1}, T);
-      bScalar.get()->maybe_zero_dim(true);
-      REQUIRE((a + bScalar).equal(a + bScalar.expand(a.sizes())));
-    }
+// explicit dim specification
+void TestExplicitDimBasic(DeprecatedTypeProperties& T) {
+  auto a = randn({1}, T);
+  auto b = randn({5, 3}, T);
+  auto c = randn({3, 7}, T);
+  ASSERT_TRUE(a.addmm(b, c).equal(a.expand({5, 7}).addmm(b, c)));
+}
 
-    SECTION( "error: would have to expand inplace arg" ) {
-      auto a = randn({1, 5}, T);
-      auto b = randn({3, 1}, T);
-      REQUIRE_THROWS(a.add_(b));
-    }
-  }
+// with scalar
+void TestExplicitDimWithScalar(DeprecatedTypeProperties& T) {
+  auto a = randn({1}, T);
+  auto b = randn({5, 3}, T);
+  auto c = randn({3, 7}, T);
+  Tensor aScalar = ones({1}, T);
+  aScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  ASSERT_TRUE(aScalar.addmm(b, c).equal(aScalar.expand({5, 7}).addmm(b, c)));
+}
 
-  SECTION( "in-place function with 3 args" ) {
+// with mismatched sizes
+void TestExplicitDimWithMismatchedSizes(DeprecatedTypeProperties& T) {
+  auto b = randn({5, 3}, T);
+  auto c = randn({3, 7}, T);
+  auto a = randn({3, 3}, T);
+  ASSERT_ANY_THROW(a.addmm(b, c));
+}
 
-    auto a = randn({3, 5, 2}, T);
-    auto b = randn({3, 1, 2}, T);
-    auto c = randn({1, 5, 1}, T);
+TEST(BroadcastTest, Broadcast) {
+  manual_seed(123);
+  DeprecatedTypeProperties& T = CPU(kFloat);
 
-    SECTION( "basic" ) {
-      auto aClone = a.clone();
-      REQUIRE(a.addcmul_(b, c).equal(aClone.addcmul_(b.expand(a.sizes()), c.expand(a.sizes()))));
-    }
+  TestEmptyTensor(T);
 
-    SECTION( "with scalar" ) {
-      auto aClone = a.clone();
-      auto bScalar = ones({1}, T);
-      bScalar.get()->maybe_zero_dim(true);
-      REQUIRE(a.addcmul_(bScalar, c).equal(aClone.addcmul_(bScalar.expand(a.sizes()), c.expand(a.sizes()))));
-    }
+  TestOut2Basic(T);
+  TestOut2WithScalar(T);
+  TestOut2OldFallback(T);
+  TestOut2MismatchedSizes(T);
 
-    SECTION( "error: would have to expand inplace arg" ) {
-      auto a = randn({1, 3, 5}, T);
-      auto b = randn({4, 1, 1}, T);
-      auto c = randn({1, 3, 1}, T);
-      REQUIRE_THROWS(a.addcmul_(b, c));
-    }
-  }
+  TestOut3Basic(T);
+  TestOut3WithScalar(T);
+  TestOut3OldFallback(T);
+  TestOut3MismatchedSizes(T);
 
-  SECTION( "explicit dim specification" ) {
+  TestIn2Basic(T);
+  TestIn2WithScalar(T);
+  TestIn2ExpandError(T);
 
-    auto a = randn({1}, T);
-    auto b = randn({5, 3}, T);
-    auto c = randn({3, 7}, T);
+  TestIn3Basic(T);
+  TestIn3WithScalar(T);
+  TestIn3ExpandError(T);
 
-    SECTION( "basic" ) {
-      REQUIRE(a.addmm(b, c).equal(a.expand({5,7}).addmm(b, c)));
-    }
-
-    SECTION( "with scalar" ) {
-      Tensor aScalar = ones({1}, T);
-      aScalar.get()->maybe_zero_dim(true);
-      REQUIRE(aScalar.addmm(b, c).equal(aScalar.expand({5, 7}).addmm(b, c)));
-    }
-
-    SECTION( "with mismatched sizes" ) {
-      auto a = randn({3, 3}, T);
-      REQUIRE_THROWS(a.addmm(b, c));
-    }
-  }
+  TestExplicitDimBasic(T);
+  TestExplicitDimWithScalar(T);
+  TestExplicitDimWithMismatchedSizes(T);
 }

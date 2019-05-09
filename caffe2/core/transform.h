@@ -3,7 +3,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/graph.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
@@ -31,7 +31,7 @@ namespace caffe2 {
  * own transform, write your implementations for PatternRule, ValidatorRule, and
  * ReplaceRule.
  */
-class Transform {
+class CAFFE2_API Transform {
  public:
   Transform() {}
 
@@ -148,22 +148,22 @@ class Transform {
 };
 
 // Creates a Transform based on a key, which should be defined in registry.
-unique_ptr<Transform> CreateTransform(string key);
+CAFFE2_API unique_ptr<Transform> CreateTransform(string key);
 
-CAFFE_DECLARE_REGISTRY(TransformRegistry, Transform);
+C10_DECLARE_REGISTRY(TransformRegistry, Transform);
 #define REGISTER_TRANSFORM(name, ...) \
-  CAFFE_REGISTER_CLASS(TransformRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(TransformRegistry, name, __VA_ARGS__)
 
 // Create a Transform object from registry,
 // and immediately apply it to a Netdef.
-NetDef ApplyTransform(const string& key, const NetDef& netdef);
+CAFFE2_API NetDef ApplyTransform(const string& key, const NetDef& netdef);
 
 // Create a Transform object from registry, apply it to a NetDef.
 // Will only return the transformed net if it is faster than the old net.
 // This will run the init net first, will run the two nets warmup_runs times.
 // Then, we will take the average time of main_runs runs, and only keep the
 // transformed net if it is faster by a factor of improvement_threshold.
-NetDef ApplyTransformIfFaster(
+CAFFE2_API NetDef ApplyTransformIfFaster(
     const string& key,
     const NetDef& netdef,
     const NetDef& init_netdef,

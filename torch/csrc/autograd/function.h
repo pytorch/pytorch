@@ -1,17 +1,17 @@
 #pragma once
 
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/anomaly_mode.h"
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/autograd/saved_variable.h"
-#include "torch/csrc/autograd/type_and_shape.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/python_stub.h"
-#include "torch/csrc/utils/variadic.h"
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/input_metadata.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/python_stub.h>
+#include <torch/csrc/utils/variadic.h>
 
 #include <ATen/ATen.h>
-#include <ATen/Error.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -86,10 +86,9 @@ void deleteFunction(Function* function);
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct TORCH_API Function : std::enable_shared_from_this<Function> {
  public:
-  /// Construct a new `Function` with `num_inputs` inputs and the given
-  /// `next_edges`. sequence_nr is a (currently THE) hint to prioritization
-  /// in the backward() pass, with higher sequence numbers prioritized
-  /// before lower sequence numbers.
+  /// Construct a new `Function` with the given `next_edges`. `sequence_nr` is
+  /// a (currently THE) hint to prioritization in the backward() pass, with
+  /// higher sequence numbers prioritized before lower sequence numbers.
   explicit Function(
       uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
@@ -113,7 +112,9 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(variable_list&& inputs) {
-    profiler::RecordFunction rec(this);
+    RECORD_FUNCTION(
+        this, std::vector<c10::IValue>(inputs.begin(), inputs.end()));
+
     return apply(std::move(inputs));
   }
 
@@ -128,9 +129,18 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
 
   /// Adds the type and shape metadata for a new input. Returns the index of
   /// of the new input.
-  uint32_t add_input_metadata(const at::Type& type, at::IntList shape) noexcept {
+  uint32_t add_input_metadata(
+    const at::DeprecatedTypeProperties& type
+  , at::IntArrayRef shape
+  , at::Device device) noexcept {
     uint32_t input_nr = input_metadata_.size();
-    input_metadata_.emplace_back(type, shape);
+    input_metadata_.emplace_back(type, shape, device);
+    return input_nr;
+  }
+
+  uint32_t add_input_metadata(const at::Tensor& t) noexcept {
+    uint32_t input_nr = input_metadata_.size();
+    input_metadata_.emplace_back(t);
     return input_nr;
   }
 
@@ -145,7 +155,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     return input_metadata_.size();
   }
 
-  const TypeAndShape& input_metadata(size_t index) const {
+  const InputMetadata& input_metadata(size_t index) const {
     return input_metadata_[index];
   }
 
@@ -294,15 +304,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     return false;
   }
 
-  /// Returns `Variable`s saved by this `Function`.
-  /// This let's the JIT find inputs to apply that are not present explicitly
-  /// in arguments. Required only for functions that are not traceable, don't
-  /// pass state to backward transparently, and are not backwards closures of
-  /// functions that don't pass the state transparently. Which means that
-  /// hopefully they will hardly ever need to be implemented :)
-  virtual std::unique_ptr<saved_variable_list> saved_variables() {
-    return nullptr;
-  }
+  static uint64_t peek_at_next_sequence_nr();
 
  protected:
   static uint64_t& get_next_sequence_nr();
@@ -322,13 +324,13 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
-  at::SmallVector<TypeAndShape, 2> input_metadata_;
+  at::SmallVector<InputMetadata, 2> input_metadata_;
 };
 
 /// See Function::is_traceable() for definition.
 struct TraceableFunction : public Function {
   using Function::Function;
-  bool is_traceable() final override {
+  bool is_traceable() final {
     return true;
   }
 };
@@ -360,14 +362,14 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
 /// `input_nr` thus equal to `function->num_inputs()`. Additionally, it
 /// increments the `Function`'s number of inputs by one. Approximately
 /// equivalent to `variable.set_gradient_edge(function,
-/// function->add_input_metadata(variable.type(), variable.sizes()))`.
+/// function->add_input_metadata(variable.dispatch_type(), variable.sizes()))`.
 /// If you don't want the `Function`'s `num_inputs` to be incremented, use
 /// `set_gradient_edge` directly.
 inline void create_gradient_edge(
     Variable& variable,
     std::shared_ptr<Function> function) {
   // Copy before move.
-  const auto input_nr = function->add_input_metadata(variable.type(), variable.sizes());
+  const auto input_nr = function->add_input_metadata(variable);
   variable.set_gradient_edge({std::move(function), input_nr});
 }
 

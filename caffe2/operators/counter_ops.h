@@ -9,7 +9,7 @@
 
 namespace caffe2 {
 template <typename T>
-class Counter {
+class CAFFE2_API Counter {
  public:
   explicit Counter(T count) : count_(count) {}
   bool countDown() {
@@ -45,14 +45,15 @@ template <typename T, class Context>
 class CreateCounterOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CreateCounterOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        init_count_(OperatorBase::GetSingleArgument<T>("init_count", 0)) {
+  template <class... Args>
+  explicit CreateCounterOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        init_count_(this->template GetSingleArgument<T>("init_count", 0)) {
     CAFFE_ENFORCE_LE(0, init_count_, "negative init_count is not permitted.");
   }
 
   bool RunOnDevice() override {
-    *OperatorBase::Output<std::unique_ptr<Counter<T>>>(0) =
+    *this->template Output<std::unique_ptr<Counter<T>>>(0) =
         std::unique_ptr<Counter<T>>(new Counter<T>(init_count_));
     return true;
   }
@@ -65,17 +66,18 @@ template <typename T, class Context>
 class ResetCounterOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ResetCounterOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        init_count_(OperatorBase::GetSingleArgument<T>("init_count", 0)) {
+  template <class... Args>
+  explicit ResetCounterOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        init_count_(this->template GetSingleArgument<T>("init_count", 0)) {
     CAFFE_ENFORCE_LE(0, init_count_, "negative init_count is not permitted.");
   }
 
   bool RunOnDevice() override {
-    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
+    auto& counterPtr = this->template Input<std::unique_ptr<Counter<T>>>(0);
     auto previous = counterPtr->reset(init_count_);
     if (OutputSize() == 1) {
-      auto* output = OperatorBase::Output<TensorCPU>(0);
+      auto* output = Output(0);
       output->Resize();
       *output->template mutable_data<T>() = previous;
     }
@@ -91,12 +93,13 @@ template <typename T, class Context>
 class CountDownOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CountDownOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit CountDownOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
-    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
-    auto* output = OperatorBase::Output<TensorCPU>(0);
+    auto& counterPtr = this->template Input<std::unique_ptr<Counter<T>>>(0);
+    auto* output = Output(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<bool>() = counterPtr->countDown();
     return true;
@@ -108,12 +111,13 @@ template <typename T, class Context>
 class CheckCounterDoneOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CheckCounterDoneOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit CheckCounterDoneOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
-    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
-    auto* output = OperatorBase::Output<TensorCPU>(0);
+    auto& counterPtr = this->template Input<std::unique_ptr<Counter<T>>>(0);
+    auto* output = Output(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<bool>() = counterPtr->checkIfDone();
     return true;
@@ -125,12 +129,13 @@ template <typename T, class Context>
 class CountUpOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CountUpOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit CountUpOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
-    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
-    auto* output = OperatorBase::Output<TensorCPU>(0);
+    auto& counterPtr = this->template Input<std::unique_ptr<Counter<T>>>(0);
+    auto* output = Output(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<T>() = counterPtr->countUp();
     return true;
@@ -142,12 +147,13 @@ template <typename T, class Context>
 class RetrieveCountOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  RetrieveCountOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit RetrieveCountOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
-    auto& counterPtr = OperatorBase::Input<std::unique_ptr<Counter<T>>>(0);
-    auto* output = OperatorBase::Output<TensorCPU>(0);
+    auto& counterPtr = this->template Input<std::unique_ptr<Counter<T>>>(0);
+    auto* output = Output(0);
     output->Resize(std::vector<int>{});
     *output->template mutable_data<T>() = counterPtr->retrieve();
     return true;

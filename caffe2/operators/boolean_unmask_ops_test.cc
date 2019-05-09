@@ -5,7 +5,7 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/operator.h"
 
-CAFFE2_DECLARE_string(caffe_test_root);
+C10_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
 
@@ -16,13 +16,13 @@ static void AddScalarInput(
     Workspace* ws,
     bool isEmpty = false) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   if (!isEmpty) {
-    tensor->Resize(vector<TIndex>{1});
-    *(tensor->mutable_data<DataT>()) = value;
+    tensor->Resize(vector<int64_t>{1});
+    *(tensor->template mutable_data<DataT>()) = value;
   } else {
-    tensor->Resize(vector<TIndex>{0});
-    tensor->mutable_data<DataT>();
+    tensor->Resize(vector<int64_t>{0});
+    tensor->template mutable_data<DataT>();
   }
   return;
 }
@@ -62,7 +62,7 @@ TEST(BooleanUnmaskTest, Test) {
   EXPECT_NE(nullptr, unmasked_data_blob);
 
   auto& unmasked_data = unmasked_data_blob->Get<TensorCPU>();
-  EXPECT_EQ(unmasked_data.size(), 1);
+  EXPECT_EQ(unmasked_data.numel(), 1);
 
   CHECK_EQ(unmasked_data.data<float>()[0], 1.0f);
 }

@@ -21,30 +21,32 @@ __global__ void DropoutKernel(
 template <>
 bool DropoutOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->Resize(X.dims());
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   if (is_test_) {
     if (Y != &X) {
-      context_.Copy<float, CUDAContext, CUDAContext>(
-          X.size(), X.data<float>(), Y->mutable_data<float>());
+      context_.CopySameDevice<float>(
+          X.numel(), X.data<float>(), Y->template mutable_data<float>());
     }
     return true;
   } else {
     // We do a simple trick here: since curand cannot generate random
     // boolean numbers, we will generate into dY and write the result to
     // mask.
-    float* Ydata = Y->mutable_data<float>();
-    auto* mask = Output(1);
-    mask->Resize(X.dims());
+    float* Ydata = Y->template mutable_data<float>();
+    auto* mask = Output(1, X.sizes(), at::dtype<bool>());
     CAFFE_ENFORCE(X.data<float>() != Ydata, "In-place GPU dropout is broken");
     CURAND_ENFORCE(
-        curandGenerateUniform(context_.curand_generator(), Ydata, X.size()));
+        curandGenerateUniform(context_.curand_generator(), Ydata, X.numel()));
     DropoutKernel<<<
-        CAFFE_GET_BLOCKS(X.size()),
+        CAFFE_GET_BLOCKS(X.numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
-        X.size(), ratio_, X.data<float>(), Ydata, mask->mutable_data<bool>());
+        X.numel(),
+        ratio_,
+        X.data<float>(),
+        Ydata,
+        mask->template mutable_data<bool>());
     return true;
   }
 }
@@ -65,28 +67,27 @@ __global__ void DropoutGradientKernel(
 template <>
 bool DropoutGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(dY.dims());
+  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
   if (is_test_) {
     if (dX != &dY) {
-      context_.Copy<float, CUDAContext, CUDAContext>(
-          dY.size(), dY.data<float>(), dX->mutable_data<float>());
+      context_.CopySameDevice<float>(
+          dY.numel(), dY.data<float>(), dX->template mutable_data<float>());
     }
     return true;
   } else {
     auto& mask = Input(1);
-    CAFFE_ENFORCE_EQ(dY.size(), mask.size());
+    CAFFE_ENFORCE_EQ(dY.numel(), mask.numel());
     const float scale = 1. / (1. - ratio_);
     DropoutGradientKernel<<<
-        CAFFE_GET_BLOCKS(dY.size()),
+        CAFFE_GET_BLOCKS(dY.numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
-        dY.size(),
+        dY.numel(),
         dY.data<float>(),
         mask.data<bool>(),
         scale,
-        dX->mutable_data<float>());
+        dX->template mutable_data<float>());
     return true;
   }
 }

@@ -25,7 +25,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
     Adaptive softmax partitions the labels into several clusters, according to
     their frequency. These clusters may contain different number of targets
     each.
-    Additionally, clusters containig less frequent labels assign lower
+    Additionally, clusters containing less frequent labels assign lower
     dimensional embeddings to those labels, which speeds up the computation.
     For each minibatch, only clusters for which at least one target is
     present are evaluated.
@@ -45,7 +45,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
       assigned to the first cluster, and targets `101, 102, ..., 1000` will be
       assigned to the second cluster, while targets
       `1001, 1002, ..., n_classes - 1` will be assigned
-      to the last, third cluster
+      to the last, third cluster.
 
     * :attr:`div_value` is used to compute the size of each additional cluster,
       which is given as
@@ -74,10 +74,12 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     Args:
         in_features (int): Number of features in the input tensor
-        n_classes (int): Number of classes in the dataset.
-        cutoffs (Sequence): Cutoffs used to assign targets to their buckets.
+        n_classes (int): Number of classes in the dataset
+        cutoffs (Sequence): Cutoffs used to assign targets to their buckets
         div_value (float, optional): value used as an exponent to compute sizes
             of the clusters. Default: 4.0
+        head_bias (bool, optional): If ``True``, adds a bias term to the 'head' of the
+            adaptive softmax. Default: ``False``
 
     Returns:
         ``NamedTuple`` with ``output`` and ``loss`` fields:
@@ -89,8 +91,8 @@ class AdaptiveLogSoftmaxWithLoss(Module):
     Shape:
         - input: :math:`(N, in\_features)`
         - target: :math:`(N)` where each value satisfies :math:`0 <= target[i] <= n\_classes`
-        - output: :math:`(N)`
-        - loss: ``Scalar``
+        - output1: :math:`(N)`
+        - output2: ``Scalar``
 
 
     .. _Efficient softmax approximation for GPUs:
@@ -107,7 +109,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
         if (cutoffs != sorted(cutoffs)) \
                 or (min(cutoffs) <= 0) \
-                or (max(cutoffs) >= (n_classes - 1)) \
+                or (max(cutoffs) > (n_classes - 1)) \
                 or (len(set(cutoffs)) != len(cutoffs)) \
                 or any([int(c) != c for c in cutoffs]):
 
@@ -220,7 +222,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         return out
 
     def log_prob(self, input):
-        """ Computes log probabilities for all :math:`n\_classes`
+        r""" Computes log probabilities for all :math:`n\_classes`
 
         Args:
             input (Tensor): a minibatch of examples
@@ -240,7 +242,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         return self._get_full_log_prob(input, head_output)
 
     def predict(self, input):
-        """ This is equivalent to `self.log_pob(input).argmax(dim=1)`,
+        r""" This is equivalent to `self.log_pob(input).argmax(dim=1)`,
         but is more efficient in some cases.
 
         Args:

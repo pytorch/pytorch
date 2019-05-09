@@ -5,7 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.uniform import Uniform
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
-from torch.distributions.utils import _finfo, broadcast_all
+from torch.distributions.utils import broadcast_all
 
 euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
 
@@ -29,16 +29,28 @@ class Gumbel(TransformedDistribution):
 
     def __init__(self, loc, scale, validate_args=None):
         self.loc, self.scale = broadcast_all(loc, scale)
-        finfo = _finfo(self.loc)
+        finfo = torch.finfo(self.loc.dtype)
         if isinstance(loc, Number) and isinstance(scale, Number):
-            batch_shape = torch.Size()
             base_dist = Uniform(finfo.tiny, 1 - finfo.eps)
         else:
-            batch_shape = self.scale.size()
-            base_dist = Uniform(self.loc.new(self.loc.size()).fill_(finfo.tiny), 1 - finfo.eps)
+            base_dist = Uniform(torch.full_like(self.loc, finfo.tiny),
+                                torch.full_like(self.loc, 1 - finfo.eps))
         transforms = [ExpTransform().inv, AffineTransform(loc=0, scale=-torch.ones_like(self.scale)),
                       ExpTransform().inv, AffineTransform(loc=loc, scale=-self.scale)]
         super(Gumbel, self).__init__(base_dist, transforms, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Gumbel, _instance)
+        new.loc = self.loc.expand(batch_shape)
+        new.scale = self.scale.expand(batch_shape)
+        return super(Gumbel, self).expand(batch_shape, _instance=new)
+
+    # Explicitly defining the log probability function for Gumbel due to precision issues
+    def log_prob(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
+        y = (self.loc - value) / self.scale
+        return (y - y.exp()) - self.scale.log()
 
     @property
     def mean(self):

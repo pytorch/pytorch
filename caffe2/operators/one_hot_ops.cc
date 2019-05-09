@@ -11,33 +11,33 @@ bool BatchOneHotOp<CPUContext>::DoRunWithType() {
   auto& input = Input(X);
   auto& lens = Input(LENS);
   auto& vals = Input(VALS);
-  CAFFE_ENFORCE_GE(input.ndim(), 1);
-  auto N = input.dim(0);
+  CAFFE_ENFORCE_GE(input.dim(), 1);
+  auto N = input.size(0);
   auto D = input.size_from_dim(1);
-  CAFFE_ENFORCE_EQ(lens.size(), D);
+  CAFFE_ENFORCE_EQ(lens.numel(), D);
 
   const auto* lens_data = lens.template data<int32_t>();
-  TIndex output_dim = 0;
+  int64_t output_dim = 0;
   valsOffsets_.resize(D + 1);
-  for (TIndex i = 0; i < D; i++) {
+  for (int64_t i = 0; i < D; i++) {
     CAFFE_ENFORCE_GE(lens_data[i], 0);
     valsOffsets_[i] = output_dim;
     output_dim += lens_data[i];
   }
   valsOffsets_[D] = output_dim;
 
-  CAFFE_ENFORCE_EQ(vals.size(), output_dim);
-  auto* output = Output(ONE_HOT);
-  output->Resize(N, output_dim);
+  CAFFE_ENFORCE_EQ(vals.numel(), output_dim);
+
+  auto* output = Output(ONE_HOT, {N, output_dim}, at::dtype<T>());
 
   const auto* input_data = input.template data<T>();
   const auto* vals_data = vals.template data<T>();
   auto* output_data = output->template mutable_data<T>();
 
-  for (TIndex i = 0; i < N; ++i) {
-    for (TIndex j = 0; j < D; j++) {
+  for (int64_t i = 0; i < N; ++i) {
+    for (int64_t j = 0; j < D; j++) {
       const auto input_val = input_data[i * D + j];
-      for (TIndex k = valsOffsets_[j]; k < valsOffsets_[j + 1]; ++k) {
+      for (int64_t k = valsOffsets_[j]; k < valsOffsets_[j + 1]; ++k) {
         output_data[k] = vals_data[k] == input_val;
       }
     }
@@ -50,21 +50,21 @@ bool BatchOneHotOp<CPUContext>::DoRunWithType() {
 vector<TensorShape> TensorInferenceForBatchOneHot(
     const OperatorDef& /* def */,
     const vector<TensorShape>& in) {
-  std::vector<TIndex> output_dims(2);
+  std::vector<int64_t> output_dims(2);
   output_dims[0] = in[0].dims(0); // N
   output_dims[1] = in[2].dims(0); // vals.size()
   return vector<TensorShape>{
-      CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
+      CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
 }
 
 vector<TensorShape> TensorInferenceForBucketBatchOneHot(
     const OperatorDef& /* def */,
     const vector<TensorShape>& in) {
-  std::vector<TIndex> output_dims(2);
+  std::vector<int64_t> output_dims(2);
   output_dims[0] = in[0].dims(0); // N
   output_dims[1] = in[1].dims(0) + in[2].dims(0); // vals.size() + length.size()
   return vector<TensorShape>{
-      CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
+      CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
 }
 
 OpSchema::Cost CostInferenceForBatchOneHot(
@@ -90,11 +90,11 @@ OpSchema::Cost CostInferenceForBatchOneHot(
 
 template <>
 void OneHotOp<CPUContext>::DoOneHotOp(
-    TIndex batch_size,
-    TIndex index_size,
-    const Tensor<CPUContext>& indices,
-    Tensor<CPUContext>* one_hots) {
-  const TIndex* indices_ptr = indices.template data<TIndex>();
+    int64_t batch_size,
+    int64_t index_size,
+    const Tensor& indices,
+    Tensor* one_hots) {
+  const int64_t* indices_ptr = indices.template data<int64_t>();
   float* one_hots_ptr = one_hots->template mutable_data<float>();
   memset(one_hots_ptr, 0, one_hots->nbytes());
   for (int i = 0; i < batch_size; ++i) {
@@ -110,53 +110,53 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
   auto& input = Input(X);
   auto& lens = Input(LENS);
   auto& boundaries = Input(BOUNDARIES);
-  CAFFE_ENFORCE_GE(input.ndim(), 1);
-  auto N = input.dim(0);
+  CAFFE_ENFORCE_GE(input.dim(), 1);
+  auto N = input.size(0);
   auto D = input.size_from_dim(1);
-  CAFFE_ENFORCE_EQ(lens.size(), D);
+  CAFFE_ENFORCE_EQ(lens.numel(), D);
 
   const auto* lens_data = lens.template data<int32_t>();
 
   CAFFE_ENFORCE_EQ(
-      std::accumulate(lens_data, lens_data + lens.size(), 0),
-      boundaries.size(),
+      std::accumulate(lens_data, lens_data + lens.numel(), 0),
+      boundaries.numel(),
       "The sum of length should be equal to the length of boundaries");
 
-  TIndex output_dim = 0;
-  for (TIndex i = 0; i < D; i++) {
+  int64_t output_dim = 0;
+  for (int64_t i = 0; i < D; i++) {
     CAFFE_ENFORCE_GT(lens_data[i], 0);
     // Number of buckets is number of bucket edges + 1
     output_dim += (lens_data[i] + 1);
   }
-  auto* output = Output(ONE_HOT);
-  output->Resize(N, output_dim);
+
+  auto* output = Output(ONE_HOT, {N, output_dim}, at::dtype<float>());
 
   const auto* input_data = input.template data<float>();
   const auto* boundaries_data = boundaries.template data<float>();
   auto* output_data = output->template mutable_data<float>();
 
-  math::Set<float, CPUContext>(output->size(), 0.f, output_data, &context_);
+  math::Set<float, CPUContext>(output->numel(), 0.f, output_data, &context_);
 
-  TIndex pos = 0;
-  for (TIndex i = 0; i < N; i++) {
+  int64_t pos = 0;
+  for (int64_t i = 0; i < N; i++) {
     auto* boundaries_offset = boundaries_data;
-    TIndex output_offset = 0;
+    int64_t output_offset = 0;
 
-    for (TIndex j = 0; j < D; j++) {
+    for (int64_t j = 0; j < D; j++) {
       // here we assume the boundary values for each feature are sorted
-      TIndex lower_bucket_idx = std::lower_bound(
+      int64_t lower_bucket_idx = std::lower_bound(
                                     boundaries_offset,
                                     boundaries_offset + lens_data[j],
                                     input_data[pos]) -
           boundaries_offset;
 
-      TIndex upper_bucket_idx = std::upper_bound(
+      int64_t upper_bucket_idx = std::upper_bound(
                                     boundaries_offset,
                                     boundaries_offset + lens_data[j],
                                     input_data[pos]) -
           boundaries_offset;
 
-      TIndex bucket_idx = (lower_bucket_idx + upper_bucket_idx) / 2;
+      int64_t bucket_idx = (lower_bucket_idx + upper_bucket_idx) / 2;
       output_data[i * output_dim + output_offset + bucket_idx] = 1.0;
       boundaries_offset += lens_data[j];
       output_offset += (lens_data[j] + 1);
@@ -169,33 +169,34 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
 
 class SegmentOneHotOp : public Operator<CPUContext> {
  public:
-  SegmentOneHotOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit SegmentOneHotOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& lengths = Input(0);
     auto& indices = Input(1);
     auto& index_size_tensor = Input(2);
-    CAFFE_ENFORCE(lengths.ndim() == 1);
-    CAFFE_ENFORCE(indices.ndim() == 1);
-    CAFFE_ENFORCE(index_size_tensor.size() == 1);
-    auto batch_size = lengths.size();
+    CAFFE_ENFORCE(lengths.dim() == 1);
+    CAFFE_ENFORCE(indices.dim() == 1);
+    CAFFE_ENFORCE(index_size_tensor.numel() == 1);
+    auto batch_size = lengths.numel();
     auto index_size = *index_size_tensor.data<int64_t>();
     CAFFE_ENFORCE(index_size > 0);
 
     auto* lengths_ptr = lengths.data<int32_t>();
     auto* indices_ptr = indices.data<int64_t>();
-    auto* one_hots = Output(0);
-    one_hots->Resize(batch_size, index_size);
-    auto* one_hots_ptr = one_hots->mutable_data<float>();
-    if (one_hots->size() == 0) {
+
+    auto* one_hots = Output(0, {batch_size, index_size}, at::dtype<float>());
+    auto* one_hots_ptr = one_hots->template mutable_data<float>();
+    if (one_hots->numel() == 0) {
       return true;
     }
     memset(one_hots_ptr, 0, one_hots->nbytes());
     int el_idx = 0;
     for (int i = 0; i < batch_size; ++i) {
       for (int j = 0; j < lengths_ptr[i]; ++j) {
-        DCHECK(el_idx < indices.size());
+        DCHECK(el_idx < indices.numel());
         auto label_idx = indices_ptr[el_idx++];
         DCHECK((0 <= label_idx) && (label_idx < index_size));
         one_hots_ptr[label_idx] = 1.0;
@@ -213,6 +214,7 @@ REGISTER_CPU_OPERATOR(SegmentOneHot, SegmentOneHotOp);
 OPERATOR_SCHEMA(BatchBucketOneHot)
     .NumInputs(3)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 Input is a matrix tensor. Its first dimension is the batch
 size. For each column, bucketize it based on the boundary values and then do
@@ -244,6 +246,10 @@ For example
 OPERATOR_SCHEMA(BatchOneHot)
     .NumInputs(3)
     .NumOutputs(1)
+    .ValueKeyLengthInputFillers(
+        BatchOneHotOp<CPUContext>::X,
+        BatchOneHotOp<CPUContext>::VALS,
+        BatchOneHotOp<CPUContext>::LENS)
     .SetDoc(R"DOC(
 Input is a matrix tensor. Its first dimension is the batch
 size. Expand each column of it using one hot encoding. The `lengths` specifies
@@ -269,6 +275,7 @@ of one-hot encoding for each column. For example
 OPERATOR_SCHEMA(OneHot)
     .NumInputs(2)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 The *OneHot* op accepts two inputs *indices* and *index_size_tensor*, and produces a single output *one_hots*.  For each index in *indices* the op creates a one-hot row in *one_hots* of length *index_size_tensor* where all entries are zero except the entry at the index is 1. The size of *one_hots* is *len(indices)* x *index_size_tensor*.
 
@@ -335,6 +342,7 @@ one_hots:
 OPERATOR_SCHEMA(SegmentOneHot)
     .NumInputs(3)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 Given a sequence of indices, segmented by the lengths tensor, returns a matrix
 that has the elements in each sequence set to 1.0, and 0.0 everywhere else.

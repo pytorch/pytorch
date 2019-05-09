@@ -1,6 +1,6 @@
 #include "caffe2/core/common.h"
 
-#if CAFFE2_MOBILE && defined(CAFFE2_USE_MPSCNN_TEST)
+#if defined(C10_MOBILE) && defined(CAFFE2_USE_MPSCNN_TEST)
 
 #include "mpscnn_context.h"
 #include "mpscnn_graph_mask.h"
@@ -94,7 +94,7 @@ void testMPSCNN() {
 
               Workspace ws;
               for (auto i = 0; i < N; ++i) {
-                auto* t = ws.CreateBlob(cpu(i))->GetMutable<TensorCPU>();
+                auto* t = BlobGetMutableTensor(ws.CreateBlob(cpu(i)), CPU);
                 t->Resize(BS, C, H, W);
                 CPUContext ctx;
                 math::RandGaussian<float, CPUContext>(
@@ -123,7 +123,7 @@ void testMPSCNN() {
               for (auto i = 0; i < N; ++i) {
                 const auto& t1 = ws.GetBlob(cpu(i))->Get<TensorCPU>();
                 const auto& t2 = ws.GetBlob(y_cpu(i))->Get<TensorCPU>();
-                CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+                CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
                 for (auto i = 0; i < t1.size(); ++i) {
                   // FP16 <-> FP32 round trip.
                   CHECK_NEAR(t1.data<float>()[i], t2.data<float>()[i], 1e-2);
@@ -152,7 +152,7 @@ void testMPSCNN() {
 
         Workspace ws;
         for (auto i = 0; i < N; ++i) {
-          auto* t = ws.CreateBlob(cpu(i))->GetMutable<TensorCPU>();
+          auto* t = BlobGetMutableTensor(ws.CreateBlob(cpu(i)), CPU);
           switch (ndim) {
             case 1:
               t->Resize(5);
@@ -210,7 +210,7 @@ void testMPSCNN() {
         LOG(INFO) << "MPSCNNNormalizePlanarYUV Test: ";
         Workspace ws;
         {
-          auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+          auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
           t->Resize(batch_size, channels, 8, 13);
           CPUContext ctx;
           math::RandGaussian<float, CPUContext>(
@@ -218,14 +218,14 @@ void testMPSCNN() {
         }
 
         {
-          auto* t = ws.CreateBlob("mean")->GetMutable<TensorCPU>();
+          auto* t = BlobGetMutableTensor(ws.CreateBlob("mean"), CPU);
           t->Resize(1, channels);
           CPUContext ctx;
           math::RandGaussian<float, CPUContext>(
               t->size(), 0, 1, t->mutable_data<float>(), &ctx);
         }
         {
-          auto* t = ws.CreateBlob("stddev")->GetMutable<TensorCPU>();
+          auto* t = BlobGetMutableTensor(ws.CreateBlob("stddev"), CPU);
           t->Resize(1, channels);
           CPUContext ctx;
           math::RandUniform<float, CPUContext>(
@@ -269,7 +269,7 @@ void testMPSCNN() {
         const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
         const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-        CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+        CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
         for (auto i = 0; i < t1.size(); ++i) {
           // FP16 <-> FP32 round trip, accumulation, etc.
           const float t1_i = t1.data<float>()[i];
@@ -290,7 +290,7 @@ void testMPSCNN() {
           for (const auto dim : {10, 40}) {
             Workspace ws;
             {
-              auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+              auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
               t->Resize(batchSize, channels, dim, dim);
               CPUContext ctx;
               // Too noisy.
@@ -299,7 +299,7 @@ void testMPSCNN() {
             }
 
             {
-              auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
+              auto* t = BlobGetMutableTensor(ws.CreateBlob("W"), CPU);
               t->Resize(channels);
               CPUContext ctx;
               for (auto i = 0; i < t->size(); ++i) {
@@ -310,7 +310,7 @@ void testMPSCNN() {
               // t->mutable_data<float>(), &ctx);
             }
             {
-              auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
+              auto* t = BlobGetMutableTensor(ws.CreateBlob("b"), CPU);
               t->Resize(channels);
               CPUContext ctx;
               for (auto i = 0; i < t->size(); ++i) {
@@ -321,7 +321,7 @@ void testMPSCNN() {
               // t->mutable_data<float>(), &ctx);
             }
             {
-              auto* t = ws.CreateBlob("pw")->GetMutable<TensorCPU>();
+              auto* t = BlobGetMutableTensor(ws.CreateBlob("pw"), CPU);
               t->Resize(prelu == PreluTy::SHARED ? 1 : channels);
               CPUContext ctx;
               // Too noisy.
@@ -385,7 +385,7 @@ void testMPSCNN() {
             const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
             const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-            CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+            CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
             for (auto i = 0; i < t1.size(); ++i) {
               // FP16 <-> FP32 round trip, accumulation, etc.
               const float t1_i = t1.data<float>()[i];
@@ -409,7 +409,7 @@ void testMPSCNN() {
           Workspace ws;
           const auto channels = array ? 12 : 3;
           {
-            auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+            auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
             t->Resize(batch_size, channels, 8, 13);
             CPUContext ctx;
             math::RandGaussian<float, CPUContext>(
@@ -417,7 +417,7 @@ void testMPSCNN() {
           }
 
           {
-            auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
+            auto* t = BlobGetMutableTensor(ws.CreateBlob("b"), CPU);
             t->Resize(shared ? channels : 1);
             CPUContext ctx;
             math::RandGaussian<float, CPUContext>(
@@ -462,7 +462,7 @@ void testMPSCNN() {
           const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
           const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+          CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
           for (auto i = 0; i < t1.size(); ++i) {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];
@@ -480,7 +480,7 @@ void testMPSCNN() {
         LOG(INFO) << "MPSCNNSpatialBN Test: " << channels;
         Workspace ws;
         {
-          auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+          auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
           t->Resize(batch_size, channels, 8, 13);
           CPUContext ctx;
           math::RandGaussian<float, CPUContext>(
@@ -488,7 +488,7 @@ void testMPSCNN() {
         }
 
         for (const std::string name : {"scale", "bias", "mean", "var"}) {
-          auto* t = ws.CreateBlob(name)->GetMutable<TensorCPU>();
+          auto* t = BlobGetMutableTensor(ws.CreateBlob(name), CPU);
           t->Resize(channels);
           CPUContext ctx;
           // High mean to avoid var division by zero.
@@ -555,7 +555,7 @@ void testMPSCNN() {
         const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
         const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-        CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+        CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
         for (auto i = 0; i < t1.size(); ++i) {
           // FP16 <-> FP32 round trip, accumulation, etc.
           const float t1_i = t1.data<float>()[i];
@@ -575,7 +575,7 @@ void testMPSCNN() {
               LOG(INFO) << "MPSCNNFC Test";
               Workspace ws;
               {
-                auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+                auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
                 t->Resize(batchSize, CIn, H, W);
                 CPUContext ctx;
                 math::RandGaussian<float, CPUContext>(
@@ -583,7 +583,7 @@ void testMPSCNN() {
               }
 
               {
-                auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
+                auto* t = BlobGetMutableTensor(ws.CreateBlob("W"), CPU);
                 t->Resize(COut, CIn * H * W);
                 CPUContext ctx;
                 math::RandGaussian<float, CPUContext>(
@@ -591,7 +591,7 @@ void testMPSCNN() {
               }
 
               {
-                auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
+                auto* t = BlobGetMutableTensor(ws.CreateBlob("b"), CPU);
                 t->Resize(COut);
                 CPUContext ctx;
                 math::RandGaussian<float, CPUContext>(
@@ -640,10 +640,10 @@ void testMPSCNN() {
               CAFFE_ENFORCE_EQ(t1.ndim(), 2);
               CAFFE_ENFORCE(t2.dim32(2) == 1 && t2.dim32(3) == 1);
               const_cast<TensorCPU&>(t2).Reshape(
-                  std::vector<TIndex>{TIndex(batchSize), TIndex(COut)});
+                  std::vector<int64_t>{int64_t(batchSize), int64_t(COut)});
               // Note dims do not match, as Metal leaves a 1x1 spatial
               // dimension.
-              CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+              CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
 
               for (auto i = 0; i < t1.size(); ++i) {
                 // FP16 <-> FP32 round trip, accumulation, etc.
@@ -682,8 +682,8 @@ void testMPSCNN() {
                           LOG(INFO) << "MPSCNNPool Test: " << pool;
                           Workspace ws;
                           {
-                            auto* t =
-                                ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+                            auto* t = BlobGetMutableTensor(
+                                ws.CreateBlob("X_cpu"), CPU);
                             t->Resize(batchSize, 8, 8, 13);
                             CPUContext ctx;
                             math::RandGaussian<float, CPUContext>(
@@ -758,7 +758,7 @@ void testMPSCNN() {
                           const auto& t1 =
                               ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-                          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+                          CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
                           for (auto i = 0; i < t1.size(); ++i) {
                             // FP16 <-> FP32 round trip, accumulation, etc.
                             const float t1_i = t1.data<float>()[i];
@@ -784,7 +784,7 @@ void testMPSCNN() {
          std::vector<std::vector<size_t>>{{1, 3, 50, 80}, {1, 12, 50, 80}}) {
       Workspace ws;
       {
-        auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+        auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
         t->Resize(dims);
         CPUContext ctx;
         math::RandGaussian<float, CPUContext>(
@@ -844,7 +844,7 @@ void testMPSCNN() {
       const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
       const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-      CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+      CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
       for (auto i = 0; i < t1.size(); ++i) {
         // FP16 <-> FP32 round trip, accumulation, etc.
         const float t1_i = t1.data<float>()[i];
@@ -860,7 +860,7 @@ void testMPSCNN() {
     LOG(INFO) << "MPSCNNPreprocess Test";
     Workspace ws;
     {
-      auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
       t->Resize(1, 8, 13, 4);
       CPUContext ctx;
       for (auto i = 0; i < t->size(); ++i) {
@@ -869,7 +869,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("mean")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("mean"), CPU);
       t->Resize(3);
       CPUContext ctx;
       t->mutable_data<float>()[0] = 100;
@@ -927,7 +927,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -940,7 +940,7 @@ void testMPSCNN() {
     LOG(INFO) << "MPSCNNDeprocess Test";
     Workspace ws;
     {
-      auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
       t->Resize(1, 3, 8, 24);
       CPUContext ctx;
       for (auto i = 0; i < t->size(); ++i) {
@@ -949,7 +949,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("mean")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("mean"), CPU);
       t->Resize(3);
       CPUContext ctx;
       t->mutable_data<float>()[0] = 100;
@@ -986,7 +986,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<uint8_t>()[i];
@@ -999,7 +999,7 @@ void testMPSCNN() {
     LOG(INFO) << "MPSCNNDeprocess Test";
     Workspace ws;
     {
-      auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
       t->Resize(1, 3, 1280, 720);
       CPUContext ctx;
       for (auto i = 0; i < t->size(); ++i) {
@@ -1008,7 +1008,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("mean")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("mean"), CPU);
       t->Resize(3);
       CPUContext ctx;
       t->mutable_data<float>()[0] = 30;
@@ -1045,7 +1045,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<uint8_t>()[i];
@@ -1073,7 +1073,7 @@ void testMPSCNN() {
                       Workspace ws;
                       {
                         auto* t =
-                            ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+                            BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
                         t->Resize(batchSize, 12, 57, 72);
                         CPUContext ctx;
                         math::RandGaussian<float, CPUContext>(
@@ -1081,7 +1081,7 @@ void testMPSCNN() {
                       }
 
                       {
-                        auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
+                        auto* t = BlobGetMutableTensor(ws.CreateBlob("W"), CPU);
                         t->Resize(8, 12, kernel_h, kernel_w);
                         CPUContext ctx;
                         math::RandGaussian<float, CPUContext>(
@@ -1093,7 +1093,7 @@ void testMPSCNN() {
                       }
 
                       {
-                        auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
+                        auto* t = BlobGetMutableTensor(ws.CreateBlob("b"), CPU);
                         t->Resize(8);
                         CPUContext ctx;
                         math::RandGaussian<float, CPUContext>(
@@ -1161,7 +1161,7 @@ void testMPSCNN() {
                       const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
                       const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-                      CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+                      CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
                       for (auto i = 0; i < t1.size(); ++i) {
                         // FP16 <-> FP32 round trip, accumulation, etc.
                         const float t1_i = t1.data<float>()[i];
@@ -1189,7 +1189,7 @@ void testMPSCNN() {
             Workspace ws;
             int output_channels = input_channels * channel_multiplier;
             {
-              auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+              auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
               t->Resize(batchSize, input_channels, 57, 72);
               CPUContext ctx;
               math::RandGaussian<float, CPUContext>(
@@ -1197,7 +1197,7 @@ void testMPSCNN() {
             }
 
             {
-              auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
+              auto* t = BlobGetMutableTensor(ws.CreateBlob("W"), CPU);
               t->Resize(output_channels, 1, 3, 3);
               CPUContext ctx;
               math::RandGaussian<float, CPUContext>(
@@ -1205,7 +1205,7 @@ void testMPSCNN() {
             }
 
             {
-              auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
+              auto* t = BlobGetMutableTensor(ws.CreateBlob("b"), CPU);
               t->Resize(output_channels);
               CPUContext ctx;
               math::RandGaussian<float, CPUContext>(
@@ -1259,7 +1259,7 @@ void testMPSCNN() {
             const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
             const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-            CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+            CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
             for (auto i = 0; i < t1.size(); ++i) {
               // FP16 <-> FP32 round trip, accumulation, etc.
               const float t1_i = t1.data<float>()[i];
@@ -1276,7 +1276,7 @@ void testMPSCNN() {
     LOG(INFO) << "MPSCNNConvRelu Test";
     Workspace ws;
     {
-      auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
       t->Resize(1, 12, 57, 72);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1284,7 +1284,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("W"), CPU);
       t->Resize(8, 12, 3, 3);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1292,7 +1292,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("b"), CPU);
       t->Resize(8);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1373,7 +1373,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -1386,7 +1386,7 @@ void testMPSCNN() {
     LOG(INFO) << "MPSConv Test";
     Workspace ws;
     {
-      auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
       t->Resize(1, 12, 57, 72);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1394,7 +1394,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("W"), CPU);
       t->Resize(8, 12, 3, 3);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1402,7 +1402,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("b"), CPU);
       t->Resize(8);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1476,7 +1476,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -1494,7 +1494,7 @@ void testMPSCNN() {
               LOG(INFO) << "MPSConv Test";
               Workspace ws;
               {
-                auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+                auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
                 t->Resize(batchSize, C, 12, 16);
                 CPUContext ctx;
                 math::RandGaussian<float, CPUContext>(
@@ -1502,7 +1502,7 @@ void testMPSCNN() {
               }
 
               {
-                auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
+                auto* t = BlobGetMutableTensor(ws.CreateBlob("W"), CPU);
                 t->Resize(M, C, K, K);
                 CPUContext ctx;
                 math::RandGaussian<float, CPUContext>(
@@ -1510,7 +1510,7 @@ void testMPSCNN() {
               }
 
               {
-                auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
+                auto* t = BlobGetMutableTensor(ws.CreateBlob("b"), CPU);
                 t->Resize(M);
                 CPUContext ctx;
                 math::RandGaussian<float, CPUContext>(
@@ -1584,7 +1584,7 @@ void testMPSCNN() {
               const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
               const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-              CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+              CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
               for (auto i = 0; i < t1.size(); ++i) {
                 // FP16 <-> FP32 round trip, accumulation, etc.
                 const float t1_i = t1.data<float>()[i];
@@ -1608,7 +1608,7 @@ void testMPSCNN() {
                 LOG(INFO) << "MPSCNNConv Test - group";
                 Workspace ws;
                 {
-                  auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+                  auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
                   t->Resize(batchSize, C, 12, 16);
                   CPUContext ctx;
                   math::RandGaussian<float, CPUContext>(
@@ -1616,7 +1616,7 @@ void testMPSCNN() {
                 }
 
                 {
-                  auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
+                  auto* t = BlobGetMutableTensor(ws.CreateBlob("W"), CPU);
                   t->Resize(M, C / group, K, K);
                   CPUContext ctx;
                   math::RandGaussian<float, CPUContext>(
@@ -1624,7 +1624,7 @@ void testMPSCNN() {
                 }
 
                 {
-                  auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
+                  auto* t = BlobGetMutableTensor(ws.CreateBlob("b"), CPU);
                   t->Resize(M);
                   CPUContext ctx;
                   math::RandGaussian<float, CPUContext>(
@@ -1708,7 +1708,7 @@ void testMPSCNN() {
                 const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
                 const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-                CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+                CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
                 for (auto i = 0; i < t1.size(); ++i) {
                   // FP16 <-> FP32 round trip, accumulation, etc.
                   const float t1_i = t1.data<float>()[i];
@@ -1727,7 +1727,7 @@ void testMPSCNN() {
     LOG(INFO) << "MPSCNNMul Test";
     Workspace ws;
     {
-      auto* t = ws.CreateBlob("X0_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X0_cpu"), CPU);
       t->Resize(1, 12, 57, 72);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1735,7 +1735,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("X1_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X1_cpu"), CPU);
       t->Resize(72);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1779,7 +1779,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -1792,7 +1792,7 @@ void testMPSCNN() {
     LOG(INFO) << "MPSCNNSub Test";
     Workspace ws;
     {
-      auto* t = ws.CreateBlob("X0_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X0_cpu"), CPU);
       t->Resize(1, 12, 57, 72);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1800,7 +1800,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("X1_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X1_cpu"), CPU);
       t->Resize(72);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1844,7 +1844,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -1857,7 +1857,7 @@ void testMPSCNN() {
     LOG(INFO) << "MPSAdd Test";
     Workspace ws;
     {
-      auto* t = ws.CreateBlob("X0_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X0_cpu"), CPU);
       t->Resize(1, 12, 57, 72);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1865,7 +1865,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("X1_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X1_cpu"), CPU);
       t->Resize(1, 12, 57, 72);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1909,7 +1909,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -1922,7 +1922,7 @@ void testMPSCNN() {
     LOG(INFO) << "MPSAdd Test";
     Workspace ws;
     {
-      auto* t = ws.CreateBlob("X0_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X0_cpu"), CPU);
       t->Resize(1, 12, 57, 72);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1930,7 +1930,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("X1_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X1_cpu"), CPU);
       t->Resize(1, 12, 57, 72);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -1998,7 +1998,7 @@ void testMPSCNN() {
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -2012,7 +2012,7 @@ void testMPSCNN() {
       LOG(INFO) << "MPSCNNNeuron Test: " << n;
       Workspace ws;
       {
-        auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+        auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
         t->Resize(1, 4, 12, 12);
         CPUContext ctx;
         math::RandGaussian<float, CPUContext>(
@@ -2052,7 +2052,7 @@ void testMPSCNN() {
       const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
       const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-      CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+      CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
       for (auto i = 0; i < t1.size(); ++i) {
         // FP16 <-> FP32 round trip, accumulation, etc.
         const float t1_i = t1.data<float>()[i];
@@ -2066,7 +2066,7 @@ void testMPSCNN() {
     LOG(INFO) << "MPSCNNDropout Test";
     Workspace ws;
     {
-      auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
       t->Resize(1, 12, 57, 72);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(
@@ -2117,8 +2117,8 @@ void testMPSCNN() {
     ws.RunNetOnce(netdef);
     const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
     const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
-    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-    LOG(INFO) << t1.dims();
+    CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+    LOG(INFO) << t1.sizes();
     for (auto i = 0; i < t1.size(); ++i) {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
@@ -2137,7 +2137,7 @@ void testMPSCNN() {
                       << " - scale: " << scale;
             Workspace ws;
             {
-              auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+              auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
               t->Resize(1, channels, 40, 40);
               CPUContext ctx;
               math::RandGaussian<float, CPUContext>(
@@ -2145,7 +2145,7 @@ void testMPSCNN() {
             }
             {
               // Use the batch-first encoding (n, [bbox])
-              auto* t = ws.CreateBlob("R")->GetMutable<TensorCPU>();
+              auto* t = BlobGetMutableTensor(ws.CreateBlob("R"), CPU);
               t->Resize(6, 5);
               for (auto i = 0; i < t->dim32(0); ++i) {
                 t->mutable_data<float>()[5 * i + 0] = 0; // batch
@@ -2231,8 +2231,8 @@ void testMPSCNN() {
             const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
             const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
 
-            CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-            LOG(INFO) << t1.dims();
+            CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+            LOG(INFO) << t1.sizes();
             for (auto i = 0; i < t1.size(); ++i) {
               // FP16 <-> FP32 round trip, accumulation, etc.
               const float t1_i = t1.data<float>()[i];
@@ -2251,14 +2251,14 @@ void testMPSCNN() {
         LOG(INFO) << "MPSCNNRoIWarp Test 2";
         Workspace ws;
         {
-          auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+          auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
           t->Resize(1, 8, 40, 40);
           CPUContext ctx;
           math::RandGaussian<float, CPUContext>(
               t->size(), 4, 2, t->mutable_data<float>(), &ctx);
         }
         {
-          auto* t = ws.CreateBlob("R")->GetMutable<TensorCPU>();
+          auto* t = BlobGetMutableTensor(ws.CreateBlob("R"), CPU);
           t->Resize(6, 4);
           for (auto i = 0; i < t->dim32(0); ++i) {
             t->mutable_data<float>()[4 * i + 0] = (i % 4 + 1) * 1.0 / scale;
@@ -2343,8 +2343,8 @@ void testMPSCNN() {
         const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
         const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
 
-        CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-        LOG(INFO) << t1.dims();
+        CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+        LOG(INFO) << t1.sizes();
         for (auto i = 0; i < t1.size(); ++i) {
           // FP16 <-> FP32 round trip, accumulation, etc.
           const float t1_i = t1.data<float>()[i];
@@ -2363,7 +2363,7 @@ void testMPSCNN() {
             LOG(INFO) << "MPSCNNResizeNearestOp Test";
             Workspace ws;
             {
-              auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+              auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
               t->Resize(N, C, 37, 89);
               CPUContext ctx;
               math::RandGaussian<float, CPUContext>(
@@ -2422,8 +2422,8 @@ void testMPSCNN() {
             const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
             const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
 
-            CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-            LOG(INFO) << t1.dims();
+            CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+            LOG(INFO) << t1.sizes();
             for (auto i = 0; i < t1.size(); ++i) {
               // FP16 <-> FP32 round trip, accumulation, etc.
               const float t1_i = t1.data<float>()[i];
@@ -2498,7 +2498,7 @@ void testMPSCNN() {
     vector<float> im_info{60, 80, 0.166667};
     vector<float> anchors{-38, -16, 53, 31, -120, -120, 135, 135};
     {
-      auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
       t->Resize(num_images, A, H, W);
       for (auto i = 0; i < t->size(); ++i) {
         t->mutable_data<float>()[i] = scores[i];
@@ -2506,7 +2506,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("bbox_delta_cpu")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("bbox_delta_cpu"), CPU);
       t->Resize(num_images, 4 * A, H, W);
       for (auto i = 0; i < t->size(); ++i) {
         t->mutable_data<float>()[i] = bbx[i];
@@ -2514,7 +2514,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("im_info")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("im_info"), CPU);
       t->Resize(num_images, 3);
       for (auto i = 0; i < t->size(); ++i) {
         t->mutable_data<float>()[i] = im_info[i];
@@ -2522,7 +2522,7 @@ void testMPSCNN() {
     }
 
     {
-      auto* t = ws.CreateBlob("anchors")->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(ws.CreateBlob("anchors"), CPU);
       t->Resize(A, 4);
       for (auto i = 0; i < t->size(); ++i) {
         t->mutable_data<float>()[i] = anchors[i];
@@ -2588,7 +2588,7 @@ void testMPSCNN() {
       LOG(INFO) << "MPSCNNSoftmax Test";
       Workspace ws;
       {
-        auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+        auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
         // Only works for spatial dimension of (1, 1) - weird.
         t->Resize(batchSize, 12, 1, 1);
         CPUContext ctx;
@@ -2628,8 +2628,8 @@ void testMPSCNN() {
       ws.RunNetOnce(netdef);
       const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
       const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
-      CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-      LOG(INFO) << t1.dims();
+      CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+      LOG(INFO) << t1.sizes();
       for (auto i = 0; i < t1.size(); ++i) {
         // FP16 <-> FP32 round trip, accumulation, etc.
         const float t1_i = t1.data<float>()[i];
@@ -2662,8 +2662,8 @@ void testMPSCNN() {
                             LOG(INFO) << "MPSConvTranspose Test";
                             Workspace ws;
                             {
-                              auto* t = ws.CreateBlob("X_cpu")
-                                            ->GetMutable<TensorCPU>();
+                              auto* t = BlobGetMutableTensor(
+                                  ws.CreateBlob("X_cpu"), CPU);
                               t->Resize(batchSize, inputChannels, 8, 12);
                               CPUContext ctx;
                               math::RandGaussian<float, CPUContext>(
@@ -2676,7 +2676,7 @@ void testMPSCNN() {
 
                             {
                               auto* t =
-                                  ws.CreateBlob("W")->GetMutable<TensorCPU>();
+                                  BlobGetMutableTensor(ws.CreateBlob("W"), CPU);
                               t->Resize(
                                   inputChannels,
                                   outputChannels,
@@ -2693,7 +2693,7 @@ void testMPSCNN() {
 
                             {
                               auto* t =
-                                  ws.CreateBlob("b")->GetMutable<TensorCPU>();
+                                  BlobGetMutableTensor(ws.CreateBlob("b"), CPU);
                               t->Resize(outputChannels);
                               CPUContext ctx;
                               math::RandGaussian<float, CPUContext>(
@@ -2769,8 +2769,8 @@ void testMPSCNN() {
                                 ws.GetBlob("Y_cpu")->Get<TensorCPU>();
                             const auto& t1 =
                                 ws.GetBlob("Y_ref")->Get<TensorCPU>();
-                            CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-                            LOG(INFO) << t1.dims();
+                            CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+                            LOG(INFO) << t1.sizes();
                             for (auto i = 0; i < t1.size(); ++i) {
                               // FP16 <-> FP32 round trip, accumulation, etc.
                               const float t1_i = t1.data<float>()[i];
@@ -2810,7 +2810,7 @@ void testMPSCNN() {
                     << batchSize;
           Workspace ws;
           for (auto i = 0; i < numInputs; ++i) {
-            auto* t = ws.CreateBlob(cpu(i))->GetMutable<TensorCPU>();
+            auto* t = BlobGetMutableTensor(ws.CreateBlob(cpu(i)), CPU);
             t->Resize(batchSize, array ? (i + 1) * 4 : 4, 10, 10);
             CPUContext ctx;
             math::RandGaussian<float, CPUContext>(
@@ -2869,8 +2869,8 @@ void testMPSCNN() {
           const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
           const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
-          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-          LOG(INFO) << t1.dims();
+          CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+          LOG(INFO) << t1.sizes();
           for (auto i = 0; i < t1.size(); ++i) {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];
@@ -2892,7 +2892,7 @@ void testMPSCNN() {
           }
           Workspace ws;
           {
-            auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+            auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
             t->Resize(batchSize, inputChannels, 53, 47);
             CPUContext ctx;
             math::RandGaussian<float, CPUContext>(
@@ -2938,7 +2938,7 @@ void testMPSCNN() {
           const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
           const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
-          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+          CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
           for (auto i = 0; i < t1.size(); ++i) {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];
@@ -2965,7 +2965,7 @@ void testMPSCNN() {
                     << numInputs << ", " << batchSize;
           Workspace ws;
           for (auto i = 0; i < numInputs; ++i) {
-            auto* t = ws.CreateBlob(cpu(i))->GetMutable<TensorCPU>();
+            auto* t = BlobGetMutableTensor(ws.CreateBlob(cpu(i)), CPU);
             t->Resize(batchSize, channelCount, 9, 17);
             CPUContext ctx;
             math::RandGaussian<float, CPUContext>(
@@ -3024,8 +3024,8 @@ void testMPSCNN() {
           const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
 
           const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
-          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-          LOG(INFO) << t1.dims();
+          CAFFE_ENFORCE_EQ(t1.sizes(), t2.sizes());
+          LOG(INFO) << t1.sizes();
           for (auto i = 0; i < t1.size(); ++i) {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];
@@ -3337,8 +3337,8 @@ void compareModels(const NetDef& initNet, NetDef predictNet) {
     Workspace cws;
     cws.RunNetOnce(initNet);
     {
-      auto* t =
-          cws.CreateBlob(predictNet.external_input(0))->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(
+          cws.CreateBlob(predictNet.external_input(0)), CPU);
       t->Resize(1, 224, 224, 4);
       for (auto i = 0; i < t->size(); ++i) {
         t->mutable_data<uint8_t>()[i] = i % 225;
@@ -3349,8 +3349,8 @@ void compareModels(const NetDef& initNet, NetDef predictNet) {
     Workspace mws;
     mws.RunNetOnce(initNet);
     {
-      auto* t =
-          mws.CreateBlob(predictNet.external_input(0))->GetMutable<TensorCPU>();
+      auto* t = BlobGetMutableTensor(
+          mws.CreateBlob(predictNet.external_input(0)), CPU);
       t->Resize(1, 224, 224, 4);
       for (auto i = 0; i < t->size(); ++i) {
         t->mutable_data<uint8_t>()[i] = i % 225;
@@ -3365,7 +3365,7 @@ void compareModels(const NetDef& initNet, NetDef predictNet) {
     {
       const auto& mt = mws.GetBlob(name)->Get<TensorCPU>();
       const auto& ct = cws.GetBlob(name)->Get<TensorCPU>();
-      CHECK_EQ(mt.dims(), ct.dims());
+      CHECK_EQ(mt.sizes(), ct.sizes());
       for (auto j = 0; j < mt.size(); ++j) {
         if (mt.IsType<float>()) {
           if (j < 10) {
@@ -3398,16 +3398,16 @@ void verifyRewrite(
   dumpDef(predictNet);
   dumpDef(metalPredictNet);
 
-#define RUN_NET(ws, predictNet)                                               \
-  ws.RunNetOnce(initNet);                                                     \
-  {                                                                           \
-    auto* t =                                                                 \
-        ws.CreateBlob(predictNet.external_input(0))->GetMutable<TensorCPU>(); \
-    t->Resize(inputDims);                                                     \
-    CPUContext ctx;                                                           \
-    math::RandGaussian<float, CPUContext>(                                    \
-        t->size(), 0, 1, t->mutable_data<float>(), &ctx);                     \
-  }                                                                           \
+#define RUN_NET(ws, predictNet)                            \
+  ws.RunNetOnce(initNet);                                  \
+  {                                                        \
+    auto* t = BlobGetMutableTensor(                        \
+        ws.CreateBlob(predictNet.external_input(0)), CPU); \
+    t->Resize(inputDims);                                  \
+    CPUContext ctx;                                        \
+    math::RandGaussian<float, CPUContext>(                 \
+        t->size(), 0, 1, t->mutable_data<float>(), &ctx);  \
+  }                                                        \
   ws.RunNetOnce(predictNet);
 
   // initialize
@@ -3422,13 +3422,13 @@ void verifyRewrite(
   for (auto i = 0; i < predictNet.external_output_size(); i++) {
     auto blobName = predictNet.external_output(i);
     LOG(INFO) << "Checking output blob:" << blobName;
-    const auto& mt = mws.GetBlob(blobName)->Get<TensorCPU>();
-    const auto& ct = cws.GetBlob(blobName)->Get<TensorCPU>();
+    const auto& mt = mws.GetBlob(blobName)->Get<Tensor>();
+    const auto& ct = cws.GetBlob(blobName)->Get<Tensor>();
     if (mt.size() == 0 || ct.size() == 0) {
       LOG(INFO) << "One of the operator failed.";
       return;
     }
-    // CHECK_EQ(mt.dims(), ct.dims());
+    // CHECK_EQ(mt.sizes(), ct.sizes());
     for (auto j = 0; j < fmin(mt.size(), ct.size()); ++j) {
       if (mt.IsType<float>()) {
         if (j < 10) {

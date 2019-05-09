@@ -1,10 +1,11 @@
-#include "THCUNN.h"
-#include "THCAtomics.cuh"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCDeviceUtils.cuh"
-#include "THCNumerics.cuh"
-#include "THCTensorTypeUtils.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCAtomics.cuh>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCTensorTypeUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
 
 #define OUTPUT_FEATURES_PER_THREAD 32
 #define MAX_WARPS_PER_RUN 4
@@ -397,7 +398,7 @@ runFeatureLPPoolingUpdateOutput(THCState* state,
   cudaStream_t stream =
     THCState_getCurrentStream(state);
   const cudaDeviceProp* deviceProperties =
-    THCState_getCurrentDeviceProperties(state);
+    at::cuda::getCurrentDeviceProperties();
 
   int outputFeatures = ((input.getSize(1) - width) / stride) + 1;
 
@@ -526,7 +527,7 @@ runFeatureLPPoolingUpdateGradInput(THCState* state,
   cudaStream_t stream =
     THCState_getCurrentStream(state);
   const cudaDeviceProp* deviceProperties =
-    THCState_getCurrentDeviceProperties(state);
+    at::cuda::getCurrentDeviceProperties();
 
   for (int i = 0; i < 4; ++i) {
     THAssert(gradOutput.getSize(i) == output.getSize(i));
@@ -649,5 +650,5 @@ runFeatureLPPoolingUpdateGradInput(THCState* state,
 #undef LP_WIDTH_CASE
 }
 
-#include "generic/FeatureLPPooling.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/FeatureLPPooling.cu>
+#include <THC/THCGenerateFloatTypes.h>

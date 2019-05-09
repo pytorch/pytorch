@@ -3,13 +3,11 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THStorageClass.hpp"
-#include "THStorageFunctions.h"
+#include <c10/core/Storage.h>
+#include <c10/core/StorageImpl.h>
+#include <TH/THStorageFunctions.h>
 
-#include <ATen/ScalarType.h>
-#include <ATen/ScalarTypeUtils.h>
-#include "THTypeConversion.hpp"
-#include <atomic>
+#include <c10/core/ScalarType.h>
 
 // Note [Weak references for intrusive refcounting]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -33,13 +31,8 @@
 //    If it is not, you must report that the storage is dead.
 //
 
+TH_CPP_API THStorage* THStorage_new(caffe2::TypeMeta data_type);
 TH_API ptrdiff_t THStorage_size(const THStorage *self);
 
-TH_API void THStorage_setFlag(THStorage *storage, const char flag);
-TH_API void THStorage_clearFlag(THStorage *storage, const char flag);
 TH_API void THStorage_retain(THStorage *storage);
 TH_API void THStorage_resize(THStorage *storage, ptrdiff_t size);
-TH_API void THStorage_swap(THStorage *storage1, THStorage *storage2);
-
-TH_API void THStorage_weakRetain(THStorage *weak_storage);
-TH_API THStorage* THStorage_weakLock(THStorage *weak_storage);
