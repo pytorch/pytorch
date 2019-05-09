@@ -74,6 +74,8 @@ class ScriptModuleDeserializer final {
   // Results from __getstate__ to be passed to __setstate__ methods
   std::vector<IValue> state_table_;
   std::unordered_set<std::string> imported_libs_;
+
+  std::shared_ptr<script::Module> main_module_;
 };
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
@@ -124,6 +126,7 @@ void ScriptModuleDeserializer::deserialize(
       "JSON transcoder produced invalid protobuf output.");
   moduleLookup_ = module_lookup;
   device_ = device;
+  main_module_ = module_lookup({});
 
   const auto& module_def = model_def.main_module();
 
@@ -250,7 +253,12 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   size_t size;
   std::tie(data, size) = reader_.getRecord(path);
   std::string src(static_cast<const char*>(data.get()), size);
-  script::import_libs(qualifier, src, tensor_table_, import_callback);
+  script::import_libs(
+      main_module_->class_compilation_unit(),
+      qualifier,
+      src,
+      tensor_table_,
+      import_callback);
 }
 
 void ScriptModuleDeserializer::convertModule(
@@ -294,7 +302,12 @@ void ScriptModuleDeserializer::convertModule(
 
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
-    script::import_methods(module, data_str, tensor_table_, import_callback);
+    script::import_methods(
+        main_module_->class_compilation_unit(),
+        module,
+        data_str,
+        tensor_table_,
+        import_callback);
   }
 
   // TODO: get the correct index so this works for submodules
