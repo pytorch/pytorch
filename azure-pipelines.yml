@@ -12,7 +12,7 @@ container:
   options: -u 0
 
 steps:
-- bash:
+- bash: |
     set +x
     git submodule sync && git submodule update -q --init
     .jenkins/pytorch/build.sh
