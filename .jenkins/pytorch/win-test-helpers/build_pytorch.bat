@@ -21,13 +21,42 @@ if "%REBUILD%"=="" ( pip install -q ninja )
 git submodule sync --recursive
 git submodule update --init --recursive
 
-set PATH=%TMP_DIR_WIN%\bin;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\bin;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\libnvvp;%PATH%
+if "%CUDA_VERSION%" == "9" goto cuda_build_9
+if "%CUDA_VERSION%" == "10" goto cuda_build_10
+goto cuda_build_end
+
+:cuda_build_9
+
+:: Override VS env here
+pushd .
+call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+@echo on
+popd
+set DISTUTILS_USE_SDK=1
+
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0
-set CUDA_PATH_V9_0=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0
+set CUDA_PATH_V9_0=%CUDA_PATH%
+
+goto cuda_build_common
+
+:cuda_build_10
+
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.1
+set CUDA_PATH_V10_1=%CUDA_PATH%
+
+goto cuda_build_common
+
+:cuda_build_common
+
+set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
+set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
+set CUDNN_ROOT_DIR=%CUDA_PATH%
 set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
-set CUDNN_LIB_DIR=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\lib\x64
-set CUDA_TOOLKIT_ROOT_DIR=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0
-set CUDNN_ROOT_DIR=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0
+set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
+
+:cuda_build_end
+
+set PATH=%TMP_DIR_WIN%\bin;%PATH%
 
 :: Target only our CI GPU machine's CUDA arch to speed up the build
 set TORCH_CUDA_ARCH_LIST=5.2
