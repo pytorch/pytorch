@@ -201,17 +201,14 @@ inline std::string if_empty_then(std::string x, std::string y) {
     C10_THROW_ERROR(Error,                                  \
       ::c10::detail::if_empty_then(                         \
         ::c10::str(__VA_ARGS__),                            \
-        "Expected " #cond, " to be true, but got false.  "  \
+        "Expected " #cond " to be true, but got false.  "   \
         "(Could this error message be improved?  If so, "   \
         "please report an enhancement request to PyTorch.)" \
       ) \
     ); \
   }
-// NB: I was a little clever, and don't paste #cond to the suffix message, so I
-// only get one of those in the final binary instead of N oh so slightly
-// different string literals. It probably doesn't matter, but I thought
-// I'd point it out.
-
+// TODO: We're going to get a lot of similar looking string literals
+// this way; check if this actually affects binary size.
 
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
 #define TORCH_CHECK_INDEX(cond, ...)                        \
@@ -219,7 +216,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
     C10_THROW_ERROR(IndexError,                             \
       ::c10::detail::if_empty_then(                         \
         ::c10::str(__VA_ARGS__),                            \
-        "Expected " #cond, " to be true, but got false.  "  \
+        "Expected " #cond " to be true, but got false.  "   \
         "(Could this error message be improved?  If so, "   \
         "please report an enhancement request to PyTorch.)" \
       )                                                     \
