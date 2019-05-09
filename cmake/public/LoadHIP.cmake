@@ -161,6 +161,8 @@ IF(HIP_FOUND)
   FIND_LIBRARY(hiprand_LIBRARIES hiprand HINTS ${HIPRAND_PATH}/lib)
   FIND_LIBRARY(rocsparse_LIBRARIES rocsparse HINTS ${ROCSPARSE_PATH}/lib)
   FIND_LIBRARY(hipsparse_LIBRARIES hipsparse HINTS ${HIPSPARSE_PATH}/lib)
+  # hiprtc is part of HIP
+  FIND_LIBRARY(ROCM_HIPRTC_LIB hiprtc HINTS ${HIP_PATH}/lib)
 
 
   # Necessary includes for building PyTorch since we include HIP headers that depend on hcc/hsa headers.
