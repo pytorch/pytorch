@@ -13,8 +13,6 @@
   _(nvrtcGetPTX)                                 \
   _(cuModuleLoadData)                            \
   _(cuModuleGetFunction)                         \
-  _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
-  _(cuGetErrorString)                            \
   _(nvrtcGetErrorString)                         \
   _(nvrtcGetProgramLogSize)                      \
   _(nvrtcGetProgramLog)                          \
@@ -24,9 +22,16 @@
   _(cuModuleUnload)                              \
   _(cuDevicePrimaryCtxGetState)
 
+#define TORCH_FORALL_NVRTC_ONLY(_)               \
+  _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
+  _(cuGetErrorString)                            \
+
 extern "C" typedef struct THNVRTC {
 #define CREATE_MEMBER(name) decltype(&name) name;
   TORCH_FORALL_NVRTC(CREATE_MEMBER)
+#ifndef __HIP_PLATFORM_HCC__
+  TORCH_FORALL_NVRTC_ONLY(CREATE_MEMBER)
+#endif
 #undef CREATE_MEMBER
 } THNVRTC;
 
