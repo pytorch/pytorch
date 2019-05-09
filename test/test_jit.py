@@ -2041,8 +2041,10 @@ graph(%Ra, %Rb):
         self.assertEqual(out, out_ref)
         self.assertEqual(grad, grad_ref)
 
-        # The generated test only covers CPU
-        self.assertAutodiffNode(func.graph_for(x), True, [], ['aten::mul', 'aten::rand_like', 'aten::lt', 'aten::type_as'])
+        if not IS_WINDOWS and not IS_SANDCASTLE:
+            # the generated nn functional test only covers CPU
+            # so when the fuser is available, we wnat to see that it is used
+            self.assertAutodiffNode(func.graph_for(x), True, [], ['aten::mul', 'aten::rand_like', 'aten::lt', 'aten::type_as'])
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40)
