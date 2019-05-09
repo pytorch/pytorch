@@ -576,9 +576,13 @@ struct to_ir {
     return old_frame;
   }
 
-  void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
-    // NB: moving returns to end needs to run before all other passes
-    moveAllReturnsToEnd(to_clean);
+  void runCleanupPasses(
+      std::shared_ptr<Graph>& to_clean,
+      bool move_returns = true) {
+    if (move_returns) {
+      // NB: moving returns to end needs to run before all other passes
+      moveAllReturnsToEnd(to_clean);
+    }
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(to_clean);
     ConstantPooling(to_clean);
@@ -2434,7 +2438,8 @@ struct to_ir {
     }
     // Lambda lift block(0) into attr::Subgraph
     lambdaLiftFork(fork_node);
-    runCleanupPasses(fork_node->g(attr::Subgraph));
+    // returns already moved in existing function call
+    runCleanupPasses(fork_node->g(attr::Subgraph), /*move_returns*/ false);
     return std::make_shared<SimpleValue>(node_output);
   }
 
@@ -3020,8 +3025,7 @@ struct FunctionResolver : public Resolver {
       functionTable_;
 };
 
-CompilationUnit::CompilationUnit(const std::string& source)
-{
+CompilationUnit::CompilationUnit(const std::string& source) {
   // calles the define with native resolver to generate the graph for functions
   define(source, nativeResolver(), nullptr);
 }

@@ -683,13 +683,15 @@ void testRecordFunction() {
         for (const auto& input : inputs) {
           if (input.isTensor()) {
             sizes.push_back(input.toTensor().sizes().vec());
-          } else if (input.isScalar()){
+          } else if (input.isScalar()) {
             sizes.push_back(std::vector<int64_t>());
           }
         }
         traced_inputs.push_back(
             std::make_tuple(std::string(getFullName(&fn)), sizes));
-      }, [](const autograd::profiler::RecordFunction&) {}, true);
+      },
+      [](const autograd::profiler::RecordFunction&) {},
+      true);
 
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
@@ -797,7 +799,7 @@ void testModuleConversion() {
     // test cuda to cpu for params and buffers
     m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
     m->register_buffer("bar", torch::ones({}, at::kCUDA));
-    
+
     m->to(at::kCUDA);
     m->to(at::kCPU);
     AT_ASSERT(m->get_parameter("foo").data().device().is_cpu());
@@ -807,13 +809,12 @@ void testModuleConversion() {
     // test cpu to cuda for params and buffers
     m->register_parameter("foo", torch::ones({}), false);
     m->register_buffer("bar", torch::ones({}));
-    
+
     m->to(at::kCUDA);
     AT_ASSERT(m->get_parameter("foo").data().device().is_cuda());
     AT_ASSERT(m->get_buffer("bar").data().device().is_cuda());
   }
 }
-
 
 static int testPassValue = 0;
 void fakePass(std::shared_ptr<Graph>& g) {
@@ -845,6 +846,27 @@ static void checkShape(Node* n, std::vector<int64_t> expected) {
   auto tp = n->output()->type();
   auto ptp = tp->expect<ProfiledTensorType>();
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+}
+
+void testBottomTypeMisuse() {
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph():
+    %opt : Bottom = prim::Uninitialized()
+    %tst : Tensor = prim::Print(%opt)
+    return (%tst)
+    )IR",
+        &*graph);
+    bool thrown = false;
+    try {
+      graph->lint();
+    } catch (...) {
+      thrown = true;
+    }
+    AT_ASSERT(thrown);
+  }
 }
 
 void testProfiler() {

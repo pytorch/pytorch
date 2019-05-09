@@ -11867,6 +11867,26 @@ a")
         with self.assertRaisesRegex(RuntimeError, "returned a value of type int but"):
             cu = torch.jit.CompilationUnit(code)
 
+    def test_early_return_fork_join(self):
+        @torch.jit.script
+        def foo(x):
+            if x.dim() == 2:
+                return torch.neg(x), x
+            else:
+                return torch.neg(x), x + 1
+
+        x = torch.rand(3, 4)
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit._fork(foo, x)
+            y_hat = foo(x)
+            y = torch.jit._wait(fut)
+            return y, y_hat
+
+        FileCheck().check("with prim::fork").check("prim::If").check("return")\
+                   .run(wait_script.graph)
+
     def test_early_return_type_refinement(self):
         @torch.jit.script
         def test(x):
@@ -11996,14 +12016,14 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "does not return along all"):
             @torch.jit.script
-            def partial(x):
+            def partial(x):  # noqa 484
                 # type: (Tensor) -> int
                 if x:
-                    return x
+                    return 1
 
         with self.assertRaisesRegex(RuntimeError, "does not return along all"):
             @torch.jit.script
-            def typed_none():
+            def typed_none():  # noqa 484
                 # type: () -> Optional[int]
                 pass
 

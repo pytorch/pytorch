@@ -42,8 +42,10 @@ class AliasDb {
 
   // Does `n` write to an alias of one of the values in `vs`?
   // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
-  TORCH_API bool writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks = false)
-      const;
+  TORCH_API bool writesToAlias(
+      Node* n,
+      const ValueSet& vs,
+      bool recurseBlocks = false) const;
 
   // Does `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
@@ -178,6 +180,9 @@ class AliasDb {
   // Is the element a wildcard or an unhandled container type,
   // or does the element contain an element for which that's true
   bool cannotCheckAliasContainment(const Value* elem) const;
+
+  // Is this a value which will not alias
+  bool nonAliasingValue(const Value* elem) const;
 
   /**
    * Special analysis methods

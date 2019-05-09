@@ -352,6 +352,15 @@ void Node::lint() const {
 
   // Node subclass invariants
   switch (kind()) {
+    case prim::Uninitialized: {
+      AT_ASSERT(inputs_.size() == 0);
+      for (const auto& use : outputs().at(0)->uses()) {
+        auto u_kind = use.user->kind();
+        AT_ASSERT(
+            use.user->blocks().size() > 1 || u_kind == prim::Param ||
+            u_kind == prim::Return);
+      }
+    } break;
     case prim::Constant:
       AT_ASSERT(inputs_.size() == 0);
       break;
@@ -539,7 +548,6 @@ Block::Block(Graph* graph_, Node* node_)
       output_(graph_->create(prim::Return, 0)),
       input_(graph_->create(prim::Param, 0)),
       owning_node_(node_) {
-
   input_->next() = output_;
   input_->prev() = output_;
   output_->next() = input_;
@@ -1107,7 +1115,9 @@ Node* Node::insertBefore(Node* n) {
 Node* Node::insertAfter(Node* n) {
   AT_ASSERT(!inBlockList() && n->inBlockList());
   AT_ASSERT(n->owningBlock());
-  AT_ASSERTM(n->kind() != prim::Return, "Attempting to insert a Node after the Return node or before the Param node");
+  AT_ASSERTM(
+      n->kind() != prim::Return,
+      "Attempting to insert a Node after the Return node or before the Param node");
   this->owning_block_ = n->owningBlock();
   Node* next = n->next();
   n->next() = this;

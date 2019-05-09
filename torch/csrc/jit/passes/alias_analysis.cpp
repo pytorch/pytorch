@@ -10,14 +10,16 @@ namespace torch {
 namespace jit {
 
 bool AliasDb::shouldAnnotate(const TypePtr& type) {
-  return type->isSubtypeOf(TensorType::get()) ||
-      type->kind() == TypeKind::ListType ||
-      type->kind() == TypeKind::TupleType ||
-      type->kind() == TypeKind::DictType || type->kind() == TypeKind::VarType ||
-      type->kind() == TypeKind::FutureType ||
-      type->kind() == TypeKind::ClassType ||
-      (type->kind() == TypeKind::OptionalType &&
-       shouldAnnotate(type->cast<OptionalType>()->getElementType()));
+  return !type->cast<BottomType>() &&
+      (type->isSubtypeOf(TensorType::get()) ||
+       type->kind() == TypeKind::ListType ||
+       type->kind() == TypeKind::TupleType ||
+       type->kind() == TypeKind::DictType ||
+       type->kind() == TypeKind::VarType ||
+       type->kind() == TypeKind::FutureType ||
+       type->kind() == TypeKind::ClassType ||
+       (type->kind() == TypeKind::OptionalType &&
+        shouldAnnotate(type->cast<OptionalType>()->getElementType())));
 }
 
 // We only need to annotate values that either are mutable or could contain
@@ -63,7 +65,7 @@ bool AliasDb::isWildcard(const Value* v) const {
 }
 
 bool AliasDb::writesTo(Node* n, const Value* v) const {
-  if (!shouldAnnotate(v) || v->mustBeNone()) {
+  if (!shouldAnnotate(v)) {
     // This is a non-aliasing value
     return false;
   }
@@ -107,7 +109,9 @@ bool AliasDb::hasWriters(const Value* v) const {
     return numWrites_ != 0;
   }
 
-  if (!elementMap_.count(v) || v->mustBeNone()) {
+  // bc this is important api, check if value is non-aliasing before wildcard
+  // check
+  if (!elementMap_.count(v) || nonAliasingValue(v)) {
     return false;
   }
 
@@ -783,10 +787,22 @@ void AliasDb::analyzeBroadcastingChunk(Node* node) {
   }
 }
 
+bool AliasDb::nonAliasingValue(const Value* elem) const {
+  // these are values which can point to aliasing types in the graph,
+  // as with a None value pointing to an optional if node output,
+  // but will never alias themselves
+  return elem->mustBeNone() || elem->type()->cast<BottomType>();
+}
+
 // Register the fact that `value` is a pointer to `to`
 void AliasDb::makePointerTo(const Value* from, const Value* to) {
-  // BottomType values are guaranteed never to be used, so we do not track them
-  if (from->type() == BottomType::get() || to->type() == BottomType::get()) {
+  if (nonAliasingValue(from) || nonAliasingValue(to)) {
+    // if either value is guaranteed to be non-aliasing, we do not need to
+    // connect the two elements. however, it is invariant that aliasing types
+    // that are not wildcards have a memory dag element, so we create one if
+    // needed
+    giveFreshAlias(from);
+    giveFreshAlias(to);
     return;
   }
 
