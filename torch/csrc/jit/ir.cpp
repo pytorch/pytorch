@@ -849,6 +849,7 @@ bool Node::hasSideEffects() const {
     case prim::RaiseException:
     case prim::SetAttr:
     case aten::warn:
+    case aten::save:
     case aten::manual_seed:
     case prim::AddStatValue:
     case prim::TimePoint:
@@ -1145,6 +1146,35 @@ void Node::removeAllInputs() {
     dropInput(i);
   }
   inputs_.clear();
+}
+
+void Node::permuteInputs(const std::vector<size_t>& new_order) {
+  schema_ = nullptr;
+  AT_ASSERT(new_order.size() == inputs_.size());
+  std::vector<Value*> new_inputs;
+  new_inputs.reserve(new_order.size());
+  for (size_t i = 0; i < new_order.size(); ++i) {
+    AT_ASSERTM(inputs_.at(new_order[i]) != nullptr, "Repeated index");
+    new_inputs.push_back(inputs_.at(new_order[i]));
+    auto it = findUseForInput(new_order[i]);
+    it->offset = i;
+    inputs_.at(new_order[i]) = nullptr;
+  }
+  inputs_ = std::move(new_inputs);
+}
+
+void Node::permuteOutputs(const std::vector<size_t>& new_order) {
+  schema_ = nullptr;
+  AT_ASSERT(new_order.size() == outputs_.size());
+  std::vector<Value*> new_outputs;
+  new_outputs.reserve(new_order.size());
+  for (size_t i = 0; i < new_order.size(); ++i) {
+    AT_ASSERTM(outputs_.at(new_order[i]) != nullptr, "Repeated index");
+    new_outputs.push_back(outputs_.at(new_order[i]));
+    outputs_.at(new_order[i])->setOffset(i);
+    outputs_.at(new_order[i]) = nullptr;
+  }
+  outputs_ = std::move(new_outputs);
 }
 
 use_list::iterator Node::findUseForInput(size_t i) {
