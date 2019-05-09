@@ -1,7 +1,6 @@
 #pragma once
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/Parallel.h>
 
 #include <c10/core/thread_pool.h>
 

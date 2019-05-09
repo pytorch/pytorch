@@ -99,5 +99,5 @@ CAFFE2_API void launch(const std::function<void()>& func);
 #endif
 
 #if AT_PARALLEL_NATIVE
-#include <ATen/Parallel_native.h>
+#include <ATen/ParallelNative.h>
 #endif
