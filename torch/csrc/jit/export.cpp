@@ -38,7 +38,13 @@ namespace onnx = ::ONNX_NAMESPACE;
 class ScriptModuleSerializer;
 
 std::string getNodeStackTraceString(const Node* n) {
-  return n->sourceRange().str();
+  std::stringstream ss;
+  if (n->getSourceLocation()) {
+    n->getSourceLocation()->highlight(ss);
+  } else {
+    ss << "<unknown location>";
+  }
+  return ss.str();
 }
 
 void validateBlock(
@@ -252,8 +258,10 @@ void EncoderBase::EncodeBlock(
       continue;
     }
     auto p_n = graph_proto->add_node();
-    if (!strip_doc_) {
-      p_n->set_doc_string(node->sourceRange().str());
+    if (node->getSourceLocation() && !strip_doc_) {
+      std::stringstream ss;
+      node->getSourceLocation()->highlight(ss);
+      p_n->set_doc_string(ss.str());
     }
     for (auto input : node->inputs()) {
       if (input->node()->mustBeNone() && !is_raw_export) {

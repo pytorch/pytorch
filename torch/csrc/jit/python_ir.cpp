@@ -439,9 +439,15 @@ void initPythonIRBindings(PyObject* module_) {
             return ss.str();
           })
       .def(
-          "sourceRange",
-          [](Node& n) {
-            return n.sourceRange().str();
+          "getSourceLocation",
+          [](Node& n) -> py::object {
+            std::stringstream ss;
+            if (auto sl = n.getSourceLocation()) {
+              sl->highlight(ss);
+              return py::str(ss.str());
+            } else {
+              return py::none();
+            }
           })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })

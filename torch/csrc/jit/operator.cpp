@@ -237,7 +237,7 @@ const Operator& getOperatorFor(const Node* node) {
   if (op)
     return *op;
 
-  auto er = script::ErrorReport(node->sourceRange());
+  auto er = script::ErrorReport(node->getSourceLocation());
   er << "Schema not found for node. File a bug report.\n";
   er << "Node: " << *node << "\n";
   er << "Input types:";

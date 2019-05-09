@@ -249,7 +249,7 @@ struct TORCH_API Node {
   std::vector<Block*> blocks_;
   Graph* graph_;
   Block* owning_block_;
-  c10::optional<SourceRange> source_range_;
+  std::shared_ptr<SourceLocation> source_location_;
   ScopePtr scope_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
@@ -287,12 +287,13 @@ struct TORCH_API Node {
   NodeKind kind() const {
     return kind_;
   }
-  Node* setSourceRange(SourceRange r) {
-    source_range_ = std::move(r);
+  Node* setSourceLocation(std::shared_ptr<SourceLocation> sl) {
+    source_location_ = std::move(sl);
     return this;
   }
-  SourceRange sourceRange() const;
-
+  std::shared_ptr<SourceLocation> getSourceLocation() const {
+    return source_location_;
+  }
   Graph* owningGraph() {
     return graph_;
   }

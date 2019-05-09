@@ -38,7 +38,7 @@ std::shared_ptr<SugaredValue> PrintValue::call(
     lowered_inputs.erase(lowered_inputs.begin());
   }
   g.insertNode(g.create(prim::Print, lowered_inputs, 0)
-                   ->setSourceRange(loc));
+                   ->setSourceLocation(std::make_shared<SourceRange>(loc)));
   return std::make_shared<NoneValue>();
 }
 

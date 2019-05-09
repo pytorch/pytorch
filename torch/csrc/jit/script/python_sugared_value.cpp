@@ -110,7 +110,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     auto python_op = static_cast<PythonOp*>(new_node);
     python_op->ignore_on_export = true;
   }
-  new_node->setSourceRange(loc);
+  new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
   for (auto& i : matched_schema->inputs)
     new_node->addInput(i);
 
