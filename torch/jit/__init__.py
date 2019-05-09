@@ -1475,7 +1475,8 @@ if _enabled:
             # Copy constants
             self.__dict__["_constants_set"] = constants_set
             for name in self.__dict__["_constants_set"]:
-                self.__dict__[name] = getattr(original, name)
+                if hasattr(original, name):
+                    self.__dict__[name] = getattr(original, name)
 
             # Copy overloads
             self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
