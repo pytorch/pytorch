@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/inplace_check.h>
@@ -593,9 +594,8 @@ struct GraphExecutorImpl {
     PropagateRequiresGrad(opt_graph);
 
     // Phase 3. Run differentiable optimizations (i.e. simple graph rewrites
-    // that
-    //          we can still execute using autograd).
-    runOptimization(opt_graph, spec);
+    //          that we can still execute using autograd).
+    runOptimization(opt_graph);
 
     // Phase 4. If this graph will be differentiated, we need to slice out the
     //          symbolically differentiable subgraphs for further optimizations.
@@ -608,6 +608,13 @@ struct GraphExecutorImpl {
       for (Node* dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
+        // Run post differentiation optimizations, Autodiff will replace some 
+        // parts of graph with new graph, these new graphs usually consists of
+        // control flows and miss shape information on nodes, so we run shape
+        // prop and differentiable optimizations to ensure the graph is optimized
+        PropagateInputShapes(gradient.f);
+        runOptimization(gradient.f);
+        // run non diff optimization on the forward graph
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
@@ -623,8 +630,7 @@ struct GraphExecutorImpl {
   }
 
   void runOptimization(
-      std::shared_ptr<Graph>& graph,
-      const ArgumentSpec& spec) {
+      std::shared_ptr<Graph>& graph) {
     // Basic graph preprocessing to eliminate noise.
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
@@ -646,6 +652,9 @@ struct GraphExecutorImpl {
     for (const auto& pass : getCustomPasses()) {
       pass(graph);
     }
+    // decomposition pass, decompose certain ops that will be used in the following
+    // passes (like batchmm and jit fusion)
+    DecomposeOps(graph);
     // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
 
