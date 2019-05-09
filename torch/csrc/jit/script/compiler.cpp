@@ -626,6 +626,8 @@ struct to_ir {
         List<Stmt>::create(r, {ret}));
     auto m = std::make_shared<Module>();
     CompilationUnit cu;
+    // set optimize to false since we don't need to run it in optimize mode
+    cu.set_optimized(false);
     cu.define({def}, {resolver}, nullptr);
     Stack stack;
     cu.get_function("defaults").run(stack);
@@ -2977,6 +2979,12 @@ struct FunctionResolver : public Resolver {
   const std::unordered_map<std::string, std::shared_ptr<Function>>&
       functionTable_;
 };
+
+CompilationUnit::CompilationUnit(const std::string& source)
+{
+  // calles the define with native resolver to generate the graph for functions
+  define(source, nativeResolver(), nullptr);
+}
 
 void CompilationUnit::define(
     const std::vector<Def>& definitions,
