@@ -903,6 +903,7 @@ def emit_body(declaration):
                     if simple_type == 'Tensor':
                         body.append(TENSOR_SET_DATA.substitute(tensor_name=arg[:-1]))
                     # yf225 TODO: since set_data() is not called on TensorList, might need to manually implement _cudnn_rnn_flatten_weight
+                    # Or, should be call vec() on TensorList and then call set_data() on it?
                     # if simple_type == 'TensorList':
                     #     body.append(TENSORLIST_SET_DATA.substitute(tensorlist_name=arg[:-1]))
                     # elif simple_type == 'Tensor':
