@@ -14,7 +14,7 @@ container:
 steps:
 - bash: |
     set +x
-    echo "id: "$id
+    .jenkins/pytorch/build.sh
   env:
     ACCESS_KEY_ID: $(ECR_ACCESS_KEY_ID)
     SECRET: $(ECR_SECRET)
