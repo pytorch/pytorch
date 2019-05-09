@@ -91,7 +91,6 @@ SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRe
   return self;
 }
 
-// Does NOT make copies of indices and values
 SparseTensor new_with_dims_and_tensor_sparse(
     int64_t sparse_dim,
     int64_t dense_dim,
@@ -101,7 +100,9 @@ SparseTensor new_with_dims_and_tensor_sparse(
     const TensorOptions& options) {
   SparseTensor self = new_sparse(options);
   get_sparse_impl(self)->resize_(sparse_dim, dense_dim, size);
-  alias_into_sparse(self, indices, values);
+  auto indices_shallow_copy = LongTensor(indices.unsafeGetTensorImpl()->shallow_copy_and_detach());
+  auto values_shallow_copy = Tensor(values.unsafeGetTensorImpl()->shallow_copy_and_detach());
+  alias_into_sparse(self, indices_shallow_copy, values_shallow_copy);
   return self;
 }
 
