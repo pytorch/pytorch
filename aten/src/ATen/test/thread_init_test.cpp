@@ -42,7 +42,6 @@ int main() {
   ASSERT_EQ(at::get_num_interop_threads(), std::thread::hardware_concurrency());
   at::set_num_interop_threads(5);
   ASSERT_EQ(at::get_num_interop_threads(), 5);
-  bool exception_thrown = false;
   ASSERT_ANY_THROW(at::set_num_interop_threads(6));
 
   return 0;
