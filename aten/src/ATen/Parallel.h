@@ -95,5 +95,5 @@ CAFFE2_API void launch(const std::function<void()>& func);
 } // namespace at
 
 #if AT_PARALLEL_OPENMP
-#include <ATen/Parallel_openmp.h>
+#include <ATen/ParallelOpenMP.h>
 #endif
