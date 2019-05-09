@@ -124,15 +124,15 @@ namespace detail {
   template<class T>
   struct legacy_ivalue_to_arg_type<std::vector<T>> final {
     static std::vector<T> call(IValue&& v) {
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported argument type: std::vector<T> and T is not one of the supported primitive types.");
+      // static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported argument type: std::vector<T> and T is not one of the supported primitive types.");
       return std::move(*std::move(v).to<intrusive_ptr<ivalue::List<T>>>()).elements();
     }
   };
   template<class Key, class Value>
   struct legacy_ivalue_to_arg_type<std::unordered_map<Key, Value>> final {
     static std::unordered_map<Key, Value> call(const IValue& v) {
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported argument type: std::unordered_map<Key, Value> and Key is not one of the supported primitive types.");
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported argument type: std::unordered_map<Key, Value> and Value is not one of the supported primitive types.");
+      // static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported argument type: std::unordered_map<Key, Value> and Key is not one of the supported primitive types.");
+      // static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported argument type: std::unordered_map<Key, Value> and Value is not one of the supported primitive types.");
 
       auto dict_ptr = std::move(v).toGenericDict();
       auto dict = impl::toTypedDict<Key, Value>(std::move(dict_ptr->elements()));
