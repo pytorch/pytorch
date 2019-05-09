@@ -4,7 +4,7 @@ namespace torch {
 namespace jit {
 
 // a range of a shared string 'file_' with
-void SourceRange::highlight(std::ostream& out) const {
+C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   if (size() == file_->size()) {
     // this is just the entire file, not a subset, so print it out.
     // primarily used to print out python stack traces
