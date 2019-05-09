@@ -3391,6 +3391,70 @@
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
 
+- func: _getri_single(Tensor self) -> Tensor
+
+- func: _index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
+
+- func: _ger(Tensor self, Tensor vec2) -> Tensor
+
+- func: _ger(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: _mm(Tensor self, Tensor mat2) -> Tensor
+
+- func: _mm(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: _mv(Tensor self, Tensor vec) -> Tensor
+
+- func: _mv(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: _addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: _addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+
+- func: _addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+
+- func: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: _addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+
+- func: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+
+- func: _dot(Tensor self, Tensor tensor) -> Tensor
+
+- func: _cumsum(Tensor self, int dim) -> Tensor
+
+- func: _cumsum(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: _cumprod(Tensor self, int dim) -> Tensor
+
+- func: _cumprod(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: _var(Tensor self, bool unbiased=True) -> Tensor
+
+- func: _std(Tensor self, bool unbiased=True) -> Tensor
+
+- func: _addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+
+- func: _addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: _addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+
+- func: _cat(Tensor[] tensors, int dim=0) -> Tensor
+
+- func: _cat(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
+
+- func: _mode(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
+
+- func: _max(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+
+- func: _max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
+
+- func: _min(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+
+- func: _min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
+
 ## NN wrappers
 
 - func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)

@@ -2,7 +2,6 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/Parallel.h>
@@ -258,7 +257,7 @@ Tensor inverse(const Tensor &self) {
     return at::empty_like(self);
   }
   if (self.dim() == 2) {
-    return at::legacy::th::_th_getri_single(self);
+    return at::_getri_single(self);
   }
   squareCheckInputs(self);
   return at::_inverse_helper(self);
