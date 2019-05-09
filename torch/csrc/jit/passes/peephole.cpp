@@ -61,8 +61,9 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
           self_type->device() == other_type->device()) {
         node->output()->replaceAllUsesWith(node->input(0));
       }
-    } else if (node->matches(
-                   "aten::_grad_sum_to_size(Tensor self, int[]? size) -> Tensor")) {
+    } else if (
+        node->matches(
+            "aten::_grad_sum_to_size(Tensor self, int[]? size) -> Tensor")) {
       if (node->input(1)->mustBeNone()) {
         node->output()->replaceAllUsesWith(node->input(0));
       }
@@ -166,8 +167,8 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       auto uses = node->output()->uses();
       for (Use u : uses) {
         if (u.user->matches(
-                "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")
-	    && u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
+                "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)") &&
+            u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
           u.user->replaceInput(0, node->inputs().at(0));
         }
       }
