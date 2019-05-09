@@ -5,10 +5,11 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
+#include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/jit/tracer.h"
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"

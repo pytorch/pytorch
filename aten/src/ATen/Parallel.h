@@ -7,6 +7,8 @@
 #include <exception>
 
 #ifdef _OPENMP
+#define INTRA_OP_PARALLEL
+
 #include <omp.h>
 #endif
 
@@ -127,7 +129,7 @@ inline scalar_t parallel_reduce(
     const scalar_t ident,
     const F f,
     const SF sf) {
-  if (get_num_threads() == 1) {
+  if (in_parallel_region() || get_num_threads() == 1) {
     return f(begin, end, ident);
   } else {
     const int64_t num_results = divup((end - begin), grain_size);
@@ -142,6 +144,9 @@ inline scalar_t parallel_reduce(
         results_data, results_data + results.size(), ident, sf);
   }
 }
+
+// Returns a detailed string describing parallelization settings
+CAFFE2_API std::string get_parallel_info();
 
 class CAFFE2_API PTThreadPool : public c10::ThreadPool {
  public:
