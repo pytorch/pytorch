@@ -11524,9 +11524,15 @@ a")
     def test_get_set_state(self):
         with self.disableEmitHook():
             class M(torch.jit.ScriptModule):
-                def __init__(self):
+                __constants__ = ['number']
+
+                def __init__(self, number, submodule=None):
                     super(M, self).__init__()
-                    self.register_buffer('buffer', torch.ones(2, 2))
+                    self.register_buffer('buffer1', torch.ones(2, 2))
+                    self.register_buffer('buffer2', torch.ones(2, 2))
+                    self.number = number
+                    if submodule:
+                        self.submodule = submodule
 
                 @torch.jit.script_method
                 def __getstate__(self):
@@ -11536,15 +11542,27 @@ a")
                 @torch.jit.script_method
                 def __setstate__(self, state):
                     # type: (Tuple[int, int, int]) -> None
-                    self.buffer += state[2]
+                    self.buffer1 += state[2]
+                    self.buffer2 += self.number
+
 
             with TemporaryFileName() as fname:
-                m = M()
+                m = M(23, submodule=M(99))
                 m.save(fname)
                 loaded = torch.jit.load(fname)
 
-            self.assertEqual(m.buffer, torch.ones(2, 2))
-            self.assertEqual(loaded.buffer, torch.ones(2, 2) + 3)
+            # Check original module
+            self.assertEqual(m.buffer1, torch.ones(2, 2))
+            self.assertEqual(m.buffer2, torch.ones(2, 2))
+
+            # Check top level module
+            self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 3)
+            self.assertEqual(loaded.buffer2, torch.ones(2, 2) + 23)
+
+            # Check submodule
+            self.assertEqual(loaded.submodule.buffer1, torch.ones(2, 2) + 3)
+            self.assertEqual(loaded.submodule.buffer2, torch.ones(2, 2) + 99)
+
 
     def test_string_slicing(self):
         def fn1(x):

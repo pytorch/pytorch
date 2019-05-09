@@ -298,10 +298,11 @@ void ScriptModuleDeserializer::convertModule(
   }
 
   // TODO: get the correct index so this works for submodules
-  size_t module_num = 0;
-  if (module_num <= state_table_.size()) {
+  static size_t module_num = 0;
+  if (module_num < state_table_.size()) {
     module->setstate(state_table_.at(module_num));
   }
+  module_num++;
 }
 
 } // namespace
