@@ -17,6 +17,9 @@ struct TORCH_API NoGradGuard : public AutoGradMode {
 /// Sets the global random seed for all newly created CPU and CUDA tensors.
 using at::manual_seed;
 
+// Called during new thread initialization
+using at::init_num_threads;
+
 // Returns the number of threads used in parallel region.
 using at::get_num_threads;
 
