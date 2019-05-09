@@ -423,20 +423,6 @@ def cumsum(g, input, dim):
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
 
 
-def _sample_dirichlet(g, self, generator):
-    if not generator.node().mustBeNone():
-        return _unimplemented('_sample_dirichlet',
-                              'We are not able to export generator')
-    return g.op("ATen", self, operator_s="_sample_dirichlet")
-
-
-def _standard_gamma(g, self, generator):
-    if not generator.node().mustBeNone():
-        return _unimplemented('_standard_gamma',
-                              'We are not able to export generator')
-    return g.op("ATen", self, operator_s="_standard_gamma")
-
-
 def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
@@ -1484,8 +1470,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
     assert len(all_weights) == num_layers * weights_per_layer * (1 + bidirectional)
     layer_weights = [all_weights[i:i + weights_per_layer] for i in range(0, len(all_weights), weights_per_layer)]
     if batch_first:
-        # batch, seq, feat -> seq, batch, feat
-        input = g.op('Transpose', input, perm_i=[1, 0, 2])
+        return _unimplemented("RNN/GRU/LSTM", "batch_first")
     if dropout and train:
         return _unimplemented("RNN/GRU/LSTM", "dropout in training mode")
 
@@ -1587,9 +1572,6 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         h_outs.append(h_out)
         if variant == 'LSTM':
             c_outs.append(c_out)
-    if batch_first:
-        # seq, batch, num_directions * hidden_size -> batch, seq, num_directions * hidden_size
-        prev_output = g.op('Transpose', prev_output, perm_i=[1, 0, 2])
     h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
     if variant == 'RNN' or variant == 'GRU':
         return prev_output, h_outs
@@ -1658,7 +1640,7 @@ def detach(g, input):
     return input
 
 
-def contiguous(g, input, _memory_format):
+def contiguous(g, input, memory_format=None):
     return input
 
 
@@ -1694,10 +1676,6 @@ def randn(g, *shapes):
     shapes_list = list(shapes)
     shape = _maybe_get_const(shapes_list[0], "is")
     return g.op('RandomNormal', shape_i=shape)
-
-
-def randn_like(g, self, *others):
-    return g.op('RandomNormalLike', self)
 
 
 @parse_args('v', 'f', 'f', 'i', 'none')
