@@ -883,6 +883,32 @@ class TestFuser(JitTestCase):
         self.assertEqual(result2, expected2)
         self.assertAllFused(script_f.graph_for(x, y), except_for={'prim::TupleConstruct'})
 
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_grad_sum_to_size_elimination(self):
+
+        def my_broadcasted_cell(a, b, c):
+            return (a + b) + c
+
+        s1 = torch.randn(5, 1, requires_grad=True, device='cuda')
+        s2 = torch.randn(5, 5, requires_grad=True, device='cuda')
+
+        for i in range(3):
+            module = self.checkScript(my_broadcasted_cell, (s1, s1, s1))
+            if i == 0:
+                forward_graph = module.graph_for(s1, s1, s1)
+                self.assertAllFused(forward_graph, except_for=("aten::size", "prim::BroadcastSizes",
+                                                               "aten::_size_if_not_equal"))
+            # if we have s2, then the s1 are _grad_sum_to_size'd
+            res = module(s2 if i < 1 else s1, s2 if i < 2 else s1, s2)
+            res.sum().backward()
+            backward = backward_graph(module)
+            self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "aten::_grad_sum_to_size"]), i)
+            self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "prim::Param"]), 3 - i)
+
+
     @unittest.skipIf(not IS_WINDOWS, "Test that the fuser is disabled on Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_windows_cuda(self):
