@@ -2257,7 +2257,7 @@ void checkSortSchema(const Node* node, const c10::TypePtr& list_element_type) {
         << ", got list of " << list_element_type->python_str() << "\n";
   }
 
-  auto error_msg = script::ErrorReport(node->getSourceLocation());
+  auto error_msg = script::ErrorReport(node->sourceRange());
   error_msg << error_str.str();
   throw error_msg;
 }
