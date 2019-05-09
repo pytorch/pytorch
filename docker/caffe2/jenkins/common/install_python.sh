@@ -165,5 +165,6 @@ pip install --no-cache-dir \
     mock \
     typing \
     typing-extensions \
-    pyyaml
+    pyyaml \
+    librosa>=0.6.2
 
