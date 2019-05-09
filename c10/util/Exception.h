@@ -285,54 +285,54 @@ inline void deprecated_AT_ASSERTM() {}
 // Deprecated alias; this alias was deprecated because it wasn't clear to
 // people that you should use a macro with AT_ prefix inside the torch/csrc
 // directory.  Use TORCH_CHECK instead.
-#define AT_CHECK(...) \
-  do { \
+#define AT_CHECK(...)                     \
+  do {                                    \
     ::c10::detail::deprecated_AT_CHECK(); \
-    TORCH_CHECK(__VA_ARGS__); \
-  }
+    TORCH_CHECK(__VA_ARGS__);             \
+  } while (false);
 
 // Deprecated alias; this alias was deprecated because people kept mistakenly
 // using it for user error checking.  Use TORCH_INTERNAL_ASSERT or TORCH_CHECK
 // instead. See https://github.com/pytorch/pytorch/issues/20287 for more details.
-#define AT_ASSERT(...) \
-  do { \
-    ::c10::detail::deprecated_AT_ASSERT(); \
-    TORCH_INTERNAL_ASSERT(__VA_ARGS__); \
+#define AT_ASSERT(...)                      \
+  do {                                      \
+    ::c10::detail::deprecated_AT_ASSERT();  \
+    TORCH_INTERNAL_ASSERT(__VA_ARGS__);     \
   } while (false);
 
 // Deprecated alias, like AT_ASSERT.  The new TORCH_INTERNAL_ASSERT macro supports
 // both 0-ary and variadic calls, so having a separate message-accepting macro
 // is not necessary.
-#define AT_ASSERTM(...) \
-  do { \
+#define AT_ASSERTM(...)                     \
+  do {                                      \
     ::c10::detail::deprecated_AT_ASSERTM(); \
-    TORCH_INTERNAL_ASSERT(__VA_ARGS__); \
+    TORCH_INTERNAL_ASSERT(__VA_ARGS__);     \
   } while (false);
 
 // Deprecated alias; this alias was deprecated because it represents extra API
 // surface that makes it hard for people to understand what macro to use.
 // Use TORCH_CHECK(false, ...) or TORCH_INTERNAL_ASSERT(false, ...) to
 // unconditionally fail at a line of code.
-#define AT_ERROR(...) \
-  do { \
-    ::c10::detail::deprecated_AT_ERROR(); \
-    TORCH_CHECK(false, ::c10::str(__VA_ARGS__)); \
+#define AT_ERROR(...)                             \
+  do {                                            \
+    ::c10::detail::deprecated_AT_ERROR();         \
+    TORCH_CHECK(false, ::c10::str(__VA_ARGS__));  \
   } while (false);
 
 // Deprecated alias; this alias was deprecated for consistency with TORCH_CHECK.
-#define AT_INDEX_ERROR(...) \
-  do { \
-    ::c10::detail::deprecated_AT_INDEX_ERROR(); \
-    TORCH_CHECK_INDEX(false, ::c10::str(__VA_ARGS__)); \
+#define AT_INDEX_ERROR(...)                             \
+  do {                                                  \
+    ::c10::detail::deprecated_AT_INDEX_ERROR();         \
+    TORCH_CHECK_INDEX(false, ::c10::str(__VA_ARGS__));  \
   } while (false);
 
 // Deprecated alias; this alias was deprecated because it wasn't clear to
 // people that you should use a macro with AT_ prefix inside the torch/csrc
 // directory.  Use TORCH_WARN instead.
-#define AT_WARN(...) \
-  do { \
-    ::c10::detail::deprecated_AT_WARN(); \
-    TORCH_WARN(__VA_ARGS__); \
+#define AT_WARN(...)                      \
+  do {                                    \
+    ::c10::detail::deprecated_AT_WARN();  \
+    TORCH_WARN(__VA_ARGS__);              \
   } while (false);
 
 
