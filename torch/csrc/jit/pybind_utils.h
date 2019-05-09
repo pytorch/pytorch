@@ -110,7 +110,7 @@ inline TypedIValue toTypedIValue(py::handle input) {
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
-    at::ivalue::UnorderedMap elems;
+    c10::impl::GenericDict elems;
 
     size_t len = py::len(dict);
     if (!len) {
@@ -131,7 +131,7 @@ inline TypedIValue toTypedIValue(py::handle input) {
       }
       keyType = *unifiedKey;
       valueType = *unifiedValue;
-      elems.insert(std::make_pair(keyInfo.first, valInfo.first));
+      elems.insert(keyInfo.first, valInfo.first);
     }
     return TypedIValue(
         at::ivalue::GenericDict::create(std::move(elems)),
@@ -200,11 +200,11 @@ inline IValue createGenericDict(
     py::handle obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
-  at::ivalue::UnorderedMap elems;
+  c10::impl::GenericDict elems;
   elems.reserve(py::len(obj));
   for (auto key : obj) {
-    elems.insert(std::make_pair(
-        toIValue(key, key_type), toIValue(obj[key], value_type)));
+    elems.insert(
+        toIValue(key, key_type), toIValue(obj[key], value_type));
   }
   return at::ivalue::GenericDict::create(std::move(elems));
 }
@@ -417,7 +417,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     const auto& elements = dict->elements();
     py::dict py_dict;
     for (auto pair : elements) {
-      py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
+      py_dict[toPyObject(IValue{pair.key()})] = toPyObject(IValue{pair.value()});
     }
     return std::move(py_dict);
   } else if (ivalue.isObject()) {

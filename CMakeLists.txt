@@ -89,6 +89,7 @@ cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" OFF)
+option(NAMEDTENSOR_ENABLED "Experimental: compile with namedtensor support" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
@@ -261,6 +262,10 @@ include(cmake/Dependencies.cmake)
 
 if(USE_FBGEMM)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
+endif()
+
+if(NAMEDTENSOR_ENABLED)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNAMEDTENSOR_ENABLED")
 endif()
 
 # ---[ Whitelist file if whitelist is specified

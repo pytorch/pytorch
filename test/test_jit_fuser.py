@@ -522,7 +522,7 @@ class TestFuser(JitTestCase):
         b = torch.randn(5, 5, requires_grad=True)
         a = torch.randn(5, 5, requires_grad=True)
         s = self.checkScript(f, (a, b))
-        self.assertAllFused(s.graph_for(a, b), except_for={'aten::size', 'aten::_size_if_not_equal'})
+        self.assertAllFused(s.graph_for(a, b), except_for={'aten::size', 'aten::_size_if_not_equal', 'prim::BroadcastSizes'})
 
         c = s(a, b)
         ga, gb = torch.autograd.grad(c.sum(), [a, b])
@@ -657,8 +657,8 @@ class TestFuser(JitTestCase):
         hy, cy = module(*inputs)
         (hy + cy).sum().backward()
         backward = backward_graph(module)
-        FileCheck().check("FusionGroup_0").check_next("FusionGroup_1") \
-            .check_not("FusionGroup_2").run(str(backward))
+        self.assertAllFused(backward, except_for=("aten::t", "aten::mm",
+                                                  "aten::_grad_sum_to_size"))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
