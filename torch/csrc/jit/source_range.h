@@ -10,7 +10,7 @@ namespace jit {
 // a range of a shared string 'file_' with functions to help debug by highlight
 // that
 // range.
-struct SourceRange {
+struct CAFFE2_API SourceRange {
   SourceRange(std::shared_ptr<std::string> file_, size_t start_, size_t end_)
       : file_(std::move(file_)), start_(start_), end_(end_) {}
   explicit SourceRange(std::string string_range)
