@@ -2390,33 +2390,35 @@ graph(%Ra, %Rb):
     def test_decompose_addmm(self):
         def does_decompose():
             @torch.jit.script
-            def addmm(mat, mat1, mat2, alpha, beta):
-                a = mat.addmm(mat1, mat2, alpha=4.20, beta=2.0)
-                b = mat.addmm(mat1, mat2, alpha=int(alpha), beta=int(beta))
-
+            def addmm(mat, mat1, mat2):
+                a = mat.addmm(mat1, mat2)
+                b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
                 return a + b
 
             mat = torch.randn(2, 2)
             mat1 = torch.randn(2, 4)
             mat2 = torch.randn(4, 2)
-            alpha = torch.FloatTensor([123.0])
-            beta = torch.FloatTensor([321.0])
 
-            out_ref = addmm(mat, mat1, mat2, alpha, beta)
-            self.run_pass('canonicalize_ops', addmm.graph)
-            out_test = addmm(mat, mat1, mat2, alpha, beta)
+            out_ref = addmm(mat, mat1, mat2)
+            self.run_pass('decompose_ops', addmm.graph)
+            out_test = addmm(mat, mat1, mat2)
             self.assertEqual(out_ref, out_test)
             FileCheck().check_not("addmm").run(str(addmm.graph))
 
         def doesnt_decompose():
             @torch.jit.script
             def addmm(mat, mat1, mat2, alpha, beta):
-                a = mat.addmm(mat1, mat2)
-                b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
+                a = mat.addmm(mat1, mat2, alpha=4.20, beta=2.0)
+                b = mat.addmm(mat1, mat2, alpha=int(alpha), beta=int(beta))
 
-            orig = str(addm.graph)
-            self.run_pass('canonicalize_ops', addmm.graph)
+                return a + b
+
+            orig = str(addmm.graph)
+            self.run_pass('decompose_ops', addmm.graph)
             self.assertTrue(orig == str(addmm.graph))
+
+        does_decompose()
+        doesnt_decompose()
 
     def test_index_put(self):
         ten = torch.zeros(3, 3)
@@ -12354,6 +12356,69 @@ a")
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
 
+    def _test_pickle_checkpoint(self, device):
+        with TemporaryFileName() as fname:
+            class M(torch.jit.ScriptModule):
+                __constants__ = ['fname']
+
+                def __init__(self, tensor):
+                    super(M, self).__init__()
+                    self.fname = fname
+                    self.tensor = torch.nn.Parameter(tensor)
+
+                @torch.jit.script_method
+                def forward(self, x):
+                    y = self.tensor + x
+                    torch.save(y, self.fname)
+                    return y
+
+            param = torch.randn(2, 2).to(device)
+            input = torch.randn(2, 2).to(device)
+            m = M(param)
+            m(input)
+            with open(fname, "rb") as handle:
+                loaded_tensor = torch.load(fname)
+                self.assertEqual(loaded_tensor, input + param)
+
+    def _test_pickle_checkpoint_views(self, device):
+        with TemporaryFileName() as fname:
+            class M(torch.jit.ScriptModule):
+                __constants__ = ['fname']
+
+                def __init__(self, tensor):
+                    super(M, self).__init__()
+                    self.fname = fname
+                    self.tensor = torch.nn.Parameter(tensor)
+
+                @torch.jit.script_method
+                def forward(self, x):
+                    y = self.tensor + x
+                    y_view = y.view(4)
+                    torch.save((y, y_view, y), self.fname)
+                    return y
+
+            param = torch.randn(2, 2).to(device)
+            input = torch.randn(2, 2).to(device)
+            m = M(param)
+            m(input)
+            with open(fname, "rb") as handle:
+                loaded_y, loaded_y_view, loaded_y_2 = torch.load(fname)
+                self.assertEqual(loaded_y, input + param)
+                with torch.no_grad():
+                    loaded_y_view[1] += 20
+                    # assert that loaded_y changed as well
+                    self.assertEqual(loaded_y.view(4), loaded_y_view)
+                    self.assertEqual(loaded_y_2.view(4), loaded_y_view)
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_pickle_checkpoint_cuda(self):
+        self._test_pickle_checkpoint('cuda')
+        self._test_pickle_checkpoint_views('cuda')
+
+    def test_pickle_checkpoint(self):
+        self._test_pickle_checkpoint('cpu')
+        self._test_pickle_checkpoint_views('cpu')
+
     def test_split(self):
         def split_two(tensor):
             a, b, c = torch.split(tensor, 2, dim=1)
@@ -13609,8 +13674,8 @@ nn_functional_tests = [
     ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],), '', (True,)),
     ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],), '', (True,)),
     ('dropout', (S, S, S), (0.5,), '', (True,
-                                        ['prim::is_cuda', 'aten::bernoulli_'],
-                                        ['aten::rand_like', 'aten::lt', 'aten::type_as', 'aten::mul', 'aten::div'])),
+                                        ['aten::bernoulli_',
+                                         'aten::empty_like', 'aten::mul', 'aten::div'])),
     ('alpha_dropout', (S, S, S), (0.5,)),
     ('dropout2d', (S, S, S), (0.5,)),
     ('dropout3d', (S, S, S), (0.5,)),
@@ -13653,14 +13718,14 @@ nn_functional_tests = [
         '', (True, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
-     (True, ['prim::Loop', 'aten::_batch_norm_impl_index'])),
+     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
     ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),), 'with_only_weight',
-     (True, ['prim::Loop', 'aten::_batch_norm_impl_index'])),
+     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
     ('layer_norm', (S, S, S, S), ([5], None, non_differentiable(torch.rand(S)),), 'with_only_bias',
-     (True, ['prim::Loop', 'aten::_batch_norm_impl_index'])),
+     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
     ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),
                                   non_differentiable(torch.rand(S))), 'with_weight_and_bias',
-     (True, ['prim::Loop', 'aten::_batch_norm_impl_index'])),
+     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index', 'aten::addcmul'])),
     ('group_norm', (S, S, S), (1, torch.rand(5),),),
     ('local_response_norm', (S, S, S), (2, ),),
     ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '', (True, 'aten::nll_loss_forward')),
