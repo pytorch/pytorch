@@ -184,6 +184,10 @@ struct TORCH_API Function {
 // are used to implement their Methods
 
 struct TORCH_API CompilationUnit {
+  // constructor that takes a set of functions to compile using the native resolver
+  explicit CompilationUnit(const std::string& source);
+  CompilationUnit() = default;
+
   std::shared_ptr<Function> find_function(const std::string& name) const {
     auto it = dict_.find(name);
     if (it == dict_.end())
