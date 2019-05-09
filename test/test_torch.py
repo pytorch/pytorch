@@ -9055,6 +9055,14 @@ class _TestTorchMixin(object):
                             self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]].item(), 0)
                         lex = is_lexicographically_sorted(dst1)
                         self.assertEqual(torch.ones_like(lex), lex)
+                    if TEST_NUMPY:
+                        tup1 = torch.nonzero_tuple(tensor)
+                        tup2 = tensor.nonzero_tuple()
+                        np1  = tensor.numpy().nonzero()
+                        for t in (tup1, tup2):
+                            self.assertEqual(len(t), len(np1))
+                            for i in range(len(t)):
+                                self.assertEqual(t[i].cpu().numpy(), np1[i])
 
     def test_nonzero_empty(self):
         for device in torch.testing.get_all_device_types():

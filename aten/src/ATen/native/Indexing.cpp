@@ -568,4 +568,8 @@ Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& in
     return at::_sparse_coo_tensor_unsafe(sparse_ind, grad.reshape(-1), self.sizes());
 }
 
+std::vector<Tensor> nonzero_tuple(const Tensor& self) {
+  return self.nonzero().unbind(1);
+}
+
 }} // at::native

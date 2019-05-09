@@ -60,6 +60,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: masked_select
 .. autofunction:: narrow
 .. autofunction:: nonzero
+.. autofunction:: nonzero_tuple
 .. autofunction:: reshape
 .. autofunction:: split
 .. autofunction:: squeeze

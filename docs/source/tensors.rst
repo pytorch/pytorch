@@ -347,6 +347,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: neg_
    .. automethod:: nelement
    .. automethod:: nonzero
+   .. automethod:: nonzero_tuple
    .. automethod:: norm
    .. automethod:: normal_
    .. automethod:: numel
