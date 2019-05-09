@@ -111,7 +111,7 @@ TORCH_API bool isLazyInputsCopy();
 TORCH_API void setLazyInputsCopy(bool);
 
 inline std::vector<c10::IValue> toVec(std::vector<c10::IValue>&& vec) {
-  return vec;
+  return std::move(vec);
 }
 
 inline std::vector<c10::IValue> toVec(c10::ArrayRef<c10::IValue> vec_ref) {
@@ -124,7 +124,7 @@ inline std::vector<c10::IValue> toVec(c10::ArrayRef<c10::IValue> vec_ref) {
   if (torch::autograd::profiler::hasCallbacks()) { \
     if (torch::autograd::profiler::needsInputs()) { \
       if (torch::autograd::profiler::isLazyInputsCopy()) { \
-        guard.before(fn, [&](){ return torch::autograd::profiler::toVec(inputs); }, ##__VA_ARGS__); \
+        guard.before(fn, [&](){ return torch::autograd::profiler::toVec(std::move(inputs)); }, ##__VA_ARGS__); \
       } else { \
         guard.before(fn, inputs, ##__VA_ARGS__); \
       } \
