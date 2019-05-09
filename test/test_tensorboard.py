@@ -33,6 +33,7 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
+from caffe2.python import workspace
 from common_utils import TestCase, run_tests
 
 
@@ -71,6 +72,10 @@ if TEST_TENSORBOARD:
             # python primitive type
             self.assertIsInstance(make_np(0), np.ndarray)
             self.assertIsInstance(make_np(0.1), np.ndarray)
+
+        def test_pytorch_autograd_np(self):
+            x = torch.autograd.Variable(torch.Tensor(1))
+            self.assertIsInstance(make_np(x), np.ndarray)
 
         def test_pytorch_write(self):
             with SummaryWriter() as w:
@@ -499,6 +504,18 @@ if TEST_TENSORBOARD:
             self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
             res = make_np(np.int64(100000000000))
             self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
+
+        def test_numpy_caffe_blob(self):
+            workspace.FeedBlob("testBlob", np.random.randn(1, 3, 64, 64).astype(np.float32))
+            self.assertIsInstance(make_np('testBlob'), np.ndarray)   
+
+        def test_numpy_expect_fail(self):
+            with self.assertRaises(RuntimeError):
+                res = make_np('This_blob_does_not_exist')
+
+        def test_numpy_expect_fail_2(self):
+            with self.assertRaises(NotImplementedError):
+                res = make_np({'pytorch': 1.0})
 
         def test_numpy_vid(self):
             shapes = [(16, 3, 30, 28, 28), (19, 3, 30, 28, 28), (19, 3, 29, 23, 19)]
