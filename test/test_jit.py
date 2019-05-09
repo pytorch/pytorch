@@ -11545,7 +11545,6 @@ a")
                     self.buffer1 += state[2]
                     self.buffer2 += self.number
 
-
             with TemporaryFileName() as fname:
                 m = M(23, submodule=M(99))
                 m.save(fname)
