@@ -73,6 +73,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/alias_analysis.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/canonicalize_ops.cpp",
+    "torch/csrc/jit/passes/decompose_ops.cpp",
     "torch/csrc/jit/passes/canonicalize.cpp",
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
     "torch/csrc/jit/passes/constant_propagation.cpp",

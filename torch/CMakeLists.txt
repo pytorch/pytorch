@@ -155,6 +155,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
