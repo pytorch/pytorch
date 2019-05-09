@@ -13,7 +13,7 @@ tensor as input. Correct code for this case is generated, however, nvrtc does
 not know how to handle int*_t integer types, so typedefs help it handle those
 cases*/
 
-+#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_HCC__
 static auto type_declarations_template = CodeTemplate(R"(
 #include <hip/hip_runtime.h>
 ${HalfHeader}
