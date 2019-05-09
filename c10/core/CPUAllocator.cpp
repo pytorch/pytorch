@@ -1,5 +1,4 @@
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/typeid.h>
 #include <c10/core/DeviceType.h>
 
 // TODO: rename flags to C10

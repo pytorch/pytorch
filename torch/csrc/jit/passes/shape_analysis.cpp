@@ -554,6 +554,15 @@ class ShapePropagator {
         }
         return;
       }
+      case prim::unchecked_unwrap_optional: {
+        // If we have specialized the optional type to the element type,
+        // we want to pass it down. We write this as input.isSubtypeOf(output)
+        // to be sure that we don't screw up nested optionals.
+        if (node->input()->type()->isSubtypeOf(node->output()->type())) {
+          node->output()->setType(node->input()->type());
+        }
+        return;
+      }
       case prim::ConstantChunk: {
         Value* tensor = node->input();
         if (auto type = tensor->type()->cast<DimensionedTensorType>()) {
@@ -576,10 +585,13 @@ class ShapePropagator {
         return;
       }
       case aten::_unwrap_optional: {
-        auto input_ivalue = toIValue(node->input());
-        if (input_ivalue && input_ivalue->isNone()) {
-          return;
+        // If we have specialized the optional type to the element type,
+        // we want to pass it down. We write this as input.isSubtypeOf(output)
+        // to be sure that we don't screw up nested optionals.
+        if (node->input()->type()->isSubtypeOf(node->output()->type())) {
+          node->output()->setType(node->input()->type());
         }
+        return;
       }
       default:
         break; // fall-through

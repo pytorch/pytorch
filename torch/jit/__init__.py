@@ -854,9 +854,9 @@ class CompilationUnit(object):
             raise AttributeError("'CompilationUnit' has no attribute '{}'".format(attr))
         return r
 
-    def _import(self, src, constants):
+    def _import(self, src, constants, op_version_set=1):
         """ test import logic for single function, use only for testing """
-        src = "op_version_set = 0\n{}".format(src)
+        src = "op_version_set = {}\n{}".format(op_version_set, src)
         torch._C._jit_import_functions(self._c, src, constants, None)
         return self
 
@@ -946,10 +946,10 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
-        name = _qualified_name(obj)
-        ast = get_jit_class_def(obj, name)
-        _jit_script_class_compile(ast, _rcb)
-        _add_script_class(obj, name)
+        qualified_name = _qualified_name(obj)
+        ast = get_jit_class_def(obj, obj.__name__)
+        _jit_script_class_compile(qualified_name, ast, _rcb)
+        _add_script_class(obj, qualified_name)
         return obj
     else:
         ast = get_jit_def(obj)
@@ -1630,8 +1630,9 @@ class TracedModule(ScriptModule):
         raise RuntimeError("Cannot set new properties on a traced module.")
 
 
-class TopLevelTracedModule(TracedModule):
-    forward = _CachedForward()
+if _enabled:
+    class TopLevelTracedModule(TracedModule):
+        forward = _CachedForward()
 
 
 class _ConstModuleList(ScriptModule):

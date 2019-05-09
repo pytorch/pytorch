@@ -175,6 +175,7 @@ def run_cmake(version,
         USE_CUDA=USE_CUDA,
         USE_DISTRIBUTED=USE_DISTRIBUTED,
         USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or check_negative_env_flag('USE_FBGEMM')),
+        NAMEDTENSOR_ENABLED=(check_env_flag('USE_NAMEDTENSOR') or check_negative_env_flag('NO_NAMEDTENSOR')),
         USE_NUMPY=USE_NUMPY,
         NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
         USE_SYSTEM_NCCL=USE_SYSTEM_NCCL,
@@ -207,6 +208,16 @@ def run_cmake(version,
         USE_GLOG=os.getenv('USE_GLOG'),
         USE_GFLAGS=os.getenv('USE_GFLAGS'),
         WERROR=os.getenv('WERROR'))
+
+    if os.getenv('USE_OPENMP'):
+        cmake_defines(cmake_args, USE_OPENMP=check_env_flag('USE_OPENMP'))
+
+    if os.getenv('MKL_SEQ'):
+        cmake_defines(cmake_args, INTEL_MKL_SEQUENTIAL=check_env_flag('MKL_SEQ'))
+
+    mkldnn_threading = os.getenv('MKLDNN_THREADING')
+    if mkldnn_threading:
+        cmake_defines(cmake_args, MKLDNN_THREADING=mkldnn_threading)
 
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
