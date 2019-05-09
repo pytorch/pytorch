@@ -1109,7 +1109,7 @@ class Softmax(Module):
 
     Examples::
 
-        >>> m = nn.Softmax()
+        >>> m = nn.Softmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
@@ -1127,6 +1127,9 @@ class Softmax(Module):
     @weak_script_method
     def forward(self, input):
         return F.softmax(input, self.dim, _stacklevel=5)
+
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)
 
 
 @weak_module

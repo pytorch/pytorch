@@ -163,6 +163,8 @@ if (MSVC)
       string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
     endif()
   endforeach(flag_var)
+  # Turning off USE_DISTRIBUTED on default
+  set(USE_DISTRIBUTED OFF)
 endif(MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not

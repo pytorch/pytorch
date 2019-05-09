@@ -13,9 +13,6 @@
 #include <sstream>
 #include <vector>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 namespace {
   const int MODE_SUM = 0;
@@ -546,8 +543,8 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
   auto next_unique_index_idx =
       compute_counts_uniq(num_weights, indices_data, numel, counts);
 
-  #pragma omp parallel for if (numel > 1000)
-    for (int64_t i = 0; i < (int64_t)next_unique_index_idx.size(); i++) {
+  auto loop = [&](int64_t start, int64_t end) {
+    for (int64_t i = start; i < end; i++) {
       int64_t start = i == 0 ? 0 : next_unique_index_idx[i - 1];
       int64_t index = indices_data[start];
       for (int64_t j = start; j < next_unique_index_idx[i]; j++) {
@@ -579,6 +576,12 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
                     igwd + ddim * index, 1);
       }
     }
+  };
+  if (numel > 1000) {
+    at::parallel_for(0, (int64_t)next_unique_index_idx.size(), 0, loop);
+  } else {
+    loop(0, (int64_t)next_unique_index_idx.size());
+  }
 }
 
 Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indices_,

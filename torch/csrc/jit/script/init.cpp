@@ -107,7 +107,8 @@ struct PythonResolver : public Resolver {
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
 
-    return ClassType::get(c10::QualifiedName(qualifiedName));
+    return CompilationUnit::_get_python_cu().get_class(
+        c10::QualifiedName(qualifiedName));
   }
 
  private:
@@ -556,6 +557,7 @@ void initJitScriptBindings(PyObject* module) {
         auto cu = std::make_shared<CompilationUnit>();
         auto classType =
             ClassType::create(c10::QualifiedName(qualifiedName), cu);
+        CompilationUnit::_get_python_cu().register_class(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
@@ -608,11 +610,17 @@ void initJitScriptBindings(PyObject* module) {
          const std::string& src,
          const std::vector<at::Tensor>& constant_table,
          const Self& self) {
-        import_functions(cu, src, constant_table, self, nullptr);
+        import_functions(
+            CompilationUnit::_get_python_cu_const(),
+            cu,
+            src,
+            constant_table,
+            self,
+            nullptr);
       });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
-  m.def("_jit_clear_class_registry", ClassType::clearRegistry);
+  m.def("_jit_clear_class_registry", CompilationUnit::_clear_python_cu);
   m.def(
       "_debug_set_autodiff_subgraph_inlining",
       debugSetAutodiffSubgraphInlining);

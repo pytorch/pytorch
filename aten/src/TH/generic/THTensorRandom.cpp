@@ -4,10 +4,6 @@
 
 #include <cmath>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
 #include <cpuinfo.h>
 
 #include <TH/THGenerator.hpp>

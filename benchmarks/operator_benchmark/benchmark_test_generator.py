@@ -8,6 +8,8 @@ from operator_benchmark.benchmark_caffe2 import Caffe2OperatorTestCase
 from operator_benchmark.benchmark_pytorch import PyTorchOperatorTestCase
 from operator_benchmark.benchmark_utils import * # noqa
 
+import torch
+
 
 def generate_test(configs, map_config, ops, OperatorTestCase):
     """

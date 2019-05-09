@@ -11336,6 +11336,19 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 weight), torch.tensor(bias), 1, epsilon, True)
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
+    def test_subclass_tensors(self):
+        # raise an error when trying to subclass FloatTensor
+        with self.assertRaisesRegex(TypeError, "type 'torch.FloatTensor' is not an acceptable base type"):
+            class Foo1(torch.FloatTensor):
+                pass
+
+        # but allow subclassing Tensor:
+        class Foo2(torch.Tensor):
+            def foo(self):
+                return 5
+        f = Foo2()
+        self.assertEqual(f.foo(), 5)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
