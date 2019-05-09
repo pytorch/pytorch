@@ -132,7 +132,8 @@ void registerOperator(Operator&& op) {
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
     }
-    if (!aliasAnalysisHasSpecialCaseFor(s)) {
+    if (!aliasAnalysisHasSpecialCaseFor(s) &&
+        op.options().aliasAnalysis() == AliasAnalysisKind::DEFAULT) {
       AT_ERROR(
           "Missing special case in alias analysis for non-schematized"
           " operator ",
