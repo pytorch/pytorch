@@ -47,6 +47,7 @@ TESTS = [
     'utils',
     'namedtuple_return_api',
     'jit_fuser',
+    'tensorboard',
 ]
 
 WINDOWS_BLACKLIST = [

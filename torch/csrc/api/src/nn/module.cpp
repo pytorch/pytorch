@@ -278,9 +278,11 @@ void Module::save(serialize::OutputArchive& archive) const {
     archive.write(buffer.key(), buffer.value(), /*is_buffer=*/true);
   }
   for (const auto& child : children_) {
-    serialize::OutputArchive child_archive;
-    child.value()->save(child_archive);
-    archive.write(child.key(), child_archive);
+    if (child.value()->is_serializable()) {
+      serialize::OutputArchive child_archive;
+      child.value()->save(child_archive);
+      archive.write(child.key(), child_archive);
+    }
   }
 }
 
@@ -292,10 +294,16 @@ void Module::load(serialize::InputArchive& archive) {
     archive.read(buffer.key(), buffer.value(), /*is_buffer=*/true);
   }
   for (const auto& child : children_) {
-    serialize::InputArchive child_archive;
-    archive.read(child.key(), child_archive);
-    child.value()->load(child_archive);
+    if (child.value()->is_serializable()) {
+      serialize::InputArchive child_archive;
+      archive.read(child.key(), child_archive);
+      child.value()->load(child_archive);
+    }
   }
+}
+
+bool Module::is_serializable() const {
+  return true;
 }
 
 Tensor& Module::register_parameter(

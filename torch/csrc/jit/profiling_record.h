@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
@@ -21,7 +22,7 @@ struct ProfilingRecord {
   ProfilingRecord(const ProfilingRecord&) = delete;
   ProfilingRecord(ProfilingRecord&&) noexcept = delete;
   static ProfiledTensorTypePtr toProfiledTensorTypePtr(const IValue& ival);
-  static std::unique_ptr<ProfilingRecord> instrumentGraph(
+  TORCH_API static std::unique_ptr<ProfilingRecord> instrumentGraph(
       const std::shared_ptr<Graph>& graph);
 
   std::shared_ptr<Graph> profiled_graph_;

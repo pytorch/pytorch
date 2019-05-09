@@ -29,7 +29,7 @@ SKIP_PYTHON_BINDINGS = [
     'arange.*', 'range.*', '_solve.*', '_getri.*', '_inverse.*',
     '_cholesky.*', '_triangular_solve.*',
     'slice', 'randint(_out)?',
-    'item', '_local_scalar_dense', 'linear', 'to',
+    'item', '_local_scalar_dense', 'to',
     'copy_sparse_to_sparse_', 'copy_',
 ]
 

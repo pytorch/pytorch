@@ -21,6 +21,11 @@
 
 namespace torch {
 namespace jit {
+
+namespace script {
+  struct Module;
+}
+
 namespace tracer {
 
 using ::c10::ivalue::List;
@@ -88,7 +93,7 @@ struct TypedStack : public std::pair<Stack, TupleTypePtr>
   }
 };
 
-TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs);
+TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs, const std::shared_ptr<script::Module>& self=nullptr);
 
 TORCH_API void exit(const Stack& outputs);
 

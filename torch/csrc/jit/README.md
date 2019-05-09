@@ -1290,20 +1290,17 @@ During export a list of all the tensors in a model is created. Tensors can come 
 
 ### `attributes.pkl`
 
-Attributes are all module properties that are not parameters or constants. Attributes are saved in a list in the order they were defined on the module. The list is stored as a Python `pickle` archive. `pickle`'s format was chosen due to:
-* **user friendliness** - the attributes file can be loaded in Python with `pickle` without having PyTorch installed
-* **size limits** - formats such as Protobuf empose size limits on total message size, whereas pickle limits are on individual values (e.g. strings cannot be longer than 4 GB)
-* **standard format** - `pickle` is a standard Python module with a reasonably simple format. The format is a program to be consumed by a stack machine that is detailed in Python's [`pickletools.py`](https://svn.python.org/projects/python/trunk/Lib/pickletools.py)
-* **built-in memoization** - for shared reference types (e.g. Tensor, string, lists, dicts)
-* **self describing** - a separate definition file is not needed to understand the pickled data
-* **eager mode save** - `torch.save()` already produces a `pickle` archive, so doing the same with attributes may ease unification of these formats in the future
+[pickler.h](pickler.h),
+[pickler.cpp](pickler.cpp),
+[torch/jit/_pickle.py](../../../torch/jit/_pickle.py)
+[caffe2/proto/torch.proto](../../../caffe2/proto/torch.proto)
 
-A given module may have many attributes of different types and many submodules, each with their own attributes. Attributes are recorded in `model.json`:
+Attributes are all module properties that are not parameters or constants. Attributes are saved in a list in the order they were defined on the module. A given module may have many attributes of different types and many submodules, each with their own attributes. Attribute metadata is recorded in `model.json`:
 * `type` - the full type of the attribute (in [Mypy syntax](https://mypy.readthedocs.io/en/latest/cheat_sheet_py3.html))
 * `name` - the attribute's name
 * `id` - the offset into the saved list of all model attributes
 
-`model.json`
+In `model.json`:
 ```json
 {
   "mainModule": {
@@ -1344,41 +1341,61 @@ A given module may have many attributes of different types and many submodules, 
 }
 ```
 
-Attributes of the main module and its submodules are saved to a single file in the `zip` archive of a `.pt` file named `attributes.pkl`. A single file is used so that attributes can reference each other and shared values. Unpickling this will return a list of values corresponding to the attributes.
+Attributes of the main module and its submodules are saved to a single file in the `zip` archive of a `.pt` file named `attributes.pkl`. Attributes are stored as a Python `pickle` archive. `pickle`'s format was chosen due to:
+* **user friendliness** - the attributes file can be loaded in Python with `pickle`
+* **size limits** - formats such as Protobuf empose size limits on total message size, whereas pickle limits are on individual values (e.g. strings cannot be longer than 4 GB)
+* **standard format** - `pickle` is a standard Python module with a reasonably simple format. The format is a program to be consumed by a stack machine that is detailed in Python's [`pickletools.py`](https://svn.python.org/projects/python/trunk/Lib/pickletools.py)
+* **built-in memoization** - for shared reference types (e.g. Tensor, string, lists, dicts)
+* **self describing** - a separate definition file is not needed to understand the pickled data
+* **eager mode save** - `torch.save()` already produces a `pickle` archive, so doing the same with attributes avoids introducing yet another format
 
-All attributes are written into the `attributes.pkl` file with the exception of tensors, which store only a tensor table index (see "tensors" above). Classes are used to mark special data types, such as this tensor table index or specialized lists. To load the `attributes.pkl` file without PyTorch for inspection or manual editing, these classes must be defined, so a custom [`Unpickler`](https://docs.python.org/3/library/pickle.html#pickle.Unpickler) is necessary:
+[pickler.cpp](pickler.cpp) implements a subset of the Pickle format necessary for TorchScript models.
+
+
+A single file is used for the top level module and all submodules so that attributes can reference each other and share values. Unpickling `attributes.pkl`  will return a tuple of values corresponding to the attributes.
+
+All attributes are written into the `attributes.pkl` file with the exception of tensors, which store only a tensor table index (see "tensors" above). PyTorch functions defined in [torch/jit/_pickle.py](../../../torch/jit/_pickle.py) are used to mark special data types, such as this tensor table index or specialized lists. To load the `attributes.pkl` file, use the `pickle` module in Python:
+
+```python
+import pickle
+# attributes.pkl include references to functions in torch.jit._pickle
+import torch
+
+pickle.load(open("attributes.pkl", "rb"))
+```
+
+If for some reason you don't have PyTorch installed, you can still load `attributes.pkl` with a custom [`Unpickler`](https://docs.python.org/3/library/pickle.html#pickle.Unpickler):
 
 ```python
 import pickle
 
-# Tensor objects are stored as instances of this class
-class TensorID(object):
-    def __setstate__(self, id):
-        self.id = id
-
-# List[int] has internal specializations, and these are indicated with this class
-class IntList(object):
-    def __setstate__(self, data):
-        self.data = data
-
 class JitUnpickler(pickle.Unpickler):
     def find_class(self, module, name):
-        if not module == '__main__':
-            return None
+        if module != 'torch.jit._pickle':
+            raise RuntimeError("Unknown module")
 
-        if name == 'TensorID':
-            return TensorID
-        elif name == 'IntList':
-            return IntList
+        identity = lambda x: x
+        if name == 'build_tensor_from_id':
+            # Without the tensor table we can't do anything other than
+            # return the tensor ID
+            return identity
+        elif name == 'build_intlist':
+            return identity
 
-JitUnpickler(open("my_model/attributes.pkl", "rb")).load()
+print(JitUnpickler(open("out_dir/out/attributes.pkl", "rb")).load())
 ```
 
 #### Binary Format
 
 Running the following snippet produces a `ScriptModule` with several attributes.
+Python's `pickletools` module can be used to decode the binary blob of `attributes.pkl` into a human readable format.
 
 ```python
+import pickletools
+import zipfile
+import torch
+from typing import Tuple, List
+
 class M(torch.jit.ScriptModule):
     def __init__(self):
         super(M, self).__init__()
@@ -1391,50 +1408,46 @@ class M(torch.jit.ScriptModule):
     def forward(self):
         return (self.float, self.tuple, self.tensor, self.int_list)
 
-M().save("out.pt")
+M().save("out.zip")
+model_zip = zipfile.ZipFile("out.zip", 'r')
+model_zip.extractall("out_dir")
+pickletools.dis(open("out_dir/out/attributes.pkl", "rb"))
 ```
 
-In a terminal, Python's `pickletools` module can be used to decode the binary blob of `attributes.pkl` into a human readable format.
 
-```bash
-unzip -o out.pt
-python -m pickletools out/attributes.pkl
+The output of the above commands demonstrates the concepts described earlier. Attributes are wrapped in with `2: EMPTY_LIST` and appear in the order they are defined on the module. Functions for certain special types (e.g. `List[int]`, `Tensor`) can be seen at `37: GLOBAL` and `66: GLOBAL`, followed by data specific to that type, then finally by an instruction to build the object at `65: BUILD` and `113: BUILD` respectively.
 ```
-
-The output of the above commands demonstrates the concepts described earlier. Attributes are wrapped in with `2: EMPTY_LIST` and appear in the order they are defined on the module. Classes for certain special types (`List[int]`, `Tensor`) can be seen at `37: GLOBAL` and `66: GLOBAL`, followed by data specific to that type, then finally by an instruction to build the object at `65: BUILD` and `113: BUILD` respectively.
-```
-    0: \x80 PROTO      2
-    2: ]    EMPTY_LIST
-    3: (    MARK
-    4: G        BINFLOAT   2.3
-   13: (        MARK
-   14: J            BININT     1
-   19: J            BININT     2
-   24: J            BININT     3
-   29: J            BININT     4
-   34: t            TUPLE      (MARK at 13)
-   35: q        BINPUT     0
-   37: c        GLOBAL     '__main__ TensorID'
-   56: q        BINPUT     1
-   58: )        EMPTY_TUPLE
-   59: \x81     NEWOBJ
-   60: J        BININT     0
-   65: b        BUILD
-   66: c        GLOBAL     '__main__ IntList'
-   84: q        BINPUT     2
-   86: )        EMPTY_TUPLE
-   87: \x81     NEWOBJ
-   88: ]        EMPTY_LIST
-   89: q        BINPUT     3
-   91: (        MARK
-   92: J            BININT     1
-   97: J            BININT     2
-  102: J            BININT     3
-  107: J            BININT     4
-  112: e            APPENDS    (MARK at 91)
-  113: b        BUILD
-  114: e        APPENDS    (MARK at 3)
-  115: .    STOP
+  0: \x80 PROTO      2
+  2: (    MARK
+  3: G        BINFLOAT   2.3
+ 12: (        MARK
+ 13: K            BININT1    1
+ 15: K            BININT1    2
+ 17: K            BININT1    3
+ 19: K            BININT1    4
+ 21: t            TUPLE      (MARK at 12)
+ 22: q        BINPUT     0
+ 24: c        GLOBAL     'torch.jit._pickle build_tensor_from_id'
+ 64: q        BINPUT     1
+ 66: (        MARK
+ 67: K            BININT1    0
+ 69: t            TUPLE      (MARK at 66)
+ 70: R        REDUCE
+ 71: c        GLOBAL     'torch.jit._pickle build_intlist'
+104: q        BINPUT     2
+106: (        MARK
+107: ]            EMPTY_LIST
+108: (            MARK
+109: K                BININT1    1
+111: K                BININT1    2
+113: K                BININT1    3
+115: K                BININT1    4
+117: e                APPENDS    (MARK at 108)
+118: t            TUPLE      (MARK at 106)
+119: R        REDUCE
+120: q        BINPUT     3
+122: t        TUPLE      (MARK at 2)
+123: .    STOP
 highest protocol among opcodes = 2
 ```
 

@@ -41,9 +41,10 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     TypedStack trace_inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
-    const c10::optional<size_t>& num_real_inputs) {
-  size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
-  auto enter_info = tracer::enter(std::move(trace_inputs));
+    const std::shared_ptr<script::Module>& self) {
+  auto enter_info = tracer::enter(std::move(trace_inputs), self);
+  auto graph = enter_info.first->graph;
+
   getTracingState()->lookup_var_name_fn =
       [var_name_lookup_fn](const Variable& var) -> std::string {
     AutoGIL ag;
@@ -51,6 +52,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
   };
   getTracingState()->force_outplace = force_outplace;
   try {
+    size_t num_func_inputs = enter_info.second.size();
     py::tuple py_inputs(num_func_inputs);
     for (size_t i = 0; i < num_func_inputs; ++i) {
       py_inputs[i] = py::cast(enter_info.second[i]);
@@ -62,7 +64,6 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
           "captured in traces, so it would be a no-op.");
     }
     tracer::exit({toIValue(out)});
-    auto graph = enter_info.first->graph;
     EliminateDeadCode(graph);
     LowerSimpleTuples(graph);
 

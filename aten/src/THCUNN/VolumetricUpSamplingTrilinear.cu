@@ -45,19 +45,19 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
       return;
     }
     //
-    const Acctype t1r = linear_upsampling_compute_source_index<Acctype>(rdepth, t2, align_corners);
+    const Acctype t1r = area_pixel_compute_source_index<Acctype>(rdepth, t2, align_corners, /*cubic=*/false);
     const int t1 = t1r;
     const int t1p = (t1 < depth1 - 1) ? 1 : 0;
     const Acctype t1lambda = t1r - t1;
     const Acctype t0lambda = Acctype(1) - t1lambda;
     //
-    const Acctype h1r = linear_upsampling_compute_source_index<Acctype>(rheight, h2, align_corners);
+    const Acctype h1r = area_pixel_compute_source_index<Acctype>(rheight, h2, align_corners, /*cubic=*/false);
     const int h1 = h1r;
     const int h1p = (h1 < height1 - 1) ? 1 : 0;
     const Acctype h1lambda = h1r - h1;
     const Acctype h0lambda = Acctype(1) - h1lambda;
     //
-    const Acctype w1r = linear_upsampling_compute_source_index<Acctype>(rwidth, w2, align_corners);
+    const Acctype w1r = area_pixel_compute_source_index<Acctype>(rwidth, w2, align_corners, /*cubic=*/false);
     const int w1 = w1r;
     const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const Acctype w1lambda = w1r - w1;
@@ -112,19 +112,19 @@ __global__ void caffe_gpu_interp2_kernel_backward(const int n,
       return;
     }
     //
-    const Acctype t1r = linear_upsampling_compute_source_index<Acctype>(rdepth, t2, align_corners);
+    const Acctype t1r = area_pixel_compute_source_index<Acctype>(rdepth, t2, align_corners, /*cubic=*/false);
     const int t1 = t1r;
     const int t1p = (t1 < depth1 - 1) ? 1 : 0;
     const Acctype t1lambda = t1r - t1;
     const Acctype t0lambda = Acctype(1) - t1lambda;
     //
-    const Acctype h1r = linear_upsampling_compute_source_index<Acctype>(rheight, h2, align_corners);
+    const Acctype h1r = area_pixel_compute_source_index<Acctype>(rheight, h2, align_corners, /*cubic=*/false);
     const int h1 = h1r;
     const int h1p = (h1 < height1 - 1) ? 1 : 0;
     const Acctype h1lambda = h1r - h1;
     const Acctype h0lambda = Acctype(1) - h1lambda;
     //
-    const Acctype w1r = linear_upsampling_compute_source_index<Acctype>(rwidth, w2, align_corners);
+    const Acctype w1r = area_pixel_compute_source_index<Acctype>(rwidth, w2, align_corners, /*cubic=*/false);
     const int w1 = w1r;
     const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const Acctype w1lambda = w1r - w1;

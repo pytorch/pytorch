@@ -324,6 +324,7 @@ struct CAFFE2_API IValue final {
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
+  IValue(const char* v): IValue(std::string(v)) {}
   bool isString() const { return Tag::String == tag; }
   c10::intrusive_ptr<ivalue::ConstantString> toString() && {
     AT_ASSERT(isString());
@@ -490,7 +491,7 @@ struct CAFFE2_API IValue final {
   optional<T> toOptional();
 
   // this is a shallow comparison of two IValues to test the object identity
-  bool isSameIdentity(IValue& rhs);
+  bool isSameIdentity(const IValue& rhs) const;
 
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
@@ -708,7 +709,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return slots_.at(slot);
   }
 
-  const std::string& name() const;
+  std::string name() const;
 
   const std::vector<IValue>& slots() const {
     return slots_;
@@ -949,7 +950,7 @@ inline optional<T> IValue::toOptional() {
   return this->to<T>();
 }
 
-inline bool IValue::isSameIdentity(IValue& rhs) {
+inline bool IValue::isSameIdentity(const IValue& rhs) const {
   // We choose to not use memcmp for payload check due to potential random padding characters on union type
 
   // Semantics:

@@ -53,10 +53,7 @@ enum class TypeID {
   QuantizedCPU,
   MSNPU,
   XLA,
-  CPUComplexFloat,
-  CPUComplexDouble,
-  CUDAComplexFloat,
-  CUDAComplexDouble,
+  ComplexCPU,
   Undefined,
   NumOptions
 };
@@ -568,5 +565,3 @@ protected:
 };
 
 } // namespace at
-
-#include <ATen/core/Tensor.h>

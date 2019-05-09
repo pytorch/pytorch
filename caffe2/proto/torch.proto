@@ -79,10 +79,13 @@ message LibDef {
 }
 
 enum ProtoVersion {
-  PROTO_VERSION_NEWEST = 0x0000000000000002;
+  PROTO_VERSION_NEWEST = 0x0000000000000003;
 }
 
 message ModelDef {
+  // numbers of fields that have been removed. Do not reuse them!
+  reserved 9;
+  reserved "libs";
   // for the proto version, to keep both backward and forward
   // compatibility, please bump the proto_version when we add any
   // change in the proto. runtime decides whether accept the
@@ -101,8 +104,4 @@ message ModelDef {
   // the table contains all the tensor information
   // the tensor id is defined as TensorProto.name
   repeated TensorDef tensors = 5;
-
-  // TorchScript code that this module hierarchy depends on
-  // Libs will be loaded in before the main module is compiled.
-  optional LibDef libs = 9;
 }

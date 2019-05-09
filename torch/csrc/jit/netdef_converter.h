@@ -2,6 +2,7 @@
 #include <caffe2/proto/caffe2_pb.h>
 #include <torch/csrc/jit/ir.h>
 #include <unordered_map>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
@@ -15,7 +16,7 @@ namespace jit {
  * \p Prefix can be used for appending some string to every operator name (e.g.
  * we can add "caffe2::").
  */
-void convertNetDefToIR(
+TORCH_API void convertNetDefToIR(
     const caffe2::NetDef& net,
     Graph* graph,
     std::unordered_map<std::string, Value*>* valueMapPtr = nullptr,
@@ -34,7 +35,7 @@ void convertNetDefToIR(
  * TODO: We might need to do a better job at preserving names of the variables,
  * especially external_inputs/external_outputs.
  */
-void convertIRToNetDef(
+TORCH_API void convertIRToNetDef(
     caffe2::NetDef* net,
     const Graph& graph,
     const std::string& prefix = "");

@@ -77,7 +77,7 @@ const char* ComplexCPUType::toString() const {
 }
 
 TypeID ComplexCPUType::ID() const {
-  return TypeID::CPUComplexFloat;
+  return TypeID::ComplexCPU;
 }
 
 REGISTER_COMPLEX_HOOKS(ComplexHooks);

@@ -7060,29 +7060,38 @@ class TestNN(NNTestCase):
                 gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingBicubic2d(self):
-        # test output against known input
-        in_t = torch.arange(4).view(1, 1, 2, 2).type(torch.FloatTensor)
+        # test output against known input: align_corners=False result must match opencv
+        in_t = torch.arange(8).view(1, 2, 2, 2).type(torch.FloatTensor)
         expected_out_t = torch.Tensor(
-            [[[[0.00000, 0.31481, 0.68519, 1.00000],
-               [0.62963, 0.94444, 1.31481, 1.62963],
-               [1.37037, 1.68518, 2.05556, 2.37037],
-               [2.00000, 2.31481, 2.68519, 3.00000]]]])
-        out_t = F.interpolate(in_t, scale_factor=2, mode='bicubic', align_corners=True)
+            [[[[-0.31641, 0.01562, 0.56250, 0.89453],
+              [0.34766, 0.67969, 1.22656, 1.55859],
+              [1.44141, 1.77344, 2.32031, 2.65234],
+              [2.10547, 2.43750, 2.98438, 3.31641]],
+
+             [[3.68359, 4.01562, 4.56250, 4.89453],
+              [4.34766, 4.67969, 5.22656, 5.55859],
+              [5.44141, 5.77344, 6.32031, 6.65234],
+              [6.10547, 6.43750, 6.98438, 7.31641]]]])
+        out_t = F.interpolate(in_t, scale_factor=2, mode='bicubic', align_corners=False)
         torch.set_printoptions(precision=5)
         self.assertEqual(out_t, expected_out_t)
 
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
+
         for align_corners in [True, False]:
             kwargs = dict(mode='bicubic', align_corners=align_corners)
-
             # test float scale factor up & downsampling
-            for scale_factor in [0.5, 1.5, 2]:
-                in_t = torch.ones(2, 2, 2, 2)
-                out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data)
+            for device in device_list:
+                for scale_factor in [0.5, 1.5, 2]:
+                    in_t = torch.ones(2, 2, 2, 2).to(device)
+                    out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                    self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data)
 
-                input = torch.randn(2, 2, 2, 2, requires_grad=True)
-                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                    input = torch.randn(2, 2, 2, 2, requires_grad=True)
+                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)

@@ -1,7 +1,10 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/utils/memory.h>
+
+#include <list>
 
 namespace torch {
 namespace jit {
@@ -60,8 +63,8 @@ bool AliasDb::isWildcard(const Value* v) const {
 }
 
 bool AliasDb::writesTo(Node* n, const Value* v) const {
-  if (!shouldAnnotate(v)) {
-    // This is a primitive type
+  if (!shouldAnnotate(v) || v->mustBeNone()) {
+    // This is a non-aliasing value
     return false;
   }
   if (isWildcard(v)) {
@@ -104,7 +107,7 @@ bool AliasDb::hasWriters(const Value* v) const {
     return numWrites_ != 0;
   }
 
-  if (!elementMap_.count(v)) {
+  if (!elementMap_.count(v) || v->mustBeNone()) {
     return false;
   }
 
@@ -363,6 +366,21 @@ void AliasDb::analyze(Node* node) {
   }
 }
 
+// Returns true if analysis was run using
+// the registered analyzer.
+bool AliasDb::tryRegisteredAnalysis(Node* node) {
+  const Operator& op = getOperatorFor(node);
+  auto analysis = op.options().aliasAnalysis();
+  switch (analysis) {
+    case AliasAnalysisKind::PURE:
+      analyzeCreator(node);
+      return true;
+    case AliasAnalysisKind::DEFAULT:
+      return false;
+  }
+  return false;
+}
+
 // The basic strategy is:
 //   1. Retrieve alias information for every input.
 //   2. Use the node's schema's alias annotations to propgagate alias/write
@@ -430,6 +448,9 @@ void AliasDb::analyzeImpl(Node* node) {
       // These ops do nothing
       return;
     default:
+      if (tryRegisteredAnalysis(node)) {
+        return;
+      }
       AT_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
   }
 
@@ -1265,7 +1286,7 @@ c10::optional<const Node*> AliasDb::getLastWildcard() const {
   }
 }
 
-TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
+bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
   // WARNING: by adding a case to this list, you are asserting that you have
   // added a case for the unschematized node in AliasDb::analyze
   const static std::unordered_set<Symbol> handled = {

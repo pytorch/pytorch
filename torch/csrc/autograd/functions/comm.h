@@ -6,6 +6,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/ATenCUDAGeneral.h>
 
 #include <cstddef>
 #include <vector>
@@ -13,6 +14,7 @@
 namespace torch {
 namespace autograd {
 
+//TODO: change it to TORCH_API when we merge the libs
 struct TORCH_API Scatter : public Function {
   explicit Scatter(
       std::vector<at::Device> devices,
@@ -21,6 +23,7 @@ struct TORCH_API Scatter : public Function {
       const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams =
           c10::nullopt,
       bool unsqueeze_scalars = false);
+  ~Scatter() override;
 
   variable_list apply(variable_list&& inputs) override;
 
@@ -33,6 +36,7 @@ struct TORCH_API Scatter : public Function {
 
 struct TORCH_API Gather : public Function {
   explicit Gather(const at::Device& destination_device, int64_t dim = 0);
+  ~Gather() override;
 
   variable_list apply(variable_list&& inputs) override;
 
