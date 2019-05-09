@@ -126,6 +126,8 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
                                  at::Generator* gen,
                                  const dist_t& dist_func,
                                  const transform_t transform_func) {
+  static_assert(unroll_factor >= 1, "unroll_factor must be >= 1.");
+  
   auto execution_policy = calc_execution_policy(iter.numel());
   auto counter_offset = std::get<0>(execution_policy);
   auto grid = std::get<1>(execution_policy);
