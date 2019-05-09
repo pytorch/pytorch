@@ -147,13 +147,12 @@ def get_nightly_tests():
     configs = gen_build_env_list(False)
     filtered_configs = filter(predicate_exclude_nonlinux_and_libtorch, configs)
 
-    mylist = []
+    tests = []
     for conf_options in filtered_configs:
-        d = {conf_options.gen_build_name("test"): {"requires": [conf_options.gen_build_name("build")]}}
-        mylist.append(d)
+        params = {"requires": ["setup", conf_options.gen_build_name("build")]}
+        tests.append({conf_options.gen_build_name("test"): params})
 
-    return mylist
-
+    return tests
 
 def get_nightly_uploads():
 
@@ -163,7 +162,7 @@ def get_nightly_uploads():
         return {
             conf.gen_build_name("upload"): OrderedDict([
                 ("context", "org-member"),
-                ("requires", [conf.gen_build_name(phase_dependency)]),
+                ("requires", ["setup", conf.gen_build_name(phase_dependency)]),
             ]),
         }
 
@@ -190,12 +189,12 @@ def gen_schedule_tree(cron_timing):
 
 def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
 
-    jobs_list = []
+    jobs_list = ["setup"]
 
     configs = gen_build_env_list(smoke)
     for build_config in configs:
         build_name = build_config.gen_build_name("build")
-        jobs_list.append(build_name)
+        jobs_list.append({build_name: {"requires": ["setup"]}})
 
     jobs_dict[toplevel_key] = OrderedDict(
         triggers=gen_schedule_tree(cron_schedule),

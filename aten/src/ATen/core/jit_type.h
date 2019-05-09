@@ -1310,7 +1310,7 @@ using ::torch::jit::script::Function;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public Type {
-  // Create a user type and register it globally.
+  // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       QualifiedName qualifiedName,
       std::shared_ptr<CompilationUnit> cu);
@@ -1318,11 +1318,6 @@ struct CAFFE2_API ClassType : public Type {
   // Create a type representing a Module,
   // These do not have methods, and are not globally registered
   static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
-
-  // returns nullptr if there is no type with that name
-  static ClassTypePtr get(const QualifiedName& qualifiedName);
-  // For testing: delete all registered types
-  static void clearRegistry();
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {

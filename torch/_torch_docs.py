@@ -1596,8 +1596,9 @@ eig(a, eigenvectors=False, out=None) -> (Tensor, Tensor)
 
 Computes the eigenvalues and eigenvectors of a real square matrix.
 
-.. note:: Since eigenvalues and eigenvectors might be complex, backward pass is supported only
-for :func:`torch.symeig`
+.. note::
+    Since eigenvalues and eigenvectors might be complex, backward pass is supported only
+    for :func:`torch.symeig`
 
 Args:
     a (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
