@@ -691,24 +691,28 @@ void testRecordFunction() {
             std::make_tuple(std::string(getFullName(&fn)), sizes));
       }, [](const autograd::profiler::RecordFunction&) {}, true);
 
-  auto t = torch::randn({1, 2, 3}, at::kCPU);
-  t.set_requires_grad(true);
-  auto t2 = invokeTestRecordFunction(t);
-  t2.backward();
-  auto eager_inputs = traced_inputs;
-  traced_inputs.clear();
+  for (auto iter = 0; iter < 2; ++iter) {
+    autograd::profiler::setLazyInputsCopy(iter == 0);
 
-  t = torch::randn({1, 2, 3}, at::kCPU);
-  t.set_requires_grad(true);
-  t2 = invokeTestRecordFunctionJIT(t);
-  t2.backward();
-  auto jit_inputs = traced_inputs;
-  traced_inputs.clear();
+    auto t = torch::randn({1, 2, 3}, at::kCPU);
+    t.set_requires_grad(true);
+    auto t2 = invokeTestRecordFunction(t);
+    t2.backward();
+    auto eager_inputs = traced_inputs;
+    traced_inputs.clear();
+
+    t = torch::randn({1, 2, 3}, at::kCPU);
+    t.set_requires_grad(true);
+    t2 = invokeTestRecordFunctionJIT(t);
+    t2.backward();
+    auto jit_inputs = traced_inputs;
+    traced_inputs.clear();
+
+    checkTracedInputs(eager_inputs);
+    checkTracedInputs(jit_inputs);
+  }
 
   autograd::profiler::popCallback();
-
-  checkTracedInputs(eager_inputs);
-  checkTracedInputs(jit_inputs);
 }
 
 void testAutogradProfiler() {
@@ -797,7 +801,7 @@ void testModuleConversion() {
     // test cuda to cpu for params and buffers
     m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
     m->register_buffer("bar", torch::ones({}, at::kCUDA));
-    
+
     m->to(at::kCUDA);
     m->to(at::kCPU);
     AT_ASSERT(m->get_parameter("foo").data().device().is_cpu());
@@ -807,7 +811,7 @@ void testModuleConversion() {
     // test cpu to cuda for params and buffers
     m->register_parameter("foo", torch::ones({}), false);
     m->register_buffer("bar", torch::ones({}));
-    
+
     m->to(at::kCUDA);
     AT_ASSERT(m->get_parameter("foo").data().device().is_cuda());
     AT_ASSERT(m->get_buffer("bar").data().device().is_cuda());

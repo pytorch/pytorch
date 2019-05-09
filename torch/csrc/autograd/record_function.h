@@ -54,6 +54,15 @@ struct TORCH_API RecordFunction {
     before(fn, current_sequence_nr);
   }
 
+  template<typename F>
+  void before(
+      F fn,
+      std::function<std::vector<c10::IValue>()> inputs_cb,
+      int64_t current_sequence_nr = -1) {
+    inputs_cb_ = inputs_cb;
+    before(fn, current_sequence_nr);
+  }
+
   // Destructor calls end callbacks
   virtual ~RecordFunction();
 
@@ -70,6 +79,10 @@ struct TORCH_API RecordFunction {
   }
 
   const std::vector<c10::IValue>& inputs() const {
+    if (inputs_cb_) {
+      inputs_ = inputs_cb_();
+      inputs_cb_ = nullptr;
+    }
     return inputs_;
   }
 
@@ -83,21 +96,38 @@ struct TORCH_API RecordFunction {
   Function* fn_ = nullptr;
   StringView name_;
   int64_t sequence_nr_ = -1;
-  std::vector<c10::IValue> inputs_;
   RecordFunction* parent_ = nullptr;
+
+  // lazy initialization
+  mutable std::vector<c10::IValue> inputs_;
+  mutable std::function<std::vector<c10::IValue>()> inputs_cb_;
 
   bool initialized_ = false;
 };
 
 TORCH_API bool hasCallbacks();
 TORCH_API bool needsInputs();
+TORCH_API bool isLazyInputsCopy();
+TORCH_API void setLazyInputsCopy(bool);
+
+inline std::vector<c10::IValue> toVec(std::vector<c10::IValue>&& vec) {
+  return vec;
+}
+
+inline std::vector<c10::IValue> toVec(c10::ArrayRef<c10::IValue> vec_ref) {
+  return vec_ref.vec();
+}
 
 // optional argument - function's seq_no
 #define RECORD_FUNCTION(fn, inputs, ...) \
   torch::autograd::profiler::RecordFunction guard; \
   if (torch::autograd::profiler::hasCallbacks()) { \
     if (torch::autograd::profiler::needsInputs()) { \
-      guard.before(fn, inputs, ##__VA_ARGS__); \
+      if (torch::autograd::profiler::isLazyInputsCopy()) { \
+        guard.before(fn, [&](){ return torch::autograd::profiler::toVec(inputs); }, ##__VA_ARGS__); \
+      } else { \
+        guard.before(fn, inputs, ##__VA_ARGS__); \
+      } \
     } else { \
       guard.before(fn, ##__VA_ARGS__); \
     } \
