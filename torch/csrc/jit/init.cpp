@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
@@ -27,13 +28,13 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
-#include <torch/csrc/jit/passes/pattern_fusion.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_arg_flatten.h>
@@ -172,21 +173,27 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
       .def(
-          "_jit_pass_pattern_based_fusion",
-          [](std::shared_ptr<script::Module> m) {
-            return PatternBasedFusion(m);
+          "_jit_pass_pattern_based_rewrite",
+          [](std::shared_ptr<script::Module>& m) {
+            return PatternBasedRewrite(m);
           })
       .def(
-          "_jit_pass_custom_pattern_based_fusion",
+          "_jit_pass_custom_pattern_based_rewrite",
           [](const std::string& pattern,
              const std::string& fused_node_name,
-             std::vector<std::string> inputs,
-             std::vector<std::string> outputs,
              std::shared_ptr<script::Module> m) {
-            PatternFuser pattern_fuser;
-            pattern_fuser.RegisterFusionPattern(
-                pattern, fused_node_name, inputs, outputs);
-            pattern_fuser.runOnModule(m);
+            SubgraphRewriter subgraph_rewriter;
+            subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
+            subgraph_rewriter.runOnModule(m);
+          })
+      .def(
+          "_jit_pass_custom_pattern_based_rewrite_graph",
+          [](const std::string& pattern,
+             const std::string& fused_node_name,
+             std::shared_ptr<Graph> g) {
+            SubgraphRewriter subgraph_rewriter;
+            subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
+            subgraph_rewriter.runOnGraph(g);
           })
       .def(
           "_jit_pass_fold_quant_inputs",
@@ -268,6 +275,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
+      .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def(
