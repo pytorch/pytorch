@@ -858,7 +858,7 @@ jobs:
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-pytorch_linux_xenial_cuda9_cudnn7_py3_multigpu_test:
+  pytorch_linux_xenial_cuda9_cudnn7_py3_multigpu_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3-multigpu-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:300"
