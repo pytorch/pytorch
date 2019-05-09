@@ -81,14 +81,17 @@ elif REL_WITH_DEB_INFO:
 
 
 def overlay_windows_vcvars(env):
-    from distutils._msvccompiler import _get_vc_env
-    vc_arch = 'x64' if IS_64BIT else 'x86'
-    vc_env = _get_vc_env(vc_arch)
-    for k, v in env.items():
-        lk = k.lower()
-        if lk not in vc_env:
-            vc_env[lk] = v
-    return vc_env
+    if sys.version_info >= (3, 5):
+        from distutils._msvccompiler import _get_vc_env
+        vc_arch = 'x64' if IS_64BIT else 'x86'
+        vc_env = _get_vc_env(vc_arch)
+        for k, v in env.items():
+            lk = k.lower()
+            if lk not in vc_env:
+                vc_env[lk] = v
+        return vc_env
+    else:
+        return env
 
 
 def mkdir_p(dir):
