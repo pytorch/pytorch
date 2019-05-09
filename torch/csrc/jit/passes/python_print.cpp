@@ -882,6 +882,9 @@ struct PythonPrintPass {
       case prim::Bool: {
         printValueList(stmt, node->inputs(), "bool(", ")");
       } break;
+      case prim::str: {
+        printValueList(stmt, node->inputs(), "str(", ")");
+      } break;
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");
       } break;

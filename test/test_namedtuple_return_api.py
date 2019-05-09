@@ -86,10 +86,7 @@ class TestNamedTupleAPI(unittest.TestCase):
         '''))
 
         # test pstrf
-        b = torch.mm(a, a.t())
-        # add a small number to the diagonal to make the matrix numerically positive semidefinite
-        for i in range(a.size(0)):
-            b[i][i] = b[i][i] + 1e-7
+        b = torch.eye(5)
         ret = b.pstrf()
         self.assertIs(ret.u, ret[0])
         self.assertIs(ret.pivot, ret[1])

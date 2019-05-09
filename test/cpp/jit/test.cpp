@@ -12,6 +12,7 @@
 #include <test/cpp/jit/test_alias_analysis.h>
 #include <test/cpp/jit/test_argument_spec.h>
 #include <test/cpp/jit/test_autodiff.h>
+#include <test/cpp/jit/test_class_import.h>
 #include <test/cpp/jit/test_class_parser.h>
 #include <test/cpp/jit/test_code_template.h>
 #include <test/cpp/jit/test_constant_pooling.h>
@@ -46,6 +47,7 @@ namespace jit {
   _(CustomOperators)               \
   _(CustomOperatorAliasing)        \
   _(IValueKWargs)                  \
+  _(CustomFusion)                  \
   _(Differentiate)                 \
   _(DifferentiateWithRequiresGrad) \
   _(DynamicDAG)                    \
@@ -77,7 +79,8 @@ namespace jit {
   _(RecordFunction)                \
   _(SubgraphMatching)              \
   _(ModuleDefine)                  \
-  _(QualifiedName)
+  _(QualifiedName)                 \
+  _(ClassImport)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

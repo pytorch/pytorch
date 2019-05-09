@@ -1630,8 +1630,9 @@ class TracedModule(ScriptModule):
         raise RuntimeError("Cannot set new properties on a traced module.")
 
 
-class TopLevelTracedModule(TracedModule):
-    forward = _CachedForward()
+if _enabled:
+    class TopLevelTracedModule(TracedModule):
+        forward = _CachedForward()
 
 
 class _ConstModuleList(ScriptModule):

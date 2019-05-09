@@ -69,6 +69,7 @@ includes = [
     "caffe2/core/*",
     "caffe2/db/*",
     "caffe2/utils/*",
+    "caffe2/contrib/gloo/*",
     "c10/cuda/*",
     "c10/cuda/test/CMakeLists.txt",
     "modules/*",
@@ -126,7 +127,7 @@ if not args.out_of_place_only:
     paths = ("torch", "tools")
     for root, _directories, files in chain.from_iterable(os.walk(path) for path in paths):
         for filename in files:
-            if filename.endswith(".cpp") or filename.endswith(".h"):
+            if filename.endswith(".cpp") or filename.endswith(".h") or filename.endswith(".hpp"):
                 source = os.path.join(root, filename)
                 # Disabled files
                 if reduce(lambda result, exclude: source.endswith(exclude) or result, ignore_files, False):
