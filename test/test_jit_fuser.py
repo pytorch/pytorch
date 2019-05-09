@@ -275,7 +275,7 @@ class TestFuser(JitTestCase):
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
             inp1, inp2 = inputs
             s = self.checkScript(f, (inp1, inp2))
-            self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size'})
+            self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
 
             c = s(inp1, inp2)
             c.sum().backward()
@@ -335,7 +335,8 @@ class TestFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(x, y))
         x.requires_grad_(True)
         y.requires_grad_(True)
-        self.assertAllFused(ge.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes"))
+        self.assertAllFused(ge.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes",
+                                                            "aten::_size_if_not_equal"))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -507,7 +508,8 @@ class TestFuser(JitTestCase):
         self.assertAllFused(scripted.graph_for(x, p))
         x.requires_grad_(True)
         out = scripted(x, p)
-        self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes"))
+        self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
+                                                                  "aten::_size_if_not_equal"))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
@@ -520,7 +522,7 @@ class TestFuser(JitTestCase):
         b = torch.randn(5, 5, requires_grad=True)
         a = torch.randn(5, 5, requires_grad=True)
         s = self.checkScript(f, (a, b))
-        self.assertAllFused(s.graph_for(a, b), except_for={'aten::size'})
+        self.assertAllFused(s.graph_for(a, b), except_for={'aten::size', 'aten::_size_if_not_equal'})
 
         c = s(a, b)
         ga, gb = torch.autograd.grad(c.sum(), [a, b])
@@ -563,12 +565,12 @@ class TestFuser(JitTestCase):
 
         s = self.checkScript(iou, (b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2))
         self.assertAllFused(s.graph_for(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2),
-                            except_for={'aten::size', 'prim::BroadcastSizes'})
+                            except_for={'aten::size', 'prim::BroadcastSizes', 'aten::_size_if_not_equal'})
 
         c = s(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2)
         torch.autograd.grad(c.sum(), [b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2])
         graph = backward_graph(s)
-        self.assertAllFused(graph, except_for={'aten::size', 'prim::BroadcastSizes'})
+        self.assertAllFused(graph, except_for={'aten::size', 'prim::BroadcastSizes', 'aten::_size_if_not_equal'})
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -786,7 +788,8 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(fn_test_erf, (x,))
         self.assertAllFused(ge.graph_for(x))
         x.requires_grad_(True)
-        self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes"))
+        self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes",
+                                                         "aten::_size_if_not_equal"))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -803,7 +806,8 @@ class TestFuser(JitTestCase):
         self.assertAllFused(script_f.graph_for(x, y))
         x.requires_grad_(True)
         out = script_f(x, y)
-        self.assertAllFused(script_f.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes"))
+        self.assertAllFused(script_f.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes",
+                                                                  "aten::_size_if_not_equal"))
         # test that broadcasting random produces correct results
         x = torch.ones(4, 4, dtype=torch.float, device='cuda')
         y = torch.ones(4, dtype=torch.float, device='cuda')
