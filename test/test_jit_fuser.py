@@ -275,6 +275,8 @@ class TestFuser(JitTestCase):
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
             inp1, inp2 = inputs
             s = self.checkScript(f, (inp1, inp2))
+            import pdb
+            pdb.set_trace()
             self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size'})
 
             c = s(inp1, inp2)

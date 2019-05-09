@@ -111,7 +111,8 @@ bool isSimpleMap(Node* node) {
   }
   for (Value* input : node->inputs()) {
     if (input->type()->isSubtypeOf(TensorType::get()) ||
-        input->type()->isSubtypeOf(FloatType::get())) {
+        input->type()->isSubtypeOf(FloatType::get()) ||
+        input->type()->isSubtypeOf(IntType::get())) {
       continue;
     }
     if (input->node()->kind() != prim::Constant) {

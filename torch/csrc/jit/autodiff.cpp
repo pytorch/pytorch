@@ -38,6 +38,12 @@ bool isDifferentiable(Node* n) {
     return true;
 
   if (n->matches(
+        "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor"))
+      return true;
+  if (n->matches(
+              "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor"))
+      return true;
+  if (n->matches(
           "aten::dropout(Tensor input, float p, bool train) -> Tensor",
           attr::train)) {
     return n->get<bool>(attr::train).value();
@@ -186,7 +192,44 @@ class GradientHelper {
 
     } else if (node->kind() == prim::ConstantChunk) {
       return {SymbolicVariable::cat(grads, node->i(attr::dim))};
-
+//    } else if (node->matches(
+//            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
+//      return {gradSumToSizeOf(grads.at(0), attr::self),
+//              gradSumToSizeOf(
+//                  grads.at(0) * node->namedInput(attr::alpha), attr::other),
+//              nullptr};
+//
+    } else if (
+        node->matches(
+            "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor")) {
+      // handle the case that min/max is None
+      Value* min = inputs.at(1);
+      bool min_must_be_none = min->mustBeNone();
+      Value* max = inputs.at(2);
+      bool max_must_be_none = max->mustBeNone();
+      // XXX - this formula is wrong when min or max are not stricly a constant
+      // None but may be None dynamically. In this case an internal compiler
+      // error will get thrown when trying to generate expressions involving the
+      // values of min/max
+      if (!min_must_be_none && !max_must_be_none) {
+        return {grads.at(0) *
+                    (1 - (inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0))) *
+                    (1 - (inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))),
+                nullptr,
+                nullptr};
+      } else if (max_must_be_none) {
+        return {grads.at(0) *
+                    (1 - (inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0))),
+                nullptr,
+                nullptr};
+      } else if (min_must_be_none) {
+        return {grads.at(0) *
+                    (1 - (inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))),
+                nullptr,
+                nullptr};
+      } else {
+        return {grads.at(0), nullptr, nullptr};
+      }
     } else if (
         node->kind() == prim::Constant || node->kind() == prim::AutogradZero) {
       return {};

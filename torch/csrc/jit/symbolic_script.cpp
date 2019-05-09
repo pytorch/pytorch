@@ -978,11 +978,11 @@ const std::vector<std::string> functions = {
                 # error will get throw when tring to generate expressions involving the
                 # values of min/max.
                 if min is not None and max is not None:
-                    grad_self = grad_output * (1 - (self <= min).type_as(self)) * (1 - (self >= max).type_as(self))
+                    grad_self = grad_output * (1 - (self <= float(min)).type_as(self)) * (1 - (self >= float(max)).type_as(self))
                 elif min is not None:
-                    grad_self = grad_output * (1 - (self <= min).type_as(self))
+                    grad_self = grad_output * (1 - (self <= float(min)).type_as(self))
                 elif max is not None:
-                    grad_self = grad_output * (1 - (self >= max).type_as(self))
+                    grad_self = grad_output * (1 - (self >= float(max)).type_as(self))
                 else:
                     grad_self = grad_output
                 return grad_self, None, None

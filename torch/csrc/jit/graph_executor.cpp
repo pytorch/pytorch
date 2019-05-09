@@ -610,14 +610,23 @@ struct GraphExecutorImpl {
       for (Node* dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
+        //std::cout << "DIFF" << std::endl;
+        //gradient.f->dump();
+        //gradient.df->dump();
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
       InlineAutodiffSubgraphs(
           opt_graph,
           autodiff_subgraph_inlining ? autodiffSubgraphInlineThreshold : 1);
+      ConstantPropagation(opt_graph);
+      //opt_graph->dump();
     } else {
+        std::cout << "before" << std::endl;
+        opt_graph->dump();
       runNondiffOptimization(opt_graph);
+      std::cout << "nonDIFF" << std::endl;
+      opt_graph->dump();
     }
     // Make sure there are no leftovers from any passes.
     EliminateDeadCode(opt_graph);
