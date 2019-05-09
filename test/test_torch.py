@@ -9287,33 +9287,45 @@ class _TestTorchMixin(object):
 
     def test_serialization_offset(self):
         a = torch.randn(5, 5)
-        i = 41
-        for use_name in (False, True):
-            # Passing filename to torch.save(...) will cause the file to be opened twice,
-            # which is not supported on Windows
-            if sys.platform == "win32" and use_name:
-                continue
-            with tempfile.NamedTemporaryFile() as f:
-                handle = f if not use_name else f.name
-                pickle.dump(i, f)
-                torch.save(a, f)
-                f.seek(0)
-                j = pickle.load(f)
-                b = torch.load(f)
-            self.assertTrue(torch.equal(a, b))
-            self.assertEqual(i, j)
+        b = torch.randn(2, 2)
+        m = torch.nn.Conv2d(1, 1, (1, 3))
+        i, j = 41, 43
+        with tempfile.NamedTemporaryFile() as f:
+            pickle.dump(i, f)
+            torch.save(a, f)
+            pickle.dump(j, f)
+            torch.save(b, f)
+            torch.save(m, f)
+            f.seek(0)
+            i_loaded = pickle.load(f)
+            a_loaded = torch.load(f)
+            j_loaded = pickle.load(f)
+            b_loaded = torch.load(f)
+            m_loaded = torch.load(f)
+        self.assertTrue(torch.equal(a, a_loaded))
+        self.assertTrue(torch.equal(b, b_loaded))
+        self.assertTrue(m.kernel_size == m_loaded.kernel_size)
+        self.assertEqual(i, i_loaded)
+        self.assertEqual(j, j_loaded)
 
     def test_serialization_offset_filelike(self):
         a = torch.randn(5, 5)
-        i = 41
+        b = torch.randn(2, 3)
+        i, j = 41, 43
         with BytesIOContext() as f:
             pickle.dump(i, f)
-            torch.save(a, f)
+            torch.save(a, f)            
+            pickle.dump(j, f)
+            torch.save(b, f)
             f.seek(0)
-            j = pickle.load(f)
-            b = torch.load(f)
-        self.assertTrue(torch.equal(a, b))
-        self.assertEqual(i, j)
+            i_loaded = pickle.load(f)
+            a_loaded = torch.load(f)
+            j_loaded = pickle.load(f)
+            b_loaded = torch.load(f)
+        self.assertTrue(torch.equal(a, a_loaded))
+        self.assertTrue(torch.equal(b, b_loaded))
+        self.assertEqual(i, i_loaded)
+        self.assertEqual(j, j_loaded)
 
     def test_serialization_offset_gzip(self):
         a = torch.randn(5, 5)
