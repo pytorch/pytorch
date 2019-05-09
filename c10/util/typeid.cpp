@@ -81,7 +81,7 @@ CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(
     detail::_guard_long_unique<std::vector<long>>);
 
 CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(27, c10::qint8);
-
 CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(28, _CaffeHighestPreallocatedTypeId)
-
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(29, float*)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(30, at::Half*)
 } // namespace caffe2
