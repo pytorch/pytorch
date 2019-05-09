@@ -953,7 +953,7 @@ struct to_ir {
 
   Node* create(Symbol kind, const SourceRange& loc, size_t n_outputs) {
     return graph->create(kind, n_outputs)
-        ->setSourceRange(loc);
+        ->setSourceLocation(std::make_shared<SourceRange>(loc));
   }
 
   Value* emitTernaryIf(const TernaryIf& expr) {
@@ -2379,7 +2379,7 @@ struct to_ir {
     auto fork_node =
         method.graph()
             ->insertNode(method.graph()->create(prim::fork, 1))
-            ->setSourceRange(loc);
+            ->setSourceLocation(std::make_shared<SourceRange>(loc));
     auto body_block = fork_node->addBlock();
 
     // Build a template of the graph to be executed

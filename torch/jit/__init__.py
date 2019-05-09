@@ -519,10 +519,10 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
                         node_diff = difflib.ndiff(str(n_mod).splitlines(True),
                                                   str(n_check).splitlines(True))
                         source_printout = 'Node diff:\n' + indent(''.join(node_diff)) + '\n'
-                        mod_stack = n_mod.sourceRange()
+                        mod_stack = n_mod.getSourceLocation()
                         if mod_stack:
                             source_printout += 'Trace source location:\n' + indent(mod_stack) + '\n'
-                        check_stack = n_check.sourceRange()
+                        check_stack = n_check.getSourceLocation()
                         if check_stack:
                             source_printout += 'Check source location:\n' + indent(check_stack) + '\n'
                         graph_diff_errors += source_printout
@@ -548,7 +548,7 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
                         if tensor_compare_errors is None:
                             tensor_compare_errors = ''
                         tensor_compare_errors += 'Node:\n' + indent(str(n_mod)) + '\n'
-                        compare_stack = n_mod.sourceRange()
+                        compare_stack = n_mod.getSourceLocation()
                         if compare_stack:
                             tensor_compare_errors += 'Source Location:\n' + indent(compare_stack) + '\n'
                         tensor_compare_errors += 'Comparison exception: ' + indent(str(e))
