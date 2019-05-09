@@ -12,7 +12,7 @@ namespace {
 class BroadcastWork {
  public:
   BroadcastWork(
-      std::shared_ptr<c10d::ProcessGroup> process_group,
+      const std::shared_ptr<c10d::ProcessGroup>& process_group,
       std::vector<at::Tensor> bucket_tensors)
       : bucket_tensors_(std::move(bucket_tensors)),
         flat_tensor_({torch::utils::flatten_dense_tensors(bucket_tensors_)}),
