@@ -324,6 +324,7 @@ struct CAFFE2_API IValue final {
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
+  IValue(const char* v): IValue(std::string(v)) {}
   bool isString() const { return Tag::String == tag; }
   c10::intrusive_ptr<ivalue::ConstantString> toString() && {
     AT_ASSERT(isString());

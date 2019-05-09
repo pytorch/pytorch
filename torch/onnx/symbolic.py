@@ -423,6 +423,20 @@ def cumsum(g, input, dim):
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
 
 
+def _sample_dirichlet(g, self, generator):
+    if not generator.node().mustBeNone():
+        return _unimplemented('_sample_dirichlet',
+                              'We are not able to export generator')
+    return g.op("ATen", self, operator_s="_sample_dirichlet")
+
+
+def _standard_gamma(g, self, generator):
+    if not generator.node().mustBeNone():
+        return _unimplemented('_standard_gamma',
+                              'We are not able to export generator')
+    return g.op("ATen", self, operator_s="_standard_gamma")
+
+
 def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
@@ -686,8 +700,6 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if ceil_mode and input.type().kind() != "CompleteTensorType":
             return _unimplemented(name, "input size not accesible")
-        if set(tuple_fn(dilation)) != {1}:
-            return _unimplemented(name, "dilation")
         if not stride:
             stride = kernel_size
         padding = tuple(tuple_fn(padding))
@@ -696,6 +708,13 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
             padding = padding + tuple(numpy.add(padding_ceil, padding))
         else:
             padding = padding * 2
+        kwargs = {
+            'kernel_shape_i': tuple_fn(kernel_size),
+            'pads_i': padding,
+            'strides_i': tuple_fn(stride),
+        }
+        if set(tuple_fn(dilation)) != {1}:
+            kwargs['dilations_i'] = tuple_fn(dilation)
         # easy but hacky way to get flattened indices values
         # to be used to convert the indices values to non-flattened.
         # In ONNX the indices are computed as a flatten 1-D tensor,
@@ -710,10 +729,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
         # For more information :
         # https://github.com/pytorch/pytorch/pull/16455#issuecomment-460776407
         if return_indices:
-            r, indices = g.op("MaxPool", input, outputs=2,
-                              kernel_shape_i=tuple_fn(kernel_size),
-                              pads_i=padding,
-                              strides_i=tuple_fn(stride))
+            r, indices = g.op("MaxPool", input, outputs=2, **kwargs)
             _, flattened_indices = g.op("MaxPool", input, outputs=2,
                                         kernel_shape_i=[1 for _ in range(ndims)],
                                         strides_i=[1 for _ in range(ndims)])
@@ -723,10 +739,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
             indices = sub(g, indices, s)
             return r, indices
         else:
-            r = g.op("MaxPool", input, outputs=1,
-                     kernel_shape_i=tuple_fn(kernel_size),
-                     pads_i=padding,
-                     strides_i=tuple_fn(stride))
+            r = g.op("MaxPool", input, outputs=1, **kwargs)
             return r
 
     return symbolic_fn
@@ -1471,7 +1484,8 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
     assert len(all_weights) == num_layers * weights_per_layer * (1 + bidirectional)
     layer_weights = [all_weights[i:i + weights_per_layer] for i in range(0, len(all_weights), weights_per_layer)]
     if batch_first:
-        return _unimplemented("RNN/GRU/LSTM", "batch_first")
+        # batch, seq, feat -> seq, batch, feat
+        input = g.op('Transpose', input, perm_i=[1, 0, 2])
     if dropout and train:
         return _unimplemented("RNN/GRU/LSTM", "dropout in training mode")
 
@@ -1573,6 +1587,9 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         h_outs.append(h_out)
         if variant == 'LSTM':
             c_outs.append(c_out)
+    if batch_first:
+        # seq, batch, num_directions * hidden_size -> batch, seq, num_directions * hidden_size
+        prev_output = g.op('Transpose', prev_output, perm_i=[1, 0, 2])
     h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
     if variant == 'RNN' or variant == 'GRU':
         return prev_output, h_outs
@@ -1631,7 +1648,9 @@ rnn_relu = _one_hidden_rnn('RNN_RELU')
 
 @parse_args('v', 'i')
 def _dim_arange(g, like, dim):
-    return g.op('ATen', like, dim_i=dim, operator_s='_dim_arange')
+    like_shape = g.op('Shape', like)
+    stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
+    return g.op("_caffe2::Range", stop)
 
 
 def detach(g, input):
@@ -1675,6 +1694,10 @@ def randn(g, *shapes):
     shapes_list = list(shapes)
     shape = _maybe_get_const(shapes_list[0], "is")
     return g.op('RandomNormal', shape_i=shape)
+
+
+def randn_like(g, self, *others):
+    return g.op('RandomNormalLike', self)
 
 
 @parse_args('v', 'f', 'f', 'i', 'none')

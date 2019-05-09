@@ -4,6 +4,11 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+C10_DEFINE_bool(
+    caffe2_extract_feature_length_for_shape_inference,
+    false,
+    "If true, infer shape information instead of using global flag");
+
 namespace caffe2 {
 
 namespace {
@@ -74,6 +79,10 @@ void BoundShapeInferencer::InferBoundShapeAndType(
       InferGivenTensorFill(op);
     } else if (op.type() == "Shape") {
       InferShape(op);
+    } else if (
+        op.type() == "ClipRangesGatherSigridHash" &&
+        FLAGS_caffe2_extract_feature_length_for_shape_inference) {
+      InferClipRangesGatherSigridHash(op);
     } else {
       InferCommonOp(op);
     }
@@ -91,12 +100,26 @@ void BoundShapeInferencer::InferBoundShapeAndType(
   EnsureShapeNames(&shape_info_);
 }
 
-TensorShape& BoundShapeInferencer::CheckAndSetTensorShapeAndType(
+TensorShape& BoundShapeInferencer::SetTensorShapeAndTypeIfNotExist(
     const std::string& name,
     ShapeInfo::DimType t,
     std::vector<int64_t> bound_dims,
     TensorProto::DataType type,
     bool is_quantized) {
+  return CheckAndSetTensorShapeAndType(
+      name, t, bound_dims, type, is_quantized, true);
+}
+
+// if allow_existing_shape is true, we use existing shape directly
+// and not enforce shape to be equal to bound_dims
+// else we enforce them to be equal
+TensorShape& BoundShapeInferencer::CheckAndSetTensorShapeAndType(
+    const std::string& name,
+    ShapeInfo::DimType t,
+    std::vector<int64_t> bound_dims,
+    TensorProto::DataType type,
+    bool is_quantized,
+    bool allow_existing_shape) {
   auto rt = shape_info_.emplace(name, ShapeInfo());
   ShapeInfo& shape_info = rt.first->second;
   TensorShape& shape = shape_info.shape;
@@ -116,19 +139,22 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorShapeAndType(
       shape_info.dim_type = t;
       shape.set_dims(0, bound_dims.front());
     }
-    for (int i = 0; i < shape.dims_size(); ++i) {
-      CAFFE_ENFORCE_EQ(
-          shape.dims(i),
-          bound_dims[i],
-          "Shape inconsistency found in tensor ",
-          name,
-          " on dim ",
-          i,
-          " (",
-          shape.dims(i),
-          " vs ",
-          bound_dims[i],
-          ")");
+
+    if (!allow_existing_shape) {
+      for (int i = 0; i < shape.dims_size(); ++i) {
+        CAFFE_ENFORCE_EQ(
+            shape.dims(i),
+            bound_dims[i],
+            "Shape inconsistency found in tensor ",
+            name,
+            " on dim ",
+            i,
+            " (",
+            shape.dims(i),
+            " vs ",
+            bound_dims[i],
+            ")");
+      }
     }
     return shape;
   }
@@ -212,7 +238,7 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
   }
 
   // Bound inputs
-  CheckAndSetTensorShapeAndType(
+  SetTensorShapeAndTypeIfNotExist(
       op.input(1 + weight),
       ShapeInfo::DimType::SEQ,
       {spec_.max_seq_size},
@@ -436,6 +462,43 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
       ConvertToVec(output_shapes[0].dims()),
       output_shapes[0].data_type(),
       false);
+}
+
+void BoundShapeInferencer::InferClipRangesGatherSigridHash(
+    const OperatorDef& op) {
+  CAFFE_ENFORCE(
+      op.output_size() % 2 == 0,
+      "ClipRangesGatherSigridHash has to have even number of outputs");
+  ArgumentHelper helper(op);
+  auto max_lengths_arg = helper.GetRepeatedArgument<int>("max_lengths");
+  CAFFE_ENFORCE_EQ(
+      max_lengths_arg.size() * 2,
+      op.output_size(),
+      "Output size of ClipRangesGatherSigridHash has to be the same with 2 * length of max_lengths arg");
+  for (int i = 0; i < op.output_size(); i++) {
+    auto output_name = op.output(i);
+    if (i % 2 == 0) {
+      CAFFE_ENFORCE(
+          output_name.find("lengths") != std::string::npos,
+          "In ClipRangesGatherSigridHash, name of output in even index has to contain 'lengths'");
+      CheckAndSetTensorShapeAndType(
+          output_name,
+          ShapeInfo::DimType::BATCH,
+          {spec_.max_batch_size},
+          TensorProto_DataType_INT32,
+          false);
+    } else {
+      CAFFE_ENFORCE(
+          output_name.find("values") != std::string::npos,
+          "In ClipRangesGatherSigridHash, name of output in odd index has to contain 'values'");
+      CheckAndSetTensorShapeAndType(
+          output_name,
+          ShapeInfo::DimType::SEQ,
+          {max_lengths_arg[i / 2] * spec_.max_batch_size},
+          TensorProto_DataType_INT64,
+          false);
+    }
+  }
 }
 
 void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {

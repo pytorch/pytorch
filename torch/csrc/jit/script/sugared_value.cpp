@@ -104,9 +104,12 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     auto names = tuple_type->names();
     for (size_t i = 0; i < names.size(); i++) {
       if (names[i] == field) {
-        auto r = m.graph()
-                     ->insertNode(m.graph()->createTupleIndex(value_, i))
-                     ->output();
+        auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
+        auto out_type = tuple_type->elements().at(i);
+        auto r =
+            m.graph()
+                ->insertNode(m.graph()->createTupleIndex(value_, idx, out_type))
+                ->output();
         return std::make_shared<SimpleValue>(r);
       }
     }
@@ -225,7 +228,8 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
   Node* self = getValue()->node();
   if (self->kind() == prim::TupleConstruct && self->inputs().size() == 2 &&
       self->inputs().at(0)->node()->kind() == prim::Function) {
-    std::shared_ptr<Graph> graph = self->inputs().at(0)->node()->g(attr::Subgraph);
+    std::shared_ptr<Graph> graph =
+        self->inputs().at(0)->node()->g(attr::Subgraph);
     Value* context = self->inputs().at(1);
     AT_ASSERT(context->node()->kind() == prim::TupleConstruct);
 
@@ -237,11 +241,11 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
             ->insertNode(m.graph()->createTuple(context->node()->inputs()))
             ->output();
     auto fn = CompilationUnit().create_function("anon", graph);
-    return MethodValue(close_context, fn).call(loc, m, inputs, attributes, n_binders);
+    return MethodValue(close_context, fn)
+        .call(loc, m, inputs, attributes, n_binders);
   }
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
 }
-
 
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
