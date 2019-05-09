@@ -11,6 +11,9 @@
 #include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/script/compilation_unit.h>
+#include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
 
@@ -2219,6 +2222,78 @@ RegisterOperators reg2({
     Operator("aten::hash(str t) -> int", hashValue<std::string>),
     Operator("aten::hash(int t) -> int", hashValue<int>),
     Operator("aten::hash(float t) -> int", hashValue<double>),
+});
+
+bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
+  return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
+}
+
+void checkSortSchema(const Node* node, const c10::TypePtr& list_element_type) {
+  std::stringstream error_str;
+  if (auto class_type = list_element_type->cast<ClassType>()) {
+    if (auto method = class_type->getMethod("__lt__")) {
+      const auto& lt_schema = method->getSchema();
+      const auto& schema_args = lt_schema.arguments();
+      bool error =
+          (schema_args.size() != 2 ||
+           !simpleClassTypeArg(schema_args[0], class_type) ||
+           !simpleClassTypeArg(schema_args[1], class_type) ||
+           lt_schema.returns().size() != 1 ||
+           lt_schema.returns()[0].type() != BoolType::get());
+      if (!error) {
+        return;
+      }
+    }
+    error_str << "To sort a list of " << class_type->python_str()
+              << " it must define a "
+              << "__lt__ method with two inputs of type "
+              << class_type->python_str() << " that "
+              << "returns a bool";
+  } else {
+    error_str
+        << "Input to list sort must be of Tensors, ints, floats, bools or "
+        << "a User Defined Class that defines the __lt__ compare method"
+        << ", got list of " << list_element_type->python_str() << "\n";
+  }
+
+  auto error_msg = script::ErrorReport(node->getSourceLocation());
+  error_msg << error_str.str();
+  throw error_msg;
+}
+
+// NB: this must be registered after the other aten::sort operators
+RegisterOperators regSort({
+    Operator(
+        "aten::sort(t[](a!) self, bool reverse=False) -> ()",
+        [](const Node* node) {
+          const auto list_type =
+              node->inputs().at(0)->type()->expect<ListType>();
+          checkSortSchema(node, list_type->getElementType());
+          const auto elem = list_type->getElementType()->expect<ClassType>();
+          auto func = elem->getMethod("__lt__");
+          return [func](Stack& stack) {
+            bool reverse = pop(stack).toBool();
+            auto g_list = pop(stack).toGenericList();
+            Stack sort_stack;
+            std::sort(
+                g_list->elements().begin(),
+                g_list->elements().end(),
+                [func, reverse, &sort_stack](
+                    const IValue& a, const IValue& b) -> bool {
+                  // FBCode errors without this check - "strict weak ordering"
+                  // TODO: remove when possible, since it just slows down
+                  // sorting and doesn't do anything useful
+                  if (a.isSameIdentity(b)) {
+                    return false;
+                  }
+                  sort_stack.push_back(a);
+                  sort_stack.push_back(b);
+                  func->run(sort_stack);
+                  return pop(sort_stack).toBool() ^ reverse;
+                });
+            return 0;
+          };
+        }),
 });
 
 // reference: _output_size in torch/nn/functional.py
