@@ -367,7 +367,7 @@ class SigmoidTransform(Transform):
         return y.log() - (-y).log1p()
 
     def log_abs_det_jacobian(self, x, y):
-        return -(y.reciprocal() + (1 - y).reciprocal()).log()
+        return (y * (1 - y)).log()
 
 
 class AbsTransform(Transform):
@@ -520,8 +520,12 @@ class StickBreakingTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         offset = x.shape[-1] - torch.arange(x.shape[-1], dtype=x.dtype, device=x.device)
-        z = _clipped_sigmoid(x - offset.log())
-        detJ = ((1 - z).log() + y[..., :-1].log()).sum(-1)
+        x = x - offset.log()
+        z = torch.sigmoid(x)
+        z = torch.clamp(z, min=torch.finfo(x.dtype).tiny)
+        # use the identity 1 - z = z * exp(-x), we don't have to worry about
+        # the case z ~ 1
+        detJ = (-x + z.log() + y[..., :-1].log()).sum(-1)
         return detJ
 
 
