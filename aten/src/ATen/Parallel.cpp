@@ -33,16 +33,8 @@ TaskThreadPoolBase& get_pool() {
           "C10",
           /* device_id */ 0,
           /* pool_size */ num_interop_threads.exchange(-2),
-          /* create_new */ false);
+          /* create_new */ true);
   return *pool;
-}
-
-std::shared_ptr<TaskThreadPoolBase> get_shared_threadpool(int pool_size) {
-  static std::shared_ptr<TaskThreadPoolBase> pool =
-      std::make_shared<PTThreadPool>(pool_size);
-  // the size does not change
-  AT_ASSERT(pool_size < 0 || pool->size() == pool_size);
-  return pool;
 }
 
  // Factory function for ThreadPoolRegistry
@@ -53,13 +45,9 @@ std::shared_ptr<TaskThreadPoolBase> create_c10_threadpool(
   // For now, the only accepted device id is 0
   // for the JIT inter-op pool (CPU),
   AT_ASSERT(device_id == 0);
-  if (!create_new) {
-    // use existing shared thread pool
-    return get_shared_threadpool(pool_size);
-  } else {
-    // create a new thread pool
-    return std::make_shared<PTThreadPool>(pool_size);
-  }
+  // Create new thread pool
+  AT_ASSERT(create_new);
+  return std::make_shared<PTThreadPool>(pool_size);
 }
 
 }
