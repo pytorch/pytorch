@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/pickler.h>
 #include <ATen/ATen.h>
 #include <string>
+#include <ATen/core/Dict.h>
 
 namespace torch {
 namespace jit {
@@ -609,7 +610,7 @@ OpCode Unpickler::readInstruction() {
       stack_.emplace_back(IValue(tuple));
     } break;
     case OpCode::EMPTY_DICT:
-      stack_.emplace_back(c10::ivalue::UnorderedMap());
+      stack_.emplace_back(c10::impl::GenericDict());
       break;
     case OpCode::APPENDS: {
       readList();
@@ -619,7 +620,7 @@ OpCode Unpickler::readInstruction() {
       marks_.pop_back();
       auto dict = stack_.at(start - 1).ivalue().toGenericDict();
       for (size_t i = start; i < stack_.size(); i += 2) {
-        dict->elements()[stack_[i].ivalue()] = stack_[i + 1].ivalue();
+        dict->elements().insert_or_assign(stack_[i].ivalue(), stack_[i + 1].ivalue());
       }
       stack_.erase(stack_.begin() + start, stack_.end());
     } break;
