@@ -31,6 +31,18 @@ CAFFE2_API int get_thread_num();
 // Checks whether the code runs in parallel region
 CAFFE2_API bool in_parallel_region();
 
+/*
+parallel_for
+
+begin: index at which to start applying user function
+
+end: index at which to stop applying user function
+
+grain_size: number of elements per chunk. impacts the degree of parallelization
+
+f: user function applied in parallel to the chunks, signature:
+  void f(int64_t begin, int64_t end)
+*/
 template <class F>
 void parallel_for(
     const int64_t begin,
@@ -96,8 +108,6 @@ CAFFE2_API void launch(const std::function<void()>& func);
 
 #if AT_PARALLEL_OPENMP
 #include <ATen/ParallelOpenMP.h>
-#endif
-
-#if AT_PARALLEL_NATIVE
+#elif AT_PARALLEL_NATIVE
 #include <ATen/ParallelNative.h>
 #endif
