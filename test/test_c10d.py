@@ -2646,6 +2646,72 @@ class ComputeBucketAssignmentTest(TestCase):
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
 
 
+class CommTest(MultiProcessTestCase):
+    def tearDown(self):
+        super(CommTest, self).tearDown()
+        try:
+            os.remove(self.file.name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self):
+        return 2
+
+    def _test_broadcast_coalesced(self, process_group, device):
+        half = torch.float16
+
+        # No support for float16 for CPU tensors
+        if device == torch.device('cpu'):
+            half = torch.float32
+
+        target = torch.arange(60, dtype=half, device=device).chunk(5)
+        target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
+        target += torch.arange(60, dtype=half, device=device).chunk(5)
+        target += torch.arange(60, dtype=torch.float64, device=device).chunk(5)
+        target += torch.arange(60, dtype=half, device=device).chunk(5)
+        target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
+
+        # The tensors to pass to broadcast are idential to the target
+        # only on the process that is the root of the broadcast.
+        if self.rank == 0:
+            tensors = list(tensor.clone() for tensor in target)
+        else:
+            tensors = list(torch.empty_like(tensor) for tensor in target)
+
+        c10d._broadcast_coalesced(
+            process_group,
+            tensors,
+            buffer_size=256)
+
+        self.assertEqual(tensors, target)
+
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_broadcast_coalesced_nccl(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        device = torch.device('cuda:%d' % self.rank)
+        self._test_broadcast_coalesced(process_group, device)
+
+    @skip_if_not_multigpu
+    def test_broadcast_coalesced_gloo_cuda(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        options = c10d.ProcessGroupGloo.Options()
+        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+        device = torch.device('cuda:%d' % self.rank)
+        self._test_broadcast_coalesced(process_group, device)
+
+    def test_broadcast_coalesced_gloo_cpu(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        options = c10d.ProcessGroupGloo.Options()
+        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+        device = torch.device('cpu')
+        self._test_broadcast_coalesced(process_group, device)
+
+
 if __name__ == '__main__':
     assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
 
