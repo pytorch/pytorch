@@ -117,11 +117,10 @@ ADD_LIBRARY(THD STATIC ${all_cpp})
 
 TARGET_COMPILE_DEFINITIONS(THD PRIVATE "_THD_CORE=1")
 
-ADD_DEPENDENCIES(THD caffe2)
+target_link_libraries(THD caffe2)
 
 target_include_directories(THD PRIVATE
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
-  ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
   )
 
 set_property(TARGET THD PROPERTY POSITION_INDEPENDENT_CODE ON)
