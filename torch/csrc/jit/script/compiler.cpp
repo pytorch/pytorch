@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/script/final_returns.h>
@@ -574,6 +575,8 @@ struct to_ir {
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(to_clean);
     ConstantPooling(to_clean);
+    // For jitter
+    CanonicalizeOutputs(to_clean);
   }
 
   FunctionSchema emitDef(const Def& def, const Self& self, Block* block) {
