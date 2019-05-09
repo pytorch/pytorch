@@ -464,7 +464,7 @@ void AliasDb::analyzeImpl(Node* node) {
     // We don't have alias info for this node. Either schematize it, or
     // add it an analyze* method for it.
     if (hasMutableOutputs) {
-      throw script::ErrorReport(node->getSourceLocation())
+      throw script::ErrorReport(node->sourceRange())
           << "Alias information not found for node. File a bug report.\n"
           << "Node: " << *node << "\n";
     }
