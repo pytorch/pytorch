@@ -176,13 +176,21 @@ FusedKernelCUDA::FusedKernelCUDA(
   TORCH_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
+#ifdef __HIP_PLATFORM_HCC__
+  std::vector<const char*> args = {};
+#else
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
       "--std=c++11", compute.c_str(), "-default-device"};
+#endif
   const auto result =
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
+#ifdef __HIP_PLATFORM_HCC__
+  if (result != HIPRTC_SUCCESS) {
+#else
   if (result == NVRTC_ERROR_COMPILATION) {
+#endif
     size_t logsize;
     nvrtc().nvrtcGetProgramLogSize(program, &logsize);
     std::vector<char> log(logsize);
@@ -204,9 +212,14 @@ FusedKernelCUDA::FusedKernelCUDA(
       nvrtc().cuModuleGetFunction(&function_, module_, name_.c_str()));
 
   // Computes max blocks
+#ifdef __HIP_PLATFORM_HCC__
+  // XXX this is a temporary hack until the occupancy API is supported in ROCm
+  maxBlocks_ = 16 * prop_->multiProcessorCount;
+#else
   TORCH_CU_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
       &maxBlocks_, function_, 128, 0));
   maxBlocks_ *= prop_->multiProcessorCount;
+#endif
 
   // Resets device (end of hacked at::DeviceGuard)
   at::cuda::set_device(prior_device);
