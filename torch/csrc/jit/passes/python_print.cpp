@@ -1033,7 +1033,7 @@ struct PythonPrintPass {
   }
 
  public:
-  void printFunction(script::Function& func) {
+  void printFunction(const script::Function& func) {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
@@ -1097,7 +1097,7 @@ struct PythonPrintPass {
     }
   }
 
-  void printCompilationUnit(script::CompilationUnit& cu) {
+  void printCompilationUnit(const script::CompilationUnit& cu) {
     for (auto& func : cu.get_functions()) {
       printFunction(*func);
     }
@@ -1130,8 +1130,7 @@ void PythonPrint(
     std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  pp.printFunction(const_cast<script::Function&>(func));
+  pp.printFunction(func);
   pp.print(out);
 }
 
@@ -1143,8 +1142,7 @@ void PythonPrint(
     std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  pp.printCompilationUnit(const_cast<script::CompilationUnit&>(cu));
+  pp.printCompilationUnit(cu);
   pp.print(out);
 }
 
