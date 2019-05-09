@@ -63,8 +63,8 @@ bool AliasDb::isWildcard(const Value* v) const {
 }
 
 bool AliasDb::writesTo(Node* n, const Value* v) const {
-  if (!shouldAnnotate(v)) {
-    // This is a primitive type
+  if (!shouldAnnotate(v) || v->mustBeNone()) {
+    // This is a non-aliasing value
     return false;
   }
   if (isWildcard(v)) {
@@ -107,7 +107,7 @@ bool AliasDb::hasWriters(const Value* v) const {
     return numWrites_ != 0;
   }
 
-  if (!elementMap_.count(v)) {
+  if (!elementMap_.count(v) || v->mustBeNone()) {
     return false;
   }
 

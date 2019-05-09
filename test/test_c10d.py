@@ -2370,6 +2370,57 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # No parameter should have their gradient set.
         check_no_grads()
 
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_accumulate_gradients(self):
+        gpus = gpus_for_rank(self.world_size)[self.rank][0:1]
+        self.assertEqual(len(gpus), 1)
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        local_batch_size = len(gpus)
+        global_batch_size = self.world_size * local_batch_size
+
+        model, ddp_model, input, target = \
+            self._prepare_single_device_module(
+                process_group, gpus, global_batch_size)
+
+        def step_model(model, input, target):
+            model.train()
+            output = model(input)
+            loss = F.mse_loss(output, target.to(output.device))
+            loss.backward()
+
+        # ensure accumulate grads works with no_grad
+        with torch.no_grad():
+            ddp_model.train()
+            ddp_model.module(input)
+
+        # check two model parameters over 2 iterations
+        for iteration in range(4):
+            # single cpu/gpu training
+            step_model(model, input, target)
+
+            if iteration % 2 == 0:
+                # Skip gradients sync without calling prepare_for_backward
+                step_model(ddp_model.module,
+                           input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size],
+                           target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size])
+
+                for i, j in zip(model.parameters(), ddp_model.parameters()):
+                    self.assertNotEqual(i.grad, j.grad)
+            else:
+                # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
+                step_model(ddp_model,
+                           input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size],
+                           target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size])
+
+                for i, j in zip(model.parameters(), ddp_model.parameters()):
+                    self.assertEqual(i.grad, j.grad)
+
+            # Shuffle the input so that DDP input is different
+            torch.manual_seed(1337 + iteration)
+            input = input[torch.randperm(global_batch_size)]
+
     @skip_if_not_nccl
     @skip_if_not_multigpu
     def test_ignored_output(self):
