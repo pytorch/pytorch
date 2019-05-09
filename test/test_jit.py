@@ -6876,6 +6876,90 @@ a")
             for out, ref_out in zip(outs, ref_outs):
                 torch.testing.assert_allclose(out, ref_out)
 
+    @unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+                     'Quantized RNN requires FBGEMM. FBGEMM does not play'
+                     ' well with UBSAN at the moment, so we skip the test if'
+                     ' we are in a UBSAN environment.')
+    def test_rnn_quantized(self):
+        d_in, d_hid = 2, 2
+
+        cell = torch.nn.LSTM(d_in, d_hid).float()
+
+        # Replace parameter values s.t. the range of values is exactly
+        # 255, thus we will have 0 quantization error in the quantized
+        # GEMM call. This i s for testing purposes.
+        #
+        # Note that the current implementation does not support
+        # accumulation values outside of the range representable by a
+        # 16 bit integer, instead resulting in a saturated value. We
+        # must take care that in our test we do not end up with a dot
+        # product that overflows the int16 range, e.g.
+        # (255*127+255*127) = 64770. So, we hardcode the test values
+        # here and ensure a mix of signedness.
+        vals = [[100, -155],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155]]
+        num_chunks = 4  # TODO:change when we support more than just LSTM
+        vals = vals[:d_hid * num_chunks]
+        cell.weight_ih_l0 = torch.nn.Parameter(
+            torch.tensor(vals, dtype=torch.float),
+            requires_grad=False)
+        cell.weight_hh_l0 = torch.nn.Parameter(
+            torch.tensor(vals, dtype=torch.float),
+            requires_grad=False)
+
+        ref = copy.deepcopy(cell)
+        cell = torch.jit.quantized.quantize_rnn_modules(cell)
+
+        niter = 10
+        x = torch.tensor([[100, -155],
+                          [-155, 100],
+                          [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+        h0_vals = [[-155, 100],
+                   [-155, 155],
+                   [100, -155]]
+        hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+        cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+        hiddens = (hx, cx)
+
+        # Compare quantized to unquantized
+        output, final_hiddens = cell(x, hiddens)
+        ref_out, ref_hid = ref(x, hiddens)
+
+        torch.testing.assert_allclose(output, ref_out)
+        for out, ref in zip(final_hiddens, ref_hid):
+            torch.testing.assert_allclose(out, ref)
+
+        class ScriptWrapper(torch.jit.ScriptModule):
+            def __init__(self, cell):
+                super(ScriptWrapper, self).__init__()
+                self.cell = cell
+
+            @torch.jit.script_method
+            def forward(self, x, hiddens):
+                # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+                return self.cell(x, hiddens)
+
+        wrapper = ScriptWrapper(cell)
+
+        # Compare quantize scripted module to unquantized
+        script_out, script_hid = wrapper(x, hiddens)
+        torch.testing.assert_allclose(script_out, ref_out)
+        for out, ref in zip(script_hid, ref_hid):
+            torch.testing.assert_allclose(out, ref)
+
+        # Compare export/import to unquantized
+        export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
+        ei_out, ei_hid = export_import_wrapper(x, hiddens)
+        torch.testing.assert_allclose(ei_out, ref_out)
+        for out, ref in zip(ei_hid, ref_hid):
+            torch.testing.assert_allclose(out, ref)
+
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
             def __init__(self):
@@ -6947,6 +7031,101 @@ a")
           return (%1)
         """
         FileCheck().run(graph_str, parse_ir(graph_str))
+
+    def test_canonicalize_control_outputs(self):
+        def test_all_outputs(g):
+            ifs = g.findAllNodes("prim::If")
+            loops = g.findAllNodes("prim::Loop")
+
+            def contained_blocks(node):
+                return len(node.findAllNodes("prim::If")) * 2 + len(node.findAllNodes("prim::Loop"))
+            for node in ifs + loops:
+                outs = list(node.outputs())
+                out_name = list(map(lambda x: x.uniqueName(), outs))
+                if len(out_name) == 0:
+                    continue
+                fc = FileCheck()
+                # find the last output, then all subsequent uses
+                fc.check(out_name[-1] + " : ")
+                # skip past node body
+                for i in range(contained_blocks(node)):
+                    fc.check("->")
+                if (node.kind() == "prim::If"):
+                    fc.check("->").check("->").check("\n")
+                else:
+                    fc.check("->").check("\n")
+                # the canonical order is the same order as the first use
+                # appears in text
+                for name in out_name:
+                    fc.check(name)
+                fc.run(g)
+
+        @torch.jit.script
+        def test(x):
+            # type: (bool) -> Tuple[int, int]
+            b = 2
+            a = 1
+            if x:
+                a = 1
+                b = 2
+                x = False
+            if x:
+                b = a
+            else:
+                a = b
+
+            return a, b
+        test_all_outputs(test.graph)
+
+        @torch.jit.script
+        def test2(x):
+            # type: (bool) -> Tuple[int, int]
+            b = 2
+            a = 1
+            if x:
+                a = 1
+                b = 2
+                x = False
+            if x:
+                print(a)
+            else:
+                if x:
+                    print(b)
+
+            return a, b
+        test_all_outputs(test2.graph)
+
+        @torch.jit.script
+        def test_loop(x, iter):
+            # type: (bool, int) -> (None)
+            a = 1
+            b = 2
+            c = 3
+            for i in range(iter):
+                a = 4
+                b = 5
+                c = 6
+                x = True
+            print(c)
+            if x:
+                print(a, b)
+        test_all_outputs(test_loop.graph)
+
+        @torch.jit.script
+        def loop_unused(iter):
+            # type: (int) -> (None)
+            a = 1
+            b = 2
+            c = 3
+            for i in range(iter):
+                c = c + 1
+                b = b + 1
+                a = a + 1
+                print(a, b)
+            print(c)
+
+        # c is used, then unused should be ordered by alphabetical
+        FileCheck().check(r"%c : int, %a : int, %b : int").run(loop_unused.graph)
 
     def test_filecheck(self):
         def test_check():
@@ -12310,6 +12489,69 @@ a")
 
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
+
+    def _test_pickle_checkpoint(self, device):
+        with TemporaryFileName() as fname:
+            class M(torch.jit.ScriptModule):
+                __constants__ = ['fname']
+
+                def __init__(self, tensor):
+                    super(M, self).__init__()
+                    self.fname = fname
+                    self.tensor = torch.nn.Parameter(tensor)
+
+                @torch.jit.script_method
+                def forward(self, x):
+                    y = self.tensor + x
+                    torch.save(y, self.fname)
+                    return y
+
+            param = torch.randn(2, 2).to(device)
+            input = torch.randn(2, 2).to(device)
+            m = M(param)
+            m(input)
+            with open(fname, "rb") as handle:
+                loaded_tensor = torch.load(fname)
+                self.assertEqual(loaded_tensor, input + param)
+
+    def _test_pickle_checkpoint_views(self, device):
+        with TemporaryFileName() as fname:
+            class M(torch.jit.ScriptModule):
+                __constants__ = ['fname']
+
+                def __init__(self, tensor):
+                    super(M, self).__init__()
+                    self.fname = fname
+                    self.tensor = torch.nn.Parameter(tensor)
+
+                @torch.jit.script_method
+                def forward(self, x):
+                    y = self.tensor + x
+                    y_view = y.view(4)
+                    torch.save((y, y_view, y), self.fname)
+                    return y
+
+            param = torch.randn(2, 2).to(device)
+            input = torch.randn(2, 2).to(device)
+            m = M(param)
+            m(input)
+            with open(fname, "rb") as handle:
+                loaded_y, loaded_y_view, loaded_y_2 = torch.load(fname)
+                self.assertEqual(loaded_y, input + param)
+                with torch.no_grad():
+                    loaded_y_view[1] += 20
+                    # assert that loaded_y changed as well
+                    self.assertEqual(loaded_y.view(4), loaded_y_view)
+                    self.assertEqual(loaded_y_2.view(4), loaded_y_view)
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_pickle_checkpoint_cuda(self):
+        self._test_pickle_checkpoint('cuda')
+        self._test_pickle_checkpoint_views('cuda')
+
+    def test_pickle_checkpoint(self):
+        self._test_pickle_checkpoint('cpu')
+        self._test_pickle_checkpoint_views('cpu')
 
     def test_split(self):
         def split_two(tensor):

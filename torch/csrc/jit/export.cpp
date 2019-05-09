@@ -700,29 +700,12 @@ void ScriptModuleSerializer::convertAndWriteTensor(
 
   tensor_proto->set_requires_grad(tensor.requires_grad());
 
-  uint64_t record_size = tensor.element_size() * tensor.storage().size();
   auto* key = tensor.storage().unsafeGetStorageImpl();
-
   auto storage_it = storageMap.find(key);
   if (storage_it == storageMap.end()) {
-    at::Tensor storage_tensor = tensor;
-    // TODO HIP support
-    if (tensor.storage().device_type() == at::DeviceType::CUDA) {
-      // NB: This new tensor is created to support cuda tensors.
-      // Storages can be mutated when converting tensors from cuda to cpu,
-      // and we need a cpu tensor to copy data from.
-      storage_tensor = at::empty({0}, tensor.options())
-                           .set_(
-                               tensor.storage(),
-                               /* storageOffset = */ 0,
-                               /* size = */
-                               {static_cast<int64_t>(tensor.storage().size())},
-                               /* stride = */ {1})
-                           .cpu();
-      AT_ASSERT(
-          storage_tensor.element_size() * storage_tensor.storage().size() ==
-          record_size);
-    }
+    uint64_t record_size;
+    at::Tensor storage_tensor;
+    std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
     std::string name = "tensors/" + std::to_string(tensor_id);
     writer_.writeRecord(name, storage_tensor.storage().data(), record_size);
     storage_it = storageMap.insert({key, name}).first;
@@ -749,9 +732,11 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
 void ScriptModuleSerializer::writeAttributeTable() {
   Pickler pickler(&tensor_table_);
   pickler.start();
+  pickler.startTuple();
   for (const IValue& ivalue : attribute_table_) {
     pickler.addIValue(ivalue);
   }
+  pickler.endTuple();
   pickler.finish();
   writer_.writeRecord(
       "attributes.pkl", pickler.stack().data(), pickler.stack().size());

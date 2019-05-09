@@ -393,10 +393,11 @@ const std::vector<std::string> functions = {
                     grad_bias = None
                 if input.dim() == 2:
                     grad_input = grad_output.mm(weight)
-                    grad_weight = input.t().mm(grad_output)
+                    grad_weight = grad_output.t().mm(input)
                 else:
                     grad_input, grad_weight = AD_matmul_backward(grad_output, input, weight.t())
-                return grad_input, grad_weight.t(), grad_bias
+                    grad_weight = grad_weight.t()
+                return grad_input, grad_weight, grad_bias
 
             return torch.linear(input, weight, bias), backward
     )",
