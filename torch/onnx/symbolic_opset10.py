@@ -21,7 +21,14 @@ import torch.onnx.symbolic_opset9
 # It is very important to blacklist these operators to avoid exporting
 # models with mixed versions of operators.
 # TODO : add support for the blacklisted operators in black_listed_operators
-black_listed_operators = ["flip", "slice", "upsample_nearest2d", "upsample_bilinear2d"]
+black_listed_operators = ["flip",
+                          "slice",
+                          "upsample_nearest2d", "upsample_bilinear2d",
+                          "max_pool1d", "max_pool2d", "max_pool3d",
+                          "max_pool1d_with_indices", "max_pool2d_with_indices", "max_pool3d_with_indices",
+                          "avg_pool1d", "avg_pool2d", "avg_pool3d",
+                          "dropout", "feature_dropout", "alpha_dropout", "feature_alpha_dropout",
+                          "dropout_", "feature_dropout_", "alpha_dropout_", "feature_alpha_dropout_"]
 
 for black_listed_op in black_listed_operators:
     vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
