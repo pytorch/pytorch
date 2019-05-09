@@ -543,15 +543,5 @@ if TEST_TENSORBOARD:
             with self.assertRaises(NotImplementedError):
                 res = make_np({'pytorch': 1.0})
 
-        def test_numpy_vid(self):
-            shapes = [(16, 3, 30, 28, 28), (19, 3, 30, 28, 28), (19, 3, 29, 23, 19)]
-            for s in shapes:
-                x = np.random.random_sample(s)
-                # assert make_np(x, 'VID').shape[3] == 3
-
-        def test_numpy_vid_uint8(self):
-            x = np.random.randint(0, 256, (16, 3, 30, 28, 28)).astype(np.uint8)
-            # make_np(x, 'VID').shape[3] == 3
-
 if __name__ == '__main__':
     run_tests()
