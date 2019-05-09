@@ -24,7 +24,6 @@ struct SourceRange : public SourceLocation {
 
   static const size_t CONTEXT = 10;
   void highlight(std::ostream& out) const override {
-    c10::color::colorize(out);
     const std::string& str = file();
 
     // Find the start of the line to highlight

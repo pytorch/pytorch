@@ -60,6 +60,9 @@ void initTreeViewBindings(PyObject* module) {
           "highlight",
           [](const SourceRange& self) {
             std::ostringstream stream;
+            if (c10::color::pipe_is_atty()) {
+              c10::color::colorize(stream);
+            }
             self.highlight(stream);
             return stream.str();
           })

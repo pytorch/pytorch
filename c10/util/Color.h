@@ -333,6 +333,10 @@ inline std::ostream& on_white(std::ostream& stream) {
   return stream;
 }
 
+inline bool pipe_is_atty() {
+  return _internal::is_atty(std::cout) && _internal::is_atty(std::cerr);
+}
+
 //! Since C++ hasn't a way to hide something in the header from
 //! the outer access, I have to introduce this namespace which
 //! is used for internal purpose and should't be access from

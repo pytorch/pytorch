@@ -11399,6 +11399,18 @@ a")
         x = torch.zeros(10)
         fn(x)
 
+    def test_error_colors(self):
+        # assert captured errors don't have color codes
+        try:
+            @torch.jit.script
+            def fn():
+                # type: () -> Tensor
+                return 2000
+        except RuntimeError as e:
+            print('\033[' in str(e))
+            self.assertFalse('\033[' in str(e))
+            print(e)
+
     def test_submodule_attribute_serialization(self):
         class S(torch.jit.ScriptModule):
             def __init__(self, list_data):

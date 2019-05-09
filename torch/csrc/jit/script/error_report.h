@@ -19,6 +19,9 @@ struct ErrorReport : public std::exception {
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
   const char* what() const noexcept override {
     std::stringstream msg;
+    if (c10::color::pipe_is_atty()) {
+      c10::color::colorize(msg);
+    }
     msg << "\n" << ss.str();
     if (context != nullptr) {
       msg << ":\n";
