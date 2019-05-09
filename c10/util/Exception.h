@@ -115,14 +115,14 @@ C10_API std::string GetExceptionString(const std::exception& e);
 
 namespace detail {
 
-C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an internal invariant failure, use " \
-                       "AT_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
-                       "AT_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
+//C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an internal invariant failure, use " \
+//                       "AT_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
+//                       "AT_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
 inline void deprecated_AT_ASSERT() {}
 
-C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an internal invariant failure, use " \
-                       "AT_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
-                       "AT_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
+//C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an internal invariant failure, use " \
+//                       "AT_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
+//                       "AT_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
 inline void deprecated_AT_ASSERTM() {}
 
 // Return x if it is non-empty; otherwise return y.
