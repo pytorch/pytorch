@@ -355,6 +355,16 @@ def addmm(g, self, mat1, mat2, beta, alpha):
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
 
+def linear(g, input, weight, bias):
+    if input.type().kind() in ["CompleteTensorType", "DimensionedTensorType"] and input.type.dim() == 2 and not bias.node().mustBeNone():
+        return addmm(g, bias, input, t(g, weight))
+    else:
+        out = matmul(g, input, t(g, weight))
+        if not bias.node().mustBeNone():
+            out = g.op("Add", out, bias)
+        return out
+
+
 def neg(g, self):
     return g.op("Neg", self)
 

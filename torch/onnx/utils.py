@@ -170,7 +170,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
 
     torch._C._jit_pass_canonicalize_ops(graph)
-    torch._C._jit_pass_decompose_ops(graph)
     torch._C._jit_pass_lint(graph)
 
     torch._C._jit_pass_peephole(graph, True)
