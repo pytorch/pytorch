@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
@@ -11,6 +10,7 @@ namespace torch {
 namespace jit {
 
 struct GraphExecutorState;
+struct Code;
 
 // Notice that those structs don't manage lifetime of their members.
 // They is only valid only right after you call getDebugState() and should never

@@ -4,7 +4,7 @@ include(../cmake/Codegen.cmake)
 # ---[ Declare source file lists
 
 # ---[ ATen build
-if (NOT INTERN_BUILD_MOBILE)
+if (INTERN_BUILD_ATEN_OPS)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(AT_LINK_STYLE INTERFACE)

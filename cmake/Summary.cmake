@@ -20,6 +20,7 @@ function (caffe2_print_configuration_summary)
 
   message(STATUS "  TORCH_VERSION         : ${TORCH_VERSION}")
   message(STATUS "  CAFFE2_VERSION        : ${CAFFE2_VERSION}")
+  message(STATUS "  BUILD_CAFFE2_MOBILE   : ${BUILD_CAFFE2_MOBILE}")
   message(STATUS "  BUILD_ATEN_ONLY       : ${BUILD_ATEN_ONLY}")
   message(STATUS "  BUILD_BINARY          : ${BUILD_BINARY}")
   message(STATUS "  BUILD_CUSTOM_PROTOBUF : ${BUILD_CUSTOM_PROTOBUF}")
@@ -43,6 +44,8 @@ function (caffe2_print_configuration_summary)
   message(STATUS "  BUILD_CAFFE2_OPS      : ${BUILD_CAFFE2_OPS}")
   message(STATUS "  BUILD_SHARED_LIBS     : ${BUILD_SHARED_LIBS}")
   message(STATUS "  BUILD_TEST            : ${BUILD_TEST}")
+
+  message(STATUS "  INTERN_BUILD_MOBILE   : ${INTERN_BUILD_MOBILE}")
 
   message(STATUS "  USE_ASAN              : ${USE_ASAN}")
   message(STATUS "  USE_CUDA              : ${USE_CUDA}")

@@ -28,15 +28,15 @@ int main() {
   t1.join();
 
   at::set_num_threads(4);
-  std::thread t2(test, 4);
-  std::thread t3(test, 4);
-  std::thread t4(test, 4);
+  std::thread t2(test, at::get_num_threads());
+  std::thread t3(test, at::get_num_threads());
+  std::thread t4(test, at::get_num_threads());
   t4.join();
   t3.join();
   t2.join();
 
   at::set_num_threads(5);
-  test(5);
+  test(at::get_num_threads());
 
   return 0;
 }

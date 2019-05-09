@@ -8,8 +8,9 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
 
@@ -27,6 +28,7 @@
 #include <memory>
 #include <mutex>
 #include <ostream>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <typeinfo>
@@ -110,6 +112,16 @@ static at::Tensor to_dispatch(
   } else {
     return self.to(*device, *scalarType, non_blocking, copy);
   }
+}
+
+// Convert an python index (which may be negative) into an index usable for a
+// C++ container
+int64_t normalizeIndex(int64_t idx, int64_t list_size) {
+  if (idx < 0) {
+    // Handle negative indexing
+    idx = list_size + idx;
+  }
+  return idx;
 }
 
 RegisterOperators reg(
@@ -427,6 +439,24 @@ RegisterOperators reg(
            };
          }),
      Operator(
+         "aten::save(t item, str filename) -> ()",
+         [](Stack& stack) {
+           auto filename = pop(stack).toStringRef();
+           auto value = pop(stack);
+
+           // Pickle the tensor
+           Pickler p;
+           p.pushMetadata();
+           p.start();
+           p.addIValue(value);
+           p.finish();
+
+           // Write file
+           std::fstream output(filename, std::ios::out | std::ios::binary);
+           output.write(p.stack().data(), p.stack().size());
+           return 0;
+         }),
+     Operator(
          prim::Print,
          [](const Node* node) {
            size_t num_inputs = node->inputs().size();
@@ -649,12 +679,16 @@ RegisterOperators reg(
      Operator(
          prim::TupleIndex,
          [](const Node* node) {
-           auto index = node->i(attr::index);
-           return [=](Stack& stack) {
+           return [](Stack& stack) {
+             int64_t index = pop(stack).toInt();
              auto tup = pop(stack).toTuple();
              const auto& elems = tup->elements();
-             // index is normalized to be positive at compile time
-             stack.emplace_back(elems.at(index));
+             auto norm_index = normalizeIndex(index, elems.size());
+             if (norm_index < 0 ||
+                 norm_index > static_cast<int64_t>(elems.size())) {
+               throw std::out_of_range("Tuple list index out of range");
+             }
+             stack.emplace_back(elems.at(norm_index));
              return 0;
            };
          }),
@@ -1008,16 +1042,6 @@ RegisterOperators logging_operators(
     push(stack, op);                                               \
     return 0;                                                      \
   })
-
-// Convert an python index (which may be negative) into an index usable for a
-// C++ container
-int64_t normalizeIndex(int64_t idx, int64_t list_size) {
-  if (idx < 0) {
-    // Handle negative indexing
-    idx = list_size + idx;
-  }
-  return idx;
-}
 
 int stringSlice(Stack& stack) {
   auto step = pop(stack).toInt();
@@ -1857,6 +1881,14 @@ RegisterOperators reg2({
           push(stack, std::string(&c, 1));
           return 0;
         }),
+    Operator(
+      "prim::str(t elem) -> str",
+      [](Stack& stack) {
+        std::stringstream ss;
+        ss << pop(stack);
+        push(stack, ss.str());
+        return 0;
+      }),
     Operator(
         "aten::ord(str string) -> int",
         [](Stack& stack) {

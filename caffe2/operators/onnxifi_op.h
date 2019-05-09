@@ -4,6 +4,7 @@
 
 #include "onnx/onnx_pb.h"
 
+#include "c10/util/SmallVector.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -64,6 +65,8 @@ class OnnxifiOp final : public Operator<Context> {
       }
       ++output_idx;
     }
+    input_shapes_.resize(input_names_.size());
+    output_shapes_.resize(output_names_.size());
 
     // Get output resizing hints
     adjust_output_batch_ =
@@ -293,8 +296,13 @@ class OnnxifiOp final : public Operator<Context> {
   std::vector<std::string> input_names_;
   std::vector<std::string> output_names_;
 
-  std::vector<std::vector<uint64_t>> input_shapes_;
-  std::vector<std::vector<uint64_t>> output_shapes_;
+  std::vector<c10::SmallVector<uint64_t, 4>> input_shapes_;
+  std::vector<c10::SmallVector<uint64_t, 4>> output_shapes_;
+
+  // A cache vector to avoid repeated reallocation. The existence of this is not
+  // ideal, which is purely due to the factor that we use int64_t for c2::tensor
+  // dim but uint64_t for onnxDesciptor dim. Maybe we should just use int64_t
+  c10::SmallVector<int64_t, 4> tensor_dims_int64_;
 
   // output shape hints
   std::unordered_map<int, TensorInfo> output_shape_hints_;

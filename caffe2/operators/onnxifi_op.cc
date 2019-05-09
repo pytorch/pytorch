@@ -245,22 +245,24 @@ void OnnxifiOp<CPUContext>::maybeAdjustOutputBatchSizes(
 template <>
 bool OnnxifiOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
-  input_shapes_.clear();
   for (unsigned i = 0U; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
-    const auto tensor_dims = input_tensor.sizes();
+    const at::IntArrayRef tensor_dims = input_tensor.sizes();
     auto& tensor_descriptor = input_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
-    input_shapes_.emplace_back(tensor_dims.cbegin(), tensor_dims.cend());
-    tensor_descriptor.shape = input_shapes_.back().data();
+    auto& input_shape = input_shapes_[i];
+    input_shape.clear();
+    input_shape.insert(
+        input_shape.begin(), tensor_dims.cbegin(), tensor_dims.cend());
+    tensor_descriptor.shape = input_shape.data();
     SetInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
   }
 
   CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
-  output_shapes_.clear();
   for (unsigned i = 0U; i < OutputSize(); ++i) {
+    tensor_dims_int64_.clear();
     std::vector<size_t> tensor_dims;
     uint64_t type = SetOutputShapeAndType(i, &tensor_dims);
     auto& tensor_descriptor = output_desc_[i];
@@ -271,13 +273,18 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         tensor_descriptor.dimensions != 0,
         tensor_descriptor.name,
         " has 0 dim");
-    output_shapes_.emplace_back(tensor_dims.cbegin(), tensor_dims.cend());
-    tensor_descriptor.shape = output_shapes_.back().data();
-    std::vector<int64_t> tensor_dims_int64;
-    std::copy(tensor_dims.cbegin(), tensor_dims.cend(), std::back_inserter(tensor_dims_int64));
+    auto& output_shape = output_shapes_[i];
+    output_shape.clear();
+    output_shape.insert(
+        output_shape.begin(), tensor_dims.cbegin(), tensor_dims.cend());
+    tensor_descriptor.shape = output_shape.data();
+    std::copy(
+        tensor_dims.cbegin(),
+        tensor_dims.cend(),
+        std::back_inserter(tensor_dims_int64_));
     auto* output_tensor = Output(
         i,
-        tensor_dims_int64,
+        tensor_dims_int64_,
         at::dtype(OnnxifiTypeToDataType(type)).device(CPU));
     SetOutputTensorDescriptorTypeAndBuffer(
         type, output_tensor, &tensor_descriptor);
