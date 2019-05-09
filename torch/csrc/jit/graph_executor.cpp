@@ -612,6 +612,8 @@ struct GraphExecutorImpl {
         // parts of graph with new graph, these new graphs usually consists of
         // control flows and miss shape information on nodes, so we run shape
         // prop and differentiable optimizations to ensure the graph is optimized
+        // In particular, we want to re-specialize symbolic_script
+        // Optionals relating to _grad_sum_to_size for the graph_fuser
         PropagateInputShapes(gradient.f);
         runOptimization(gradient.f);
         // run non diff optimization on the forward graph

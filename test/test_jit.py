@@ -2041,6 +2041,9 @@ graph(%Ra, %Rb):
         self.assertEqual(out, out_ref)
         self.assertEqual(grad, grad_ref)
 
+	# The generated test only covers CPU
+        self.assertAutodiffNode(func.graph_for(x), True, [], ['aten::mul', 'aten::rand_like', 'aten::lt', 'aten::type_as'])
+
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40)
         trace, outputs, inputs = torch.jit.get_trace_graph(nn.Conv2d(16, 13, 3, bias=False), x, return_inputs=True)
@@ -13766,9 +13769,10 @@ nn_functional_tests = [
     ('adaptive_avg_pool1d', (S, S, S), (5,), '', (True,)),
     ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],), '', (True,)),
     ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],), '', (True,)),
+    # dropout autodiff node test: cpu here, TestJit.test_dropout_cuda for cuda
     ('dropout', (S, S, S), (0.5,), '', (True,
-                                        ['aten::bernoulli_',
-                                         'aten::empty_like', 'aten::mul', 'aten::div'])),
+                                        ['aten::bernoulli_'],
+                                        ['aten::mul', 'aten::div'])),
     ('alpha_dropout', (S, S, S), (0.5,)),
     ('dropout2d', (S, S, S), (0.5,)),
     ('dropout3d', (S, S, S), (0.5,)),
@@ -14069,6 +14073,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
     no_grad = variant_name == 'inplace'
 
     @suppress_warnings
+    @enable_cpu_fuser_if(not (IS_SANDCASTLE or IS_WINDOWS))
     def do_test(self, name=name, args=args, test_name=test_name, check_ad=check_ad):
         torch.manual_seed(2)
 
