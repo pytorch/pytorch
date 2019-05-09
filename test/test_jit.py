@@ -14733,13 +14733,13 @@ class TestClassType(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "must define a __lt__"):
             @torch.jit.script
-            class Foo(object):
+            class NoMethod(object):
                 def __init__(self):
                     pass
 
             @torch.jit.script
             def test():
-                li = [Foo(), Foo()]
+                li = [NoMethod(), NoMethod()]
                 li.sort()
                 return li
 
