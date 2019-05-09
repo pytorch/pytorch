@@ -1,5 +1,5 @@
 #if AT_PARALLEL_NATIVE
-#include <ATen/Parallel_native.h>
+#include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>
 
 #include <atomic>
