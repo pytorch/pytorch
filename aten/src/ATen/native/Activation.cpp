@@ -5,6 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/Parallel.h>
 
 
 namespace at { namespace native {
@@ -89,19 +90,19 @@ void inline prelu_cpu_kernel_share_weights(
   const Tensor& input,
   const Tensor& weight) {
 
-  int64_t i;
   int64_t input_numel = input.numel();
   auto result_data = result.data<scalar_t>();
   auto input_data = input.data<scalar_t>();
   auto weight_val = weight.data<scalar_t>()[0];
 
-  #pragma omp parallel for private(i) if (input_numel > 1000)
-  for (i = 0; i < input_numel; i++) {
-    scalar_t input_data_val = input_data[i];
-    // to allow for compiler optimization, here splitting into two lines:
-    scalar_t r = (input_data_val > 0) ? scalar_t(1) : weight_val;
-    result_data[i] = r * input_data_val;
-  }
+  at::parallel_for(0, input_numel, 1000, [&](int64_t start, int64_t end) {
+    for (auto i = start; i < end; i++) {
+      scalar_t input_data_val = input_data[i];
+      // to allow for compiler optimization, here splitting into two lines:
+      scalar_t r = (input_data_val > 0) ? scalar_t(1) : weight_val;
+      result_data[i] = r * input_data_val;
+    }
+  });
 }
 
 template <typename scalar_t>
@@ -114,26 +115,31 @@ void inline prelu_cpu_kernel_multi_weights(
   int64_t input_stride0,
   int64_t input_stride1) {
 
-  int64_t i, j, k;
   int64_t input_numel = input.numel();
   scalar_t* result_data = result.data<scalar_t>();
   scalar_t* input_data = input.data<scalar_t>();
   scalar_t* weight_data = weight.data<scalar_t>();
 
-  #pragma omp parallel for private(i,j,k) if (input.numel() > 1000)
-  for (i = 0; i < input_dim0_size; ++i) {
-    int64_t offset = i * channel_size * input_stride1;
-    scalar_t* n_input_data = input_data + offset;
-    scalar_t* n_result_data = result_data + offset;
-    for (j = 0; j < channel_size; ++j) {
-      for (k = 0; k < input_stride1; ++k) {
-        // to allow for compiler optimization, here splitting into two lines:
-        scalar_t w = (n_input_data[k] > 0) ? scalar_t(1) : weight_data[j];
-        n_result_data[k] = w * n_input_data[k];
+  auto loop = [&](int64_t start, int64_t end) {
+    for (auto i = start; i < end; ++i) {
+      int64_t offset = i * channel_size * input_stride1;
+      scalar_t* n_input_data = input_data + offset;
+      scalar_t* n_result_data = result_data + offset;
+      for (auto j = 0; j < channel_size; ++j) {
+        for (auto k = 0; k < input_stride1; ++k) {
+          // to allow for compiler optimization, here splitting into two lines:
+          scalar_t w = (n_input_data[k] > 0) ? scalar_t(1) : weight_data[j];
+          n_result_data[k] = w * n_input_data[k];
+        }
+        n_input_data += input_stride1;
+        n_result_data += input_stride1;
       }
-      n_input_data += input_stride1;
-      n_result_data += input_stride1;
     }
+  };
+  if (input.numel() > 1000) {
+    at::parallel_for(0, input_dim0_size, 0, loop);
+  } else {
+    loop(0, input_dim0_size);
   }
 }
 
@@ -196,26 +202,28 @@ void inline prelu_cpu_backward_kernel_share_weights(
   Tensor& input_grad,
   Tensor& weight_grad) {
 
-  int64_t i;
   int64_t input_numel = input.numel();
-  scalar_t sum = 0;
   auto input_data = input.data<scalar_t>();
   auto weight_val = weight.data<scalar_t>()[0];
   auto grad_out_data = grad_out.data<scalar_t>();
   auto input_grad_data = input_grad.data<scalar_t>();
   auto weight_grad_data = weight_grad.data<scalar_t>();
 
-  #pragma omp parallel for private(i) reduction(+:sum) if (input_numel > 1000)
-  for (i = 0; i < input_numel; i++) {
-    scalar_t input_data_val = input_data[i];
-    scalar_t grad_out_data_val = grad_out_data[i];
-    // to allow for compiler optimization, here splitting into two lines:
-    scalar_t w = (input_data_val > 0) ? scalar_t(1) : weight_val;
-    input_grad_data[i] = w * grad_out_data_val;
-    // to allow for compiler optimization, here splitting into two lines:
-    scalar_t mask = (input_data_val > 0) ? scalar_t(0) : scalar_t(1);
-    sum += mask * input_data_val * grad_out_data_val;
-  }
+  scalar_t sum = at::parallel_reduce(0, input_numel, 1000, scalar_t(0),
+      [&](int64_t start, int64_t end, scalar_t ident) -> scalar_t {
+    scalar_t partial_sum = ident;
+    for (auto i = start; i < end; i++) {
+      scalar_t input_data_val = input_data[i];
+      scalar_t grad_out_data_val = grad_out_data[i];
+      // to allow for compiler optimization, here splitting into two lines:
+      scalar_t w = (input_data_val > 0) ? scalar_t(1) : weight_val;
+      input_grad_data[i] = w * grad_out_data_val;
+      // to allow for compiler optimization, here splitting into two lines:
+      scalar_t mask = (input_data_val > 0) ? scalar_t(0) : scalar_t(1);
+      partial_sum += mask * input_data_val * grad_out_data_val;
+    }
+    return partial_sum;
+  }, std::plus<scalar_t>());
   weight_grad_data[0] = sum;
 }
 
@@ -231,7 +239,6 @@ void inline prelu_cpu_backward_kernel_multi_weights(
   int64_t input_stride0,
   int64_t input_stride1) {
 
-  int64_t i, j, k;
   int64_t input_numel = input.numel();
   auto input_data = input.data<scalar_t>();
   auto weight_data = weight.data<scalar_t>();
@@ -239,22 +246,28 @@ void inline prelu_cpu_backward_kernel_multi_weights(
   auto input_grad_data = input_grad.data<scalar_t>();
   auto weight_grad_collector_data = weight_grad_collector.data<scalar_t>();
 
-  #pragma omp parallel for private(i, j, k) if (input.numel() > 1000)
-  for (i = 0; i < input_dim0_size; i++) {
-    for (j = 0; j < channel_size; j++) {
-      for (k = 0; k < input_stride1; k++) {
-        int64_t pos = i * input_stride0 + j * input_stride1 + k;
-        scalar_t weight_data_val = weight_data[j];
-        scalar_t input_data_val = input_data[pos];
-        scalar_t grad_out_data_val = grad_out_data[pos];
-        // to allow for compiler optimization, here splitting into two lines:
-        scalar_t w = (input_data_val > 0) ? scalar_t(1) : weight_data_val;
-        input_grad_data[pos] = w * grad_out_data_val;
-        // to allow for compiler optimization, here splitting into two lines:
-        scalar_t mask = (input_data_val > 0) ? scalar_t(0) : scalar_t(1);
-        weight_grad_collector_data[pos] = mask * input_data_val * grad_out_data_val;
+  auto loop = [&](int64_t start, int64_t end) {
+    for (auto i = start; i < end; i++) {
+      for (auto j = 0; j < channel_size; j++) {
+        for (auto k = 0; k < input_stride1; k++) {
+          int64_t pos = i * input_stride0 + j * input_stride1 + k;
+          scalar_t weight_data_val = weight_data[j];
+          scalar_t input_data_val = input_data[pos];
+          scalar_t grad_out_data_val = grad_out_data[pos];
+          // to allow for compiler optimization, here splitting into two lines:
+          scalar_t w = (input_data_val > 0) ? scalar_t(1) : weight_data_val;
+          input_grad_data[pos] = w * grad_out_data_val;
+          // to allow for compiler optimization, here splitting into two lines:
+          scalar_t mask = (input_data_val > 0) ? scalar_t(0) : scalar_t(1);
+          weight_grad_collector_data[pos] = mask * input_data_val * grad_out_data_val;
+        }
       }
     }
+  };
+  if (input.numel() > 1000) {
+    at::parallel_for(0, input_dim0_size, 0, loop);
+  } else {
+    loop(0, input_dim0_size);
   }
 }
 

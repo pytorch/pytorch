@@ -85,7 +85,12 @@ enum class OpCode : char {
   FRAME = '\x95'
 };
 
-enum PicklerClass : uint8_t { TENSOR = 0, INTLIST = 1 };
+enum PicklerClass : uint8_t {
+  // A reference to the tensor table
+  TENSOR = 0,
+  // List[int]
+  INTLIST = 1,
+};
 
 using ::c10::IValue;
 
@@ -93,28 +98,50 @@ class Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
-  Pickler(std::vector<at::Tensor>* tensor_table)
+  Pickler(std::vector<at::Tensor>* tensor_table = nullptr)
       : tensor_table_(tensor_table) {}
 
   const std::vector<char>& stack();
+
+  // Push protocol onto the stack
   void start();
+
+  // Push STOP OpCode onto the stack
   void finish();
+
   void addIValue(const IValue& ivalue);
 
+  // See torch/serialization.py for details, pushes a magic number, torch
+  // serialization version, and system info to the pickle archive all as
+  // individual pickle programs
+  void pushMetadata();
+
+  void startTuple();
+  void endTuple();
+
  private:
-  void pushBinGet(uint32_t memo_id);
-  void pushMemoizedString(const IValue& ivalue);
-  void pushString(const std::string& string);
-  void pushTensor(const IValue& ivalue);
-  void pushDouble(const IValue& ivalue);
-  void pushMemoization(const void* item);
-  void pushMemoization(const IValue& ivalue);
-  void pushList(const IValue& ivalue);
-  void pushIntList(const IValue& ivalue);
-  void pushTuple(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
-  void pushClass(PicklerClass cls);
+  void pushDouble(const IValue& ivalue);
   void pushInt(const IValue& ivalue);
+  void pushIntList(const IValue& ivalue);
+  void pushList(const IValue& ivalue);
+  void pushLiteralTensor(const IValue& ivalue);
+  void pushMemoization(const IValue& ivalue);
+  void pushMemoizedString(const IValue& ivalue);
+  void pushTensor(const IValue& ivalue);
+  void pushTensorReference(const IValue& ivalue);
+  void pushTuple(const IValue& ivalue);
+
+  void pushBinGet(uint32_t memo_id);
+  void pushClass(PicklerClass cls);
+  void pushGlobal(const std::string& name);
+  void pushMemoization(const void* item);
+  void pushString(const std::string& string);
+  void pushTensorData(const at::Tensor& tensor);
+
+  // Add a BINPUT op and return the memoization id used
+  size_t pushNextBinPut();
+
   const void* getPointer(const IValue& ivalue);
 
   // These convert values to bytes and add them to the stack (NB: since T is to
@@ -134,12 +161,21 @@ class Pickler {
   // BINPUT opcodes) to enable shared references
   std::unordered_map<const void*, uint32_t> memo_map_;
 
-  // External table of tensors to serialize
+  // External table of tensors to serialize. If this is missing, then tensors
+  // are serialized directly into the pickle
   std::vector<at::Tensor>* tensor_table_;
+
+  // List of tensors to serialize in the same binary as the pickle data
+  std::vector<at::Tensor> literal_tensors_;
 
   // TODO: only use this if necessary (add a pass to find all shared ivalues,
   // and only memoize those)
-  uint32_t memo_id = 0;
+  uint32_t memo_id_ = 0;
+
+  // When arbitrary (maybe temporary) values are saved, keep them here so they
+  // can be memoized correctly
+  std::vector<c10::IValue> memoized_ivalues_;
+  std::unordered_map<std::string, uint32_t> memoized_strings_map_;
 };
 
 // An item in the unpickler stack. There needs to be a way to differentiate
@@ -205,11 +241,11 @@ class Unpickler {
   }
 
   double readFloat();
-  void run();
   OpCode readInstruction();
-  std::string readString();
   OpCode readOpCode();
+  std::string readString();
   void readList();
+  void run();
 
   std::vector<StackItem> stack_;
   std::vector<StackItem> memo_table_;
@@ -221,6 +257,13 @@ class Unpickler {
   // [unpickler refactor]
   OpCode last_opcode_;
 };
+
+// returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
+// if necessary
+std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor);
+
+// return the value of the tensor's storage pointer
+uint64_t getStorageKey(const at::Tensor& tensor);
 
 } // namespace jit
 } // namespace torch

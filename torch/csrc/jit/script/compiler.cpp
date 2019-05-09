@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/script/final_returns.h>
@@ -574,6 +575,8 @@ struct to_ir {
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(to_clean);
     ConstantPooling(to_clean);
+    // For jitter
+    CanonicalizeOutputs(to_clean);
   }
 
   FunctionSchema emitDef(const Def& def, const Self& self, Block* block) {
@@ -623,6 +626,8 @@ struct to_ir {
         List<Stmt>::create(r, {ret}));
     auto m = std::make_shared<Module>();
     CompilationUnit cu;
+    // set optimize to false since we don't need to run it in optimize mode
+    cu.set_optimized(false);
     cu.define({def}, {resolver}, nullptr);
     Stack stack;
     cu.get_function("defaults").run(stack);
@@ -2974,6 +2979,12 @@ struct FunctionResolver : public Resolver {
   const std::unordered_map<std::string, std::shared_ptr<Function>>&
       functionTable_;
 };
+
+CompilationUnit::CompilationUnit(const std::string& source)
+{
+  // calles the define with native resolver to generate the graph for functions
+  define(source, nativeResolver(), nullptr);
+}
 
 void CompilationUnit::define(
     const std::vector<Def>& definitions,
