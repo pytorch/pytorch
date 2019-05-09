@@ -166,5 +166,6 @@ pip install --no-cache-dir \
     typing \
     typing-extensions \
     pyyaml \
-    librosa>=0.6.2
+    librosa>=0.6.2 \
+    psutil
 
