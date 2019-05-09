@@ -1740,6 +1740,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device)
 
+    def test_gloo_backend_cpu_module(self):
+        self._test_gloo_backend([torch.device('cpu')], [])
+
     @skip_if_not_multigpu
     def test_gloo_backend_1gpu_module_device_ids_integer_list(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
