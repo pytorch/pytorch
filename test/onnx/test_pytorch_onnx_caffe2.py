@@ -213,7 +213,11 @@ class TestCaffe2Backend(unittest.TestCase):
                 return self.many_fc(input)
 
         model = MyModel()
+        # Test 2d input
         input = torch.randn(3, 4, requires_grad=True)
+        self.run_model_test(model, train=False, batch_size=0, input=input)
+        # Test >2d input
+        input = torch.randn(5, 3, 4, requires_grad=True)
         self.run_model_test(model, train=False, batch_size=0, input=input)
 
     def test_onnx_export_with_parameter_renaming(self):
