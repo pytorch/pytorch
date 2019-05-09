@@ -10,7 +10,7 @@ from cimodel.data.caffe2_build_data import CONFIG_TREE_DATA, TopLevelNode
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 
-DOCKER_IMAGE_VERSION = 273
+DOCKER_IMAGE_VERSION = 276
 
 
 class Conf(object):
