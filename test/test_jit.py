@@ -2041,7 +2041,7 @@ graph(%Ra, %Rb):
         self.assertEqual(out, out_ref)
         self.assertEqual(grad, grad_ref)
 
-	# The generated test only covers CPU
+        # The generated test only covers CPU
         self.assertAutodiffNode(func.graph_for(x), True, [], ['aten::mul', 'aten::rand_like', 'aten::lt', 'aten::type_as'])
 
     def test_conv(self):
