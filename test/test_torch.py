@@ -11407,6 +11407,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
         self.assertFalse(y.is_contiguous(memory_format=torch.channels_last))
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_memory_format_permute_cuda(self):
         x = torch.randn(10, 3, 32, 32)
         nhwc = x.to(memory_format=torch.channels_last).cuda()
