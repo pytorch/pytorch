@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "THNN/generic/HardTanh.c"
 #else
 
+#include <ATen/Parallel.h>
+
 void THNN_(HardTanh_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -44,29 +46,31 @@ void THNN_(HardTanh_updateOutput)(
   {
     scalar_t* ptr_input  = input->data<scalar_t>();
     scalar_t* ptr_output = output->data<scalar_t>();
-    ptrdiff_t i;
     ptrdiff_t n = THTensor_(nElement)(input);
 
-    if (inplace)
-#pragma omp parallel for private(i)
-      for (i = 0; i < n; i++)
-      {
-        if (ptr_input[i] < min_val)
-          ptr_input[i] = min_val;
-        else if (ptr_input[i] > max_val)
-          ptr_input[i] = max_val;
-      }
-    else
-#pragma omp parallel for private(i)
-      for (i = 0; i < n; i++)
-      {
-        if (ptr_input[i] < min_val)
-          ptr_output[i] = min_val;
-        else if (ptr_input[i] <= max_val)
-          ptr_output[i] = ptr_input[i];
-        else
-          ptr_output[i] = max_val;
-      }
+    if (inplace) {
+      at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+        for (auto i = start; i < end; i++)
+        {
+          if (ptr_input[i] < min_val)
+            ptr_input[i] = min_val;
+          else if (ptr_input[i] > max_val)
+            ptr_input[i] = max_val;
+        }
+      });
+    } else {
+      at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+        for (auto i = start; i < end; i++)
+        {
+          if (ptr_input[i] < min_val)
+            ptr_output[i] = min_val;
+          else if (ptr_input[i] <= max_val)
+            ptr_output[i] = ptr_input[i];
+          else
+            ptr_output[i] = max_val;
+        }
+      });
+    }
   }
 }
 
@@ -113,25 +117,27 @@ void THNN_(HardTanh_updateGradInput)(
     scalar_t* ptr_gradOutput = gradOutput->data<scalar_t>();
     scalar_t* ptr_gradInput  = gradInput->data<scalar_t>();
     scalar_t* ptr_input      = input->data<scalar_t>();
-    ptrdiff_t i;
     ptrdiff_t n = THTensor_(nElement)(input);
 
-    if (inplace)
-#pragma omp parallel for private(i)
-      for (i = 0; i < n; i++)
-      {
-        if (ptr_input[i] <= min_val || ptr_input[i] >= max_val)
-          ptr_gradInput[i] = 0;
-      }
-    else
-#pragma omp parallel for private(i)
-      for (i = 0; i < n; i++)
-      {
-        if (ptr_input[i] <= min_val || ptr_input[i] >= max_val)
-          ptr_gradInput[i] = 0;
-        else
-          ptr_gradInput[i] = ptr_gradOutput[i];
-      }
+    if (inplace) {
+      at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+        for (auto i = start; i < end; i++)
+        {
+          if (ptr_input[i] <= min_val || ptr_input[i] >= max_val)
+            ptr_gradInput[i] = 0;
+        }
+      });
+    } else {
+      at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
+        for (auto i = start; i < end; i++)
+        {
+          if (ptr_input[i] <= min_val || ptr_input[i] >= max_val)
+            ptr_gradInput[i] = 0;
+          else
+            ptr_gradInput[i] = ptr_gradOutput[i];
+        }
+      });
+    }
   }
 }
 

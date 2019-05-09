@@ -16,6 +16,13 @@ if(USE_CUDA)
     set(C10D_USE_CUDA false)
     message(STATUS "CUDA not found, building C10D without CUDA support")
   endif()
+elseif(USE_ROCM)
+  add_definitions(-DUSE_ROCM=1)
+  add_definitions(-D__HIP_PLATFORM_HCC__=1)
+  add_definitions(-DHIP_VERSION=${HIP_VERSION_MAJOR})
+
+  set(C10D_USE_CUDA false)
+  set(C10D_USE_ROCM true)
 else()
   set(C10D_USE_CUDA false)
   message(STATUS "Building C10D without CUDA support")
@@ -54,6 +61,10 @@ set(C10D_SRCS
 if(C10D_USE_CUDA)
   set(C10D_LIBS
     caffe2_gpu
+    )
+elseif(C10D_USE_ROCM)
+  set(C10D_LIBS
+    caffe2_hip
     )
 else()
   set(C10D_LIBS

@@ -15,6 +15,13 @@ try:
 except ImportError:
     TEST_TENSORBOARD = False
 
+HAS_TORCHVISION = True
+try:
+    import torchvision
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
 TEST_MATPLOTLIB = True
 try:
     import matplotlib
@@ -274,7 +281,6 @@ if TEST_TENSORBOARD:
                 summary.histogram('dummy', [1, 3, 4, 5, 6], 'tensorflow')
 
         def test_empty_input(self):
-            print('expect error here:')
             with self.assertRaises(Exception) as e_info:
                 summary.histogram('dummy', np.ndarray(0), 'tensorflow')
 
@@ -350,13 +356,10 @@ if TEST_TENSORBOARD:
         expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      module_id.split('.')[-1] + '.' + functionName + ".expect")
-        print(expected_file)
         assert os.path.exists(expected_file)
         with open(expected_file) as f:
             expected = f.read()
         str_to_compare = str(str_to_compare)
-        print(remove_whitespace(str_to_compare))
-        print(remove_whitespace(expected))
         return remove_whitespace(str_to_compare) == remove_whitespace(expected)
 
     def write_proto(str_to_compare, function_ptr):
@@ -366,7 +369,6 @@ if TEST_TENSORBOARD:
         expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      module_id.split('.')[-1] + '.' + functionName + ".expect")
-        print(expected_file)
         with open(expected_file, 'w') as f:
             f.write(str(str_to_compare))
 
@@ -385,13 +387,62 @@ if TEST_TENSORBOARD:
             with SummaryWriter(comment='LinearModel') as w:
                 w.add_graph(myLinear(), dummy_input, True)
 
+        def test_mlp_graph(self):
+            dummy_input = (torch.zeros(2, 1, 28, 28),)
+
+            # This MLP class with the above input is expected
+            # to fail JIT optimizations as seen at
+            # https://github.com/pytorch/pytorch/issues/18903
+            #
+            # However, it should not raise an error during
+            # the add_graph call and still continue.
+            class myMLP(torch.nn.Module):
+                def __init__(self):
+                    super(myMLP, self).__init__()
+                    self.input_len = 1 * 28 * 28
+                    self.fc1 = torch.nn.Linear(self.input_len, 1200)
+                    self.fc2 = torch.nn.Linear(1200, 1200)
+                    self.fc3 = torch.nn.Linear(1200, 10)
+
+                def forward(self, x, update_batch_stats=True):
+                    h = torch.nn.functional.relu(
+                        self.fc1(x.view(-1, self.input_len)))
+                    h = self.fc2(h)
+                    h = torch.nn.functional.relu(h)
+                    h = self.fc3(h)
+                    return h
+
+            with SummaryWriter(comment='MLPModel') as w:
+                w.add_graph(myMLP(), dummy_input, True)
+
         def test_wrong_input_size(self):
-            print('expect error here:')
             with self.assertRaises(RuntimeError) as e_info:
                 dummy_input = torch.rand(1, 9)
                 model = torch.nn.Linear(3, 5)
                 with SummaryWriter(comment='expect_error') as w:
                     w.add_graph(model, dummy_input)  # error
+
+        @skipIfNoTorchVision
+        def test_torchvision_smoke(self):
+            model_input_shapes = {
+                'alexnet': (2, 3, 224, 224),
+                'resnet34': (2, 3, 224, 224),
+                'resnet152': (2, 3, 224, 224),
+                'densenet121': (2, 3, 224, 224),
+                'vgg16': (2, 3, 224, 224),
+                'vgg19': (2, 3, 224, 224),
+                'vgg16_bn': (2, 3, 224, 224),
+                'vgg19_bn': (2, 3, 224, 224),
+                'mobilenet_v2': (2, 3, 224, 224),  # will fail optimize_graph
+            }
+            for model_name, input_shape in model_input_shapes.items():
+                with SummaryWriter(comment=model_name) as w:
+                    model = getattr(torchvision.models, model_name)()
+                    # ValueError: only one element tensors can be converted to Python scalars
+                    if model_name == 'mobilenet_v2':
+                        w.add_graph(model, torch.zeros(input_shape), operator_export_type="RAW")
+                    else:
+                        w.add_graph(model, torch.zeros(input_shape))
 
     class TestTensorBoardFigure(BaseTestCase):
         @skipIfNoMatplotlib
