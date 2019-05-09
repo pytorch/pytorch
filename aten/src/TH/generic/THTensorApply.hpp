@@ -24,17 +24,23 @@
 
 #define TH_TENSOR_APPLY_CONTIG(TYPE, TENSOR, CODE) \
 { \
-  int inOmp = omp_in_parallel(); \
   ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR); \
-  PRAGMA(omp parallel if ((TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD) && (!inOmp))) \
-  { \
-    size_t num_threads = omp_get_num_threads(); \
-    size_t tid = omp_get_thread_num(); \
-    ptrdiff_t TH_TENSOR_offset = tid * (TH_TENSOR_size / num_threads); \
-    ptrdiff_t TH_TENSOR_end = tid == num_threads - 1 ? TH_TENSOR_size : \
-      TH_TENSOR_offset + TH_TENSOR_size / num_threads; \
-    ptrdiff_t TENSOR##_len = TH_TENSOR_end - TH_TENSOR_offset; \
-    TYPE *TENSOR##_data = TENSOR->data<scalar_t>() + TH_TENSOR_offset; \
+  if( TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD ) { \
+    int inOmp = omp_in_parallel(); \
+    PRAGMA(omp parallel if ((TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD) && (!inOmp))) \
+    { \
+      size_t num_threads = omp_get_num_threads(); \
+      size_t tid = omp_get_thread_num(); \
+      ptrdiff_t TH_TENSOR_offset = tid * (TH_TENSOR_size / num_threads); \
+      ptrdiff_t TH_TENSOR_end = tid == num_threads - 1 ? TH_TENSOR_size : \
+        TH_TENSOR_offset + TH_TENSOR_size / num_threads; \
+      ptrdiff_t TENSOR##_len = TH_TENSOR_end - TH_TENSOR_offset; \
+      TYPE *TENSOR##_data = TENSOR->data<scalar_t>() + TH_TENSOR_offset; \
+      CODE \
+    } \
+  } else {\
+    ptrdiff_t TENSOR##_len = TH_TENSOR_size; \
+    TYPE *TENSOR##_data = TENSOR->data<scalar_t>(); \
     CODE \
   } \
 }

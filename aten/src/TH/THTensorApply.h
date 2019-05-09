@@ -40,7 +40,7 @@
     TENSOR##_n *= TENSOR->size(TENSOR##_i); \
 \
   if(TENSOR->is_empty()) \
-    TH_TENSOR_APPLY_hasFinished = 1; \
+    TH_TENSOR_APPLY_hasFinished = true; \
   else \
   { \
     TENSOR##_data = THTensor_getStoragePtr(TENSOR)->data<TYPE>()+TENSOR->storage_offset(); \
@@ -128,7 +128,7 @@
       { \
         if(TENSOR##_i == 0) \
         { \
-          TH_TENSOR_APPLY_hasFinished = 1; \
+          TH_TENSOR_APPLY_hasFinished = true; \
           break; \
         } \
           else \
@@ -146,7 +146,7 @@
 
 #define TH_TENSOR_APPLY3_D(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, DIM, CODE) \
 { \
-  int TH_TENSOR_APPLY_hasFinished = 0; \
+  bool TH_TENSOR_APPLY_hasFinished = false; \
   int64_t TH_TENSOR_dim_index = 0; \
   __TH_TENSOR_APPLYX_PREAMBLE(TYPE1, TENSOR1, DIM, 1) \
   __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, DIM, 1) \
@@ -192,7 +192,7 @@
 
 #define TH_TENSOR_APPLY2_D(TYPE1, TENSOR1, TYPE2, TENSOR2, DIM, CODE) \
 { \
-  int TH_TENSOR_APPLY_hasFinished = 0; \
+  bool TH_TENSOR_APPLY_hasFinished = false; \
   int64_t TH_TENSOR_dim_index = 0; \
   __TH_TENSOR_APPLYX_PREAMBLE(TYPE1, TENSOR1, DIM, 1) \
   __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, DIM, 1) \
@@ -225,7 +225,7 @@
 
 #define TH_TENSOR_APPLY_D(TYPE, TENSOR, DIM, CODE) \
 { \
-  int TH_TENSOR_APPLY_hasFinished = 0; \
+  bool TH_TENSOR_APPLY_hasFinished = false; \
   int64_t TH_TENSOR_dim_index = 0; \
   __TH_TENSOR_APPLYX_PREAMBLE(TYPE, TENSOR, DIM, 0) \
 \
@@ -247,12 +247,12 @@
 
 #ifdef _OPENMP
 
-#ifdef _WIN32  
-// MSVC doesn't support loop pragmas, but does support others. Create a new macro to account for those differences.  
-#define PRAGMA_LOOP(P)    // Noop  
+#ifdef _WIN32
+// MSVC doesn't support loop pragmas, but does support others. Create a new macro to account for those differences.
+#define PRAGMA_LOOP(P)    // Noop
 #define PRAGMA(P)         __pragma(P)
 #else
-#define PRAGMA_LOOP(P)    _Pragma(#P)  
+#define PRAGMA_LOOP(P)    _Pragma(#P)
 #define PRAGMA(P)         _Pragma(#P)
 #endif
 
@@ -331,10 +331,10 @@
       CODE                                         \
     }                                              \
   } else {                                         \
-    int TH_TENSOR_APPLY_hasFinished = 0;           \
+    bool TH_TENSOR_APPLY_hasFinished = false;           \
     int64_t TH_TENSOR_dim_index = 0;               \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE, TENSOR, -1, 1);\
-    if (0 == TH_TENSOR_APPLY_hasFinished) {          \
+    if (!TH_TENSOR_APPLY_hasFinished) {          \
       PRAGMA(omp parallel if (TENSOR##Size > OMP_THRESHOLD) firstprivate(TENSOR##_data, TENSOR##_sizes, TENSOR##_strides, TENSOR##_dim, TENSOR##_stride, TENSOR##_size, TENSOR##_i) reduction(OPERATION))\
       {\
         size_t num_threads = omp_get_num_threads();\
@@ -396,12 +396,12 @@
      *    first one.
      * 4. iterate all elements in each thread. update the indexes in each dimension of the rest.
     */                                                                                             \
-    int TH_TENSOR_APPLY_hasFinished = 0; \
+    bool TH_TENSOR_APPLY_hasFinished = false; \
     int64_t TH_TENSOR_dim_index = 0;     \
     /*step 1*/                           \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, -1, 1) \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE1, TENSOR1, -1, 1) \
-    if (0 == TH_TENSOR_APPLY_hasFinished) {            \
+    if (! TH_TENSOR_APPLY_hasFinished) {            \
       PRAGMA(omp parallel if (SIZE > OMP_THRESHOLD) firstprivate(TENSOR2##_data, TENSOR2##_sizes, TENSOR2##_strides, TENSOR2##_dim, TENSOR2##_stride, TENSOR2##_size, TENSOR2##_i, TENSOR1##_data, TENSOR1##_sizes, TENSOR1##_strides, TENSOR1##_dim, TENSOR1##_stride, TENSOR1##_size, TENSOR1##_i)) \
       {                                   \
         /*step 2*/                                                                 \
@@ -471,12 +471,12 @@
       } \
     }\
   } else{              \
-    int TH_TENSOR_APPLY_hasFinished = 0;\
+    bool TH_TENSOR_APPLY_hasFinished = false;\
     int64_t TH_TENSOR_dim_index = 0;\
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE1, TENSOR1, -1, 1) \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, -1, 1) \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE3, TENSOR3, -1, 1) \
-    if (0 == TH_TENSOR_APPLY_hasFinished) {            \
+    if (!TH_TENSOR_APPLY_hasFinished) {            \
       PRAGMA(omp parallel if (SIZE > OMP_THRESHOLD) firstprivate(TENSOR1##_data, TENSOR1##_sizes, TENSOR1##_strides, TENSOR1##_dim, TENSOR1##_stride, TENSOR1##_size, TENSOR1##_i, TENSOR2##_data, TENSOR2##_sizes, TENSOR2##_strides, TENSOR2##_dim, TENSOR2##_stride, TENSOR2##_size, TENSOR2##_i, TENSOR3##_data, TENSOR3##_sizes, TENSOR3##_strides, TENSOR3##_dim, TENSOR3##_stride, TENSOR3##_size, TENSOR3##_i))\
       {\
         size_t num_threads = omp_get_num_threads();\
