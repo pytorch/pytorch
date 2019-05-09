@@ -57,10 +57,8 @@
 // error when __has_cpp_attribute is given a scoped attribute in C mode.
 #elif __cplusplus && defined(__has_cpp_attribute)
 # if __has_cpp_attribute(clang::warn_unused_result)
-#  ifndef __CUDACC__
-#   undef C10_NODISCARD
-#   define C10_NODISCARD [[clang::warn_unused_result]]
-#  endif
+#  undef C10_NODISCARD
+#  define C10_NODISCARD [[clang::warn_unused_result]]
 # endif
 #endif
 
