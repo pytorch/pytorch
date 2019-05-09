@@ -452,6 +452,27 @@ void testAliasAnalysis() {
     AliasDb aliasDb(graph);
     ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
   }
+
+  // test none value does not have writers
+  {
+    {
+      auto graph = std::make_shared<Graph>();
+      std::unordered_map<std::string, Value*> vmap;
+      script::parseIR(
+          R"IR(
+    graph():
+      %opt : Tensor? = prim::Constant()
+      %out : Tensor = prim::unchecked_unwrap_optional(%opt)
+      %ret.2 : Tensor = aten::div(%out, %out, %out)
+      return (%opt, %out, %ret.2)
+      )IR",
+          &*graph,
+          vmap);
+
+      AliasDb aliasDb(graph);
+      AT_ASSERT(!aliasDb.hasWriters(vmap["opt"]->node()));
+    }
+  }
 }
 
 void testWriteTracking() {
