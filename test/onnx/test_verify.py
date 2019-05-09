@@ -119,6 +119,16 @@ class TestVerify(TestCase):
         y = torch.tensor([[2, -1]])
         self.assertVerifyExpectFail(MyModel(), x, backend, test_args=[(y,)])
 
+    # TODO : update this test, to use a different op
+    # when exporting Slice is supported in opset 10
+    def test_blacklisted_ops(self):
+        class MyModel(Module):
+            def forward(self, x):
+                return x[-1, :, :]
+
+        x = torch.randn(3, 4, 5)
+        self.assertVerifyExpectFail(MyModel(), x, backend, opset=10)
+
 
 if __name__ == '__main__':
     run_tests()
