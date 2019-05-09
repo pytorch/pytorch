@@ -200,6 +200,7 @@ def add_torch_libs():
         "torch/csrc/autograd/python_variable_indexing.cpp",
         "torch/csrc/byte_order.cpp",
         "torch/csrc/distributed/Module.cpp",
+        "torch/csrc/distributed/c10d/comm.cpp",
         "torch/csrc/distributed/c10d/init.cpp",
         "torch/csrc/distributed/c10d/reducer.cpp",
         "torch/csrc/jit/init.cpp",
