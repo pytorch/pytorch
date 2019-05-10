@@ -3,6 +3,6 @@
 namespace at {
 
 class Tensor;
-using SparseTensorRef = Tensor;
+using SparseTensorRef = const Tensor&;
 
 }
