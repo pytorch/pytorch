@@ -5857,7 +5857,7 @@ a")
             # type: (int, int) -> int
             return math.gcd(x, y)
 
-        for inputs in [(2, 4), (-5, -15), (-5, 15), (10, 0), (0, 10), (-5, 0), (0, -5), (0, 0), (0,  -0)]:
+        for inputs in [(2, 4), (-5, -15), (-5, 15), (10, 0), (0, 10), (-5, 0), (0, -5), (0, 0), (0, -0)]:
             self.checkScript(test_gcd, inputs)
 
     def test_math_ops1(self):
