@@ -96,7 +96,6 @@ static int gcd(int a, int b) {
         int r = a % b;
         a = b;
         b = r;
-        b = r;
     }
     // in python gcd returns non-negative values
     return std::abs(a);
