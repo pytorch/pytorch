@@ -177,8 +177,7 @@ private:
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
 
-class CAFFE2_API SchemaRegistrationHandleRAII final {
-public:
+struct CAFFE2_API SchemaRegistrationHandleRAII final {
   const OperatorHandle& opHandle() const {
     return opHandle_;
   }
