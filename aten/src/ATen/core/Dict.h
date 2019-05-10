@@ -284,7 +284,7 @@ public:
   std::pair<iterator, bool> insert(Key_&& key, Value_&& value) {
     static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of Dict::insert");
     static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of Dict::insert");
-    auto inserted = map_.insert({
+    auto inserted = map_.insert(std::pair<IValue, IValue>{
       Key(std::forward<Key_>(key)),
       Value(std::forward<Value_>(value))});
     return {iterator{inserted.first}, inserted.second};
@@ -330,7 +330,7 @@ public:
    * Returns the mapped value of the element with key equivalent to key.
    * If no such element exists, an exception of type std::out_of_range is thrown.
    */
-  Value at(const Key& key) {
+  Value at(const Key& key) const {
     return map_.at(key).template to<Value>();
   }
 
