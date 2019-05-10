@@ -91,7 +91,7 @@ struct WelfordOps {
 #if defined(__CUDACC__) || defined(__HIPCC__)
     thrust::tuple<scalar_t, scalar_t> results((scalar_t) ret, (scalar_t) mean);
 #else
-    std::vector<scalar_t> results{(scalar_t) ret, (scalar_t) mean};
+    std::tuple<scalar_t, scalar_t> results{(scalar_t) ret, (scalar_t) mean};
 #endif
     return results;
   }
