@@ -69,6 +69,8 @@ message ModuleDef {
   optional bool optimize = 8;
 
   repeated AttributeDef attributes = 9;
+
+  optional int64 id = 10;
 }
 
 // Represents all non-module code that the model depends on.
@@ -79,7 +81,7 @@ message LibDef {
 }
 
 enum ProtoVersion {
-  PROTO_VERSION_NEWEST = 0x0000000000000003;
+  PROTO_VERSION_NEWEST = 0x0000000000000004;
 }
 
 message ModelDef {

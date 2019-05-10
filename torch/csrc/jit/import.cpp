@@ -60,6 +60,9 @@ class ScriptModuleDeserializer final {
   void loadTensorTable(torch::ModelDef* model_def);
   std::vector<IValue> loadPickleArchive(const std::string& name);
   void importCallback(const std::string& qualifier);
+  void moduleSetState(
+      const std::shared_ptr<script::Module>& module,
+      IValue state);
 
   caffe2::serialize::PyTorchStreamReader reader_;
   // this is a hack to make sure the script module created in C++ is the
@@ -69,10 +72,8 @@ class ScriptModuleDeserializer final {
   std::vector<std::string> moduleStack_;
 
   std::vector<at::Tensor> tensor_table_;
-  std::vector<IValue> attribute_table_;
+  std::vector<IValue> pickled_ivalues_;
 
-  // Results from __getstate__ to be passed to __setstate__ methods
-  std::vector<IValue> state_table_;
   std::unordered_set<std::string> imported_libs_;
 
   std::shared_ptr<script::Module> main_module_;
@@ -141,11 +142,10 @@ void ScriptModuleDeserializer::deserialize(
   }
 
   loadTensorTable(&model_def);
-  if (model_def.proto_version() >= 2) {
-    attribute_table_ = loadPickleArchive("attributes.pkl");
-  }
-  if (model_def.proto_version() >= 3) {
-    state_table_ = loadPickleArchive("states.pkl");
+  if (reader_.hasRecord("states.pkl")) {
+    pickled_ivalues_ = loadPickleArchive("states.pkl");
+  } else if (reader_.hasRecord("attributes.pkl")) {
+    pickled_ivalues_ = loadPickleArchive("states.pkl");
   }
 
   // TODO: this can be simplified when C++/Python interop lands,
@@ -261,6 +261,22 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
       import_callback);
 }
 
+void ScriptModuleDeserializer::moduleSetState(const std::shared_ptr<script::Module>& module, IValue state) {
+  auto setstate = module->module_object()->type()->getMethod("__setstate__");
+  AT_CHECK(
+      setstate != nullptr,
+      "Cannot call '__setstate__' method because"
+      " it does not exist");
+
+  // TODO: validate schema
+  // validateGetSetStateSchema();
+
+  Stack stack;
+  stack.emplace_back(module->module_object());
+  stack.emplace_back(std::move(state));
+  setstate->run(stack);
+}
+
 void ScriptModuleDeserializer::convertModule(
     const torch::ModuleDef& module_def) {
   std::shared_ptr<script::Module> module = moduleLookup_(moduleStack_);
@@ -291,7 +307,7 @@ void ScriptModuleDeserializer::convertModule(
     module->register_attribute(
         attr_def.name(),
         typeParser.parseType(attr_def.type()),
-        attribute_table_.at(attr_def.id()));
+        pickled_ivalues_.at(attr_def.id()));
   }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
@@ -310,12 +326,7 @@ void ScriptModuleDeserializer::convertModule(
         import_callback);
   }
 
-  // TODO: get the correct index so this works for submodules
-  static size_t module_num = 0;
-  if (module_num < state_table_.size()) {
-    module->setstate(state_table_.at(module_num));
-  }
-  module_num++;
+  moduleSetState(module, pickled_ivalues_.at(module_def.id()));
 }
 
 } // namespace
