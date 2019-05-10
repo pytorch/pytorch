@@ -70,10 +70,10 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // we matched.
     std::vector<Value*> inputs, outputs;
     for (Value* v : pattern_graph.inputs()) {
-      inputs.push_back(const_cast<Value*>(match.values_map.at(v)));
+      inputs.push_back(match.values_map.at(v));
     }
     for (Value* v : pattern_graph.outputs()) {
-      outputs.push_back(const_cast<Value*>(match.values_map.at(v)));
+      outputs.push_back(match.values_map.at(v));
     }
 
     // Insert a clone of replacement subgraph after the matched subgraph.
@@ -81,7 +81,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // new subgraph, and we will get `new_outputs` vector containing values
     // produced by this new subgraph - we will then rewrite old outputs with the
     // new ones.
-    WithInsertPoint insert_point(const_cast<Node*>(match.anchor));
+    WithInsertPoint insert_point(match.anchor);
     std::vector<Value*> new_outputs =
         inlineCallTo(*graph, replacement_graph, inputs);
 
@@ -94,7 +94,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // Record all planned deletions
     for (Node* pattern_n : pattern_graph.nodes()) {
       if (match.nodes_map.count(pattern_n)) {
-        Node* n = const_cast<Node*>(match.nodes_map.at(pattern_n));
+        Node* n = match.nodes_map.at(pattern_n);
         nodes_to_delete_.insert(n);
       }
     }
@@ -116,7 +116,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
 
 bool SubgraphRewriter::overlapsWithPreviousMatches(const Match* match) {
   for (auto n : match->nodes_map) {
-    if (nodes_to_delete_.count(const_cast<Node*>(n.second))) {
+    if (nodes_to_delete_.count(n.second)) {
       return true;
     }
   }
