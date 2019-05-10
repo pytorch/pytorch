@@ -692,7 +692,7 @@ class MultiheadAttention(Module):
         embed_dim: total dimension of the model.
         num_heads: parallel attention heads.
         add_bias_kv: add bias to the key and value sequences at dim=0.
-        add_zero_attn: add a new batch of zeros to the key and 
+        add_zero_attn: add a new batch of zeros to the key and
                        value sequences at dim=1.
 
     Examples::
@@ -710,11 +710,11 @@ class MultiheadAttention(Module):
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
         self.scaling = self.head_dim ** -0.5
 
-        self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
+        self.lin_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
         if bias:
-            self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
+            self.lin_proj_bias = Parameter(torch.empty(3 * embed_dim))
         else:
-            self.register_parameter('in_proj_bias', None)
+            self.register_parameter('lin_proj_bias', None)
         self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
 
         if add_bias_kv:
@@ -728,13 +728,13 @@ class MultiheadAttention(Module):
         self._reset_parameters()
 
     def _reset_parameters(self):
-        xavier_uniform_(self.in_proj_weight[:self.embed_dim, :])
-        xavier_uniform_(self.in_proj_weight[self.embed_dim:(self.embed_dim * 2), :])
-        xavier_uniform_(self.in_proj_weight[(self.embed_dim * 2):, :])
+        xavier_uniform_(self.lin_proj_weight[:self.embed_dim, :])
+        xavier_uniform_(self.lin_proj_weight[self.embed_dim:(self.embed_dim * 2), :])
+        xavier_uniform_(self.lin_proj_weight[(self.embed_dim * 2):, :])
 
         xavier_uniform_(self.out_proj.weight)
-        if self.in_proj_bias is not None:
-            constant_(self.in_proj_bias, 0.)
+        if self.lin_proj_bias is not None:
+            constant_(self.lin_proj_bias, 0.)
             constant_(self.out_proj.bias, 0.)
         if self.bias_k is not None:
             xavier_normal_(self.bias_k)
@@ -746,24 +746,24 @@ class MultiheadAttention(Module):
                 need_weights=True, static_kv=False, attn_mask=None):
         r"""
     Args:
-        query, key, value: map a query and a set of key-value pairs to an output. 
-            See "Attention Is All You Need" for more details. 
-        key_padding_mask: if provided, specified padding elements in the key will 
+        query, key, value: map a query and a set of key-value pairs to an output.
+            See "Attention Is All You Need" for more details.
+        key_padding_mask: if provided, specified padding elements in the key will
             be ignored by the attention.
         incremental_state: if provided, previous time steps are cached.
         need_weights: output attn_output_weights.
-        static_kv: if true, key and value are static. The key and value in previous 
+        static_kv: if true, key and value are static. The key and value in previous
             states will be used.
         attn_mask: mask that prevents attention to certain positions.
 
     Shape:
         - Inputs:
 
-        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is 
+        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
           the embedding dimension.
-        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is 
+        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
-        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is 
+        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
         - incremental_state: a dictionary used for storing states.
@@ -771,7 +771,7 @@ class MultiheadAttention(Module):
 
         - Outputs:
 
-        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, 
+        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
           L is the target sequence length, S is the source sequence length.
@@ -913,8 +913,8 @@ class MultiheadAttention(Module):
         return self._in_proj(value, start=2 * self.embed_dim)
 
     def _in_proj(self, input, start=0, end=None):
-        weight = self.in_proj_weight
-        bias = self.in_proj_bias
+        weight = self.lin_proj_weight
+        bias = self.lin_proj_bias
         weight = weight[start:end, :]
         if bias is not None:
             bias = bias[start:end]
