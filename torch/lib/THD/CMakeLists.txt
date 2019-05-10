@@ -117,7 +117,7 @@ ADD_LIBRARY(THD STATIC ${all_cpp})
 
 TARGET_COMPILE_DEFINITIONS(THD PRIVATE "_THD_CORE=1")
 
-ADD_DEPENDENCIES(THD caffe2)
+target_link_libraries(THD caffe2)
 
 target_include_directories(THD PRIVATE
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
