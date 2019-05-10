@@ -159,7 +159,9 @@ static void py_initialize_tensor_type(PyTypeObject& type, const char* name, PyOb
   ((PyObject*)&type)->ob_refcnt = 1;
   ((PyObject*)&type)->ob_type = &metaclass;
   type.tp_basicsize = sizeof(PyTensorType);
-  type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
+  // Subclassing from torch.<ScalarType>Tensor isn't supported.
+  // (Py_TPFLAGS_BASETYPE omitted). Subclassing torch.Tensor still allowed.
+  type.tp_flags = Py_TPFLAGS_DEFAULT;
   type.tp_name = name;
   type.tp_new = Tensor_new;
   if (PyType_Ready(&type) < 0) {

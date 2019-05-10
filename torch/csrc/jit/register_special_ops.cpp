@@ -22,7 +22,7 @@ namespace {
 void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
   if (!elem_type->isSubtypeOf(NumberType::get()) &&
       elem_type != BoolType::get()) {
-    auto error = script::ErrorReport(node->getSourceLocation());
+    auto error = script::ErrorReport(node->sourceRange());
     error << "Input list to torch.tensor must be of ints, floats, or bools, "
           << "got " << elem_type->str();
     // special case empty list torch.tensor([])
@@ -404,7 +404,7 @@ RegisterOperators reg(
        double a;
        double b;
        pop(stack, tensor, a, b);
-       push(stack, at::_th_uniform_(tensor, a, b));
+       push(stack, tensor.uniform_(a, b));
        return 0;
      }),
      Operator("aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std) -> Tensor(a!)", [](Stack& stack) {
@@ -415,7 +415,7 @@ RegisterOperators reg(
        double mean;
        double std;
        pop(stack, tensor, mean, std);
-       push(stack, at::_th_normal_(tensor, mean, std));
+       push(stack, tensor.normal_(mean, std));
        return 0;
      }),
      Operator("aten::_no_grad_fill_(Tensor(a!) tensor, float val) -> Tensor(a!)", [](Stack& stack) {

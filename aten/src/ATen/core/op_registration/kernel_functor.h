@@ -71,6 +71,16 @@ namespace detail {
       return ivalue_to_arg_type<T>::call(std::move(v));
     }
   };
+  template<class Key, class Value>
+  struct ivalue_to_arg_type<Dict<Key, Value>> {
+    static Dict<Key, Value> call(IValue&& v) {
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported argument type: c10::Dict<Key, Value> and Key is not one of the supported primitive types.");
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported argument type: c10::Dict<Key, Value> and Value is not one of the supported primitive types.");
+
+      auto dict_ptr = std::move(v).toGenericDict();
+      return impl::toTypedDict<Key, Value>(std::move(dict_ptr->elements()));
+    }
+  };
   // The following specialisations of ivalue_to_arg_type are technically not
   // necessary since we would hit the base case and show an error message
   // there if they didn't exist, but we can show a better error message
@@ -81,6 +91,13 @@ namespace detail {
     // internal optimization to how we represent lists (e.g. SmallVector).
     // Users should use ArrayRef instead.
     static_assert(guts::false_t<std::vector<T>>::value, "You tried to register a kernel with an unsupported argument type: std::vector<T>. Please use c10::ArrayRef<T> instead.");
+  };
+  template<class Key, class Value>
+  struct ivalue_to_arg_type<std::unordered_map<Key, Value>> {
+    // We don't support std::vector because that would prevent us from doing
+    // internal optimization to how we represent lists (e.g. SmallVector).
+    // Users should use ArrayRef instead.
+    static_assert(guts::false_t<std::unordered_map<Key, Value>>::value, "You tried to register a kernel with an unsupported argument type: std::unordered_map<Key, Value>. Please use c10::Dict<Key, Value> instead.");
   };
   template<class T>
   struct ivalue_to_arg_type<T, guts::enable_if_t<std::is_same<float, T>::value>> {
@@ -106,66 +123,111 @@ namespace detail {
   };
   template<class T>
   struct legacy_ivalue_to_arg_type<std::vector<T>> final {
-    static const std::vector<T>& call(const IValue& v) {
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported argument type: c10::ArrayRef<T> and T is not one of the supported primitive types.");
-      return v.to<intrusive_ptr<ivalue::List<T>>>()->elements();
+    static std::vector<T> call(IValue&& v) {
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported argument type: std::vector<T> and T is not one of the supported primitive types.");
+      return std::move(*std::move(v).to<intrusive_ptr<ivalue::List<T>>>()).elements();
+    }
+  };
+  template<class Key, class Value>
+  struct legacy_ivalue_to_arg_type<std::unordered_map<Key, Value>> final {
+    static std::unordered_map<Key, Value> call(const IValue& v) {
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported argument type: std::unordered_map<Key, Value> and Key is not one of the supported primitive types.");
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported argument type: std::unordered_map<Key, Value> and Value is not one of the supported primitive types.");
+
+      auto dict_ptr = std::move(v).toGenericDict();
+      auto dict = impl::toTypedDict<Key, Value>(std::move(dict_ptr->elements()));
+      std::unordered_map<Key, Value> result;
+      result.reserve(dict.size());
+      for (auto& element : dict) {
+        result.emplace(element.key(), element.value());
+      }
+      return result;
     }
   };
 
+  // TODO Make nesting types work, e.g. Dicts of lists, lists of lists, and so on
+
   template<class T, class Enable = void>
-  struct return_type_to_ivalue_ {
+  struct return_type_to_ivalue {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type.");
   };
   template<class T>
-  struct return_type_to_ivalue_<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+  struct return_type_to_ivalue<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static IValue call(T&& v) {
       return IValue(std::move(v));
     }
   };
   template<class T>
-  struct return_type_to_ivalue_<optional<T>> {
+  struct return_type_to_ivalue<optional<T>> {
     static IValue call(optional<T>&& v) {
       if (!v.has_value()) {
         return IValue();
       }
-      return return_type_to_ivalue_<T>::call(std::move(*v));
+      return return_type_to_ivalue<T>::call(std::move(*v));
     }
   };
   template<class T>
-  struct return_type_to_ivalue_<std::vector<T>> {
+  struct return_type_to_ivalue<std::vector<T>> {
     static IValue call(std::vector<T>&& v) {
       static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported return type: vector<T> and T is not one of the supported primitive types.");
       static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
       return IValue(std::move(v));
     }
   };
-  // The following specialisations of return_type_to_ivalue_ are technically not
+  template<class Key, class Value>
+  struct return_type_to_ivalue<c10::Dict<Key, Value>> {
+    static IValue call(c10::Dict<Key, Value>&& v) {
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported return type: Dict<Key, Value> and Key is not one of the supported primitive types.");
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported return type: Dict<Key, Value> and Value is not one of the supported primitive types.");
+      return IValue(impl::toGenericDict(std::move(v)));
+    }
+  };
+  // The following specialisations of return_type_to_ivalue are technically not
   // necessary since we would hit the base case and show an error message
   // there if they didn't exist, but we can show a better error message
   // in some common error scenarios.
   template<class T>
-  struct return_type_to_ivalue_<c10::ArrayRef<T>> {
+  struct return_type_to_ivalue<c10::ArrayRef<T>> {
     static_assert(guts::false_t<c10::ArrayRef<T>>::value, "You tried to register a kernel with an unsupported return type: c10::ArrayRef<T>. Please use std::vector<T> instead.");
   };
+  template<class Key, class Value>
+  struct return_type_to_ivalue<std::unordered_map<Key, Value>> {
+    static_assert(guts::false_t<std::unordered_map<Key, Value>>::value, "You tried to register a kernel with an unsupported return type: std::unordered_map<Key, Value>. Please use c10::Dict<Key, Value> instead.");
+  };
   template<class T>
-  struct return_type_to_ivalue_<T, guts::enable_if_t<std::is_same<float, T>::value>> {
+  struct return_type_to_ivalue<T, guts::enable_if_t<std::is_same<float, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type: float. Please use double instead.");
   };
   template<class T>
-  struct return_type_to_ivalue_<T, guts::enable_if_t<std::is_same<const char*, T>::value>> {
+  struct return_type_to_ivalue<T, guts::enable_if_t<std::is_same<const char*, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type: const char*. Please use std::string instead.");
   };
   template<class T>
-  struct return_type_to_ivalue_<T, guts::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+  struct return_type_to_ivalue<T, guts::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral return argument type. Please use int64_t instead.");
   };
-
+  // legacy_return_type_to_ivalue is like return_type_to_ivalue but additionally
+  // allows a few deprecated types like std::vector.
   template<class T>
-  IValue return_type_to_ivalue(T&& v) {
-    return return_type_to_ivalue_<guts::decay_t<T>>::call(std::move(v));
-  }
+  struct legacy_return_type_to_ivalue final {
+    static IValue call(T&& v) {
+      return return_type_to_ivalue<T>::call(std::move(v));
+    }
+  };
+  template<class Key, class Value>
+  struct legacy_return_type_to_ivalue<std::unordered_map<Key, Value>> final {
+    static IValue call(std::unordered_map<Key, Value>&& v) {
+      c10::Dict<Key, Value> dict;
+      dict.reserve(v.size());
+      for (auto& element : v) {
+        dict.insert(element.first, element.second);
+      }
+      return return_type_to_ivalue<c10::Dict<Key, Value>>::call(std::move(dict));
+    }
+  };
 
   template<bool AllowDeprecatedTypes, class T> using ivalue_to_arg = guts::conditional_t<AllowDeprecatedTypes, legacy_ivalue_to_arg_type<T>, ivalue_to_arg_type<T>>;
+  template<bool AllowDeprecatedTypes, class T> using return_to_ivalue = guts::conditional_t<AllowDeprecatedTypes, legacy_return_type_to_ivalue<guts::decay_t<T>>, return_type_to_ivalue<guts::decay_t<T>>>;
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
   typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack_(Functor* functor, Stack* stack, guts::index_sequence<ivalue_arg_indices...>) {
@@ -185,14 +247,14 @@ namespace detail {
     return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, stack, guts::make_index_sequence<num_ivalue_args>());
   }
 
-  template<class OutputType>
+  template<class OutputType, bool AllowDeprecatedTypes>
   struct push_outputs final {
     static void call(OutputType&& output, Stack* stack) {
-      torch::jit::push(*stack, return_type_to_ivalue(std::move(output)));
+      torch::jit::push(*stack, return_to_ivalue<AllowDeprecatedTypes, OutputType>::call(std::move(output)));
     }
   };
-  template<class... OutputTypes>
-  struct push_outputs<std::tuple<OutputTypes...>> final {
+  template<class... OutputTypes, bool AllowDeprecatedTypes>
+  struct push_outputs<std::tuple<OutputTypes...>, AllowDeprecatedTypes> final {
     static void call(std::tuple<OutputTypes...>&& output, Stack* stack) {
       call_(std::move(output), stack, guts::make_index_sequence<sizeof...(OutputTypes)>());
     }
@@ -200,7 +262,7 @@ namespace detail {
   private:
     template<size_t... indices>
     static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, guts::index_sequence<indices...>) {
-      torch::jit::push(*stack, return_type_to_ivalue(std::move(std::get<indices>(output)))...);
+      torch::jit::push(*stack, return_to_ivalue<AllowDeprecatedTypes, OutputTypes>::call(std::move(std::get<indices>(output)))...);
     }
   };
 
@@ -216,7 +278,7 @@ namespace detail {
       KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
       auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, stack);
       torch::jit::drop(*stack, num_inputs);
-      push_outputs<typename guts::infer_function_traits_t<KernelFunctor>::return_type>::call(std::move(output), stack);
+      push_outputs<typename guts::infer_function_traits_t<KernelFunctor>::return_type, AllowDeprecatedTypes>::call(std::move(output), stack);
     }
   };
 

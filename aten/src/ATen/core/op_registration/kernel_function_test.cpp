@@ -16,8 +16,10 @@ using c10::ivalue::TensorList;
 using c10::ivalue::IntList;
 using c10::intrusive_ptr;
 using c10::ArrayRef;
-using std::unique_ptr;
+using c10::Dict;
 using at::Tensor;
+using std::string;
+using std::unique_ptr;
 
 namespace {
 
@@ -207,26 +209,38 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithIntListOutput_
   EXPECT_EQ(6, result[0].toIntListRef()[2]);
 }
 
-std::tuple<Tensor, int64_t, std::vector<Tensor>> kernelWithMultipleOutputs(Tensor) {
-  return std::tuple<Tensor, int64_t, std::vector<Tensor>>(
-    dummyTensor(TensorType2()), 5, {dummyTensor(TensorType1()), dummyTensor(TensorType2())}
+std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> kernelWithMultipleOutputs(Tensor) {
+  Dict<string, Tensor> dict;
+  dict.insert("first", dummyTensor(TensorType1()));
+  dict.insert("second", dummyTensor(TensorType2()));
+  return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
+    dummyTensor(TensorType2()),
+    5,
+    {dummyTensor(TensorType1()), dummyTensor(TensorType2())},
+    c10::optional<int64_t>(c10::in_place, 0),
+    dict
   );
 }
 
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-     .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[])", kernel<decltype(kernelWithMultipleOutputs), &kernelWithMultipleOutputs>(), dispatchKey(TensorType1()));
+     .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", kernel<decltype(kernelWithMultipleOutputs), &kernelWithMultipleOutputs>(), dispatchKey(TensorType1()));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::multiple_outputs", "");
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()));
-  EXPECT_EQ(3, result.size());
+  EXPECT_EQ(5, result.size());
   EXPECT_EQ(TensorType2(), result[0].toTensor().type_id());
   EXPECT_EQ(5, result[1].toInt());
   EXPECT_EQ(2, result[2].toTensorListRef().size());
   EXPECT_EQ(TensorType1(), result[2].toTensorListRef()[0].type_id());
   EXPECT_EQ(TensorType2(), result[2].toTensorListRef()[1].type_id());
+  EXPECT_EQ(0, result[3].toInt());
+  auto result_dict = c10::impl::toTypedDict<string, Tensor>(std::move(result[4].toGenericDict()->elements()));
+  EXPECT_EQ(2, result_dict.size());
+  EXPECT_EQ(TensorType1(), result_dict.at("first").type_id());
+  EXPECT_EQ(TensorType2(), result_dict.at("second").type_id());
 }
 
 Tensor kernelWithTensorInputByReferenceWithOutput(const Tensor& input1) {
@@ -416,6 +430,70 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorListInpu
   auto outputs = callOp(*op, TensorList::create({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
+}
+
+int captured_dict_size = 0;
+
+void kernelWithDictInputWithoutOutput(Dict<string, Tensor> input1) {
+  captured_dict_size = input1.size();
+}
+
+TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", kernel<decltype(kernelWithDictInputWithoutOutput), &kernelWithDictInputWithoutOutput>());
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  captured_dict_size = 0;
+  Dict<string, Tensor> dict;
+  dict.insert("key1", dummyTensor(TensorType1()));
+  dict.insert("key2", dummyTensor(TensorType2()));
+  auto outputs = callOp(*op, dict);
+  EXPECT_EQ(0, outputs.size());
+  EXPECT_EQ(2, captured_dict_size);
+}
+
+string kernelWithDictInputWithOutput(Dict<string, string> input1) {
+  return input1.at("key2");
+}
+
+TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::dict_input(Dict(str, str) input) -> str", kernel<decltype(kernelWithDictInputWithOutput), &kernelWithDictInputWithOutput>());
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  Dict<string, string> dict;
+  dict.insert("key1", "value1");
+  dict.insert("key2", "value2");
+  auto outputs = callOp(*op, dict);
+  EXPECT_EQ(1, outputs.size());
+  EXPECT_EQ("value2", outputs[0].toString()->string());
+}
+
+Dict<string, string> kernelWithDictOutput(Dict<string, string> input) {
+  return input;
+}
+
+TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", kernel<decltype(kernelWithDictOutput), &kernelWithDictOutput>());
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
+  ASSERT_TRUE(op.has_value());
+
+  Dict<string, string> dict;
+  dict.insert("key1", "value1");
+  dict.insert("key2", "value2");
+  auto outputs = callOp(*op, dict);
+  EXPECT_EQ(1, outputs.size());
+  auto output = c10::impl::toTypedDict<string, string>(std::move(outputs[0].toGenericDict()->elements()));
+
+  EXPECT_EQ(2, output.size());
+  EXPECT_EQ("value1", output.at("key1"));
+  EXPECT_EQ("value2", output.at("key2"));
 }
 
 bool called = false;

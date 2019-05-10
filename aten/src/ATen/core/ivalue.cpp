@@ -2,6 +2,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Formatting.h>
 #include <cmath>
+#include <ATen/core/Dict.h>
 
 namespace c10 {
 namespace ivalue {
@@ -38,7 +39,7 @@ std::ostream& printDict(std::ostream& out, const Dict& v) {
     if (!first) {
       out << ", ";
     }
-    out << pair.first << ": " << pair.second;
+    out << pair.key() << ": " << pair.value();
     first = false;
   }
 
@@ -133,7 +134,10 @@ static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
 }
 
 const ivalue::GenericDict::IterationOrder ivalue::GenericDict::iterationOrder() const {
-  IterationOrder ordered(elements().begin(), elements().end());
+  IterationOrder ordered;
+  for (auto element : elements()) {
+    ordered.emplace_back(element.key(), element.value());
+  }
   std::sort(ordered.begin(), ordered.end(), CompareIValue);
   return ordered;
 }
