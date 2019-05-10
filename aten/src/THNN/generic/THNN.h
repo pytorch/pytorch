@@ -4,6 +4,20 @@
 
 #include <ATen/core/Reduction.h>
 
+TH_API void THNN_(SpatialConvolutionMM_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,         // [OPTIONAL]
+          THTensor *finput,
+          THTensor *fgradInput,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH);
+
+#if !defined(TH_REAL_IS_LONG)
+
 TH_API void THNN_(AbsCriterion_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor
@@ -420,17 +434,6 @@ TH_API void THNN_(TemporalUpSamplingLinear_updateGradInput)(
           int osizeW,
           bool align_corners);
 
-TH_API void THNN_(SpatialConvolutionMM_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,         // [OPTIONAL]
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH);
 TH_API void THNN_(SpatialConvolutionMM_updateGradInput)(
           THNNState *state,
           THTensor *input,
@@ -951,5 +954,5 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           THTensor *total_weight,      // [BUFFER]
           int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
 
-
+#endif
 #endif
