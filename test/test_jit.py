@@ -5836,7 +5836,6 @@ a")
             # type: (float, int) -> float
             return math.pow(x, y)
 
-
         self.checkScript(test_floor, (1.5,))
         self.checkScript(test_ceil, (1.5,))
         self.checkScript(test_log_int, (2,))
@@ -5864,17 +5863,8 @@ a")
     def test_math_ops1(self):
         funcs_template = dedent('''
         def func():
-            return math.{func}({scalar1})
+            return math.{func}({scalar})
         ''')
-        # map functions to the test values from their domains
-        default_inputs = [1, 10, 0, -1, -1.5, 5.0, 1.5]
-        func_inputs = {func: default_inputs for func in ['erf', 'erfc', 'expm1', 'fabs']}
-        func_inputs.update(
-            {
-              'gamma': [1, 10, -1.5, 1.0, 1.5],
-              'lgamma': [1, 10, -1.5, 1.0, 1.5]
-            }
-        )
 
         def run_test(code):
             scope = {}
@@ -5882,9 +5872,13 @@ a")
             cu = torch.jit.CompilationUnit(code)
             self.assertEqual(cu.func(), scope['func']())
 
-        for func in func_inputs:
-            for scalar in func_inputs[func]:
-                code = funcs_template.format(func=func, scalar1=scalar)
+        special_domain = ['gamma', 'lgamma']
+
+        for func in ['erf', 'erfc', 'expm1', 'fabs', 'gamma', 'lgamma']:
+            for scalar in [1, 10, 0, -1, -1.5, 5.0, 1.5]:
+                if func in special_domain and scalar in [0, -1]:
+                    continue
+                code = funcs_template.format(func=func, scalar=scalar)
                 run_test(code)
 
     def test_math_copysign(self):
@@ -5905,14 +5899,12 @@ a")
             # type: (float, float) -> float
             return math.copysign(x, y)
 
-        for inputs in [(3, 5), (3, -5), (-3, 5), (-3, -5), (3, 0), (0, 3)]:
-            self.checkScript(func1, inputs)
-        for inputs in [(3, 5.5), (3, -5.5), (-3, 5.5), (-3, -5.5), (3, 0.0), (0, 3.3)]:
-            self.checkScript(func2, inputs)
-        for inputs in [(3.3, 5), (3.3, -5), (-3.3, 5), (-3.3, -5), (3.3, 0), (0.0, 3)]:
-            self.checkScript(func3, inputs)
-        for inputs in [(3.3, 5.5), (3.3, -5.5), (-3.3, 5.5), (-3.3, -5.5), (3.3, 0.0), (0.0, 3.3)]:
-            self.checkScript(func4, inputs)
+        inputs = [(3.3, 5.5), (3.3, -5.5), (-3.3, 5.5), (-3.3, -5.5), (3.3, 0.0), (0.0, 3.3)]
+        for a, b in inputs:
+            self.checkScript(func1, (int(a), int(b)))
+            self.checkScript(func2, (int(a), b))
+            self.checkScript(func3, (a, int(b)))
+            self.checkScript(func4, (a, b))
 
     def test_if_nest_while(self):
         def func(a, b):
