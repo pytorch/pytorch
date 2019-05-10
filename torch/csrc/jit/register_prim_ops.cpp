@@ -131,9 +131,7 @@ RegisterOperators reg(
     {Operator(
          prim::profile,
          [](const Node* node) {
-           // TODO: figure out why cast isn't marked as const
-           auto n = const_cast<Node*>(node); // NOLINT
-           auto callback = n->cast<ProfileOp>()->getCallback();
+           auto callback = node->cast<ProfileOp>()->getCallback();
            return [callback](Stack& stack) {
              callback(stack);
              return 0;
