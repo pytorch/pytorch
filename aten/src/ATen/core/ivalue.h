@@ -10,6 +10,13 @@
 #include <ATen/core/ivalue_base.h>
 #include <ATen/core/Dict.h>
 
+namespace torch {
+namespace jit {
+namespace script {
+struct Function;
+}
+} // namespace jit
+} // namespace torch
 namespace c10 {
 struct IValue;
 struct ClassType;
@@ -342,6 +349,14 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return c10::make_intrusive<Object>(std::move(type), numSlots);
   }
 
+  /**
+   * Slot API.
+   *
+   * Attributes are stored as a simple vector so that lookups are fast at
+   * runtime. A "slot" is just an index into that vector, which can be computed
+   * statically if you have access to the class type. Use this API if you are
+   * writing compiler stuff.
+   */
   void setSlot(size_t slot, IValue v) {
     if (slot >= slots_.size()) {
       // for module types, it is possible that the members of the class have
@@ -355,6 +370,19 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   const IValue& getSlot(size_t slot) const {
     return slots_.at(slot);
   }
+
+  /**
+   * Attribute API.
+   *
+   * Wrappers around the slot stuff so that users can access attributes
+   * directly. Use this API if you are a user.
+   *
+   * Note: Unlike in Python, TorchScript must make a distinction between
+   * attributes (which are IValues) and methods (which are Methods). If you
+   * want a method, use `obj.type()->getMethod()`
+   */
+  IValue getAttr(const std::string& name) const;
+  void setAttr(const std::string& name, IValue v);
 
   std::string name() const;
 
