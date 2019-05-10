@@ -495,6 +495,8 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if ceil_mode and input.type().kind() != "CompleteTensorType":
             return _unimplemented(name, "input size not accesible")
+        if set(tuple_fn(dilation)) != {1}:
+            return _unimplemented(name, "dilation")
         if not stride:
             stride = kernel_size
         padding = tuple(tuple_fn(padding))
@@ -508,8 +510,6 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
             'pads_i': padding,
             'strides_i': tuple_fn(stride),
         }
-        if set(tuple_fn(dilation)) != {1}:
-            kwargs['dilations_i'] = tuple_fn(dilation)
         # easy but hacky way to get flattened indices values
         # to be used to convert the indices values to non-flattened.
         # In ONNX the indices are computed as a flatten 1-D tensor,
