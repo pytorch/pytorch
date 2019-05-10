@@ -46,7 +46,7 @@ size_t getParamIndexinOpArgs(Node* n, const std::string& param_name) {
   return static_cast<size_t>(-1);
 }
 
-std::vector<param_info_t> getQuantizableParamsofType(
+std::vector<param_info_t> getQuantizableParamsofName(
     script::Method& method,
     const std::string& param_name) {
   std::vector<param_info_t> params_to_insert_qdq;
@@ -493,7 +493,7 @@ void InsertQuantDequantNodesForParam(
         getQParamFunc,
     at::ScalarType t) {
   AT_ASSERT(getQParamFunc != nullptr);
-  auto params_to_insert_qdq = getQuantizableParamsofType(method, param_name);
+  auto params_to_insert_qdq = getQuantizableParamsofName(method, param_name);
 
   for (auto& param_info : params_to_insert_qdq) {
     auto& param_slot = method.initial_ivalues()[param_info.idx];
