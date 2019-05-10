@@ -27,6 +27,19 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     fi
   fi
 fi
+if [[ "${BUILD_ENVIRONMENT}" == *namedtensor* ]]; then
+  if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
+    # It's a PR; test for [namedtensor] tag on the TOPMOST commit
+    topmost_commit=$(git log --format='%B' -n 1 HEAD)
+    if !(echo $topmost_commit | grep -q -e '\[namedtensor\]' -e '\[ci namedtensor\]' -e '\[namedtensor ci\]'); then
+      # NB: This doesn't halt everything, just this job.  So
+      # the rest of the workflow will keep going and you need
+      # to make sure you halt there too.  Blegh.
+      circleci step halt
+      exit
+    fi
+  fi
+fi
 
 # Set up NVIDIA docker repo
 curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
