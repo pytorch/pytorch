@@ -2498,8 +2498,9 @@ class _TestTorchMixin(object):
                 actual)
             # double input
             actual = torch.histc(
-                torch.tensor([1, 2, 1], dtype=torch.double, device=device),
-                bins=4, min=0, max=3)
+                torch.tensor([1, 2, 1], dtype=torch.double, device=device), bins=4, min=0, max=3)
+            print(actual)
+            print(actual.dtype)
             self.assertEqual(
                 torch.tensor([0, 2, 1, 0], dtype=torch.double, device=device),
                 actual)
