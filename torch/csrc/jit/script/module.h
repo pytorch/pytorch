@@ -442,6 +442,14 @@ struct TORCH_API Module {
   // so that C++ users can easily add methods
   void define(const std::string& src, const ResolverPtr& resolver = nullptr);
 
+  template <typename... Types>
+  IValue create_class(const c10::QualifiedName& name, Types&&... args)
+      const {
+    return create_class(name, {IValue(std::forward<Types>(args))...});
+  }
+
+  IValue create_class(const c10::QualifiedName& name, Stack stack) const;
+
  private:
   std::pair<std::shared_ptr<Function>, std::vector<Slot>>
   lower_first_class_method(Function* fn);
