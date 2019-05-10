@@ -430,6 +430,13 @@ def _sample_dirichlet(g, self, generator):
     return g.op("ATen", self, operator_s="_sample_dirichlet")
 
 
+def _standard_gamma(g, self, generator):
+    if not generator.node().mustBeNone():
+        return _unimplemented('_standard_gamma',
+                              'We are not able to export generator')
+    return g.op("ATen", self, operator_s="_standard_gamma")
+
+
 def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 

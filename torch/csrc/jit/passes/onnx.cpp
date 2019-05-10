@@ -211,7 +211,7 @@ void BlockToONNX(
         outputs[i]->setType(old->type());
         // Copy over source location and scope information to all nodes
         // created by the symbolic
-        outputs[i]->node()->setSourceLocation(node->getSourceLocation());
+        outputs[i]->node()->setSourceRange(node->sourceRange());
         outputs[i]->node()->setScope(node->scope());
         env[old] = outputs[i];
       } else {

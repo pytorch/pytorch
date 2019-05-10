@@ -12,7 +12,7 @@ namespace jit {
 namespace script {
 
 static const auto classSrcs1 = R"JIT(
-op_version_set = 0
+op_version_set = 1
 class FooNestedTest:
     def __init__(self, y):
         self.y = y
@@ -30,7 +30,7 @@ class FooTest:
 )JIT";
 
 static const auto classSrcs2 = R"JIT(
-op_version_set = 0
+op_version_set = 1
 class FooTest:
     def __init__(self, x):
       self.dx = x
@@ -85,12 +85,11 @@ void testScriptObject() {
   ASSERT_ANY_THROW(m1.create_class(c10::QualifiedName(base, "FooTest"), {1}));
   auto x = torch::ones({2, 3});
   auto obj = m2.create_class(c10::QualifiedName(base, "FooTest"), x).toObject();
-  auto dx = c10::getattr(obj, "dx");
   ASSERT_TRUE(test::almostEqual(x, dx.toTensor()));
 
   auto new_x = torch::rand({2, 3});
-  c10::setattr(obj, "dx", new_x);
-  auto new_dx = c10::getattr(obj, "dx");
+  obj->setAttr("dx", new_x);
+  auto new_dx = obj->getAttr("dx");
   ASSERT_TRUE(test::almostEqual(new_x, new_dx.toTensor()));
 }
 

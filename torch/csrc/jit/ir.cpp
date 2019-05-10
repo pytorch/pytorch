@@ -200,6 +200,14 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
   out << "]";
 }
 
+SourceRange Node::sourceRange() const {
+ if(source_range_) {
+   return *source_range_;
+ }
+ std::stringstream ss;
+ return SourceRange(ss.str());
+}
+
 static std::ostream& indent(std::ostream& out, size_t level) {
   for (size_t i = 0; i < level; ++i) {
     out << "  ";
@@ -224,8 +232,10 @@ std::ostream& Node::print(
       if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
         printAttributes(out, /*ignore_subgraph=*/true);
       }
+
       groups->push_back(this);
     } else {
+
       out << kind().toQualString();
       if (hasAttributes()) {
         printAttributes(out);
@@ -241,6 +251,7 @@ std::ostream& Node::print(
     out << ", ";
     out << "scope: " << scName << "\n";
   }
+
   for (size_t i = 0; i < blocks().size(); ++i) {
     auto b = blocks()[i];
     indent(out, level + 1) << "block" << i << "("
@@ -251,6 +262,7 @@ std::ostream& Node::print(
     }
     indent(out, level + 2) << "-> (" << b->outputs() << ")\n";
   }
+
   return out;
 }
 
@@ -849,6 +861,7 @@ bool Node::hasSideEffects() const {
     case prim::RaiseException:
     case prim::SetAttr:
     case aten::warn:
+    case aten::save:
     case aten::manual_seed:
     case prim::AddStatValue:
     case prim::TimePoint:
@@ -972,7 +985,7 @@ void Node::destroy() {
 }
 
 void Node::cloneFrom(Node* s) {
-  setSourceLocation(s->getSourceLocation());
+  s->source_range_ = s->source_range_;
   if (s->scope_ && !s->scope_->isBlank()) {
     scope_ = s->scope_;
   }
@@ -1145,6 +1158,35 @@ void Node::removeAllInputs() {
     dropInput(i);
   }
   inputs_.clear();
+}
+
+void Node::permuteInputs(const std::vector<size_t>& new_order) {
+  schema_ = nullptr;
+  AT_ASSERT(new_order.size() == inputs_.size());
+  std::vector<Value*> new_inputs;
+  new_inputs.reserve(new_order.size());
+  for (size_t i = 0; i < new_order.size(); ++i) {
+    AT_ASSERTM(inputs_.at(new_order[i]) != nullptr, "Repeated index");
+    new_inputs.push_back(inputs_.at(new_order[i]));
+    auto it = findUseForInput(new_order[i]);
+    it->offset = i;
+    inputs_.at(new_order[i]) = nullptr;
+  }
+  inputs_ = std::move(new_inputs);
+}
+
+void Node::permuteOutputs(const std::vector<size_t>& new_order) {
+  schema_ = nullptr;
+  AT_ASSERT(new_order.size() == outputs_.size());
+  std::vector<Value*> new_outputs;
+  new_outputs.reserve(new_order.size());
+  for (size_t i = 0; i < new_order.size(); ++i) {
+    AT_ASSERTM(outputs_.at(new_order[i]) != nullptr, "Repeated index");
+    new_outputs.push_back(outputs_.at(new_order[i]));
+    outputs_.at(new_order[i])->setOffset(i);
+    outputs_.at(new_order[i]) = nullptr;
+  }
+  outputs_ = std::move(new_outputs);
 }
 
 use_list::iterator Node::findUseForInput(size_t i) {
