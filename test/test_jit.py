@@ -3100,6 +3100,15 @@ graph(%Ra, %Rb):
         warns = [str(w.message) for w in warns]
         self.assertEqual(len(warns), 0)
 
+    @unittest.skipIf(sys.platform == "win32", "temp file name on windows")
+    def test_trace_save(self):
+        def fn(x):
+            return x + 2
+
+        out = torch.jit.trace(fn, (torch.ones(2, 2),))
+        with tempfile.NamedTemporaryFile() as f:
+            out.save(f.name)
+
     @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
     def test_torch_load_error(self):
         class J(torch.jit.ScriptModule):

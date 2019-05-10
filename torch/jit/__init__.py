@@ -724,18 +724,18 @@ def trace(func,
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
 
     if isinstance(func, torch.nn.Module):
+        name = 'forward'
         if _module_class is None:
             _module_class = TopLevelTracedModule
-        traced = _module_class(func, **executor_options)
-        traced._c._create_method_from_trace('forward', func, example_inputs,
-                                            var_lookup_fn, _force_outplace)
     else:
         name = getattr(func, '__name__', 'forward')
+        if _module_class is None:
+            _module_class = TopLevelTracedFunction
         if name == '<lambda>':
             name = '_lambda'  # make name a valid identifier
-        traced = torch._C._create_function_from_trace(name, func, example_inputs,
-                                                      var_lookup_fn,
-                                                      _force_outplace)
+    traced = _module_class(func, **executor_options)
+    traced._c._create_method_from_trace('forward', func, example_inputs,
+                                        var_lookup_fn, _force_outplace)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
@@ -1605,7 +1605,7 @@ class TracedModule(ScriptModule):
                 check_unique(buf)
 
         if orig._backward_hooks or orig._forward_hooks or orig._forward_pre_hooks:
-            raise ValueError("Modules that have hooks assigned can't be compiled")
+            raise ValueError("Modules that have hooks assigned can't be traced")
 
         for name, submodule in orig._modules.items():
             if isinstance(submodule, ScriptModule) and not isinstance(submodule, TracedModule):
@@ -1630,8 +1630,17 @@ class TracedModule(ScriptModule):
         raise RuntimeError("Cannot set new properties on a traced module.")
 
 
+class TracedFunction(TracedModule):
+    def __init__(self, func, id_set=None, optimize=True):
+        ScriptModule.__init__(self, optimize=optimize)
+        self._freeze()
+
+
 if _enabled:
     class TopLevelTracedModule(TracedModule):
+        forward = _CachedForward()
+
+    class TopLevelTracedFunction(TracedFunction):
         forward = _CachedForward()
 
 
