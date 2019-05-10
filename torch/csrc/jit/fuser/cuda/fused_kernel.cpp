@@ -87,10 +87,15 @@ static inline void nvrtcCheck(nvrtcResult result, const char* file, int line) {
 
 static inline void cuCheck(CUresult result, const char* file, int line) {
   if (result != CUDA_SUCCESS) {
+#ifdef __HIP_PLATFORM_HCC__
+    std::stringstream ss;
+    ss << file << ":" << line << ": Error in HIP.";
+#else
     const char* str;
     nvrtc().cuGetErrorString(result, &str);
     std::stringstream ss;
     ss << file << ":" << line << ": " << str;
+#endif
     throw std::runtime_error(ss.str());
   }
 }
