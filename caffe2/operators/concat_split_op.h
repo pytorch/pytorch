@@ -5,23 +5,9 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
-
-namespace {
-inline int GetDimFromOrderString(const string& str) {
-  auto order = StringToStorageOrder(str);
-  switch (order) {
-    case StorageOrder::NHWC:
-      return 3;
-    case StorageOrder::NCHW:
-      return 1;
-    default:
-      CAFFE_THROW("Unsupported storage order: ", str);
-      return -1;
-  }
-}
-} // namespace
 
 template <class Context>
 class SplitOp final : public Operator<Context> {
@@ -29,8 +15,9 @@ class SplitOp final : public Operator<Context> {
   static const int kSplitOpInputSize = 2;
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SplitOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SplitOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         split_(this->template GetRepeatedArgument<int>("split")) {
     CAFFE_ENFORCE(
         !(OperatorBase::HasArgument("axis") &&
@@ -62,8 +49,9 @@ template <class Context>
 class SplitByLengthsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SplitByLengthsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit SplitByLengthsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     CAFFE_ENFORCE(
         !(OperatorBase::HasArgument("axis") &&
           OperatorBase::HasArgument("order")),
@@ -91,8 +79,9 @@ template <class Context>
 class ConcatOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ConcatOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit ConcatOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     CAFFE_ENFORCE(
         !(OperatorBase::HasArgument("axis") &&
           OperatorBase::HasArgument("order")),
@@ -331,6 +320,14 @@ bool ConcatOp<Context>::RunOnDevice() {
   }
   return true;
 }
+
+OpSchema::Cost CostInferenceForConcat(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in);
+
+std::vector<TensorShape> TensorInferenceForConcat(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in);
 
 } // namespace caffe2
 

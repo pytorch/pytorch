@@ -833,6 +833,15 @@ OPERATOR_SCHEMA(NanCheck)
         "Tensor to copy input into if no NaNs or inf."
         " Can be in-place");
 
+REGISTER_CPU_OPERATOR(IsNaN, IsNanOp<CPUContext>);
+
+OPERATOR_SCHEMA(IsNaN)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc("Returns a new tensor with boolean elements representing if each element is NaN or not.")
+    .Input(0, "tensor", "Tensor to check for nan")
+    .Output(0, "output", "Tensor containing a 1 at each location of NaN elements."); 
+
 OPERATOR_SCHEMA(Size)
     .NumInputs(1)
     .NumOutputs(1)

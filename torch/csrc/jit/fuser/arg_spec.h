@@ -1,11 +1,8 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CUDA_FUSER || USE_CPU_FUSER
-
 #include <ATen/ATen.h>
+#include <ATen/core/functional.h> // fmap
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/fuser/tensor_desc.h>
-#include <torch/csrc/utils/functional.h> // fmap
 #include <torch/csrc/utils/hash.h>
 
 #include <cstdint>
@@ -22,7 +19,7 @@ namespace fuser {
 //  are compiled per-device.
 struct TORCH_API ArgSpec {
   ArgSpec(at::TensorList inputs, const int _device)
-      : descs_{fmap<TensorDesc>(inputs)},
+      : descs_{c10::fmap<TensorDesc>(inputs)},
         hash_code_{torch::get_hash(_device, inputs.size(), descs_)},
         device_{_device} {}
 
@@ -60,5 +57,3 @@ struct TORCH_API ArgSpec {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CUDA_FUSER || USE_CPU_FUSER

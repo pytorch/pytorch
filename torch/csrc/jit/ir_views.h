@@ -5,7 +5,7 @@ namespace jit {
 
 struct IfView {
   explicit IfView(Node* node) : node_(node) {
-    JIT_ASSERT(node->kind() == prim::If);
+    AT_ASSERT(node->kind() == ::c10::prim::If);
   }
   Value* cond() const {
     return node_->input(0);
@@ -32,13 +32,20 @@ struct IfView {
     return node_;
   }
 
+  void permuteOutputs(const std::vector<size_t>& new_output_order) {
+    node_->permuteOutputs(new_output_order);
+    thenBlock()->permuteOutputs(new_output_order);
+    elseBlock()->permuteOutputs(new_output_order);
+  }
+
  private:
   Node* node_;
 };
 
 struct LoopView {
   explicit LoopView(Node* node) : node_(node) {
-    JIT_ASSERT(node->kind() == prim::Loop || node->kind() == onnx::Loop);
+    AT_ASSERT(
+        node->kind() == ::c10::prim::Loop || node->kind() == ::c10::onnx::Loop);
   }
   Block* bodyBlock() const {
     return node_->blocks().at(0);
@@ -79,9 +86,33 @@ struct LoopView {
     return node_;
   }
 
+  void permuteLoopCarried(const std::vector<size_t>& new_output_order) {
+    node_->permuteOutputs(new_output_order);
+    // skip trip count and cond
+    node_->permuteInputs(adjustIndices(2, new_output_order));
+    auto adjusted_block_order = adjustIndices(1, new_output_order);
+    bodyBlock()->permuteOutputs(adjusted_block_order);
+    bodyBlock()->permuteInputs(adjusted_block_order);
+  }
+
  private:
   Node* node_;
-};
 
+  // adjust index_ordering by adding indices 0 - thorugh adjust, and
+  // incrementing all existing inputs by adjust
+  static std::vector<size_t> adjustIndices(
+      size_t adjust,
+      const std::vector<size_t>& index_ordering) {
+    std::vector<size_t> adjusted;
+    adjusted.reserve(adjust + index_ordering.size());
+    for (size_t i = 0; i < adjust; ++i) {
+      adjusted.push_back(i);
+    }
+    for (auto index : index_ordering) {
+      adjusted.push_back(index + adjust);
+    }
+    return adjusted;
+  }
+};
 } // namespace jit
 } // namespace torch

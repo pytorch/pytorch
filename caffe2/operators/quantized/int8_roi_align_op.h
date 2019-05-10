@@ -258,8 +258,9 @@ void ROIAlignForward(
 
 class Int8RoIAlignOp final : public Operator<CPUContext> {
  public:
-  Int8RoIAlignOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit Int8RoIAlignOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NHWC"))),
         spatial_scale_(
@@ -301,7 +302,10 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
     assert(sampling_ratio_ >= 0);
 
     // only supports NHWC now
-    Y->t.Resize(R.dim32(0), pooled_height_, pooled_width_, X.t.dim32(3));
+    ReinitializeTensor(
+        &Y->t,
+        {R.dim32(0), pooled_height_, pooled_width_, X.t.dim32(3)},
+        at::dtype<uint8_t>().device(CPU));
     int output_size = Y->t.numel();
 
     ROIAlignForward(

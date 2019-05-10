@@ -54,7 +54,8 @@ struct TORCH_API Engine {
 protected:
   void compute_dependencies(Function* root, GraphTask& task);
   void evaluate_function(FunctionTask& task);
-  ReadyQueue& ready_queue(int device);
+  ReadyQueue& ready_queue(at::Device device);
+  ReadyQueue& ready_queue_by_index(int device_index);
   void start_threads();
   virtual void thread_init(int device);
   virtual void thread_main(GraphTask *graph_task);

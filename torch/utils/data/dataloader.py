@@ -42,7 +42,9 @@ class DataLoader(object):
             (default: ``0``)
         collate_fn (callable, optional): merges a list of samples to form a mini-batch.
         pin_memory (bool, optional): If ``True``, the data loader will copy tensors
-            into CUDA pinned memory before returning them.
+            into CUDA pinned memory before returning them.  If your data elements
+            are a custom type, or your ``collate_fn`` returns a batch that is a custom type
+            see the example below.
         drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
             if the dataset size is not divisible by the batch size. If ``False`` and
             the size of dataset is not divisible by the batch size, then the last batch
@@ -53,7 +55,38 @@ class DataLoader(object):
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
 
-    .. note:: By default, each worker will have its PyTorch seed set to
+    .. note:: When ``num_workers != 0``, the corresponding worker processes are created each time
+              iterator for the DataLoader is obtained (as in when you call
+              ``enumerate(dataloader,0)``).
+              At this point, the dataset, ``collate_fn`` and ``worker_init_fn`` are passed to each
+              worker, where they are used to access and initialize data based on the indices
+              queued up from the main process. This means that dataset access together with
+              its internal IO, transforms and collation runs in the worker, while any
+              shuffle randomization is done in the main process which guides loading by assigning
+              indices to load. Workers are shut down once the end of the iteration is reached.
+
+              Since workers rely on Python multiprocessing, worker launch behavior is different
+              on Windows compared to Unix. On Unix fork() is used as the default
+              muliprocessing start method, so child workers typically can access the dataset and
+              Python argument functions directly through the cloned address space. On Windows, another
+              interpreter is launched which runs your main script, followed by the internal
+              worker function that receives the dataset, collate_fn and other arguments
+              through Pickle serialization.
+
+              This separate serialization means that you should take two steps to ensure you
+              are compatible with Windows while using workers
+              (this also works equally well on Unix):
+
+              - Wrap most of you main script's code within ``if __name__ == '__main__':`` block,
+                to make sure it doesn't run again (most likely generating error) when each worker
+                process is launched. You can place your dataset and DataLoader instance creation
+                logic here, as it doesn't need to be re-executed in workers.
+              - Make sure that ``collate_fn``, ``worker_init_fn`` or any custom dataset code
+                is declared as a top level def, outside of that ``__main__`` check. This ensures
+                they are available in workers as well
+                (this is needed since functions are pickled as references only, not bytecode).
+
+              By default, each worker will have its PyTorch seed set to
               ``base_seed + worker_id``, where ``base_seed`` is a long generated
               by main process using its RNG. However, seeds for other libraies
               may be duplicated upon initializing workers (w.g., NumPy), causing
@@ -65,6 +98,42 @@ class DataLoader(object):
 
     .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
                  unpicklable object, e.g., a lambda function.
+
+    The default memory pinning logic only recognizes Tensors and maps and iterables
+    containg Tensors.  By default, if the pinning logic sees a batch that is a custom type
+    (which will occur if you have a ``collate_fn`` that returns a custom batch type),
+    or if each element of your batch is a custom type, the pinning logic will not
+    recognize them, and it will return that batch (or those elements)
+    without pinning the memory.  To enable memory pinning for custom batch or data types,
+    define a ``pin_memory`` method on your custom type(s).
+
+    Example::
+
+        class SimpleCustomBatch:
+            def __init__(self, data):
+                transposed_data = list(zip(*data))
+                self.inp = torch.stack(transposed_data[0], 0)
+                self.tgt = torch.stack(transposed_data[1], 0)
+
+            def pin_memory(self):
+                self.inp = self.inp.pin_memory()
+                self.tgt = self.tgt.pin_memory()
+                return self
+
+        def collate_wrapper(batch):
+            return SimpleCustomBatch(batch)
+
+        inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        dataset = TensorDataset(inps, tgts)
+
+        loader = DataLoader(dataset, batch_size=2, collate_fn=collate_wrapper,
+                            pin_memory=True)
+
+        for batch_ndx, sample in enumerate(loader):
+            print(sample.inp.is_pinned())
+            print(sample.tgt.is_pinned())
+
     """
 
     __initialized = False
@@ -243,9 +312,18 @@ class _DataLoaderIter(object):
     #           happen when data in queue is corrupted (e.g., due to
     #           `cancel_join_thread` or unexpected exit).
     #
-    #           For child exit, we register SIGCHLD handler on main process,
-    #           which checks if any of the workers fail in the (Python) handler.
-    #           See DataLoader.cpp.
+    #           For child exit, we set a timeout whenever we try to get data
+    #           from `data_queue`, and check the workers' status on each timeout
+    #           and error.
+    #           See `_DataLoaderiter._get_batch()` and
+    #           `_DataLoaderiter._try_get_batch()` for details.
+    #
+    #           Additionally, for child exit on non-Windows platforms, we also
+    #           register a SIGCHLD handler (which is supported on Windows) on
+    #           the main process, which checks if any of the workers fail in the
+    #           (Python) handler. This is more efficient and faster in detecting
+    #           worker failures, compared to only using the above mechanism.
+    #           See `DataLoader.cpp` and `_utils/signal_handling.py` for details.
     #
     #           For `.get()` calls where the sender(s) is not the workers, we
     #           guard them with timeouts, and check the status of the sender
@@ -281,7 +359,7 @@ class _DataLoaderIter(object):
     #
     # Now let's get back to 1:
     #   how we gracefully exit the workers when the last reference to the
-    #   iteartor is gone.
+    #   iterator is gone.
     #
     # To achieve this, we implement the following logic along with the design
     # choices mentioned above:
@@ -417,28 +495,64 @@ class _DataLoaderIter(object):
     def __len__(self):
         return len(self.batch_sampler)
 
+    def _try_get_batch(self, timeout=_utils.MP_STATUS_CHECK_INTERVAL):
+        # Tries to fetch data from `data_queue` for a given timeout. This can
+        # also be used as inner loop of fetching without timeout, with the
+        # sender status as the loop condition.
+        #
+        # This raises a `RuntimeError` if any worker died expectedly. This error
+        # can come from either the SIGCHLD handler in `_utils/signal_handling.py`
+        # (only for non-Windows platforms), or the manual check below on errors
+        # and timeouts.
+        #
+        # Returns a 2-tuple:
+        #   (bool: whether successfully get data, any: data if successful else None)
+        try:
+            data = self.data_queue.get(timeout=timeout)
+            return (True, data)
+        except Exception as e:
+            # At timeout and error, we manually check whether any worker has
+            # failed. Note that this is the only mechanism for Windows to detect
+            # worker failures.
+            if not all(w.is_alive() for w in self.workers):
+                pids_str = ', '.join(str(w.pid) for w in self.workers if not w.is_alive())
+                raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str))
+            if isinstance(e, queue.Empty):
+                return (False, None)
+            raise
+
     def _get_batch(self):
-        # In the non-timeout case, worker exit is covered by SIGCHLD handler.
-        # But if `pin_memory=True`, we still need account for the possibility
-        # that `pin_memory_thread` dies.
+        # Fetches data from `self.data_queue`.
+        #
+        # We check workers' status every `MP_STATUS_CHECK_INTERVAL` seconds,
+        # which we achieve by running `self._try_get_batch(timeout=MP_STATUS_CHECK_INTERVAL)`
+        # in a loop. This is the only mechanism to detect worker failures for
+        # Windows. For other platforms, a SIGCHLD handler is also used for
+        # worker failure detection.
+        #
+        # If `pin_memory=True`, we also need check if `pin_memory_thread` had
+        # died at timeouts.
         if self.timeout > 0:
-            try:
-                return self.data_queue.get(timeout=self.timeout)
-            except queue.Empty:
+            success, data = self._try_get_batch(self.timeout)
+            if success:
+                return data
+            else:
                 raise RuntimeError('DataLoader timed out after {} seconds'.format(self.timeout))
         elif self.pin_memory:
             while self.pin_memory_thread.is_alive():
-                try:
-                    return self.data_queue.get(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
-                except queue.Empty:
-                    continue
+                success, data = self._try_get_batch()
+                if success:
+                    return data
             else:
                 # while condition is false, i.e., pin_memory_thread died.
                 raise RuntimeError('Pin memory thread exited unexpectedly')
             # In this case, `self.data_queue` is a `queue.Queue`,. But we don't
             # need to call `.task_done()` because we don't use `.join()`.
         else:
-            return self.data_queue.get()
+            while True:
+                success, data = self._try_get_batch()
+                if success:
+                    return data
 
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
@@ -486,7 +600,12 @@ class _DataLoaderIter(object):
         self.rcvd_idx += 1
         self._put_indices()
         if isinstance(batch, _utils.ExceptionWrapper):
-            raise batch.exc_type(batch.exc_msg)
+            # make multiline KeyError msg readable by working around
+            # a python bug https://bugs.python.org/issue2651
+            if batch.exc_type == KeyError and "\n" in batch.exc_msg:
+                raise Exception("KeyError:" + batch.exc_msg)
+            else:
+                raise batch.exc_type(batch.exc_msg)
         return batch
 
     def __getstate__(self):
@@ -508,41 +627,50 @@ class _DataLoaderIter(object):
         # See (1) and the second half of the note.
         if not self.shutdown:
             self.shutdown = True
-            # Removes pids from the C side data structure first so worker
-            # termination afterwards won't trigger false positive error report.
-            if self.worker_pids_set:
-                _utils.signal_handling._remove_worker_pids(id(self))
-                self.worker_pids_set = False
+            try:
+                self.done_event.set()
 
-            self.done_event.set()
+                # Exit `pin_memory_thread` first because exiting workers may leave
+                # corrupted data in `worker_result_queue` which `pin_memory_thread`
+                # reads from.
+                if hasattr(self, 'pin_memory_thread'):
+                    # Use hasattr in case error happens before we set the attribute.
+                    # First time do `worker_result_queue.put` in this process.
 
-            # Exit `pin_memory_thread` first because exiting workers may leave
-            # corrupted data in `worker_result_queue` which `pin_memory_thread`
-            # reads from.
-            if hasattr(self, 'pin_memory_thread'):
-                # Use hasattr in case error happens before we set the attribute.
-                # First time do `worker_result_queue.put` in this process.
+                    # `cancel_join_thread` in case that `pin_memory_thread` exited.
+                    self.worker_result_queue.cancel_join_thread()
+                    self.worker_result_queue.put(None)
+                    self.pin_memory_thread.join()
+                    # Indicate that no more data will be put on this queue by the
+                    # current process. This **must** be called after
+                    # `pin_memory_thread` is joined because that thread shares the
+                    # same pipe handles with this loader thread. If the handle is
+                    # closed, Py3 will error in this case, but Py2 will just time
+                    # out even if there is data in the queue.
+                    self.worker_result_queue.close()
 
-                # `cancel_join_thread` in case that `pin_memory_thread` exited.
-                self.worker_result_queue.cancel_join_thread()
-                self.worker_result_queue.put(None)
-                self.pin_memory_thread.join()
-                # Indicate that no more data will be put on this queue by the
-                # current process. This **must** be called after
-                # `pin_memory_thread` is joined because that thread shares the
-                # same pipe handles with this loader thread. If the handle is
-                # closed, Py3 will error in this case, but Py2 will just time
-                # out even if there is data in the queue.
-                self.worker_result_queue.close()
-
-            # Exit workers now.
-            for q in self.index_queues:
-                q.put(None)
-                # Indicate that no more data will be put on this queue by the
-                # current process.
-                q.close()
-            for w in self.workers:
-                w.join()
+                # Exit workers now.
+                for q in self.index_queues:
+                    q.put(None)
+                    # Indicate that no more data will be put on this queue by the
+                    # current process.
+                    q.close()
+                for w in self.workers:
+                    w.join()
+            finally:
+                # Even though all this function does is putting into queues that
+                # we have called `cancel_join_thread` on, weird things can
+                # happen when a worker is killed by a signal, e.g., hanging in
+                # `Event.set()`. So we need to guard this with SIGCHLD handler,
+                # and remove pids from the C side data structure only at the
+                # end.
+                #
+                # FIXME: Unfortunately, for Windows, we are missing a worker
+                #        error detection mechanism here in this function, as it
+                #        doesn't provide a SIGCHLD handler.
+                if self.worker_pids_set:
+                    _utils.signal_handling._remove_worker_pids(id(self))
+                    self.worker_pids_set = False
 
     def __del__(self):
         if self.num_workers > 0:

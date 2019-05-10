@@ -415,8 +415,8 @@ class TestShapeInference(test_util.TestCase):
         net = core.Net("concat")
 
         net.Concat(["A", "B"], ["C", "splits"], axis=1)
-        net.Concat(["C", "D"], ["E"], order="NCHW")
-        net.Concat(["E", "F"], ["G"], add_axis=1, order="NHWC")
+        net.Concat(["C", "D"], ["E", "splitsE"], order="NCHW")
+        net.Concat(["E", "F"], ["G", "splitsG"], add_axis=1, order="NHWC")
         (shapes, types) = workspace.InferShapesAndTypes(
             [net],
             {
@@ -435,8 +435,8 @@ class TestShapeInference(test_util.TestCase):
         net = core.Net("concat")
 
         net.Concat(["A", "B"], ["C", "splits"], axis=1)
-        net.Concat(["C", "D"], ["E"], order="NCHW")
-        net.Concat(["E", "F"], ["G"], add_axis=1, order="NHWC")
+        net.Concat(["C", "D"], ["E", "splitsE"], order="NCHW")
+        net.Concat(["E", "F"], ["G", "splitsG"], add_axis=1, order="NHWC")
         (shapes, types) = workspace.InferShapesAndTypes(
             [net],
             blob_dimensions={

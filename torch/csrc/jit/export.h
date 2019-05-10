@@ -19,29 +19,36 @@ namespace jit {
 // file contents being the raw tensor data.
 using RawDataExportMap = std::unordered_map<std::string, at::Tensor>;
 
+constexpr size_t CURRENT_OP_VERSION_SET = 1;
+
 TORCH_API std::tuple<std::string, RawDataExportMap> export_onnx(
     const std::shared_ptr<Graph>& graph,
-    const std::vector<at::Tensor>& initializers,
+    const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export = false,
     ::torch::onnx::OperatorExportTypes operator_export_type =
-        ::torch::onnx::OperatorExportTypes::ONNX);
+        ::torch::onnx::OperatorExportTypes::ONNX,
+    bool strip_doc_string = true);
 
 // For testing purposes
 TORCH_API std::string pretty_print_onnx(
     const std::shared_ptr<Graph>& graph,
-    const std::vector<at::Tensor>& initializers,
+    const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export,
     ::torch::onnx::OperatorExportTypes operator_export_type =
         ::torch::onnx::OperatorExportTypes::ONNX,
     bool google_printer = false);
 
-TORCH_API void ExportModule(const script::Module& module, std::ostream& out);
+TORCH_API void ExportModule(
+    const script::Module& module,
+    std::ostream& out,
+    const script::ExtraFilesMap& metadata = script::ExtraFilesMap());
 
 TORCH_API void ExportModule(
     const script::Module& module,
-    const std::string& filename);
+    const std::string& filename,
+    const script::ExtraFilesMap& metadata = script::ExtraFilesMap());
 
 } // namespace jit
 } // namespace torch

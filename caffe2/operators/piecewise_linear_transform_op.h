@@ -11,8 +11,9 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  PiecewiseLinearTransformOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit PiecewiseLinearTransformOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     binary_ = this->template GetSingleArgument<bool>("binary", false);
 
     // Retrieve transform params (i.e., the linear functions).

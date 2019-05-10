@@ -3,27 +3,11 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cpu/CopyKernel.h>
 
 namespace {
-
-template <typename self_T, typename src_T>
-void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
-  at::CPU_tensor_apply2<self_T, src_T>(
-      self, src, [](self_T& self_val, const src_T& src_val) {
-        self_val = static_cast<self_T>(
-            static_cast<at::native::inter_copy_type_t<self_T>>(src_val));
-      });
-}
-
-template <typename self_T>
-void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
-  AT_CHECK(self.numel() == src.numel(), "sizes do not match");
-  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "_copy__cpu", [&]() {
-    _copy__cpu<self_T, scalar_t>(self, src);
-  });
-}
 
 bool copy_transpose_valid(const at::Tensor& self, const at::Tensor& src) {
   const int MIN_SZ = 60 * 60;
@@ -37,13 +21,31 @@ bool copy_transpose_valid(const at::Tensor& self, const at::Tensor& src) {
 namespace at {
 namespace native {
 
+Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
+  Tensor b_src;
+  if (self.is_sparse() && src.is_sparse()) {
+    return at::copy_sparse_to_sparse_(self, src, non_blocking);
+  }
+  if (!self.is_sparse() && !src.is_sparse()) {
+    std::tie(b_src) = expand_inplace(self, src, "copy");
+    return s_copy_(self, b_src, non_blocking);
+  }
+  AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ",
+           self.type(), " and src type = ", src.type());
+}
+
 Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
-  if (src.is_cuda()) {
+  if (src.type_id() != CPUTensorId()) {
     _s_copy_from(src, self, non_blocking);
     return self;
   }
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
-      self.type(), "_copy__cpu", [&]() { ::_copy__cpu<scalar_t>(self, src); });
+
+  if (self.scalar_type() == src.scalar_type()) {
+    copy_kernel_same_type(kCPU, self, src);
+  } else {
+    AT_CHECK(self.numel() == src.numel(), "sizes do not match");
+    copy_kernel_cast(kCPU, self, src);
+  }
   return self;
 }
 
@@ -58,8 +60,8 @@ void _copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   }
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
-      self.type(), "_copy_same_type_transpose_", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(
+    at::ScalarType::Half, self.scalar_type(), "_copy_same_type_transpose_", [&]() {
         scalar_t* sp = src.data<scalar_t>();
         scalar_t* rp = self.data<scalar_t>();
         scalar_t* bp = buf.data<scalar_t>();
@@ -105,43 +107,15 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
     return;
   }
 
-  bool serial_path = false;
-  if (self.numel() == src.numel()) {
-    if (self.is_contiguous() && src.is_contiguous()) {
-      copy_kernel(kCPU, self, src);
-    } else if (copy_transpose_valid(self, src)) {
-      _copy_same_type_transpose_(self, src);
-    } else {
-#ifdef _OPENMP
-      if (!in_parallel_region()) {
-        AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy_same_type_", [&]() {
-          at::CPU_tensor_parallel_apply2<scalar_t, scalar_t>(
-              self, src, [](scalar_t& self_val, const scalar_t& src_val) {
-                self_val = src_val;
-              });
-        });
-      } else {
-        serial_path = true;
-      }
-#else
-      serial_path = true;
-#endif
-    }
-  } else {
-    serial_path = true;
+  if (self.numel() == src.numel() && copy_transpose_valid(self, src)) {
+    return _copy_same_type_transpose_(self, src);
   }
 
-  if (serial_path) {
-    AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy_same_type_", [&]() {
-      at::CPU_tensor_apply2<scalar_t, scalar_t>(
-          self, src, [](scalar_t& self_val, const scalar_t& src_val) {
-            self_val = src_val;
-          });
-    });
-  }
+  copy_kernel_same_type(kCPU, self, src);
 }
 
-DEFINE_DISPATCH(copy_kernel);
+DEFINE_DISPATCH(copy_kernel_cast);
+DEFINE_DISPATCH(copy_kernel_same_type);
 
 } // namespace native
 } // namespace at

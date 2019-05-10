@@ -4,7 +4,9 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
+# shellcheck disable=SC2034
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
+
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # For distributed, four environmental configs:
@@ -30,8 +32,8 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT"
   sudo mkdir -p /var/run/sshd
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" $*
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-py3-clang5-asan* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
 echo "Python version:"
@@ -45,6 +47,29 @@ cmake --version
 
 # TODO: Don't run this...
 pip install -q -r requirements.txt || true
+
+# TODO: Don't install this here
+if ! which conda; then
+  # In ROCm CIs, we are doing cross compilation on build machines with
+  # intel cpu and later run tests on machines with amd cpu.
+  # Also leave out two builds to make sure non-mkldnn builds still work.
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda8-cudnn7-py3-* ]]; then
+    pip install -q mkl mkl-devel
+    export USE_MKLDNN=1
+  else
+    export USE_MKLDNN=0
+  fi
+fi
+
+# Use special scripts for Android builds
+if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
+  export ANDROID_NDK=/opt/ndk
+  build_args=()
+  build_args+=("-DBUILD_CAFFE2_MOBILE=OFF")
+  build_args+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+  build_args+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+  exec ./scripts/build_android.sh "${build_args[@]}" "$@"
+fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # When hcc runs out of memory, it silently exits without stopping
@@ -86,21 +111,11 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   exit 0
 fi
 
-# TODO: Don't install this here
-if ! which conda; then
-  pip install -q mkl mkl-devel
-  if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc7.2* ]] || [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc4.8* ]]; then
-    export USE_MKLDNN=1
-  else
-    export USE_MKLDNN=0
-  fi
-fi
-
 # sccache will fail for CUDA builds if all cores are used for compiling
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
 if [ -z "$MAX_JOBS" ]; then
   if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]) && which sccache > /dev/null; then
-    export MAX_JOBS=`expr $(nproc) - 1`
+    export MAX_JOBS=$(($(nproc) - 1))
   fi
 fi
 
@@ -115,35 +130,48 @@ if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
   export DEBUG=1
 fi
 
+# Patch required to build xla
+if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
+  git clone --recursive https://github.com/pytorch/xla.git
+  ./xla/scripts/apply_patches.sh
+fi
+
+
+# check that setup.py would fail with bad arguments
+echo "The next three invocations are expected to fail with invalid command error messages."
+( ! get_exit_code python setup.py bad_argument )
+( ! get_exit_code python setup.py clean] )
+( ! get_exit_code python setup.py clean bad_argument )
+
 # ppc64le build fails when WERROR=1
 # set only when building other architectures
 # only use for "python setup.py install" line
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   WERROR=1 python setup.py install
-elif [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+else
   python setup.py install
 fi
 
-
-# Add the test binaries so that they won't be git clean'ed away
-git add -f build/bin
+assert_git_not_dirty
 
 # Test documentation build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn7-py3* ]]; then
   pushd docs
   # TODO: Don't run this here
   pip install -q -r requirements.txt || true
   LC_ALL=C make html
   popd
+  assert_git_not_dirty
 fi
 
 # Test standalone c10 build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn7-py3* ]]; then
   mkdir -p c10/build
   pushd c10/build
   cmake ..
   make -j
   popd
+  assert_git_not_dirty
 fi
 
 # Test no-Python build
@@ -166,4 +194,54 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake "$CUSTOM_OP_TEST"
   make VERBOSE=1
   popd
+  assert_git_not_dirty
+fi
+
+# Test XLA build
+if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
+  # TODO: Move this to Dockerfile.
+
+  pip install -q lark-parser
+
+  # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
+  sudo add-apt-repository "deb http://apt.llvm.org/trusty/ llvm-toolchain-trusty-7 main"
+  wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
+  sudo apt-get -qq update
+
+  # Install clang-7 clang++-7 for xla
+  sudo apt-get -qq install clang-7 clang++-7
+
+  # Bazel dependencies
+  sudo apt-get -qq install pkg-config zip zlib1g-dev unzip
+  # XLA build requires Bazel
+  wget https://github.com/bazelbuild/bazel/releases/download/0.24.1/bazel-0.24.1-installer-linux-x86_64.sh
+  chmod +x bazel-*.sh
+  sudo ./bazel-*.sh
+  BAZEL="$(which bazel)"
+  if [ -z "${BAZEL}" ]; then
+    echo "Unable to find bazel..."
+    exit 1
+  fi
+
+  # Install bazels3cache for cloud cache
+  sudo apt-get -qq install npm
+  npm config set strict-ssl false
+  curl -sL https://deb.nodesource.com/setup_6.x | sudo -E bash -
+  sudo apt-get install -qq nodejs
+  sudo npm install -g bazels3cache
+  BAZELS3CACHE="$(which bazels3cache)"
+  if [ -z "${BAZELS3CACHE}" ]; then
+    echo "Unable to find bazels3cache..."
+    exit 1
+  fi
+
+  bazels3cache --bucket=ossci-compiler-cache-circleci-xla --maxEntrySizeBytes=0
+  pushd xla
+  export CC=clang-7 CXX=clang++-7
+  # Use cloud cache to build when available.
+  sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
+
+  python setup.py install
+  popd
+  assert_git_not_dirty
 fi

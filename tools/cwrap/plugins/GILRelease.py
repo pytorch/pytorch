@@ -1,5 +1,4 @@
 from . import CWrapPlugin
-from string import Template
 
 
 class GILRelease(CWrapPlugin):

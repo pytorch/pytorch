@@ -5,7 +5,10 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/utils/proto_utils.h"
 
+#include <c10/macros/Macros.h>
+
 #include <cmath>
+#include <string>
 #include <vector>
 
 // Utilities that make it easier to write caffe2 C++ unit tests.
@@ -15,10 +18,10 @@ namespace caffe2 {
 namespace testing {
 
 // Asserts that the values of two tensors are the same.
-void assertTensorEquals(const TensorCPU& tensor1, const TensorCPU& tensor2);
+CAFFE2_API void assertTensorEquals(const TensorCPU& tensor1, const TensorCPU& tensor2);
 
 // Asserts that two float values are close within epsilon.
-void assertNear(float value1, float value2, float epsilon);
+CAFFE2_API void assertNear(float value1, float value2, float epsilon);
 
 // Asserts that the numeric values of a tensor is equal to a data vector.
 template <typename T>
@@ -49,33 +52,33 @@ void assertTensor(
 }
 
 // Asserts a list of tensors presented in two workspaces are equal.
-void assertTensorListEquals(
+CAFFE2_API void assertTensorListEquals(
     const std::vector<std::string>& tensorNames,
     const Workspace& workspace1,
     const Workspace& workspace2);
 
 // Read a tensor from the workspace.
-const caffe2::Tensor& getTensor(
+CAFFE2_API const caffe2::Tensor& getTensor(
     const caffe2::Workspace& workspace,
     const std::string& name);
 
 // Create a new tensor in the workspace.
-caffe2::Tensor* createTensor(
+CAFFE2_API caffe2::Tensor* createTensor(
     const std::string& name,
     caffe2::Workspace* workspace);
 
 // Create a new operator in the net.
-caffe2::OperatorDef* createOperator(
+CAFFE2_API caffe2::OperatorDef* createOperator(
     const std::string& type,
-    const std::vector<string>& inputs,
-    const std::vector<string>& outputs,
+    const std::vector<std::string>& inputs,
+    const std::vector<std::string>& outputs,
     caffe2::NetDef* net);
 
 // Fill data from a vector to a tensor.
 template <typename T>
 void fillTensor(
-    const vector<int64_t>& shape,
-    const vector<T>& data,
+    const std::vector<int64_t>& shape,
+    const std::vector<T>& data,
     TensorCPU* tensor) {
   tensor->Resize(shape);
   CAFFE_ENFORCE_EQ(data.size(), tensor->numel());
@@ -88,12 +91,21 @@ void fillTensor(
 // Create a tensor and fill data.
 template <typename T>
 caffe2::Tensor* createTensorAndFill(
-    const string& name,
-    const vector<int64_t>& shape,
-    const vector<T>& data,
+    const std::string& name,
+    const std::vector<int64_t>& shape,
+    const std::vector<T>& data,
     Workspace* workspace) {
   auto* tensor = createTensor(name, workspace);
   fillTensor<T>(shape, data, tensor);
+  return tensor;
+}
+
+template <typename T>
+caffe2::Tensor createTensorAndFill(
+    const std::vector<int64_t>& shape,
+    const std::vector<T>& data) {
+  Tensor tensor(caffe2::CPU);
+  fillTensor<T>(shape, data, &tensor);
   return tensor;
 }
 
@@ -113,8 +125,8 @@ void constantFillTensor(
 // Create a tensor and fill a constant.
 template <typename T>
 caffe2::Tensor* createTensorAndConstantFill(
-    const string& name,
-    const vector<int64_t>& shape,
+    const std::string& name,
+    const std::vector<int64_t>& shape,
     const T& data,
     Workspace* workspace) {
   auto* tensor = createTensor(name, workspace);
@@ -123,22 +135,29 @@ caffe2::Tensor* createTensorAndConstantFill(
 }
 
 // Concise util class to mutate a net in a chaining fashion.
-class NetMutator {
+class CAFFE2_API NetMutator {
  public:
   explicit NetMutator(caffe2::NetDef* net) : net_(net) {}
 
   NetMutator& newOp(
       const std::string& type,
-      const std::vector<string>& inputs,
-      const std::vector<string>& outputs);
+      const std::vector<std::string>& inputs,
+      const std::vector<std::string>& outputs);
+
+  NetMutator& externalInputs(const std::vector<std::string>& externalInputs);
+
+  NetMutator& externalOutputs(const std::vector<std::string>& externalOutputs);
 
   // Add argument to the last created op.
   template <typename T>
-  NetMutator& addArgument(const string& name, const T& value) {
+  NetMutator& addArgument(const std::string& name, const T& value) {
     CAFFE_ENFORCE(lastCreatedOp_ != nullptr);
     AddArgument(name, value, lastCreatedOp_);
     return *this;
   }
+
+  // Set device name for the last created op.
+  NetMutator& setDeviceOptionName(const std::string& name);
 
  private:
   caffe2::NetDef* net_;
@@ -146,7 +165,7 @@ class NetMutator {
 };
 
 // Concise util class to mutate a workspace in a chaining fashion.
-class WorkspaceMutator {
+class CAFFE2_API WorkspaceMutator {
  public:
   explicit WorkspaceMutator(caffe2::Workspace* workspace)
       : workspace_(workspace) {}
@@ -154,9 +173,9 @@ class WorkspaceMutator {
   // New tensor filled by a data vector.
   template <typename T>
   WorkspaceMutator& newTensor(
-      const string& name,
-      const vector<int64_t>& shape,
-      const vector<T>& data) {
+      const std::string& name,
+      const std::vector<int64_t>& shape,
+      const std::vector<T>& data) {
     createTensorAndFill<T>(name, shape, data, workspace_);
     return *this;
   }
@@ -164,7 +183,7 @@ class WorkspaceMutator {
   // New tensor filled by a constant.
   template <typename T>
   WorkspaceMutator& newTensorConst(
-      const string& name,
+      const std::string& name,
       const std::vector<int64_t>& shape,
       const T& data) {
     createTensorAndConstantFill<T>(name, shape, data, workspace_);

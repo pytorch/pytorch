@@ -1,5 +1,5 @@
 IF(NOT LIBSHM_INSTALL_LIB_SUBDIR)
-  SET(LIBSHM_INSTALL_BIN_SUBDIR "lib" CACHE PATH "libshm install binary directory")
+  SET(LIBSHM_INSTALL_BIN_SUBDIR "bin" CACHE PATH "libshm install binary directory")
   SET(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
 ENDIF()
 
@@ -11,6 +11,7 @@ TARGET_COMPILE_DEFINITIONS(shm PRIVATE
 )
 
 target_include_directories(shm PRIVATE
+  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
   ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -19,8 +20,9 @@ target_include_directories(shm PRIVATE
 TARGET_LINK_LIBRARIES(shm caffe2 c10)
 
 
-INSTALL(TARGETS shm
-          RUNTIME DESTINATION "${LIBSHM_INSTALL_BIN_SUBDIR}"
-          LIBRARY DESTINATION "${LIBSHM_INSTALL_LIB_SUBDIR}"
-          ARCHIVE DESTINATION "${LIBSHM_INSTALL_LIB_SUBDIR}")
+INSTALL(TARGETS shm DESTINATION "${LIBSHM_INSTALL_LIB_SUBDIR}")
 INSTALL(FILES libshm.h DESTINATION "include")
+
+if (MSVC AND NOT TORCH_STATIC)
+  INSTALL(FILES $<TARGET_PDB_FILE:shm> DESTINATION "${LIBSHM_INSTALL_LIB_SUBDIR}" OPTIONAL)
+endif()

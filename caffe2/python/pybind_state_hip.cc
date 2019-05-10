@@ -69,7 +69,7 @@ void addHIPObjectMethods(py::module& m) {
           "Copy data from given DLPack tensor into this tensor.")
       .def_property_readonly(
           "_shape",
-          [](const DLPackWrapper<HIPContext>& t) { return t.tensor->dims(); })
+          [](const DLPackWrapper<HIPContext>& t) { return t.tensor->sizes(); })
       .def(
           "_reshape",
           [](DLPackWrapper<HIPContext>* t, std::vector<int64_t> dims) {

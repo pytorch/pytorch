@@ -65,7 +65,7 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
     }
 
     output[slice][oFrame][oRow][oColumn] = max;
-    indices[slice][oFrame][oRow][oColumn] = maxIndex + TH_INDEX_BASE;
+    indices[slice][oFrame][oRow][oColumn] = maxIndex;
   }
 }
 
@@ -125,7 +125,7 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
     }
 
     output[slice][oFrame][oRow][oColumn] = max;
-    indices[slice][oFrame][oRow][oColumn] = maxIndex + TH_INDEX_BASE;
+    indices[slice][oFrame][oRow][oColumn] = maxIndex;
   }
 }
 
@@ -147,7 +147,7 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateGradInput(
 
   if (oRow < gradOutput.getSize(2) && oColumn < gradOutput.getSize(3))
   {
-    int maxIndex = indices[slice][oFrame][oRow][oColumn] - TH_INDEX_BASE;
+    int maxIndex = indices[slice][oFrame][oRow][oColumn];
     if (maxIndex != -1) {
       atomicAdd(&gradInputData[slice * inputT * inputH * inputW + maxIndex],
                 gradOutput[slice][oFrame][oRow][oColumn]);

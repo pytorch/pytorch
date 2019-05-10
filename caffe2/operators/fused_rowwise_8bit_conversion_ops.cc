@@ -1,5 +1,4 @@
 #include "caffe2/operators/fused_rowwise_8bit_conversion_ops.h"
-#include <fp16.h>
 #include "c10/util/Registry.h"
 
 namespace caffe2 {
@@ -11,14 +10,13 @@ void convertfp32fp32(float* dst, const float* src, size_t N) {
 
 void convertfp16fp32(float* dst, const at::Half* src, size_t N) {
   for (size_t i = 0; i < N; i++) {
-    dst[i] = fp16_ieee_to_fp32_value(src[i].x);
+    dst[i] = src[i];
   }
 }
 
 void convertfp32fp16(at::Half* dst, const float* src, size_t N) {
   for (size_t i = 0; i < N; i++) {
-    uint16_t out = fp16_ieee_from_fp32_value(src[i]);
-    memcpy(dst + i, &out, sizeof(uint16_t));
+    dst[i] = src[i];
   }
 }
 } // namespace

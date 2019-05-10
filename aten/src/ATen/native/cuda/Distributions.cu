@@ -82,7 +82,7 @@ void gamma_cuda_kernel(
         };
         BaseSampler<accscalar_t, decltype(normal_lambda)> standard_normal(normal_lambda);
         auto sample = sample_gamma<scalar_t, accscalar_t, decltype(uniform_lambda), decltype(normal_lambda)>(alpha, standard_uniform, standard_normal);
-        auto min_value = std::numeric_limits<scalar_t>::lowest();
+        auto min_value = std::numeric_limits<scalar_t>::min();
         ret_val = (min_value > sample) ? min_value : sample;
       });
 }
@@ -181,12 +181,27 @@ void bernoulli_scalar_cuda_kernel(
     );
 }
 
+template<typename scalar_t>
+void dirichlet_scalar_cuda_kernel(
+    at::Tensor& ret,
+    const at::Tensor& gamma) {
+  auto gamma_sum = gamma.sum(-1, true).expand(ret.sizes());
+  at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, gamma, gamma_sum,
+  [] __device__(scalar_t &ret_val, const scalar_t &gamma, const scalar_t &gamma_sum) {
+    ret_val = gamma / gamma_sum;
+    auto min_value = std::numeric_limits<scalar_t>::min();
+    auto max_value = 1 - std::numeric_limits<scalar_t>::epsilon();
+    ret_val = (min_value > ret_val) ? min_value : ret_val;
+    ret_val = (max_value < ret_val) ? max_value : ret_val;
+  });
+}
+
 } // namespace
 
 namespace at { namespace native {
 Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
   Tensor ret = at::empty(lambda.sizes(), lambda.options());
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "poisson", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "poisson_cuda", [&] {
     poisson_cuda_kernel<scalar_t>(ret, lambda, next_philox_seed(gen, 20));
   });
   return ret;
@@ -194,15 +209,25 @@ Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
 
 Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "gamma", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "gamma_cuda", [&] {
      gamma_cuda_kernel<scalar_t>(ret, alpha, next_philox_seed(gen, 10));
    });
   return ret;
 }
 
+Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen) {
+  Tensor ret = at::empty(alpha.sizes(), alpha.options());
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "dirichlet", [&] {
+    Tensor gamma = at::empty(alpha.sizes(), alpha.options());
+    gamma_cuda_kernel<scalar_t>(gamma, alpha, next_philox_seed(gen, 10));
+    dirichlet_scalar_cuda_kernel<scalar_t>(ret, gamma);
+  });
+  return ret;
+}
+
 Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "_standard_gamma_grad", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "_standard_gamma_grad_cuda", [&] {
      gamma_grad_cuda_kernel<scalar_t>(ret, self, output);
    });
   return ret;
@@ -210,21 +235,21 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
 
 Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen) {
   auto p = std::get<0>(expand_inplace(self, p_.to(kCUDA)));
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "bernoulli_tensor_cuda_self_", [&] {
-    const at::Type& p_type = p.type();
-    using self_t = scalar_t;
-    auto seeds = next_philox_seed(gen, 10);
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.type(), "bernoulli_tensor_cuda_p_", [&] {
-      using p_t = scalar_t;
-      return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, seeds);
-    });
+  AT_DISPATCH_ALL_TYPES_AND(
+    at::ScalarType::Half, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
+      using self_t = scalar_t;
+      auto seeds = next_philox_seed(gen, 10);
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
+        using p_t = scalar_t;
+        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, seeds);
+      });
    });
   return self;
 }
 
 Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
   AT_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "bernoulli_scalar_cuda_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "bernoulli_scalar_cuda_", [&] {
     auto seeds = next_philox_seed(gen, 10);
     bernoulli_scalar_cuda_kernel<scalar_t>(self, p, seeds);
    });

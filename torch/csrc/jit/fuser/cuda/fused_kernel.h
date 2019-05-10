@@ -1,6 +1,4 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CUDA_FUSER
 
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -32,9 +30,7 @@ struct TORCH_API FusedKernelCUDA : public ::torch::jit::fuser::FusedKernel {
       std::vector<PartitionDesc> concat_desc,
       bool has_random);
 
-  ~FusedKernelCUDA() override {
-    cuModuleUnload(module_);
-  }
+  ~FusedKernelCUDA() override;
 
   void launch_raw(const uint32_t numel, std::vector<void*>& arguments)
       const override;
@@ -60,5 +56,3 @@ struct TORCH_API FusedKernelCUDA : public ::torch::jit::fuser::FusedKernel {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CUDA_FUSER

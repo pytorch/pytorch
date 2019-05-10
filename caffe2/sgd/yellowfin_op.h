@@ -180,8 +180,8 @@ for (int i = 0; i < param_tensor.dim(); ++i) {
     distance_avg_out_ = ++out_memory_it;
 
 #define CAFFE2_YF_INIT_VECTOR(NAME) \
-  NAME##_tensor_.Resize(D_);        \
-  NAME##_ = NAME##_tensor_.template mutable_data<T>();
+    ReinitializeTensor(&NAME##_tensor_, {D_}, at::dtype<T>().device(Context::GetDeviceType())); \
+    NAME##_ = NAME##_tensor_.template mutable_data<T>();
 
     CAFFE2_YF_INIT_VECTOR(aux_vector)
     CAFFE2_YF_INIT_VECTOR(g_deb)
@@ -190,8 +190,8 @@ for (int i = 0; i < param_tensor.dim(); ++i) {
 #undef CAFFE2_YF_INIT_VECTOR
 
 #define CAFFE2_YF_INIT_SCALAR(NAME) \
-  NAME##_tensor_.Resize(1);         \
-  NAME##_ = NAME##_tensor_.template mutable_data<T>();
+      ReinitializeTensor(&NAME##_tensor_, {1}, at::dtype<T>().device(Context::GetDeviceType())); \
+      NAME##_ = NAME##_tensor_.template mutable_data<T>();
 
     CAFFE2_YF_INIT_SCALAR(aux_scalar)
     CAFFE2_YF_INIT_SCALAR(distance)
@@ -229,8 +229,8 @@ for (int i = 0; i < param_tensor.dim(); ++i) {
   int D_;
 
 // Temporary memory on device, listed all variables used in calculations
-#define CAFFE2_YF_DEFINE_TENSOR(NAME)              \
-  Tensor NAME##_tensor_{Context::GetDeviceType()}; \
+#define CAFFE2_YF_DEFINE_TENSOR(NAME) \
+  Tensor NAME##_tensor_;              \
   T* NAME##_;
 
   CAFFE2_YF_DEFINE_TENSOR(aux_vector)

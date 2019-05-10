@@ -16,6 +16,7 @@ def ref_adagrad(
     using_fp16=False,
     output_effective_lr=False,
     output_effective_lr_and_update=False,
+    decay=1.0,
     row_wise=False,
 ):
     mom_in_f32 = mom_in
@@ -25,9 +26,9 @@ def ref_adagrad(
         param_in_f32 = param_in.astype(np.float32)
 
     if row_wise:
-        mom_out = mom_in_f32 + np.mean(np.square(grad))
+        mom_out = decay * mom_in_f32 + np.mean(np.square(grad))
     else:
-        mom_out = mom_in_f32 + np.square(grad)
+        mom_out = decay * mom_in_f32 + np.square(grad)
     effective_lr = lr / (np.sqrt(mom_out) + epsilon)
     grad_adj = effective_lr * grad
     param_out = param_in_f32 + grad_adj
@@ -121,7 +122,7 @@ def adagrad_sparse_test_helper(
         return (param_out, momentum_out)
 
     ref_using_fp16_values = [False]
-    if dc == hu.gpu_do:
+    if gc == hu.gpu_do and not row_wise:
         ref_using_fp16_values.append(True)
 
     for ref_using_fp16 in ref_using_fp16_values:

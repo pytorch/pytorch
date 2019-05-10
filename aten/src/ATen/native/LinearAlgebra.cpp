@@ -9,6 +9,7 @@
 #include <functional>
 #include <numeric>
 #include <vector>
+#include <limits>
 
 namespace at {
 namespace native {
@@ -20,13 +21,11 @@ namespace native {
 // where info helps us identify singular matrices.
 static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor& self) {
   Tensor p, lu, info;
-  std::tie(lu, p, info) = self.unsqueeze(0).btrifact_with_info();
-  p.squeeze_(0);
-  lu.squeeze_(0);
-  int int_info = info.squeeze_().item<int32_t>();
+  std::tie(lu, p, info) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors=*/false);
+  int int_info = info.item<int32_t>();
   AT_CHECK(int_info >= 0, "LU factorization (getrf) failed with info = ", int_info);
   auto n = self.size(0);
-  auto num_exchanges = (at::arange(1, n + 1, p.type()) != p).nonzero().size(0);
+  auto num_exchanges = (at::arange(1, n + 1, p.options()) != p).nonzero().size(0);
   if (num_exchanges % 2 == 1) {
     return std::make_tuple(-1., lu.diag(), int_info);
   } else {
@@ -35,7 +34,7 @@ static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor
 }
 
 Tensor det(const Tensor& self) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()) &&
+  AT_CHECK(at::isFloatingType(self.scalar_type()) &&
            self.dim() == 2 && self.size(0) == self.size(1),
            "det(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
            "of floating types");
@@ -44,52 +43,57 @@ Tensor det(const Tensor& self) {
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    return at::zeros({}, self.type());
+    return at::zeros({}, self.options());
   } else {
     return diag_U.prod().mul_(det_P);
   }
 }
 
 Tensor logdet(const Tensor& self) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()) &&
+  AT_CHECK(at::isFloatingType(self.scalar_type()) &&
            self.dim() == 2 && self.size(0) == self.size(1),
            "logdet(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
            "of floating types");
   double det_P;
-  Tensor diag_U, det;
+  Tensor diag_U;
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    det = at::zeros({}, self.type());
-  } else {
-    det = diag_U.prod().mul_(det_P);
+    return at::full({}, -std::numeric_limits<double>::infinity(), self.options());
   }
-  if (det.sign().item<double>() <= 0) {
-    return det.log_();  // in order to get proper -inf (det=0) or nan (det<0)
+  // `det_sign` is the sign of the determinant. We work on `diag_U.sign()` for
+  // numerical stability when diag_U has a lot small values.
+  auto det_sign = diag_U.sign().prod().mul_(det_P);
+  // This synchronizes on GPU, but `_lu_det_P_diag_U_info` above already synchronizes
+  if (det_sign.item<double>() <= 0) {
+    return det_sign.log_();  // get proper nan (det<0) or -inf (det=0)
   } else {
-    return diag_U.abs().log().sum();
+    return diag_U.abs_().log_().sum();
   }
 }
 
 std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()) &&
+  AT_CHECK(at::isFloatingType(self.scalar_type()) &&
            self.dim() == 2 && self.size(0) == self.size(1),
            "slogdet(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
            "of floating types");
   double det_P;
-  Tensor diag_U, det;
+  Tensor diag_U;
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    det = at::zeros({}, self.type());
+    return std::make_tuple(at::zeros({}, self.options()),
+                           at::full({}, -std::numeric_limits<double>::infinity(), self.options()));
   } else {
-    det = diag_U.prod().mul_(det_P);
+    // `det_sign` is the sign of the determinant. We work on `diag_U.sign()` for
+    // numerical stability when diag_U has a lot small values.
+    auto det_sign = diag_U.sign().prod().mul_(det_P);
+    return std::make_tuple(det_sign, diag_U.abs_().log_().sum());
   }
-  return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
 }
 
 Tensor pinverse(const Tensor& self, double rcond) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+  AT_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
            "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
   if (self.numel() == 0) {
@@ -117,7 +121,7 @@ static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
 }
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+  AT_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
            "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
 
@@ -126,12 +130,12 @@ Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
 }
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+  AT_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
            "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
-  double tol = _get_epsilon(self.type().scalarType()) * std::max(self.size(0), self.size(1));
+  double tol = _get_epsilon(self.scalar_type()) * std::max(self.size(0), self.size(1));
   return (S > S.max().mul_(tol)).sum();
 }
 
@@ -153,7 +157,7 @@ Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
 
 Tensor mm(const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm(at::zeros({}, mat2.type()), self, mat2, 0, 1);
+    return at::zeros({}, mat2.options()).addmm(self, mat2, 0, 1);
   }
   return at::legacy::th::_th_mm(self, mat2);
 }
@@ -293,24 +297,24 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   }
 
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
-    return (t.stride(2) == 1 && t.stride(1) == t.size(2))
-            || (t.stride(1) == 1 && t.stride(2) == t.size(1));
+    return (t.stride(2) == 1 && t.stride(1) >= t.size(2))
+            || (t.stride(1) == 1 && t.stride(2) >= t.size(1));
   };
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
-      AT_DISPATCH_ALL_TYPES(batch1.type(), "bmm", [&] {
+      AT_DISPATCH_ALL_TYPES(batch1.scalar_type(), "bmm", [&] {
           baddbmm_cpu_kernel<scalar_t, true>(self_or_result, batch1, batch2, beta, alpha);
         });
     } else {
-      AT_DISPATCH_ALL_TYPES(batch1.type(), "baddbmm", [&] {
+      AT_DISPATCH_ALL_TYPES(batch1.scalar_type(), "baddbmm", [&] {
           baddbmm_cpu_kernel<scalar_t, false>(self_or_result, batch1, batch2, beta, alpha);
         });
     }
   } else if (at::hasMKL() && at::native::is_floating_point(self_or_result)
-	     && batch_items_contiguous_or_transposed(batch1)
-	     && batch_items_contiguous_or_transposed(batch2)
-	     && self_or_result.is_contiguous()) {
+            && batch_items_contiguous_or_transposed(batch1)
+            && batch_items_contiguous_or_transposed(batch2)
+            && self_or_result.is_contiguous()) {
     at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
   } else { // split along batch dimension
     if (is_bmm_out) {
@@ -364,8 +368,9 @@ Tensor dot(const Tensor& self, const Tensor& tensor) {
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
   result.resize_({});
-  // dispatching through type ensures we don't allow mismatched types.
-  return self.type().fill_(result, self.dot(tensor));
+  AT_CHECK(result.scalar_type() == self.scalar_type(),
+           "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  return result.fill_(self.dot(tensor));
 }
 
 /*
@@ -428,10 +433,10 @@ Tensor matmul(
     // we track m1 vs m2 separately even though they must match for nicer error messages
     int64_t n = dim_tensor1 > 1 ? tensor1.size(-2) : 1;
     int64_t m1 = tensor1.size(-1);
-    IntList batch_tensor1(tensor1.sizes().data(), std::max<int64_t>(dim_tensor1 - 2, 0));
+    IntArrayRef batch_tensor1(tensor1.sizes().data(), std::max<int64_t>(dim_tensor1 - 2, 0));
     int64_t m2 = dim_tensor2 > 1 ? tensor2.size(-2) : 1;
     int64_t p = tensor2.size(-1);
-    IntList batch_tensor2(tensor2.sizes().data(), std::max<int64_t>(dim_tensor2 - 2, 0));
+    IntArrayRef batch_tensor2(tensor2.sizes().data(), std::max<int64_t>(dim_tensor2 - 2, 0));
 
     // expand the batch portion (i.e. cut off matrix dimensions and expand rest)
     std::vector<int64_t> expand_batch_portion = infer_size(batch_tensor1, batch_tensor2);
@@ -484,7 +489,7 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
 }
 
 Tensor matrix_power(const Tensor& a, int64_t n) {
-  AT_CHECK(a.dim() >= 2 && at::isFloatingType(a.type().scalarType()),
+  AT_CHECK(a.dim() >= 2 && at::isFloatingType(a.scalar_type()),
            "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
            "of floating types with dim at least 2");
   if (n == 0) {
@@ -525,14 +530,14 @@ Tensor frobenius_norm(const Tensor& self) {
   return at::norm(self);
 }
 
-Tensor frobenius_norm(const Tensor& self, IntList dim, bool keepdim) {
+Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   AT_CHECK(
       dim.size() <= 2,
       "Expected at most 2 dimensions, but got ",
       dim.size(),
       " dimensions instead.");
   if (dim.size() == 1) {
-    return at::norm(self, 2, dim[0], keepdim);
+    return at::norm(self, 2, dim, keepdim, self.scalar_type());
   }
   return at::sqrt(at::sum(self * self, dim, keepdim));
 }
@@ -540,7 +545,7 @@ Tensor frobenius_norm(const Tensor& self, IntList dim, bool keepdim) {
 Tensor &frobenius_norm_out(
     Tensor& result,
     const Tensor& self,
-    IntList dim,
+    IntArrayRef dim,
     bool keepdim) {
   AT_CHECK(
       dim.size() <= 2,
@@ -548,7 +553,7 @@ Tensor &frobenius_norm_out(
       dim.size(),
       " dimensions instead.");
   if (dim.size() == 1) {
-    return at::norm_out(result, self, 2, dim[0], keepdim);
+    return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
   }
   return at::sqrt_out(result, at::sum(self * self, dim, keepdim));
 }

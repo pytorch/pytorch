@@ -1,5 +1,4 @@
-#include "spatial_softmax_with_loss_op.h"
-#include "softmax_shared.h"
+#include "caffe2/operators/spatial_softmax_with_loss_op.h"
 
 namespace caffe2 {
 
@@ -72,7 +71,11 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   auto* P =
       Output(0, X.sizes(), at::dtype<float>()); // Probabilities from softmax
 
-  if (sum_multiplier_.numel() != D) {
+  if (!sum_multiplier_.defined()) {
+    sum_multiplier_ = caffe2::empty({D}, at::dtype<float>().device(CPU));
+    math::Set<float, CPUContext>(
+        D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  } else if (sum_multiplier_.numel() != D) {
     sum_multiplier_.Resize(D);
     math::Set<float, CPUContext>(
         D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);

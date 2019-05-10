@@ -52,7 +52,7 @@ class SoftmaxFocalLossOp final : public Operator<Context> {
   float alpha_;
   int num_classes_;
   StorageOrder order_;
-  Tensor losses_{Context::GetDeviceType()};
+  Tensor losses_;
 };
 
 template <typename T, class Context>
@@ -83,7 +83,7 @@ class SoftmaxFocalLossGradientOp final : public Operator<Context> {
   float alpha_;
   int num_classes_;
   StorageOrder order_;
-  Tensor buff_{Context::GetDeviceType()};
+  Tensor buff_;
 };
 
 } // namespace caffe2

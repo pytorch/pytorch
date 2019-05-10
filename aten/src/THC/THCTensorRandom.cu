@@ -169,5 +169,8 @@ GENERATE_KERNEL2(generate_cauchy, at::Half, double median, double sigma, float, 
 #include <THC/generic/THCTensorRandom.cu>
 #include <THC/THCGenerateAllTypes.h>
 
+#include <THC/generic/THCTensorRandom.cu>
+#include <THC/THCGenerateBoolType.h>
+
 #undef GENERATE_KERNEL1
 #undef GENERATE_KERNEL2

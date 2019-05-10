@@ -130,10 +130,9 @@ class BinaryElementwiseWithArgsGradientOp<
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
 
-  BinaryElementwiseWithArgsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit BinaryElementwiseWithArgsGradientOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, "broadcast", legacy_broadcast_, false),
         OP_SINGLE_ARG(int, "axis", axis_, -1),
         OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
@@ -179,8 +178,8 @@ class BinaryElementwiseWithArgsGradientOp<
     const T* C_data = nullptr;
     std::vector<int> A_dims;
     std::vector<int> B_dims;
-    at::IntList dA_sizes;
-    at::IntList dB_sizes;
+    at::IntArrayRef dA_sizes;
+    at::IntArrayRef dB_sizes;
     if (InputSize() == 3) {
       const auto& B = Input(0);
       const auto& C = Input(1);

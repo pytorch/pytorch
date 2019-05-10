@@ -55,7 +55,7 @@ class CAFFE2_API LegacyTypeDispatch {
   // have a Tensor and thus the Type of that Tensor must already
   // be initialized.
   Type* getNonVariableTypeRaw(Backend p, ScalarType s) {
-    return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
+    return type_registry[static_cast<int>(p)].get();
   }
   Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
     if (p != Backend::Undefined) {
@@ -99,9 +99,9 @@ class CAFFE2_API LegacyTypeDispatch {
       return getNonVariableType(p, s);
     }
   }
-  void registerType(Backend b, ScalarType s, TypeUniquePtr&& t) {
-    type_registry[static_cast<int>(b)][static_cast<int>(s)] = std::move(t);
-    detail::getVariableHooks().registerVariableTypeFor(this, b, s);
+  void registerType(Backend b, TypeUniquePtr&& t) {
+    type_registry[static_cast<int>(b)] = std::move(t);
+    detail::getVariableHooks().registerVariableTypeFor(this, b);
   }
 private:
   void initForDeviceType(DeviceType p) {
@@ -134,24 +134,61 @@ private:
   // NB: type_registry has nullptr for all CUDA backends until
   // CUDA initialization has occurred
   TypeUniquePtr type_registry
-    [static_cast<int>(Backend::NumOptions)]
-    [static_cast<int>(ScalarType::NumOptions)];
+    [static_cast<int>(Backend::NumOptions)];
 };
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
+
+struct CAFFE2_API NonVariableTypeMode {
+  static bool is_enabled();
+  static void set_enabled(bool enabled);
+};
+
+// A RAII, thread local (!) guard that has the following effect:
+//
+// Upon construction: sets NonVariableTypeMode_enabled for the current thread to
+// control whether we are in non-Variable-type mode.
+//
+// Upon destruction: sets NonVariableTypeMode_enabled back to the original value.
+//
+// See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
+struct CAFFE2_API AutoNonVariableTypeMode {
+  AutoNonVariableTypeMode(bool enabled) : prev_mode(NonVariableTypeMode::is_enabled()) {
+    NonVariableTypeMode::set_enabled(enabled);
+  }
+  ~AutoNonVariableTypeMode() {
+    NonVariableTypeMode::set_enabled(prev_mode);
+  }
+  bool prev_mode;
+};
 
 /**
  * Return the Type object corresponding to this Tensor, which we can
  * use to do dynamic dispatch to operators from.  This method is NOT
  * intended to be used by end-users; it is purely an implementation
  * detail.
+ *
+ * NOTE: We also check `at::NonVariableTypeMode`, and if it's enabled
+ * we always return non-Variable type in this function.
+ * See NOTE [ Treating Variables as non-Variables in type dispatch ]
  */
 inline Type& legacyTensorType(const TensorImpl& tensor) {
   // NB: It's valid to use getTypeRaw here, because the TensorImpl
   // could not have been created without initializing the Type first.
-  // TODO: This is not actually true via the Caffe2 codepath!  Make
-  // it so.
-  return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(tensor.type_id()), typeMetaToScalarType(tensor.dtype()), tensor.is_variable());
+  // NB: This is not actually true via the Caffe2 codepath! But we call
+  // initializeLegacyTypeDispatchFor in the right place.
+  return *globalLegacyTypeDispatch().getTypeRaw(
+      tensorTypeIdToBackend(tensor.type_id()),
+      typeMetaToScalarType(tensor.dtype()),
+      tensor.is_variable() && !at::NonVariableTypeMode::is_enabled());
+}
+
+inline void initializeLegacyTypeDispatchFor(const TensorImpl& tensor) {
+  // getType calls the right initialization
+  globalLegacyTypeDispatch().getType(
+      tensorTypeIdToBackend(tensor.type_id()),
+      typeMetaToScalarType(tensor.dtype()),
+      tensor.is_variable() && !at::NonVariableTypeMode::is_enabled());
 }
 
 } // namespace at

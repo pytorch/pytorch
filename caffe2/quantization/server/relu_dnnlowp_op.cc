@@ -7,7 +7,7 @@ namespace caffe2 {
 template <typename T>
 bool ReluDNNLowPOp<T>::RunOnDevice() {
   auto& X = InputIsType<int8::Int8TensorCPU>(0)
-      ? OperatorBase::Input<int8::Int8TensorCPU>(0).t
+      ? (this->template Input<int8::Int8TensorCPU>(0)).t
       : Input(0);
 
   TensorCPU* Y = nullptr;

@@ -17,7 +17,7 @@ using SparseType = Type;
 //
 // This may be called repeatedly, so make sure it's pretty cheap.
 inline SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
-  AT_ASSERTM(!self.is_variable(), "_internal_get_SparseTensorImpl: should not be a variable");
+  AT_ASSERTM(!self.is_variable(), "_internal_get_SparseTensorImpl: should not be a variable");  // TODO: remove this when Variable and Tensor are merged
   AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
   return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
 }
@@ -31,7 +31,10 @@ inline void alias_into_sparse(const SparseTensor& self, const LongTensor& indice
 // Take indices and values and makes a (data) copy of them to put into the sparse
 // indices/values.  This used to be called THSTensor_(_set)
 inline void copy_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values, bool non_blocking) {
-  alias_into_sparse(self, self._indices().type().copy(indices, non_blocking), self._values().type().copy(values, non_blocking));
+  alias_into_sparse(
+      self,
+      indices.to(self._indices().options(), non_blocking, /*copy=*/true),
+      values.to(self._values().options(), non_blocking, /*copy=*/true));
 }
 
 // TODO: put this into the public API
@@ -66,7 +69,7 @@ inline Tensor new_values_with_size_of(const Tensor& values, int64_t nnz) {
 // the flattened tensor `t.reshape( prod(full_size[:indices.size(0)]), -1 )`.
 // if forceClone is true, the result will forced to be a clone of self.
 // if force_clone is true, the result will forced to be a clone of self.
-inline LongTensor flatten_indices(const Tensor& indices, IntList full_size, bool force_clone = false) {
+inline LongTensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_clone = false) {
   int64_t sparse_dim = indices.size(0);
   if (sparse_dim == 1) {
     if (force_clone) {
@@ -82,8 +85,10 @@ inline LongTensor flatten_indices(const Tensor& indices, IntList full_size, bool
       indices_mult_cpu_vec[i] = mult;
       mult *= full_size[i];
     }
-    auto indices_mult_cpu = indices.type().cpu()
-                                   .tensorFromBlob(indices_mult_cpu_vec.data(), /*size=*/{sparse_dim, 1});
+    auto indices_mult_cpu = at::from_blob(
+        indices_mult_cpu_vec.data(),
+        /*size=*/{sparse_dim, 1},
+        indices.options().device(kCPU));
     // NB: must be blocking because this blob may be freed after this closure,
     //     and non_blocking copy will see garbage.
     auto indices_mult = indices_mult_cpu.to(indices.device(), /*non_blocking=*/false);
@@ -113,7 +118,7 @@ inline LongTensor flatten_indices(const Tensor& indices, IntList full_size, bool
 // Ex2:
 //   dims_to_flatten = [1]
 //   new_indices = [ 3, 1, 3 ]  # uncoalesced
-inline LongTensor flatten_indices_by_dims(const LongTensor& indices, const IntList& sizes, const IntList& dims_to_flatten){
+inline LongTensor flatten_indices_by_dims(const LongTensor& indices, const IntArrayRef& sizes, const IntArrayRef& dims_to_flatten){
   LongTensor new_indices = at::zeros({indices.size(1)}, indices.options());
   for (auto d : dims_to_flatten) {
     new_indices.mul_(sizes[d]);

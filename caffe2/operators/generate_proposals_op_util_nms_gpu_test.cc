@@ -379,13 +379,9 @@ TEST(UtilsNMSTest, TestNMSGPURotatedAngle0) {
     return;
   const int box_dim = 5;
   // Same boxes in TestNMS with (x_ctr, y_ctr, w, h, angle) format
-  std::vector<float> boxes = {
-    30, 35, 41, 51, 0,
-    29.5, 36, 38, 49, 0,
-    24, 29.5, 33, 42, 0,
-    125, 120, 51, 41, 0,
-    127, 124.5, 57, 30, 0
-  };
+  std::vector<float> boxes = {30, 35, 41,   51,    0,  29.5, 36,  38,  49,
+                              0,  24, 29.5, 33,    42, 0,    125, 120, 51,
+                              41, 0,  127,  124.5, 57, 30,   0};
 
   std::vector<float> scores = {0.5f, 0.7f, 0.6f, 0.9f, 0.8f};
 
@@ -466,7 +462,6 @@ TEST(UtilsNMSTest, TestNMSGPURotatedAngle0) {
   cuda_context.FinishDeviceComputation();
 }
 
-#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
 TEST(UtilsNMSTest, TestPerfRotatedNMS) {
   if (!HasCudaGPU())
     return;
@@ -678,6 +673,5 @@ TEST(UtilsNMSTest, GPUEqualsCPURotatedCorrectnessTest) {
     }
   }
 }
-#endif // CV_MAJOR_VERSION >= 3
 
 } // namespace caffe2

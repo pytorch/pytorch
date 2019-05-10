@@ -9,13 +9,13 @@
 // new functions in here, they should probably be un-genericized.
 
 TH_CPP_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                                      at::IntList size_, at::IntList stride_);
-TH_CPP_API THTensor *THTensor_(newView)(THTensor *tensor, at::IntList size);
+                                      at::IntArrayRef size_, at::IntArrayRef stride_);
+TH_CPP_API THTensor *THTensor_(newView)(THTensor *tensor, at::IntArrayRef size);
 /* strides.data() might be NULL */
 TH_CPP_API THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset,
-                                               at::IntList sizes, at::IntList strides);
+                                               at::IntArrayRef sizes, at::IntArrayRef strides);
 
-TH_CPP_API void THTensor_(resize)(THTensor *self, at::IntList size, at::IntList stride);
-TH_CPP_API THTensor *THTensor_(newWithSize)(at::IntList size, at::IntList stride);
+TH_CPP_API void THTensor_(resize)(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride);
+TH_CPP_API THTensor *THTensor_(newWithSize)(at::IntArrayRef size, at::IntArrayRef stride);
 
 #endif

@@ -1,7 +1,6 @@
 import json
 import torch
 import torch.legacy.optim as optim
-from pprint import pprint
 
 
 def rosenbrock(tensor):

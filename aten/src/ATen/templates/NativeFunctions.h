@@ -4,7 +4,6 @@
 
 #include <ATen/Context.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/TensorMethods.h>
 #include <c10/core/TensorOptions.h>
 
 #include <array>
@@ -24,23 +23,6 @@ struct Type;
 
 namespace at {
 namespace native {
-
-inline Tensor from_blob(
-    void* data,
-    IntList sizes,
-    const std::function<void(void*)>& deleter,
-    const TensorOptions& options = {}) {
-  return at::getType(options).tensorFromBlob(data, sizes, deleter);
-}
-
-inline Tensor from_blob(
-    void* data,
-    IntList sizes,
-    IntList strides,
-    const std::function<void(void*)>& deleter,
-    const TensorOptions& options = {}) {
-  return at::getType(options).tensorFromBlob(data, sizes, strides, deleter);
-}
 
 // These functions are defined in native/TensorFactories.cpp.
 #define TENSOR(T, S, _1)                                                      \

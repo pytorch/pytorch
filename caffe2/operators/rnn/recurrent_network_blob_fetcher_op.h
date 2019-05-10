@@ -17,7 +17,7 @@ class RecurrentNetworkBlobFetcherOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  RecurrentNetworkBlobFetcherOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit RecurrentNetworkBlobFetcherOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     prefix_ = this->template GetSingleArgument<std::string>("prefix", "rnn");
     ws_ = ws;

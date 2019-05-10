@@ -199,22 +199,22 @@ bool RoIAlignRotatedGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& R = Input(1); // RoIs
   auto& dY = Input(2); // Gradient of net w.r.t. output of "forward" op
                        // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-                        // (aka "gradInput")
 
-  dX->ResizeLike(X);
+  auto* dX = Output(
+      0, X.sizes(), at::dtype<float>()); // Gradient of net w.r.t. input to
+                                         // "forward" op (aka "gradInput")
 
   // Must zero-out dX before accumulating gradients
   math::Set<float, CUDAContext>(
-      dX->size(), 0.f, dX->mutable_data<float>(), &context_);
+      dX->numel(), 0.f, dX->mutable_data<float>(), &context_);
 
-  if (dY.size() > 0) { // Handle possibly empty gradient if there were no rois
+  if (dY.numel() > 0) { // Handle possibly empty gradient if there were no rois
     RoIAlignRotatedBackward<float>
-        <<<CAFFE_GET_BLOCKS(dY.size()),
+        <<<CAFFE_GET_BLOCKS(dY.numel()),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
-            dY.size(),
+            dY.numel(),
             dY.data<float>(),
             R.dim32(0),
             spatial_scale_,

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 
 namespace torch {
 namespace jit {
@@ -21,11 +21,22 @@ namespace jit {
 // In practice, we are only using it with Node and const Node.  'destroy()'
 // needs to be renegotiated if you want to use this somewhere else.
 //
-// Besides the benefits of being intrusive, unlike std::list, these lists handle
-// forward and backward iteration uniformly because we require a
-// "before-first-element" sentinel.  This means that reverse iterators
-// physically point to the element they logically point to, rather than
-// the off-by-one behavior for all standard library reverse iterators.
+// Regardless of the iteration direction, iterators always physically point
+// to the element they logically point to, rather than
+// the off-by-one behavior for all standard library reverse iterators like std::list.
+
+// The list is includes two sentinel nodes, one at the beginning and one at the end
+// with a circular link between them. It is an error to insert nodes after the
+// end sentinel node but before the beginning node:
+
+// Visualization showing only the next() links:
+//  HEAD -> first -> second  -> ... -> last -> TAIL
+//   ^------------------------------------------
+
+// Visualization showing only the prev() links:
+//  HEAD <- first <- second  <- ... <- last <- TAIL
+//   ------------------------------------------^
+
 
 static constexpr int kNextDirection = 0;
 static constexpr int kPrevDirection = 1;
@@ -62,7 +73,7 @@ struct generic_graph_node_list_iterator {
     return cur;
   }
   generic_graph_node_list_iterator& operator++() {
-    JIT_ASSERT(cur);
+    AT_ASSERT(cur);
     cur = cur->next_in_graph[d];
     return *this;
   }
@@ -72,7 +83,7 @@ struct generic_graph_node_list_iterator {
     return old;
   }
   generic_graph_node_list_iterator& operator--() {
-    JIT_ASSERT(cur);
+    AT_ASSERT(cur);
     cur = cur->next_in_graph[reverseDir()];
     return *this;
   }
@@ -114,10 +125,10 @@ struct generic_graph_node_list {
     return generic_graph_node_list_iterator<const T>(head->next_in_graph[d], d);
   }
   generic_graph_node_list_iterator<T> end() {
-    return generic_graph_node_list_iterator<T>(head, d);
+    return generic_graph_node_list_iterator<T>(head->next_in_graph[!d], d);
   }
   generic_graph_node_list_iterator<const T> end() const {
-    return generic_graph_node_list_iterator<const T>(head, d);
+    return generic_graph_node_list_iterator<const T>(head->next_in_graph[!d], d);
   }
   generic_graph_node_list_iterator<T> rbegin() {
     return reverse().begin();
@@ -133,11 +144,11 @@ struct generic_graph_node_list {
   }
   generic_graph_node_list reverse() {
     return generic_graph_node_list(
-        head, d == kNextDirection ? kPrevDirection : kNextDirection);
+        head->next_in_graph[!d], !d);
   }
   const generic_graph_node_list reverse() const {
     return generic_graph_node_list(
-        head, d == kNextDirection ? kPrevDirection : kNextDirection);
+        head->next_in_graph[!d], !d);
   }
   T* front() {
     return head->next_in_graph[d];
@@ -154,7 +165,9 @@ struct generic_graph_node_list {
   generic_graph_node_list(T* head, int d) : head(head), d(d) {}
 
  private:
-  T* head;
+  T* head; // both head and tail are sentinel nodes
+           // the first real node is head->next_in_graph[d]
+           // the tail sentinel is head->next_in_graph[!d]
   int d;
 };
 

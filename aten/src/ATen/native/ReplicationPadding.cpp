@@ -1,5 +1,6 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
+#include <ATen/Parallel.h>
 #include <algorithm>
 
 namespace at {
@@ -17,25 +18,26 @@ static void replication_pad1d_out_frame(
   int iStartX = std::max(0, -pad_l);
   int oStartX = std::max(0, pad_l);
 
-  long k, ip_x;
-#pragma omp parallel for private(k, ip_x)
-  for (k = 0; k < nslices; k++)
-  {
-    for (long j = 0; j < owidth; j++) {
-      if (j < pad_l) {
-        ip_x = pad_l;
-      } else if (j >= pad_l && j < iwidth + pad_l) {
-        ip_x = j;
-      } else {
-        ip_x = iwidth + pad_l - 1;
-      }
-      ip_x = ip_x - oStartX + iStartX;
+  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    long ip_x;
+    for (auto k = start; k < end; k++)
+    {
+      for (long j = 0; j < owidth; j++) {
+        if (j < pad_l) {
+          ip_x = pad_l;
+        } else if (j >= pad_l && j < iwidth + pad_l) {
+          ip_x = j;
+        } else {
+          ip_x = iwidth + pad_l - 1;
+        }
+        ip_x = ip_x - oStartX + iStartX;
 
-      scalar_t *dest_p = output_p + k*owidth + j;
-      scalar_t *src_p = input_p + k*iwidth + ip_x;
-      *dest_p = *src_p;
+        scalar_t *dest_p = output_p + k*owidth + j;
+        scalar_t *src_p = input_p + k*iwidth + ip_x;
+        *dest_p = *src_p;
+      }
     }
-  }
+  });
 }
 
 template <typename scalar_t>
@@ -47,20 +49,20 @@ static void replication_pad1d_out_batch(
     int pad_l, int pad_r,
     int nbatch)
 {
-  long p;
-#pragma omp parallel for private(p)
-  for (p = 0; p < nbatch; p++)
-  {
-    scalar_t *input_p = input_data+p*nslices*iwidth;
-    scalar_t *output_p = output_data+p*nslices*owidth;
-    replication_pad1d_out_frame(input_p, output_p, nslices, iwidth, owidth, pad_l, pad_r);
-  }
+  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+    for (auto p = start; p < end; p++)
+    {
+      scalar_t *input_p = input_data+p*nslices*iwidth;
+      scalar_t *output_p = output_data+p*nslices*owidth;
+      replication_pad1d_out_frame(input_p, output_p, nslices, iwidth, owidth, pad_l, pad_r);
+    }
+  });
 }
 
 void replication_pad1d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   int dimw = 1;
   int dimslices = 0;
@@ -97,7 +99,7 @@ void replication_pad1d_out_cpu_template(
   if (input.ndimension() == 2)
   {
     output.resize_({nslices, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "replication_pad1d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad1d_cpu", [&] {
       auto input_data = input.data<scalar_t>();
       auto output_data = output.data<scalar_t>();
       replication_pad1d_out_frame<scalar_t>(
@@ -113,7 +115,7 @@ void replication_pad1d_out_cpu_template(
   else
   {
     output.resize_({nbatch, nslices, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "replication_pad1d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad1d_cpu", [&] {
       auto input_data = input.data<scalar_t>();
       auto output_data = output.data<scalar_t>();
       replication_pad1d_out_batch<scalar_t>(
@@ -140,25 +142,26 @@ static void replication_pad1d_backward_out_frame(
   int iStartX = std::max(0, -pad_l);
   int oStartX = std::max(0, pad_l);
 
-  long k, ip_x;
-#pragma omp parallel for private(k, ip_x)
-  for (k = 0; k < nslices; k++)
-  {
-    for (long j = 0; j < owidth; j++) {
-      if (j < pad_l) {
-        ip_x = pad_l;
-      } else if (j >= pad_l && j < iwidth + pad_l) {
-        ip_x = j;
-      } else {
-        ip_x = iwidth + pad_l - 1;
-      }
-      ip_x = ip_x - oStartX + iStartX;
+  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    long ip_x;
+    for (auto k = start; k < end; k++)
+    {
+      for (long j = 0; j < owidth; j++) {
+        if (j < pad_l) {
+          ip_x = pad_l;
+        } else if (j >= pad_l && j < iwidth + pad_l) {
+          ip_x = j;
+        } else {
+          ip_x = iwidth + pad_l - 1;
+        }
+        ip_x = ip_x - oStartX + iStartX;
 
-      scalar_t *src_p = goutput_p + k*owidth + j;
-      scalar_t *dest_p = ginput_p + k*iwidth + ip_x;
-      *dest_p += *src_p;
+        scalar_t *src_p = goutput_p + k*owidth + j;
+        scalar_t *dest_p = ginput_p + k*iwidth + ip_x;
+        *dest_p += *src_p;
+      }
     }
-  }
+  });
 }
 
 template <typename scalar_t>
@@ -170,22 +173,22 @@ static void replication_pad1d_backward_out_batch(
     int pad_l, int pad_r,
     int nbatch)
 {
-  long p;
-#pragma omp parallel for private(p)
-  for (p = 0; p < nbatch; p++)
-  {
-    scalar_t *ginput_p = ginput_data + p * nslices * iwidth;
-    scalar_t *goutput_p = goutput_data + p * nslices * owidth;
-    replication_pad1d_backward_out_frame(ginput_p, goutput_p,
-      nslices, iwidth, owidth, pad_l, pad_r);
-  }
+  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+    for (auto p = start; p < end; p++)
+    {
+      scalar_t *ginput_p = ginput_data + p * nslices * iwidth;
+      scalar_t *goutput_p = goutput_data + p * nslices * owidth;
+      replication_pad1d_backward_out_frame(ginput_p, goutput_p,
+        nslices, iwidth, owidth, pad_l, pad_r);
+    }
+  });
 }
 
 Tensor& replication_pad1d_backward_out_cpu_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   int dimw = 1;
   int dimslices = 0;
@@ -219,7 +222,7 @@ Tensor& replication_pad1d_backward_out_cpu_template(
   if (input.ndimension() == 2)
   {
     AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "replication_pad1d_backward", [&] {
+      input.scalar_type(), "replication_pad1d_backward_cpu", [&] {
       scalar_t *gradInput_data = gradInput.data<scalar_t>();
       scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
 
@@ -236,7 +239,7 @@ Tensor& replication_pad1d_backward_out_cpu_template(
   else
   {
     AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "replication_pad1d_backward", [&] {
+      input.scalar_type(), "replication_pad1d_backward_cpu", [&] {
       scalar_t *gradInput_data = gradInput.data<scalar_t>();
       scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
 
@@ -268,36 +271,37 @@ static void replication_pad2d_out_frame(
   int oStartX = std::max(0, pad_l);
   int oStartY = std::max(0, pad_t);
 
-  int64_t k, ip_x, ip_y;
-#pragma omp parallel for private(k, ip_x, ip_y)
-  for (k = 0; k < nslices; k++)
-  {
-    for (int64_t i = 0; i < oheight; i++) {
-      for (int64_t j = 0; j < owidth; j++) {
-        if (j < pad_l) {
-          ip_x = pad_l;
-        } else if (j >= pad_l && j < iwidth + pad_l) {
-          ip_x = j;
-        } else {
-          ip_x = iwidth + pad_l - 1;
-        }
-        ip_x = ip_x - oStartX + iStartX;
+  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    int64_t ip_x, ip_y;
+    for (auto k = start; k < end; k++)
+    {
+      for (int64_t i = 0; i < oheight; i++) {
+        for (int64_t j = 0; j < owidth; j++) {
+          if (j < pad_l) {
+            ip_x = pad_l;
+          } else if (j >= pad_l && j < iwidth + pad_l) {
+            ip_x = j;
+          } else {
+            ip_x = iwidth + pad_l - 1;
+          }
+          ip_x = ip_x - oStartX + iStartX;
 
-        if (i < pad_t) {
-          ip_y = pad_t;
-        } else if (i >= pad_t && i < iheight + pad_t) {
-          ip_y = i;
-        } else {
-          ip_y = iheight + pad_t - 1;
-        }
-        ip_y = ip_y - oStartY + iStartY;
+          if (i < pad_t) {
+            ip_y = pad_t;
+          } else if (i >= pad_t && i < iheight + pad_t) {
+            ip_y = i;
+          } else {
+            ip_y = iheight + pad_t - 1;
+          }
+          ip_y = ip_y - oStartY + iStartY;
 
-        scalar_t *dest_p = output_p + k*owidth*oheight + i * owidth + j;
-        scalar_t *src_p = input_p + k*iwidth*iheight + ip_y * iwidth + ip_x;
-        *dest_p = *src_p;
+          scalar_t *dest_p = output_p + k*owidth*oheight + i * owidth + j;
+          scalar_t *src_p = input_p + k*iwidth*iheight + ip_y * iwidth + ip_x;
+          *dest_p = *src_p;
+        }
       }
     }
-  }
+  });
 }
 
 template <typename scalar_t>
@@ -310,20 +314,20 @@ static void replication_pad2d_out_batch(
     int pad_t, int pad_b,
     int nbatch)
 {
-  int64_t p;
-#pragma omp parallel for private(p)
-  for (p = 0; p < nbatch; p++)
-  {
-    scalar_t *input_p = input_data+p*nslices*iwidth*iheight;
-    scalar_t *output_p = output_data+p*nslices*owidth*oheight;
-    replication_pad2d_out_frame(input_p, output_p, nslices,
-        iwidth, iheight, owidth, oheight, pad_l, pad_r, pad_t, pad_b);
-  }
+  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+    for (auto p = start; p < end; p++)
+    {
+      scalar_t *input_p = input_data+p*nslices*iwidth*iheight;
+      scalar_t *output_p = output_data+p*nslices*owidth*oheight;
+      replication_pad2d_out_frame(input_p, output_p, nslices,
+          iwidth, iheight, owidth, oheight, pad_l, pad_r, pad_t, pad_b);
+    }
+  });
 }
 
 void replication_pad2d_out_cpu_template(Tensor& output,
     const Tensor& input_,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
   int pad_l = paddingSize[0];
@@ -365,7 +369,7 @@ void replication_pad2d_out_cpu_template(Tensor& output,
   if (input.dim() == 3)
   {
     output.resize_({nslices, oheight, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "replication_pad2d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad2d_cpu", [&] {
       auto input_data = input.data<scalar_t>();
       auto output_data = output.data<scalar_t>();
       replication_pad2d_out_frame<scalar_t> (input_data, output_data,
@@ -380,7 +384,7 @@ void replication_pad2d_out_cpu_template(Tensor& output,
   else
   {
     output.resize_({nbatch, nslices, oheight, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "replication_pad2d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad2d_cpu", [&] {
       auto input_data = input.data<scalar_t>();
       auto output_data = output.data<scalar_t>();
       replication_pad2d_out_batch<scalar_t> (input_data, output_data,
@@ -409,36 +413,37 @@ static void replication_pad2d_backward_out_frame(
   int oStartX = std::max(0, pad_l);
   int oStartY = std::max(0, pad_t);
 
-  int64_t k, ip_x, ip_y;
-#pragma omp parallel for private(k, ip_x, ip_y)
-  for (k = 0; k < nslices; k++)
-  {
-    for (int64_t i = 0; i < oheight; i++) {
-      for (int64_t j = 0; j < owidth; j++) {
-        if (j < pad_l) {
-          ip_x = pad_l;
-        } else if (j >= pad_l && j < iwidth + pad_l) {
-          ip_x = j;
-        } else {
-          ip_x = iwidth + pad_l - 1;
-        }
-        ip_x = ip_x - oStartX + iStartX;
+  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    int64_t ip_x, ip_y;
+    for (auto k = start; k < end; k++)
+    {
+      for (int64_t i = 0; i < oheight; i++) {
+        for (int64_t j = 0; j < owidth; j++) {
+          if (j < pad_l) {
+            ip_x = pad_l;
+          } else if (j >= pad_l && j < iwidth + pad_l) {
+            ip_x = j;
+          } else {
+            ip_x = iwidth + pad_l - 1;
+          }
+          ip_x = ip_x - oStartX + iStartX;
 
-        if (i < pad_t) {
-          ip_y = pad_t;
-        } else if (i >= pad_t && i < iheight + pad_t) {
-          ip_y = i;
-        } else {
-          ip_y = iheight + pad_t - 1;
-        }
-        ip_y = ip_y - oStartY + iStartY;
+          if (i < pad_t) {
+            ip_y = pad_t;
+          } else if (i >= pad_t && i < iheight + pad_t) {
+            ip_y = i;
+          } else {
+            ip_y = iheight + pad_t - 1;
+          }
+          ip_y = ip_y - oStartY + iStartY;
 
-        scalar_t *src_p = goutput_p + k*owidth*oheight + i * owidth + j;
-        scalar_t *dest_p = ginput_p + k*iwidth*iheight + ip_y * iwidth + ip_x;
-        *dest_p += *src_p;
+          scalar_t *src_p = goutput_p + k*owidth*oheight + i * owidth + j;
+          scalar_t *dest_p = ginput_p + k*iwidth*iheight + ip_y * iwidth + ip_x;
+          *dest_p += *src_p;
+        }
       }
     }
-  }
+  });
 }
 
 template <typename scalar_t>
@@ -451,22 +456,22 @@ static void replication_pad2d_backward_out_batch(
     int pad_t, int pad_b,
     int nbatch)
 {
-  int64_t p;
-#pragma omp parallel for private(p)
-  for (p = 0; p < nbatch; p++)
-  {
-    scalar_t *ginput_p = ginput_data + p * nslices * iheight * iwidth;
-    scalar_t *goutput_p = goutput_data + p * nslices * oheight * owidth;
-    replication_pad2d_backward_out_frame(ginput_p, goutput_p, nslices,
-        iwidth, iheight, owidth, oheight, pad_l, pad_r, pad_t, pad_b);
-  }
+  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+    for (auto p = start; p < end; p++)
+    {
+      scalar_t *ginput_p = ginput_data + p * nslices * iheight * iwidth;
+      scalar_t *goutput_p = goutput_data + p * nslices * oheight * owidth;
+      replication_pad2d_backward_out_frame(ginput_p, goutput_p, nslices,
+          iwidth, iheight, owidth, oheight, pad_l, pad_r, pad_t, pad_b);
+    }
+  });
 }
 
 Tensor& replication_pad2d_backward_out_cpu_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
   int pad_l = paddingSize[0];
@@ -511,7 +516,7 @@ Tensor& replication_pad2d_backward_out_cpu_template(
   if (input.dim() == 3)
   {
     AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "replication_pad2d_backward", [&] {
+      input.scalar_type(), "replication_pad2d_backward_cpu", [&] {
       replication_pad2d_backward_out_frame<scalar_t>(
         gradInput.data<scalar_t>(),
         gradOutput.data<scalar_t>(),
@@ -526,7 +531,7 @@ Tensor& replication_pad2d_backward_out_cpu_template(
   else
   {
     AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "replication_pad2d_backward", [&] {
+      input.scalar_type(), "replication_pad2d_backward_cpu", [&] {
       replication_pad2d_backward_out_batch<scalar_t>(
         gradInput.data<scalar_t>(),
         gradOutput.data<scalar_t>(),
@@ -596,48 +601,49 @@ static void replication_pad3d_out_frame(
   int oStartY = std::max(0, ptop);
   int oStartZ = std::max(0, pfront);
 
-  int64_t k, ip_x, ip_y, ip_z;
-#pragma omp parallel for private(k, ip_x, ip_y, ip_z)
-  for (k = 0; k < nslices; k++) {
-    for (int64_t z = 0; z < odepth; z++) {
-      for (int64_t i = 0; i < oheight; i++) {
-        for (int64_t j = 0; j < owidth; j++) {
-          if (j < pleft) {
-            ip_x = pleft;
-          } else if (j >= pleft && j < iwidth + pleft) {
-            ip_x = j;
-          } else {
-            ip_x = iwidth + pleft - 1;
-          }
-          ip_x = ip_x - oStartX + iStartX;
+  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    int64_t ip_x, ip_y, ip_z;
+    for (auto k = start; k < end; k++) {
+      for (int64_t z = 0; z < odepth; z++) {
+        for (int64_t i = 0; i < oheight; i++) {
+          for (int64_t j = 0; j < owidth; j++) {
+            if (j < pleft) {
+              ip_x = pleft;
+            } else if (j >= pleft && j < iwidth + pleft) {
+              ip_x = j;
+            } else {
+              ip_x = iwidth + pleft - 1;
+            }
+            ip_x = ip_x - oStartX + iStartX;
 
-          if (i < ptop) {
-            ip_y = ptop;
-          } else if (i >= ptop && i < iheight + ptop) {
-            ip_y = i;
-          } else {
-            ip_y = iheight + ptop - 1;
-          }
-          ip_y = ip_y - oStartY + iStartY;
+            if (i < ptop) {
+              ip_y = ptop;
+            } else if (i >= ptop && i < iheight + ptop) {
+              ip_y = i;
+            } else {
+              ip_y = iheight + ptop - 1;
+            }
+            ip_y = ip_y - oStartY + iStartY;
 
-          if (z < pfront) {
-            ip_z = pfront;
-          } else if (z >= pfront && z < idepth + pfront) {
-            ip_z = z;
-          } else {
-            ip_z = idepth + pfront - 1;
-          }
-          ip_z = ip_z - oStartZ + iStartZ;
+            if (z < pfront) {
+              ip_z = pfront;
+            } else if (z >= pfront && z < idepth + pfront) {
+              ip_z = z;
+            } else {
+              ip_z = idepth + pfront - 1;
+            }
+            ip_z = ip_z - oStartZ + iStartZ;
 
-          scalar_t *dest_p = output_p + k * owidth * oheight * odepth +
-            z * owidth * oheight + i * owidth + j;
-          scalar_t *src_p = input_p + k * iwidth * iheight * idepth +
-            ip_z * iwidth * iheight + ip_y * iwidth + ip_x;
-          *dest_p = *src_p;
+            scalar_t *dest_p = output_p + k * owidth * oheight * odepth +
+              z * owidth * oheight + i * owidth + j;
+            scalar_t *src_p = input_p + k * iwidth * iheight * idepth +
+              ip_z * iwidth * iheight + ip_y * iwidth + ip_x;
+            *dest_p = *src_p;
+          }
         }
       }
     }
-  }
+  });
 }
 
 template <typename scalar_t>
@@ -651,22 +657,22 @@ static void replication_pad3d_out_batch(
     int pfront, int pback,
     int nbatch)
 {
-  int64_t p;
-#pragma omp parallel for private(p)
-  for (p = 0; p < nbatch; p++)
-  {
-    scalar_t *input_p = input_data + p * nslices * iwidth * iheight * idepth;
-    scalar_t *output_p = output_data + p * nslices * owidth * oheight * odepth;
-    replication_pad3d_out_frame(input_p, output_p, nslices,
-        iwidth, iheight, idepth, owidth, oheight, odepth,
-        pleft, pright, ptop, pbottom, pfront, pback);
-  }
+  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+    for (auto p = start; p < end; p++)
+    {
+      scalar_t *input_p = input_data + p * nslices * iwidth * iheight * idepth;
+      scalar_t *output_p = output_data + p * nslices * owidth * oheight * odepth;
+      replication_pad3d_out_frame(input_p, output_p, nslices,
+          iwidth, iheight, idepth, owidth, oheight, odepth,
+          pleft, pright, ptop, pbottom, pfront, pback);
+    }
+  });
 }
 
 void replication_pad3d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
   int pleft = paddingSize[0];
@@ -709,7 +715,7 @@ void replication_pad3d_out_cpu_template(
   if (input.dim() == 4)
   {
     output.resize_({nslices, odepth, oheight, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "replication_pad3d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
       auto input_data = input.data<scalar_t>();
       auto output_data = output.data<scalar_t>();
       replication_pad3d_out_frame<scalar_t>(
@@ -722,7 +728,7 @@ void replication_pad3d_out_cpu_template(
   else
   {
     output.resize_({nbatch, nslices, odepth, oheight, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "replication_pad3d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
       auto input_data = input.data<scalar_t>();
       auto output_data = output.data<scalar_t>();
       replication_pad3d_out_batch<scalar_t>(
@@ -752,48 +758,49 @@ static void replication_pad3d_backward_out_frame(
   int oStartY = std::max(0, ptop);
   int oStartZ = std::max(0, pfront);
 
-  int64_t k, ip_x, ip_y, ip_z;
-#pragma omp parallel for private(k, ip_x, ip_y, ip_z)
-  for (k = 0; k < nslices; k++) {
-    for (int64_t z = 0; z < odepth; z++) {
-      for (int64_t i = 0; i < oheight; i++) {
-        for (int64_t j = 0; j < owidth; j++) {
-          if (j < pleft) {
-            ip_x = pleft;
-          } else if (j >= pleft && j < iwidth + pleft) {
-            ip_x = j;
-          } else {
-            ip_x = iwidth + pleft - 1;
-          }
-          ip_x = ip_x - oStartX + iStartX;
+  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    int64_t ip_x, ip_y, ip_z;
+    for (auto k = start; k < end; k++) {
+      for (int64_t z = 0; z < odepth; z++) {
+        for (int64_t i = 0; i < oheight; i++) {
+          for (int64_t j = 0; j < owidth; j++) {
+            if (j < pleft) {
+              ip_x = pleft;
+            } else if (j >= pleft && j < iwidth + pleft) {
+              ip_x = j;
+            } else {
+              ip_x = iwidth + pleft - 1;
+            }
+            ip_x = ip_x - oStartX + iStartX;
 
-          if (i < ptop) {
-            ip_y = ptop;
-          } else if (i >= ptop && i < iheight + ptop) {
-            ip_y = i;
-          } else {
-            ip_y = iheight + ptop - 1;
-          }
-          ip_y = ip_y - oStartY + iStartY;
+            if (i < ptop) {
+              ip_y = ptop;
+            } else if (i >= ptop && i < iheight + ptop) {
+              ip_y = i;
+            } else {
+              ip_y = iheight + ptop - 1;
+            }
+            ip_y = ip_y - oStartY + iStartY;
 
-          if (z < pfront) {
-            ip_z = pfront;
-          } else if (z >= pfront && z < idepth + pfront) {
-            ip_z = z;
-          } else {
-            ip_z = idepth + pfront - 1;
-          }
-          ip_z = ip_z - oStartZ + iStartZ;
+            if (z < pfront) {
+              ip_z = pfront;
+            } else if (z >= pfront && z < idepth + pfront) {
+              ip_z = z;
+            } else {
+              ip_z = idepth + pfront - 1;
+            }
+            ip_z = ip_z - oStartZ + iStartZ;
 
-          scalar_t *src_p = goutput_p + k * owidth * oheight * odepth +
-            z * owidth * oheight + i * owidth + j;
-          scalar_t *dest_p = ginput_p + k * iwidth * iheight * idepth +
-            ip_z * iwidth * iheight + ip_y * iwidth + ip_x;
-          *dest_p += *src_p;
+            scalar_t *src_p = goutput_p + k * owidth * oheight * odepth +
+              z * owidth * oheight + i * owidth + j;
+            scalar_t *dest_p = ginput_p + k * iwidth * iheight * idepth +
+              ip_z * iwidth * iheight + ip_y * iwidth + ip_x;
+            *dest_p += *src_p;
+          }
         }
       }
     }
-  }
+  });
 }
 
 template <typename scalar_t>
@@ -807,23 +814,23 @@ static void replication_pad3d_backward_out_batch(
     int pfront, int pback,
     int nbatch)
 {
-  int64_t p;
-#pragma omp parallel for private(p)
-  for (p = 0; p < nbatch; p++)
-  {
-    scalar_t *ginput_p = ginput_data + p * nslices * idepth * iheight * iwidth;
-    scalar_t *goutput_p = goutput_data + p * nslices * odepth * oheight * owidth;
-    replication_pad3d_backward_out_frame(ginput_p, goutput_p, nslices,
-        iwidth, iheight, idepth, owidth, oheight, odepth,
-        pleft, pright, ptop, pbottom, pfront, pback);
-  }
+  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+    for (auto p = start; p < end; p++)
+    {
+      scalar_t *ginput_p = ginput_data + p * nslices * idepth * iheight * iwidth;
+      scalar_t *goutput_p = goutput_data + p * nslices * odepth * oheight * owidth;
+      replication_pad3d_backward_out_frame(ginput_p, goutput_p, nslices,
+          iwidth, iheight, idepth, owidth, oheight, odepth,
+          pleft, pright, ptop, pbottom, pfront, pback);
+    }
+  });
 }
 
 Tensor& replication_pad3d_backward_out_cpu_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
   int pleft = paddingSize[0];
@@ -871,7 +878,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   if (input.dim() == 4)
   {
     AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "replication_pad3d_backward", [&] {
+      input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
       replication_pad3d_backward_out_frame<scalar_t> (
         gradInput.data<scalar_t>(),
         gradOutput.data<scalar_t>(),
@@ -887,7 +894,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   else
   {
     AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "replication_pad3d_backward", [&] {
+      input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
       replication_pad3d_backward_out_batch<scalar_t> (
         gradInput.data<scalar_t>(),
         gradOutput.data<scalar_t>(),
@@ -908,7 +915,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
 Tensor& replication_pad1d_out_cpu(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad1d_out_cpu_template(
       output, input, paddingSize);
@@ -917,7 +924,7 @@ Tensor& replication_pad1d_out_cpu(
 
 Tensor replication_pad1d_cpu(
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto output = at::empty({0}, input.options());
   replication_pad1d_out_cpu_template(
@@ -929,7 +936,7 @@ Tensor& replication_pad1d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   gradInput.resize_as_(input);
   replication_pad1d_backward_out_cpu_template(
@@ -940,7 +947,7 @@ Tensor& replication_pad1d_backward_out_cpu(
 Tensor replication_pad1d_backward_cpu(
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto gradInput = at::zeros_like(input);
   replication_pad1d_backward_out_cpu_template(
@@ -951,7 +958,7 @@ Tensor replication_pad1d_backward_cpu(
 Tensor& replication_pad2d_out_cpu(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad2d_out_cpu_template(
       output, input, paddingSize);
@@ -960,7 +967,7 @@ Tensor& replication_pad2d_out_cpu(
 
 Tensor replication_pad2d_cpu(
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto output = at::empty({0}, input.options());
   replication_pad2d_out_cpu_template(
@@ -972,7 +979,7 @@ Tensor& replication_pad2d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad2d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
@@ -982,7 +989,7 @@ Tensor& replication_pad2d_backward_out_cpu(
 Tensor replication_pad2d_backward_cpu(
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto gradInput = at::zeros_like(input);
   replication_pad2d_backward_out_cpu_template(
@@ -993,7 +1000,7 @@ Tensor replication_pad2d_backward_cpu(
 Tensor& replication_pad3d_out_cpu(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad3d_out_cpu_template(
       output, input, paddingSize);
@@ -1002,7 +1009,7 @@ Tensor& replication_pad3d_out_cpu(
 
 Tensor replication_pad3d_cpu(
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto output = at::empty({0}, input.options());
   replication_pad3d_out_cpu_template(
@@ -1014,7 +1021,7 @@ Tensor& replication_pad3d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad3d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
@@ -1024,7 +1031,7 @@ Tensor& replication_pad3d_backward_out_cpu(
 Tensor replication_pad3d_backward_cpu(
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto gradInput = at::zeros_like(input);
   replication_pad3d_backward_out_cpu_template(

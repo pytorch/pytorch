@@ -12,6 +12,7 @@
 #include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/cuda/Storage.h>
 #include <torch/csrc/cuda/Stream.h>
+#include <torch/csrc/cuda/Event.h>
 #ifdef _THP_CORE
 #include <torch/csrc/cuda/utils.h>
 #endif

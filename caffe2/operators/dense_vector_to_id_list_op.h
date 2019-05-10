@@ -23,13 +23,11 @@ class DenseVectorToIdListOp : public Operator<Context> {
     const auto batch_size = input.size(0);
     const auto col_num = input.size(1);
 
-    auto* out_lengths = Output(0);
-    out_lengths->Resize(batch_size);
+    auto* out_lengths = Output(0, {batch_size}, at::dtype<int32_t>());
 
     auto* out_lengths_data = out_lengths->template mutable_data<int32_t>();
 
-    auto* out_values = Output(1);
-    out_values->Resize(batch_size * col_num);
+    auto* out_values = Output(1, {batch_size * col_num}, at::dtype<M>());
 
     auto* out_values_data = out_values->template mutable_data<M>();
 

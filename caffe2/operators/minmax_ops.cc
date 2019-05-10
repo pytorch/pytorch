@@ -1,10 +1,9 @@
 #include "caffe2/operators/minmax_ops.h"
-#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
-REGISTER_CPU_OPERATOR(Max, MaxOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(Min, MinOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(Max, MaxOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Max)
     .NumInputs(1, INT_MAX)
@@ -154,35 +153,5 @@ Min:
         "*(type: Tensor`<Ord>`)* Output tensor with same dimensions as input(s)."
         "Contains the minimum valued element at each location.")
     .InheritOnnxSchema();
-
-template <typename T, class Context>
-bool MaxOp<T, Context>::Compute() {
-  auto& input0 = Input(0);
-  const int N = input0.numel();
-  T* output_data = Output(0)->template mutable_data<T>();
-
-  for (int i = 1; i < InputSize(); i++) {
-    auto input_data = Input(i).template data<T>();
-    EigenVectorMap<T> output_vec(output_data, N);
-    output_vec = output_vec.cwiseMax(ConstEigenVectorMap<T>(input_data, N));
-  }
-
-  return true;
-}
-
-template <typename T, class Context>
-bool MinOp<T, Context>::Compute() {
-  auto& input0 = Input(0);
-  const int N = input0.numel();
-  T* output_data = Output(0)->template mutable_data<T>();
-
-  for (int i = 1; i < InputSize(); i++) {
-    auto input_data = Input(i).template data<T>();
-    EigenVectorMap<T> output_vec(output_data, N);
-    output_vec = output_vec.cwiseMin(ConstEigenVectorMap<T>(input_data, N));
-  }
-
-  return true;
-}
 
 } // namespace caffe2

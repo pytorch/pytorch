@@ -13,8 +13,9 @@ namespace caffe2 {
 template <typename T, class Context>
 class HeatmapMaxKeypointOp final : public Operator<Context> {
  public:
-  HeatmapMaxKeypointOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit HeatmapMaxKeypointOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         should_output_softmax_(this->template GetSingleArgument<bool>(
             "should_output_softmax",
             false)) {}
