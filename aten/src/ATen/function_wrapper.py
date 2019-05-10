@@ -34,14 +34,15 @@ else:
 # what has to be done to add a Operation ...
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#
-# 1. if broadcasting or without the full list of arguments, add a non-virtual
-#    declaration under Type.h  (right now, we call this template
-#    BROADCAST but it also handles default arguments)
+
+# TH functions are generated into at::legacy::cpu and at::legacy::cuda,
+# where they can be called directly by a native function, they can be wrapped
+# by a native function that handles dispatch
+
+# Handle broadcasting for TH functions that need it
 LEGACY_TH_DECLARATION_BROADCAST = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals});
 """)
-# 2. broadcasting functions are implemented in Type.cpp
 LEGACY_TH_DEFINITION_BROADCAST = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}) {
     ${device_guard_declaration}
@@ -75,15 +76,13 @@ case ScalarType::${ScalarName}: {
 }
 """)
 
-# 3. add virtual dispatch declaration to Type.h and impl to Type.cpp; method_prefix_derived
-#    is present for providing a base-class definition for a derived-type method with a prefix.
+# Native functions are generated on Type. Add a virtual dispatch declaration to Type.h
 #
-#    If the declaration is abstract, then the actual implementation will
-#    be in a derived type; we put in a simple default "not implemented"
-#    stub.  However, if the declaration is concrete, we dispatch to the
-#    actual implementation.  At the moment, this situation *only* occurs
-#    for 'native' declarations (so the native dispatch is hardcoded into
-#    the template here.)
+# If the function has backend dependent dispatch, we define a "not implemented" stub on
+# TypeDefault.cpp and the actual implementations will be on derived types. Otherwise,
+# we define the actual implementations on TypeDefault.
+#
+# TODO: Some stuff like method_prefix_derived can probably be cleaned up here.
 PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const = 0;
 """)
@@ -109,12 +108,12 @@ ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
     ${type_definition_body}
 }
 """)
-# 4. add override to TypeDerived.h
+
+# For backend dependent dispatch, override declaration in TypeDerived.h and
+# override definition in TypeDerived.cpp
 TYPE_DERIVED_DECLARATION = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
-# 5. add override definition to TypeDerived.cpp
-
 TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
@@ -923,40 +922,6 @@ def create_generic(top_env, declarations):
                                                         else 'size' if broadcast_dims else 'outplace')
             option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
                                                     for y in option['actuals']]
-
-        '''
-        method_of = ['Type']
-        if is_namespace_function:
-            option['inferred_type'] = 'detail::infer_type({})'.format(dispatch_tensor)
-            top_env['function_declarations'].append(
-                FUNCTION_DECLARATION.substitute(env))
-            top_env['function_definitions'].append(
-                FUNCTION_DEFINITION.substitute(env))
-            method_of.append('namespace')
-
-        buffer_names = [buffer['name'] for buffer in option.get('buffers', [])]
-
-        output_options.append(OutputDeclaration(
-            name=option['api_name'],
-            matches_jit_signature=option['matches_jit_signature'],
-            schema_string=option['schema_string'],
-            method_prefix_derived=option['method_prefix_derived'],
-            arguments=formals,
-            method_of=method_of,
-            mode=mode,
-            python_module=option.get('python_module', ''),
-            buffers=buffer_names,
-            returns=option['returns'],
-            inplace=option['inplace'],
-            is_factory_method=False,
-            # See Note [Abstract ATen methods]
-            abstract=abstract,
-            requires_tensor=option.get('requires_tensor', False),
-            device_guard=option.get('device_guard', True),
-            with_gil=option.get('with_gil', False),
-            deprecated=option.get('deprecated', False)
-        ))
-        '''
 
     def native_get_formals(option, include_constants=False):
         # type: (FunctionOption, bool) -> List[AtFormal]
