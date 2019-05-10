@@ -530,7 +530,7 @@ Linear layers
 ----------------------------------
 
 :hidden:`Identity`
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Identity
     :members:

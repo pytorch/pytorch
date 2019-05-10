@@ -203,6 +203,9 @@ class TorchIntegration(hu.HypothesisTestCase):
             soft_nms_sigma=0.5,
             soft_nms_min_score_thres=0.001,
             rotated=rotated,
+            cls_agnostic_bbox_reg=False,
+            input_boxes_include_bg_cls=True,
+            output_classes_include_bg_cls=True,
         )
 
         for o, o_ref in zip(outputs, output_refs):

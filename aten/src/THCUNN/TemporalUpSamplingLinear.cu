@@ -38,7 +38,7 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
       return;
     }
     //
-    const Acctype w1r = linear_upsampling_compute_source_index<Acctype>(rwidth, w2, align_corners);
+    const Acctype w1r = area_pixel_compute_source_index<Acctype>(rwidth, w2, align_corners, /*cubic=*/false);
     const int w1 = w1r;
     const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const Acctype w1lambda = w1r - w1;
@@ -81,7 +81,7 @@ __global__ void caffe_gpu_interp2_kernel_backward(const int n,
       return;
     }
     //
-    const Acctype w1r = linear_upsampling_compute_source_index<Acctype>(rwidth, w2, align_corners);
+    const Acctype w1r = area_pixel_compute_source_index<Acctype>(rwidth, w2, align_corners, /*cubic=*/false);
     const int w1 = w1r;
     const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const Acctype w1lambda = w1r - w1;

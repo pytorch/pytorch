@@ -101,14 +101,6 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
     const std::unordered_map<std::string, TensorShape>& shape_hints_mapped,
     const BoundShapeSpec& spec) {
   ShapeInfoMap shape_map;
-  // Populate shapes from workplace
-  const std::vector<std::string> ws_blobs = ws->Blobs();
-  for (const auto& s : ws_blobs) {
-    auto shape_info = getShapeInfoFromBlob(ws->GetBlob(s));
-    if (shape_info.dim_type != ShapeInfo::DimType::UNKNOWN) {
-      shape_map[s] = shape_info;
-    }
-  }
   // We treat hinted shapes as BATCH. If there are shape hints on blobs in the
   // workspace, since they are already inserted as CONSTANT, it will take effect
   // here. For SEQ typed tensors, there are only a few of them and they will be
@@ -119,9 +111,17 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
         std::forward_as_tuple(kv.first),
         std::forward_as_tuple(ShapeInfo::DimType::BATCH, kv.second));
   }
-  BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(*pred_net, shape_map);
-  const auto& out_map = eng.shape_info();
+  // Populate shapes from workplace
+  const std::vector<std::string> ws_blobs = ws->Blobs();
+  for (const auto& s : ws_blobs) {
+    auto shape_info = getShapeInfoFromBlob(ws->GetBlob(s));
+    if (shape_info.dim_type != ShapeInfo::DimType::UNKNOWN) {
+      shape_map.emplace(s, shape_info);
+    }
+  }
+  auto eng = BoundShapeInferencerRegistry()->Create("C10", spec);
+  eng->InferBoundShapeAndType(*pred_net, shape_map);
+  const auto& out_map = eng->shape_info();
   shape_map.clear();
   for (const auto& kv : out_map) {
     shape_map.emplace(
@@ -156,6 +156,6 @@ void BackendTransformerBase::dumpNet(
       qshape_arg->mutable_qtensors()->Add()->CopyFrom(t);
     }
   }
-  WriteProtoToTextFile(shape_net, "debug_ssa_net.pb_txt");
+  WriteProtoToTextFile(shape_net, fname);
 }
 } // namespace caffe2

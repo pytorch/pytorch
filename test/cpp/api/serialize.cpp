@@ -324,3 +324,79 @@ TEST(SerializeTest, VectorOfTensors) {
     ASSERT_TRUE(x.allclose(y));
   }
 }
+
+// NOTE: if a `Module` contains unserializable submodules (e.g. `nn::Functional`),
+// we expect those submodules to be skipped when the `Module` is being serialized.
+TEST(SerializeTest, UnserializableSubmoduleIsSkippedWhenSavingModule) {
+  struct A : torch::nn::Module {
+    A() {
+      register_module("relu", torch::nn::Functional(torch::relu));
+    }
+  };
+
+  auto out = std::make_shared<A>();
+  std::stringstream ss;
+  torch::save(out, ss);
+
+  torch::serialize::InputArchive archive;
+  archive.load_from(ss);
+  torch::serialize::InputArchive relu_archive;
+
+  // Submodule with name "relu" should not exist in the `InputArchive`,
+  // because the "relu" submodule is an `nn::Functional` and is not serializable.
+  ASSERT_FALSE(archive.try_read("relu", relu_archive));
+}
+
+// NOTE: If a `Module` contains unserializable submodules (e.g. `nn::Functional`),
+// we don't check the existence of those submodules in the `InputArchive` when
+// deserializing.
+TEST(SerializeTest, UnserializableSubmoduleIsIgnoredWhenLoadingModule) {
+  struct B : torch::nn::Module {
+    B() {
+      register_module("relu1", torch::nn::Functional(torch::relu));
+      register_buffer("foo", torch::zeros(5, torch::kInt32));
+    }
+  };
+  struct A : torch::nn::Module {
+    A() {
+      register_module("b", std::make_shared<B>());
+      register_module("relu2", torch::nn::Functional(torch::relu));
+    }
+  };
+
+  auto out = std::make_shared<A>();
+  // Manually change the values of "b.foo", so that we can check whether the buffer
+  // contains these values after deserialization.
+  out->named_buffers()["b.foo"].fill_(1);
+  auto tempfile = c10::make_tempfile();
+  torch::save(out, tempfile.name);
+
+  torch::serialize::InputArchive archive;
+  archive.load_from(tempfile.name);
+  torch::serialize::InputArchive archive_b;
+  torch::serialize::InputArchive archive_relu;
+  torch::Tensor tensor_foo;
+
+  ASSERT_TRUE(archive.try_read("b", archive_b));
+  ASSERT_TRUE(archive_b.try_read("foo", tensor_foo, /*is_buffer=*/true));
+
+  // Submodule with name "relu1" should not exist in `archive_b`, because the "relu1"
+  // submodule is an `nn::Functional` and is not serializable.
+  ASSERT_FALSE(archive_b.try_read("relu1", archive_relu));
+
+  // Submodule with name "relu2" should not exist in `archive`, because the "relu2"
+  // submodule is an `nn::Functional` and is not serializable.
+  ASSERT_FALSE(archive.try_read("relu2", archive_relu));
+
+  auto in = std::make_shared<A>();
+  // `torch::load(...)` works without error, even though `A` contains the `nn::Functional`
+  // submodules while the serialized file doesn't, because the `nn::Functional` submodules
+  // are not serializable and thus ignored when deserializing.
+  torch::load(in, tempfile.name);
+
+  // Check that the "b.foo" buffer is correctly deserialized from the file.
+  const int output = in->named_buffers()["b.foo"].sum().item<int>();
+  // `output` should equal to the sum of the values we manually assigned to "b.foo" before
+  // serialization.
+  ASSERT_EQ(output, 5);  
+}

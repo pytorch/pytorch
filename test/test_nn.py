@@ -2070,24 +2070,61 @@ class TestNN(NNTestCase):
     def test_embedding_dense_grad_cuda(self):
         self._test_embedding_dense_grad("cuda")
 
-    def test_embedding_sparse_backward(self):
+    def test_move_sparse_half_embedding(self):
         embedding = nn.Embedding(10, 3, sparse=True)
-        embedding.zero_grad()
-        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3]]))
-        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(3, 3))
+        self.assertEqual(embedding.weight.device.type, 'cpu')
+        self.assertEqual(embedding.weight.dtype, torch.float64)
+        embedding.to(torch.float16)
+        self.assertEqual(embedding.weight.dtype, torch.float16)
+        self.assertEqual(embedding.embedding_dim, 3)
+        self.assertEqual(embedding.num_embeddings, 10)
+
+        if torch.cuda.is_available():
+            embedding.to('cuda')
+            self.assertEqual(embedding.weight.device.type, 'cuda')
+            embedding.to('cpu')
+            self.assertEqual(embedding.weight.device.type, 'cpu')
+
+    def test_embedding_sparse_backward(self):
+        self._test_embedding_backward()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_embedding_sparse_half_backward(self):
+        # same as test_embedding_sparse_backward above but testing half types in
+        # cuda. cpu sum not supported for half types.
+        self._test_embedding_backward('cuda', torch.float16)
+
+    def _test_embedding_backward(self, device='cpu', dtype=torch.float64):
+        embedding = nn.Embedding(10, 3, sparse=True)
+        tensor = torch.tensor([[7, 1, 3]])
+        ones = torch.tensor(1.).expand(3, 3)
+        tensorTwice = tensor.repeat(1, 2)
+        onesTwice = torch.cat((ones, ones))
+
+        embedding = embedding.to(dtype=dtype).to(device)
+        tensor = tensor.to(device)
+        ones = ones.to(device)
+        tensorTwice = tensorTwice.to(device)
+        onesTwice = onesTwice.to(device)
 
         embedding.zero_grad()
-        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3, 7, 1, 3]]))
-        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(6, 3))
+        embedding(tensor[0]).sum().backward()
+        self.assertEqual(embedding.weight.grad._indices(), tensor)
+        self.assertEqual(embedding.weight.grad._values(), ones)
 
         embedding.zero_grad()
-        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        embedding(torch.LongTensor([8, 1, 3])).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3, 8, 1, 3]]))
-        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(6, 3))
+        embedding(tensor[0]).sum().backward()
+        embedding(tensor[0]).sum().backward()
+        self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
+        self.assertEqual(embedding.weight.grad._values(), onesTwice)
+
+        embedding.zero_grad()
+        embedding(tensor[0]).sum().backward()
+        tensor[0, 0] = 8
+        embedding(tensor[0]).sum().backward()
+        tensorTwice[0, 3] = 8
+        self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
+        self.assertEqual(embedding.weight.grad._values(), onesTwice)
 
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx=0)
@@ -2377,6 +2414,7 @@ class TestNN(NNTestCase):
             needed_prec = dtype2prec[dtype] * 2
         else:
             needed_prec = backward_prec
+
         self.assertEqual(es_weight_grad, e.weight.grad, needed_prec)
 
         if test_per_sample_weights and trainable_per_sample_weights:
@@ -2564,12 +2602,13 @@ class TestNN(NNTestCase):
 
     def test_embedding_bag(self):
         for dtype in [torch.double, torch.float]:
-            # TODO: figure out why backward on float breaks
-            test_backward = dtype is not torch.float
-            self._test_EmbeddingBag(False, 'sum', False, test_backward=test_backward, dtype=dtype)
-            self._test_EmbeddingBag(False, 'mean', False, test_backward=test_backward, dtype=dtype)
-            self._test_EmbeddingBag(False, 'max', False, test_backward=test_backward, dtype=dtype)
+            self._test_EmbeddingBag(False, 'sum', False, dtype=dtype)
+            self._test_EmbeddingBag(False, 'mean', False, dtype=dtype)
+            self._test_EmbeddingBag(False, 'max', False, dtype=dtype)
 
+            # TODO: figure out why precision on sparse embeddings isn't the
+            # same as for dense.
+            test_backward = dtype is not torch.float
             self._test_EmbeddingBag(False, 'sum', True, test_backward=test_backward, dtype=dtype)
             self._test_EmbeddingBag(False, 'mean', True, test_backward=test_backward, dtype=dtype)
 
@@ -2733,10 +2772,11 @@ class TestNN(NNTestCase):
         self._test_EmbeddingBag(True, 'sum', False, dtype)
         self._test_EmbeddingBag(True, 'mean', False, dtype)
         self._test_EmbeddingBag(True, 'max', False, dtype)
-        if dtype != torch.half:
-            # torch.cuda.sparse.HalfTensor is not enabled.
-            self._test_EmbeddingBag(True, 'sum', True, dtype)
-            self._test_EmbeddingBag(True, 'mean', True, dtype)
+
+        # see 'todo' in test_embedding_bag.
+        test_backward = dtype is not torch.float16
+        self._test_EmbeddingBag(True, 'sum', True, dtype, test_backward=test_backward)
+        self._test_EmbeddingBag(True, 'mean', True, dtype, test_backward=test_backward)
 
     def test_fractional_max_pool2d(self):
         x = torch.randn(1, 2, 7, 7, requires_grad=True)
@@ -7060,29 +7100,38 @@ class TestNN(NNTestCase):
                 gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingBicubic2d(self):
-        # test output against known input
-        in_t = torch.arange(4).view(1, 1, 2, 2).type(torch.FloatTensor)
+        # test output against known input: align_corners=False result must match opencv
+        in_t = torch.arange(8).view(1, 2, 2, 2).type(torch.FloatTensor)
         expected_out_t = torch.Tensor(
-            [[[[0.00000, 0.31481, 0.68519, 1.00000],
-               [0.62963, 0.94444, 1.31481, 1.62963],
-               [1.37037, 1.68518, 2.05556, 2.37037],
-               [2.00000, 2.31481, 2.68519, 3.00000]]]])
-        out_t = F.interpolate(in_t, scale_factor=2, mode='bicubic', align_corners=True)
+            [[[[-0.31641, 0.01562, 0.56250, 0.89453],
+              [0.34766, 0.67969, 1.22656, 1.55859],
+              [1.44141, 1.77344, 2.32031, 2.65234],
+              [2.10547, 2.43750, 2.98438, 3.31641]],
+
+             [[3.68359, 4.01562, 4.56250, 4.89453],
+              [4.34766, 4.67969, 5.22656, 5.55859],
+              [5.44141, 5.77344, 6.32031, 6.65234],
+              [6.10547, 6.43750, 6.98438, 7.31641]]]])
+        out_t = F.interpolate(in_t, scale_factor=2, mode='bicubic', align_corners=False)
         torch.set_printoptions(precision=5)
         self.assertEqual(out_t, expected_out_t)
 
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
+
         for align_corners in [True, False]:
             kwargs = dict(mode='bicubic', align_corners=align_corners)
-
             # test float scale factor up & downsampling
-            for scale_factor in [0.5, 1.5, 2]:
-                in_t = torch.ones(2, 2, 2, 2)
-                out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data)
+            for device in device_list:
+                for scale_factor in [0.5, 1.5, 2]:
+                    in_t = torch.ones(2, 2, 2, 2).to(device)
+                    out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                    self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data)
 
-                input = torch.randn(2, 2, 2, 2, requires_grad=True)
-                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                    input = torch.randn(2, 2, 2, 2, requires_grad=True)
+                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)

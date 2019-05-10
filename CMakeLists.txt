@@ -61,9 +61,7 @@ endif()
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
-option(BUILD_TORCH "Build Torch" OFF)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
-option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
 option(BUILD_ATEN_ONLY "Build only a subset focused on ATen only" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
@@ -71,6 +69,7 @@ option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_pa
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
+option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
     "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
@@ -89,6 +88,7 @@ cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" OFF)
+option(NAMEDTENSOR_ENABLED "Experimental: compile with namedtensor support" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
@@ -163,10 +163,34 @@ if (MSVC)
       string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
     endif()
   endforeach(flag_var)
+  # Turning off USE_DISTRIBUTED on default
+  set(USE_DISTRIBUTED OFF)
 endif(MSVC)
 
+# Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
+# applicable to mobile are disabled by this variable.
 if (ANDROID OR IOS)
-  set(BUILD_ATEN_MOBILE ON)
+  set(INTERN_BUILD_MOBILE ON)
+endif()
+
+# INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
+# It's disabled for caffe2 mobile library.
+if (INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
+  set(INTERN_BUILD_ATEN_OPS OFF)
+else()
+  set(INTERN_BUILD_ATEN_OPS ON)
+endif()
+
+# BUILD_CAFFE2_MOBILE is the master switch to choose between libcaffe2 v.s. libtorch mobile build.
+# When it's enabled it builds original libcaffe2 mobile library without ATen/TH ops nor TorchScript support;
+# When it's disabled it builds libtorch mobile library, which contains ATen/TH ops and native support for
+# TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
+if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+  set(BUILD_PYTHON OFF)
+  set(BUILD_TORCH ON)
+  set(BUILD_CAFFE2_OPS OFF)
+  set(USE_DISTRIBUTED OFF)
+  set(FEATURE_TORCH_MOBILE ON)
 endif()
 
 if (BUILD_ATEN_ONLY)
@@ -237,6 +261,10 @@ include(cmake/Dependencies.cmake)
 
 if(USE_FBGEMM)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
+endif()
+
+if(NAMEDTENSOR_ENABLED)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNAMEDTENSOR_ENABLED")
 endif()
 
 # ---[ Whitelist file if whitelist is specified
@@ -479,6 +507,7 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
+
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
       FILE Caffe2Targets.cmake
       COMPONENT dev)

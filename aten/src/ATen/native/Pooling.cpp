@@ -114,6 +114,10 @@ Tensor max_pool2d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+  if (self.is_mkldnn()) {
+    return at::mkldnn_max_pool2d(
+        self, kernel_size, stride, padding, dilation, ceil_mode);
+  }
   auto output_and_indices = at::max_pool2d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
   return std::get<0>(output_and_indices);

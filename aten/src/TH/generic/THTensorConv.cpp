@@ -590,7 +590,6 @@ void THTensor_(conv2DRevger)(THTensor *r_, scalar_t beta, scalar_t alpha, THTens
   scalar_t *weight_data;
   scalar_t *output_data;
   ptrdiff_t nelem;
-  int64_t k;
 
   AT_CHECK(!t_->is_empty() && t_->dim() == 3, "input: non-empty 3D Tensor expected, got size: ", t_->sizes());
   AT_CHECK(!k_->is_empty() && k_->dim() == 3, "kernel: non-empty 3D Tensor expected, got size: ", k_->sizes());
@@ -625,53 +624,53 @@ void THTensor_(conv2DRevger)(THTensor *r_, scalar_t beta, scalar_t alpha, THTens
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
     /*THTensor_(zero)(r_);*/
-
-#pragma omp parallel for private(k)
-    for (k = 0; k < r_->size(0)*r_->size(1); k++)
-    {
-      scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      int64_t l;
-      for (l = 0; l < nOutputRows*nOutputCols; l++)
-        ptr_output[l] = 0.0;
-    }
+    at::parallel_for(0, r_->size(0)*r_->size(1), 0, [&](int64_t start, int64_t end) {
+      for (auto k = start; k < end; k++) {
+        scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
+        int64_t l;
+        for (l = 0; l < nOutputRows*nOutputCols; l++) {
+          ptr_output[l] = 0.0;
+        }
+      }
+    });
   }
   else if (beta != 1)
   {
     /*THTensor_(mul)(r_, beta);*/
-#pragma omp parallel for private(k)
-    for (k = 0; k < r_->size(0)*r_->size(1); k++)
-    {
-      scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      int64_t l;
-      for (l = 0; l < nOutputRows*nOutputCols; l++)
-        ptr_output[l] *= beta;
-    }
+    at::parallel_for(0, r_->size(0)*r_->size(1), 0, [&](int64_t start, int64_t end) {
+      for (auto k = start; k < end; k++) {
+        scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
+        int64_t l;
+        for (l = 0; l < nOutputRows*nOutputCols; l++) {
+          ptr_output[l] *= beta;
+        }
+      }
+    });
   }
 
-#pragma omp parallel for private(k)
-  for(k = 0; k < nKernelPlane; k++)
-  {
-    int64_t i;
-    /* get kernel */
-    scalar_t *ptr_weight = weight_data+k*kstride0;
+  at::parallel_for(0, nKernelPlane, 0, [&](int64_t start, int64_t end) {
+    for (auto k = start; k < end; k++) {
+      int64_t i;
+      /* get kernel */
+      scalar_t *ptr_weight = weight_data+k*kstride0;
 
-    for(i = 0; i < nInputPlane; i++)
-    {
-      /* get output */
-      scalar_t *ptr_output = output_data + k*nInputPlane*nOutputCols*nOutputRows + i*nOutputCols*nOutputRows;
-      /* get input */
-      scalar_t *ptr_input = input_data+i*istride0;
+      for (i = 0; i < nInputPlane; i++) {
+        /* get output */
+        scalar_t *ptr_output = output_data + k*nInputPlane*nOutputCols*nOutputRows + i*nOutputCols*nOutputRows;
+        /* get input */
+        scalar_t *ptr_input = input_data+i*istride0;
 
-      /* do image, kernel convolution */
-      THTensor_(validXCorr2DRevptr)(ptr_output,
-                                    alpha,
-                                    ptr_input,  nInputRows,  nInputCols,
-                                    ptr_weight, nKernelRows, nKernelCols,
-                                    srow, scol);
-      /* Next output plane */
-      /* output_data += nOutputCols*nOutputRows; */
+        /* do image, kernel convolution */
+        THTensor_(validXCorr2DRevptr)(ptr_output,
+                                      alpha,
+                                      ptr_input,  nInputRows,  nInputCols,
+                                      ptr_weight, nKernelRows, nKernelCols,
+                                      srow, scol);
+        /* Next output plane */
+        /* output_data += nOutputCols*nOutputRows; */
+      }
     }
-  }
+  });
   c10::raw::intrusive_ptr::decref(input);
   c10::raw::intrusive_ptr::decref(kernel);
 }
@@ -696,7 +695,6 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, scalar_t beta, scalar_t alpha, THTen
   scalar_t *weight_data;
   scalar_t *output_data;
   ptrdiff_t nelem;
-  int64_t k;
 
   AT_CHECK(!t_->is_empty() && t_->dim() == 4, "input: non-empty 4D Tensor expected, got size: ", t_->sizes());
   AT_CHECK(!k_->is_empty() && k_->dim() == 4, "kernel: non-empty 4D Tensor expected, got size: ", k_->sizes());
@@ -736,55 +734,55 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, scalar_t beta, scalar_t alpha, THTen
   {
     /*THTensor_(zero)(r_);*/
 
-#pragma omp parallel for private(k)
-    for (k = 0; k < r_->size(0)*r_->size(1); k++)
-    {
-      scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      int64_t l;
-      for (l = 0; l < nOutputRows*nOutputCols; l++)
-        ptr_output[l] = 0.0;
-    }
+    at::parallel_for(0, r_->size(0)*r_->size(1), 0, [&](int64_t start, int64_t end) {
+      for (auto k = start; k < end; k++) {
+        scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
+        int64_t l;
+        for (l = 0; l < nOutputRows*nOutputCols; l++) {
+          ptr_output[l] = 0.0;
+        }
+      }
+    });
   }
   else if (beta != 1)
   {
     /*THTensor_(mul)(r_, beta);*/
-#pragma omp parallel for private(k)
-    for (k = 0; k < r_->size(0)*r_->size(1); k++)
-    {
-      scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      int64_t l;
-      for (l = 0; l < nOutputRows*nOutputCols; l++)
-        ptr_output[l] *= beta;
-    }
+    at::parallel_for(0, r_->size(0)*r_->size(1), 0, [&](int64_t start, int64_t end) {
+      for (auto k = start; k < end; k++) {
+        scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
+        int64_t l;
+        for (l = 0; l < nOutputRows*nOutputCols; l++) {
+          ptr_output[l] *= beta;
+        }
+      }
+    });
   }
 
-#pragma omp parallel for private(k)
-  for(k = 0; k < nKernelPlane; k++)
-  {
-    int64_t i;
-    for(i = 0; i < nInputPlane; i++)
-    {
-      int64_t p;
-      for(p = 0; p < nbatch; p++)
-      {
-        /* get kernel */
-        scalar_t *ptr_weight = weight_data + p*kstride0 + k*kstride1;
-        /* get output */
-        scalar_t *ptr_output = output_data + k*nInputPlane*nOutputCols*nOutputRows + i*nOutputCols*nOutputRows;
-        /* get input */
-        scalar_t *ptr_input = input_data + p*istride0 + i*istride1;
+  at::parallel_for(0, nKernelPlane, 0, [&](int64_t start, int64_t end) {
+    for (auto k = start; k < end; k++) {
+      int64_t i;
+      for (i = 0; i < nInputPlane; i++) {
+        int64_t p;
+        for (p = 0; p < nbatch; p++) {
+          /* get kernel */
+          scalar_t *ptr_weight = weight_data + p*kstride0 + k*kstride1;
+          /* get output */
+          scalar_t *ptr_output = output_data + k*nInputPlane*nOutputCols*nOutputRows + i*nOutputCols*nOutputRows;
+          /* get input */
+          scalar_t *ptr_input = input_data + p*istride0 + i*istride1;
 
-        /* do image, kernel convolution */
-        THTensor_(validXCorr2DRevptr)(ptr_output,
-                                      alpha,
-                                      ptr_input,  nInputRows,  nInputCols,
-                                      ptr_weight, nKernelRows, nKernelCols,
-                                      srow, scol);
-        /* Next output plane */
-        /* output_data += nOutputCols*nOutputRows; */
+          /* do image, kernel convolution */
+          THTensor_(validXCorr2DRevptr)(ptr_output,
+                                        alpha,
+                                        ptr_input,  nInputRows,  nInputCols,
+                                        ptr_weight, nKernelRows, nKernelCols,
+                                        srow, scol);
+          /* Next output plane */
+          /* output_data += nOutputCols*nOutputRows; */
+        }
       }
     }
-  }
+  });
   c10::raw::intrusive_ptr::decref(input);
   c10::raw::intrusive_ptr::decref(kernel);
 }
@@ -808,7 +806,6 @@ void THTensor_(conv2Dger)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor 
   scalar_t *weight_data;
   scalar_t *output_data;
   ptrdiff_t nelem;
-  int64_t k;
 
   AT_CHECK(!t_->is_empty() && t_->dim() == 3, "input: non-empty 3D Tensor expected, got size: ", t_->sizes());
   AT_CHECK(!k_->is_empty() && k_->dim() == 3, "kernel: non-empty 3D Tensor expected, got size: ", k_->sizes());
@@ -850,73 +847,77 @@ void THTensor_(conv2Dger)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
     /*THTensor_(zero)(r_);*/
-#pragma omp parallel for private(k)
-    for (k = 0; k < r_->size(0)*r_->size(1); k++)
-    {
-      scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      int64_t l;
-      for (l = 0; l < nOutputRows*nOutputCols; l++)
-        ptr_output[l] = 0.0;
-    }
+    at::parallel_for(0, r_->size(0)*r_->size(1), 0, [&](int64_t start, int64_t end) {
+      for (auto k = start; k < end; k++) {
+        scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
+        int64_t l;
+        for (l = 0; l < nOutputRows*nOutputCols; l++) {
+          ptr_output[l] = 0.0;
+        }
+      }
+    });
   }
   else if (beta != 1)
   {
     /*THTensor_(mul)(r_, beta);*/
-#pragma omp parallel for private(k)
-    for (k = 0; k < r_->size(0)*r_->size(1); k++)
-    {
-      scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      int64_t l;
-      for (l = 0; l < nOutputRows*nOutputCols; l++)
-        ptr_output[l] *= beta;
-    }
+    at::parallel_for(0, r_->size(0)*r_->size(1), 0, [&](int64_t start, int64_t end) {
+      for (auto k = start; k < end; k++) {
+        scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
+        int64_t l;
+        for (l = 0; l < nOutputRows*nOutputCols; l++) {
+          ptr_output[l] *= beta;
+        }
+      }
+    });
   }
 
-#pragma omp parallel for private(k)
-  for(k = 0; k < nKernelPlane; k++)
-  {
-    int64_t i;
-    /* get kernel */
-    scalar_t *ptr_weight = weight_data+k*kstride0;
+  at::parallel_for(0, nKernelPlane, 0, [&](int64_t start, int64_t end) {
+    for(auto k = start; k < end; k++) {
+      int64_t i;
+      /* get kernel */
+      scalar_t *ptr_weight = weight_data+k*kstride0;
 
-    for(i = 0; i < nInputPlane; i++)
-    {
-      /* get output */
-      scalar_t *ptr_output = output_data + k*nInputPlane*nOutputCols*nOutputRows + i*nOutputCols*nOutputRows;
-      /* get input */
-      scalar_t *ptr_input = input_data+i*istride0;
+      for (i = 0; i < nInputPlane; i++) {
+        /* get output */
+        scalar_t *ptr_output = output_data + k*nInputPlane*nOutputCols*nOutputRows + i*nOutputCols*nOutputRows;
+        /* get input */
+        scalar_t *ptr_input = input_data+i*istride0;
 
-      /* do image, kernel convolution */
-      if (*vf == 'F')
-        if (*xc == 'X')
-          THTensor_(fullXCorr2Dptr)(ptr_output,
-                                    alpha,
-                                    ptr_input,  nInputRows,  nInputCols,
-                                    ptr_weight, nKernelRows, nKernelCols,
-                                    srow, scol);
-        else
-          THTensor_(fullConv2Dptr)(ptr_output,
-                                   alpha,
-                                   ptr_input,  nInputRows,  nInputCols,
-                                   ptr_weight, nKernelRows, nKernelCols,
-                                   srow, scol);
-      else
-        if (*xc == 'X')
-          THTensor_(validXCorr2Dptr)(ptr_output,
+        /* do image, kernel convolution */
+        if (*vf == 'F') {
+          if (*xc == 'X') {
+            THTensor_(fullXCorr2Dptr)(ptr_output,
+                                      alpha,
+                                      ptr_input,  nInputRows,  nInputCols,
+                                      ptr_weight, nKernelRows, nKernelCols,
+                                      srow, scol);
+          } else {
+            THTensor_(fullConv2Dptr)(ptr_output,
                                      alpha,
                                      ptr_input,  nInputRows,  nInputCols,
                                      ptr_weight, nKernelRows, nKernelCols,
                                      srow, scol);
-        else
-          THTensor_(validConv2Dptr)(ptr_output,
-                                    alpha,
-                                    ptr_input,  nInputRows,  nInputCols,
-                                    ptr_weight, nKernelRows, nKernelCols,
-                                    srow, scol);
-      /* Next output plane */
-      /* output_data += nOutputCols*nOutputRows; */
+          }
+        } else {
+          if (*xc == 'X') {
+            THTensor_(validXCorr2Dptr)(ptr_output,
+                                       alpha,
+                                       ptr_input,  nInputRows,  nInputCols,
+                                       ptr_weight, nKernelRows, nKernelCols,
+                                       srow, scol);
+          } else {
+            THTensor_(validConv2Dptr)(ptr_output,
+                                      alpha,
+                                      ptr_input,  nInputRows,  nInputCols,
+                                      ptr_weight, nKernelRows, nKernelCols,
+                                      srow, scol);
+          }
+        }
+        /* Next output plane */
+        /* output_data += nOutputCols*nOutputRows; */
+      }
     }
-  }
+  });
   c10::raw::intrusive_ptr::decref(input);
   c10::raw::intrusive_ptr::decref(kernel);
 }
@@ -939,7 +940,6 @@ void THTensor_(conv2Dmv)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor *
   scalar_t *weight_data;
   scalar_t *output_data;
   ptrdiff_t nelem;
-  int64_t k;
 
   AT_CHECK(!t_->is_empty() && t_->dim() == 3, "input: non-empty 3D Tensor expected, got size: ", t_->sizes());
   AT_CHECK(!k_->is_empty() && k_->dim() == 4, "kernel: non-empty 4D Tensor expected, got size: ", k_->sizes());
@@ -988,72 +988,76 @@ void THTensor_(conv2Dmv)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor *
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
     /*THTensor_(zero)(r_);*/
-#pragma omp parallel for private(k)
-    for (k = 0; k < r_->size(0); k++)
-    {
-      scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      int64_t l;
-      for (l = 0; l < nOutputRows*nOutputCols; l++)
-        ptr_output[l] = 0.0;
-    }
+    at::parallel_for(0, r_->size(0), 0, [&](int64_t start, int64_t end) {
+      for (auto k = start; k < end; k++) {
+        scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
+        int64_t l;
+        for (l = 0; l < nOutputRows*nOutputCols; l++) {
+          ptr_output[l] = 0.0;
+        }
+      }
+    });
   }
   else if (beta != 1)
   {
     /*THTensor_(mul)(r_, beta);*/
-#pragma omp parallel for private(k)
-    for (k = 0; k < r_->size(0); k++)
-    {
-      scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
-      int64_t l;
-      for (l = 0; l < nOutputRows*nOutputCols; l++)
-        ptr_output[l] *= beta;
-    }
+    at::parallel_for(0, r_->size(0), 0, [&](int64_t start, int64_t end) {
+      for (auto k = start; k < end; k++) {
+        scalar_t* ptr_output = output_data + k*nOutputCols*nOutputRows;
+        int64_t l;
+        for (l = 0; l < nOutputRows*nOutputCols; l++) {
+          ptr_output[l] *= beta;
+        }
+      }
+    });
   }
 
-#pragma omp parallel for private(k)
-  for(k = 0; k < nOutputPlane; k++)
-  {
-    int64_t i;
-    /* get output */
-    scalar_t *ptr_output = output_data + k*nOutputCols*nOutputRows;
-    for(i = 0; i < nInputPlane; i++)
-    {
-      /* get kernel */
-      scalar_t *ptr_weight = weight_data + k*kstride0 + i*kstride1;
-      /* get input */
-      scalar_t *ptr_input = input_data + i*istride0;
+  at::parallel_for(0, nOutputPlane, 0, [&](int64_t start, int64_t end) {
+    for (auto k = start; k < end; k++) {
+      int64_t i;
+      /* get output */
+      scalar_t *ptr_output = output_data + k*nOutputCols*nOutputRows;
+      for (i = 0; i < nInputPlane; i++) {
+        /* get kernel */
+        scalar_t *ptr_weight = weight_data + k*kstride0 + i*kstride1;
+        /* get input */
+        scalar_t *ptr_input = input_data + i*istride0;
 
-      /* do image, kernel convolution */
-      if (*vf == 'F')
-        if (*xc == 'X')
-          THTensor_(fullXCorr2Dptr)(ptr_output,
-                                    alpha,
-                                    ptr_input,  nInputRows,  nInputCols,
-                                    ptr_weight, nKernelRows, nKernelCols,
-                                    srow, scol);
-        else
-          THTensor_(fullConv2Dptr)(ptr_output,
-                                   alpha,
-                                   ptr_input,  nInputRows,  nInputCols,
-                                   ptr_weight, nKernelRows, nKernelCols,
-                                   srow, scol);
-      else
-        if (*xc == 'X')
-          THTensor_(validXCorr2Dptr)(ptr_output,
+        /* do image, kernel convolution */
+        if (*vf == 'F') {
+          if (*xc == 'X') {
+            THTensor_(fullXCorr2Dptr)(ptr_output,
+                                      alpha,
+                                      ptr_input,  nInputRows,  nInputCols,
+                                      ptr_weight, nKernelRows, nKernelCols,
+                                      srow, scol);
+          } else {
+            THTensor_(fullConv2Dptr)(ptr_output,
                                      alpha,
                                      ptr_input,  nInputRows,  nInputCols,
                                      ptr_weight, nKernelRows, nKernelCols,
                                      srow, scol);
-        else
-          THTensor_(validConv2Dptr)(ptr_output,
-                                    alpha,
-                                    ptr_input,  nInputRows,  nInputCols,
-                                    ptr_weight, nKernelRows, nKernelCols,
-                                    srow, scol);
+          }
+        } else {
+          if (*xc == 'X') {
+            THTensor_(validXCorr2Dptr)(ptr_output,
+                                       alpha,
+                                       ptr_input,  nInputRows,  nInputCols,
+                                       ptr_weight, nKernelRows, nKernelCols,
+                                       srow, scol);
+          } else {
+            THTensor_(validConv2Dptr)(ptr_output,
+                                      alpha,
+                                      ptr_input,  nInputRows,  nInputCols,
+                                      ptr_weight, nKernelRows, nKernelCols,
+                                      srow, scol);
+          }
+        }
+      }
+      /* Next output plane */
+      /* output_data += nOutputCols*nOutputRows;*/
     }
-    /* Next output plane */
-    /* output_data += nOutputCols*nOutputRows;*/
-  }
+  });
   c10::raw::intrusive_ptr::decref(input);
   c10::raw::intrusive_ptr::decref(kernel);
 }
@@ -1077,7 +1081,6 @@ void THTensor_(conv2Dmm)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor *
   scalar_t *input_data;
   scalar_t *weight_data;
   scalar_t *output_data;
-  int64_t p;
 
   AT_CHECK(!t_->is_empty() && t_->dim() == 4, "input: non-empty 4D Tensor expected, got size: ", t_->sizes());
   AT_CHECK(!k_->is_empty() && k_->dim() == 4, "kernel: non-empty 4D Tensor expected, got size: ", k_->sizes());
@@ -1126,84 +1129,85 @@ void THTensor_(conv2Dmm)(THTensor *r_, scalar_t beta, scalar_t alpha, THTensor *
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
     /*THTensor_(zero)(r_);*/
-#pragma omp parallel for private(p)
-    for (p=0; p < r_->size(0); p++)
-    {
-      int64_t k;
-      for (k = 0; k < r_->size(1); k++)
-      {
-        scalar_t* ptr_output = output_data + p*nOutputPlane*nOutputRows*nOutputCols + k*nOutputCols*nOutputRows;
-        int64_t l;
-        for (l = 0; l < nOutputRows*nOutputCols; l++)
-          ptr_output[l] = 0.0;
+    at::parallel_for(0, r_->size(0), 0, [&](int64_t start, int64_t end) {
+      for (auto p = start; p < end; p++) {
+        int64_t k;
+        for (k = 0; k < r_->size(1); k++) {
+          scalar_t* ptr_output = output_data + p*nOutputPlane*nOutputRows*nOutputCols + k*nOutputCols*nOutputRows;
+          int64_t l;
+          for (l = 0; l < nOutputRows*nOutputCols; l++) {
+            ptr_output[l] = 0.0;
+          }
+        }
       }
-    }
+    });
   }
   else if (beta != 1)
   {
     /*THTensor_(mul)(r_, beta);*/
-#pragma omp parallel for private(p)
-    for(p=0; p < r_->size(0); p++)
-    {
-      int64_t k;
-      for (k = 0; k < r_->size(1); k++)
-      {
-        scalar_t* ptr_output = output_data + p*nOutputPlane*nOutputRows*nOutputCols + k*nOutputCols*nOutputRows;
-        int64_t l;
-        for (l = 0; l < nOutputRows*nOutputCols; l++)
-          ptr_output[l] *= beta;
+    at::parallel_for(0, r_->size(0), 0, [&](int64_t start, int64_t end) {
+      for (auto p = start; p < end; p++) {
+        int64_t k;
+        for (k = 0; k < r_->size(1); k++) {
+          scalar_t* ptr_output = output_data + p*nOutputPlane*nOutputRows*nOutputCols + k*nOutputCols*nOutputRows;
+          int64_t l;
+          for (l = 0; l < nOutputRows*nOutputCols; l++) {
+            ptr_output[l] *= beta;
+          }
+        }
       }
-    }
+    });
   }
 
-#pragma omp parallel for private(p)
-  for(p=0; p < nbatch; p++)
-  {
-    int64_t k;
-    for(k = 0; k < nOutputPlane; k++)
-    {
-      int64_t i;
-      /* get output */
-      scalar_t *ptr_output = output_data + p*nOutputPlane*nOutputCols*nOutputRows + k*nOutputCols*nOutputRows;
-      for(i = 0; i < nInputPlane; i++)
-      {
-        /* get kernel */
-        scalar_t *ptr_weight = weight_data + k*kstride0 + i*kstride1;
-        /* get input */
-        scalar_t *ptr_input = input_data + p*nInputPlane*nInputRows*nInputCols + i*nInputRows*nInputCols;
+  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+    for (auto p = start; p < end; p++) {
+      int64_t k;
+      for (k = 0; k < nOutputPlane; k++) {
+        int64_t i;
+        /* get output */
+        scalar_t *ptr_output = output_data + p*nOutputPlane*nOutputCols*nOutputRows + k*nOutputCols*nOutputRows;
+        for (i = 0; i < nInputPlane; i++) {
+          /* get kernel */
+          scalar_t *ptr_weight = weight_data + k*kstride0 + i*kstride1;
+          /* get input */
+          scalar_t *ptr_input = input_data + p*nInputPlane*nInputRows*nInputCols + i*nInputRows*nInputCols;
 
-        /* do image, kernel convolution */
-        if (*vf == 'F')
-          if (*xc == 'X')
-            THTensor_(fullXCorr2Dptr)(ptr_output,
-                                      alpha,
-                                      ptr_input,  nInputRows,  nInputCols,
-                                      ptr_weight, nKernelRows, nKernelCols,
-                                      srow, scol);
-          else
-            THTensor_(fullConv2Dptr)(ptr_output,
-                                     alpha,
-                                     ptr_input,  nInputRows,  nInputCols,
-                                     ptr_weight, nKernelRows, nKernelCols,
-                                     srow, scol);
-        else
-          if (*xc == 'X')
-            THTensor_(validXCorr2Dptr)(ptr_output,
+          /* do image, kernel convolution */
+          if (*vf == 'F') {
+            if (*xc == 'X') {
+              THTensor_(fullXCorr2Dptr)(ptr_output,
+                                        alpha,
+                                        ptr_input,  nInputRows,  nInputCols,
+                                        ptr_weight, nKernelRows, nKernelCols,
+                                        srow, scol);
+            } else {
+              THTensor_(fullConv2Dptr)(ptr_output,
                                        alpha,
                                        ptr_input,  nInputRows,  nInputCols,
                                        ptr_weight, nKernelRows, nKernelCols,
                                        srow, scol);
-          else
-            THTensor_(validConv2Dptr)(ptr_output,
-                                      alpha,
-                                      ptr_input,  nInputRows,  nInputCols,
-                                      ptr_weight, nKernelRows, nKernelCols,
-                                      srow, scol);
+            }
+          } else {
+            if (*xc == 'X') {
+              THTensor_(validXCorr2Dptr)(ptr_output,
+                                         alpha,
+                                         ptr_input,  nInputRows,  nInputCols,
+                                         ptr_weight, nKernelRows, nKernelCols,
+                                         srow, scol);
+            } else {
+              THTensor_(validConv2Dptr)(ptr_output,
+                                        alpha,
+                                        ptr_input,  nInputRows,  nInputCols,
+                                        ptr_weight, nKernelRows, nKernelCols,
+                                        srow, scol);
+            }
+          }
+        }
+        /* Next output plane */
+        /* output_data += nOutputCols*nOutputRows;*/
       }
-      /* Next output plane */
-      /* output_data += nOutputCols*nOutputRows;*/
     }
-  }
+  });
   c10::raw::intrusive_ptr::decref(input);
   c10::raw::intrusive_ptr::decref(kernel);
 }

@@ -12,7 +12,7 @@
 
 template<typename Acctype>
 __host__ __forceinline__
-static Acctype linear_upsampling_compute_scale(
+static Acctype area_pixel_compute_scale(
                           int inputSize, int outputSize, bool align_corners) {
   if (outputSize > 1) {
     return align_corners ? (Acctype) (inputSize - 1) / (outputSize - 1)
@@ -24,13 +24,14 @@ static Acctype linear_upsampling_compute_scale(
 
 template<typename Acctype>
 __device__ __forceinline__
-static Acctype linear_upsampling_compute_source_index(
-                          Acctype scale, int dst_index, bool align_corners) {
+static Acctype area_pixel_compute_source_index(
+                          Acctype scale, int dst_index, bool align_corners, bool cubic) {
   if (align_corners) {
     return scale * dst_index;
   } else {
     Acctype src_idx = scale * (dst_index + Acctype(0.5)) - Acctype(0.5);
-    return src_idx < Acctype(0) ? Acctype(0) : src_idx;
+    // See Note[Follow Opencv resize logic]
+    return (!cubic && src_idx < Acctype(0)) ? Acctype(0) : src_idx;
   }
 }
 
