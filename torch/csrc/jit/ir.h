@@ -590,8 +590,6 @@ struct TORCH_API Node {
   // template variable, returning nullptr if the cast is invalid..
   //
   // Example usage: if(auto s = n.cast<Select>()) { ... }
-  //
-  // TODO: Make this const correct
   template <typename T>
   T* cast() {
     if (T::Kind == kind()) {
@@ -599,6 +597,14 @@ struct TORCH_API Node {
     }
     return nullptr;
   }
+  template <typename T>
+  const T* cast() const {
+    if (T::Kind == kind()) {
+      return static_cast<const T*>(this);
+    }
+    return nullptr;
+  }
+
   template <typename T>
   T* expect() {
     AT_CHECK(
