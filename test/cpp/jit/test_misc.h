@@ -28,6 +28,7 @@
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
+#include "torch/csrc/jit/passes/insert_guards.h"
 #include "torch/csrc/jit/symbolic_script.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tracer.h"
@@ -847,6 +848,38 @@ static void checkShape(Node* n, std::vector<int64_t> expected) {
   auto tp = profile->output()->type();
   auto ptp = tp->expect<ProfiledTensorType>();
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+}
+
+void testInsertGuards()
+{
+  static const auto basic_example = R"JIT(
+  def basic(x, y):
+    a = x + y
+    b = x * y
+    c = x + 1
+    d = a - c
+    e = b - c
+    return d + e
+  )JIT";
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("basic");
+  auto pr = ProfilingRecord::instrumentGraph(fun.graph());
+  pr->profiled_graph_->dump();
+
+  auto x = at::randn({2, 3}, at::kCPU);
+  auto y = at::randn({2, 3}, at::kCPU);
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+  auto stack = createStack({v(x), v(y)});
+  // introduce some profiling information
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+  std::cout << "after running interpreter:\n";
+  pr->profiled_graph_->dump();
+  InsertGuards(pr->profiled_graph_);
+  std::cout << "after guards inserted:\n";
+  pr->profiled_graph_->dump();
 }
 
 void testProfiler() {
