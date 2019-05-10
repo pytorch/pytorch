@@ -20,6 +20,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/Dict.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
@@ -857,11 +858,11 @@ RegisterOperators reg(
                  "DictConstruct must have an even number of inputs");
            }
            return [=](Stack& stack) {
-             c10::ivalue::UnorderedMap vals;
+             c10::impl::GenericDict vals;
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
-               vals[key] = val;
+               vals.insert_or_assign(std::move(key), std::move(val));
              }
              push(stack, std::move(vals));
              return 0;
@@ -1575,24 +1576,24 @@ int listSetItem<Shared<BoolList>, bool>(Stack& stack) {
 int dictSetItem(Stack& stack) {
   auto value = pop(stack);
   auto idx = pop(stack);
-  auto& dict = pop(stack).toGenericDict()->elements();
-  dict[idx] = value;
-  push(stack, dict);
+  auto dict = pop(stack).toGenericDict();
+  dict->elements().insert_or_assign(std::move(idx), std::move(value));
+  push(stack, std::move(dict));
   return 0;
 }
 
 int dictLen(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
-  push(stack, int64_t(dict.size()));
+  auto dict = pop(stack).toGenericDict();
+  push(stack, int64_t(dict->elements().size()));
   return 0;
 }
 
 int dictKeys(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
+  auto dict = pop(stack).toGenericDict();
   std::vector<IValue> keys;
-  keys.reserve(dict.size());
-  for (auto item : dict) {
-    keys.push_back(item.first);
+  keys.reserve(dict->elements().size());
+  for (auto item : dict->elements()) {
+    keys.push_back(item.key());
   }
   push(stack, IValue(keys));
   return 0;
@@ -1636,7 +1637,7 @@ int dictIndex(Stack& stack) {
   if (value == elems.end()) {
     AT_ERROR("KeyError: '", index, "'");
   }
-  push(stack, value->second);
+  push(stack, value->value());
   return 0;
 }
 
@@ -1648,7 +1649,7 @@ int dictGet(Stack& stack) {
   if (value == elems.end()) {
     push(stack, IValue());
   } else {
-    push(stack, value->second);
+    push(stack, value->value());
   }
   return 0;
 }
@@ -1662,7 +1663,7 @@ int dictGetDefault(Stack& stack) {
   if (value == elems.end()) {
     push(stack, default_value);
   } else {
-    push(stack, value->second);
+    push(stack, value->value());
   }
   return 0;
 }
