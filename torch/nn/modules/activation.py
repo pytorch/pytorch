@@ -728,7 +728,7 @@ class MultiheadAttention(Module):
         self._reset_parameters()
 
     def _reset_parameters(self):
-        xavier_uniform_(self.lin_proj_weight[:self.embed_dim, :])
+        0(self.lin_proj_weight[:self.embed_dim, :])
         xavier_uniform_(self.lin_proj_weight[self.embed_dim:(self.embed_dim * 2), :])
         xavier_uniform_(self.lin_proj_weight[(self.embed_dim * 2):, :])
 
