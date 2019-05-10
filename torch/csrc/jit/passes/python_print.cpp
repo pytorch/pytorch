@@ -1204,6 +1204,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
       prim::Store, // used in interpreter only
+      prim::profile, // used in interpreter only
 
   };
 

@@ -6,7 +6,7 @@ namespace jit {
 ProfilingRecord::ProfilingRecord(std::shared_ptr<Graph> g)
     : profiled_graph_(std::move(g)), profiling_count_(3) {}
 
-Node* ProfilingRecord::createProfileNode(
+ProfileOp* ProfilingRecord::createProfileNode(
     const std::function<void(Stack&)>& fp,
     at::ArrayRef<Value*> inputs) {
   auto pn = new ProfileOp(profiled_graph_.get(), fp);
@@ -18,32 +18,37 @@ Node* ProfilingRecord::createProfileNode(
 }
 
 void ProfilingRecord::instrumentBlock(Block* block) {
-  // iterating backwards allows us to easily insert profile nodes
-  // without affecting an iterator
-  for (auto it = block->nodes().rend(); it != block->nodes().rbegin(); --it) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
-    for (auto o : n->outputs()) {
-      if (!o->type()->isSubclass(TypeKind::TensorType)) {
+    for (auto i : n->inputs()) {
+      if (!i->type()->isSubclass(TypeKind::TensorType) ||
+          i->node()->kind() == prim::profile) {
         continue;
       }
 
-      std::function<void(Stack&)> shape_profiler = [this, o](Stack& stack) {
+      auto pn = createProfileNode(nullptr, {i});
+      auto pno = pn->addOutput();
+      pno->setType(i->type());
+      std::function<void(Stack&)> shape_profiler = [this, pno](Stack& stack) {
         IValue t;
         pop(stack, t);
         if (t.isTensor()) {
           auto pttp = ProfiledTensorType::create(t.toTensor());
           std::lock_guard<std::mutex> lock(this->mutex_);
-          if (o->type()->isSubclass(TypeKind::ProfiledTensorType)) {
-            auto type = o->type()->cast<ProfiledTensorType>();
-            o->setType(type->merge(pttp));
+          if (pno->type()->isSubclass(TypeKind::ProfiledTensorType)) {
+            auto type = pno->type()->cast<ProfiledTensorType>();
+            pno->setType(type->merge(pttp));
           } else {
-            o->setType(pttp);
+            pno->setType(pttp);
           }
         }
+        // passing t through
+        push(stack, t);
       };
 
-      auto pn = createProfileNode(shape_profiler, {o});
-      pn->insertAfter(n);
+      pn->setCallback(shape_profiler);
+      pn->insertBefore(n);
+      n->replaceInputWith(i, pn->output());
     }
 
     for (auto b : n->blocks()) {

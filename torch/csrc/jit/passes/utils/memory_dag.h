@@ -45,7 +45,7 @@ class MemoryDAG {
   TORCH_API bool mayAlias(Element* a, Element* b) const;
 
   // Does a hold reference to any memory that is stored in elem, or vice versa?
-  bool mayContainAlias(const Element* a, const Element* b) const;
+  TORCH_API bool mayContainAlias(const Element* a, const Element* b) const;
   bool mayContainAlias(Element* a, Element* b) const;
 
   bool mayContainAlias(

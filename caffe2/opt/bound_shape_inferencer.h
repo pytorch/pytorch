@@ -29,16 +29,18 @@ struct CAFFE2_API BoundShapeSpec {
 /// then propagates the bound shape down the network. For now the variable part
 /// (bound part) is the first dimension of the shape, which usually corresponds
 /// to the batch size or sequence lookup size.
-class CAFFE2_API BoundShapeInferencer {
+class BoundShapeInferencerBase {
  public:
-  explicit BoundShapeInferencer(const BoundShapeSpec& spec) : spec_(spec) {
+  explicit BoundShapeInferencerBase(const BoundShapeSpec& spec) : spec_(spec) {
     CAFFE_ENFORCE_GE(spec_.max_batch_size, 0);
     CAFFE_ENFORCE_GE(spec_.max_seq_size, 0);
   }
 
-  void InferBoundShapeAndType(
+  virtual ~BoundShapeInferencerBase() {}
+
+  virtual void InferBoundShapeAndType(
       const NetDef& net,
-      const std::unordered_map<std::string, ShapeInfo>& info);
+      const std::unordered_map<std::string, ShapeInfo>& info) = 0;
 
   const ShapeInfoMap& shape_info() const {
     return shape_info_;
@@ -58,7 +60,23 @@ class CAFFE2_API BoundShapeInferencer {
     return ss.str();
   }
 
- private:
+ protected:
+  const BoundShapeSpec spec_;
+  std::unordered_map<std::string, ShapeInfo> shape_info_;
+};
+
+class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
+ public:
+  explicit BoundShapeInferencer(const BoundShapeSpec& spec)
+      : BoundShapeInferencerBase(spec) {}
+
+  virtual ~BoundShapeInferencer() override {}
+
+  void InferBoundShapeAndType(
+      const NetDef& net,
+      const std::unordered_map<std::string, ShapeInfo>& info) override;
+
+ protected:
   TensorShape& CheckAndSetTensorShapeAndType(
       const std::string& name,
       ShapeInfo::DimType t,
@@ -89,10 +107,16 @@ class CAFFE2_API BoundShapeInferencer {
   // function
   void InferCommonOp(const OperatorDef& op);
 
-  const BoundShapeSpec spec_;
   ShapeInfo::DimType current_dim_type_{ShapeInfo::DimType::BATCH};
   int64_t current_max_batch_size_{0};
-  std::unordered_map<std::string, ShapeInfo> shape_info_;
 };
+
+CAFFE2_API std::shared_ptr<BoundShapeInferencerBase> getBoundShapeInferencer(
+    const BoundShapeSpec& spec);
+
+C10_DECLARE_SHARED_REGISTRY(
+    BoundShapeInferencerRegistry,
+    BoundShapeInferencerBase,
+    const BoundShapeSpec&);
 
 } // namespace caffe2
