@@ -2,7 +2,7 @@
 
 #include <torch/csrc/jit/operator.h>
 #include <ATen/core/stack.h>
-#include <ATen/core/op_registration/infer_schema.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
@@ -246,11 +246,24 @@ struct TORCH_API RegisterOperators {
   RegisterOperators& op(
       const std::string& name,
       Implementation&& implementation,
-      OperatorOptions options = OperatorOptions()) {
+      OperatorOptions options) {
+
     registerOperator(createOperator(
         name, std::forward<Implementation>(implementation), options));
     return *this;
   }
+
+  template <typename Implementation>
+  RegisterOperators& op(
+      const std::string& name,
+      Implementation&& implementation) {
+    registrars_.emplace_back(c10::guts::make_unique<c10::RegisterOperators>(name, std::forward<Implementation>(implementation)));
+
+    return *this;
+  }
+
+private:
+  std::vector<std::shared_ptr<c10::RegisterOperators>> registrars_;
 };
 
 } // namespace jit
