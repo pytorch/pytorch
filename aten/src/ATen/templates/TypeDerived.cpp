@@ -7,7 +7,6 @@
 
 // ${generated_comment}
 
-$th_headers
 $storage_tensor_headers
 #include <ATen/${Generator}.h>
 #include <c10/core/Allocator.h>

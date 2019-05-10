@@ -819,9 +819,15 @@
 
 - func: fill_(Tensor(a!) self, Scalar value) -> Tensor(a!)
   variants: function, method
+  dispatch:
+    CPU: fill__cpu
+    CUDA: fill__cuda
 
 - func: fill_(Tensor(a!) self, Tensor value) -> Tensor(a!)
   variants: function, method
+  dispatch:
+    CPU: fill__cpu
+    CUDA: fill__cuda
 
 - func: floor(Tensor self) -> Tensor
   variants: function, method
@@ -2132,8 +2138,8 @@
   cpu_bool: True
   cuda_bool: True
   dispatch:
-    CPU: clone
-    CUDA: clone
+    CPU: clone_cpu
+    CUDA: clone_cuda
     SparseCPU: clone_sparse
     SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
@@ -2144,23 +2150,23 @@
   cpu_half: True
   variants: function, method
   dispatch:
-    CPU: resize_as_
-    CUDA: resize_as_
+    CPU: resize_as__cpu
+    CUDA: resize_as__cuda
     SparseCPU: resize_as_sparse_
     SparseCUDA: resize_as_sparse_
 
 - func: pow(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: pow_out
-    CUDA: pow_out
+    CPU: pow_out_cpu
+    CUDA: pow_out_cuda
     SparseCPU: pow_out_sparse_scalar
     SparseCUDA: pow_out_sparse_scalar
 
 - func: pow(Tensor self, Scalar exponent) -> Tensor
   variants: function, method
   dispatch:
-    CPU: pow
-    CUDA: pow
+    CPU: pow_cpu
+    CUDA: pow_cuda
     SparseCPU: pow_sparse_scalar
     SparseCUDA: pow_sparse_scalar
 
@@ -2170,8 +2176,8 @@
   cpu_bool: True
   cuda_bool: True
   dispatch:
-    CPU: zero_
-    CUDA: zero_
+    CPU: zero__cpu
+    CUDA: zero__cuda
     SparseCPU: zero_sparse_
     SparseCUDA: zero_sparse_
 
@@ -2685,38 +2691,62 @@
 - func: set_(Tensor(a!) self, Storage source) -> Tensor(a!)
   variants: method
   device_guard: False
+  dispatch:
+    CPU: set__cpu
+    CUDA: set__cuda
 
 - func: set_(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
   variants: method
   device_guard: False
+  dispatch:
+    CPU: set__cpu
+    CUDA: set__cuda
 
 - func: set_(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
   device_guard: False
+  dispatch:
+    CPU: set__cpu
+    CUDA: set__cuda
 
 - func: set_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: set__cpu
+    CUDA: set__cuda
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
   cpu_bool: True
   cuda_bool: True
   device_guard: False
+  dispatch:
+    CPU: is_set_to_cpu
+    CUDA: is_set_to_cuda
 
 - func: masked_fill_(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: masked_fill__cpu
+    CUDA: masked_fill__cuda
 
 - func: masked_fill(Tensor self, Tensor mask, Scalar value) -> Tensor
   variants: function, method
 
 - func: masked_fill_(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: masked_fill__cpu
+    CUDA: masked_fill__cuda
 
 - func: masked_fill(Tensor self, Tensor mask, Tensor value) -> Tensor
   variants: function, method
 
 - func: masked_scatter_(Tensor(a!) self, Tensor mask, Tensor source) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: masked_scatter__cpu
+    CUDA: masked_scatter__cuda
 
 - func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
   variants: function, method
@@ -2728,150 +2758,273 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: view
-    CUDA: view
+    CPU: view_cpu
+    CUDA: view_cuda
     MkldnnCPU: mkldnn_view
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: put__cpu
+    CUDA: put__cuda
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: index_add__cpu
+    CUDA: index_add__cuda
 
 - func: index_add(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
   variants: function, method
 
 - func: index_fill_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: index_fill__cpu
+    CUDA: index_fill__cuda
 
 - func: index_fill(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
 
 - func: index_fill_(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: index_fill__cpu
+    CUDA: index_fill__cuda
 
 - func: index_fill(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
   variants: function, method
 
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: scatter__cpu
+    CUDA: scatter__cuda
 
 - func: scatter(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: scatter__cpu
+    CUDA: scatter__cuda
 
 - func: scatter(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
 
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: scatter_add__cpu
+    CUDA: scatter_add__cuda
 
 - func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
 - func: lt_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: lt__cpu
+    CUDA: lt__cuda
 
 - func: lt_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: lt__cpu
+    CUDA: lt__cuda
 
 - func: gt_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: gt__cpu
+    CUDA: gt__cuda
 
 - func: gt_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: gt__cpu
+    CUDA: gt__cuda
 
 - func: le_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: le__cpu
+    CUDA: le__cuda
 
 - func: le_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: le__cpu
+    CUDA: le__cuda
 
 - func: ge_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: ge__cpu
+    CUDA: ge__cuda
 
 - func: ge_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: ge__cpu
+    CUDA: ge__cuda
 
 - func: eq_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: eq__cpu
+    CUDA: eq__cuda
 
 - func: eq_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: eq__cpu
+    CUDA: eq__cuda
 
 - func: ne_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: ne__cpu
+    CUDA: ne__cuda
 
 - func: ne_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: ne__cpu
+    CUDA: ne__cuda
 
 - func: __and__(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: __and___cpu
+    CUDA: __and___cuda
 
 - func: __and__(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: __and___cpu
+    CUDA: __and___cuda
 
 - func: __iand__(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: __iand___cpu
+    CUDA: __iand___cuda
 
 - func: __iand__(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: __iand___cpu
+    CUDA: __iand___cuda
 
 - func: __or__(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: __or___cpu
+    CUDA: __or___cuda
 
 - func: __or__(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: __or___cpu
+    CUDA: __or___cuda
 
 - func: __ior__(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: __ior___cpu
+    CUDA: __ior___cuda
 
 - func: __ior__(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: __ior___cpu
+    CUDA: __ior___cuda
 
 - func: __xor__(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: __xor___cpu
+    CUDA: __xor___cuda
 
 - func: __xor__(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: __xor___cpu
+    CUDA: __xor___cuda
 
 - func: __ixor__(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: __ixor___cpu
+    CUDA: __ixor___cuda
 
 - func: __ixor__(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: __ixor___cpu
+    CUDA: __ixor___cuda
 
 - func: __lshift__(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: __lshift___cpu
+    CUDA: __lshift___cuda
 
 - func: __lshift__(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: __lshift___cpu
+    CUDA: __lshift___cuda
 
 - func: __ilshift__(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: __ilshift___cpu
+    CUDA: __ilshift___cuda
 
 - func: __ilshift__(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: __ilshift___cpu
+    CUDA: __ilshift___cuda
 
 - func: __rshift__(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: __rshift___cpu
+    CUDA: __rshift___cuda
 
 - func: __rshift__(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: __rshift___cpu
+    CUDA: __rshift___cuda
 
 - func: __irshift__(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: __irshift___cpu
+    CUDA: __irshift___cuda
 
 - func: __irshift__(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: __irshift___cpu
+    CUDA: __irshift___cuda
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: lgamma__cpu
+    CUDA: lgamma__cuda
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: atan2__cpu
+    CUDA: atan2__cuda
 
 - func: tril_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
   variants: method
@@ -2887,21 +3040,39 @@
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: digamma__cpu
+    CUDA: digamma__cuda
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: polygamma__cpu
+    CUDA: polygamma__cuda
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: erfinv__cpu
+    CUDA: erfinv__cuda
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: renorm__cpu
+    CUDA: renorm__cuda
 
 - func: pow_(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: pow__cpu
+    CUDA: pow__cuda
 
 - func: pow_(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: pow__cpu
+    CUDA: pow__cuda
 
 - func: lerp_(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   variants: method
@@ -2917,66 +3088,129 @@
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: sign__cpu
+    CUDA: sign__cuda
 
 - func: fmod_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: fmod__cpu
+    CUDA: fmod__cuda
 
 - func: fmod_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: fmod__cpu
+    CUDA: fmod__cuda
 
 - func: remainder_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: remainder__cpu
+    CUDA: remainder__cuda
 
 - func: remainder_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: remainder__cpu
+    CUDA: remainder__cuda
 
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: addbmm__cpu
+    CUDA: addbmm__cuda
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: addbmm_out_cpu
+    CUDA: addbmm_out_cuda
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: addbmm_cpu
+    CUDA: addbmm_cuda
 
 - func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: addcmul__cpu
+    CUDA: addcmul__cuda
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: addcdiv__cpu
+    CUDA: addcdiv__cuda
 
 - func: random_(Tensor(a!) self, int from, int to, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: random__cpu
+    CUDA: random__cuda
 
 - func: random_(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: random__cpu
+    CUDA: random__cuda
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: random__cpu
+    CUDA: random__cuda
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: uniform__cpu
+    CUDA: uniform__cuda
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: normal__cpu
+    CUDA: normal__cuda
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: cauchy__cpu
+    CUDA: cauchy__cuda
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: log_normal__cpu
+    CUDA: log_normal__cuda
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: exponential__cpu
+    CUDA: exponential__cuda
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: geometric__cpu
+    CUDA: geometric__cuda
 
 # wrappers for TH functions
 
 - func: diag(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: diag_out_cpu
+    CUDA: diag_out_cuda
 
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: diag_cpu
+    CUDA: diag_cuda
 
 - func: cross(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -3011,108 +3245,231 @@
 
 - func: trace(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: trace_cpu
+    CUDA: trace_cuda
 
 - func: ne(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: ne_out_cpu
+    CUDA: ne_out_cuda
 
 - func: ne(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: ne_cpu
+    CUDA: ne_cuda
 
 - func: ne(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: ne_out_cpu
+    CUDA: ne_out_cuda
 
 - func: ne(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: ne_cpu
+    CUDA: ne_cuda
 
 - func: eq(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: eq_out_cpu
+    CUDA: eq_out_cuda
 
 - func: eq(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: eq_cpu
+    CUDA: eq_cuda
 
 - func: eq(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: eq_out_cpu
+    CUDA: eq_out_cuda
 
 - func: eq(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: eq_cpu
+    CUDA: eq_cuda
 
 - func: ge(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: ge_out_cpu
+    CUDA: ge_out_cuda
 
 - func: ge(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: ge_cpu
+    CUDA: ge_cuda
 
 - func: ge(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: ge_out_cpu
+    CUDA: ge_out_cuda
 
 - func: ge(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: ge_cpu
+    CUDA: ge_cuda
 
 - func: le(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: le_out_cpu
+    CUDA: le_out_cuda
 
 - func: le(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: le_cpu
+    CUDA: le_cuda
 
 - func: le(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: le_out_cpu
+    CUDA: le_out_cuda
 
 - func: le(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: le_cpu
+    CUDA: le_cuda
 
 - func: gt(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: gt_out_cpu
+    CUDA: gt_out_cuda
 
 - func: gt(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: gt_cpu
+    CUDA: gt_cuda
 
 - func: gt(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: gt_out_cpu
+    CUDA: gt_out_cuda
 
 - func: gt(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: gt_cpu
+    CUDA: gt_cuda
 
 - func: lt(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: lt_out_cpu
+    CUDA: lt_out_cuda
 
 - func: lt(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: lt_cpu
+    CUDA: lt_cuda
 
 - func: lt(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: lt_out_cpu
+    CUDA: lt_out_cuda
 
 - func: lt(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: lt_cpu
+    CUDA: lt_cuda
 
 - func: take(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: take_out_cpu
+    CUDA: take_out_cuda
 
 - func: take(Tensor self, Tensor index) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: take_cpu
+    CUDA: take_cuda
 
 - func: index_select(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: index_select_out_cpu
+    CUDA: index_select_out_cuda
 
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: index_select_cpu
+    CUDA: index_select_cuda
 
 - func: masked_select(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: masked_select_out_cpu
+    CUDA: masked_select_out_cuda
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: masked_select_cpu
+    CUDA: masked_select_cuda
 
 - func: nonzero(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: nonzero_out_cpu
+    CUDA: nonzero_out_cuda
 
 - func: nonzero(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: nonzero_cpu
+    CUDA: nonzero_cuda
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: gather_out_cpu
+    CUDA: gather_out_cuda
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: gather_cpu
+    CUDA: gather_cuda
 
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: addcmul_out_cpu
+    CUDA: addcmul_out_cuda
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: addcmul_cpu
+    CUDA: addcmul_cuda
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: addcdiv_out_cpu
+    CUDA: addcdiv_out_cuda
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: addcdiv_cpu
+    CUDA: addcdiv_cuda
 
 - func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
+  dispatch:
+    CPU: gels_out_cpu
+    CUDA: gels_out_cuda
 
 - func: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   variants: method, function
+  dispatch:
+    CPU: gels_cpu
+    CUDA: gels_cuda
 
 - func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
 
@@ -3126,19 +3483,37 @@
     CUDA: _triangular_solve_helper_cuda
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  dispatch:
+    CPU: symeig_out_cpu
+    CUDA: symeig_out_cuda
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   variants: method, function
+  dispatch:
+    CPU: symeig_cpu
+    CUDA: symeig_cuda
 
 - func: eig(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  dispatch:
+    CPU: eig_out_cpu
+    CUDA: eig_out_cuda
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   variants: method, function
+  dispatch:
+    CPU: eig_cpu
+    CUDA: eig_cuda
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
+  dispatch:
+    CPU: svd_out_cpu
+    CUDA: svd_out_cuda
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   variants: method, function
+  dispatch:
+    CPU: svd_cpu
+    CUDA: svd_cuda
 
 - func: cholesky(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -3174,34 +3549,64 @@
     CUDA: _solve_helper_cuda
 
 - func: cholesky_inverse(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: cholesky_inverse_out_cpu
+    CUDA: cholesky_inverse_out_cuda
 
 - func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: cholesky_inverse_cpu
+    CUDA: cholesky_inverse_cuda
 
 - func: pstrf(Tensor self, bool upper=True, Scalar tol=-1, *, Tensor(a!) u, Tensor(b!) pivot) -> (Tensor(a!) u, Tensor(b!) pivot)
+  dispatch:
+    CPU: pstrf_out_cpu
 
 - func: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)
   variants: method, function
+  dispatch:
+    CPU: pstrf_cpu
 
 - func: qr(Tensor self, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
+  dispatch:
+    CPU: qr_out_cpu
+    CUDA: qr_out_cuda
 
 - func: qr(Tensor self) -> (Tensor Q, Tensor R)
   variants: method, function
+  dispatch:
+    CPU: qr_cpu
+    CUDA: qr_cuda
 
 - func: geqrf(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
+  dispatch:
+    CPU: geqrf_out_cpu
+    CUDA: geqrf_out_cuda
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   variants: method, function
+  dispatch:
+    CPU: geqrf_cpu
+    CUDA: geqrf_cuda
 
 - func: orgqr(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: orgqr_out_cpu
 
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: orgqr_cpu
 
 - func: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: ormqr_out_cpu
 
 - func: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: ormqr_cpu
 
 - func: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor, Tensor, Tensor)
   variants: function
@@ -3210,48 +3615,99 @@
     CUDA: _lu_with_info_cuda
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: lu_solve_out_cpu
+    CUDA: lu_solve_out_cuda
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: lu_solve_cpu
+    CUDA: lu_solve_cuda
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: multinomial_out_cpu
+    CUDA: multinomial_out_cuda
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: multinomial_cpu
+    CUDA: multinomial_cuda
 
 - func: _multinomial_alias_setup(Tensor probs) -> (Tensor, Tensor)
   variants: function
+  dispatch:
+    CPU: _multinomial_alias_setup_cpu
+    CUDA: _multinomial_alias_setup_cuda
 
 - func: _multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, Generator? generator=None) -> Tensor
   variants: function
+  dispatch:
+    CPU: _multinomial_alias_draw_cpu
+    CUDA: _multinomial_alias_draw_cuda
 
 - func: lgamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: lgamma_out_cpu
+    CUDA: lgamma_out_cuda
 
 - func: lgamma(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: lgamma_cpu
+    CUDA: lgamma_cuda
 
 - func: digamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: digamma_out_cpu
+    CUDA: digamma_out_cuda
 
 - func: digamma(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: digamma_cpu
+    CUDA: digamma_cuda
 
 - func: polygamma(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: polygamma_out_cpu
+    CUDA: polygamma_out_cuda
 
 - func: polygamma(int n, Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: polygamma_cpu
+    CUDA: polygamma_cuda
 
 - func: erfinv(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: erfinv_out_cpu
+    CUDA: erfinv_out_cuda
 
 - func: erfinv(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: erfinv_cpu
+    CUDA: erfinv_cuda
 
 - func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: dist_cpu
+    CUDA: dist_cuda
 
 - func: atan2(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: atan2_out_cpu
+    CUDA: atan2_out_cuda
 
 - func: atan2(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: atan2_cpu
+    CUDA: atan2_cuda
 
 - func: lerp(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3287,45 +3743,93 @@
     CUDA: _histc_cuda
 
 - func: sign(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: sign_out_cpu
+    CUDA: sign_out_cuda
 
 - func: sign(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: sign_cpu
+    CUDA: sign_cuda
 
 - func: fmod(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: fmod_out_cpu
+    CUDA: fmod_out_cuda
 
 - func: fmod(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: fmod_cpu
+    CUDA: fmod_cuda
 
 - func: fmod(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: fmod_out_cpu
+    CUDA: fmod_out_cuda
 
 - func: fmod(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: fmod_cpu
+    CUDA: fmod_cuda
 
 - func: remainder(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: remainder_out_cpu
+    CUDA: remainder_out_cuda
 
 - func: remainder(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: remainder_cpu
+    CUDA: remainder_cuda
 
 - func: remainder(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: remainder_out_cpu
+    CUDA: remainder_out_cuda
 
 - func: remainder(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: remainder_cpu
+    CUDA: remainder_cuda
 
 - func: min(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: min_out_cpu
+    CUDA: min_out_cuda
 
 - func: min(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: min_cpu
+    CUDA: min_cuda
 
 - func: min(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: min_cpu
+    CUDA: min_cuda
 
 - func: max(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: max_out_cpu
+    CUDA: max_out_cuda
 
 - func: max(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: max_cpu
+    CUDA: max_cuda
 
 - func: max(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: max_cpu
+    CUDA: max_cuda
 
 - func: median(Tensor self) -> Tensor
   variants: method, function
@@ -3334,17 +3838,32 @@
     CUDA: median_cuda
 
 - func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  dispatch:
+    CPU: sort_out_cpu
+    CUDA: sort_out_cuda
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   variants: method, function
+  dispatch:
+    CPU: sort_cpu
+    CUDA: sort_cuda
 
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: argsort_cpu
+    CUDA: argsort_cuda
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
+  dispatch:
+    CPU: topk_out_cpu
+    CUDA: topk_out_cuda
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   variants: method, function
+  dispatch:
+    CPU: topk_cpu
+    CUDA: topk_cuda
 
 - func: all(Tensor self) -> Tensor
   variants: method, function
@@ -3353,109 +3872,256 @@
   variants: method, function
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: renorm_out_cpu
+    CUDA: renorm_out_cuda
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: renorm_cpu
+    CUDA: renorm_cuda
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   variants: method
+  dispatch:
+    CPU: unfold_cpu
+    CUDA: unfold_cuda
 
 - func: equal(Tensor self, Tensor other) -> bool
   variants: method, function
+  dispatch:
+    CPU: equal_cpu
+    CUDA: equal_cuda
 
 - func: pow(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: pow_out_cpu
+    CUDA: pow_out_cuda
 
 - func: pow(Tensor self, Tensor exponent) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: pow_cpu
+    CUDA: pow_cuda
 
 - func: pow(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: pow_out_cpu
+    CUDA: pow_out_cuda
 
 - func: pow(Scalar self, Tensor exponent) -> Tensor
+  dispatch:
+    CPU: pow_cpu
+    CUDA: pow_cuda
 
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: normal_out_cpu
+    CUDA: normal_out_cuda
 
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
+  dispatch:
+    CPU: normal_cpu
+    CUDA: normal_cuda
 
 - func: normal(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: normal_out_cpu
+    CUDA: normal_out_cuda
 
 - func: normal(float mean, Tensor std, *, Generator? generator=None) -> Tensor
+  dispatch:
+    CPU: normal_cpu
+    CUDA: normal_cuda
 
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: normal_out_cpu
+    CUDA: normal_out_cuda
 
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
+  dispatch:
+    CPU: normal_cpu
+    CUDA: normal_cuda
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
+  dispatch:
+    CPU: alias_cpu
+    CUDA: alias_cuda
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _dirichlet_grad_out_cpu
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
+  dispatch:
+    CPU: _dirichlet_grad_cpu
 
 - func: _getri_single(Tensor self) -> Tensor
+  dispatch:
+    CPU: _getri_single_cpu
+    CUDA: _getri_single_cuda
 
 - func: _index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
+  dispatch:
+    CPU: _index_copy__cpu
+    CUDA: _index_copy__cuda
 
 - func: _ger(Tensor self, Tensor vec2) -> Tensor
+  dispatch:
+    CPU: _ger_cpu
+    CUDA: _ger_cuda
 
 - func: _ger(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _ger_out_cpu
+    CUDA: _ger_out_cuda
 
 - func: _mm(Tensor self, Tensor mat2) -> Tensor
+  dispatch:
+    CPU: _mm_cpu
+    CUDA: _mm_cuda
 
 - func: _mm(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _mm_out_cpu
+    CUDA: _mm_out_cuda
 
 - func: _mv(Tensor self, Tensor vec) -> Tensor
+  dispatch:
+    CPU: _mv_cpu
+    CUDA: _mv_cuda
 
 - func: _mv(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _mv_out_cpu
+    CUDA: _mv_out_cuda
 
 - func: _addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  dispatch:
+    CPU: _addmv_cpu
+    CUDA: _addmv_cuda
 
 - func: _addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  dispatch:
+    CPU: _addmv__cpu
+    CUDA: _addmv__cuda
 
 - func: _addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _addmv_out_cpu
+    CUDA: _addmv_out_cuda
 
 - func: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  dispatch:
+    CPU: _addr_cpu
+    CUDA: _addr_cuda
 
 - func: _addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  dispatch:
+    CPU: _addr__cpu
+    CUDA: _addr__cuda
 
 - func: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _addr_out_cpu
+    CUDA: _addr_out_cuda
 
 - func: _dot(Tensor self, Tensor tensor) -> Tensor
+  dispatch:
+    CPU: _dot_cpu
+    CUDA: _dot_cuda
 
 - func: _cumsum(Tensor self, int dim) -> Tensor
+  dispatch:
+    CPU: _cumsum_cpu
+    CUDA: _cumsum_cuda
 
 - func: _cumsum(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _cumsum_out_cpu
+    CUDA: _cumsum_out_cuda
 
 - func: _cumprod(Tensor self, int dim) -> Tensor
+  dispatch:
+    CPU: _cumprod_cpu
+    CUDA: _cumprod_cuda
 
 - func: _cumprod(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _cumprod_out_cpu
+    CUDA: _cumprod_out_cuda
 
 - func: _var(Tensor self, bool unbiased=True) -> Tensor
+  dispatch:
+    CPU: _var_cpu
+    CUDA: _var_cuda
 
 - func: _std(Tensor self, bool unbiased=True) -> Tensor
+  dispatch:
+    CPU: _std_cpu
+    CUDA: _std_cuda
 
 - func: _addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _addmm_out_cpu
+    CUDA: _addmm_out_cuda
 
 - func: _addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  dispatch:
+    CPU: _addmm_cpu
+    CUDA: _addmm_cuda
 
 - func: _addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  dispatch:
+    CPU: _addmm__cpu
+    CUDA: _addmm__cuda
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
+  dispatch:
+    CPU: _cat_cpu
+    CUDA: _cat_cuda
 
 - func: _cat(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _cat_out_cpu
+    CUDA: _cat_out_cuda
 
-- func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
+- func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _mode_cpu
+    CUDA: _mode_cuda
 
-- func: _mode(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: _mode(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!), Tensor(b!))
+  dispatch:
+    CPU: _mode_out_cpu
+    CUDA: _mode_out_cuda
 
-- func: _max(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+- func: _max(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _max_cpu
+    CUDA: _max_cuda
 
-- func: _max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: _max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!), Tensor(b!))
+  dispatch:
+    CPU: _th_max_out_cpu
+    CUDA: _th_max_out_cuda
 
-- func: _min(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+- func: _min(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _min_cpu
+    CUDA: _min_cuda
 
-- func: _min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: _min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!), Tensor(b!))
+  dispatch:
+    CPU: _th_min_out_cpu
+    CUDA: _th_min_out_cuda
 
 - func: _copy_ignoring_overlaps_(Tensor(a!) self, Tensor src) -> Tensor(a!)
+  dispatch:
+    CUDA: _copy_ignoring_overlaps__cuda
 
 ## NN wrappers
 
@@ -4287,15 +4953,23 @@
 
 - func: thnn_conv_depthwise2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CUDA: thnn_conv_depthwise2d_forward_out_cuda
 
 - func: thnn_conv_depthwise2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation) -> Tensor
   python_module: nn
+  dispatch:
+    CUDA: thnn_conv_depthwise2d_forward_cuda
 
 - func: thnn_conv_depthwise2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CUDA: thnn_conv_depthwise2d_backward_out_cuda
 
 - func: thnn_conv_depthwise2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool[2] output_mask) -> (Tensor grad_input, Tensor grad_weight)
   python_module: nn
+  dispatch:
+    CUDA: thnn_conv_depthwise2d_backward_cuda
 
 - func: thnn_conv3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

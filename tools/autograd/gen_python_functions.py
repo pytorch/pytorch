@@ -753,6 +753,8 @@ def group_declarations(declarations):
     for declaration in declarations:
         signature = get_python_signature(declaration, False)
         v = grouped[signature]
+        if declaration['name'] == '_max_out' or declaration['name'] == '_max':
+            print(signature)
         if declaration['name'].endswith('_out'):
             v['out'] = declaration
             # prefer the signature with optional out=... arguments

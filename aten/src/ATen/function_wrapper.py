@@ -38,18 +38,43 @@ else:
 # 1. if broadcasting or without the full list of arguments, add a non-virtual
 #    declaration under Type.h  (right now, we call this template
 #    BROADCAST but it also handles default arguments)
-TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) const override;
+LEGACY_TH_DECLARATION_BROADCAST = CodeTemplate("""\
+${return_type} ${api_name}(${type_method_formals});
 """)
 # 2. broadcasting functions are implemented in Type.cpp
-TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
-${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
+LEGACY_TH_DEFINITION_BROADCAST = CodeTemplate("""\
+${return_type} ${api_name}(${type_method_formals}) {
     ${device_guard_declaration}
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
     return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
 }
 """)
+
+LEGACY_TH_DECLARATION = CodeTemplate("""\
+${return_type} ${method_prefix_derived}${api_name}(${type_method_formals});
+""")
+LEGACY_TH_DEFINITION = CodeTemplate("""\
+${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) {
+    ${device_guard_declaration}
+    ${type_definition_body}
+}
+""")
+LEGACY_TH_DEFINITION_SWITCH_STATEMENT = CodeTemplate("""\
+${dispatch_scalar_type_declaration}
+switch (dispatch_scalar_type) {
+    ${cases}
+    default:
+        AT_ERROR("${api_name} not supported on ${Type} for ", dispatch_scalar_type);
+}
+""")
+LEGACY_TH_DEFINITION_CASE = CodeTemplate("""\
+case ScalarType::${ScalarName}: {
+    ${case_body}
+    break;
+}
+""")
+
 # 3. add virtual dispatch declaration to Type.h and impl to Type.cpp; method_prefix_derived
 #    is present for providing a base-class definition for a derived-type method with a prefix.
 #
@@ -65,9 +90,6 @@ virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals
 DEPRECATED_PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
 C10_DEPRECATED virtual ${return_type} \
 ${method_prefix_derived}${api_name}(${type_method_formals}) const = 0;
-""")
-PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
-virtual ${return_type} ${api_name}(${type_method_formals}) const = 0;
 """)
 
 TYPE_METHOD_DECLARATION_ABSTRACT = CodeTemplate("""\
@@ -92,26 +114,7 @@ TYPE_DERIVED_DECLARATION = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
 # 5. add override definition to TypeDerived.cpp
-TYPE_DERIVED_DEFINITION = CodeTemplate("""\
-${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formals}) const {
-    ${device_guard_declaration}
-    ${type_definition_body}
-}
-""")
-TYPE_DERIVED_DEFINITION_SWITCH_STATEMENT = CodeTemplate("""\
-${dispatch_scalar_type_declaration}
-switch (dispatch_scalar_type) {
-    ${cases}
-    default:
-        AT_ERROR("${api_name} not supported on ${Type} for ", dispatch_scalar_type);
-}
-""")
-TYPE_DERIVED_DEFINITION_CASE = CodeTemplate("""\
-case ScalarType::${ScalarName}: {
-    ${case_body}
-    break;
-}
-""")
+
 TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
@@ -181,12 +184,9 @@ static inline ${return_type} ${api_name}(${formals}) {
 }
 """)
 
-# We need to cast to the base type because C++ may hide the base class
-# implementation of ${api_name} if we have overloaded a function with
-# the same name (but different signature) already
 ZERO_DIM_CHECK = CodeTemplate("""\
 if (${check_name}.dim() == 0) {
-    return static_cast<const TypeExtendedInterface*>(this)->${api_name}(${zero_dim_actuals});
+    return ${api_name}(${zero_dim_actuals});
 }""")
 
 ZERO_DIM_ONLY = CodeTemplate("""\
@@ -332,7 +332,7 @@ CHECKED_CAST = {
             'DeviceType::${Backend}, at::scalarTypeToTypeMeta(ScalarType::${ScalarName}))'),
     'THGenerator*':
         CodeTemplate(
-            'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(device_type()))'),
+            'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(k${DeviceType}))'),
     # This is a cast done via direct-construction
     'IntArrayRefStride': CodeTemplate('at::IntArrayRef ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
@@ -361,19 +361,19 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                 '(c10::Storage(caffe2::TypeMeta::Make<${ScalarType}>(), 0, allocator(), true),'
+                 '(c10::Storage(caffe2::TypeMeta::Make<${ScalarType}>(), 0, ${allocator}, true),'
                  '${Backend}TensorId()).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
+                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, ${allocator}, true),'
                      '${Backend}TensorId()).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
+                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, ${allocator}, true),'
                      '${Backend}TensorId()).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
+                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, ${allocator}, true),'
                      '${Backend}TensorId()).release()',
     'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                        '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Int), 0, allocator(), true),'
+                        '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Int), 0, ${allocator}, true),'
                         '${Backend}TensorId()).release()',
 }
 
@@ -907,43 +907,9 @@ def create_generic(top_env, declarations):
         option['device_guard_declaration'] = device_guard(option, False, dispatch_tensor)
         option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, False, dispatch_tensor)
 
-        env = nested_dict(option, top_env)
-
-        mode = option['mode']
-        abstract = True
         assert option['extended_method'], 'Expected legacy operator to be an extended method'
 
-        if mode == 'NN' and option.get('cimpls') is None:
-            # NN function with no _forward/_backward suffix don't have cimpls.
-            # They call the _forward function and discard any buffer returns
-            abstract = False
-            top_env['pure_virtual_extended_type_method_declarations'].append(
-                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-            top_env['type_method_declarations'].append(
-                TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
-            body = emit_nn_body(option)
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_CONCRETE.substitute(
-                    env, type_definition_body=body))
-        elif broadcast_arg is None:
-            top_env['pure_virtual_extended_type_method_declarations'].append(
-                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-            top_env['type_method_declarations'].append(
-                TYPE_METHOD_DECLARATION_ABSTRACT.substitute(env))
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
-        else:
-            top_env['pure_virtual_extended_type_method_declarations'].append(
-                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-            top_env['pure_virtual_extended_type_method_declarations'].append(
-                PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
-            top_env['type_method_declarations'].append(
-                TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
-            top_env['type_method_declarations'].append(
-                TYPE_METHOD_DECLARATION_ABSTRACT.substitute(env))
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
-
+        if broadcast_arg is not None:
             broadcast_inplace = 'inplace' in broadcast_arg['broadcast']
             broadcast_dims = 'dims:' in broadcast_arg['broadcast']
             option['broadcast_actuals'] = get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims)
@@ -957,9 +923,8 @@ def create_generic(top_env, declarations):
                                                         else 'size' if broadcast_dims else 'outplace')
             option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
                                                     for y in option['actuals']]
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_BROADCAST.substitute(env))
 
+        '''
         method_of = ['Type']
         if is_namespace_function:
             option['inferred_type'] = 'detail::infer_type({})'.format(dispatch_tensor)
@@ -991,6 +956,7 @@ def create_generic(top_env, declarations):
             with_gil=option.get('with_gil', False),
             deprecated=option.get('deprecated', False)
         ))
+        '''
 
     def native_get_formals(option, include_constants=False):
         # type: (FunctionOption, bool) -> List[AtFormal]
@@ -1253,6 +1219,8 @@ def create_derived(backend_type_env, declarations):
     # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str]]
     type_object_declarations = []
     type_object_definitions = []
+    legacy_th_declarations = []
+    legacy_th_definitions = []
     is_cuda = 'CUDA' in backend_type_env['Backend']
 
     def replace_with_null(argument):
@@ -1369,10 +1337,11 @@ def create_derived(backend_type_env, declarations):
     def allocate_arg(env, arg, output_count):
         # type: (Environment, THFormal, int) -> List[str]
         name = arg['name']
-        state = ''
         if is_cuda:
-            state = 'globalContext().getTHCState()'
-        allocation = CodeTemplate(ALLOC_NOARGS_WRAP[arg['type']]).substitute(env)
+            allocator = 'at::cuda::getCUDADeviceAllocator()'
+        else:
+            allocator = 'getCPUAllocator()'
+        allocation = CodeTemplate(ALLOC_NOARGS_WRAP[arg['type']]).substitute(env, allocator=allocator)
         tensor_arg = '{}_'.format(name)
         if arg.get('mask', False):
             allocation = 'output_mask[{}] ? {} : nullptr'.format(output_count, allocation)
@@ -1444,6 +1413,7 @@ def create_derived(backend_type_env, declarations):
 
                 case_env = {
                     'Backend': env['Backend'],
+                    'DeviceType': env['DeviceType'],
                     'state': env['state'],
                     'ScalarType': c_type,
                     'ScalarName': scalar_name,
@@ -1628,8 +1598,8 @@ def create_derived(backend_type_env, declarations):
                 else:
                     raise Exception("NYI - return handling")
 
-                cases.append(TYPE_DERIVED_DEFINITION_CASE.substitute(case_env, case_body=case_body))
-        body.append(TYPE_DERIVED_DEFINITION_SWITCH_STATEMENT.substitute(env, cases=cases))
+                cases.append(LEGACY_TH_DEFINITION_CASE.substitute(case_env, case_body=case_body))
+        body.append(LEGACY_TH_DEFINITION_SWITCH_STATEMENT.substitute(env, cases=cases))
         return body
 
     def process_option(option):
@@ -1639,10 +1609,15 @@ def create_derived(backend_type_env, declarations):
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option, option['backend_types'][backend])  # type: ignore
             option['type_definition_body'] = body
-            type_object_declarations.append(
-                TYPE_DERIVED_DECLARATION.substitute(env))
-            type_object_definitions.append(
-                TYPE_DERIVED_DEFINITION.substitute(env))
+            if option.get('broadcast_actuals', None):
+                legacy_th_declarations.append(
+                    LEGACY_TH_DECLARATION_BROADCAST.substitute(env))
+                legacy_th_definitions.append(
+                    LEGACY_TH_DEFINITION_BROADCAST.substitute(env))
+            legacy_th_declarations.append(
+                LEGACY_TH_DECLARATION.substitute(env))
+            legacy_th_definitions.append(
+                LEGACY_TH_DEFINITION.substitute(env))
 
     def process_native(option):
         # type: (FunctionOption) -> None
@@ -1677,7 +1652,7 @@ def create_derived(backend_type_env, declarations):
                         process_native(option)
                 except NYIError:
                     pass
-    return type_object_declarations, type_object_definitions
+    return type_object_declarations, type_object_definitions, legacy_th_declarations, legacy_th_definitions
 
 
 def create_extension_backend(backend_type_env, declarations):
@@ -1687,7 +1662,7 @@ def create_extension_backend(backend_type_env, declarations):
 
     for declaration in declarations:
         for option in declaration['options']:
-            if not option.get('skip', False):
+            if not option.get('skip', False) and option['mode'] == 'native':
                 try:
                     option['formals_types'] = [f['type'] for f in option['formals_list']]
                     option['native_actuals'] = [f['name'] for f in option['formals_list']]
