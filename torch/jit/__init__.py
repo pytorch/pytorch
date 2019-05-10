@@ -482,14 +482,14 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
             for name, data in inputs.items():
                 copied_dict[name] = _clone_inputs(data)
             check_mod = torch.jit.trace_module(
-                func.__self__,
+                func.__self__ if hasattr(func, '__self__') else func,
                 copied_dict,
                 check_trace=False,
                 _force_outplace=force_outplace,
                 **executor_options)
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
-            if isinstance(inputs, torch.Tensor):
+            if isinstance(inputs, (torch.Tensor, dict)):
                 inputs = (inputs,)
         else:
             check_mod = torch.jit.trace(
@@ -617,10 +617,12 @@ class TracerWarning(Warning):
         # We ignore warnings from all submodules excluding the JIT, because we need them e.g. for _check_trace
         warnings.filterwarnings('ignore', category=TracerWarning, module='torch.(?!jit)')
 
+
 # We ignore the tracer warnings coming form inside the library, because all our shape
 # checks in nn will trigger them.
 TracerWarning.ignore_lib_warnings()
 torch._C._tracer_warn_use_python()
+
 
 def make_tuple(example_inputs):
     if isinstance(example_inputs, (torch.Tensor, dict)):
@@ -630,10 +632,12 @@ def make_tuple(example_inputs):
         return tuple(example_inputs)
     return example_inputs
 
+
 def make_module(mod, _module_class, executor_options):
     if _module_class is None:
         _module_class = TopLevelTracedModule
     return _module_class(mod, **executor_options)
+
 
 def trace(func,
           example_inputs,
@@ -714,6 +718,18 @@ def trace(func,
     """
     if not _enabled:
         return func
+
+    if isinstance(func, torch.nn.Module):
+        return trace_module(func, {'forward': example_inputs}, optimize,
+                            check_trace, check_inputs,
+                            check_tolerance, _force_outplace, _module_class)
+
+    if (hasattr(func, '__self__') and isinstance(func.__self__, torch.nn.Module) and
+            func.__name__ == 'forward'):
+        return trace_module(func.__self__, {'forward': example_inputs}, optimize,
+                            check_trace, check_inputs,
+                            check_tolerance, _force_outplace, _module_class)
+
     executor_options = {'optimize': bool(optimize)}
     # Special case for common case of passing a single Tensor
     if isinstance(example_inputs, (torch.Tensor, dict)):
@@ -721,21 +737,19 @@ def trace(func,
     # done primarily so that weird iterables fail here and not pybind11 code
     elif not isinstance(example_inputs, tuple):
         example_inputs = tuple(example_inputs)
+
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
 
-    if isinstance(func, torch.nn.Module):
-        if _module_class is None:
-            _module_class = TopLevelTracedModule
-        traced = _module_class(func, **executor_options)
-        traced._c._create_method_from_trace('forward', func, example_inputs,
-                                            var_lookup_fn, _force_outplace)
-    else:
-        name = getattr(func, '__name__', 'forward')
-        if name == '<lambda>':
-            name = '_lambda'  # make name a valid identifier
-        traced = torch._C._create_function_from_trace(name, func, example_inputs,
-                                                      var_lookup_fn,
-                                                      _force_outplace)
+    if (hasattr(func, '__self__') and isinstance(func.__self__, torch.nn.Module)):
+        raise AttributeError("trace doesn't support compiling individual module's functions.\n"
+                             "Please use trace_module")
+
+    name = getattr(func, '__name__', 'forward')
+    if name == '<lambda>':
+        name = '_lambda'  # make name a valid identifier
+    traced = torch._C._create_function_from_trace(name, func, example_inputs,
+                                                  var_lookup_fn,
+                                                  _force_outplace)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
@@ -745,6 +759,7 @@ def trace(func,
             _check_trace([example_inputs], func, executor_options, traced, check_tolerance, _force_outplace, False)
 
     return traced
+
 
 def trace_module(mod,
                  inputs,
@@ -807,6 +822,7 @@ def trace_module(mod,
         traced_f = torch.jit.trace(f, torch.rand(1))
 
     """
+
     if not _enabled:
         return mod
     executor_options = {'optimize': bool(optimize)}
@@ -821,8 +837,8 @@ def trace_module(mod,
     module = make_module(mod, _module_class, executor_options)
 
     for method_name, example_inputs in inputs.items():
-
-        func = getattr(mod, method_name)
+        # this is needed since Module.__call__ sets up some extra tracing
+        func = mod if method_name == "forward" else getattr(mod, method_name)
         example_inputs = make_tuple(example_inputs)
         module._c._create_method_from_trace(method_name, func, example_inputs, var_lookup_fn, _force_outplace)
         check_trace_method = module._c._get_method(method_name)
@@ -830,11 +846,14 @@ def trace_module(mod,
         # Check the trace against new traces created from user-specified inputs
         if check_trace:
             if check_inputs is not None:
-                _check_trace(check_inputs, func, executor_options, check_trace_method, check_tolerance, _force_outplace, True)
+                _check_trace(check_inputs, func, executor_options, check_trace_method,
+                             check_tolerance, _force_outplace, True)
             else:
-                _check_trace([inputs], func, executor_options, check_trace_method, check_tolerance, _force_outplace, True)
+                _check_trace([inputs], func, executor_options, check_trace_method,
+                             check_tolerance, _force_outplace, True)
 
         return module
+
 
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True, _frames_up=0):
