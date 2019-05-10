@@ -3197,6 +3197,8 @@ class TestNN(NNTestCase):
                         output = m(sigmoid(input), target)
                         verify_reduction_scalars(input, reduction, output)
 
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
+                     "Scipy v1.0 and/or numpy not found")
     def test_multihead_attention(self):
         def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, src_lengths=None, 
                                  attn_mask=None, add_zero_attn=False):
