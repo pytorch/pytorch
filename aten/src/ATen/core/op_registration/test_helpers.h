@@ -47,6 +47,18 @@ struct InputToIValue<std::vector<std::unordered_map<Key, Value>>> final {
     return list;
   }
 };
+template<>
+struct InputToIValue<std::vector<std::string>> final {
+  template<class T_>
+  static c10::IValue call(T_&& v) {
+    auto list = c10::ivalue::GenericList::create({});
+    list->elements().reserve(v.size());
+    for (std::string& e : v) {
+      list->elements().push_back(InputToIValue<std::string>::call(std::move(e)));
+    }
+    return list;
+  }
+};
 template<class Key, class Value>
 struct InputToIValue<c10::Dict<Key, Value>> final {
   template<class T_>

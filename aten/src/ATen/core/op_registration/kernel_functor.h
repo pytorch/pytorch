@@ -122,13 +122,13 @@ namespace detail {
     }
   };
   template<class T>
-  struct legacy_ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> final {
+  struct legacy_ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> final {
     static std::vector<T> call(IValue&& v) {
       return std::move(*std::move(v).to<intrusive_ptr<ivalue::List<T>>>()).elements();
     }
   };
   template<class T>
-  struct legacy_ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value>> final {
+  struct legacy_ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> final {
     static std::vector<T> call(IValue&& v) {
       auto list = std::move(v).toGenericList();
       std::vector<T> result;
@@ -222,13 +222,13 @@ namespace detail {
     }
   };
   template<class T>
-  struct legacy_return_type_to_ivalue<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+  struct legacy_return_type_to_ivalue<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> {
     static IValue call(std::vector<T>&& v) {
       return return_type_to_ivalue<std::vector<T>>::call(std::move(v));
     }
   };
   template<class T>
-  struct legacy_return_type_to_ivalue<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+  struct legacy_return_type_to_ivalue<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> {
     static IValue call(std::vector<T>&& v) {
       static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
       std::vector<IValue> result;
