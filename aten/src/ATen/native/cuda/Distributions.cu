@@ -401,7 +401,7 @@ Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
   return self;
 }
 
-static void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generator* gen) {
+void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generator* gen) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "uniform_cuda", [&] {
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);
