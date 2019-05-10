@@ -176,7 +176,10 @@ def ann_to_type(ann):
         value = ann_to_type(ann.__args__[1])
         return DictType(key, value)
     elif is_optional(ann):
-        return OptionalType(ann_to_type(ann.__args__[0]))
+        if issubclass(ann.__args__[1], type(None)):
+            return OptionalType(ann_to_type(ann.__args__[0]))
+        else:
+            return OptionalType(ann_to_type(ann.__args__[1]))
     elif ann is float:
         return FloatType.get()
     elif ann is int:

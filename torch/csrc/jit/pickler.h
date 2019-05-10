@@ -159,19 +159,19 @@ struct StackItem {
   StackItem(PicklerClass pickler_class)
       : pickler_class_(pickler_class), ivalue_(c10::nullopt) {}
 
-  IValue ivalue() {
+  IValue ivalue() const {
     return *ivalue_;
   }
 
-  PicklerClass pickler_class() {
+  PicklerClass pickler_class() const {
     return *pickler_class_;
   }
 
-  c10::optional<IValue> ivalue_opt() {
+  c10::optional<IValue> ivalue_opt() const {
     return ivalue_;
   }
 
-  c10::optional<PicklerClass> pickler_class_opt() {
+  c10::optional<PicklerClass> pickler_class_opt() const {
     return pickler_class_;
   }
 

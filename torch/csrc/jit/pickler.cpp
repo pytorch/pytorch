@@ -610,40 +610,41 @@ OpCode Unpickler::readInstruction() {
 void Unpickler::readList() {
   size_t start = marks_.back();
   marks_.pop_back();
-  auto list_ivalue = stack_.at(start - 1);
+  auto list_ivalue = stack_.at(start - 1).ivalue();
   auto num_elements = stack_.size() - start;
-  if (list_ivalue.ivalue().isIntList()) {
-    auto list = stack_.at(start - 1).ivalue().toIntList();
-    list->elements().reserve(num_elements);
-    for (auto it = stack_.begin() + start; it != stack_.end(); ++it) {
-      list->elements().emplace_back(it->ivalue().toInt());
+  auto elements = at::ArrayRef<StackItem>(stack_).slice(start);
+  if (list_ivalue.isIntList()) {
+    auto& list = list_ivalue.toIntList()->elements();
+    list.reserve(num_elements);
+    for (const auto& elem : elements) {
+      list.emplace_back(elem.ivalue().toInt());
     }
-  } else if (list_ivalue.ivalue().isTensorList()) {
-    auto list = stack_.at(start - 1).ivalue().toTensorList();
-    list->elements().reserve(num_elements);
-    for (auto it = stack_.begin() + start; it != stack_.end(); ++it) {
-      list->elements().emplace_back(it->ivalue().toTensor());
+  } else if (list_ivalue.isTensorList()) {
+    auto& list = list_ivalue.toTensorList()->elements();
+    list.reserve(num_elements);
+    for (const auto& elem : elements) {
+      list.emplace_back(elem.ivalue().toTensor());
     }
-  } else if (list_ivalue.ivalue().isDoubleList()) {
-    auto list = stack_.at(start - 1).ivalue().toDoubleList();
-    list->elements().reserve(num_elements);
-    for (auto it = stack_.begin() + start; it != stack_.end(); ++it) {
-      list->elements().emplace_back(it->ivalue().toDouble());
+  } else if (list_ivalue.isDoubleList()) {
+    auto& list = list_ivalue.toDoubleList()->elements();
+    list.reserve(num_elements);
+    for (const auto& elem : elements) {
+      list.emplace_back(elem.ivalue().toDouble());
     }
-  } else if (list_ivalue.ivalue().isBoolList()) {
-    auto list = stack_.at(start - 1).ivalue().toBoolList();
-    list->elements().reserve(num_elements);
-    for (auto it = stack_.begin() + start; it != stack_.end(); ++it) {
-      list->elements().push_back(it->ivalue().toBool());
+  } else if (list_ivalue.isBoolList()) {
+    auto& list = list_ivalue.toBoolList()->elements();
+    list.reserve(num_elements);
+    for (const auto& elem : elements) {
+      list.push_back(elem.ivalue().toBool());
     }
-  } else if (list_ivalue.ivalue().isGenericList()) {
-    auto list = stack_.at(start - 1).ivalue().toGenericList();
-    list->elements().reserve(num_elements);
-    for (auto it = stack_.begin() + start; it != stack_.end(); ++it) {
-      list->elements().emplace_back(it->ivalue());
+  } else if (list_ivalue.isGenericList()) {
+    auto& list = list_ivalue.toGenericList()->elements();
+    list.reserve(num_elements);
+    for (const auto& elem : elements) {
+      list.emplace_back(elem.ivalue());
     }
   } else {
-    AT_ERROR("Unknown IValue list kind: ", list_ivalue.ivalue().tagKind());
+    AT_ERROR("Unknown IValue list kind: ", list_ivalue.tagKind());
   }
 
   stack_.erase(stack_.begin() + start, stack_.end());

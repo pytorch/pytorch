@@ -203,8 +203,9 @@ try:
         if ann.__module__ == 'typing' and \
            (getattr(ann, '__origin__', None) is typing.Union):
             args = getattr(ann, '__args__', ())
-            if len(args) == 2 and issubclass(args[1], type(None)):
-                union_optional = True
+            if len(args) == 2:
+                union_optional = (issubclass(args[1], type(None)) and not issubclass(args[0], type(None))) \
+                    or (issubclass(args[0], type(None)) and not issubclass(args[1], type(None)))
 
         optional = ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.Optional)
