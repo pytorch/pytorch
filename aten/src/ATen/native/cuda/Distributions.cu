@@ -409,8 +409,9 @@ static void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, 
       "uniform_ expects to return a [from, to) range, but found from=", from,
       " > to=", to);
     AT_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
-          "uniform_ expects to-from ≤ std::numeric_limits<double>::max(), but found to=", to,
-          " and from=", from, " which result in to-from to exceed the limit");
+          "uniform_ expects to-from <= std::numeric_limits<", toString(iter.dtype()),
+          ">::max(), but found to=", to, " and from=", from,
+          " which result in to-from to exceed the limit");
 
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto range = static_cast<accscalar_t>(to-from);
@@ -420,7 +421,7 @@ static void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, 
       // reverse the bounds of curand4 from (0, 1] to [0, 1)
       // Note that this method is from legacy THCTensorRandom and is likely to give
       // you more 0-s, since, the probability of gettings 1-s is higher than 0-s and
-      // by reversing the bounds, we are fliping the probabilities of 1-s and 0-s.
+      // by reversing the bounds, we are flipping the probabilities of 1-s and 0-s.
       auto reverse_bound_rand = rand == static_cast<accscalar_t>(1.0) ? static_cast<accscalar_t>(0.0) : rand;
       return static_cast<scalar_t>(reverse_bound_rand * range + from);
     };

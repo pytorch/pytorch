@@ -176,8 +176,7 @@ void THCTensor_(multinomial)(struct THCState *state,
     // Uniform random samples in a separate kernel launch, into
     // temporarily allocated memory. The device RNG is thread-limited
     THCTensor *sampled = THCTensor_(newWithSize2d)(state, numDist, n_sample);
-    c10::raw::intrusive_ptr::incref(sampled);
-    auto out = at::Tensor(c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(sampled));
+    auto out = THTensor_wrap(sampled);
     at::native::uniform_cuda_(out, 0.0, 1.0);
 
     dim3 block(numCategories < maxThreads ? numCategories : maxThreads);
@@ -367,10 +366,8 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
   THCTensor *uniform = THCTensor_(newWithSize1d)(state, n_sample);
   THCTensor *bernoulli = THCTensor_(newWithSize1d)(state, n_sample);
 
-  c10::raw::intrusive_ptr::incref(uniform);
-  c10::raw::intrusive_ptr::incref(bernoulli);
-  auto out_uniform = at::Tensor(c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(uniform));
-  auto out_bernoulli = at::Tensor(c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(bernoulli));
+  auto out_uniform = THTensor_wrap(uniform);
+  auto out_bernoulli = THTensor_wrap(bernoulli);
   at::native::uniform_cuda_(out_uniform, 0, K);
   at::native::uniform_cuda_(out_bernoulli, 0, 1);
 
