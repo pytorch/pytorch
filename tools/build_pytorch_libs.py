@@ -139,6 +139,7 @@ def run_cmake(version,
     elif IS_WINDOWS:
         if IS_64BIT:
             cmake_args.append('-GVisual Studio 15 2017 Win64')
+            cmake_args.append('-Thost=x64')
         else:
             cmake_args.append('-GVisual Studio 15 2017')
     try:
@@ -166,7 +167,7 @@ def run_cmake(version,
         BUILDING_WITH_TORCH_LIBS=os.getenv("BUILDING_WITH_TORCH_LIBS", "ON"),
         TORCH_BUILD_VERSION=version,
         CMAKE_BUILD_TYPE=build_type,
-        BUILD_TORCH=os.getenv("BUILD_TORCH", "ON"),
+        CMAKE_VERBOSE_MAKEFILE="ON",
         BUILD_PYTHON=build_python,
         BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS", "ON"),
         BUILD_BINARY=check_env_flag('BUILD_BINARY'),
@@ -286,7 +287,7 @@ def build_caffe2(version,
             check_call(build_cmd, cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
-            ninja_cmd = ['ninja', 'install']
+            ninja_cmd = ['ninja', 'install', '-v']
             if max_jobs is not None:
                 ninja_cmd += ['-j', max_jobs]
             check_call(ninja_cmd, cwd=build_dir, env=my_env)
