@@ -9735,7 +9735,6 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
-        print(tm.graph.__repr__)
         # Note: the parameters from both modules should appear in the flattened
         # inputs of the graph. All ops from both modules should be inlined.
         self.assertTrue(len(list(tm.graph.inputs())) == 3)
@@ -9757,7 +9756,6 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
-        print (tm.graph.__repr__)
         # Note: neg op from the traced function should be properly inlined
         FileCheck().check("aten::mm").check_same("scope: TracedModule") \
             .check_next("aten::neg").check("scope: TracedModule/traced_fn") \
