@@ -121,7 +121,7 @@ struct TopKTypeConfig<at::Half> {
   typedef uint32_t RadixType;
 
   static inline __device__ RadixType convert(at::Half v) {
-#if CUDA_VERSION >= 9000 || defined __HIP_PLATFORM_HCC__
+#if defined(__CUDA_ARCH__) || defined __HIP_PLATFORM_HCC__
     RadixType x = __half_as_ushort(v);
     RadixType mask = -((x >> 15)) | 0x8000;
     return (v == v) ? (x ^ mask) : 0xffff;
