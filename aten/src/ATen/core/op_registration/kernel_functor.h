@@ -130,10 +130,10 @@ namespace detail {
   template<class T>
   struct legacy_ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value>> final {
     static std::vector<T> call(IValue&& v) {
-      const auto& list = v.toGenericListRef();
+      auto list = std::move(v).toGenericList();
       std::vector<T> result;
-      result.reserve(list.size());
-      for (auto&& elem : list) {
+      result.reserve(list->elements().size());
+      for (auto&& elem : std::move(list)->elements()) {
         result.push_back(legacy_ivalue_to_arg_type<T>::call(std::move(elem)));
       }
       return result;
