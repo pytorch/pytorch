@@ -146,8 +146,15 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   nrhs = rb__->size(1);
   info = 0;
 
-  // yf225 TODO: try to print tensors here to find out the bug!
-
+  // yf225 TODO DEBUG:
+  at::print(std::cout, at::Tensor(ra__->shallow_copy_and_detach()), 99);
+  at::print(std::cout, at::Tensor(rb__->shallow_copy_and_detach()), 99);
+  std::cout << "m: " << m << std::endl;
+  std::cout << "n: " << n << std::endl;
+  std::cout << "nrhs: " << nrhs << std::endl;
+  std::cout << "lda: " << lda << std::endl;
+  std::cout << "ldb: " << ldb << std::endl;
+  // yf225 TODO DEBUG end
 
   /* get optimal workspace size */
   THLapack_(gels)('N', m, n, nrhs, ra__->data<scalar_t>(), lda,
@@ -180,11 +187,10 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   c10::raw::intrusive_ptr::decref(work);
   if (free_b) c10::raw::intrusive_ptr::decref(b);
 
+  // yf225 TODO DEBUG:
   at::print(std::cout, at::Tensor(ra_->shallow_copy_and_detach()), 99);
-  at::print(std::cout, at::Tensor(rb_->shallow_copy_and_detach()), 99);
-
-  // std::cout << "ra_: " << *ra_ << std::endl;
-  // std::cout << "rb_: " << *rb_ << std::endl;
+  at::print(std::cout, at::Tensor(rb_->shallow_copy_and_detach()), 99);  // rb_'s value is wrong!
+  // yf225 TODO DEBUG end
 }
 
 void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *jobvr)
