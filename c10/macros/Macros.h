@@ -36,11 +36,18 @@
 
 /// C10_NODISCARD - Warn if a type or return value is discarded.
 #define C10_NODISCARD
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) && !defined(_WIN32)
 // Unconditionally use [[nodiscard]] when compiling with nvcc; it
 // works (nvcc seems to support it, even though we're technically
 // not modern enough C++20); in any case, clang::warn_unused_result
 // doesn't work; see https://github.com/pytorch/pytorch/issues/13118
+//
+// However, don't do this on Windows, because the host compiler will
+// complain:
+//
+//  error C2429: attribute 'nodiscard' requires compiler flag '/std:c++latest'
+//
+// So I guess Windows is a bit more strict about this :)
 #  undef C10_NODISCARD
 #  define C10_NODISCARD [[nodiscard]]
 // This code is dead (as we compile C++11 at the moment), but it is
@@ -57,6 +64,8 @@
 // error when __has_cpp_attribute is given a scoped attribute in C mode.
 #elif __cplusplus && defined(__has_cpp_attribute)
 # if __has_cpp_attribute(clang::warn_unused_result)
+// TODO: It's possible this is still triggering https://github.com/pytorch/pytorch/issues/13118
+// on Windows; if it is, better fix it.
 #  undef C10_NODISCARD
 #  define C10_NODISCARD [[clang::warn_unused_result]]
 # endif
