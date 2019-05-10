@@ -732,8 +732,6 @@ SparseTensor& _sspaddmm_out_cpu(
   int64_t dim_j = sparse.size(1);
   int64_t dim_k = dense.size(1);
 
-  // NB: This has to occur before the checks, because r may alias t.
-  // See test_saddmm
   get_sparse_impl(r)->raw_resize_(2, 0, {dim_i, dim_k});
 
   AT_CHECK(dense.size(0) == dim_j,
@@ -823,7 +821,7 @@ Tensor& _sspaddmm_out_only_sparse(Tensor& result, const Tensor& self,
 
 // sparse, dense -> sparse
 Tensor smm(const Tensor& self, const Tensor& mat2) {
-  auto result = at::empty({0}, self.options());
+  auto result = at::_sparse_coo_tensor_with_dims(2, 0, {self.size(0), mat2.size(1)}, self.options());
   at::sspaddmm_out(result, result, self, mat2, 0.0, 1.0);
   return result;
 }
