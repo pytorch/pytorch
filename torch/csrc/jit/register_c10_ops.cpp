@@ -22,19 +22,19 @@ IValue unwrap(IValue&& ivalue) {
     for (auto& item : ivalue.toTensorList()->elements()) {
       item = unwrap_tensor(std::move(item));
     }
-    return ivalue;
+    return std::move(ivalue);
   } else if (ivalue.isGenericList()) {
     for (auto& item : ivalue.toGenericList()->elements()) {
       item = unwrap(std::move(item));
     }
-    return ivalue;
+    return std::move(ivalue);
   } else if (ivalue.isGenericDict()) {
     for (auto& item : ivalue.toGenericDict()->elements()) {
       item.setValue(unwrap(item.value()));
     }
-    return ivalue;
+    return std::move(ivalue);
   } else {
-    return ivalue;
+    return std::move(ivalue);
   }
 }
 
@@ -49,19 +49,19 @@ IValue wrap(IValue&& ivalue) {
     for (auto& item : ivalue.toTensorList()->elements()) {
       item = wrap_tensor(std::move(item));
     }
-    return ivalue;
+    return std::move(ivalue);
   } else if (ivalue.isGenericList()) {
     for (auto& item : ivalue.toGenericList()->elements()) {
       item = wrap(std::move(item));
     }
-    return ivalue;
+    return std::move(ivalue);
   } else if (ivalue.isGenericDict()) {
     for (auto& item : ivalue.toGenericDict()->elements()) {
       item.setValue(wrap(item.value()));
     }
-    return ivalue;
+    return std::move(ivalue);
   } else {
-    return ivalue;
+    return std::move(ivalue);
   }
 }
 
