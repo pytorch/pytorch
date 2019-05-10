@@ -448,6 +448,25 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTens
   EXPECT_EQ(2, outputs[0].toInt());
 }
 
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithStringListOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::stringlist_output(str[] input) -> str[]", [](std::vector<std::string> input) {
+        return input;
+      });
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::stringlist_output", "");
+  ASSERT_TRUE(op.has_value());
+
+  std::vector<std::string> list{"value1", "value2"};
+  auto outputs = callOp(*op, list);
+  EXPECT_EQ(1, outputs.size());
+  auto output = std::move(outputs[0].toGenericList()->elements());
+
+  EXPECT_EQ(2, output.size());
+  EXPECT_EQ("value1", output[0].toString()->string());
+  EXPECT_EQ("value2", output[1].toString()->string());
+}
+
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   int captured_dict_size = 0;
 
