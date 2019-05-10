@@ -128,11 +128,7 @@ class Pickler {
  private:
   void pushDict(const IValue& ivalue);
   void pushDouble(const IValue& ivalue);
-<<<<<<< HEAD
-  void pushMemoization(const void* item);
-  void pushMemoization(const IValue& ivalue);
   void pushGenericList(const IValue& ivalue);
-=======
   void pushInt(const IValue& ivalue);
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
@@ -141,18 +137,14 @@ class Pickler {
   void pushMemoizedString(const IValue& ivalue);
   void pushTensor(const IValue& ivalue);
   void pushTensorReference(const IValue& ivalue);
->>>>>>> d68802ba473602c3c66cad80d724f01386780753
   void pushTuple(const IValue& ivalue);
 
   void pushBinGet(uint32_t memo_id);
   void pushClass(PicklerClass cls);
-<<<<<<< HEAD
-  void pushInt(const IValue& ivalue);
   void pushSpecializedList(
       const IValue& ivalue,
       PicklerClass cls,
       const std::function<void(const IValue&)>& item_pusher);
-=======
   void pushGlobal(const std::string& name);
   void pushMemoization(const void* item);
   void pushString(const std::string& string);
@@ -161,7 +153,6 @@ class Pickler {
   // Add a BINPUT op and return the memoization id used
   size_t pushNextBinPut();
 
->>>>>>> d68802ba473602c3c66cad80d724f01386780753
   const void* getPointer(const IValue& ivalue);
 
   // These convert values to bytes and add them to the stack (NB: since T is to
