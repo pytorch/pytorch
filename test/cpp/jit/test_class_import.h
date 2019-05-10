@@ -85,6 +85,7 @@ void testScriptObject() {
   ASSERT_ANY_THROW(m1.create_class(c10::QualifiedName(base, "FooTest"), {1}));
   auto x = torch::ones({2, 3});
   auto obj = m2.create_class(c10::QualifiedName(base, "FooTest"), x).toObject();
+  auto dx = obj->getAttr("dx");
   ASSERT_TRUE(test::almostEqual(x, dx.toTensor()));
 
   auto new_x = torch::rand({2, 3});
