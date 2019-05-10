@@ -3211,6 +3211,10 @@ def foo(x):
             check_inputs.append({'forward' : check_forward_input, 'weighted_kernel_sum' : check_weight})
         module = torch.jit.trace_module(n, inputs, True, True, check_inputs)
 
+        module = torch.jit.trace(n.forward, example_forward_input)
+        with self.assertRaisesRegex(AttributeError, "trace doesn't support compiling individual module's functions"):
+            module = torch.jit.trace(n.weighted_kernel_sum, inputs)
+
     def test_submodule_twice(self):
         @torch.jit.script
         def foo(x):
@@ -9731,6 +9735,7 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
+        print(tm.graph.__repr__)
         # Note: the parameters from both modules should appear in the flattened
         # inputs of the graph. All ops from both modules should be inlined.
         self.assertTrue(len(list(tm.graph.inputs())) == 3)
@@ -9752,6 +9757,7 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
+        print (tm.graph.__repr__)
         # Note: neg op from the traced function should be properly inlined
         FileCheck().check("aten::mm").check_same("scope: TracedModule") \
             .check_next("aten::neg").check("scope: TracedModule/traced_fn") \
