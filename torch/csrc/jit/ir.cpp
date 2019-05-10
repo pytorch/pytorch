@@ -200,6 +200,14 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
   out << "]";
 }
 
+SourceRange Node::sourceRange() const {
+ if(source_range_) {
+   return *source_range_;
+ }
+ std::stringstream ss;
+ return SourceRange(ss.str());
+}
+
 static std::ostream& indent(std::ostream& out, size_t level) {
   for (size_t i = 0; i < level; ++i) {
     out << "  ";
@@ -224,8 +232,10 @@ std::ostream& Node::print(
       if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
         printAttributes(out, /*ignore_subgraph=*/true);
       }
+
       groups->push_back(this);
     } else {
+
       out << kind().toQualString();
       if (hasAttributes()) {
         printAttributes(out);
@@ -241,6 +251,7 @@ std::ostream& Node::print(
     out << ", ";
     out << "scope: " << scName << "\n";
   }
+
   for (size_t i = 0; i < blocks().size(); ++i) {
     auto b = blocks()[i];
     indent(out, level + 1) << "block" << i << "("
@@ -251,6 +262,7 @@ std::ostream& Node::print(
     }
     indent(out, level + 2) << "-> (" << b->outputs() << ")\n";
   }
+
   return out;
 }
 
@@ -973,7 +985,7 @@ void Node::destroy() {
 }
 
 void Node::cloneFrom(Node* s) {
-  setSourceLocation(s->getSourceLocation());
+  s->source_range_ = s->source_range_;
   if (s->scope_ && !s->scope_->isBlank()) {
     scope_ = s->scope_;
   }

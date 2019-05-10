@@ -119,9 +119,9 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
       shape_map.emplace(s, shape_info);
     }
   }
-  BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(*pred_net, shape_map);
-  const auto& out_map = eng.shape_info();
+  auto eng = BoundShapeInferencerRegistry()->Create("C10", spec);
+  eng->InferBoundShapeAndType(*pred_net, shape_map);
+  const auto& out_map = eng->shape_info();
   shape_map.clear();
   for (const auto& kv : out_map) {
     shape_map.emplace(
