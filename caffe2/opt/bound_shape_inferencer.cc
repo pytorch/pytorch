@@ -571,4 +571,18 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   }
 }
 
+std::shared_ptr<BoundShapeInferencerBase> getBoundShapeInferencer(
+    const BoundShapeSpec& spec) {
+  return std::make_shared<BoundShapeInferencer>(spec);
+}
+
+C10_DEFINE_SHARED_REGISTRY(
+    BoundShapeInferencerRegistry,
+    BoundShapeInferencerBase,
+    const BoundShapeSpec&);
+
+C10_REGISTER_CREATOR(
+    BoundShapeInferencerRegistry,
+    C10,
+    getBoundShapeInferencer);
 } // namespace caffe2
