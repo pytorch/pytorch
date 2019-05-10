@@ -1042,6 +1042,7 @@ RegisterOperators logging_operators(
           })
 
 
+
 #define DEFINE_INT_FLOAT_OP(aten_op, op, result)                           \
   Operator(                                                                \
       #aten_op "(int a, float b) -> " #result,                             \
