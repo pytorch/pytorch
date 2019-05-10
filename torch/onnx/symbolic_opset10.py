@@ -25,7 +25,6 @@ import torch.onnx.symbolic_opset9
 black_listed_operators = ["flip",
                           "slice",
                           "upsample_nearest2d", "upsample_bilinear2d",
-                          "avg_pool1d", "avg_pool2d", "avg_pool3d",
                           "dropout", "feature_dropout", "alpha_dropout", "feature_alpha_dropout",
                           "dropout_", "feature_dropout_", "alpha_dropout_", "feature_alpha_dropout_"]
 
