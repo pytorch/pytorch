@@ -110,8 +110,8 @@ TORCH_API bool needsInputs();
 TORCH_API bool isLazyInputsCopy();
 TORCH_API void setLazyInputsCopy(bool);
 
-inline std::vector<c10::IValue> toVec(std::vector<c10::IValue>&& vec) {
-  return std::move(vec);
+inline std::vector<c10::IValue> toVec(std::vector<c10::IValue> vec) {
+  return vec;
 }
 
 inline std::vector<c10::IValue> toVec(c10::ArrayRef<c10::IValue> vec_ref) {
