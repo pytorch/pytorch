@@ -8,6 +8,8 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
+    - attach_workspace:
+        at: ~/workspace
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -41,6 +43,8 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
+    - attach_workspace:
+        at: ~/workspace
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -196,4 +200,3 @@
             git submodule sync && git submodule update -q --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
-

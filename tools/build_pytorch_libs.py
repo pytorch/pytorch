@@ -81,14 +81,17 @@ elif REL_WITH_DEB_INFO:
 
 
 def overlay_windows_vcvars(env):
-    from distutils._msvccompiler import _get_vc_env
-    vc_arch = 'x64' if IS_64BIT else 'x86'
-    vc_env = _get_vc_env(vc_arch)
-    for k, v in env.items():
-        lk = k.lower()
-        if lk not in vc_env:
-            vc_env[lk] = v
-    return vc_env
+    if sys.version_info >= (3, 5):
+        from distutils._msvccompiler import _get_vc_env
+        vc_arch = 'x64' if IS_64BIT else 'x86'
+        vc_env = _get_vc_env(vc_arch)
+        for k, v in env.items():
+            lk = k.lower()
+            if lk not in vc_env:
+                vc_env[lk] = v
+        return vc_env
+    else:
+        return env
 
 
 def mkdir_p(dir):
@@ -175,6 +178,7 @@ def run_cmake(version,
         USE_CUDA=USE_CUDA,
         USE_DISTRIBUTED=USE_DISTRIBUTED,
         USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or check_negative_env_flag('USE_FBGEMM')),
+        NAMEDTENSOR_ENABLED=(check_env_flag('USE_NAMEDTENSOR') or check_negative_env_flag('NO_NAMEDTENSOR')),
         USE_NUMPY=USE_NUMPY,
         NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
         USE_SYSTEM_NCCL=USE_SYSTEM_NCCL,
@@ -207,6 +211,16 @@ def run_cmake(version,
         USE_GLOG=os.getenv('USE_GLOG'),
         USE_GFLAGS=os.getenv('USE_GFLAGS'),
         WERROR=os.getenv('WERROR'))
+
+    if os.getenv('USE_OPENMP'):
+        cmake_defines(cmake_args, USE_OPENMP=check_env_flag('USE_OPENMP'))
+
+    if os.getenv('MKL_SEQ'):
+        cmake_defines(cmake_args, INTEL_MKL_SEQUENTIAL=check_env_flag('MKL_SEQ'))
+
+    mkldnn_threading = os.getenv('MKLDNN_THREADING')
+    if mkldnn_threading:
+        cmake_defines(cmake_args, MKLDNN_THREADING=mkldnn_threading)
 
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")

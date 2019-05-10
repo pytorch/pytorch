@@ -249,7 +249,7 @@ struct TORCH_API Node {
   std::vector<Block*> blocks_;
   Graph* graph_;
   Block* owning_block_;
-  std::shared_ptr<SourceLocation> source_location_;
+  c10::optional<SourceRange> source_range_;
   ScopePtr scope_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
@@ -287,13 +287,12 @@ struct TORCH_API Node {
   NodeKind kind() const {
     return kind_;
   }
-  Node* setSourceLocation(std::shared_ptr<SourceLocation> sl) {
-    source_location_ = std::move(sl);
+  Node* setSourceRange(SourceRange r) {
+    source_range_ = std::move(r);
     return this;
   }
-  std::shared_ptr<SourceLocation> getSourceLocation() const {
-    return source_location_;
-  }
+  SourceRange sourceRange() const;
+
   Graph* owningGraph() {
     return graph_;
   }
@@ -553,6 +552,14 @@ struct TORCH_API Node {
   // Execute: %3.removeAllInputs()
   // Result: %3 = f()
   void removeAllInputs();
+
+  // Rearrange the ordering of inputs or outputs of a node
+  // Given: %3 = f(%1, %2)
+  // Execute: %3.permuteInputs({1, 0})
+  // Result: %3 = f(%2, %1)
+  // Each index must appear exactly once
+  void permuteInputs(const std::vector<size_t>& new_inputs);
+  void permuteOutputs(const std::vector<size_t>& new_inputs);
 
   // iterators of the node list starting at this node
   // useful for resuming a search starting at this node
@@ -842,10 +849,10 @@ struct Block {
     return static_cast<const Node*>(output_)->inputs();
   }
   graph_node_list nodes() {
-    return {output_, kNextDirection};
+    return {input_, kNextDirection};
   }
   const_graph_node_list nodes() const {
-    return {output_, kNextDirection};
+    return {input_, kNextDirection};
   }
   Node* return_node() {
     return output_;
@@ -896,6 +903,12 @@ struct Block {
   void eraseOutput(size_t i) {
     output_->removeInput(i);
   }
+  void permuteOutputs(const std::vector<size_t>& new_inputs) {
+    output_->permuteInputs(new_inputs);
+  }
+  void permuteInputs(const std::vector<size_t>& new_inputs) {
+    input_->permuteOutputs(new_inputs);
+  }
 
   Node* appendNode(Node* n) {
     AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
@@ -904,7 +917,7 @@ struct Block {
   }
   Node* prependNode(Node* n) {
     AT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
-    n->insertAfter(output_);
+    n->insertAfter(input_);
     return n;
   }
   // clone all inputs, nodes, and outputs from src and append them
@@ -916,13 +929,6 @@ struct Block {
 
  private:
   void reIndexTopology();
-
-  // should only be called in the constructor
-  Node* initOutput(Node* p) {
-    p->next() = p;
-    p->prev() = p;
-    return p;
-  }
 
   // get rid of all nodes
   // destroys in reverse order so that uses internal to this block
@@ -1049,7 +1055,7 @@ struct Graph {
   TORCH_API Node* createNone(
       TypePtr typ); // value of None with type Optional[typ]
   TORCH_API Node* createAutogradZero();
-  TORCH_API Node* createFusionGroup();
+  TORCH_API Node* createWithSubgraph(Symbol kind);
   TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(
       at::ArrayRef<Value*> values,

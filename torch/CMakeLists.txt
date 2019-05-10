@@ -155,6 +155,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
@@ -163,13 +164,13 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/passes/pattern_fusion.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_inplace_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_autogradzero.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/subgraph_rewrite.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/python_print.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/utils/subgraph_utils.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
@@ -337,7 +338,7 @@ endif()
 target_link_libraries(torch caffe2_library)
 
 find_package(OpenMP QUIET)
-if(OPENMP_FOUND)
+if(USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
@@ -690,11 +691,14 @@ if (BUILD_PYTHON)
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES THD)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if (NOT MSVC AND NOT APPLE)
-      list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp)
-      list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp)
+      list(APPEND TORCH_PYTHON_SRCS
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/comm.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp
+        )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
-      if (USE_CUDA)
+      if (USE_CUDA OR USE_ROCM)
         list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/c10d/ddp.cpp)
       endif()
     endif()

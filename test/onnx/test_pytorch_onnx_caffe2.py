@@ -129,8 +129,7 @@ class TestCaffe2Backend(unittest.TestCase):
         return cuda_model, cuda_input
 
     def run_debug_test(self, model, train, batch_size, state_dict=None,
-                       input=None, use_gpu=True, example_outputs=None,
-                       do_constant_folding=False):
+                       input=None, use_gpu=True, example_outputs=None):
         """
         # TODO: remove this from the final release version
         This test is for our debugging only for the case where
@@ -149,7 +148,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
         onnxir, torch_out = do_export(model, input, export_params=self.embed_params, verbose=False,
                                       example_outputs=example_outputs,
-                                      do_constant_folding=do_constant_folding)
+                                      do_constant_folding=False)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -183,8 +182,12 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                       example_outputs=None, do_constant_folding=False):
+                       example_outputs=None, do_constant_folding=True):
         use_gpu_ = torch.cuda.is_available() and use_gpu
+        # NOTE: do_constant_folding is turned on only when model has
+        # parameters embedded (which are needed for constant folding),
+        # i.e. for self.embed_params=True case. self.embed_params=True
+        # for the TestCaffe2BackendEmbed class defined at the bottom.
         if self.embed_params:
             self.run_actual_test(model, train, batch_size, state_dict, input,
                                  use_gpu=use_gpu_, rtol=rtol, atol=atol,
@@ -192,8 +195,7 @@ class TestCaffe2Backend(unittest.TestCase):
                                  do_constant_folding=do_constant_folding)
         else:
             self.run_debug_test(model, train, batch_size, state_dict, input,
-                                use_gpu=use_gpu_, example_outputs=example_outputs,
-                                do_constant_folding=do_constant_folding)
+                                use_gpu=use_gpu_, example_outputs=example_outputs)
 
     def test_linear(self):
         class MyModel(torch.nn.Module):
@@ -288,11 +290,13 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def _elman_rnn_test(self, layers, nonlinearity, bidirectional,
                         initial_state, packed_sequence, dropout):
+        batch_first = True if packed_sequence == 2 else False
         model = nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE,
                        layers,
                        nonlinearity=nonlinearity,
                        bidirectional=bidirectional,
-                       dropout=dropout)
+                       dropout=dropout,
+                       batch_first=batch_first)
 
         if packed_sequence == 1:
             model = RnnModelWithPackedSequence(model, False)
@@ -303,9 +307,7 @@ class TestCaffe2Backend(unittest.TestCase):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
-            inputs = rnn_utils.pad_sequence(inputs)
-            if packed_sequence == 2:
-                inputs = inputs.transpose(0, 1)
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
 
             directions = 2 if bidirectional else 1
@@ -331,9 +333,10 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def _lstm_test(self, layers, bidirectional, initial_state,
                    packed_sequence, dropout):
+        batch_first = True if packed_sequence == 2 else False
         model = LstmFlatteningResult(
             RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
-            bidirectional=bidirectional, dropout=dropout)
+            bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
         if packed_sequence == 1:
             model = RnnModelWithPackedSequence(model, False)
         if packed_sequence == 2:
@@ -343,9 +346,7 @@ class TestCaffe2Backend(unittest.TestCase):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
-            inputs = rnn_utils.pad_sequence(inputs)
-            if packed_sequence == 2:
-                inputs = inputs.transpose(0, 1)
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
 
             directions = 2 if bidirectional else 1
@@ -372,8 +373,9 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def _gru_test(self, layers, bidirectional, initial_state,
                   packed_sequence, dropout):
+        batch_first = True if packed_sequence == 2 else False
         model = nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
-                       bidirectional=bidirectional, dropout=dropout)
+                       bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
         if packed_sequence == 1:
             model = RnnModelWithPackedSequence(model, False)
         if packed_sequence == 2:
@@ -383,9 +385,7 @@ class TestCaffe2Backend(unittest.TestCase):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
-            inputs = rnn_utils.pad_sequence(inputs)
-            if packed_sequence == 2:
-                inputs = inputs.transpose(0, 1)
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
 
             directions = 2 if bidirectional else 1
@@ -1605,6 +1605,32 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
         self.run_model_test(Log2Model(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test__sample_dirichlet(self):
+        class DirichletModel(torch.nn.Module):
+            def forward(self, input):
+                return torch._sample_dirichlet(input)
+
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        model = DirichletModel()
+        onnxir, _ = do_export(model, x)
+        onnx_model = onnx.ModelProto.FromString(onnxir)
+        prepared = c2.prepare(onnx_model)
+        caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
+        self.assertEqual(caffe2_out[0].shape, x.shape)
+
+    def test__standard_gamma(self):
+        class GammaModel(torch.nn.Module):
+            def forward(self, input):
+                return torch._standard_gamma(input)
+
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        model = GammaModel()
+        onnxir, _ = do_export(model, x)
+        onnx_model = onnx.ModelProto.FromString(onnxir)
+        prepared = c2.prepare(onnx_model)
+        caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
+        self.assertEqual(caffe2_out[0].shape, x.shape)
 
     def test_prim_shape(self):
         x = torch.randn(4, 5, requires_grad=True)
