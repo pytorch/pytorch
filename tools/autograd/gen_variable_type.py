@@ -683,7 +683,7 @@ def emit_body(declaration):
         res = []
         for arg in args:
             if arg['type'] == 'SparseTensorRef':
-                res.append('{}.tref'.format(arg['name']))
+                res.append('{}'.format(arg['name']))
             else:
                 res.append(arg['name'])
         return res

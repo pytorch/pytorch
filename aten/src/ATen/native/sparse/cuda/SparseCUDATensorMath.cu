@@ -249,7 +249,7 @@ SparseTensor hspmm_sparse_cuda(const SparseTensor& sparse, const Tensor& dense) 
 // --------------------------------------------------------------------
 
 Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorRef sparse_, at::Scalar value) {
-  const SparseTensor& sparse = sparse_.tref;
+  const SparseTensor& sparse = sparse_;
 
   AT_ASSERT(dense.is_cuda()); // dispatch argument
   AT_CHECK(sparse.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");

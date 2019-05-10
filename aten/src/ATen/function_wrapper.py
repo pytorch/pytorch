@@ -291,7 +291,7 @@ CHECKED_CAST = {
     'THSTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
-            '${arg_name}.tref,"${arg_name}",${arg_pos},false, '
+            '${arg_name},"${arg_name}",${arg_pos},false, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THByteTensor*':
         CodeTemplate(
