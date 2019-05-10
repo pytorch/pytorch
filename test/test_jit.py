@@ -201,13 +201,13 @@ def get_fn(file_name, script_path):
     return fn
 
 
-def get_execution_plan(graph_executor_state):
+def get_execution_plan(graph_executor_state, plan_idx=None):
     execution_plans = list(graph_executor_state.execution_plans.values())
     num_plans = len(execution_plans)
-    if num_plans != 1:
+    if num_plans != 1 and plan_idx is None:
         raise RuntimeError('This test assumes this GraphExecutor should '
                            'only have one execution plan, got: {}'.format(num_plans))
-    return execution_plans[0]
+    return execution_plans[0 if plan_idx is None else plan_idx]
 
 
 def get_grad_executor(plan_state, diff_graph_idx=None):
@@ -221,11 +221,11 @@ def get_grad_executor(plan_state, diff_graph_idx=None):
     return grad_executors[diff_graph_idx or 0]
 
 
-def backward_graph(script_module, diff_graph_idx=None):
+def backward_graph(script_module, diff_graph_idx=None, bw_plan_idx=None):
     ge_state = script_module.get_debug_state()
     fwd_plan = get_execution_plan(ge_state)
     grad_executor_state = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx)
-    bwd_plan = get_execution_plan(grad_executor_state)
+    bwd_plan = get_execution_plan(grad_executor_state, plan_idx=bw_plan_idx)
     # Running JIT passes requires that we own the graph (with a shared_ptr).
     # The debug state struct does not own its graph so we make a copy of it.
     return bwd_plan.graph.copy()
