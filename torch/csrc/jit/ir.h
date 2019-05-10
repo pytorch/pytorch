@@ -1261,6 +1261,10 @@ struct ProfileOp : public Node {
     return callback_;
   }
 
+  void setCallback(std::function<void(std::vector<IValue>&)> callback) {
+    callback_ = callback;
+  }
+
  private:
   std::function<void(std::vector<IValue>&)> callback_;
 };
