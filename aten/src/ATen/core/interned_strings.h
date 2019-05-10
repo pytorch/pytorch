@@ -5,8 +5,11 @@
 #include <unordered_map>
 #include <algorithm>
 
-#include <ATen/core/aten_interned_strings.h>
 #include <c10/macros/Macros.h>
+
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
+#include <ATen/core/aten_interned_strings.h>
+#endif
 
 namespace c10 {
 

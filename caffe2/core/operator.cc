@@ -64,7 +64,9 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 }
 
 namespace {
-int compute_input_size_(const std::vector<c10::IValue>& inputs) {
+int
+C10_UNUSED  // Suppress unused function warning on mobile.
+compute_input_size_(const std::vector<c10::IValue>& inputs) {
   if (inputs.empty()) {
     return 0;
   }
@@ -92,6 +94,7 @@ int compute_input_size_(const std::vector<c10::IValue>& inputs) {
 }
 } // namespace
 
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     std::vector<c10::IValue> inputs,
@@ -103,6 +106,7 @@ OperatorBase::OperatorBase(
   input_tensors_.resize(input_size_);
   output_tensors_.resize(newstyle_outputs_.size());
 }
+#endif
 
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
   vector<TensorShape> tps;
@@ -737,7 +741,11 @@ std::function<void(const OperatorDef&)> GetOperatorLogger() {
 
 c10::optional<int> OperatorBase::argumentIndexWithName(
     const std::string& name) const {
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
   return getFunctionSchema().argumentIndexWithName(name);
+#else
+  CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
+#endif
 }
 
 OperatorBase::~OperatorBase() noexcept = default;

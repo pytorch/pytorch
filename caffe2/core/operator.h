@@ -50,10 +50,12 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
    * Alternatively, inputs can be one tensor list ivalue followed by non-tensors
    * to represent operators with a variable number of inputs.
    */
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
   explicit OperatorBase(
       const c10::FunctionSchema& schema,
       std::vector<c10::IValue> inputs,
       std::vector<at::Tensor> outputs);
+#endif
 
   virtual ~OperatorBase() noexcept;
 
@@ -61,12 +63,20 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
    * New operators should be instantiated with FunctionSchema
    */
   bool isLegacyOperator() const {
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
     return !fn_schema_;
+#else
+    return true;
+#endif
   }
 
   const c10::FunctionSchema& getFunctionSchema() const {
     CAFFE_ENFORCE(!isLegacyOperator());
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
     return *fn_schema_.get();
+#else
+    CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
+#endif
   }
 
   /** @brief Checks if the operator has an argument of the given name.
@@ -556,7 +566,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
   // Preferrably use c10::optional, but nvcc doesn't work
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
   std::unique_ptr<const c10::FunctionSchema> fn_schema_;
+#endif
   vector<c10::IValue> newstyle_inputs_;
   vector<at::Tensor> newstyle_outputs_;
   // HACK
@@ -688,6 +700,7 @@ class Operator : public OperatorBase {
     // constructors will run on that device.
     context_.SwitchToDevice();
   }
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
       std::vector<c10::IValue> inputs,
@@ -697,6 +710,7 @@ class Operator : public OperatorBase {
     // constructors will run on that device.
     context_.SwitchToDevice();
   }
+#endif
   ~Operator() noexcept override {}
 
   /// Retrieve a non-owning reference to the input at position 'idx' for this
