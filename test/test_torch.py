@@ -2502,6 +2502,7 @@ class _TestTorchMixin(object):
             self.assertEqual(
                 torch.tensor([0, 2, 1, 0], dtype=torch.double, device=device),
                 actual)
+            self.assertEqual(actual.dtype, torch.double)
             # mixed input
             actual = torch.histc(
                 torch.tensor([1., 2, 1], dtype=torch.float, device=device),
@@ -2509,6 +2510,7 @@ class _TestTorchMixin(object):
             self.assertEqual(
                 torch.tensor([0, 2, 1, 0], dtype=torch.float, device=device),
                 actual)
+            self.assertEqual(actual.dtype, torch.float)
 
         # test against numpy.histogram()
         def test_against_np(tensor, bins=100, min=0, max=0):
