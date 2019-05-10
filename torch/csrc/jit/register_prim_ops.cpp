@@ -102,7 +102,8 @@ static int gcd(int a, int b) {
         a = b;
         b = r;
     }
-    return a;
+    // in python gcd returns non-negative values
+    return std::abs(a);
 }
 
 // reference function THPVariable_to in python_variable_methods.cpp
