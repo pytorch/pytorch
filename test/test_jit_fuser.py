@@ -898,7 +898,7 @@ class TestFuser(JitTestCase):
         module = self.checkScript(my_broadcasted_cell, (s1, s1, s1))
         forward_graph = module.graph_for(s1, s1, s1)
         self.assertAllFused(forward_graph, except_for=("aten::size", "prim::BroadcastSizes",
-                                                        "aten::_size_if_not_equal"))
+                                                       "aten::_size_if_not_equal"))
 
         for i in range(3):
             # if we have s2, then the s1 are _grad_sum_to_size'd
