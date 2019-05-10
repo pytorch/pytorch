@@ -1,5 +1,4 @@
 #include <ATen/core/jit_type.h>
-#include <ATen/core/Dict.h>
 
 #include <iostream>
 
@@ -181,7 +180,7 @@ TypePtr attemptToRecoverType(const IValue& ivalue) {
     }
     auto item = dict.begin();
     return DictType::create(
-        attemptToRecoverType(item->key()), attemptToRecoverType(item->value()));
+        attemptToRecoverType(item->first), attemptToRecoverType(item->second));
   }
   return incompleteInferTypeFrom(ivalue);
 }
@@ -225,9 +224,9 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
     auto dict_type = type->expect<DictType>();
     const auto& dict = ivalue.toGenericDictRef();
     return std::all_of(
-        dict.begin(), dict.end(), [=](const c10::impl::GenericDict::const_iterator::value_type& item) {
-          return isSubvalueOf(item.key(), dict_type->getKeyType()) &&
-              isSubvalueOf(item.value(), dict_type->getValueType());
+        dict.begin(), dict.end(), [=](const std::pair<IValue, IValue>& item) {
+          return isSubvalueOf(item.first, dict_type->getKeyType()) &&
+              isSubvalueOf(item.second, dict_type->getValueType());
         });
   }
   return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
