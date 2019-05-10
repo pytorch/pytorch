@@ -450,7 +450,7 @@ if (NOT INTERN_BUILD_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_unix.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
     )
-    if (USE_CUDA AND NOT USE_ROCM)
+    if (USE_CUDA)
       list(APPEND Caffe2_GPU_SRCS
         ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
       )
