@@ -390,9 +390,6 @@ def legacy_iterate_types():
             for scalar_type in (scalar_types + quantized_scalar_types):
                 if density == 'Mkldnn' and (backend != 'CPU' or scalar_type[0] != 'Float'):
                     continue
-                if density == 'Sparse' and scalar_type[0] == 'Half':
-                    # THS does not do half type yet.
-                    continue
                 else:
                     yield (backend, density, scalar_type)
     for backend in quantized_backends:
