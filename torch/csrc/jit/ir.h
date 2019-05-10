@@ -249,7 +249,7 @@ struct TORCH_API Node {
   std::vector<Block*> blocks_;
   Graph* graph_;
   Block* owning_block_;
-  std::shared_ptr<SourceLocation> source_location_;
+  c10::optional<SourceRange> source_range_;
   ScopePtr scope_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
@@ -287,13 +287,12 @@ struct TORCH_API Node {
   NodeKind kind() const {
     return kind_;
   }
-  Node* setSourceLocation(std::shared_ptr<SourceLocation> sl) {
-    source_location_ = std::move(sl);
+  Node* setSourceRange(SourceRange r) {
+    source_range_ = std::move(r);
     return this;
   }
-  std::shared_ptr<SourceLocation> getSourceLocation() const {
-    return source_location_;
-  }
+  SourceRange sourceRange() const;
+
   Graph* owningGraph() {
     return graph_;
   }
@@ -553,6 +552,14 @@ struct TORCH_API Node {
   // Execute: %3.removeAllInputs()
   // Result: %3 = f()
   void removeAllInputs();
+
+  // Rearrange the ordering of inputs or outputs of a node
+  // Given: %3 = f(%1, %2)
+  // Execute: %3.permuteInputs({1, 0})
+  // Result: %3 = f(%2, %1)
+  // Each index must appear exactly once
+  void permuteInputs(const std::vector<size_t>& new_inputs);
+  void permuteOutputs(const std::vector<size_t>& new_inputs);
 
   // iterators of the node list starting at this node
   // useful for resuming a search starting at this node
@@ -895,6 +902,12 @@ struct Block {
   }
   void eraseOutput(size_t i) {
     output_->removeInput(i);
+  }
+  void permuteOutputs(const std::vector<size_t>& new_inputs) {
+    output_->permuteInputs(new_inputs);
+  }
+  void permuteInputs(const std::vector<size_t>& new_inputs) {
+    input_->permuteOutputs(new_inputs);
   }
 
   Node* appendNode(Node* n) {
