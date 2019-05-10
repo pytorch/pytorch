@@ -288,11 +288,6 @@ CHECKED_CAST = {
             'checked_tensor_unwrap('
             '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
-    'THSTensor*':
-        CodeTemplate(
-            'checked_tensor_unwrap('
-            '${arg_name},"${arg_name}",${arg_pos},false, '
-            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THByteTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
