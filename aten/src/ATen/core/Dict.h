@@ -8,7 +8,6 @@
 namespace c10 {
 template<class Key, class Value> class Dict;
 namespace impl {
-
 inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
   if (lhs.isNone()) {
     return rhs.isNone();
@@ -153,8 +152,6 @@ inline bool operator!=(const DictIterator<Key, Value, Iterator>& lhs, const Dict
   return !(lhs == rhs);
 }
 
-template<class Key, class Value> Dict<Key, Value> toTypedDict(Dict<IValue, IValue>&& dict);
-template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Value>&& dict);
 }
 
 /**
@@ -180,10 +177,6 @@ private:
   // because such operations would get expensive if we switch out
   // the actual map implementation.
   detail::dict_map_type map_;
-
-  explicit Dict(detail::dict_map_type&& map): map_(std::move(map)) {}
-  template<class K, class V> friend Dict<K, V> impl::toTypedDict(Dict<IValue, IValue>&&);
-  template<class K, class V> friend Dict<IValue, IValue> impl::toGenericDict(Dict<K, V>&&);
 
 public:
   using key_type = Key;
@@ -377,16 +370,6 @@ namespace impl {
 // public API. Kernels should use Dicts with concrete Key, Value types instead
 // (maybe except for some internal prim ops).
 using GenericDict = Dict<IValue, IValue>;
-
-template<class Key, class Value>
-Dict<Key, Value> toTypedDict(GenericDict&& dict) {
-  return Dict<Key, Value>(std::move(dict.map_));
-}
-
-template<class Key, class Value>
-GenericDict toGenericDict(Dict<Key, Value>&& dict) {
-  return GenericDict(std::move(dict.map_));
-}
 }
 
 }
