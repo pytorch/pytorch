@@ -9,7 +9,7 @@ namespace jit {
 namespace script {
 
 static const auto classSrcs1 = R"JIT(
-op_version_set = 0
+op_version_set = 1
 class FooNestedTest:
     def __init__(self, y):
         self.y = y
@@ -25,7 +25,7 @@ class FooTest:
 )JIT";
 
 static const auto classSrcs2 = R"JIT(
-op_version_set = 0
+op_version_set = 1
 class FooTest:
     def __init__(self, x):
       self.dx = x
