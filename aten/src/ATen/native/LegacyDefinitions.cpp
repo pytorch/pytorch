@@ -956,4 +956,8 @@ std::tuple<Tensor &,Tensor &> _min_out(Tensor& values, Tensor& indices,
   return at::legacy::th::_th_min_out(values, indices, self, dim, keepdim);
 }
 
+Tensor& _copy_ignoring_overlaps_(Tensor& self, const Tensor& src) {
+  return at::legacy::th::_th_copy_ignoring_overlaps_(self, src);
+}
+
 }} // namespace at::native

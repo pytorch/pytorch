@@ -3455,6 +3455,8 @@
 
 - func: _min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
 
+- func: _copy_ignoring_overlaps_(Tensor(a!) self, Tensor src) -> Tensor(a!)
+
 ## NN wrappers
 
 - func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
