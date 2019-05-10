@@ -325,6 +325,9 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
 // NB: Dropped the resizeNd variants
 
 Tensor sparse_to_dense(const SparseTensor& self) {
+  if(self.scalar_type() == ScalarType::Half && self.options().device().is_cpu()) {
+    AT_ERROR("to_dense() not supported for float16 on CPU");
+  }
   Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
   return dst.add_(self);
 }

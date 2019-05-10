@@ -73,11 +73,7 @@ class ShapePropagator {
       } catch (propagation_error& e) {
         setUnshapedType(node);
       } catch (std::exception& e) {
-        if (auto sl = node->getSourceLocation()) {
-          sl->wrapAndRethrowException(e, "operation failed shape propagation");
-        } else {
-          throw;
-        }
+         node->sourceRange().wrapAndRethrowException(e, "operation failed shape propagation");
       }
     }
   }
