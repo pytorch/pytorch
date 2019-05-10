@@ -5390,9 +5390,6 @@ a")
             # type: (float, int) -> float
             return math.pow(x, y)
 
-        def test_gcd(x, y):
-            # type: (int, int) -> int
-            return math.gcd(x, y)
 
         self.checkScript(test_floor, (1.5,))
         self.checkScript(test_ceil, (1.5,))
@@ -5408,7 +5405,15 @@ a")
         self.checkScript(test_sqrt_float, (2.0,))
         self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
-        self.checkScript(test_gcd, (2, 4))
+
+    @unittest.skipIf(PY2, "Requires python 3")
+    def test_math_gcd(self):
+        def test_gcd(x, y):
+            # type: (int, int) -> int
+            return math.gcd(x, y)
+
+        for inputs in [(2, 4), (-5, -15), (-5, 15), (10, 0), (0, 10), (-5, 0), (0, -5), (0, 0), (0,  -0)]:
+            self.checkScript(test_gcd, inputs)
 
     def test_math_ops1(self):
         funcs_template = dedent('''
