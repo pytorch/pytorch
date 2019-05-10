@@ -9057,7 +9057,7 @@ class _TestTorchMixin(object):
                         self.assertEqual(torch.ones_like(lex), lex)
                     if TEST_NUMPY:
                         tup1 = torch.nonzero_tuple(tensor)
-                        tup2 = tensor.nonzero_tuple()
+                        tup2 = tensor.nonzero(as_tuple=True)
                         np1  = tensor.numpy().nonzero()
                         for t in (tup1, tup2):
                             self.assertEqual(len(t), len(np1))
@@ -9065,19 +9065,34 @@ class _TestTorchMixin(object):
                                 self.assertEqual(t[i].cpu().numpy(), np1[i])
 
     def test_nonzero_empty(self):
+        def assert_tuple_empty(tup, dim):
+            self.assertEqual(dim, len(tup))
+            for t in tup:
+                self.assertEqual(torch.Size([0]), t.shape)
         for device in torch.testing.get_all_device_types():
             x = torch.randn(0, 2, 0, 5, 0, device=device)
             y = torch.nonzero(x)
+            z = torch.nonzero(x, as_tuple=True)
+
             self.assertEqual(0, y.numel())
             self.assertEqual(torch.Size([0, 5]), y.shape)
+            assert_tuple_empty(z, 5)
 
             x = torch.tensor(0.5, device=device)
             y = torch.nonzero(x)
-            self.assertEqual(torch.Size([1, 0]), y.shape)
+            # For now, nonzero with as_tuple returns an empty
+            # tuple for a zero-dim tensor.
+            # This is different from numpy behavior, and We may decide to
+            # change it.
+            z = torch.nonzero(x, as_tuple=True)
+            self.assertEqual((), z)
 
             x = torch.zeros((), device=device)
             y = torch.nonzero(x)
+            z = torch.nonzero(x, as_tuple=True)
             self.assertEqual(torch.Size([0, 0]), y.shape)
+            self.assertEqual((), z)
+
 
     def test_deepcopy(self):
         from copy import deepcopy
