@@ -258,6 +258,11 @@ def enable_cpu_fuser_if(cond):
             return wrapper
         return noop_fuser
 
+@contextmanager
+def enable_profiling_mode():
+    torch._C._jit_set_profiling_mode(True)
+    yield
+    torch._C._jit_set_profiling_mode(False)
 
 # note: not re-entrant, use unnested only
 @contextmanager
@@ -5000,6 +5005,31 @@ a")
         outputs = alpha * x + beta * y
         # NOTE: cannot optimize yet because broadcasts are not inserted before the fuser runs
         self.checkScript(script, [alpha, beta, x, y], optimize=False, outputs=outputs)
+
+    def test_profiling_graph_executor(self):
+        @torch.jit.script
+        def basic(x, y):
+            a = x + y
+            b = x * y
+            c = x + 1
+            d = a - c
+            e = b - c
+            return d + e
+
+        a = torch.rand(2, 3)
+        b = torch.rand(2, 3)
+
+        with enable_profiling_mode():
+            basic(a, b)
+            basic(a, b)
+            basic(a, b)
+
+            # this tests that a profiling count is being decrement by
+            # a profile instruction.
+            # this is the easiest way to test that a graph was instrumented
+            # from python
+            with self.assertRaisesRegex(RuntimeError, "Not yet implemented"):
+                basic(a, b)
 
     def test_resize_input_ops(self):
         # resize_ and resize_as resize the input tensor. because our shape analysis

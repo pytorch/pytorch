@@ -66,7 +66,10 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   pr->instrumentBlock(new_g->block());
   std::function<void(Stack&)> counter = [raw_pr](Stack&) {
     std::lock_guard<std::mutex> lock(raw_pr->mutex_);
-    raw_pr->profiling_count_--;
+    if (raw_pr->profiling_count_ > 0)
+    {
+        raw_pr->profiling_count_--;
+    }
   };
 
   auto pop = pr->createProfileNode(counter, {});
