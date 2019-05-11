@@ -170,6 +170,24 @@ void initJITBindings(PyObject* module) {
             return InsertQuantDequantNodes(g, qparam_dict);
           })
       .def(
+          "_jit_pass_insert_quantdequant_for_param",
+          [](std::shared_ptr<script::Module>& moduleObj,
+             const std::string& method_name,
+             const std::string& param_name,
+             py::function pyGetQParamFunc) {
+            if (param_name == std::string("weight")) {
+              auto getQParamFunc =
+                  py::cast<std::function<std::tuple<std::string, float, int>(
+                      at::Tensor)>>(pyGetQParamFunc);
+              InsertQuantDequantNodesForParam(
+                  moduleObj,
+                  method_name,
+                  param_name,
+                  getQParamFunc,
+                  at::ScalarType::QInt8);
+            }
+          })
+      .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
       .def(
