@@ -1419,7 +1419,7 @@
 
 - func: poisson_nll_loss(Tensor input, Tensor target, bool log_input, bool full, float eps, int reduction) -> Tensor
   variants: function
-  
+
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -4132,51 +4132,99 @@
 
 - func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: binary_cross_entropy_out_cpu
+    CUDA: binary_cross_entropy_out_cuda
 
 - func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: binary_cross_entropy_cpu
+    CUDA: binary_cross_entropy_cuda
 
-- func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: binary_cross_entropy_backward_out_cpu
+    CUDA: binary_cross_entropy_backward_out_cuda
 
-- func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int reduction) -> Tensor
+- func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: binary_cross_entropy_backward_cpu
+    CUDA: binary_cross_entropy_backward_cuda
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: mse_loss_out_cpu
+    CUDA: mse_loss_out_cuda
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: mse_loss_cpu
+    CUDA: mse_loss_cuda
 
 - func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: mse_loss_backward_out_cpu
+    CUDA: mse_loss_backward_out_cuda
 
 - func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: mse_loss_backward_cpu
+    CUDA: mse_loss_backward_cuda
 
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: l1_loss_out_cpu
+    CUDA: l1_loss_out_cuda
 
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: l1_loss_cpu
+    CUDA: l1_loss_cuda
 
 - func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: l1_loss_backward_out_cpu
+    CUDA: l1_loss_backward_out_cuda
 
 - func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: l1_loss_backward_cpu
+    CUDA: l1_loss_backward_cuda
 
 - func: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: multi_margin_loss_out_cpu
+    CUDA: multi_margin_loss_out_cuda
 
 - func: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: multi_margin_loss_cpu
+    CUDA: multi_margin_loss_cuda
 
 - func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: multi_margin_loss_backward_out_cpu
+    CUDA: multi_margin_loss_backward_out_cuda
 
 - func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int reduction) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: multi_margin_loss_backward_cpu
+    CUDA: multi_margin_loss_backward_cuda
 
 - func: multilabel_margin_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4186,15 +4234,27 @@
 
 - func: multilabel_margin_loss_forward(Tensor self, Tensor target, int reduction, *, Tensor(a!) output, Tensor(b!) is_target) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: multilabel_margin_loss_forward_out_cpu
+    CUDA: multilabel_margin_loss_forward_out_cuda
 
 - func: multilabel_margin_loss_forward(Tensor self, Tensor target, int reduction) -> (Tensor output, Tensor is_target)
   python_module: nn
+  dispatch:
+    CPU: multilabel_margin_loss_forward_cpu
+    CUDA: multilabel_margin_loss_forward_cuda
 
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: multilabel_margin_loss_backward_out_cpu
+    CUDA: multilabel_margin_loss_backward_out_cuda
 
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: multilabel_margin_loss_backward_cpu
+    CUDA: multilabel_margin_loss_backward_cuda
 
 - func: nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4204,15 +4264,27 @@
 
 - func: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, *, Tensor(a!) output, Tensor(b!) total_weight) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: nll_loss_forward_out_cpu
+    CUDA: nll_loss_forward_out_cuda
 
 - func: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
   python_module: nn
+  dispatch:
+    CPU: nll_loss_forward_cpu
+    CUDA: nll_loss_forward_cuda
 
 - func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: nll_loss_backward_out_cpu
+    CUDA: nll_loss_backward_out_cuda
 
 - func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: nll_loss_backward_cpu
+    CUDA: nll_loss_backward_cuda
 
 - func: nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4222,96 +4294,189 @@
 
 - func: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, *, Tensor(a!) output, Tensor(b!) total_weight) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: nll_loss2d_forward_out_cpu
+    CUDA: nll_loss2d_forward_out_cuda
 
 - func: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
   python_module: nn
+  dispatch:
+    CPU: nll_loss2d_forward_cpu
+    CUDA: nll_loss2d_forward_cuda
 
 - func: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: nll_loss2d_backward_out_cpu
+    CUDA: nll_loss2d_backward_out_cuda
 
 - func: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: nll_loss2d_backward_cpu
+    CUDA: nll_loss2d_backward_cuda
 
 - func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: smooth_l1_loss_out_cpu
+    CUDA: smooth_l1_loss_out_cuda
 
 - func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: smooth_l1_loss_cpu
+    CUDA: smooth_l1_loss_cuda
 
 - func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: smooth_l1_loss_backward_out_cpu
+    CUDA: smooth_l1_loss_backward_out_cuda
 
 - func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: smooth_l1_loss_backward_cpu
+    CUDA: smooth_l1_loss_backward_cuda
 
 - func: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: soft_margin_loss_out_cpu
+    CUDA: soft_margin_loss_out_cuda
 
 - func: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: soft_margin_loss_cpu
+    CUDA: soft_margin_loss_cuda
 
 - func: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: soft_margin_loss_backward_out_cpu
+    CUDA: soft_margin_loss_backward_out_cuda
 
 - func: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: soft_margin_loss_backward_cpu
+    CUDA: soft_margin_loss_backward_cuda
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: elu_out_cpu
+    CUDA: elu_out_cuda
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: elu_cpu
+    CUDA: elu_cuda
 
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: elu_backward_out_cpu
+    CUDA: elu_backward_out_cuda
 
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: elu_backward_cpu
+    CUDA: elu_backward_cuda
 
 - func: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: elu__cpu
+    CUDA: elu__cuda
 
 - func: glu(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: glu_out_cpu
+    CUDA: glu_out_cuda
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: glu_cpu
+    CUDA: glu_cuda
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: glu_backward_out_cpu
+    CUDA: glu_backward_out_cuda
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: glu_backward_cpu
+    CUDA: glu_backward_cuda
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: hardtanh_out_cpu
+    CUDA: hardtanh_out_cuda
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: hardtanh_cpu
+    CUDA: hardtanh_cuda
 
 - func: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: hardtanh_backward_out_cpu
+    CUDA: hardtanh_backward_out_cuda
 
 - func: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: hardtanh_backward_cpu
+    CUDA: hardtanh_backward_cuda
 
 - func: hardtanh_(Tensor(a!) self, Scalar min_val=-1, Scalar max_val=1) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: hardtanh__cpu
+    CUDA: hardtanh__cuda
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: leaky_relu_out_cpu
+    CUDA: leaky_relu_out_cuda
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: leaky_relu_cpu
+    CUDA: leaky_relu_cuda
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: leaky_relu_backward_out_cpu
+    CUDA: leaky_relu_backward_out_cuda
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: leaky_relu_backward_cpu
+    CUDA: leaky_relu_backward_cuda
 
 - func: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: leaky_relu__cpu
+    CUDA: leaky_relu__cuda
 
 - func: log_sigmoid(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4321,54 +4486,105 @@
 
 - func: log_sigmoid_forward(Tensor self, *, Tensor(a!) output, Tensor(b!) buffer) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: log_sigmoid_forward_out_cpu
+    CUDA: log_sigmoid_forward_out_cuda
 
 - func: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   python_module: nn
+  dispatch:
+    CPU: log_sigmoid_forward_cpu
+    CUDA: log_sigmoid_forward_cuda
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: log_sigmoid_backward_out_cpu
+    CUDA: log_sigmoid_backward_out_cuda
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: log_sigmoid_backward_cpu
+    CUDA: log_sigmoid_backward_cuda
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: rrelu_with_noise_out_cpu
+    CUDA: rrelu_with_noise_out_cuda
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: rrelu_with_noise_cpu
+    CUDA: rrelu_with_noise_cuda
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: rrelu_with_noise_backward_out_cpu
+    CUDA: rrelu_with_noise_backward_out_cuda
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: rrelu_with_noise_backward_cpu
+    CUDA: rrelu_with_noise_backward_cuda
 
 - func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: rrelu_with_noise__cpu
+    CUDA: rrelu_with_noise__cuda
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: softplus_out_cpu
+    CUDA: softplus_out_cuda
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: softplus_cpu
+    CUDA: softplus_cuda
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: softplus_backward_out_cpu
+    CUDA: softplus_backward_out_cuda
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: softplus_backward_cpu
+    CUDA: softplus_backward_cuda
 
 - func: softshrink(Tensor self, Scalar lambd=0.5, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: softshrink_out_cpu
+    CUDA: softshrink_out_cuda
 
 - func: softshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: softshrink_cpu
+    CUDA: softshrink_cuda
 
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: softshrink_backward_out_cpu
+    CUDA: softshrink_backward_out_cuda
 
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: softshrink_backward_cpu
+    CUDA: softshrink_backward_cuda
 
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4398,15 +4614,27 @@
 
 - func: adaptive_avg_pool3d(Tensor self, int[3] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: adaptive_avg_pool3d_out_cpu
+    CUDA: adaptive_avg_pool3d_out_cuda
 
 - func: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: adaptive_avg_pool3d_cpu
+    CUDA: adaptive_avg_pool3d_cuda
 
 - func: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: adaptive_avg_pool3d_backward_out_cpu
+    CUDA: adaptive_avg_pool3d_backward_out_cuda
 
 - func: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: adaptive_avg_pool3d_backward_cpu
+    CUDA: adaptive_avg_pool3d_backward_cuda
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
@@ -4463,34 +4691,52 @@
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: avg_pool2d_out
-    CUDA: avg_pool2d_out
+    CPU: avg_pool2d_out_cpu
+    CUDA: avg_pool2d_out_cuda
     MkldnnCPU: mkldnn_avg_pool2d_out
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   python_module: nn
   dispatch:
-    CPU: avg_pool2d
-    CUDA: avg_pool2d
+    CPU: avg_pool2d_cpu
+    CUDA: avg_pool2d_cuda
     MkldnnCPU: mkldnn_avg_pool2d
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: avg_pool2d_backward_out_cpu
+    CUDA: avg_pool2d_backward_out_cuda
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: avg_pool2d_backward_cpu
+    CUDA: avg_pool2d_backward_cuda
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: avg_pool3d_out_cpu
+    CUDA: avg_pool3d_out_cuda
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: avg_pool3d_cpu
+    CUDA: avg_pool3d_cuda
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: avg_pool3d_backward_out_cpu
+    CUDA: avg_pool3d_backward_out_cuda
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: avg_pool3d_backward_cpu
+    CUDA: avg_pool3d_backward_cuda
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
@@ -4547,54 +4793,102 @@
 # Return: (Tensor output, Tensor indices)
 - func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: max_pool2d_with_indices_out_cpu
+    CUDA: max_pool2d_with_indices_out_cuda
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
   python_module: nn
+  dispatch:
+    CPU: max_pool2d_with_indices_cpu
+    CUDA: max_pool2d_with_indices_cuda
 
 - func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: max_pool2d_with_indices_backward_out_cpu
+    CUDA: max_pool2d_with_indices_backward_out_cuda
 
 - func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: max_pool2d_with_indices_backward_cpu
+    CUDA: max_pool2d_with_indices_backward_cuda
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: max_pool3d_with_indices_out_cpu
+    CUDA: max_pool3d_with_indices_out_cuda
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
   python_module: nn
+  dispatch:
+    CPU: max_pool3d_with_indices_cpu
+    CUDA: max_pool3d_with_indices_cuda
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: max_pool3d_with_indices_backward_out_cpu
+    CUDA: max_pool3d_with_indices_backward_out_cuda
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: max_pool3d_with_indices_backward_cpu
+    CUDA: max_pool3d_with_indices_backward_cuda
 
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: max_unpool2d_out_cpu
+    CUDA: max_unpool2d_out_cuda
 
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: max_unpool2d_cpu
+    CUDA: max_unpool2d_cuda
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: max_unpool2d_backward_out_cpu
+    CUDA: max_unpool2d_backward_out_cuda
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: max_unpool2d_backward_cpu
+    CUDA: max_unpool2d_backward_cuda
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: max_unpool3d_out_cpu
+    CUDA: max_unpool3d_out_cuda
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: max_unpool3d_cpu
+    CUDA: max_unpool3d_cuda
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: max_unpool3d_backward_out_cpu
+    CUDA: max_unpool3d_backward_out_cuda
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: max_unpool3d_backward_cpu
+    CUDA: max_unpool3d_backward_cuda
 
 - func: reflection_pad1d(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4886,15 +5180,27 @@
 
 - func: sigmoid_backward(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: sigmoid_backward_out_cpu
+    CUDA: sigmoid_backward_out_cuda
 
 - func: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: sigmoid_backward_cpu
+    CUDA: sigmoid_backward_cuda
 
 - func: tanh_backward(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: tanh_backward_out_cpu
+    CUDA: tanh_backward_out_cuda
 
 - func: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: tanh_backward_cpu
+    CUDA: tanh_backward_cuda
 
 - func: thnn_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4904,15 +5210,27 @@
 
 - func: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_transpose2d_forward_out_cpu
+    CUDA: thnn_conv_transpose2d_forward_out_cuda
 
 - func: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation) -> (Tensor output, Tensor columns, Tensor ones)
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_transpose2d_forward_cpu
+    CUDA: thnn_conv_transpose2d_forward_cuda
 
 - func: thnn_conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_transpose2d_backward_out_cpu
+    CUDA: thnn_conv_transpose2d_backward_out_cuda
 
 - func: thnn_conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_transpose2d_backward_cpu
+    CUDA: thnn_conv_transpose2d_backward_cuda
 
 - func: thnn_conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4922,15 +5240,27 @@
 
 - func: thnn_conv_transpose3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_transpose3d_forward_out_cpu
+    CUDA: thnn_conv_transpose3d_forward_out_cuda
 
 - func: thnn_conv_transpose3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation) -> (Tensor output, Tensor finput, Tensor fgrad_input)
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_transpose3d_forward_cpu
+    CUDA: thnn_conv_transpose3d_forward_cuda
 
 - func: thnn_conv_transpose3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_transpose3d_backward_out_cpu
+    CUDA: thnn_conv_transpose3d_backward_out_cuda
 
 - func: thnn_conv_transpose3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_transpose3d_backward_cpu
+    CUDA: thnn_conv_transpose3d_backward_cuda
 
 - func: thnn_conv2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4940,15 +5270,27 @@
 
 - func: thnn_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: thnn_conv2d_forward_out_cpu
+    CUDA: thnn_conv2d_forward_out_cuda
 
 - func: thnn_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
   python_module: nn
+  dispatch:
+    CPU: thnn_conv2d_forward_cpu
+    CUDA: thnn_conv2d_forward_cuda
 
 - func: thnn_conv2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: thnn_conv2d_backward_out_cpu
+    CUDA: thnn_conv2d_backward_out_cuda
 
 - func: thnn_conv2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
+  dispatch:
+    CPU: thnn_conv2d_backward_cpu
+    CUDA: thnn_conv2d_backward_cuda
 
 - func: thnn_conv_depthwise2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4984,15 +5326,23 @@
 
 - func: thnn_conv3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: thnn_conv3d_forward_out_cpu
 
 - func: thnn_conv3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
   python_module: nn
+  dispatch:
+    CPU: thnn_conv3d_forward_cpu
 
 - func: thnn_conv3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: thnn_conv3d_backward_out_cpu
 
 - func: thnn_conv3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
+  dispatch:
+    CPU: thnn_conv3d_backward_cpu
 
 - func: thnn_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -5002,15 +5352,27 @@
 
 - func: thnn_conv_dilated2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_dilated2d_forward_out_cpu
+    CUDA: thnn_conv_dilated2d_forward_out_cuda
 
 - func: thnn_conv_dilated2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation) -> (Tensor output, Tensor columns, Tensor ones)
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_dilated2d_forward_cpu
+    CUDA: thnn_conv_dilated2d_forward_cuda
 
 - func: thnn_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_dilated2d_backward_out_cpu
+    CUDA: thnn_conv_dilated2d_backward_out_cuda
 
 - func: thnn_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_dilated2d_backward_cpu
+    CUDA: thnn_conv_dilated2d_backward_cuda
 
 - func: thnn_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -5020,24 +5382,48 @@
 
 - func: thnn_conv_dilated3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_dilated3d_forward_out_cpu
+    CUDA: thnn_conv_dilated3d_forward_out_cuda
 
 - func: thnn_conv_dilated3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] dilation) -> (Tensor output, Tensor columns, Tensor ones)
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_dilated3d_forward_cpu
+    CUDA: thnn_conv_dilated3d_forward_cuda
 
 - func: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_dilated3d_backward_out_cpu
+    CUDA: thnn_conv_dilated3d_backward_out_cuda
 
 - func: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
+  dispatch:
+    CPU: thnn_conv_dilated3d_backward_cpu
+    CUDA: thnn_conv_dilated3d_backward_cuda
 
 - func: thnn_col2im(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: thnn_col2im_cpu
+    CUDA: thnn_col2im_cuda
 
 - func: thnn_col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: thnn_col2im_backward_cpu
+    CUDA: thnn_col2im_backward_cuda
 
 - func: thnn_im2col(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: thnn_im2col_cpu
+    CUDA: thnn_im2col_cuda
 
 - func: thnn_im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: thnn_im2col_backward_cpu
+    CUDA: thnn_im2col_backward_cuda
