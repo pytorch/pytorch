@@ -12235,22 +12235,35 @@ a")
         m = self.createFunctionFromGraph(foo.graph)
         self.getExportImportCopy(m)
 
+    def get_pickle_values(self):
+        return (('dict', {"I": "am", "a test": "test"}, Dict[str, str]),
+                ('float', 2.3, float),
+                ('int', 99, int),
+                ('bool', False, bool),
+                ('tuple', (1, 2, 3, 4), Tuple[int, int, int, int]),
+                ('list', [(1, 2), (3, 4)], List[Tuple[int, int]]),
+                ('tensor', torch.randn(2, 2), torch.Tensor),
+                ('int_list', [1, 2, 3, 4], List[int]),
+                ('tensor_list', [torch.ones(2, 2) + i for i in range(4)], List[torch.Tensor]),
+                ('bool_list', [True, True, False, True], List[bool]),
+                ('float_list', [1., 2., 3., 4.], List[float]),
+                ('str_list', ['hello', 'bye'], List[str]),
+                ('none', None, Optional[int]),)
+
     def test_attribute_serialization(self):
+        tester = self
+
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__()
-                self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
-                self.float = torch.jit.Attribute(2.3, float)
-                self.int = torch.jit.Attribute(99, int)
-                self.bool = torch.jit.Attribute(False, bool)
-                self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
-                self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
-                self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
-                self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
+                for name, value, the_type in tester.get_pickle_values():
+                    setattr(self, name, torch.jit.Attribute(value, the_type))
 
             @torch.jit.script_method
             def forward(self):
-                return (self.table, self.float, self.int, self.bool, self.tuple, self.list, self.int_list)
+                return (self.dict, self.float, self.int, self.bool, self.tuple,
+                        self.list, self.int_list, self.tensor_list, self.bool_list,
+                        self.float_list, self.str_list, self.none)
 
         m = M()
         imported_m = self.getExportImportCopy(m)
@@ -12268,21 +12281,19 @@ a")
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_attribute_unpickling(self):
         tensor = torch.randn(2, 2)
+        tester = self
 
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__()
-                self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
-                self.float = torch.jit.Attribute(2.3, float)
-                self.int = torch.jit.Attribute(99, int)
-                self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
-                self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
-                self.tensor = torch.jit.Attribute(tensor, torch.Tensor)
-                self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
+                for name, value, the_type in tester.get_pickle_values():
+                    setattr(self, name, torch.jit.Attribute(value, the_type))
 
             @torch.jit.script_method
             def forward(self):
-                return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
+                return (self.dict, self.float, self.int, self.bool, self.tuple,
+                        self.list, self.int_list, self.tensor_list, self.bool_list,
+                        self.float_list, self.str_list, self.none)
 
         with TemporaryFileName() as fname:
             M().save(fname)
@@ -12291,10 +12302,17 @@ a")
             pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
             out = pickle.load(io.BytesIO(pickled_data))
 
-            self.assertEqual(out[0], {"I": "am", "a test": "test"})
-            self.assertEqual(out[1], 2.3)
-            self.assertEqual(out[2], 99)
-            self.assertEqual(out[6], [1, 2, 3, 4])
+            def is_tensor_value(item):
+                if isinstance(item, torch.Tensor):
+                    return True
+                if isinstance(item, list):
+                    return is_tensor_value(item[0])
+                return False
+
+            for loaded_item, item in zip(out, self.get_pickle_values()):
+                if is_tensor_value(item[1]):
+                    continue
+                self.assertEqual(item[1], loaded_item)
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):
