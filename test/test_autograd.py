@@ -3006,6 +3006,29 @@ class TestAutograd(TestCase):
         # gpu thread ReadyQueue
         out.sum().backward()
 
+    def test_set_data_preserve_version_counter(self):
+        x = torch.Tensor(1, 2)
+
+        # In-place op bumps version
+        x_saved_version = x._version
+        x.add_(1).add_(1)
+        self.assertTrue(x._version > x_saved_version)
+
+        # Differentiable view shares version counter
+        xz = x[:]
+        self.assertTrue(x._version == xz._version)
+
+        # `x.data = y` preserves version counter of `x`
+        x_saved_version = x._version
+        x.data = torch.Tensor(2, 3)
+        self.assertTrue(x._version == x_saved_version)
+        self.assertTrue(x._version == xz._version)
+
+        # In-place op on `x` also updates version of `xz`,
+        # because they share the version counter
+        x.add_(1)
+        self.assertTrue(x._version == xz._version)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
