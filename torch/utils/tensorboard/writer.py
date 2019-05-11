@@ -35,30 +35,30 @@ class FileWriter(object):
     training.
     """
 
-    def __init__(self, logdir, max_queue=10, flush_secs=120, filename_suffix=''):
+    def __init__(self, log_dir, max_queue=10, flush_secs=120, filename_suffix=''):
         """Creates a `FileWriter` and an event file.
-        On construction the writer creates a new event file in `logdir`.
+        On construction the writer creates a new event file in `log_dir`.
         The other arguments to the constructor control the asynchronous writes to
         the event file.
 
         Args:
-          logdir: A string. Directory where event file will be written.
+          log_dir: A string. Directory where event file will be written.
           max_queue: Integer. Size of the queue for pending events and
             summaries before one of the 'add' calls forces a flush to disk.
             Default is ten items.
           flush_secs: Number. How often, in seconds, to flush the
             pending events and summaries to disk. Default is every two minutes.
           filename_suffix: A string. Suffix added to all event filenames
-            in the logdir directory. More details on filename construction in
+            in the log_dir directory. More details on filename construction in
             tensorboard.summary.writer.event_file_writer.EventFileWriter.
         """
         # Sometimes PosixPath is passed in and we need to coerce it to
         # a string in all cases
         # TODO: See if we can remove this in the future if we are
         # actually the ones passing in a PosixPath
-        logdir = str(logdir)
+        log_dir = str(log_dir)
         self.event_writer = EventFileWriter(
-            logdir, max_queue, flush_secs, filename_suffix)
+            log_dir, max_queue, flush_secs, filename_suffix)
 
     def get_logdir(self):
         """Returns the directory where event file will be written."""
@@ -147,7 +147,7 @@ class FileWriter(object):
 
 
 class SummaryWriter(object):
-    """Writes entries directly to event files in the logdir to be
+    """Writes entries directly to event files in the log_dir to be
     consumed by TensorBoard.
 
     The `SummaryWriter` class provides a high-level API to create an event file
@@ -157,31 +157,31 @@ class SummaryWriter(object):
     training.
     """
 
-    def __init__(self, logdir=None, comment='', purge_step=None, max_queue=10,
+    def __init__(self, log_dir=None, comment='', purge_step=None, max_queue=10,
                  flush_secs=120, filename_suffix=''):
         """Creates a `SummaryWriter` that will write out events and summaries
         to the event file.
 
         Args:
-            logdir (string): Save directory location. Default is
+            log_dir (string): Save directory location. Default is
               runs/**CURRENT_DATETIME_HOSTNAME**, which changes after each run.
               Use hierarchical folder structure to compare
               between runs easily. e.g. pass in 'runs/exp1', 'runs/exp2', etc.
               for each new experiment to compare across them.
-            comment (string): Comment logdir suffix appended to the default
-              ``logdir``. If ``logdir`` is assigned, this argument has no effect.
+            comment (string): Comment log_dir suffix appended to the default
+              ``log_dir``. If ``log_dir`` is assigned, this argument has no effect.
             purge_step (int):
               When logging crashes at step :math:`T+X` and restarts at step :math:`T`,
               any events whose global_step larger or equal to :math:`T` will be
               purged and hidden from TensorBoard.
-              Note that crashed and resumed experiments should have the same ``logdir``.
+              Note that crashed and resumed experiments should have the same ``log_dir``.
             max_queue (int): Size of the queue for pending events and
               summaries before one of the 'add' calls forces a flush to disk.
               Default is ten items.
             flush_secs (int): How often, in seconds, to flush the
               pending events and summaries to disk. Default is every two minutes.
             filename_suffix (string): Suffix added to all event filenames in
-              the logdir directory. More details on filename construction in
+              the log_dir directory. More details on filename construction in
               tensorboard.summary.writer.event_file_writer.EventFileWriter.
 
         Examples::
@@ -201,13 +201,13 @@ class SummaryWriter(object):
             # folder location: runs/May04_22-14-54_s-MacBook-Pro.localLR_0.1_BATCH_16/
 
         """
-        if not logdir:
+        if not log_dir:
             import socket
             from datetime import datetime
             current_time = datetime.now().strftime('%b%d_%H-%M-%S')
-            logdir = os.path.join(
+            log_dir = os.path.join(
                 'runs', current_time + '_' + socket.gethostname() + comment)
-        self.logdir = logdir
+        self.log_dir = log_dir
         self.purge_step = purge_step
         self.max_queue = max_queue
         self.flush_secs = flush_secs
@@ -246,7 +246,7 @@ class SummaryWriter(object):
     def _get_file_writer(self):
         """Returns the default FileWriter instance. Recreates it if closed."""
         if self.all_writers is None or self.file_writer is None:
-            self.file_writer = FileWriter(self.logdir, self.max_queue,
+            self.file_writer = FileWriter(self.log_dir, self.max_queue,
                                           self.flush_secs, self.filename_suffix)
             self.all_writers = {self.file_writer.get_logdir(): self.file_writer}
             if self.purge_step is not None:
@@ -257,6 +257,10 @@ class SummaryWriter(object):
                     Event(step=most_recent_step, session_log=SessionLog(status=SessionLog.START)))
                 self.purge_step = None
         return self.file_writer
+
+    def get_logdir(self):
+        """Returns the directory where event files will be written."""
+        return self.log_dir
 
     def add_scalar(self, tag, scalar_value, global_step=None, walltime=None):
         """Add scalar data to summary.

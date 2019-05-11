@@ -1,6 +1,11 @@
 #pragma once
 
+#include <torch/arg.h>
+#include <torch/csrc/utils/memory.h>
 #include <torch/data/datasets/stateful.h>
+#include <torch/data/samplers.h>
+#include <queue>
+#include <thread>
 
 namespace torch {
 namespace data {
@@ -12,10 +17,11 @@ namespace datasets {
 /// A chunk could be an entire file, such as an audio data file or an image,
 /// or part of a file in the case of a large text-file split based on seek
 /// positions.
-template <typename Chunk = std::vector<Example<>>>
+template <typename ExampleType_, typename ChunkType_ = std::vector<ExampleType_>>
 class ChunkDataReader {
  public:
-  using ChunkType = Chunk;
+  using ChunkType = ChunkType_;
+  using ExampleType = ExampleType_;
 
   /// Read an entire chunk.
   virtual ChunkType read_chunk(size_t chunk_index) = 0;
@@ -34,7 +40,7 @@ namespace detail {
 /// return. If the cache is empty, it either waits to load more chunks or return
 /// null if all chunks are loaded.
 template <
-    typename UnwrappedBatch = std::vector<Example<>>,
+    typename UnwrappedBatch,
     typename ExampleSampler = samplers::RandomSampler>
 class BatchDataBuffer {
  public:
