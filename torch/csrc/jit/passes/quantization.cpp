@@ -46,18 +46,7 @@ size_t getParamIndexinOpArgs(Node* n, const std::string& param_name) {
   return static_cast<size_t>(-1);
 }
 
-float getScaleforNode(Node* n) {
-  if (!n->inputs().size()) {
-    return 0;
-  }
-  // TODO: Fetch the position of scale from op schema once its available
-  Value* scale_value = n->inputs()[1];
-  c10::IValue scale_ivalue = toIValue(scale_value).value();
-  float scale = static_cast<float>(scale_ivalue.toDouble());
-  return scale;
-}
-
-std::vector<param_info_t> getQuantizableParamsofType(
+std::vector<param_info_t> getQuantizableParamsofName(
     script::Method& method,
     const std::string& param_name) {
   std::vector<param_info_t> params_to_insert_qdq;
@@ -504,7 +493,7 @@ void InsertQuantDequantNodesForParam(
         getQParamFunc,
     at::ScalarType t) {
   AT_ASSERT(getQParamFunc != nullptr);
-  auto params_to_insert_qdq = getQuantizableParamsofType(method, param_name);
+  auto params_to_insert_qdq = getQuantizableParamsofName(method, param_name);
 
   for (auto& param_info : params_to_insert_qdq) {
     auto& param_slot = method.initial_ivalues()[param_info.idx];
@@ -515,15 +504,14 @@ void InsertQuantDequantNodesForParam(
   }
 }
 
-// Adding quant-dequant node for bias is considered as special case because
-// qparam for bias depend on scale factors for input activation and weight.
-void InsertQuantDequantNodesForBias(
+void InsertQuantDequantNodesForParam(
     script::Method& method,
+    const std::string& param_name,
     const std::function<std::tuple<std::string, float, int>(float, float)>&
-        getQParamFunc) {
+        getQParamFunc,
+    at::ScalarType t) {
   AT_ASSERT(getQParamFunc != nullptr);
-  auto params_to_insert_qdq =
-      getQuantizableParamsofType(method, std::string("bias"));
+  auto params_to_insert_qdq = getQuantizableParamsofName(method, param_name);
 
   for (auto& param_info : params_to_insert_qdq) {
     // Fetch scale for input activation and weight to the quantizable
@@ -543,13 +531,16 @@ void InsertQuantDequantNodesForBias(
       Value* input_value = n->inputs()[input_index];
       Node* n_input_value = input_value->node();
       if (n_input_value->kind().toQualString() !=
-              std::string("aten::dequantize_linear") ||
-          !n_input_value->inputs().size()) {
+          std::string("aten::dequantize_linear")) {
         // Dequant node pattern for input is missing
         skip_node = true;
         break;
       }
-      float input_scale = getScaleforNode(n_input_value);
+      AT_ASSERT(n_input_value->inputs().size() >= 3);
+      // Fetch scale from the dequantize_linear node
+      Value* scale_value = n_input_value->inputs()[1];
+      c10::IValue scale_ivalue = toIValue(scale_value).value();
+      float input_scale = static_cast<float>(scale_ivalue.toDouble());
       AT_ASSERT(input_scale != 0.0);
       scale_factors[idx] = input_scale;
     }
@@ -557,22 +548,12 @@ void InsertQuantDequantNodesForBias(
       continue;
     }
     auto bias_qparam = getQParamFunc(scale_factors[0], scale_factors[1]);
-    addQuantDeQuantNodesForInput(
-        param_info.v, param_info.n, bias_qparam, at::ScalarType::Int);
+    addQuantDeQuantNodesForInput(param_info.v, param_info.n, bias_qparam, t);
   }
 }
 
-void InsertQuantDequantNodesForBias(
-    std::shared_ptr<script::Module>& moduleObj,
-    const std::string& method_name,
-    const std::function<std::tuple<std::string, float, int>(float, float)>&
-        getQParamFunc) {
-  auto& method = moduleObj->get_method(method_name);
-  InsertQuantDequantNodesForBias(method, getQParamFunc);
-}
-
 // Exposing the template api helps reuse the same interface for different
-// qparamfunc for different qschemes.
+// qparamfunc for different qschemes and params.
 template <typename Fn>
 void InsertQuantDequantNodesForParam(
     std::shared_ptr<script::Module>& moduleObj,
@@ -585,11 +566,19 @@ void InsertQuantDequantNodesForParam(
 }
 
 // Explicit Supported Template specialization for getQParamFunc.
-template void InsertQuantDequantNodesForParam(
+template TORCH_API void InsertQuantDequantNodesForParam(
     std::shared_ptr<script::Module>& moduleObj,
     const std::string& method_name,
     const std::string& param_name,
     const std::function<std::tuple<std::string, float, int>(at::Tensor)>&
+        getQParamFunc,
+    at::ScalarType t);
+
+template void InsertQuantDequantNodesForParam(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::string& param_name,
+    const std::function<std::tuple<std::string, float, int>(float, float)>&
         getQParamFunc,
     at::ScalarType t);
 
