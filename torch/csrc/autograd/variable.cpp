@@ -108,9 +108,9 @@ void Variable::set_data(const at::Tensor &new_data) {
   // Version counter is not shared when we replace a `Variable`'s underlying `Tensor`
   // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
   // See NOTE [ Version Counter Sharing ] for details.
-  auto saved_version_ = get()->version_counter().current_version();
+  auto saved_version_counter = get()->version_counter();
   get()->shallow_copy_from(new_data.getIntrusivePtr());
-  get()->set_version_counter(saved_version_);
+  get()->set_version_counter(saved_version_counter);
 }
 
 Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)
