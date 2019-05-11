@@ -78,7 +78,13 @@ def _parse_arg(value, desc):
         elif desc == 't':
             return tval
         elif desc == 'is':
-            return [int(v) for v in tval]
+            try:
+                return [int(v) for v in tval]
+            except TypeError:
+                if tval.dim():
+                    raise
+            # scalar tensors are not iterable
+            return [int(tval)]
         else:
             raise RuntimeError("ONNX symbolic doesn't know to interpret Constant node")
     elif value.node().kind() == 'prim::ListConstruct':

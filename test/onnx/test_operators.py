@@ -330,6 +330,10 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.mean(x, dim=2), x)
 
+    def test_reduced_mean_multidim(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.mean(x, dim=[2, 3]), x)
+
     def test_reduced_mean_keepdim(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.mean(x, dim=2, keepdim=True), x)

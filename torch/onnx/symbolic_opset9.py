@@ -208,8 +208,9 @@ def _reduce_op_symbolic(onnx_op_name):
             return g.op(onnx_op_name, self, keepdims_i=0)
         else:
             # dim-reduce path
-            dim, keepdim = sym_help._get_const(dim, 'i', 'dim'), sym_help._get_const(keepdim, 'i', 'keepdim')
-            return g.op(onnx_op_name, self, axes_i=[dim], keepdims_i=keepdim)
+            return g.op(onnx_op_name, self,
+                        axes_i=sym_help._get_const(dim, 'is', 'dim'),
+                        keepdims_i=sym_help._get_const(keepdim, 'i', 'keepdim'))
     return symbolic
 
 mean = _reduce_op_symbolic('ReduceMean')
@@ -1061,7 +1062,7 @@ alpha_dropout_ = alpha_dropout
 feature_alpha_dropout_ = feature_alpha_dropout
 
 
-@parse_args('v', 't', 'i', 'i')
+@parse_args('v', 't', 'is', 'i')
 def norm(g, self, p, dim, keepdim):
     if p == 1:
         f = _reduce_op_symbolic("ReduceL1")

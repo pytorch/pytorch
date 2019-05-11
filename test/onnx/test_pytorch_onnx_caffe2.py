@@ -1029,6 +1029,24 @@ class TestCaffe2Backend(unittest.TestCase):
             x = torch.randn(*shape)
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_mean_multidim(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.mean(x, [1, 2])
+
+        shape = (3, 4, 5)
+        x = torch.randn(*shape)
+        self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_norm_multidim(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.norm(x, dim=[1, 2])
+
+        shape = (3, 4, 5)
+        x = torch.randn(*shape)
+        self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+
     # TODO: Add test cases for prod once Caffe2 has support for ReduceProd
     def test_softmax(self):
         for i in range(2, 8):
