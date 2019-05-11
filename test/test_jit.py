@@ -10750,6 +10750,61 @@ a")
             test_str.append(str(fn.schema))
         self.assertExpected("\n".join(test_str))
 
+    @unittest.skipIf(not PY35, "Python 3.5 needed")
+    def test_multiline_annot_ast_py3_fn(self):
+        code = dedent('''
+            from typing import Tuple, List, Optional
+            from torch import Tensor
+            from torch.jit.annotations import BroadcastingList2, BroadcastingList3
+            import torch
+            @torch.jit.script
+            def foo(x,  # type: {input}
+                    y   # type: Tuple[Tensor, Tensor]
+                    ):
+                # type: (...) -> Tuple[{output}, {output}]
+                return x, x
+        ''')
+        test_str = []
+
+        for pair in self.type_input_return_pairs():
+            fn = self._get_py3_code(self.format_code(code, pair), 'foo')
+            args = fn.schema.arguments
+            returns = fn.schema.returns
+            self.assertEqual(str(args[0].type), pair[1])
+            self.assertEqual(str(args[1].type), "Tuple[Tensor, Tensor]")
+            self.assertEqual(str(returns[0].type), "Tuple[{}, {}]".format(pair[1], pair[1]))
+
+    def test_bad_multiline_annotations(self):
+        with self.assertRaisesRegex(RuntimeError, "Return type line"):
+            @torch.jit.script
+            def bad_type_line(a,  # type: Tensor
+                              b,  # type: Tensor
+                              c   # type: Tensor
+                              ):
+                # type: (int, int, int) -> Tensor
+                # type: bad type line
+
+                return a + b + c
+
+        with self.assertRaisesRegex(RuntimeError, "Return type line"):
+            @torch.jit.script
+            def bad_return_line(a,  # type: Tensor
+                                b,
+                                c   # type: Tensor
+                                ):
+                # type: (int, int, int) -> Tensor
+                return a + b + c
+
+        # TODO: this should be supported but is difficult to parse
+        with self.assertRaisesRegex(RuntimeError, "Number of type annotations"):
+            @torch.jit.script
+            def missing_type(a,  # type: Tensor
+                             b,
+                             c   # type: Tensor
+                             ):
+                # type: (...) -> Tensor
+                return a + b + c
+
     #  Python AST Frontend , Python 3-style type annotations , Script method
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_py3_method(self):
