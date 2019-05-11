@@ -93,6 +93,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == Backend::CPU);
+  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
 
   c10::Allocator* allocator;

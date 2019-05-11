@@ -19,6 +19,10 @@ QuantizerPtr make_per_tensor_affine_quantizer(
 }
 
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
+  // TODO: remove this when Variable and Tensor are merged
+  AT_ASSERTM(
+      !self.is_variable(),
+      "_internal_get_QTensorImpl: should not be a variable");
   // TODO: uncomment after is_quantized() is implemented
   // AT_ASSERTM(self.is_quantized(), "_internal_get_QTensorImpl: not a quantized
   // tensor");

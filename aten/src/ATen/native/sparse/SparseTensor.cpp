@@ -71,6 +71,7 @@ Tensor values_sparse(const Tensor& self) {
 /*** Helper methods ***/
 
 SparseTensor new_sparse(const TensorOptions& options) {
+  AT_ASSERT(!options.is_variable());  // TODO: remove this when Variable and Tensor are merged
   AT_ASSERT(options.layout() == kSparse);
   TensorTypeId type_id;
   if (options.device().is_cuda()) {
@@ -341,8 +342,7 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
-  // This check exists to make sure operations on `self` doesn't build up autograd history.
-  AT_ASSERT(!(self.is_variable() && self.requires_grad()) || at::NonVariableTypeMode::is_enabled());
+  AT_ASSERT(!self.is_variable());  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
   AT_ASSERT(self.is_sparse());
 
   if (self.is_coalesced()) {

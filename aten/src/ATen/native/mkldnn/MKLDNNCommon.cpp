@@ -62,6 +62,7 @@ Tensor new_with_sizes_mkldnn(IntArrayRef sizes, const TensorOptions& options) {
 ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
   AT_ASSERTM(mkldnn_tensor.is_mkldnn(),
              "mkldnn_to_dense expects MKL-DNN tensor input");
+  AT_ASSERTM(!mkldnn_tensor.is_variable(), "_internal_get_MKLDNNImpl: should not be a variable");
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
