@@ -139,11 +139,6 @@ private:
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
 
-struct CAFFE2_API NonVariableTypeMode {
-  static bool is_enabled();
-  static void set_enabled(bool enabled);
-};
-
 // A RAII, thread local (!) guard that has the following effect:
 //
 // Upon construction: sets NonVariableTypeMode_enabled for the current thread to
