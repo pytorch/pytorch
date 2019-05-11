@@ -3282,6 +3282,10 @@ def foo(x):
             check_inputs.append({'forward' : check_forward_input, 'weighted_kernel_sum' : check_weight})
         module = torch.jit.trace_module(n, inputs, True, True, check_inputs)
 
+        module = torch.jit.trace(n.forward, example_forward_input)
+        with self.assertRaisesRegex(AttributeError, "trace doesn't support compiling individual module's functions"):
+            module = torch.jit.trace(n.weighted_kernel_sum, inputs)
+
     def test_submodule_twice(self):
         @torch.jit.script
         def foo(x):
