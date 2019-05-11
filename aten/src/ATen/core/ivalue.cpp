@@ -2,7 +2,6 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Formatting.h>
 #include <cmath>
-#include <ATen/core/Dict.h>
 
 namespace c10 {
 namespace ivalue {
@@ -39,7 +38,7 @@ std::ostream& printDict(std::ostream& out, const Dict& v) {
     if (!first) {
       out << ", ";
     }
-    out << pair.key() << ": " << pair.value();
+    out << pair.first << ": " << pair.second;
     first = false;
   }
 
@@ -114,6 +113,16 @@ std::string ivalue::Object::name() const {
   return this->type_->qualname();
 }
 
+IValue ivalue::Object::getAttr(const std::string& name) const {
+  const size_t slot = type_->getAttributeSlot(name);
+  return getSlot(slot);
+}
+
+void ivalue::Object::setAttr(const std::string& name, IValue v) {
+  const size_t slot = type_->getAttributeSlot(name);
+  setSlot(slot, std::move(v));
+}
+
 void ivalue::Object::resizeObject(size_t slot) {
   AT_ASSERT(slot < type()->numAttributes());
   slots_.resize(type()->numAttributes());
@@ -134,10 +143,7 @@ static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
 }
 
 const ivalue::GenericDict::IterationOrder ivalue::GenericDict::iterationOrder() const {
-  IterationOrder ordered;
-  for (auto element : elements()) {
-    ordered.emplace_back(element.key(), element.value());
-  }
+  IterationOrder ordered(elements().begin(), elements().end());
   std::sort(ordered.begin(), ordered.end(), CompareIValue);
   return ordered;
 }
