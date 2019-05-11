@@ -518,7 +518,7 @@ void InsertQuantDequantNodesForParam(
 }
 
 // Explicit Supported Template specialization for getQParamFunc.
-template void InsertQuantDequantNodesForParam(
+template TORCH_API void InsertQuantDequantNodesForParam(
     std::shared_ptr<script::Module>& moduleObj,
     const std::string& method_name,
     const std::string& param_name,
