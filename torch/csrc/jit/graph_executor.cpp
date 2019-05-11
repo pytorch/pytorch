@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/jit/graph_executor_impl.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/pass_manager.h>
@@ -27,6 +28,8 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/profiling_graph_executor_impl.h>
+#include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/tracer.h>
 
@@ -58,6 +61,11 @@ std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
   return last_executed_optimized_graph.lock();
 }
 
+void ExecutionPlan::run(Stack& stack) const {
+  InterpreterState(code).run(stack);
+  last_executed_optimized_graph = graph;
+}
+
 namespace {
 
 using tensor_list = std::vector<at::Tensor>;
@@ -69,31 +77,6 @@ using autograd::variable_list;
 
 const size_t autodiffSubgraphNodeThreshold = 2;
 const size_t autodiffSubgraphInlineThreshold = 5;
-
-struct ExecutionPlan {
-  ExecutionPlan() = default;
-  ExecutionPlan(std::shared_ptr<Graph> graph)
-      : code(graph), graph(std::move(graph)) {}
-
-  void run(Stack& stack) const {
-    InterpreterState(code).run(stack);
-    last_executed_optimized_graph = graph;
-  }
-
-  operator bool() const {
-    return static_cast<bool>(graph);
-  }
-
-  ExecutionPlanState getDebugState() {
-    ExecutionPlanState state;
-    state.code = &code;
-    state.graph = graph.get();
-    return state;
-  }
-
-  Code code;
-  std::shared_ptr<Graph> graph;
-};
 
 struct CaptureList {
   CaptureList(size_t capture_size) {
@@ -489,27 +472,15 @@ GraphExecutor* getGradExecutor(Operation& op) {
 // and different requires_grad states, and handles specializations for each
 // situation. GraphExecutor is completely unaware of tracing or module
 // parameters to keep the tracing concerns separated.
-struct GraphExecutorImpl {
-  static std::shared_ptr<Graph> prepareGraph(std::shared_ptr<Graph>& graph) {
-    auto copy = graph->copy();
-    EraseShapeInformation(copy);
-    return copy;
-  }
-
-  GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
-      : graph(prepareGraph(graph)),
-        // until we have correct alias analysis any use of mutable operators
-        // disables all optimization
-        optimize(optimize),
-        num_inputs(this->graph->inputs().size()),
-        arg_spec_creator_(*graph),
-        num_outputs(this->graph->outputs().size()) {
+struct GraphExecutorImpl : public GraphExecutorImplBase {
+  GraphExecutorImpl(const std::shared_ptr<Graph>& graph, bool optimize)
+      : GraphExecutorImplBase(graph, optimize), arg_spec_creator_(*graph) {
     logging::getLogger()->addStatValue(
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
   // entry point where execution begins
-  void run(Stack& stack) {
+  void run(Stack& stack) override {
     AT_CHECK(
         stack.size() >= num_inputs,
         "expected ",
@@ -529,7 +500,7 @@ struct GraphExecutorImpl {
     return execution_plan.run(stack);
   }
 
-  GraphExecutorState getDebugState() {
+  GraphExecutorState getDebugState() override {
     GraphExecutorState state;
     state.graph = graph.get();
     if (fallback) {
@@ -541,7 +512,7 @@ struct GraphExecutorImpl {
     return state;
   }
 
- private:
+ protected:
   friend struct GraphExecutor;
 
   const ExecutionPlan& getOrCompileFallback() {
@@ -720,18 +691,9 @@ struct GraphExecutorImpl {
     }
   }
 
-  // The unoptimized starting graph. This field is effectively const, but we
-  // can't make it so because Graph::copy() is not const (and making it const is
-  // not that easy at this point).
-  std::shared_ptr<Graph> graph;
+  ~GraphExecutorImpl() override = default;
 
-  // If false, we'll run the graph as we get it, without any optimizations.
-  // Useful for debugging.
-  const bool optimize;
-  const size_t num_inputs;
   ArgumentSpecCreator arg_spec_creator_;
-  const size_t num_outputs;
-
   // Populated only when optimize is false (and in that case plan_cache will be
   // unused). The compiled version of graph.
   ExecutionPlan fallback;
@@ -739,14 +701,15 @@ struct GraphExecutorImpl {
   // Mapping from argument configurations to optimized versions of the graph
   // that are specialized to the spec.
   std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
-
-  // GraphExecutors can be accessed from multiple threads, so this thread needs
-  // to be held every time we access the fallback or plan_cache.
-  std::mutex compile_mutex;
 };
 
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
-    : pImpl(new GraphExecutorImpl(std::move(graph), optimize)) {}
+    : pImpl(
+          getProfilingMode()
+              ? dynamic_cast<GraphExecutorImplBase*>(
+                    new ProfilingGraphExecutorImpl(graph, optimize))
+              : dynamic_cast<GraphExecutorImplBase*>(
+                    new GraphExecutorImpl(graph, optimize))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
