@@ -3,9 +3,10 @@ import ast
 import inspect
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
-    BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict
+    BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
+    is_optional
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType, BoolType
+    ListType, StringType, DictType, BoolType, OptionalType
 from textwrap import dedent
 
 
@@ -31,6 +32,7 @@ _eval_env = {
     'Tuple': Tuple,
     'List': List,
     'Dict': Dict,
+    'Optional': Optional,
 }
 
 
@@ -173,6 +175,11 @@ def ann_to_type(ann):
         key = ann_to_type(ann.__args__[0])
         value = ann_to_type(ann.__args__[1])
         return DictType(key, value)
+    elif is_optional(ann):
+        if issubclass(ann.__args__[1], type(None)):
+            return OptionalType(ann_to_type(ann.__args__[0]))
+        else:
+            return OptionalType(ann_to_type(ann.__args__[1]))
     elif ann is float:
         return FloatType.get()
     elif ann is int:
@@ -181,7 +188,7 @@ def ann_to_type(ann):
         return StringType.get()
     elif ann is bool:
         return BoolType.get()
-    raise ValueError("Unknown type annotation: '{}'".format(ann.__name__))
+    raise ValueError("Unknown type annotation: '{}'".format(ann))
 
 
 __all__ = [
