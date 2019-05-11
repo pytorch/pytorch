@@ -204,7 +204,7 @@ namespace c10 {
 // 'onnx' symbols correspond to ONNX operators.  Their semantics
 // are defined in https://github.com/onnx/onnx/blob/master/docs/Operators.md
 // The particular version we are targeting is specified by '_onnx_opset_version'
-// in torch.onnx.symbolic
+// in torch.onnx.symbolic_helper
 //
 // In general, most ONNX operators won't get an entry here, because they
 // are handled from the Python end.  However, you may occasionally need
