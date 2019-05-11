@@ -1449,9 +1449,13 @@ if _enabled:
             self.__dict__['_initialized'] = False
             super(WeakScriptModuleProxy, self).__init__()
 
+            # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
 
-            # Copy Parameters / Modules / Buffers
+            constants_set = set(getattr(original, "__constants__", []))
+            self.__dict__["_constants_set"] = {}
+
+            # Copy Parameters and Modules
             for name in dir(original):
                 item = getattr(original, name)
                 if item is None and name in original._parameters:
@@ -1460,6 +1464,8 @@ if _enabled:
                     object.__setattr__(self, name, item)
                 elif isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
                     ScriptModule.__setattr__(self, name, item)
+
+            # Copy buffers
             for name in original._buffers:
                 if original._buffers[name] is None:
                     object.__setattr__(self, name, None)
@@ -1467,7 +1473,10 @@ if _enabled:
                     self.register_buffer(name, original._buffers[name])
 
             # Copy constants
-            self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
+            self.__dict__["_constants_set"] = constants_set
+            for name in self.__dict__["_constants_set"]:
+                if hasattr(original, name):
+                    self.__dict__[name] = getattr(original, name)
 
             # Copy overloads
             self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
@@ -1481,8 +1490,11 @@ if _enabled:
             try:
                 return ScriptModule.__getattr__(self, attr)
             except AttributeError:
-                if self.__dict__["_initialized"]:
-                    return getattr(self.__dict__["_original"](), attr)
+                # unwrap the original
+                original_module = self.__dict__["_original"]()
+                if original_module and self.__dict__["_initialized"]:
+                    # get attr from original if it is still alive
+                    return getattr(original_module, attr)
                 else:
                     # Only fall back to original once __init__() is done
                     raise AttributeError("Weak module has no attribute '{}'"
@@ -1539,7 +1551,12 @@ def _make_strong(mod):
         _jit_internal.weak_types[type(mod)]["method_stubs"] = stubs
 
     # Create proxy with stubs
-    proxy = WeakScriptModuleProxy(mod, stubs)
+    original_type = type(mod)
+
+    # Construct a new type that inherits from both WeakScriptModuleProxy and
+    # original_type so that isinstance checks work correctly
+    weak_type = type(original_type.__name__, (WeakScriptModuleProxy, original_type), {})
+    proxy = weak_type(mod, stubs)
 
     _jit_internal.weak_modules[mod] = proxy
 
