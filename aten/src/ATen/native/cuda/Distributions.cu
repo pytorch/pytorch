@@ -58,11 +58,11 @@ std::pair<uint64_t, uint64_t> next_philox_seed(at::Generator* gen, uint64_t incr
 }
 
 // launch bounds used for kernels utilizing TensorIterator
-const int block_size_bound = 256;
-const int grid_size_bound = 4;
+const uint32_t block_size_bound = 256;
+const uint32_t grid_size_bound = 4;
 // number of randoms given by distributions like curand_uniform4, curand_uniform2_double
 // used in calculating philox offset.
-const int curand4_engine_calls = 4;
+const uint32_t curand4_engine_calls = 4;
 
 // utility function that calculates proper philox_offset
 // for distributions utilizing TensorIterator. For distributions using
@@ -74,17 +74,19 @@ const int curand4_engine_calls = 4;
 // (number of elements per thread * number of engine calls), which makes
 // sure that philox offset increment is not less than the number of randoms used
 // in each thread.
-std::tuple<uint64_t, dim3, dim3> calc_execution_policy(uint64_t total_elements) {
-  const int block_size = block_size_bound;
-  const int unroll = curand4_engine_calls;
+std::tuple<uint64_t, dim3, dim3> calc_execution_policy(int64_t total_elements) {
+  const uint64_t numel = static_cast<uint64_t>(total_elements);
+  const uint32_t block_size = block_size_bound;
+  const uint32_t unroll = curand4_engine_calls;
   dim3 dim_block(block_size);
-  dim3 grid((total_elements + block_size - 1) / block_size);
+  dim3 grid((numel + block_size - 1) / block_size);
   uint32_t blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / block_size;
   grid.x = std::min(
       static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->multiProcessorCount) * blocks_per_sm,
       grid.x);
   //number of times random will be generated per thread, to offset philox counter in thc random state
-  int64_t counter_offset = ((total_elements - 1) / (block_size * grid.x * unroll) + 1) * curand4_engine_calls;
+  uint64_t counter_offset = ((numel - 1) / (block_size * grid.x * unroll) + 1)
+                                * curand4_engine_calls;
   return std::make_tuple(counter_offset, grid, dim_block);
 }
 
@@ -127,8 +129,12 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
                                  const dist_t& dist_func,
                                  const transform_t transform_func) {
   static_assert(unroll_factor >= 1, "unroll_factor must be >= 1.");
+  int64_t numel = iter.numel();
+  if (numel == 0) {
+    return;
+  }
   
-  auto execution_policy = calc_execution_policy(iter.numel());
+  auto execution_policy = calc_execution_policy(numel);
   auto counter_offset = std::get<0>(execution_policy);
   auto grid = std::get<1>(execution_policy);
   auto block = std::get<2>(execution_policy);
@@ -144,10 +150,6 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
 
   char* out_data = (char*)iter.data_ptr(0);
 
-  int64_t numel = iter.numel();
-  if (numel == 0) {
-    return;
-  }
   auto stream = at::cuda::getCurrentCUDAStream();
   if (iter.is_trivial_1d()) {
     auto strides = iter.get_inner_strides();
