@@ -3148,19 +3148,22 @@ def _in_proj_v(weight, bias, embed_dim, value):
 
 
 # TODO define this method
+@weak_script
 def _get_input_buffer(incremental_state):
     pass
 
 # TODO define this method
+@weak_script
 def _set_input_buffer(incremental_state, saved_state):
     pass
 
 
 @weak_script
-def multi_head_attention_forward(query, key, value, embed_dim_to_check, num_heads,
-            in_proj_weight, in_proj_bias, bias_k, bias_v, add_zero_attn, head_dim, scaling,
-            dropout_p, out_proj, training=True, key_padding_mask=None, incremental_state=None,
-            need_weights=True, static_kv=False, attn_mask=None):
+def multi_head_attention_forward(
+        query, key, value, embed_dim_to_check, num_heads,
+        in_proj_weight, in_proj_bias, bias_k, bias_v, add_zero_attn, head_dim, scaling,
+        dropout_p, out_proj, training=True, key_padding_mask=None, incremental_state=None,
+        need_weights=True, static_kv=False, attn_mask=None):
     r"""
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.

@@ -776,11 +776,12 @@ class MultiheadAttention(Module):
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
           L is the target sequence length, S is the source sequence length.
         """
-        return F.multi_head_attention_forward(query, key, value, self.embed_dim, self.num_heads,
-                    self.in_proj_weight, self.in_proj_bias, self.bias_k, self.bias_v, self.add_zero_attn,
-                    self.head_dim, self.scaling, self.dropout, self.out_proj, training=self.training,
-                    key_padding_mask=key_padding_mask, incremental_state=incremental_state,
-                    need_weights=need_weights, static_kv=static_kv, attn_mask=attn_mask)
+        return F.multi_head_attention_forward(
+            query, key, value, self.embed_dim, self.num_heads,
+            self.in_proj_weight, self.in_proj_bias, self.bias_k, self.bias_v, self.add_zero_attn,
+            self.head_dim, self.scaling, self.dropout, self.out_proj, training=self.training,
+            key_padding_mask=key_padding_mask, incremental_state=incremental_state,
+            need_weights=need_weights, static_kv=static_kv, attn_mask=attn_mask)
 
 
 @weak_module
