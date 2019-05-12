@@ -61,7 +61,6 @@ endif()
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
-option(BUILD_TORCH "Build Torch" OFF)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_ATEN_ONLY "Build only a subset focused on ATen only" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
@@ -89,6 +88,7 @@ cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" OFF)
+option(NAMEDTENSOR_ENABLED "Experimental: compile with namedtensor support" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
 option(USE_GLOG "Use GLOG" OFF)
@@ -163,6 +163,8 @@ if (MSVC)
       string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
     endif()
   endforeach(flag_var)
+  # Turning off USE_DISTRIBUTED on default
+  set(USE_DISTRIBUTED OFF)
 endif(MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
@@ -259,6 +261,10 @@ include(cmake/Dependencies.cmake)
 
 if(USE_FBGEMM)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
+endif()
+
+if(NAMEDTENSOR_ENABLED)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNAMEDTENSOR_ENABLED")
 endif()
 
 # ---[ Whitelist file if whitelist is specified
@@ -501,6 +507,7 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
+
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
       FILE Caffe2Targets.cmake
       COMPONENT dev)

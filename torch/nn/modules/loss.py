@@ -1202,10 +1202,10 @@ class TripletMarginLoss(_Loss):
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
 
     >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
-    >>> input1 = torch.randn(100, 128, requires_grad=True)
-    >>> input2 = torch.randn(100, 128, requires_grad=True)
-    >>> input3 = torch.randn(100, 128, requires_grad=True)
-    >>> output = triplet_loss(input1, input2, input3)
+    >>> anchor = torch.randn(100, 128, requires_grad=True)
+    >>> positive = torch.randn(100, 128, requires_grad=True)
+    >>> negative = torch.randn(100, 128, requires_grad=True)
+    >>> output = triplet_loss(anchor, positive, negative)
     >>> output.backward()
 
     .. _Learning shallow convolutional feature descriptors with triplet losses:

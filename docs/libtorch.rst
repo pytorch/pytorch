@@ -18,7 +18,7 @@ You can use a python script/module located in tools package to build libtorch
 Alternatively, you can invoke a shell script in the same directory to achieve the same goal
 ::
    cd <pytorch_root>
-   BUILD_TORCH=ON ONNX_NAMESPACE=onnx_torch bash tools/build_pytorch_libs.sh --use-nnpack caffe2
+   ONNX_NAMESPACE=onnx_torch bash tools/build_pytorch_libs.sh --use-nnpack caffe2
    ls torch/lib/tmp_install # output is produced here
    ls torch/lib/tmp_install/lib/libtorch.so # of particular interest
 
