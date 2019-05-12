@@ -88,17 +88,30 @@ class Sequential(Module):
         return keys
 
     # need to add code, just a starter
-    def append(self):
-        pass
+    def append(self,*args):
+        prev_len = self.__len__()
+        if len(args) == 1 and isinstance(args[0], OrderedDict):
+            for key, module in args[0].items():
+                self.add_module(key, module)
+        else:
+            for idx, module in enumerate(args):
+                self.add_module(str(idx+prev_len), module)
+        
     
-    def extend(self):
-        pass
-    
-    def insert(self):
+    def extend(self,sequential):
+        prev_len = self.__len__()
+        if isinstance(sequential,Sequential):
+            for idx,layer in enumerate(sequential):
+                self.add_module(str(idx + prev_len),layer)
+        else:
+            raise ValueError('The given parameter {}, is of type {},\n expected it to be of type torch.nn.Sequential'.format(sequential,torch.typename(sequential)))
+
+    def insert(self,i,layer):
         pass
 
-    def pop(self):
-        pass
+    def pop(self,idx=-1):
+        self.__delitem__(idx)
+        return self.__getitem__(idx)
     
     def forward(self, input):
         for module in self._modules.values():
