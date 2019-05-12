@@ -21,7 +21,7 @@ from ._pytorch_graph import graph
 from ._utils import figure_to_image
 from .summary import (
     scalar, histogram, histogram_raw, image, audio, text,
-    pr_curve, pr_curve_raw, video, custom_scalars, image_boxes
+    pr_curve, pr_curve_raw, video, custom_scalars, image_boxes, mesh
 )
 
 
@@ -836,6 +836,26 @@ class SummaryWriter(object):
             writer.add_custom_scalars(layout)
         """
         self._get_file_writer().add_summary(custom_scalars(layout))
+
+    def add_mesh(self, tag, vertices, colors=None, faces=None, config_dict=None, global_step=None, walltime=None):
+        """Add mesh or point cloud data to summary.
+
+        Args:
+            tag (string): Data identifier
+            vertices(torch.Tensor): List of the 3D coordinates of vertices.
+            colors(torch.Tensor): Colors for each vertex
+            faces(torch.Tensor): Indices of vertices within each triangle.
+            global_step (int): Global step value to record
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
+            config_dict: Dictionary with ThreeJS classes names and configuration.
+
+        Shape:
+            vertices: :math:`(N, T, 3)`.
+            colors: :math:`(N, T, 3)`. The values should lie in [0, 255] for type `uint8` or [0, 1] for type `float`.
+            vertices: :math:`(N, T, 3)`. The values should lie in [0, numVerts] for type `uint8`.
+        """
+        self._get_file_writer().add_summary(mesh(tag, vertices, colors, faces, config_dict), global_step, walltime)
 
     def close(self):
         if self.all_writers is None:
