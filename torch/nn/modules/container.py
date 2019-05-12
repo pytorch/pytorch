@@ -110,8 +110,9 @@ class Sequential(Module):
         pass
 
     def pop(self,idx=-1):
+        layer = self.__getitem__(idx)
         self.__delitem__(idx)
-        return self.__getitem__(idx)
+        return layer
     
     def forward(self, input):
         for module in self._modules.values():
