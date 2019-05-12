@@ -691,26 +691,25 @@ void testRecordFunction() {
             std::make_tuple(std::string(getFullName(&fn)), sizes));
       }, [](const autograd::profiler::RecordFunction&) {}, true);
 
-  for (auto iter = 0; iter < 2; ++iter) {
-    autograd::profiler::setLazyInputsCopy(iter == 0);
+  autograd::profiler::setSampledCallbacks(true);
+  autograd::profiler::setSamplingProbability(1.0);
 
-    auto t = torch::randn({1, 2, 3}, at::kCPU);
-    t.set_requires_grad(true);
-    auto t2 = invokeTestRecordFunction(t);
-    t2.backward();
-    auto eager_inputs = traced_inputs;
-    traced_inputs.clear();
+  auto t = torch::randn({1, 2, 3}, at::kCPU);
+  t.set_requires_grad(true);
+  auto t2 = invokeTestRecordFunction(t);
+  t2.backward();
+  auto eager_inputs = traced_inputs;
+  traced_inputs.clear();
 
-    t = torch::randn({1, 2, 3}, at::kCPU);
-    t.set_requires_grad(true);
-    t2 = invokeTestRecordFunctionJIT(t);
-    t2.backward();
-    auto jit_inputs = traced_inputs;
-    traced_inputs.clear();
+  t = torch::randn({1, 2, 3}, at::kCPU);
+  t.set_requires_grad(true);
+  t2 = invokeTestRecordFunctionJIT(t);
+  t2.backward();
+  auto jit_inputs = traced_inputs;
+  traced_inputs.clear();
 
-    checkTracedInputs(eager_inputs);
-    checkTracedInputs(jit_inputs);
-  }
+  checkTracedInputs(eager_inputs);
+  checkTracedInputs(jit_inputs);
 
   autograd::profiler::popCallback();
 }

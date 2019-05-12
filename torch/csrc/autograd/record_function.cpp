@@ -8,7 +8,9 @@ std::vector<RecordFunctionCallback> start_callbacks;
 std::vector<RecordFunctionCallback> end_callbacks;
 size_t callback_needs_inputs = 0;
 thread_local RecordFunction* thread_local_func_ = nullptr;
-bool lazy_inputs_copy = false;
+
+bool is_sampled_callbacks = false;
+double sampling_prob = 1.0;
 }
 
 void pushCallback(
@@ -41,12 +43,20 @@ bool needsInputs() {
   return callback_needs_inputs > 0;
 }
 
-bool isLazyInputsCopy() {
-  return lazy_inputs_copy;
+bool isSampledCallbacks() {
+  return is_sampled_callbacks;
 }
 
-void setLazyInputsCopy(bool is_lazy) {
-  lazy_inputs_copy = is_lazy;
+void setSampledCallbacks(bool is_sampled) {
+  is_sampled_callbacks = is_sampled;
+}
+
+double getSamplingProbability() {
+  return sampling_prob;
+}
+
+void setSamplingProbability(double prob) {
+  sampling_prob = prob;
 }
 
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
@@ -93,9 +103,6 @@ void RecordFunction::processCallbacks() {
   for (const auto& cb : start_callbacks) {
     cb(*this);
   }
-
-  // inputs callback is unavailable after start callbacks are called
-  inputs_cb_ = nullptr;
 }
 
 RecordFunction::~RecordFunction() {
