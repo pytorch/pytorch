@@ -697,7 +697,7 @@ adaptive_max_pool1d = torch._jit_internal.boolean_dispatch(
 
 @weak_script
 def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList2[int], bool) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -714,7 +714,7 @@ def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
 
 @weak_script
 def _adaptive_max_pool2d(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList2[int], bool) -> Tensor
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
     return adaptive_max_pool2d_with_indices(input, output_size)[0]
 
 adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
@@ -729,7 +729,7 @@ adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
 
 @weak_script
 def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList3[int], bool) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -746,7 +746,7 @@ def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
 
 @weak_script
 def _adaptive_max_pool3d(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList3[int], bool) -> Tensor
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
     return adaptive_max_pool3d_with_indices(input, output_size)[0]
 
 adaptive_max_pool3d = torch._jit_internal.boolean_dispatch(
@@ -1930,11 +1930,22 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     """
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
+    if log_input:
+        loss = torch.exp(input) - target * input
+    else:
+        loss = input - target * torch.log(input + eps)
+    if full:
+        mask = target > 1
+        loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
+    if reduction == 'none':
+        ret = loss
+    elif reduction == 'mean':
+        ret = torch.mean(loss)
+    elif reduction == 'sum':
+        ret = torch.sum(loss)
+    else:
         ret = input
         raise ValueError(reduction + " is not valid")
-
-    ret = torch.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
     return ret
 
 
@@ -3077,3 +3088,246 @@ def _pad_circular(input, padding):
         input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):-padding[-5]], input], dim=4)
 
     return input
+
+@weak_script
+def _in_proj(input, weight, bias, start=0, end=None):
+    # type: (Tensor, Tensor, Optional[Tensor], int, Optional[int]) -> Tensor
+    r"""
+    Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
+    The given integers :attr:`start` and :attr:`end` determine the subset/slice
+    of :attr:`weight` and :attr:`bias` which effectively limits the number of
+    out_features. Assumes :attr:`start` and :attr:`end` are within the bounds
+    of :math:`[0, out\_features]`.
+
+    Shape:
+
+        - Input: :math:`(N, *, in\_features)` where `*` means any number of
+          additional dimensions
+        - Weight: :math:`(out\_features, in\_features)`
+        - Bias: :math:`(out\_features)`
+        - Output: :math:`(N, *, out\_features - (end - start))`
+    """
+    weight = weight[start:end, :]
+    if bias is not None:
+        bias = bias[start:end]
+    return linear(input, weight, bias)
+
+
+@weak_script
+def _in_proj_qkv(weight, bias, query):
+    # type: (Tensor, Tensor, Tensor) -> Tensor
+    r"""
+    Applies a linear transformation for qkv.
+    """
+    return _in_proj(query, weight, bias).chunk(3, dim=-1)
+
+
+@weak_script
+def _in_proj_kv(weight, bias, embed_dim, key):
+    # type: (Tensor, Tensor, int, Tensor) -> Tensor
+    r"""
+    Applies a linear transformation for kv.
+    """
+    return _in_proj(key, weight, bias, start=embed_dim).chunk(2, dim=-1)
+
+
+@weak_script
+def _in_proj_q(weight, bias, embed_dim, query):
+    # type: (Tensor, Tensor, int, Tensor) -> Tensor
+    r"""
+    Applies a linear transformation for q.
+    """
+    return _in_proj(query, weight, bias, end=embed_dim)
+
+
+@weak_script
+def _in_proj_k(weight, bias, embed_dim, key):
+    # type: (Tensor, Tensor, int, Tensor) -> Tensor
+    r"""
+    Applies a linear transformation for k.
+    """
+    return _in_proj(key, weight, bias, start=embed_dim, end=2 * embed_dim)
+
+
+@weak_script
+def _in_proj_v(weight, bias, embed_dim, value):
+    # type: (Tensor, Tensor, int, Tensor) -> Tensor
+    r"""
+    Applies a linear transformation for v.
+    """
+    return _in_proj(value, weight, bias, start=2 * embed_dim)
+
+
+# TODO define this method
+def _get_input_buffer(incremental_state):
+    pass
+
+# TODO define this method
+def _set_input_buffer(incremental_state, saved_state):
+    pass
+
+
+@weak_script
+def multi_head_attention_forward(query, key, value, embed_dim_to_check, num_heads,
+            in_proj_weight, in_proj_bias, bias_k, bias_v, add_zero_attn, head_dim, scaling,
+            dropout_p, out_proj, training=True, key_padding_mask=None, incremental_state=None,
+            need_weights=True, static_kv=False, attn_mask=None):
+    r"""
+    Args:
+        query, key, value: map a query and a set of key-value pairs to an output.
+            See "Attention Is All You Need" for more details.
+        embed_dim_to_check: total dimension of the model.
+        num_heads: parallel attention heads.
+        add_bias_kv: add bias to the key and value sequences at dim=0.
+        add_zero_attn: add a new batch of zeros to the key and
+                       value sequences at dim=1.
+
+        key_padding_mask: if provided, specified padding elements in the key will
+            be ignored by the attention.
+        incremental_state: if provided, previous time steps are cached.
+        need_weights: output attn_output_weights.
+        static_kv: if true, key and value are static. The key and value in previous
+            states will be used.
+        attn_mask: mask that prevents attention to certain positions.
+
+
+    Shape:
+        - Inputs:
+
+        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
+        - incremental_state: a dictionary used for storing states.
+        - attn_mask: :math:`(L, L)` where L is the target sequence length.
+
+        - Outputs:
+
+        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
+          E is the embedding dimension.
+        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
+          L is the target sequence length, S is the source sequence length.
+    """
+    qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
+    kv_same = key.data_ptr() == value.data_ptr()
+
+    tgt_len, bsz, embed_dim = query.size()
+    assert embed_dim == embed_dim_to_check
+    assert list(query.size()) == [tgt_len, bsz, embed_dim]
+    assert key.size() == value.size()
+
+    if incremental_state is not None:
+        saved_state = _get_input_buffer(incremental_state)
+        if 'prev_key' in saved_state:
+            # previous time steps are cached - no need to recompute
+            # key and value if they are static
+            if static_kv:
+                assert kv_same and not qkv_same
+                key = value = None
+    else:
+        saved_state = None
+
+    if qkv_same:
+        # self-attention
+        q, k, v = _in_proj_qkv(in_proj_weight, in_proj_bias, query)
+    elif kv_same:
+        # encoder-decoder attention
+        q = _in_proj_q(in_proj_weight, in_proj_bias, embed_dim, query)
+        if key is None:
+            assert value is None
+            k = v = None
+        else:
+            k, v = _in_proj_kv(in_proj_weight, in_proj_bias, embed_dim, key)
+    else:
+        q = _in_proj_q(in_proj_weight, in_proj_bias, embed_dim, query)
+        k = _in_proj_k(in_proj_weight, in_proj_bias, embed_dim, key)
+        v = _in_proj_v(in_proj_weight, in_proj_bias, embed_dim, value)
+    q *= scaling
+
+    if bias_k is not None:
+        assert bias_v is not None
+        k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+        v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
+        if attn_mask is not None:
+            attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
+        if key_padding_mask is not None:
+            key_padding_mask = torch.cat(
+                [key_padding_mask, key_padding_mask.new_zeros(key_padding_mask.size(0), 1)], dim=1)
+
+    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    if k is not None:
+        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+    if v is not None:
+        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+
+    if saved_state is not None:
+        # saved states are stored with shape (bsz, num_heads, seq_len, head_dim)
+        if 'prev_key' in saved_state:
+            prev_key = saved_state['prev_key'].view(bsz * num_heads, -1, head_dim)
+            if static_kv:
+                k = prev_key
+            else:
+                k = torch.cat((prev_key, k), dim=1)
+        if 'prev_value' in saved_state:
+            prev_value = saved_state['prev_value'].view(bsz * num_heads, -1, head_dim)
+            if static_kv:
+                v = prev_value
+            else:
+                v = torch.cat((prev_value, v), dim=1)
+        saved_state['prev_key'] = k.view(bsz, num_heads, -1, head_dim)
+        saved_state['prev_value'] = v.view(bsz, num_heads, -1, head_dim)
+
+        _set_input_buffer(incremental_state, saved_state)
+
+    src_len = k.size(1)
+
+    if key_padding_mask is not None:
+        assert key_padding_mask.size(0) == bsz
+        assert key_padding_mask.size(1) == src_len
+
+    if add_zero_attn:
+        src_len += 1
+        k = torch.cat([k, k.new_zeros((k.size(0), 1) + k.size()[2:])], dim=1)
+        v = torch.cat([v, v.new_zeros((v.size(0), 1) + v.size()[2:])], dim=1)
+        if attn_mask is not None:
+            attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
+        if key_padding_mask is not None:
+            key_padding_mask = torch.cat(
+                [key_padding_mask, torch.zeros(key_padding_mask.size(0), 1).type_as(key_padding_mask)], dim=1)
+
+    attn_output_weights = torch.bmm(q, k.transpose(1, 2))
+    assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
+
+    if attn_mask is not None:
+        attn_mask = attn_mask.unsqueeze(0)
+        attn_output_weights += attn_mask
+
+    if key_padding_mask is not None:
+        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+        attn_output_weights = attn_output_weights.masked_fill(
+            key_padding_mask.unsqueeze(1).unsqueeze(2),
+            float('-inf'),
+        )
+        attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+
+    attn_output_weights = softmax(
+        attn_output_weights.float(), dim=-1,
+        dtype=torch.float32 if attn_output_weights.dtype == torch.float16 else attn_output_weights.dtype)
+    attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
+
+    attn_output = torch.bmm(attn_output_weights, v)
+    assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
+    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+    attn_output = out_proj(attn_output)
+
+    if need_weights:
+        # average attention weights over heads
+        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+        attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
+    else:
+        attn_output_weights = None
+
+    return attn_output, attn_output_weights
