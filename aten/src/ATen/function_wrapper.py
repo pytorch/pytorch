@@ -360,19 +360,19 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                 '(c10::Storage(caffe2::TypeMeta::Make<${ScalarType}>(), 0, ${allocator}, true),'
+                 '(c10::Storage(caffe2::TypeMeta::Make<${ScalarType}>(), 0, allocator(), true),'
                  '${Backend}TensorId()).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, ${allocator}, true),'
+                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
                      '${Backend}TensorId()).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, ${allocator}, true),'
+                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
                      '${Backend}TensorId()).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, ${allocator}, true),'
+                     '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
                      '${Backend}TensorId()).release()',
     'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                        '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Int), 0, ${allocator}, true),'
+                        '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Int), 0, allocator(), true),'
                         '${Backend}TensorId()).release()',
 }
 
@@ -1302,11 +1302,7 @@ def create_derived(backend_type_env, declarations):
     def allocate_arg(env, arg, output_count):
         # type: (Environment, THFormal, int) -> List[str]
         name = arg['name']
-        if is_cuda:
-            allocator = 'at::cuda::getCUDADeviceAllocator()'
-        else:
-            allocator = 'getCPUAllocator()'
-        allocation = CodeTemplate(ALLOC_NOARGS_WRAP[arg['type']]).substitute(env, allocator=allocator)
+        allocation = CodeTemplate(ALLOC_NOARGS_WRAP[arg['type']]).substitute(env)
         tensor_arg = '{}_'.format(name)
         if arg.get('mask', False):
             allocation = 'output_mask[{}] ? {} : nullptr'.format(output_count, allocation)

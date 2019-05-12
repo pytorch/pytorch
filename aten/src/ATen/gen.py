@@ -288,6 +288,8 @@ def generate_storage_type_and_tensor(backend, density, declarations):
             env['extra_cuda_headers'].append('#include <ATen/hip/ATenHIPGeneral.h>')
             env['extra_cuda_headers'].append('#include <ATen/hip/HIPDevice.h>')
             env['extra_cuda_headers'].append('#include <ATen/hip/HIPTypeDefault.h>')
+            env['extra_cuda_headers'].append('#include <ATen/hip/HIPContext.h>')
+            env['allocator'] = 'at::hip::getHIPDeviceAllocator()'
         else:
             env['th_headers'] = [
                 '#include <THC/THC.h>',
@@ -300,6 +302,7 @@ def generate_storage_type_and_tensor(backend, density, declarations):
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDADevice.h>')
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDATypeDefault.h>')
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDAContext.h>')
+            env['allocator'] = 'at::cuda::getCUDADeviceAllocator()'
         env['state'] = ['globalContext().getTHCState()']
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
@@ -316,6 +319,7 @@ def generate_storage_type_and_tensor(backend, density, declarations):
         env['isCUDA'] = 'false'
         env['storage_device'] = 'throw std::runtime_error("CPU storage has no device");'
         env['Generator'] = 'CPUGenerator'
+        env['allocator'] = 'getCPUAllocator()'
 
     declarations, definitions, th_declarations, th_definitions = function_wrapper.create_derived(
         env, declarations)

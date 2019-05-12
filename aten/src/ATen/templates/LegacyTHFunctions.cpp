@@ -28,6 +28,10 @@ namespace {
                           .layout(kStrided)
                           .is_variable(false);
   }
+
+  Allocator* allocator() {
+    return ${allocator};
+  }
 }
 
 ${legacy_th_definitions}
