@@ -574,7 +574,7 @@ template TORCH_API void InsertQuantDequantNodesForParam(
         getQParamFunc,
     at::ScalarType t);
 
-template void InsertQuantDequantNodesForParam(
+template TORCH_API void InsertQuantDequantNodesForParam(
     std::shared_ptr<script::Module>& moduleObj,
     const std::string& method_name,
     const std::string& param_name,
