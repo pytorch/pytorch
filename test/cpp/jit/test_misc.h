@@ -708,10 +708,10 @@ void testRecordFunction() {
   auto jit_inputs = traced_inputs;
   traced_inputs.clear();
 
+  autograd::profiler::popCallback();
+
   checkTracedInputs(eager_inputs);
   checkTracedInputs(jit_inputs);
-
-  autograd::profiler::popCallback();
 }
 
 void testAutogradProfiler() {
