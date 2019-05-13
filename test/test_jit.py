@@ -15273,6 +15273,7 @@ class TestClassType(JitTestCase):
 
             m = M()
             self.assertEqual(m(torch.ones(2, 2)), torch.ones(2, 2) + 101)
+            m.save("out.zip")
 
     def test_class_sorting(self):
         @torch.jit.script  # noqa: B903

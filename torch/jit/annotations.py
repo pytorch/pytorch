@@ -4,7 +4,7 @@ import inspect
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, is_script_class, get_script_class
+    is_optional, is_script_class, get_script_class, qualified_name
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType
 from textwrap import dedent
@@ -212,8 +212,9 @@ def ann_to_type(ann):
     elif ann is str:
         return StringType.get()
     elif inspect.isclass(ann):
-        if is_script_class(ann.__name__):
-            return get_script_class(ann.__name__)["type"]
+        qualname = qualified_name(ann)
+        if is_script_class(qualname):
+            return get_script_class(qualname)["type"]
         else:
             raise ValueError("Class annotation {} is not a script class "
                              "(did you decorate the class with '@torch.jit.script'?)".format(ann))

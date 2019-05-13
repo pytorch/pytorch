@@ -283,9 +283,10 @@ IValue getObjectState(const IValue& ivalue) {
   // No __getstate__, do equivalent of 'return self.__dict__'
   c10::ivalue::UnorderedMap state_dict;
 
-
-  for (size_t i = 0; i < object->slots().size(); ++i) {
-
+  for (size_t i = 0; i < object->type()->numAttributes(); ++i) {
+    auto name = object->type()->getAttributeName(i);
+    auto value = object->getSlot(i);
+    state_dict.insert({name, value});
   }
 
   return state_dict;
