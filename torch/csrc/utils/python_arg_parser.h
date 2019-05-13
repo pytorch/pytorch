@@ -177,6 +177,7 @@ struct FunctionParameter {
   // having this as a raw PyObject * will presumably leak it, but these are only held by static objects
   // anyway, and Py_Finalize can already be called when this is destructed.
   PyObject *python_name;
+  at::SmallVector<PyObject *, 5> numpy_python_names;
   at::Scalar default_scalar;
   std::vector<int64_t> default_intlist;
   union {
