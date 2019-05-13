@@ -77,7 +77,7 @@ class Embedding(Module):
                  [-0.1655,  0.9897,  0.0635]]])
     """
     __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
-                     'norm_type', 'scale_grad_by_freq', 'sparse', '_weight']
+                     'norm_type', 'scale_grad_by_freq', 'sparse']
 
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
                  max_norm=None, norm_type=2., scale_grad_by_freq=False,
@@ -253,7 +253,7 @@ class EmbeddingBag(Module):
                 [ 1.1306, -2.5798, -1.0044]])
     """
     __constants__ = ['num_embeddings, embedding_dim', 'max_norm', 'norm_type',
-                     'scale_grad_by_freq', 'mode', 'sparse', '_weight']
+                     'scale_grad_by_freq', 'mode', 'sparse']
 
     def __init__(self, num_embeddings, embedding_dim,
                  max_norm=None, norm_type=2., scale_grad_by_freq=False,
