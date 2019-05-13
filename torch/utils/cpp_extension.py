@@ -370,7 +370,7 @@ class BuildExtension(build_ext, object):
         check_compiler_abi_compatibility(compiler)
 
     def _add_compile_flag(self, extension, flag):
-        extension.extra_compile_args = copy.copy(extension.extra_compile_args)
+        extension.extra_compile_args = copy.deepcopy(extension.extra_compile_args)
         if isinstance(extension.extra_compile_args, dict):
             for args in extension.extra_compile_args.values():
                 args.append(flag)

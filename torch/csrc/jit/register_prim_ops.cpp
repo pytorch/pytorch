@@ -96,6 +96,16 @@ static int64_t floordiv(int64_t a, int64_t b) {
   }
 }
 
+static int gcd(int a, int b) {
+    while (b != 0) {
+        int r = a % b;
+        a = b;
+        b = r;
+    }
+    // in python gcd returns non-negative values
+    return std::abs(a);
+}
+
 // reference function THPVariable_to in python_variable_methods.cpp
 static at::Tensor to_dispatch(
     at::Tensor self,
@@ -2117,6 +2127,35 @@ RegisterOperators reg2({
           push(stack, std::sqrt(a));
           return 0;
         }),
+
+    DEFINE_INT_OP(aten::gcd, gcd(a, b)),
+
+    DEFINE_GENERIC_OP(aten::copysign, std::copysign(a, b), std::copysign(a, b), float, float),
+    DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a,b), float),
+
+#define DEFINE_MATH_OP(aten_op, op, int_result, float_result)              \
+  Operator(                                                                \
+      #aten_op "(int a) -> " #int_result,                                  \
+      [](Stack& stack) {                                                   \
+        int64_t a;                                                         \
+        pop(stack, a);                                                     \
+        push(stack, op);                                                   \
+        return 0;                                                          \
+      }),                                                                  \
+      Operator(#aten_op "(float a) -> " #float_result,                     \
+      [](Stack& stack) {                                                   \
+        double a;                                                          \
+        pop(stack, a);                                                     \
+        push(stack, op);                                                   \
+        return 0;                                                          \
+      })
+
+    DEFINE_MATH_OP(aten::gamma, std::tgamma(a), float, float),
+    DEFINE_MATH_OP(aten::erf, std::erf(a), float, float),
+    DEFINE_MATH_OP(aten::erfc, std::erfc(a), float, float),
+    DEFINE_MATH_OP(aten::expm1, std::expm1(a), float, float),
+    DEFINE_MATH_OP(aten::fabs, std::fabs(a), float, float),
+    DEFINE_MATH_OP(aten::lgamma, std::lgamma(a), float, float),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),
