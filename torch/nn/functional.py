@@ -3085,7 +3085,7 @@ def multi_head_attention_forward(
         in_proj_weight, in_proj_bias, bias_k, bias_v, add_zero_attn,
         head_dim, scaling, dropout_p, out_proj, training=True,
         key_padding_mask=None, need_weights=True, attn_mask=None):
-    # type: (Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor, Tensor, bool, int, float, float, Tensor, bool, Optional[Tensor], bool, Optional[Tensor]) -> Tensor
+    # type: (Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor, Tensor, bool, int, float, float, Tensor, bool, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Tensor]
     r"""
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
