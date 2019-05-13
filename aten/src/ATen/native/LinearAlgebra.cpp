@@ -428,6 +428,39 @@ Tensor matmul(
     Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
                             : at::_unsafe_view(t1.mm(t2), output_size);
     return has_out ? out.set_(output) : output;
+  } else if ((dim_tensor1 == 1 || dim_tensor1 == 2) && dim_tensor2 >= 3) {
+    // optimization: transpose the inner dimensions of the arguments, call
+    // matmul on the swapped arguments, then transpose the inner dimensions
+    // of the result.
+    const int64_t n = dim_tensor1 == 2 ? tensor1.size(-2) : 1;
+    const int64_t m = tensor1.size(-1);
+    const int64_t p = tensor2.size(-1);
+
+    std::vector<int64_t> perm(dim_tensor2);
+    for (int64_t i = 0; i < dim_tensor2-2; i++) {
+        perm[i] = i;
+    }
+    perm[dim_tensor2-2] = dim_tensor2-1;
+    perm[dim_tensor2-1] = dim_tensor2-2;
+
+    const Tensor t2_T = tensor2.permute(perm);
+    const Tensor t1_T = dim_tensor1 == 2 ? tensor1.t() : tensor1.reshape({n, m}).t();
+    const Tensor res_T = matmul(c10::nullopt, t2_T, t1_T);
+
+    if (dim_tensor1 == 2) {
+      Tensor res = res_T.permute(perm).contiguous();
+      return has_out ? out.set_(res) : res;
+    }
+    else {
+      const IntArrayRef& sizes = tensor2.sizes();
+
+      std::vector<int64_t> shape;
+      shape.insert(shape.end(), sizes.begin(), sizes.end() - 2);
+      shape.push_back(p);
+
+      Tensor res = res_T.reshape(shape).contiguous();
+      return has_out ? out.set_(res) : res;
+    }
   } else if ((dim_tensor1 >= 1 && dim_tensor2 >= 1) && (dim_tensor1 >= 3 || dim_tensor2 >= 3)) {
     // We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
     // we track m1 vs m2 separately even though they must match for nicer error messages
