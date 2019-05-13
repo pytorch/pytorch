@@ -25,21 +25,48 @@ pip install -q ninja future hypothesis "librosa>=0.6.2" psutil
 :: No need to install faulthandler since we only test Python >= 3.6 on Windows
 :: faulthandler is builtin since Python 3.3
 
+if "%CUDA_VERSION%" == "9" goto cuda_build_9
+if "%CUDA_VERSION%" == "10" goto cuda_build_10
+goto cuda_build_end
+
+:cuda_build_9
+
 pushd .
-call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvarsall.bat" x86_amd64
+call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+@echo on
 popd
 
-set PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\bin;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\libnvvp;%PATH%
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0
-set CUDA_PATH_V9_0=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0
+set CUDA_PATH_V9_0=%CUDA_PATH%
+
+goto cuda_build_common
+
+:cuda_build_10
+
+pushd .
+call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+@echo on
+popd
+
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.1
+set CUDA_PATH_V10_1=%CUDA_PATH%
+
+goto cuda_build_common
+
+:cuda_build_common
+
+set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
+set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
+set CUDNN_ROOT_DIR=%CUDA_PATH%
 set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
-set CUDNN_LIB_DIR=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\lib\x64
-set CUDA_TOOLKIT_ROOT_DIR=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0
-set CUDNN_ROOT_DIR=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0
+set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
+set NUMBAPRO_CUDALIB=%CUDA_PATH%\bin
+set NUMBAPRO_LIBDEVICE=%CUDA_PATH%\nvvm\libdevice
+set NUMBAPRO_NVVM=%CUDA_PATH%\nvvm\bin\nvvm64_32_0.dll
+
+:cuda_build_end
+
 set PYTHONPATH=%TMP_DIR_WIN%\build;%PYTHONPATH%
-set NUMBAPRO_CUDALIB=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\bin
-set NUMBAPRO_LIBDEVICE=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\nvvm\libdevice
-set NUMBAPRO_NVVM=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\nvvm\bin\nvvm64_32_0.dll
 
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     pushd %TMP_DIR_WIN%\build
@@ -51,4 +78,7 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     xcopy /s %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %TMP_DIR_WIN%\build\torch\
 )
 
+@echo off
+echo @echo off >> %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
 for /f "usebackq tokens=*" %%i in (`set`) do echo set "%%i" >> %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
+@echo on
