@@ -41,6 +41,12 @@ namespace c10 {
 class Scalar;
 struct Storage;
 
+// yf225 TODO: add comments for usage of this enum
+typedef enum {
+  kShareVersionCounter = 1,
+  kCreateNewVersionCounter = 2,
+} ShallowCopyVersionCounterMode;
+
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
  */
@@ -159,6 +165,8 @@ struct C10_API NonVariableTypeMode {
 // 1. When we replace a `Variable`'s underlying `Tensor` by calling `set_data(...)`,
 // 2. `x.data` does not share the version counter of `x`. (See discussion at
 // https://github.com/pytorch/pytorch/issues/5396)
+//
+// yf225 TODO: improve comment here!
 //
 // Question: Why do we put the version counter in TensorImpl instead of AutogradMeta?
 //
@@ -915,9 +923,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return std::move(autograd_meta_);
   }
 
-  // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
-  // 1. the AutogradMeta pointer, because it is unique for each Variable.
-  // 2. the version counter, because although it lives in TensorImpl, the version counter is managed
+  // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer, because it is unique for each Variable.
+
+  // NOTE: `version_counter_mode` controls ...
+  // 2. [yf225 TODO: fix comment here!] the version counter, because although it lives in TensorImpl, the version counter is managed
+  // by autograd, and the call sites of `shallow_copy_and_detach()` (from autograd) should decide what
+  // the version counter should be for each new TensorImpl. See NOTE [ Version Counter Sharing ] for details.
+  //
+
+  // 2. [yf225 TODO fix comment here!] the version counter, because although it lives in TensorImpl, the version counter is managed
   // by autograd, and the call sites of `shallow_copy_and_detach()` (from autograd) should decide what
   // the version counter should be for each new TensorImpl. See NOTE [ Version Counter Sharing ] for details.
   //
@@ -925,7 +939,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // to this function that need to change the shallow copy's size or storage afterwards, and setting
   // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
   // undesirable.
-  virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
+  virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(ShallowCopyVersionCounterMode version_counter_mode) const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id());
     impl->set_sizes_and_strides(sizes(), strides());
@@ -934,6 +948,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     impl->reserved_ = reserved_;
     impl->refresh_numel();
     impl->refresh_contiguous();
+    switch (version_counter_mode) {
+      case ShallowCopyVersionCounterMode::kShareVersionCounter:
+        impl->set_version_counter(version_counter());
+        break;
+      case ShallowCopyVersionCounterMode::kCreateNewVersionCounter:
+        impl->set_version_counter(0);
+        break;
+      default:
+        AT_ERROR("Unsupported version_counter_mode: ", version_counter_mode);
+    }
     return impl;
   }
 
