@@ -10903,7 +10903,7 @@ a")
                               c   # type: Tensor
                               ):
                 # type: (int, int, int) -> Tensor
-                # type: bad type line
+                # type: bad type line  # noqa: F723
 
                 return a + b + c
 
