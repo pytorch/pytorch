@@ -13811,7 +13811,7 @@ nn_functional_tests = [
         '', (True, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
-     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
     ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),), 'with_only_weight',
      (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
     ('layer_norm', (S, S, S, S), ([5], None, non_differentiable(torch.rand(S)),), 'with_only_bias',
