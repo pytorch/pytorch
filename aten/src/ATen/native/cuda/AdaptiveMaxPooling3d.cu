@@ -316,13 +316,12 @@ void adaptive_max_pool3d_out_cuda_template(
   AT_CHECK((input_.ndimension() == 4 || input_.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
 
-  // Issue #20215: the JIT sometimes passes output_size.size() == 1.
-  AT_CHECK(output_size.size() == 1 || output_size.size() == 3,
-    "adaptive_max_pool3d: internal error: output_size.size() must be 1 or 3");
+  AT_CHECK(output_size.size() == 3,
+    "adaptive_max_pool3d: internal error: output_size.size() must be 3");
 
   int64_t osizeT = output_size[0];
-  int64_t osizeH = output_size.size() == 1 ? output_size[0] : output_size[1];
-  int64_t osizeW = output_size.size() == 1 ? output_size[0] : output_size[2];
+  int64_t osizeH = output_size[1];
+  int64_t osizeW = output_size[2];
 
   int64_t sizeD, isizeT, isizeH, isizeW;
   int64_t istrideD, istrideT, istrideH, istrideW;

@@ -1425,6 +1425,14 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         run_model_test(self, MyModel(), train=False, input=lstm_in, batch_size=3)
 
+    def test_topk(self):
+        class TopKModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.topk(input, 3)
+        model = TopKModel()
+        x = torch.arange(1., 6.)
+        run_model_test(self, TopKModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
     def test_floor(self):
         class FloorModel(torch.nn.Module):
             def forward(self, input):

@@ -127,7 +127,12 @@ class TestVerify(TestCase):
                 return x[-1, :, :]
 
         x = torch.randn(3, 4, 5)
-        self.assertVerifyExpectFail(MyModel(), x, backend, opset=10)
+        try:
+            self.assertVerifyExpectFail(MyModel(), x, backend, opset_version=10)
+        except RuntimeError:
+            return
+        # if the test fails, should not get here
+        assert(False)
 
 
 if __name__ == '__main__':

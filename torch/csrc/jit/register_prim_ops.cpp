@@ -8,7 +8,12 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/script/compilation_unit.h>
+#include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
 
@@ -26,6 +31,7 @@
 #include <memory>
 #include <mutex>
 #include <ostream>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <typeinfo>
@@ -90,6 +96,16 @@ static int64_t floordiv(int64_t a, int64_t b) {
   }
 }
 
+static int gcd(int a, int b) {
+    while (b != 0) {
+        int r = a % b;
+        a = b;
+        b = r;
+    }
+    // in python gcd returns non-negative values
+    return std::abs(a);
+}
+
 // reference function THPVariable_to in python_variable_methods.cpp
 static at::Tensor to_dispatch(
     at::Tensor self,
@@ -123,11 +139,9 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 
 RegisterOperators reg(
     {Operator(
-         "prim::profile(...) -> ()",
+         prim::profile,
          [](const Node* node) {
-           // TODO: figure out why cast isn't marked as const
-           auto n = const_cast<Node*>(node); // NOLINT
-           auto callback = n->cast<ProfileOp>()->getCallback();
+           auto callback = node->cast<ProfileOp>()->getCallback();
            return [callback](Stack& stack) {
              callback(stack);
              return 0;
@@ -434,6 +448,24 @@ RegisterOperators reg(
              stack.emplace_back(at::Tensor());
              return 0;
            };
+         }),
+     Operator(
+         "aten::save(t item, str filename) -> ()",
+         [](Stack& stack) {
+           auto filename = pop(stack).toStringRef();
+           auto value = pop(stack);
+
+           // Pickle the tensor
+           Pickler p;
+           p.pushMetadata();
+           p.start();
+           p.addIValue(value);
+           p.finish();
+
+           // Write file
+           std::fstream output(filename, std::ios::out | std::ios::binary);
+           output.write(p.stack().data(), p.stack().size());
+           return 0;
          }),
      Operator(
          prim::Print,
@@ -2096,6 +2128,35 @@ RegisterOperators reg2({
           return 0;
         }),
 
+    DEFINE_INT_OP(aten::gcd, gcd(a, b)),
+
+    DEFINE_GENERIC_OP(aten::copysign, std::copysign(a, b), std::copysign(a, b), float, float),
+    DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a,b), float),
+
+#define DEFINE_MATH_OP(aten_op, op, int_result, float_result)              \
+  Operator(                                                                \
+      #aten_op "(int a) -> " #int_result,                                  \
+      [](Stack& stack) {                                                   \
+        int64_t a;                                                         \
+        pop(stack, a);                                                     \
+        push(stack, op);                                                   \
+        return 0;                                                          \
+      }),                                                                  \
+      Operator(#aten_op "(float a) -> " #float_result,                     \
+      [](Stack& stack) {                                                   \
+        double a;                                                          \
+        pop(stack, a);                                                     \
+        push(stack, op);                                                   \
+        return 0;                                                          \
+      })
+
+    DEFINE_MATH_OP(aten::gamma, std::tgamma(a), float, float),
+    DEFINE_MATH_OP(aten::erf, std::erf(a), float, float),
+    DEFINE_MATH_OP(aten::erfc, std::erfc(a), float, float),
+    DEFINE_MATH_OP(aten::expm1, std::expm1(a), float, float),
+    DEFINE_MATH_OP(aten::fabs, std::fabs(a), float, float),
+    DEFINE_MATH_OP(aten::lgamma, std::lgamma(a), float, float),
+
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),
     DEFINE_COMPARISON_OP(aten::lt, a < b),
@@ -2198,6 +2259,78 @@ RegisterOperators reg2({
     Operator("aten::hash(str t) -> int", hashValue<std::string>),
     Operator("aten::hash(int t) -> int", hashValue<int>),
     Operator("aten::hash(float t) -> int", hashValue<double>),
+});
+
+bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
+  return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
+}
+
+void checkSortSchema(const Node* node, const c10::TypePtr& list_element_type) {
+  std::stringstream error_str;
+  if (auto class_type = list_element_type->cast<ClassType>()) {
+    if (auto method = class_type->getMethod("__lt__")) {
+      const auto& lt_schema = method->getSchema();
+      const auto& schema_args = lt_schema.arguments();
+      bool error =
+          (schema_args.size() != 2 ||
+           !simpleClassTypeArg(schema_args[0], class_type) ||
+           !simpleClassTypeArg(schema_args[1], class_type) ||
+           lt_schema.returns().size() != 1 ||
+           lt_schema.returns()[0].type() != BoolType::get());
+      if (!error) {
+        return;
+      }
+    }
+    error_str << "To sort a list of " << class_type->python_str()
+              << " it must define a "
+              << "__lt__ method with two inputs of type "
+              << class_type->python_str() << " that "
+              << "returns a bool";
+  } else {
+    error_str
+        << "Input to list sort must be of Tensors, ints, floats, bools or "
+        << "a User Defined Class that defines the __lt__ compare method"
+        << ", got list of " << list_element_type->python_str() << "\n";
+  }
+
+  auto error_msg = script::ErrorReport(node->sourceRange());
+  error_msg << error_str.str();
+  throw error_msg;
+}
+
+// NB: this must be registered after the other aten::sort operators
+RegisterOperators regSort({
+    Operator(
+        "aten::sort(t[](a!) self, bool reverse=False) -> ()",
+        [](const Node* node) {
+          const auto list_type =
+              node->inputs().at(0)->type()->expect<ListType>();
+          checkSortSchema(node, list_type->getElementType());
+          const auto elem = list_type->getElementType()->expect<ClassType>();
+          auto func = elem->getMethod("__lt__");
+          return [func](Stack& stack) {
+            bool reverse = pop(stack).toBool();
+            auto g_list = pop(stack).toGenericList();
+            Stack sort_stack;
+            std::sort(
+                g_list->elements().begin(),
+                g_list->elements().end(),
+                [func, reverse, &sort_stack](
+                    const IValue& a, const IValue& b) -> bool {
+                  // FBCode errors without this check - "strict weak ordering"
+                  // TODO: remove when possible, since it just slows down
+                  // sorting and doesn't do anything useful
+                  if (a.isSameIdentity(b)) {
+                    return false;
+                  }
+                  sort_stack.push_back(a);
+                  sort_stack.push_back(b);
+                  func->run(sort_stack);
+                  return pop(sort_stack).toBool() ^ reverse;
+                });
+            return 0;
+          };
+        }),
 });
 
 // reference: _output_size in torch/nn/functional.py

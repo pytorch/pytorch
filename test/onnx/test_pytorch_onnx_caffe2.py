@@ -92,6 +92,7 @@ def setUp():
         torch.cuda.manual_seed_all(0)
     np.random.seed(seed=0)
 
+
 def convert_cuda(model, input):
     cuda_model = model.cuda()
     # input might be nested - we want to move everything to GPU
@@ -102,7 +103,7 @@ def convert_cuda(model, input):
 
 def run_debug_test(testCaffe2Backend, model, train, batch_size, state_dict=None,
                    input=None, use_gpu=True, example_outputs=None,
-                   do_constant_folding=False, opset_version=None):
+                   opset_version=None):
     """
     # TODO: remove this from the final release version
     This test is for our debugging only for the case where
@@ -121,7 +122,7 @@ def run_debug_test(testCaffe2Backend, model, train, batch_size, state_dict=None,
 
     onnxir, torch_out = do_export(model, input, export_params=testCaffe2Backend.embed_params,
                                   verbose=False, example_outputs=example_outputs,
-                                  do_constant_folding=do_constant_folding,
+                                  do_constant_folding=False,
                                   opset_version=opset_version)
     if isinstance(torch_out, torch.autograd.Variable):
         torch_out = (torch_out,)
@@ -158,9 +159,13 @@ def run_actual_test(testCaffe2Backend, model, train, batch_size, state_dict=None
 
 def run_model_test(testCaffe2Backend, model, train, batch_size, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                   example_outputs=None, do_constant_folding=False,
+                   example_outputs=None, do_constant_folding=True,
                    opset_version=None):
     use_gpu_ = torch.cuda.is_available() and use_gpu
+    # NOTE: do_constant_folding is turned on only when model has
+    # parameters embedded (which are needed for constant folding),
+    # i.e. for self.embed_params=True case. self.embed_params=True
+    # for the TestCaffe2BackendEmbed class defined at the bottom.
     if testCaffe2Backend.embed_params:
         run_actual_test(testCaffe2Backend, model, train, batch_size, state_dict, input,
                         use_gpu=use_gpu_, rtol=rtol, atol=atol,
@@ -170,7 +175,6 @@ def run_model_test(testCaffe2Backend, model, train, batch_size, state_dict=None,
     else:
         run_debug_test(testCaffe2Backend, model, train, batch_size, state_dict, input,
                        use_gpu=use_gpu_, example_outputs=example_outputs,
-                       do_constant_folding=do_constant_folding,
                        opset_version=opset_version)
 
 

@@ -32,6 +32,9 @@ Tensor new_with_sizes_mkldnn(IntArrayRef sizes, const TensorOptions& options);
 // Retrieve `ideep::tensor` from MKL-DNN tensor
 ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 
+// Construct an `ideep::tensor` "view" from dense tensor, note the
+// ideep::tensor will share the underlying buffer
+ideep::tensor itensor_view_from_dense(const Tensor& tensor);
 }}
 
 #endif // AT_MKLDNN_ENABLED
