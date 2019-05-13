@@ -9058,7 +9058,7 @@ class _TestTorchMixin(object):
                     if TEST_NUMPY:
                         tup1 = torch.nonzero_tuple(tensor)
                         tup2 = tensor.nonzero(as_tuple=True)
-                        np1  = tensor.numpy().nonzero()
+                        np1 = tensor.numpy().nonzero()
                         for t in (tup1, tup2):
                             self.assertEqual(len(t), len(np1))
                             for i in range(len(t)):
@@ -9093,7 +9093,6 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.Size([0, 0]), y.shape)
             self.assertEqual(1, len(z))
             self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
-
 
     def test_deepcopy(self):
         from copy import deepcopy
