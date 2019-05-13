@@ -915,7 +915,7 @@
 # SparseTensorRef gets swapped with Tensor before being used in the code snippet below,
 # because SparseTensorRef doesn't have a default constructor.
 - name: sparse_mask(Tensor self, SparseTensorRef mask)
-  self: mask.to(ScalarType::Bool).to(grad.dtype())
+  self: grad.to_dense().sparse_mask(SparseTensorRef(mask)).to_dense()
   mask: non_differentiable
 
 - name: _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, Tensor indices, Tensor values, TensorOptions options)

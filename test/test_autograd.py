@@ -3167,7 +3167,11 @@ def add_test(
                     args_variable, kwargs_variable = create_input(args, requires_grad=False, call_kwargs=kwargs)
                     output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                     if isinstance(output_variable, torch.autograd.Variable):
-                        output_variable.backward(randn_like(output_variable))
+                        if output_variable.is_sparse:
+                            rand = randn_like(output_variable.to_dense()).to_sparse()
+                        else:
+                            rand = randn_like(output_variable)
+                        output_variable.backward(rand)
                         self.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
                         self.assertTrue(self_variable.size() == self_variable.grad.size())
 
