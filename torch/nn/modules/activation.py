@@ -708,9 +708,6 @@ class MultiheadAttention(Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.dropout = dropout
-        self.head_dim = embed_dim // num_heads
-        assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
-        self.scaling = self.head_dim ** -0.5
 
         self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
         if bias:
@@ -776,7 +773,7 @@ class MultiheadAttention(Module):
         return F.multi_head_attention_forward(
             query, key, value, self.embed_dim, self.num_heads,
             self.in_proj_weight, self.in_proj_bias, self.bias_k, self.bias_v, self.add_zero_attn,
-            self.head_dim, self.scaling, self.dropout, self.out_proj, training=self.training,
+            self.dropout, self.out_proj, training=self.training,
             key_padding_mask=key_padding_mask, need_weights=need_weights, attn_mask=attn_mask)
 
 

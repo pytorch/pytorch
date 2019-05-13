@@ -3083,9 +3083,9 @@ def _pad_circular(input, padding):
 def multi_head_attention_forward(
         query, key, value, embed_dim_to_check, num_heads,
         in_proj_weight, in_proj_bias, bias_k, bias_v, add_zero_attn,
-        head_dim, scaling, dropout_p, out_proj, training=True,
+        dropout_p, out_proj, training=True,
         key_padding_mask=None, need_weights=True, attn_mask=None):
-    # type: (Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor, Tensor, bool, int, float, float, Tensor, bool, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor, Tensor, bool, float, Tensor, bool, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Tensor]
     r"""
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
@@ -3096,8 +3096,6 @@ def multi_head_attention_forward(
         bias_k, bias_v: bias of the key and value sequences to be added at dim=0.
         add_zero_attn: add a new batch of zeros to the key and
                        value sequences at dim=1.
-        head_dim: dimension of attention heads.
-        scaling: scaling factor for q.
         dropout_p: probability of an element to be zeroed.
         out_proj: the output projection.
         training: apply dropout if is ``True``.
@@ -3186,6 +3184,10 @@ def multi_head_attention_forward(
     assert embed_dim == embed_dim_to_check
     assert list(query.size()) == [tgt_len, bsz, embed_dim]
     assert key.size() == value.size()
+
+    head_dim = embed_dim // num_heads
+    assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
+    scaling = head_dim ** -0.5
 
     if qkv_same:
         # self-attention
