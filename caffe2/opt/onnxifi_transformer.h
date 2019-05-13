@@ -28,6 +28,10 @@ struct OnnxifiTransformerOptions {
   // Whether to adjust batch at the ouptuts or not
   bool adjust_batch{true};
 
+  // Whether we allow unknown output batch size. This is often needed when
+  // we explicitly blacklist operators out of the onnxifi op.
+  bool permit_unknown_output_batch_size{false};
+
   // Minimum number of ops to create an onnxifi op. If the subgraph is too
   // small, it doesn't make sense to lower it to backend.
   size_t min_ops{1};

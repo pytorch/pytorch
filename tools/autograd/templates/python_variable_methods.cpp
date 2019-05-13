@@ -5,10 +5,11 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
+#include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/jit/tracer.h"
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
@@ -507,7 +508,6 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
 static PyObject * THPVariable_new_empty(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("new_empty", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_empty(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
@@ -517,7 +517,6 @@ static PyObject * THPVariable_new_empty(PyObject* self, PyObject* args, PyObject
 static PyObject * THPVariable_new_full(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("new_full", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_full(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
@@ -527,7 +526,6 @@ static PyObject * THPVariable_new_full(PyObject* self, PyObject* args, PyObject*
 static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("new_ones", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_ones(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
@@ -537,7 +535,6 @@ static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject*
 static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("new_tensor", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_tensor(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
@@ -547,7 +544,6 @@ static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObjec
 static PyObject * THPVariable_new_zeros(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("new_zeros", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_zeros(self_.dispatch_type(), self_.scalar_type(), args, kwargs));

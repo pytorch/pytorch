@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/tracer.h>
 
@@ -17,6 +18,8 @@ at::Tensor unwrap(at::Tensor&& tensor) {
 //      It should also handle autograd.
 Operator createOperatorFromC10(const c10::OperatorHandle& op) {
   return Operator(op.schema(), [op](Stack& stack) {
+      RECORD_FUNCTION(op.schema().name(), stack);
+
       const auto input_size = op.schema().arguments().size();
       const auto output_size = op.schema().returns().size();
 

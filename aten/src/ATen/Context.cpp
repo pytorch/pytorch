@@ -123,7 +123,7 @@ TypeExtendedInterface& getType(TensorOptions options) {
 TypeExtendedInterface& getType(const TensorImpl* impl) {
   Backend backend = tensorTypeIdToBackend(impl->type_id());
   return globalContext().getType(
-            backend, typeMetaToScalarType(impl->dtype()), impl->is_variable() && !at::NonVariableTypeMode::is_enabled());
+            backend, typeMetaToScalarType(impl->dtype()), impl->is_variable());
 }
 
 TypeExtendedInterface& getType(const Tensor& t) {

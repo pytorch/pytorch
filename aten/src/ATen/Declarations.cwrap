@@ -149,6 +149,7 @@
 [[
   name: _th_nonzero
   cname: nonzero
+  cpu_half: True
   cpu_bool: True
   cuda_bool: True
   variants:
@@ -2624,7 +2625,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: uniform
   variants: function
   return: self
