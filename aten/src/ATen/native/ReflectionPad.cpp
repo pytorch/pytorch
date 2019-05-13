@@ -61,7 +61,7 @@ void reflection_pad1d_out_template(
   int64_t dim_w = 1;
   int64_t nbatch = 1;
 
-  AT_CHECK(input_.numel() > 0 &&
+  TORCH_CHECK(input_.numel() > 0 &&
     (input_.ndimension() == 2 || input_.ndimension() == 3), "non-empty 2D "
     "or 3D (batch mode) tensor expected for input, but got: ", input_);
 
@@ -79,11 +79,11 @@ void reflection_pad1d_out_template(
   int64_t input_w = input_.size(dim_w);
   int64_t output_w  = input_w + pad_l + pad_r;
 
-  AT_CHECK(pad_l < input_w && pad_r < input_w, "Argument #4: Padding size "
+  TORCH_CHECK(pad_l < input_w && pad_r < input_w, "Argument #4: Padding size "
     "should be less than the corresponding input dimension, but got: padding (",
     pad_l, ", ", pad_r, ") at dimension ", dim_w, " of input ", input_.sizes());
 
-  AT_CHECK(output_w >= 1 , 2,
+  TORCH_CHECK(output_w >= 1 , 2,
     "input (W: ", input_w, ")is too small. Calculated output W: ", output_w);
 
   /* get contiguous input */
@@ -179,7 +179,7 @@ void reflection_pad1d_backward_out_template(
   int64_t input_w = input.size(dim_w);
   int64_t output_w  = input_w + pad_l + pad_r;
 
-  AT_CHECK(output_w == grad_output_.size(dim_w), "grad_output width unexpected."
+  TORCH_CHECK(output_w == grad_output_.size(dim_w), "grad_output width unexpected."
     " Expected: ", output_w, ", Got: ", grad_output_.size(dim_w));
 
   /* get contiguous grad_output */
@@ -280,7 +280,7 @@ void reflection_pad2d_out_template(
   int dim_slices = 0;
   int64_t nbatch = 1;
 
-  AT_CHECK(input_.numel() > 0 &&
+  TORCH_CHECK(input_.numel() > 0 &&
     (input_.ndimension() == 3 || input_.ndimension() == 4), "non-empty 3D or "
     "4D (batch mode) tensor expected for input, but got: ", input_);
 
@@ -303,12 +303,12 @@ void reflection_pad2d_out_template(
   int64_t output_h = input_h + pad_t + pad_b;
   int64_t output_w  = input_w + pad_l + pad_r;
 
-  AT_CHECK(pad_l < input_w && pad_r < input_w,
+  TORCH_CHECK(pad_l < input_w && pad_r < input_w,
     "Argument #4: Padding size should be less than the corresponding "
     "input dimension, but got: padding (", pad_l, ", ", pad_r,
     ") at dimension ", dim_w, " of input ", input_.ndimension());
 
-  AT_CHECK(pad_t < input_h && pad_b < input_h,
+  TORCH_CHECK(pad_t < input_h && pad_b < input_h,
     "Argument #6: Padding size should be less than the corresponding "
     "input dimension, but got: padding (", pad_t, ", ", pad_b,
     ") at dimension ", dim_h, " of input ", input_.ndimension());
