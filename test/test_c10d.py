@@ -2366,16 +2366,15 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_not_multigpu
     @skip_if_not_nccl
     def test_accumulate_gradients(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank][0:1]
-        self.assertEqual(len(gpus), 1)
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         store = c10d.FileStore(self.file.name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        local_batch_size = len(gpus)
-        global_batch_size = self.world_size * local_batch_size
+        global_batch_size = self.world_size
 
         model, ddp_model, input, target = \
             self._prepare_single_device_module(
-                process_group, gpus, global_batch_size)
+                process_group, devices, devices, global_batch_size)
 
         def step_model(model, input, target):
             model.train()
@@ -2388,25 +2387,25 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             ddp_model.train()
             ddp_model.module(input)
 
-        # check two model parameters over 2 iterations
+        # Check two model parameters over 4 iterations.
+        # Use 4 iterations because we alternate between reducing and
+        # not reducing and want to make sure we switch both ways.
         for iteration in range(4):
-            # single cpu/gpu training
             step_model(model, input, target)
 
             if iteration % 2 == 0:
                 # Skip gradients sync without calling prepare_for_backward
-                step_model(ddp_model.module,
-                           input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size],
-                           target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size])
-
+                step_model(
+                    ddp_model.module,
+                    input[self.rank : (self.rank + 1)],
+                    target[self.rank : (self.rank + 1)])
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     self.assertNotEqual(i.grad, j.grad)
             else:
-                # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
-                step_model(ddp_model,
-                           input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size],
-                           target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size])
-
+                step_model(
+                    ddp_model,
+                    input[self.rank : (self.rank + 1)],
+                    target[self.rank : (self.rank + 1)])
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     self.assertEqual(i.grad, j.grad)
 

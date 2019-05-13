@@ -68,6 +68,7 @@ libtorch_sources = [
     "torch/csrc/jit/register_c10_ops.cpp",
     "torch/csrc/jit/subgraph_matcher.cpp",
     "torch/csrc/jit/symbolic_script.cpp",
+    "torch/csrc/jit/profiling_graph_executor_impl.cpp",
     "torch/csrc/jit/profiling_record.cpp",
     "torch/csrc/jit/operator.cpp",
     "torch/csrc/jit/passes/alias_analysis.cpp",

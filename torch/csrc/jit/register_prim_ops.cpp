@@ -20,7 +20,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/Dict.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
@@ -97,6 +96,16 @@ static int64_t floordiv(int64_t a, int64_t b) {
   }
 }
 
+static int gcd(int a, int b) {
+    while (b != 0) {
+        int r = a % b;
+        a = b;
+        b = r;
+    }
+    // in python gcd returns non-negative values
+    return std::abs(a);
+}
+
 // reference function THPVariable_to in python_variable_methods.cpp
 static at::Tensor to_dispatch(
     at::Tensor self,
@@ -130,11 +139,9 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 
 RegisterOperators reg(
     {Operator(
-         "prim::profile(...) -> ()",
+         prim::profile,
          [](const Node* node) {
-           // TODO: figure out why cast isn't marked as const
-           auto n = const_cast<Node*>(node); // NOLINT
-           auto callback = n->cast<ProfileOp>()->getCallback();
+           auto callback = node->cast<ProfileOp>()->getCallback();
            return [callback](Stack& stack) {
              callback(stack);
              return 0;
@@ -858,11 +865,11 @@ RegisterOperators reg(
                  "DictConstruct must have an even number of inputs");
            }
            return [=](Stack& stack) {
-             c10::impl::GenericDict vals;
+             c10::ivalue::UnorderedMap vals;
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
-               vals.insert_or_assign(std::move(key), std::move(val));
+               vals[key] = val;
              }
              push(stack, std::move(vals));
              return 0;
@@ -1576,24 +1583,24 @@ int listSetItem<Shared<BoolList>, bool>(Stack& stack) {
 int dictSetItem(Stack& stack) {
   auto value = pop(stack);
   auto idx = pop(stack);
-  auto dict = pop(stack).toGenericDict();
-  dict->elements().insert_or_assign(std::move(idx), std::move(value));
-  push(stack, std::move(dict));
+  auto& dict = pop(stack).toGenericDict()->elements();
+  dict[idx] = value;
+  push(stack, dict);
   return 0;
 }
 
 int dictLen(Stack& stack) {
-  auto dict = pop(stack).toGenericDict();
-  push(stack, int64_t(dict->elements().size()));
+  auto dict = pop(stack).toGenericDictRef();
+  push(stack, int64_t(dict.size()));
   return 0;
 }
 
 int dictKeys(Stack& stack) {
-  auto dict = pop(stack).toGenericDict();
+  auto dict = pop(stack).toGenericDictRef();
   std::vector<IValue> keys;
-  keys.reserve(dict->elements().size());
-  for (auto item : dict->elements()) {
-    keys.push_back(item.key());
+  keys.reserve(dict.size());
+  for (auto item : dict) {
+    keys.push_back(item.first);
   }
   push(stack, IValue(keys));
   return 0;
@@ -1637,7 +1644,7 @@ int dictIndex(Stack& stack) {
   if (value == elems.end()) {
     AT_ERROR("KeyError: '", index, "'");
   }
-  push(stack, value->value());
+  push(stack, value->second);
   return 0;
 }
 
@@ -1649,7 +1656,7 @@ int dictGet(Stack& stack) {
   if (value == elems.end()) {
     push(stack, IValue());
   } else {
-    push(stack, value->value());
+    push(stack, value->second);
   }
   return 0;
 }
@@ -1663,7 +1670,7 @@ int dictGetDefault(Stack& stack) {
   if (value == elems.end()) {
     push(stack, default_value);
   } else {
-    push(stack, value->value());
+    push(stack, value->second);
   }
   return 0;
 }
@@ -2121,6 +2128,35 @@ RegisterOperators reg2({
           return 0;
         }),
 
+    DEFINE_INT_OP(aten::gcd, gcd(a, b)),
+
+    DEFINE_GENERIC_OP(aten::copysign, std::copysign(a, b), std::copysign(a, b), float, float),
+    DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a,b), float),
+
+#define DEFINE_MATH_OP(aten_op, op, int_result, float_result)              \
+  Operator(                                                                \
+      #aten_op "(int a) -> " #int_result,                                  \
+      [](Stack& stack) {                                                   \
+        int64_t a;                                                         \
+        pop(stack, a);                                                     \
+        push(stack, op);                                                   \
+        return 0;                                                          \
+      }),                                                                  \
+      Operator(#aten_op "(float a) -> " #float_result,                     \
+      [](Stack& stack) {                                                   \
+        double a;                                                          \
+        pop(stack, a);                                                     \
+        push(stack, op);                                                   \
+        return 0;                                                          \
+      })
+
+    DEFINE_MATH_OP(aten::gamma, std::tgamma(a), float, float),
+    DEFINE_MATH_OP(aten::erf, std::erf(a), float, float),
+    DEFINE_MATH_OP(aten::erfc, std::erfc(a), float, float),
+    DEFINE_MATH_OP(aten::expm1, std::expm1(a), float, float),
+    DEFINE_MATH_OP(aten::fabs, std::fabs(a), float, float),
+    DEFINE_MATH_OP(aten::lgamma, std::lgamma(a), float, float),
+
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),
     DEFINE_COMPARISON_OP(aten::lt, a < b),
@@ -2257,7 +2293,7 @@ void checkSortSchema(const Node* node, const c10::TypePtr& list_element_type) {
         << ", got list of " << list_element_type->python_str() << "\n";
   }
 
-  auto error_msg = script::ErrorReport(node->getSourceLocation());
+  auto error_msg = script::ErrorReport(node->sourceRange());
   error_msg << error_str.str();
   throw error_msg;
 }

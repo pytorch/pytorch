@@ -81,14 +81,17 @@ elif REL_WITH_DEB_INFO:
 
 
 def overlay_windows_vcvars(env):
-    from distutils._msvccompiler import _get_vc_env
-    vc_arch = 'x64' if IS_64BIT else 'x86'
-    vc_env = _get_vc_env(vc_arch)
-    for k, v in env.items():
-        lk = k.lower()
-        if lk not in vc_env:
-            vc_env[lk] = v
-    return vc_env
+    if sys.version_info >= (3, 5):
+        from distutils._msvccompiler import _get_vc_env
+        vc_arch = 'x64' if IS_64BIT else 'x86'
+        vc_env = _get_vc_env(vc_arch)
+        for k, v in env.items():
+            lk = k.lower()
+            if lk not in vc_env:
+                vc_env[lk] = v
+        return vc_env
+    else:
+        return env
 
 
 def mkdir_p(dir):
@@ -111,10 +114,10 @@ def create_build_env():
         my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
 
     if IS_WINDOWS:
-        my_env = overlay_windows_vcvars(my_env)
         # When using Ninja under Windows, the gcc toolchain will be chosen as default.
         # But it should be set to MSVC as the user's first choice.
         if USE_NINJA:
+            my_env = overlay_windows_vcvars(my_env)
             cc = my_env.get('CC', 'cl')
             cxx = my_env.get('CXX', 'cl')
             my_env['CC'] = cc
@@ -136,6 +139,7 @@ def run_cmake(version,
     elif IS_WINDOWS:
         if IS_64BIT:
             cmake_args.append('-GVisual Studio 15 2017 Win64')
+            cmake_args.append('-Thost=x64')
         else:
             cmake_args.append('-GVisual Studio 15 2017')
     try:
@@ -163,7 +167,7 @@ def run_cmake(version,
         BUILDING_WITH_TORCH_LIBS=os.getenv("BUILDING_WITH_TORCH_LIBS", "ON"),
         TORCH_BUILD_VERSION=version,
         CMAKE_BUILD_TYPE=build_type,
-        BUILD_TORCH=os.getenv("BUILD_TORCH", "ON"),
+        CMAKE_VERBOSE_MAKEFILE="ON",
         BUILD_PYTHON=build_python,
         BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS", "ON"),
         BUILD_BINARY=check_env_flag('BUILD_BINARY'),
@@ -283,7 +287,7 @@ def build_caffe2(version,
             check_call(build_cmd, cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
-            ninja_cmd = ['ninja', 'install']
+            ninja_cmd = ['ninja', 'install', '-v']
             if max_jobs is not None:
                 ninja_cmd += ['-j', max_jobs]
             check_call(ninja_cmd, cwd=build_dir, env=my_env)
