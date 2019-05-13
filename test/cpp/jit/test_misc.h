@@ -875,8 +875,9 @@ void testInsertGuards() {
   Code cd(pr->profiled_graph_);
   InterpreterState is{cd};
   is.run(stack);
-  InsertGuards(pr->profiled_graph_);
-  auto nodes = pr->profiled_graph_->block()->nodes();
+  auto copy = pr->profiled_graph_->copy();
+  InsertGuards(copy);
+  auto nodes = copy->block()->nodes();
   auto guard = std::find_if(nodes.begin(), nodes.end(), [](Node* n) {
     return n->kind() == prim::Guard;
   });

@@ -34,7 +34,9 @@ struct GuardInserter {
         // n->input() is Tensor type
         auto guard = graph_->create(prim::Guard, {n->input()}, 1);
         auto go = guard->output();
-        // set profiling information on guard's output
+        // make a *copy* of ProfilingTensorType, in case we'd like
+        // to make changes to it independently from the one being
+        // profiled
         auto copy = ProfiledTensorType::create(
             n->output()->type()->expect<ProfiledTensorType>());
         go->setType(copy);
