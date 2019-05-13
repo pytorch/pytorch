@@ -60,7 +60,10 @@ CONFIG_TREE_DATA = OrderedDict(
 )
 
 
-DEVTOOLSET_VERSIONS = [3, 7]
+DEVTOOLSET_VERSIONS = [
+    3,
+    7,
+]
 
 
 class TopLevelNode(ConfigNode):
@@ -107,7 +110,14 @@ class LinuxGccConfigNode(ConfigNode):
         self.props["devtoolset_version"] = devtoolset_version
 
     def get_children(self):
-        return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]
+        cuda_versions = self.find_prop("cuda_versions")
+
+        # XXX devtoolset7 on CUDA 9.0 is temporarily disabled
+        # see https://github.com/pytorch/pytorch/issues/20066
+        if self.find_prop("devtoolset_version") == 7:
+            cuda_versions = filter(lambda x: x != "90", cuda_versions)
+
+        return [ArchConfigNode(self, v) for v in cuda_versions]
 
 
 class ArchConfigNode(ConfigNode):

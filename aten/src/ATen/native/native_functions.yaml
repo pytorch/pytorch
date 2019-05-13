@@ -1411,6 +1411,9 @@
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
   variants: function, method
 
+- func: poisson_nll_loss(Tensor input, Tensor target, bool log_input, bool full, float eps, int reduction) -> Tensor
+  variants: function
+  
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2523,12 +2526,14 @@
   variants: function, method
 
 - func: to_sparse(Tensor self, int sparse_dim) -> Tensor
+  cpu_half: True
   variants: method
   dispatch:
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
 
 - func: to_sparse(Tensor self) -> Tensor
+  cpu_half: True
   variants: method
   dispatch:
     CPU: dense_to_sparse
@@ -2951,6 +2956,9 @@
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: uniform_cpu_
+    CUDA: uniform_cuda_
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
