@@ -55,7 +55,7 @@ struct GuardInserter {
 };
 
 void InsertGuards(std::shared_ptr<Graph> graph) {
-  GuardInserter gi(graph);
+  GuardInserter gi(std::move(graph));
   gi.run();
 }
 
