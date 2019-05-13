@@ -3006,6 +3006,34 @@ class TestAutograd(TestCase):
         # gpu thread ReadyQueue
         out.sum().backward()
 
+    def test_version_counter(self):
+        x = torch.randn(1, 2)
+
+        # In-place op bumps version
+        x_saved_version = x._version
+        x.add_(1).add_(1)
+        self.assertTrue(x._version > x_saved_version)
+
+        # Differentiable view shares version counter
+        xz = x[:]
+        self.assertTrue(x._version == xz._version)
+        xz.add_(1)
+        self.assertTrue(x._version == xz._version)
+
+        # `x.data = y` preserves version counter of `x`
+        x_saved_version = x._version
+        x.data = torch.randn(2, 3)
+        self.assertTrue(x._version == x_saved_version)
+        x.add_(1)
+        self.assertTrue(x._version > x_saved_version)
+        # Make sure `x` is still using the same version counter it shares with `xz`
+        self.assertTrue(x._version == xz._version)
+
+        # In-place op on `xz` also updates version of `x`,
+        # because they share the version counter
+        xz.add_(1)
+        self.assertTrue(x._version == xz._version)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
