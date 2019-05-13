@@ -336,6 +336,7 @@ class Tensor(torch._C._TensorBase):
             return LU, pivots
 
     def nonzero(self, as_tuple=False):
+        r"""See :func:`torch.nonzero`"""
         return torch.nonzero(self, as_tuple=as_tuple)
 
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
