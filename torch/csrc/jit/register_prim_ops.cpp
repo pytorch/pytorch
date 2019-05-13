@@ -129,11 +129,9 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 
 RegisterOperators reg(
     {Operator(
-         "prim::profile(...) -> ()",
+         prim::profile,
          [](const Node* node) {
-           // TODO: figure out why cast isn't marked as const
-           auto n = const_cast<Node*>(node); // NOLINT
-           auto callback = n->cast<ProfileOp>()->getCallback();
+           auto callback = node->cast<ProfileOp>()->getCallback();
            return [callback](Stack& stack) {
              callback(stack);
              return 0;
@@ -2256,7 +2254,7 @@ void checkSortSchema(const Node* node, const c10::TypePtr& list_element_type) {
         << ", got list of " << list_element_type->python_str() << "\n";
   }
 
-  auto error_msg = script::ErrorReport(node->getSourceLocation());
+  auto error_msg = script::ErrorReport(node->sourceRange());
   error_msg << error_str.str();
   throw error_msg;
 }

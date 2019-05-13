@@ -1,8 +1,11 @@
 #pragma once
 
-#include <ATen/core/qualified_name.h>
 #include <test/cpp/jit/test_base.h>
+#include <test/cpp/jit/test_utils.h>
+
+#include <ATen/core/qualified_name.h>
 #include <torch/csrc/jit/import_source.h>
+#include <torch/torch.h>
 
 namespace torch {
 namespace jit {
@@ -13,10 +16,12 @@ op_version_set = 1
 class FooNestedTest:
     def __init__(self, y):
         self.y = y
+
 class FooNestedTest2:
     def __init__(self, y):
         self.y = y
         self.nested = __torch__.FooNestedTest(y)
+
 class FooTest:
     def __init__(self, x):
         self.class_attr = __torch__.FooNestedTest(x)
@@ -56,6 +61,37 @@ void testClassImport() {
 
   c = cu2.get_class(c10::QualifiedName(base, "FooNestedTest"));
   ASSERT_FALSE(c);
+}
+
+void testScriptObject() {
+  Module m1;
+  Module m2;
+  std::vector<at::Tensor> constantTable;
+  import_libs(
+      m1.class_compilation_unit(),
+      "__torch__",
+      classSrcs1,
+      constantTable,
+      nullptr);
+  import_libs(
+      m2.class_compilation_unit(),
+      "__torch__",
+      classSrcs2,
+      constantTable,
+      nullptr);
+
+  // Incorrect arguments for constructor should throw
+  c10::QualifiedName base("__torch__");
+  ASSERT_ANY_THROW(m1.create_class(c10::QualifiedName(base, "FooTest"), {1}));
+  auto x = torch::ones({2, 3});
+  auto obj = m2.create_class(c10::QualifiedName(base, "FooTest"), x).toObject();
+  auto dx = obj->getAttr("dx");
+  ASSERT_TRUE(test::almostEqual(x, dx.toTensor()));
+
+  auto new_x = torch::rand({2, 3});
+  obj->setAttr("dx", new_x);
+  auto new_dx = obj->getAttr("dx");
+  ASSERT_TRUE(test::almostEqual(new_x, new_dx.toTensor()));
 }
 
 } // namespace script
