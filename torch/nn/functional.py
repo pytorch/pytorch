@@ -3078,114 +3078,37 @@ def _pad_circular(input, padding):
 
     return input
 
-@weak_script
-def _in_proj(input, weight, bias, start=0, end=None):
-    # type: (Tensor, Tensor, Optional[Tensor], int, Optional[int]) -> Tensor
-    r"""
-    Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
-    The given integers :attr:`start` and :attr:`end` determine the subset/slice
-    of :attr:`weight` and :attr:`bias` which effectively limits the number of
-    out_features. Assumes :attr:`start` and :attr:`end` are within the bounds
-    of :math:`[0, out\_features]`.
-
-    Shape:
-
-        - Input: :math:`(N, *, in\_features)` where `*` means any number of
-          additional dimensions
-        - Weight: :math:`(out\_features, in\_features)`
-        - Bias: :math:`(out\_features)`
-        - Output: :math:`(N, *, out\_features - (end - start))`
-    """
-    weight = weight[start:end, :]
-    if bias is not None:
-        bias = bias[start:end]
-    return linear(input, weight, bias)
-
-
-@weak_script
-def _in_proj_qkv(weight, bias, query):
-    # type: (Tensor, Tensor, Tensor) -> Tensor
-    r"""
-    Applies a linear transformation for qkv.
-    """
-    return _in_proj(query, weight, bias).chunk(3, dim=-1)
-
-
-@weak_script
-def _in_proj_kv(weight, bias, embed_dim, key):
-    # type: (Tensor, Tensor, int, Tensor) -> Tensor
-    r"""
-    Applies a linear transformation for kv.
-    """
-    return _in_proj(key, weight, bias, start=embed_dim).chunk(2, dim=-1)
-
-
-@weak_script
-def _in_proj_q(weight, bias, embed_dim, query):
-    # type: (Tensor, Tensor, int, Tensor) -> Tensor
-    r"""
-    Applies a linear transformation for q.
-    """
-    return _in_proj(query, weight, bias, end=embed_dim)
-
-
-@weak_script
-def _in_proj_k(weight, bias, embed_dim, key):
-    # type: (Tensor, Tensor, int, Tensor) -> Tensor
-    r"""
-    Applies a linear transformation for k.
-    """
-    return _in_proj(key, weight, bias, start=embed_dim, end=2 * embed_dim)
-
-
-@weak_script
-def _in_proj_v(weight, bias, embed_dim, value):
-    # type: (Tensor, Tensor, int, Tensor) -> Tensor
-    r"""
-    Applies a linear transformation for v.
-    """
-    return _in_proj(value, weight, bias, start=2 * embed_dim)
-
-
-# TODO define this method
-@weak_script
-def _get_input_buffer(incremental_state):
-    pass
-
-# TODO define this method
-@weak_script
-def _set_input_buffer(incremental_state, saved_state):
-    pass
-
 
 @weak_script
 def multi_head_attention_forward(
         query, key, value, embed_dim_to_check, num_heads,
-        in_proj_weight, in_proj_bias, bias_k, bias_v, add_zero_attn, head_dim, scaling,
-        dropout_p, out_proj, training=True, key_padding_mask=None, incremental_state=None,
-        need_weights=True, static_kv=False, attn_mask=None):
+        in_proj_weight, in_proj_bias, bias_k, bias_v, add_zero_attn,
+        head_dim, scaling, dropout_p, out_proj, training=True,
+        key_padding_mask=None, need_weights=True, attn_mask=None):
+    # type: (Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor, Tensor, bool, int, float, float, Tensor, bool, Optional[Tensor], bool, Optional[Tensor]) -> Tensor
     r"""
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
             See "Attention Is All You Need" for more details.
         embed_dim_to_check: total dimension of the model.
         num_heads: parallel attention heads.
-        add_bias_kv: add bias to the key and value sequences at dim=0.
+        in_proj_weight, in_proj_bias: input projection weight and bias.
+        bias_k, bias_v: bias of the key and value sequences to be added at dim=0.
         add_zero_attn: add a new batch of zeros to the key and
                        value sequences at dim=1.
-
+        head_dim: dimension of attention heads.
+        scaling: scaling factor for q.
+        dropout_p: probability of an element to be zeroed.
+        out_proj: the output projection.
+        training: apply dropout if is ``True``.
         key_padding_mask: if provided, specified padding elements in the key will
             be ignored by the attention.
-        incremental_state: if provided, previous time steps are cached.
         need_weights: output attn_output_weights.
-        static_kv: if true, key and value are static. The key and value in previous
-            states will be used.
         attn_mask: mask that prevents attention to certain positions.
 
 
     Shape:
-        - Inputs:
-
+        Inputs:
         - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
           the embedding dimension.
         - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
@@ -3193,16 +3116,69 @@ def multi_head_attention_forward(
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
-        - incremental_state: a dictionary used for storing states.
         - attn_mask: :math:`(L, L)` where L is the target sequence length.
 
-        - Outputs:
-
+        Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
           L is the target sequence length, S is the source sequence length.
     """
+
+    @weak_script
+    def _in_proj(input, weight, bias, start=0, end=None):
+        # type: (Tensor, Tensor, Optional[Tensor], int, Optional[int]) -> Tensor
+        r"""
+        Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
+        The given integers :attr:`start` and :attr:`end` determine the subset/slice
+        of :attr:`weight` and :attr:`bias` which effectively limits the number of
+        out_features. Assumes :attr:`start` and :attr:`end` are within the bounds
+        of :math:`[0, out\_features]`.
+
+        Shape:
+
+            - Input: :math:`(N, *, in\_features)` where `*` means any number of
+              additional dimensions
+            - Weight: :math:`(out\_features, in\_features)`
+            - Bias: :math:`(out\_features)`
+            - Output: :math:`(N, *, out\_features - (end - start))`
+        """
+        weight = weight[start:end, :]
+        if bias is not None:
+            bias = bias[start:end]
+        return linear(input, weight, bias)
+
+
+    @weak_script
+    def _in_proj_qkv(weight, bias, query):
+        # type: (Tensor, Tensor, Tensor) -> Tensor
+        return _in_proj(query, weight, bias).chunk(3, dim=-1)
+
+
+    @weak_script
+    def _in_proj_kv(weight, bias, embed_dim, key):
+        # type: (Tensor, Tensor, int, Tensor) -> Tensor
+        return _in_proj(key, weight, bias, start=embed_dim).chunk(2, dim=-1)
+
+
+    @weak_script
+    def _in_proj_q(weight, bias, embed_dim, query):
+        # type: (Tensor, Tensor, int, Tensor) -> Tensor
+        return _in_proj(query, weight, bias, end=embed_dim)
+
+
+    @weak_script
+    def _in_proj_k(weight, bias, embed_dim, key):
+        # type: (Tensor, Tensor, int, Tensor) -> Tensor
+        return _in_proj(key, weight, bias, start=embed_dim, end=2 * embed_dim)
+
+
+    @weak_script
+    def _in_proj_v(weight, bias, embed_dim, value):
+        # type: (Tensor, Tensor, int, Tensor) -> Tensor
+        return _in_proj(value, weight, bias, start=2 * embed_dim)
+
+
     qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
     kv_same = key.data_ptr() == value.data_ptr()
 
@@ -3210,17 +3186,6 @@ def multi_head_attention_forward(
     assert embed_dim == embed_dim_to_check
     assert list(query.size()) == [tgt_len, bsz, embed_dim]
     assert key.size() == value.size()
-
-    if incremental_state is not None:
-        saved_state = _get_input_buffer(incremental_state)
-        if 'prev_key' in saved_state:
-            # previous time steps are cached - no need to recompute
-            # key and value if they are static
-            if static_kv:
-                assert kv_same and not qkv_same
-                key = value = None
-    else:
-        saved_state = None
 
     if qkv_same:
         # self-attention
@@ -3254,25 +3219,6 @@ def multi_head_attention_forward(
         k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
     if v is not None:
         v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
-
-    if saved_state is not None:
-        # saved states are stored with shape (bsz, num_heads, seq_len, head_dim)
-        if 'prev_key' in saved_state:
-            prev_key = saved_state['prev_key'].view(bsz * num_heads, -1, head_dim)
-            if static_kv:
-                k = prev_key
-            else:
-                k = torch.cat((prev_key, k), dim=1)
-        if 'prev_value' in saved_state:
-            prev_value = saved_state['prev_value'].view(bsz * num_heads, -1, head_dim)
-            if static_kv:
-                v = prev_value
-            else:
-                v = torch.cat((prev_value, v), dim=1)
-        saved_state['prev_key'] = k.view(bsz, num_heads, -1, head_dim)
-        saved_state['prev_value'] = v.view(bsz, num_heads, -1, head_dim)
-
-        _set_input_buffer(incremental_state, saved_state)
 
     src_len = k.size(1)
 
