@@ -300,7 +300,7 @@ Tensor _s_copy_from_cuda(
     const Tensor& dst,
     bool non_blocking) {
   Tensor dst_ = dst;
-  _s_copy__cuda(dst_, self);
+  _s_copy__cuda(dst_, self, non_blocking);
   return dst;
 }
 

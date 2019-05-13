@@ -61,9 +61,13 @@ if (std::isnan(val)) break;
 #define th_isnan_break(val)
 #endif
 
-#ifdef _WIN32
-// MSVC doesn't support loop pragmas, but does support others. Create a new macro to account for those differences.
+#ifdef _MSC_VER
+# if _MSC_VER < 1920
+// MSVC < 2019 doesn't support loop pragmas.
 #define PRAGMA_LOOP(P)    // Noop
+# else
+#define PRAGMA_LOOP(P)    __pragma(P)
+# endif
 #else
 #define PRAGMA_LOOP(P)    _Pragma(#P)
 #endif

@@ -16,7 +16,7 @@ if [[ ! -d build ]]; then
   mkdir build
   pushd build
   # We really only need compile_commands.json, so no need to build!
-  time cmake -DBUILD_TORCH=ON ..
+  time cmake ..
   popd
 
   # Generate ATen files.

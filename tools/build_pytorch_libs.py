@@ -81,14 +81,17 @@ elif REL_WITH_DEB_INFO:
 
 
 def overlay_windows_vcvars(env):
-    from distutils._msvccompiler import _get_vc_env
-    vc_arch = 'x64' if IS_64BIT else 'x86'
-    vc_env = _get_vc_env(vc_arch)
-    for k, v in env.items():
-        lk = k.lower()
-        if lk not in vc_env:
-            vc_env[lk] = v
-    return vc_env
+    if sys.version_info >= (3, 5):
+        from distutils._msvccompiler import _get_vc_env
+        vc_arch = 'x64' if IS_64BIT else 'x86'
+        vc_env = _get_vc_env(vc_arch)
+        for k, v in env.items():
+            lk = k.lower()
+            if lk not in vc_env:
+                vc_env[lk] = v
+        return vc_env
+    else:
+        return env
 
 
 def mkdir_p(dir):
@@ -136,6 +139,7 @@ def run_cmake(version,
     elif IS_WINDOWS:
         if IS_64BIT:
             cmake_args.append('-GVisual Studio 15 2017 Win64')
+            cmake_args.append('-Thost=x64')
         else:
             cmake_args.append('-GVisual Studio 15 2017')
     try:
@@ -163,7 +167,7 @@ def run_cmake(version,
         BUILDING_WITH_TORCH_LIBS=os.getenv("BUILDING_WITH_TORCH_LIBS", "ON"),
         TORCH_BUILD_VERSION=version,
         CMAKE_BUILD_TYPE=build_type,
-        BUILD_TORCH=os.getenv("BUILD_TORCH", "ON"),
+        CMAKE_VERBOSE_MAKEFILE="ON",
         BUILD_PYTHON=build_python,
         BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS", "ON"),
         BUILD_BINARY=check_env_flag('BUILD_BINARY'),
@@ -175,6 +179,7 @@ def run_cmake(version,
         USE_CUDA=USE_CUDA,
         USE_DISTRIBUTED=USE_DISTRIBUTED,
         USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or check_negative_env_flag('USE_FBGEMM')),
+        NAMEDTENSOR_ENABLED=(check_env_flag('USE_NAMEDTENSOR') or check_negative_env_flag('NO_NAMEDTENSOR')),
         USE_NUMPY=USE_NUMPY,
         NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
         USE_SYSTEM_NCCL=USE_SYSTEM_NCCL,
@@ -290,7 +295,7 @@ def build_caffe2(version,
             check_call(build_cmd, cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
-            ninja_cmd = ['ninja', 'install']
+            ninja_cmd = ['ninja', 'install', '-v']
             if max_jobs is not None:
                 ninja_cmd += ['-j', max_jobs]
             check_call(ninja_cmd, cwd=build_dir, env=my_env)
