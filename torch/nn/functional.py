@@ -3138,21 +3138,6 @@ def multi_head_attention_forward(query,                  # type: Tensor
     @weak_script
     def _in_proj(input, weight, bias, start=0, end=None):
         # type: (Tensor, Tensor, Optional[Tensor], int, Optional[int]) -> Tensor
-        r"""
-        Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
-        The given integers :attr:`start` and :attr:`end` determine the subset/slice
-        of :attr:`weight` and :attr:`bias` which effectively limits the number of
-        out_features. Assumes :attr:`start` and :attr:`end` are within the bounds
-        of :math:`[0, out\_features]`.
-
-        Shape:
-
-            - Input: :math:`(N, *, in\_features)` where `*` means any number of
-              additional dimensions
-            - Weight: :math:`(out\_features, in\_features)`
-            - Bias: :math:`(out\_features)`
-            - Output: :math:`(N, *, out\_features - (end - start))`
-        """
         weight = weight[start:end, :]
         if bias is not None:
             bias = bias[start:end]
