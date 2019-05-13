@@ -310,8 +310,8 @@ Tensor& Module::register_parameter(
     std::string name,
     Tensor tensor,
     bool requires_grad) {
-  AT_CHECK(!name.empty(), "Parameter name must not be empty");
-  AT_CHECK(
+  TORCH_CHECK(!name.empty(), "Parameter name must not be empty");
+  TORCH_CHECK(
       name.find('.') == std::string::npos,
       "Parameter name must not contain a dot (got '",
       name,
@@ -321,8 +321,8 @@ Tensor& Module::register_parameter(
 }
 
 Tensor& Module::register_buffer(std::string name, Tensor tensor) {
-  AT_CHECK(!name.empty(), "Buffer name must not be empty");
-  AT_CHECK(
+  TORCH_CHECK(!name.empty(), "Buffer name must not be empty");
+  TORCH_CHECK(
       name.find('.') == std::string::npos,
       "Buffer name must not contain a dot (got '",
       name,
@@ -388,7 +388,7 @@ std::ostream& operator<<(std::ostream& stream, const nn::Module& module) {
 serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
     const std::shared_ptr<nn::Module>& module) {
-  AT_CHECK(module != nullptr, "Cannot serialize empty module");
+  TORCH_CHECK(module != nullptr, "Cannot serialize empty module");
   module->save(archive);
   return archive;
 }
@@ -396,7 +396,7 @@ serialize::OutputArchive& operator<<(
 serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
     const std::shared_ptr<nn::Module>& module) {
-  AT_CHECK(module != nullptr, "Cannot deserialize empty module");
+  TORCH_CHECK(module != nullptr, "Cannot deserialize empty module");
   module->load(archive);
   return archive;
 }

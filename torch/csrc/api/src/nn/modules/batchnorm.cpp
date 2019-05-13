@@ -42,7 +42,7 @@ void BatchNormImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor BatchNormImpl::forward(const Tensor& input) {
-  AT_CHECK(
+  TORCH_CHECK(
       options.stateful_,
       "Calling BatchNorm::forward is only permitted when "
       "the 'stateful' option is true (was false). "
@@ -56,7 +56,7 @@ Tensor BatchNormImpl::pure_forward(
     const Tensor& variance) {
   if (is_training()) {
     const auto num_channels = input.dim() > 1 ? input.size(1) : 1;
-    AT_CHECK(
+    TORCH_CHECK(
         input.numel() / num_channels > 1,
         "BatchNorm expected more than 1 value per channel when training!");
   }
