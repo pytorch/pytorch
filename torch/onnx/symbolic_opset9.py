@@ -191,6 +191,11 @@ def sigmoid(g, self):
 
 
 def _slice_op(g, input, axes, starts, ends):
+    if sym_help._export_onnx_opset_version != 9:
+        from torch.onnx.symbolic_registry import get_registered_op 
+        slice_op = get_registered_op('_slice_op', '', sym_help._export_onnx_opset_version)
+        return slice_op(g, input, axes, starts, ends)
+
     assert len(starts) == len(ends)
     if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807:
         return input
@@ -1253,7 +1258,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         reform_permutation = [(0, 1), (3, 4), (1, 3)]
 
     def reform_weights(g, w, n, intervals):
-        slices = [g.op('Slice', w, axes_i=[0], starts_i=[x * n], ends_i=[y * n]) for x, y in intervals]
+        slices = [_slice_op(g, w, axes=[0], starts=[x * n], ends=[y * n]) for x, y in intervals]
         return g.op('Concat', *slices, axis_i=0)
 
     def transform_weights(layer_index):
@@ -1267,7 +1272,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh, bias_concat))
 
     def retrieve_state(x, start, end):
-        return x if num_layers == 1 else g.op('Slice', x, axes_i=[0], starts_i=[start], ends_i=[end])
+        return x if num_layers == 1 else _slice_op(g, x, axes=[0], starts=[start], ends=[end])
 
     for i in range(num_layers):
         if unidirectional:

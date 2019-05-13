@@ -107,5 +107,26 @@ class TestONNXOpset(TestCase):
         x = torch.randn(20, 16, 50)
         check_onnx_opsets_operator(module, x, ops, opset_versions=[10])
 
+    def test_slice(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return x[0:1]
+
+        ops_9 = [{"op_name" : "Slice",
+                  "attributes" :
+                  [{"name": "axes", "ints": [0], "type": 7},
+                   {"name": "ends", "ints": [1], "type": 7},
+                   {"name": "starts", "ints": [0], "type": 7}]}]
+        ops_10 = [{"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Slice",
+                   "input" : ["input1", "2", "3", "1", "4"]}]
+        ops = {9 : ops_9, 10 : ops_10}
+        x = torch.randn(3)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
+
+
 if __name__ == '__main__':
     run_tests()

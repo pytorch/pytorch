@@ -5,6 +5,7 @@ import torch.onnx
 # ONNX symbolics
 import torch.onnx.utils
 
+import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset
 import torch.onnx.symbolic_opset9
 
@@ -23,7 +24,6 @@ import torch.onnx.symbolic_opset9
 # models with mixed versions of operators.
 # TODO : add support for the blacklisted operators in black_listed_operators
 black_listed_operators = ["flip",
-                          "slice",
                           "upsample_nearest2d", "upsample_bilinear2d",
                           "dropout", "feature_dropout", "alpha_dropout", "feature_alpha_dropout",
                           "dropout_", "feature_dropout_", "alpha_dropout_", "feature_alpha_dropout_"]
@@ -120,3 +120,36 @@ def _avg_pool(name, tuple_fn):
 avg_pool1d = _avg_pool('avg_pool1d', _single)
 avg_pool2d = _avg_pool('avg_pool2d', _pair)
 avg_pool3d = _avg_pool('avg_pool3d', _triple)
+
+
+def _slice_op(g, input, axes, starts, ends, steps=None):
+    assert len(starts) == len(ends)
+    assert len(starts) == len(axes)
+    assert steps is None or len(starts) == len(steps)
+    if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807 \
+       and (steps is None or (len(steps) == 1 and steps[0] == 1)):
+        return input    
+    axes = g.op("Constant", value_t=torch.tensor(axes))
+    starts = g.op("Constant", value_t=torch.tensor(starts))
+    ends = g.op("Constant", value_t=torch.tensor(ends))
+    if steps is None:
+        return g.op("Slice", input, starts, ends, axes)
+    steps = g.op("Constant", value_t=torch.tensor(steps))
+    return g.op("Slice", input, starts, ends, axes, steps)
+
+
+@parse_args('v', 'v', 'v', 'v', 'i')
+def slice(g, self, dim, start, end, step):
+    if (start.node().kind() != 'onnx::Constant' or
+       end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant') \
+       and step != 1 :
+        start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
+        end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
+        dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
+        return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
+    else:
+        start = sym_help._parse_arg(start, 'i')
+        end = sym_help._parse_arg(end, 'i')
+        dim = sym_help._parse_arg(dim, 'i')
+        step = sym_help._parse_arg(step, 'i')
+        return _slice_op(g, self, axes=[dim], starts=[start], ends=[end], steps=[step])
