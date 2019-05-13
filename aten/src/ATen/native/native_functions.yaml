@@ -2956,6 +2956,9 @@
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: uniform_cpu_
+    CUDA: uniform_cuda_
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
