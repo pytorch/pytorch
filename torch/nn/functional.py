@@ -3080,12 +3080,24 @@ def _pad_circular(input, padding):
 
 
 @weak_script
-def multi_head_attention_forward(
-        query, key, value, embed_dim_to_check, num_heads,
-        in_proj_weight, in_proj_bias, bias_k, bias_v, add_zero_attn,
-        dropout_p, out_proj, training=True,
-        key_padding_mask=None, need_weights=True, attn_mask=None):
-    # type: (Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor, Tensor, bool, float, Tensor, bool, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Tensor]
+def multi_head_attention_forward(query,                  # type: Tensor
+                                 key,                    # type: Tensor
+                                 value,                  # type: Tensor
+                                 embed_dim_to_check,     # type: int
+                                 num_heads,              # type: int
+                                 in_proj_weight,         # type: Tensor
+                                 in_proj_bias,           # type: Tensor
+                                 bias_k,                 # type: Tensor
+                                 bias_v,                 # type: Tensor
+                                 add_zero_attn,          # type: bool
+                                 dropout_p,              # type: float
+                                 out_proj,               # type: Tensor
+                                 training=True,          # type: bool
+                                 key_padding_mask=None,  # type: Optional[Tensor]
+                                 need_weights=True,      # type: bool
+                                 attn_mask=None          # type: Optional[Tensor]
+                                 ):
+    # type: (...) -> Tuple[Tensor, Tensor]
     r"""
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
