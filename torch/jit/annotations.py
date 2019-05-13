@@ -215,8 +215,8 @@ def ann_to_type(ann):
         if is_script_class(ann.__name__):
             return get_script_class(ann.__name__)["type"]
         else:
-            raise ValueError("Class annotation is not a script class "
-                             "(did you decorate the class with '@torch.jit.script'?)")
+            raise ValueError("Class annotation {} is not a script class "
+                             "(did you decorate the class with '@torch.jit.script'?)".format(ann))
     elif ann is bool:
         return BoolType.get()
     raise ValueError("Unknown type annotation: '{}'".format(ann))

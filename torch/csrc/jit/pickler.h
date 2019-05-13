@@ -97,7 +97,8 @@ enum PicklerClass : uint8_t {
   DOUBLELIST = 3,
   // List[bool]
   BOOLLIST = 4,
-  OBJECT = 5
+  // Class types
+  OBJECT = 5,
 };
 
 using ::c10::IValue;

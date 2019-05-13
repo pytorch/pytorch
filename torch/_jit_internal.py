@@ -33,6 +33,7 @@ script_classes = {}
 
 
 def add_script_class(cls, name, class_type):
+    print("Adding class ", name)
     script_classes[name] = {"class": cls, "type": class_type}
 
 

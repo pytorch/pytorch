@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/script/compilation_unit.h>
+
 #include <ATen/ATen.h>
 #include <string>
 
@@ -263,6 +265,32 @@ void Pickler::pushInt(const IValue& ivalue) {
   }
 }
 
+IValue getObjectState(const IValue& ivalue) {
+  auto object = ivalue.toObject();
+  auto getstate = object->type()->getMethod("__getstate__");
+
+  // If the object provides a __getstate__ method, call it and use that value
+  if (getstate) {
+    Stack stack;
+    getstate->run(stack);
+    AT_CHECK(
+        stack.size() == 1,
+        "Pickler expected 1 value from '__getstate__' but found ",
+        stack.size());
+    return stack.at(0);
+  }
+
+  // No __getstate__, do equivalent of 'return self.__dict__'
+  c10::ivalue::UnorderedMap state_dict;
+
+
+  for (size_t i = 0; i < object->slots().size(); ++i) {
+
+  }
+
+  return state_dict;
+}
+
 void Pickler::pushObject(const IValue& ivalue) {
   auto obj = ivalue.toObject();
   at::ClassTypePtr class_type = obj->type();
@@ -278,9 +306,7 @@ void Pickler::pushObject(const IValue& ivalue) {
   push<OpCode>(OpCode::NEWOBJ);
 
   // call '__getstate__', push arguments
-  // auto state = ivalue.toObject()->type()->getMethod("__getstate__")->run();
-  auto state = IValue();
-  addIValue(state);
+  addIValue(getObjectState(ivalue));
 
   // call to '__setstate__'
   push<OpCode>(OpCode::BUILD);
