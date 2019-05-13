@@ -345,4 +345,55 @@ Tensor & VariableType::detach_(Tensor & self) const {
   return self;
 }
 
+Tensor VariableType::sparse_mask(const Tensor & self, SparseTensorRef mask) const {
+  RECORD_FUNCTION("sparse_mask", std::vector<c10::IValue>({self}), Function::peek_at_next_sequence_nr());
+  auto& self_ = unpack(self, "self", 0);
+  auto mask_ = unpack(mask, "mask", 1);
+  std::shared_ptr<SparseMaskBackward> grad_fn;
+  if (compute_requires_grad( self )) {
+    grad_fn = std::shared_ptr<SparseMaskBackward>(new SparseMaskBackward(), deleteFunction);
+    grad_fn->set_next_edges(collect_next_edges( self ));
+    auto variable = make_variable(mask_.tref);
+    grad_fn->mask_ = SavedVariable(variable, false);
+  }
+  torch::jit::Node* node = nullptr;
+  std::shared_ptr<jit::tracer::TracingState> tracer_state;
+  if (jit::tracer::isTracing()) {
+    tracer_state = jit::tracer::getTracingState();
+    at::Symbol op_name;
+    op_name = jit::Symbol::fromQualString("aten::sparse_mask");
+    node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    jit::tracer::addInputs(node, "mask", mask);
+    tracer_state->graph->insertNode(node);
+
+    jit::tracer::setTracingState(nullptr);
+  }
+  #ifndef NDEBUG
+  c10::optional<Storage> self__storage_saved =
+    self_.has_storage() ? c10::optional<Storage>(self_.storage()) : c10::nullopt;
+  c10::intrusive_ptr<TensorImpl> self__impl_saved;
+  if (self_.defined()) self__impl_saved = self_.getIntrusivePtr();
+  #endif
+  auto tmp = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return baseType->sparse_mask(self_, mask_);
+  })();
+  auto result = as_variable(tmp);
+  #ifndef NDEBUG
+  if (self__storage_saved.has_value())
+    AT_ASSERT(self__storage_saved.value().is_alias_of(self_.storage()));
+  if (self__impl_saved) AT_ASSERT(self__impl_saved == self_.getIntrusivePtr());
+  #endif
+  if (grad_fn) {
+      set_history(flatten_tensor_args( result ), grad_fn);
+  }
+  if (tracer_state) {
+    jit::tracer::setTracingState(std::move(tracer_state));
+    jit::tracer::addOutput(node, result);
+  }
+  return result;
+}
+
 }} // namespace torch::autograd

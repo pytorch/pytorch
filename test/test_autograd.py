@@ -1598,6 +1598,13 @@ class TestAutograd(TestCase):
     def test_sparse_gather_both_scalar(self):
         self._test_sparse_gather((), (), 0)
 
+    def test_to_sparse_autograd(self):
+        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
+            tensor = torch.randn(3, requires_grad=True, device=device)
+            converted = tensor.to_sparse().to_dense()
+            converted.sum().backward()
+            self.assertEqual(tensor.grad, torch.ones(3, device=device))
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,

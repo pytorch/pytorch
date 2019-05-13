@@ -138,6 +138,12 @@ def process_function(func):
 
     def save_arg(arg, is_output):
         name = arg['name']
+        # SparseTensorRef can't be constructed via a default constructor, but
+        # just wraps a Tensor. Swapping 'type' causes SparseTensorRef to be treated
+        # like Tensor, creating SavedVariable etc.
+        if arg['type'] == 'SparseTensorRef':
+            arg['type'] = 'Tensor'
+
         if arg['type'] == 'Tensor' or (arg['type'] == 'Scalar' and is_output):
             saved_variables.append('SavedVariable {}_;'.format(name))
             release_variables.append('{}_.reset_data();'.format(name))
