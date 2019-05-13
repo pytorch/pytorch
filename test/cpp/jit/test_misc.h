@@ -797,7 +797,7 @@ void testModuleConversion() {
     // test cuda to cpu for params and buffers
     m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
     m->register_buffer("bar", torch::ones({}, at::kCUDA));
-    
+
     m->to(at::kCUDA);
     m->to(at::kCPU);
     AT_ASSERT(m->get_parameter("foo").data().device().is_cpu());
@@ -807,7 +807,7 @@ void testModuleConversion() {
     // test cpu to cuda for params and buffers
     m->register_parameter("foo", torch::ones({}), false);
     m->register_buffer("bar", torch::ones({}));
-    
+
     m->to(at::kCUDA);
     AT_ASSERT(m->get_parameter("foo").data().device().is_cuda());
     AT_ASSERT(m->get_buffer("bar").data().device().is_cuda());
@@ -842,7 +842,9 @@ graph(%a):
 }
 
 static void checkShape(Node* n, std::vector<int64_t> expected) {
-  auto tp = n->output()->type();
+  auto profile = n->inputs().at(0)->node();
+  AT_ASSERT(profile->kind() == prim::profile);
+  auto tp = profile->output()->type();
   auto ptp = tp->expect<ProfiledTensorType>();
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
@@ -879,7 +881,7 @@ void testProfiler() {
   auto mm =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mm; });
   ASSERT_NE(mm, end);
-  std::vector<int64_t> mm_expected{4, 2048};
+  std::vector<int64_t> mm_expected{4, 256};
   std::vector<int64_t> eltwise{4, 512};
   checkShape(*mm, mm_expected);
   auto sigmoid_n = std::find_if(

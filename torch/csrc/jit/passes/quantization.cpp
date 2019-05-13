@@ -10,8 +10,13 @@ namespace torch {
 namespace jit {
 namespace {
 // QuantizerUtils
+struct param_info_t {
+  Value* v;
+  Node* n; // Value consumer
+  size_t idx; // Index in input param vector
+};
 
-bool checkIfNodeQuantizable(Node* n) {
+Operator* checkIfNodeQuantizable(Node* n) {
   AT_ASSERT(n != nullptr);
   // This is map for quantizable nodes. It will be expanded in future to
   // support more ops and patterns.
@@ -23,6 +28,62 @@ stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
 stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, \
 int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"};
   return quantnodeLookup.find(n);
+}
+
+// Look for index of particular param in op schema
+size_t getParamIndexinOpArgs(Node* n, const std::string& param_name) {
+  AT_ASSERT(n != nullptr);
+  Operator* optr = checkIfNodeQuantizable(n);
+  if (optr == nullptr) {
+    return static_cast<size_t>(-1);
+  }
+  auto& opargs = optr->schema().arguments();
+  for (size_t idx = 0; idx < opargs.size(); idx++) {
+    if (opargs[idx].name() == param_name) {
+      return idx;
+    }
+  }
+  return static_cast<size_t>(-1);
+}
+
+std::vector<param_info_t> getQuantizableParamsofName(
+    script::Method& method,
+    const std::string& param_name) {
+  std::vector<param_info_t> params_to_insert_qdq;
+  auto graph = method.graph();
+  // Parameters input to this method
+  size_t param_input_len = method.initial_ivalues().size();
+  // External inputs to this method
+  size_t ext_input_len = method.num_inputs();
+  std::unordered_map<Node*, size_t> node_paramidx_map;
+
+  for (size_t idx = 0; idx < param_input_len; idx++) {
+    auto& v = graph->inputs()[idx + ext_input_len];
+    if (!v->type()->isSubtypeOf(TensorType::get()) || !v->hasUses()) {
+      continue;
+    }
+    Node* n = v->uses()[0].user;
+
+    // For every param name, we match it against the quantizable op schema and
+    // find its position. if the param is present we store it in vector so
+    // later we can insert quant-dequant nodes. Caching the param index helps
+    // faster lookup for same kind of node visited multiple timees.
+    size_t param_idx;
+    auto it = node_paramidx_map.find(n);
+    if (it != node_paramidx_map.end()) {
+      param_idx = it->second;
+    } else {
+      param_idx = getParamIndexinOpArgs(n, param_name);
+      node_paramidx_map.emplace(n, param_idx);
+    }
+    if (param_idx >= n->inputs().size() || n->inputs()[param_idx] != v) {
+      // Either node does not contain param or this Value
+      // is not of type param_name
+      continue;
+    }
+    params_to_insert_qdq.emplace_back(param_info_t{v, n, idx});
+  }
+  return params_to_insert_qdq;
 }
 
 std::vector<Value*> insertQuantParamNodes(
@@ -424,6 +485,46 @@ void QuantLinting(std::shared_ptr<Graph>& graph) {
 void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
+
+void InsertQuantDequantNodesForParam(
+    script::Method& method,
+    const std::string& param_name,
+    const std::function<std::tuple<std::string, float, int>(at::Tensor)>&
+        getQParamFunc,
+    at::ScalarType t) {
+  AT_ASSERT(getQParamFunc != nullptr);
+  auto params_to_insert_qdq = getQuantizableParamsofName(method, param_name);
+
+  for (auto& param_info : params_to_insert_qdq) {
+    auto& param_slot = method.initial_ivalues()[param_info.idx];
+    const auto& itensor = param_slot.value();
+    at::Tensor tensor_var = itensor.toTensor().detach();
+    auto qparam = getQParamFunc(tensor_var);
+    addQuantDeQuantNodesForInput(param_info.v, param_info.n, qparam, t);
+  }
+}
+
+// Exposing the template api helps reuse the same interface for different
+// qparamfunc for different qschemes.
+template <typename Fn>
+void InsertQuantDequantNodesForParam(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::string& param_name,
+    const Fn& getQParamFunc,
+    at::ScalarType t) {
+  auto& method = moduleObj->get_method(method_name);
+  InsertQuantDequantNodesForParam(method, param_name, getQParamFunc, t);
+}
+
+// Explicit Supported Template specialization for getQParamFunc.
+template TORCH_API void InsertQuantDequantNodesForParam(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::string& param_name,
+    const std::function<std::tuple<std::string, float, int>(at::Tensor)>&
+        getQParamFunc,
+    at::ScalarType t);
 
 } // namespace jit
 } // namespace torch

@@ -171,7 +171,8 @@ void BlockToONNX(
   torch::autograd::SymbolicContext ctx{};
   ctx.block = new_block;
   py::object onnx = py::module::import("torch.onnx");
-  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic");
+  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic_helper");
+  py::object onnx_registry = py::module::import("torch.onnx.symbolic_registry");
 
   // Returns a node that n maps to in the new graph
   auto envFn = [&env](Value* n) -> Value* {
@@ -295,7 +296,6 @@ void BlockToONNX(
     if (func) {
       pyobj = func->get();
     }
-
     if (!py::hasattr(pyobj, "symbolic")) {
       cloneNode(op);
       return;
@@ -331,6 +331,8 @@ void BlockToONNX(
     // Call the symbolic function
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
+    py::object opset_version = onnx_symbolic.attr("_export_onnx_opset_version");
+    onnx_registry.attr("register_op")(op->name(), pyobj.attr("symbolic"), "", opset_version);
     py::object raw_output = onnx.attr("_run_symbolic_method")(
         op->name(), pyobj.attr("symbolic"), py_symbolic_args);
 

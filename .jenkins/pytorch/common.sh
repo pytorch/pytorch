@@ -116,20 +116,6 @@ if [ -z "$COMPACT_JOB_NAME" ]; then
   exit 1
 fi
 
-if grep --line-regexp -q "$COMPACT_JOB_NAME" "$(dirname "${BASH_SOURCE[0]}")/disabled-configs.txt"; then
-  echo "Job is explicitly disabled, SKIPPING"
-  exit 0
-else
-  echo "Job is not disabled, proceeding"
-fi
-
-if grep --line-regexp -q "$COMPACT_JOB_NAME" "$(dirname "${BASH_SOURCE[0]}")/enabled-configs.txt"; then
-  echo "Job is enabled, proceeding"
-else
-  echo "Job is not enabled, FAILING now (revert changes to enabled-configs.txt to fix this)"
-  exit 1
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
