@@ -38,13 +38,7 @@ namespace onnx = ::ONNX_NAMESPACE;
 class ScriptModuleSerializer;
 
 std::string getNodeStackTraceString(const Node* n) {
-  std::stringstream ss;
-  if (n->getSourceLocation()) {
-    n->getSourceLocation()->highlight(ss);
-  } else {
-    ss << "<unknown location>";
-  }
-  return ss.str();
+  return n->sourceRange().str();
 }
 
 void validateBlock(
@@ -258,10 +252,8 @@ void EncoderBase::EncodeBlock(
       continue;
     }
     auto p_n = graph_proto->add_node();
-    if (node->getSourceLocation() && !strip_doc_) {
-      std::stringstream ss;
-      node->getSourceLocation()->highlight(ss);
-      p_n->set_doc_string(ss.str());
+    if (!strip_doc_) {
+      p_n->set_doc_string(node->sourceRange().str());
     }
     for (auto input : node->inputs()) {
       if (input->node()->mustBeNone() && !is_raw_export) {
@@ -541,7 +533,6 @@ class ScriptModuleSerializer final {
   OrderedDict<ClassTypePtr, std::string> converted_classes_;
   std::unordered_map<ClassTypePtr, std::vector<ClassTypePtr>> class_to_deps_;
 
-  static const size_t op_version_set = 0;
 };
 
 // ScriptModuleSerializer's methods
@@ -612,7 +603,7 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
     const std::string& src = fileToSrc.at(filename).str();
 
     std::ostringstream lib_stream;
-    lib_stream << "op_version_set = " << op_version_set << "\n";
+    lib_stream << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     lib_stream << src;
     std::string lib_str = lib_stream.str();
     writer_.writeRecord(filename, lib_str.c_str(), lib_str.size());
@@ -771,7 +762,7 @@ void ScriptModuleSerializer::convertModule(
 
   if (module.get_methods().size() > 0) {
     std::ostringstream methods;
-    methods << "op_version_set = " << op_version_set << "\n";
+    methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
         module.class_compilation_unit(),

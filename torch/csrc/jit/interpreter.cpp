@@ -331,7 +331,7 @@ struct Instruction {
   UseList inputs;
   ListHandle<int> outputs;
   Symbol debug_name; // used in dump to understand the generated code
-  std::shared_ptr<SourceLocation> debug_location; // for error reporting
+  c10::optional<SourceRange> debug_location; // for error reporting
 };
 
 int relativeJump(int from_inst, int to_inst) {
@@ -378,7 +378,7 @@ struct CodeImpl {
 
   void insertNodesFromBlock(Block* block) {
     for (auto node : block->nodes()) {
-      const auto& source_location = node->getSourceLocation();
+      SourceRange source_location = node->sourceRange();
       switch (node->kind()) {
         case prim::If: {
           // x = if c:
@@ -482,7 +482,7 @@ struct CodeImpl {
   size_t insertInstruction(Node* n) {
     auto inst = insertInstruction(
         n->kind(),
-        n->getSourceLocation(),
+        n->sourceRange(),
         n->inputs(),
         moveFlags(n),
         n->outputs());
@@ -491,7 +491,7 @@ struct CodeImpl {
   }
   size_t insertInstruction(
       Symbol sym,
-      std::shared_ptr<SourceLocation> debug_location,
+      const SourceRange& debug_location,
       ArrayRef<Value*> inputs,
       ArrayRef<uint8_t> move_flags,
       ArrayRef<Value*> outputs) {
@@ -521,7 +521,7 @@ struct CodeImpl {
   }
 
   size_t insertAssign(
-      std::shared_ptr<SourceLocation> debug_location,
+      const SourceRange& debug_location,
       ArrayRef<Value*> inputs,
       ArrayRef<uint8_t> move_flags,
       ArrayRef<Value*> outputs) {
@@ -714,14 +714,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       } catch (std::exception& e) {
         // Error from the current thread
         bool is_jit_exception = dynamic_cast<JITException*>(&e);
-        if (instructions[pc].debug_location) {
-          handleError(
-              instructions[pc].debug_location->wrapException(
-                  e, "operation failed in interpreter"),
-              is_jit_exception);
-        } else {
-          handleError(e.what(), is_jit_exception);
-        }
+        handleError(
+            instructions[pc].debug_location->wrapException(
+                e, "operation failed in interpreter"),
+            is_jit_exception);
         return false;
       }
     }
