@@ -750,6 +750,7 @@ def trace(func,
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                   var_lookup_fn,
                                                   _force_outplace)
+    traced = TracedFunction(traced)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
@@ -1669,14 +1670,12 @@ class TracedModule(ScriptModule):
 class TracedFunction(TracedModule):
     def __init__(self, func, id_set=None, optimize=True):
         ScriptModule.__init__(self, optimize=optimize)
+        self.forward = func
         self._freeze()
 
 
 if _enabled:
     class TopLevelTracedModule(TracedModule):
-        forward = _CachedForward()
-
-    class TopLevelTracedFunction(TracedFunction):
         forward = _CachedForward()
 
 
