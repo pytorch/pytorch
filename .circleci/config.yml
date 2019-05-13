@@ -573,10 +573,14 @@ binary_linux_test: &binary_linux_test
   steps:
   - attach_workspace:
       at: ~/workspace
+  - attach_workspace:
+      at: /home/circleci/project
   - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
+  - run:
+      <<: *binary_checkout
   - run:
       <<: *binary_populate_env
   - run:
@@ -1333,6 +1337,8 @@ jobs:
     machine:
       image: ubuntu-1604:201903-01
     steps:
+    - attach_workspace:
+        at: ~/workspace
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -1386,6 +1392,8 @@ jobs:
     machine:
       image: ubuntu-1604:201903-01
     steps:
+    - attach_workspace:
+        at: ~/workspace
     - run:
         <<: *setup_linux_system_environment
     - run:

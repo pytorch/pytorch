@@ -9,7 +9,7 @@
 source /home/circleci/project/env
 echo "Running the following code in Docker"
 cat /home/circleci/project/ci_test_script.sh
-set -ex
+set -ex -o pipefail
 
 # Expect actual code to be written to this file
 chmod +x /home/circleci/project/ci_test_script.sh
