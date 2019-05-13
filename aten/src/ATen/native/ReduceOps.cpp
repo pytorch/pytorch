@@ -38,12 +38,12 @@ static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dty
 
 using DimMask = TensorIterator::DimMask;
 
-static DimMask make_dim_mask(c10::optional<IntArrayRef> dims, int64_t ndim) {
+static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
   auto mask = DimMask();
-  if (!dims.has_value() || dims.value().empty()) {
+  if (dims.empty()) {
     mask.flip();
   } else {
-    for (int64_t dim : dims.value()) {
+    for (int64_t dim : dims) {
       mask.set(maybe_wrap_dim(dim, ndim));
     }
   }
@@ -87,7 +87,7 @@ static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask,
 }
 
 static std::unique_ptr<TensorIterator> make_reduction(
-    const char* name, Tensor& result, const Tensor& self, c10::optional<IntArrayRef> dim,
+    const char* name, Tensor& result, const Tensor& self, IntArrayRef dim,
     bool keepdim, ScalarType dtype)
 {
   // check that result type and dtype match if provided
@@ -115,7 +115,7 @@ static std::unique_ptr<TensorIterator> make_reduction(
 }
 
 static std::unique_ptr<TensorIterator> make_reduction(
-    const char* name, Tensor& result1, Tensor& result2, const Tensor& self, c10::optional<IntArrayRef> dim,
+    const char* name, Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
     bool keepdim, ScalarType dtype)
 {
   // check that result type and dtype match if provided
@@ -646,7 +646,7 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
   return result;
 }
 
-static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, c10::optional<IntArrayRef> dim, bool unbiased, bool keepdim, bool take_sqrt) {
+static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            fname, " only support CPU and CUDA backend, got: ", toString(self.type().backend()));
@@ -668,20 +668,20 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
   return std::tuple<Tensor&, Tensor&>(result1, result2);
 }
 
-std::tuple<Tensor&,Tensor&> var_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, c10::optional<IntArrayRef> dim, bool unbiased, bool keepdim) {
+std::tuple<Tensor&,Tensor&> var_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return std_var_mean_out("var_mean", result1, result2, self, dim, unbiased, keepdim, false);
 }
 
-std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, c10::optional<IntArrayRef> dim, bool unbiased, bool keepdim) {
+std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return std_var_mean_out("std_mean", result1, result2, self, dim, unbiased, keepdim, true);
 }
 
 std::tuple<Tensor&,Tensor&> var_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, bool unbiased) {
-  return std_var_mean_out("var_mean", result1, result2, self, c10::nullopt, unbiased, false, false);
+  return std_var_mean_out("var_mean", result1, result2, self, {}, unbiased, false, false);
 }
 
 std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, bool unbiased) {
-  return std_var_mean_out("std_mean", result1, result2, self, c10::nullopt, unbiased, false, true);
+  return std_var_mean_out("std_mean", result1, result2, self, {}, unbiased, false, true);
 }
 
 std::tuple<Tensor,Tensor> var_mean(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
