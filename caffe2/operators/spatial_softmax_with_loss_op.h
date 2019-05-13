@@ -67,4 +67,4 @@ class SpatialSoftmaxWithLossGradientOp final : public Operator<Context> {
 
 } // namespace caffe2
 
-#endif // SOFTMAX_WITH_LOSS_OP_H_
+#endif // SPATIAL_SOFTMAX_WITH_LOSS_OP_H_

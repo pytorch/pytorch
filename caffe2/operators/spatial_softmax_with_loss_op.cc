@@ -18,8 +18,8 @@ OPERATOR_SCHEMA(SpatialSoftmaxWithLoss)
       ArgumentHelper helper(def);
       vector<TensorShape> out(2);
 
-      auto logits = in[0]; // Tensor with Shape [batch_size, num_classes]
-      auto labels = in[1]; // Tensor with shape [batch_size, ]
+      auto logits = in[0]; // Tensor with Shape [batch_size, num_classes, height, width]
+      auto labels = in[1]; // Tensor with shape [batch_size, height, width]
       auto batch_size = logits.dims().Get(0);
       auto num_classes = logits.dims().Get(1);
 
@@ -34,26 +34,32 @@ OPERATOR_SCHEMA(SpatialSoftmaxWithLoss)
       return out;
     })
     .SetDoc(R"DOC(
-Combined Spatial Softmax and Cross-Entropy loss operator.
-Similar to SoftmaxWithLoss, this operator computes the spatial softmax
-normalized values for each layer in the batch of the given input, after which
-cross-entropy loss is computed. This operator is numerically more stable than
-separate Softmax and CrossEntropy ops. The inputs are a 2-D tensor
-(Tensor) of size (batch_size x input_feature_dimensions) and tensor of
-labels (ground truth).
-Output is tensor with the probability for each label in a pixel for each example
-(N x D x W x H) and averaged loss (scalar).
-For spatial softmax, weighting is by x,y position of the input.
+Combined Spatial Softmax and Cross-Entropy loss operator. Similar to `SoftmaxWithLoss`,
+this operator first computes the spatial softmax normalized values for each layer in
+the batch of the given input, then computes cross-entropy loss. This operator is
+numerically more stable than separate `Softmax` and `CrossEntropy` ops. The inputs are
+a 4-D tensor `logits` of size (batch_size x input_feature_dimensions x height x width),
+which represents the unscaled log probabilities, and a 3-D tensor `labels` of size
+(batch_size x height x width) for ground truth. An optional third input blob
+(`weight_tensor`) can be used to weight each pixel of the samples for the loss, which
+is useful if the training set is unbalanced. This operator outputs a `softmax` tensor
+which contains the probability for each label of a pixel for each example (same shape
+as `logits` inputs), and a scalar `loss` value, which is the averaged cross-entropy
+loss between the softmax probabilities and the ground truth values.
+
 )DOC")
-    .Input(0, "logits", "Unscaled log probabilities")
-    .Input(1, "labels", "Ground truth")
+    .Arg(
+        "scale",
+        "*(type: float)* Average loss output scaling factor (must be >= 0).")
+    .Input(0, "logits", "*(type: Tensor`<float>`)* Input tensor.")
+    .Input(1, "labels", "*(type: Tensor`<float>`)* Ground truth label tensor.")
     .Input(
         2,
         "weight_tensor",
-        "Optional blob to be used to weight the samples for the loss. With\
+        "*(type: Tensor`<float>`)* [OPTIONAL] Blob used to weight the samples for the loss. With\
         spatial set, weighting is by x,y of the input")
-    .Output(0, "softmax", "Tensor with softmax cross entropy loss")
-    .Output(1, "loss", "Average loss");
+    .Output(0, "softmax", "*(type: Tensor`<float>`)* Softmax output tensor.")
+    .Output(1, "loss", "*(type: float)* Averaged cross-entropy loss output.");
 
 // Input: X, T, P, dY; Output: dX
 OPERATOR_SCHEMA(SpatialSoftmaxWithLossGradient).NumOutputs(1);
@@ -81,7 +87,6 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
         D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
   }
 
-  float* Pdata = P->template mutable_data<float>();
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : nullptr);
   CAFFE_ENFORCE_EQ(X.dim(), 4);
   CAFFE_ENFORCE_EQ(T.dim(), 3);
@@ -91,7 +96,9 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   int W = X.dim32(3);
 
   const float* Xdata = X.data<float>();
+  float* Pdata = P->template mutable_data<float>();
 
+  // Softmax for each x,y location
   for (int i = 0; i < N; ++i) {
     for (int y = 0; y < H; ++y) {
       for (int x = 0; x < W; ++x) {
@@ -127,8 +134,8 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   float* avg_loss_data = avg_loss->template mutable_data<float>();
   const int* label_data = T.data<int>();
 
-  float sum_label_xent = 0.0f;
-  float total_weight = 0.0;
+  float loss_sum = 0.0;
+  float weight_sum = 0.0;
 
   for (int y = 0; y < H; y++) {
     for (int x = 0; x < W; x++) {
@@ -138,22 +145,22 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
         if (label != DONT_CARE) {
           CAFFE_ENFORCE(
               label < D && label >= 0,
-              "Label seems incorrect:label value larger than number of classes",
-              label_data[i],
+              "Label seems incorrect: label value larger than number of classes: ",
+              label,
               " vs ",
               D);
           int idx = i * (H * W * D) + label * (H * W) + y * W + x;
-          float w = weights ? weights[label_idx] : 1.0;
-          total_weight += w;
-          sum_label_xent += -log(std::max(Pdata[idx], 1e-20f)) * w;
+          float weight = weights ? weights[label_idx] : 1.0;
+          weight_sum += weight;
+          loss_sum += -log(std::max(Pdata[idx], 1e-20f)) * weight;
         }
       }
     }
   }
-  if (total_weight != 0.0) {
-    *avg_loss_data = sum_label_xent / total_weight;
+  if (weight_sum != 0.0) {
+    avg_loss_data[0] = loss_sum * scale_ / weight_sum;
   } else {
-    *avg_loss_data = 0.0;
+    avg_loss_data[0] = 0.0;
   }
   return true;
 }
@@ -220,20 +227,15 @@ bool SpatialSoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
     }
   }
 
+  // Scale by scale_ * d_avg_loss / N
   if (total_weight > 0) {
     math::Scale<float, float, CPUContext>(
         dX->numel(),
-        scale_ / total_weight,
+        scale_ / total_weight * d_avg_loss.data<float>()[0],
         dX->data<float>(),
         dX_data,
         &context_);
   }
-  math::Scale<float, float, CPUContext>(
-      dX->numel(),
-      d_avg_loss.data<float>(),
-      dX->data<float>(),
-      dX->template mutable_data<float>(),
-      &context_);
   return true;
 }
 
