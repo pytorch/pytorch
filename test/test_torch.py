@@ -9080,18 +9080,19 @@ class _TestTorchMixin(object):
 
             x = torch.tensor(0.5, device=device)
             y = torch.nonzero(x)
-            # For now, nonzero with as_tuple returns an empty
-            # tuple for a zero-dim tensor.
-            # This is different from numpy behavior, and We may decide to
-            # change it.
+            # nonzero with as_tuple returns a
+            # tuple of len 1 for a zero-dim tensor.
+            # This is done to match Numpy behavior.
             z = torch.nonzero(x, as_tuple=True)
-            self.assertEqual((), z)
+            self.assertEqual(1, len(z))
+            self.assertEqual(torch.zeros(1, dtype=torch.long), z[0])
 
             x = torch.zeros((), device=device)
             y = torch.nonzero(x)
             z = torch.nonzero(x, as_tuple=True)
             self.assertEqual(torch.Size([0, 0]), y.shape)
-            self.assertEqual((), z)
+            self.assertEqual(1, len(z))
+            self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
 
     def test_deepcopy(self):

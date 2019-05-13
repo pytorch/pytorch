@@ -569,6 +569,18 @@ Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& in
 }
 
 std::vector<Tensor> nonzero_tuple(const Tensor& self) {
+  // special case scalar for compatibility with numpy:
+  //
+  // >>> np.array(5).nonzero()
+  // (array([0]),)
+  // >>> np.array(0).nonzero()
+  // (array([], dtype=int64),)
+  if (self.dim() == 0) {
+    if (at::is_nonzero(self)) {
+      return {at::zeros({1}, self.options().dtype(at::kLong))};
+    }
+    return {at::empty({0}, self.options().dtype(at::kLong))};
+  }
   return self.nonzero().unbind(1);
 }
 
