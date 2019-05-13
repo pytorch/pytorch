@@ -211,18 +211,18 @@ static void check_shape_forward(const at::Tensor& input,
   auto dilation = params.dilation;
   bool transposed = params.transposed;
 
-  AT_CHECK(!params.is_padding_neg(), "negative padding is not supported");
-  AT_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
-  AT_CHECK(!params.is_stride_neg(), "negative stride is not supported");
+  TORCH_CHECK(!params.is_padding_neg(), "negative padding is not supported");
+  TORCH_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
+  TORCH_CHECK(!params.is_stride_neg(), "negative stride is not supported");
 
-  AT_CHECK(weight_dim == k,
+  TORCH_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
            "-dimensional weight ", weight_sizes, ", but got ", k, "-dimensional input of size ",
            input.sizes(), " instead");
-  AT_CHECK(weight_sizes[0] >= groups,
+  TORCH_CHECK(weight_sizes[0] >= groups,
            "Given groups=", groups, ", expected weight to be at least ", groups,
            " at dimension 0, but got weight of size ", weight_sizes, " instead");
-  AT_CHECK(weight_sizes[0] % groups == 0,
+  TORCH_CHECK(weight_sizes[0] % groups == 0,
            "Given groups=", groups, ", expected weight to be divisible by ",
            groups, " at dimension 0, but got weight of size ", weight_sizes,
            " instead");
@@ -232,12 +232,12 @@ static void check_shape_forward(const at::Tensor& input,
     std::vector<int64_t> kernel_shape;
     bool kernel_size_correct = true;
 
-    AT_CHECK(input.size(1) == (weight_sizes[1] * groups),
+    TORCH_CHECK(input.size(1) == (weight_sizes[1] * groups),
              "Given groups=", groups, ", weight of size ", weight_sizes,
              ", expected input", input.sizes(), " to have ",
              (weight_sizes[1] * groups), " channels, but got ", input.size(1),
              " channels instead");
-    AT_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[0]),
+    TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[0]),
              "Given weight of size ", weight_sizes,
              ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
              ", but got bias of size ", bias.sizes(), " instead");
@@ -251,7 +251,7 @@ static void check_shape_forward(const at::Tensor& input,
       }
     }
 
-    AT_CHECK(input_shape.size() == kernel_shape.size(), "Inconsistent shape between Input and Kernel");
+    TORCH_CHECK(input_shape.size() == kernel_shape.size(), "Inconsistent shape between Input and Kernel");
 
     if (!kernel_size_correct) {
       // If kernel size is incorrect
