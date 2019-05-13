@@ -57,8 +57,6 @@ struct GuardInserter {
 void InsertGuards(std::shared_ptr<Graph> graph) {
   GuardInserter gi(graph);
   gi.run();
-  std::cout << "remove profiling instructions\n";
-  graph->dump();
 }
 
 } // namespace jit
