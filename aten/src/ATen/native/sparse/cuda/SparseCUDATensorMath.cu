@@ -181,23 +181,23 @@ Tensor& s_addmm_sparse_dense_cuda_(
 
 SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse_, const Tensor& dense/* , Scalar alpha */) {
   AT_ASSERT(sparse_.is_cuda()); // dispatch argument
-  AT_CHECK(r_.is_cuda(), "hspmm: expected 'out' to be CUDA, but got CPU");
-  AT_CHECK(dense.is_cuda(), "hspmm: expected 'mat2' to be CUDA, but got CPU");
+  TORCH_CHECK(r_.is_cuda(), "hspmm: expected 'out' to be CUDA, but got CPU");
+  TORCH_CHECK(dense.is_cuda(), "hspmm: expected 'mat2' to be CUDA, but got CPU");
 
-  AT_CHECK(cuda::check_device({r_, sparse_, dense}));
+  TORCH_CHECK(cuda::check_device({r_, sparse_, dense}));
 
-  AT_CHECK(sparse_.sparse_dim() == 2,
+  TORCH_CHECK(sparse_.sparse_dim() == 2,
       "hspmm: Argument #2: 2D tensor expected, got ", sparse_.sparse_dim(), "D tensor");
-  AT_CHECK(sparse_.dense_dim() == 0,
+  TORCH_CHECK(sparse_.dense_dim() == 0,
       "hspmm: Argument #2: scalar values expected, got ", sparse_.dense_dim(), "D values");
-  AT_CHECK(dense.dim() == 2,
+  TORCH_CHECK(dense.dim() == 2,
       "hspmm: Argument #3: 2D tensor expected, got ", dense.dim(), "D tensor");
 
   int64_t m = sparse_.size(0);
   int64_t k = sparse_.size(1);
   int64_t n = dense.size(1);
 
-  AT_CHECK(dense.size(0) == k,
+  TORCH_CHECK(dense.size(0) == k,
       "hspmm: Argument #3: Expected dim 0 size ", k, ", got ", dense.size(0));
 
   get_sparse_impl(r_)->resize_and_clear_(1, 1, {m, n});
@@ -252,12 +252,12 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
   const SparseTensor& sparse = sparse_.tref;
 
   AT_ASSERT(dense.is_cuda()); // dispatch argument
-  AT_CHECK(sparse.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
-  AT_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
+  TORCH_CHECK(sparse.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
+  TORCH_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
 
-  AT_CHECK(cuda::check_device({sparse, r_, dense}));
+  TORCH_CHECK(cuda::check_device({sparse, r_, dense}));
 
-  AT_CHECK(dense.sizes().equals(sparse.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
+  TORCH_CHECK(dense.sizes().equals(sparse.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
     dense.sizes(), " while other has size ", sparse.sizes(), " (FYI: dense-sparse addition does not currently support broadcasting)");
 
   const int64_t nnz = sparse._nnz();
@@ -272,7 +272,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     r_.resize_as_(dense);
     r_.copy_(dense);
   } else {
-    AT_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
+    TORCH_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
     r = r_.contiguous();
   }
 
@@ -293,7 +293,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     cudaGetDevice(&curDevice);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
     if (sparse.dense_dim() == 0) {
-      AT_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
+      TORCH_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
       AT_DISPATCH_ALL_TYPES_AND(
         at::ScalarType::Half, values.scalar_type(), "add_out_dense_sparse_cuda", [&] {
@@ -304,7 +304,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
                 static_cast<uint64_t>(nnz));
           });
     } else {
-      AT_CHECK(cuda::getApplyGrid(nnz * block.x, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
+      TORCH_CHECK(cuda::getApplyGrid(nnz * block.x, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
       // sparseElementwiseKernel needs values to be contiguous too
       values = values.contiguous();
@@ -354,11 +354,11 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
 
 SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const SparseTensor& src, Scalar value) {
   AT_ASSERT(t.is_cuda()); // dispatch argument
-  AT_CHECK(src.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
-  AT_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
+  TORCH_CHECK(src.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
+  TORCH_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
 
-  AT_CHECK(cuda::check_device({r_, t, src}));
-  AT_CHECK(t.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but ", t.sizes(), " != ", src.sizes());
+  TORCH_CHECK(cuda::check_device({r_, t, src}));
+  TORCH_CHECK(t.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but ", t.sizes(), " != ", src.sizes());
 
   if (src._nnz() == 0) {
     return copy_sparse_to_sparse_(r_, t);
@@ -367,7 +367,7 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
     return mul_out_sparse_scalar(r_, src, value);
   }
 
-  AT_CHECK(is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", t.sparse_dim(), " sparse dimensions while 'other' has ", src.sparse_dim(), " sparse dimensions");
+  TORCH_CHECK(is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", t.sparse_dim(), " sparse dimensions while 'other' has ", src.sparse_dim(), " sparse dimensions");
 
   // We deliberately choose to simply concat the indices and values tensors
   // rather than merging them. This removes the need to synchronously fetch nnz
@@ -413,10 +413,10 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   }
 
   AT_ASSERT(t_.is_cuda()); // dispatch argument
-  AT_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
-  AT_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
-  AT_CHECK(cuda::check_device({r_, t_, src_}));
-  AT_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
+  TORCH_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
+  TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
+  TORCH_CHECK(cuda::check_device({r_, t_, src_}));
+  TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
 
   SparseTensor t = t_.coalesce();
   SparseTensor src = src_.coalesce();
@@ -445,7 +445,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   int curDevice = -1;
   cudaGetDevice(&curDevice);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
-  AT_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
+  TORCH_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
 
   LongTensor resultNnz = at::empty({1}, CUDA(kLong));
   AT_DISPATCH_ALL_TYPES_AND(
@@ -519,8 +519,8 @@ __global__ void _sparse_sum_backward_cuda_kernel(
 }
 
 Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_, IntArrayRef dims_to_sum) {
-  AT_CHECK(grad_.is_cuda(), "_sparse_sum_backward_cuda: expected 'grad_' to be CUDA tensor, but got CPU tensor");
-  AT_CHECK(input_.is_cuda(), "_sparse_sum_backward_cuda: expected 'input_' to be CUDA tensor, but got CPU tensor");
+  TORCH_CHECK(grad_.is_cuda(), "_sparse_sum_backward_cuda: expected 'grad_' to be CUDA tensor, but got CPU tensor");
+  TORCH_CHECK(input_.is_cuda(), "_sparse_sum_backward_cuda: expected 'input_' to be CUDA tensor, but got CPU tensor");
 
   auto input = input_.coalesce();
   const int64_t input_dim = input.dim();
@@ -553,7 +553,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {
-    AT_CHECK(!grad_.is_sparse(), "_sparse_sum_backward_cuda: expected grad Tensor to be dense since all sparse dims are summed");
+    TORCH_CHECK(!grad_.is_sparse(), "_sparse_sum_backward_cuda: expected grad Tensor to be dense since all sparse dims are summed");
     auto grad_input_values = grad_;
     auto expand_size = input_values.sizes().vec();
     if (sum_dense_dim) {
@@ -566,7 +566,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
     return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values,  input.options().dtype(grad_.dtype())); // convert to grad dtype
   }
   else {
-    AT_CHECK(grad_.is_sparse(), "_sparse_sum_backward_cuda: expected grad_ Tensor to be sparse, but got dense");
+    TORCH_CHECK(grad_.is_sparse(), "_sparse_sum_backward_cuda: expected grad_ Tensor to be sparse, but got dense");
     auto grad = grad_.coalesce();
     LongTensor grad_indices = grad._indices();
     Tensor grad_values = grad._values();
@@ -617,7 +617,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       int64_t total_threads = input_nnz;
       const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), total_threads));
       dim3 grid;
-      AT_CHECK(cuda::getApplyGrid(total_threads, grid, curDevice), "_sparse_sum_backward_cuda: input too large or too many dimensions");
+      TORCH_CHECK(cuda::getApplyGrid(total_threads, grid, curDevice), "_sparse_sum_backward_cuda: input too large or too many dimensions");
 
       auto grad_indices_ti = getTensorInfo<int64_t, int64_t>(grad_indices_1D);
       auto input_indices_ti = getTensorInfo<int64_t, int64_t>(input_indices_1D);
