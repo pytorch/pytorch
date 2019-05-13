@@ -118,6 +118,8 @@ install_doc_push_script: &install_doc_push_script
     git commit -m "auto-generating sphinx docs" || true
     git status
 
+    export dry_run=false  # yf225 TODO: remove this when ready to merge
+
     if [ "\$dry_run" = false ]; then
       echo "Pushing to pytorch.github.io:site"
       set +x
@@ -133,6 +135,8 @@ install_doc_push_script: &install_doc_push_script
     else
       echo "Skipping push due to dry_run"
     fi
+
+    exit 1  # yf225 TODO: remove this when ready to merge
 
     popd
     # =================== The above code **should** be executed inside Docker container ===================
