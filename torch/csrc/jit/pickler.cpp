@@ -304,6 +304,7 @@ void Pickler::pushObject(const IValue& ivalue) {
   pushClass(PicklerClass::OBJECT);
 
   // call to '__new__'
+  push<OpCode>(OpCode::EMPTY_TUPLE);
   push<OpCode>(OpCode::NEWOBJ);
 
   // call '__getstate__', push arguments

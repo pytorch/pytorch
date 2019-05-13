@@ -211,6 +211,8 @@ def ann_to_type(ann):
         return IntType.get()
     elif ann is str:
         return StringType.get()
+    elif ann is bool:
+        return BoolType.get()
     elif inspect.isclass(ann):
         qualname = qualified_name(ann)
         if is_script_class(qualname):
@@ -218,8 +220,6 @@ def ann_to_type(ann):
         else:
             raise ValueError("Class annotation {} is not a script class "
                              "(did you decorate the class with '@torch.jit.script'?)".format(ann))
-    elif ann is bool:
-        return BoolType.get()
     raise ValueError("Unknown type annotation: '{}'".format(ann))
 
 
