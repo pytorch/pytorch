@@ -3144,9 +3144,14 @@ graph(%Ra, %Rb):
         def fn(x):
             return x + 2
 
+        @torch.jit.script
+        def script_fn(x):
+            return x + 2
+
         out = torch.jit.trace(fn, (torch.ones(2, 2),))
         with tempfile.NamedTemporaryFile() as f:
             out.save(f.name)
+            script_fn.save(f.name)
 
     @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
     def test_torch_load_error(self):

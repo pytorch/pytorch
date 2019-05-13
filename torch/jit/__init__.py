@@ -976,7 +976,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         fn = torch._C._jit_script_compile(ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
-        return fn
+        return ScriptFunction(fn)
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -1667,11 +1667,27 @@ class TracedModule(ScriptModule):
         raise RuntimeError("Cannot set new properties on a traced module.")
 
 
-class TracedFunction(TracedModule):
-    def __init__(self, func, id_set=None, optimize=True):
-        ScriptModule.__init__(self, optimize=optimize)
-        self.forward = func
+class ScriptFunction(ScriptModule):
+    __frozen = False
+
+    def __init__(self, forward, optimize=True):
+        super(ScriptFunction, self).__init__(optimize=optimize)
+        self.forward = forward
         self._freeze()
+
+    def _freeze(self):
+        self.__frozen = True
+
+    def __setattr__(self, attr, value):
+        if not self.__frozen or hasattr(self, attr):
+            return super(ScriptFunction, self).__setattr__(attr, value)
+        raise RuntimeError("Cannot set new properties on a {}".format(type(self)))
+
+
+# Just here to differentiate where the function was produced, the functionality
+# is the same as ScriptFunction
+class TracedFunction(ScriptFunction):
+    pass
 
 
 if _enabled:
