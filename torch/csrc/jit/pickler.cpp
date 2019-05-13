@@ -38,29 +38,23 @@ PicklerClass getClass(const std::string& str) {
 const std::string& getClassName(PicklerClass cls) {
   static const std::string tensor_class("build_tensor_from_id\n");
   static const std::string intlist_class("build_intlist\n");
-<<<<<<< HEAD
   static const std::string object_class("build_class\n");
-=======
   static const std::string tensorlist_class("build_tensorlist\n");
   static const std::string doublelist_class("build_doublelist\n");
   static const std::string boollist_class("build_boollist\n");
->>>>>>> 67414714e51b96f4820a842aa6727f954a29b66e
   switch (cls) {
     case PicklerClass::TENSOR:
       return tensor_class;
     case PicklerClass::INTLIST:
       return intlist_class;
-<<<<<<< HEAD
     case PicklerClass::OBJECT:
       return object_class;
-=======
     case PicklerClass::TENSORLIST:
       return tensorlist_class;
     case PicklerClass::DOUBLELIST:
       return doublelist_class;
     case PicklerClass::BOOLLIST:
       return boollist_class;
->>>>>>> 67414714e51b96f4820a842aa6727f954a29b66e
     default:
       AT_ERROR("Unknown class for pickler");
   }
@@ -189,12 +183,9 @@ void Pickler::addIValue(const IValue& ivalue) {
     pushDict(ivalue);
   } else if (ivalue.isNone()) {
     push<OpCode>(OpCode::NONE);
-  } else if (ivalue.isIntList()) {
-<<<<<<< HEAD
-    pushIntList(ivalue);
   } else if (ivalue.isObject()) {
     pushObject(ivalue);
-=======
+  } else if (ivalue.isIntList()) {
     pushSpecializedList(
         ivalue, PicklerClass::INTLIST, [=](const IValue& ivalue) {
           for (const auto& item : ivalue.toIntListRef()) {
@@ -222,7 +213,6 @@ void Pickler::addIValue(const IValue& ivalue) {
             addIValue(bool(item));
           }
         });
->>>>>>> 67414714e51b96f4820a842aa6727f954a29b66e
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -784,7 +774,6 @@ OpCode Unpickler::readInstruction() {
         case PicklerClass::INTLIST:
           stack_.emplace_back(data->elements().at(0).toIntListRef());
           break;
-<<<<<<< HEAD
         // case PicklerClass::OBJECT: {
         //   auto data = setitem_data.toTuple();
         //
@@ -801,7 +790,6 @@ OpCode Unpickler::readInstruction() {
         //       c10::ivalue::Object::create(class_type, num_slots));
           break;
         // }
-=======
         case PicklerClass::TENSORLIST:
           stack_.emplace_back(data->elements().at(0).toTensorListRef());
           break;
@@ -811,7 +799,6 @@ OpCode Unpickler::readInstruction() {
         case PicklerClass::BOOLLIST:
           stack_.emplace_back(data->elements().at(0).toBoolListRef());
           break;
->>>>>>> 67414714e51b96f4820a842aa6727f954a29b66e
         default:
           AT_ERROR("Unknown pickler class id");
       }

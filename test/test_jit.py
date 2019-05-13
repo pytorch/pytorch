@@ -15252,7 +15252,7 @@ class TestClassType(JitTestCase):
         FileCheck().check_count("Double(*, *) = prim::GetAttr", 4).run(graphstr)
 
     def test_attribute(self):
-        with self.disableModuleHook():
+        with self.disableEmitHook():
             @torch.jit.script
             class Foo(object):
                 def __init__(self, x):
@@ -15344,7 +15344,6 @@ class TestClassType(JitTestCase):
                 li = [WrongLt(), WrongLt()]
                 li.sort()
                 return li
->>>>>>> 67414714e51b96f4820a842aa6727f954a29b66e
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_imported_classes(self):
