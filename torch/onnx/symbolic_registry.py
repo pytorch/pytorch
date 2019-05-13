@@ -2,6 +2,12 @@ import warnings
 import importlib
 from inspect import getmembers, isfunction
 
+# The symbolic registry "_registry" is a dictionary that maps operators
+# (for a specific domain and opset version) to their symbolic functions.
+# An operator is defined by its domain, opset version, and opname.
+# The keys are tuples (domain, version), (where domain is a string, and version is an int),
+# and the operator's name (string).
+# The map's entries are as follows : _registry[(domain, version)][op_name] = op_symbolic
 _registry = {}
 
 _symbolic_versions = {}

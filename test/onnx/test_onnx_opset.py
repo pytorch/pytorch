@@ -28,7 +28,7 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
     # in graph.node, in the right order.
     # At least the op_name should be specified,
     # but the op's attributes can optionally be
-    # specifies as well 
+    # specified as well
     assert len(ops) == len(graph.node)
     for i in range(0, len(ops)):
         assert graph.node[i].op_type == ops[i]['op_name']
@@ -75,6 +75,37 @@ class TestONNXOpset(TestCase):
         x = torch.arange(1., 6., requires_grad=True)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
+    def test_maxpool(self):
+        module = torch.nn.MaxPool1d(2, stride=1)
+
+        ops_9 = [{"op_name" : "MaxPool",
+                  "attributes" :
+                  [{"name": "kernel_shape", "ints": [2], "type": 7},
+                   {"name": "pads", "ints": [0, 0], "type": 7},
+                   {"name": "strides", "ints": [1], "type": 7}]}]
+        ops_10 = [{"op_name" : "MaxPool",
+                   "attributes" :
+                   [{"name": "ceil_mode", "i": 0, "type": 2},
+                    {"name": "kernel_shape", "ints": [2], "type": 7},
+                    {"name": "pads", "ints": [0, 0], "type": 7},
+                    {"name": "strides", "ints": [1], "type": 7}]}]
+        ops = {9 : ops_9, 10 : ops_10}
+        x = torch.randn(20, 16, 50)
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[10])
+
+        # add test with dilations
+        module = torch.nn.MaxPool1d(2, stride=1, dilation=2)
+
+        ops_10 = [{"op_name" : "MaxPool",
+                   "attributes" :
+                   [{"name": "ceil_mode", "i": 0, "type": 2},
+                    {"name": "dilations", "ints": [2], "type": 7},
+                    {"name": "kernel_shape", "ints": [2], "type": 7},
+                    {"name": "pads", "ints": [0, 0], "type": 7},
+                    {"name": "strides", "ints": [1], "type": 7}]}]
+        ops = {9 : ops_9, 10 : ops_10}
+        x = torch.randn(20, 16, 50)
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[10])
 
 if __name__ == '__main__':
     run_tests()
