@@ -5919,6 +5919,61 @@ a")
         self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
 
+    @unittest.skipIf(PY2, "Requires python 3")
+    def test_math_gcd(self):
+        def test_gcd(x, y):
+            # type: (int, int) -> int
+            return math.gcd(x, y)
+
+        for inputs in [(2, 4), (-5, -15), (-5, 15), (10, 0), (0, 10), (-5, 0), (0, -5), (0, 0), (0, -0)]:
+            self.checkScript(test_gcd, inputs)
+
+    def test_math_ops1(self):
+        funcs_template = dedent('''
+        def func():
+            return math.{func}({scalar})
+        ''')
+
+        def run_test(code):
+            scope = {}
+            execWrapper(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            self.assertEqual(cu.func(), scope['func']())
+
+        special_domain = ['gamma', 'lgamma']
+
+        for func in ['erf', 'erfc', 'expm1', 'fabs', 'gamma', 'lgamma']:
+            for scalar in [1, 10, 0, -1, -1.5, 5.0, 1.5]:
+                if func in special_domain and scalar in [0, -1]:
+                    continue
+                code = funcs_template.format(func=func, scalar=scalar)
+                run_test(code)
+
+    def test_math_copysign(self):
+
+        def func1(x, y):
+            # type: (int, int) -> float
+            return math.copysign(x, y)
+
+        def func2(x, y):
+            # type: (int, float) -> float
+            return math.copysign(x, y)
+
+        def func3(x, y):
+            # type: (float, int) -> float
+            return math.copysign(x, y)
+
+        def func4(x, y):
+            # type: (float, float) -> float
+            return math.copysign(x, y)
+
+        inputs = [(3.3, 5.5), (3.3, -5.5), (-3.3, 5.5), (-3.3, -5.5), (3.3, 0.0), (0.0, 3.3)]
+        for a, b in inputs:
+            self.checkScript(func1, (int(a), int(b)))
+            self.checkScript(func2, (int(a), b))
+            self.checkScript(func3, (a, int(b)))
+            self.checkScript(func4, (a, b))
+
     def test_if_nest_while(self):
         def func(a, b):
             # type: (int, int) -> int
