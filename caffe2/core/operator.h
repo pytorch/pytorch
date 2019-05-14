@@ -834,10 +834,36 @@ class Operator : public OperatorBase {
 
       context_.SwitchToDevice(stream_id);
 
+#ifdef __GNU_LIBRARY__
+      // If glibc is available, use feenableexcept that will raise exception
+      // right away.
+      int old_enabled_exceptions;
+      if (FLAGS_caffe2_operator_throw_if_fp_exceptions ||
+          FLAGS_caffe2_operator_throw_if_fp_overflow_exceptions) {
+        int flag = 0;
+        if (FLAGS_caffe2_operator_throw_if_fp_exceptions) {
+          flag |= FE_DIVBYZERO | FE_INVALID;
+        }
+        if (FLAGS_caffe2_operator_throw_if_fp_overflow_exceptions) {
+          flag |= FE_OVERFLOW;
+        }
+        old_enabled_exceptions = feenableexcept(flag);
+      }
+#else
+      // Otherwise, we clear before RunOnDevice, test exception flags
+      // afterwards, and raise an error if an exception has happend.
       if (FLAGS_caffe2_operator_throw_if_fp_exceptions) {
         std::feclearexcept(FE_ALL_EXCEPT);
       }
+#endif
       bool result = RunOnDevice();
+#ifdef __GNU_LIBRARY__
+      if (FLAGS_caffe2_operator_throw_if_fp_exceptions ||
+          FLAGS_caffe2_operator_throw_if_fp_overflow_exceptions) {
+        fedisableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW);
+        feenableexcept(old_enabled_exceptions);
+      }
+#else
       if (FLAGS_caffe2_operator_throw_if_fp_exceptions) {
         CAFFE_ENFORCE(
             !std::fetestexcept(FE_DIVBYZERO),
@@ -851,6 +877,7 @@ class Operator : public OperatorBase {
             !std::fetestexcept(FE_OVERFLOW),
             "Overflow floating point exception (FE_OVERFLOW) reported.");
       }
+#endif
       if (!result) {
         this->RecordLastFailedOpNetPosition();
       }
