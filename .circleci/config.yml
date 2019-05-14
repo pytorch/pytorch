@@ -123,7 +123,7 @@ install_doc_push_script: &install_doc_push_script
     if [ "\$dry_run" = false ]; then
       echo "Pushing to pytorch.github.io:site"
       set +x
-      expect <<- DONE
+      expect <<DONE
         spawn git push origin master_test
         expect "Username*"
         send "pytorchbot\n"
