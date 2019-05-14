@@ -40,6 +40,9 @@ IF(MKL_FOUND)
   LIST(APPEND MKLDNN_LIBRARIES ${MKL_LIBRARIES})
   LIST(APPEND MKLDNN_INCLUDE_DIR ${MKL_INCLUDE_DIR})
 ELSE(MKL_FOUND)
+  IF (MKLDNN_THREADING STREQUAL "TBB")
+    message(FATAL_ERROR "Cannot use MKL small library when MKL-DNN is using TBB")
+  ENDIF()
   # If we cannot find MKL, we will use the Intel MKL Small library
   # comes with ${MKLDNN_ROOT}/external
   IF(NOT IS_DIRECTORY ${MKLDNN_ROOT}/external)
@@ -89,8 +92,35 @@ ENDIF(MKL_FOUND)
 
 IF(MKL_FOUND)
   SET(MKL_cmake_included TRUE)
+  # Does not override if there's already value set, e.g. TBB
   SET(MKLDNN_THREADING "OMP:COMP" CACHE STRING "")
 ENDIF(MKL_FOUND)
+
+IF (MKLDNN_THREADING STREQUAL "TBB")
+  IF (USE_TBB)
+    message(STATUS "MKL-DNN is using TBB")
+    add_library(TBB::tbb SHARED IMPORTED)
+    set_target_properties(TBB::tbb PROPERTIES
+                       IMPORTED_CONFIGURATIONS "RELEASE;DEBUG"
+                       IMPORTED_LOCATION_RELEASE     "${CMAKE_BINARY_DIR}/lib/libtbb.so"
+                       IMPORTED_LOCATION_DEBUG       "${CMAKE_BINARY_DIR}/lib/libtbb.so"
+                       INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/third_party/tbb/include")
+    list(APPEND TBB_IMPORTED_TARGETS TBB::tbb)
+    set(TBB_cmake_included true)
+
+    if(MKLDNN_THR_CURRENT)
+        remove_definitions(-DMKLDNN_THR=${MKLDNN_THR_CURRENT})
+    endif()
+    set(MKLDNN_THR_CURRENT MKLDNN_THR_TBB)
+    add_definitions(-DMKLDNN_THR=${MKLDNN_THR_CURRENT})
+    set(TBB_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/third_party/tbb/include")
+    include_directories(${TBB_INCLUDE_DIRS})
+    list(APPEND EXTRA_SHARED_LIBS ${TBB_IMPORTED_TARGETS})
+  ELSE()
+    message(FATAL_ERROR "MKLDNN_THREADING is set to TBB but TBB is not used")
+  ENDIF()
+ENDIF()
+
 SET(WITH_TEST FALSE CACHE BOOL "" FORCE)
 SET(WITH_EXAMPLE FALSE CACHE BOOL "" FORCE)
 SET(MKLDNN_LIBRARY_TYPE STATIC CACHE STRING "" FORCE)
