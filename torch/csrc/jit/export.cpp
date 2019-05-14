@@ -670,13 +670,7 @@ void ScriptModuleSerializer::convertModel(
       module, "", writer_.archiveName(), model_def->mutable_main_module());
 
 
-  if (moduleHasValidGetSetState(module)) {
-    // These may write some attributes to the tensor_table_
-    writePickleArchive("states.pkl", pickled_ivalues_);
-  } else {
-    writePickleArchive("attributes.pkl", pickled_ivalues_);
-  }
-
+  writePickleArchive("attributes.pkl", pickled_ivalues_);
 
   writeTensorTable(model_def);
   writeLibs(model_def);
@@ -751,14 +745,14 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
 }
 
 IValue ScriptModuleSerializer::moduleGetState(const script::Module& module) {
-  auto getstate = module.module_object()->type()->getMethod("__getstate__");
+  auto getstate = module.find_method("__getstate__");
   AT_CHECK(
       getstate != nullptr,
       "Cannot call '__getstate__' method because"
       " it does not exist");
 
   Stack stack;
-  stack.emplace_back(module.module_object());
+  // stack.emplace_back(module.module_object());
   getstate->run(stack);
   return stack.at(0);
 }
@@ -847,8 +841,6 @@ void ScriptModuleSerializer::convertModule(
     // Run the '__getstate__' method on the module and store the result
     pickled_ivalues_.emplace_back(moduleGetState(module));
     module_def->set_id(pickled_ivalues_.size() - 1);
-  } else {
-
   }
   for (const auto& attribute : module.get_attributes()) {
     // Add attribute to ModuleDef
@@ -856,8 +848,14 @@ void ScriptModuleSerializer::convertModule(
     attribute_def->set_name(attribute.name());
     attribute_def->set_type(attribute.type()->python_str());
 
-    pickled_ivalues_.push_back(attribute.value());
-    attribute_def->set_id(pickled_ivalues_.size() - 1);
+    if (!user_provided_serialization) {
+      // Write the attribute's index if it's actually saved, -1 if it needs to
+      // come from __getstate__
+      pickled_ivalues_.push_back(attribute.value());
+      attribute_def->set_id(pickled_ivalues_.size() - 1);
+    } else {
+      attribute_def->set_id(-1);
+    }
   }
 
   std::stringstream module_name;

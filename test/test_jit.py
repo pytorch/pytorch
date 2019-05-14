@@ -11824,18 +11824,13 @@ a")
                 @torch.jit.script_method
                 def __setstate__(self, state):
                     # type: (Tuple[Tensor, Tensor, int]) -> None
-                    self.buffer1.set_(state[0])
-                    self.buffer2.set_(state[1])
+                    self.buffer1 = state[0]
+                    self.buffer2 = state[1]
 
-                    self.buffer1 += state[2]
-                    self.buffer2 += self.number
-
-
-            # with TemporaryFileName() as fname:
-            fname = "out.zip"
-            m = M(23, submodule=M(99))
-            m.save(fname)
-            loaded = torch.jit.load(fname)
+            with TemporaryFileName() as fname:
+                m = M(23, submodule=M(99))
+                m.save(fname)
+                loaded = torch.jit.load(fname)
 
             # Check original module
             self.assertEqual(m.buffer1, torch.ones(2, 2))

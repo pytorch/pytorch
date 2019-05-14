@@ -142,11 +142,7 @@ void ScriptModuleDeserializer::deserialize(
   }
 
   loadTensorTable(&model_def);
-  if (reader_.hasRecord("states.pkl")) {
-    pickled_ivalues_ = loadPickleArchive("states.pkl");
-  } else if (reader_.hasRecord("attributes.pkl")) {
-    pickled_ivalues_ = loadPickleArchive("states.pkl");
-  }
+  pickled_ivalues_ = loadPickleArchive("attributes.pkl");
 
   // TODO: this can be simplified when C++/Python interop lands,
   // and the submodules would be created as the same in either C++ or Python
@@ -261,20 +257,17 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
       import_callback);
 }
 
-void ScriptModuleDeserializer::moduleSetState(const std::shared_ptr<script::Module>& module, IValue state) {
-  auto setstate = module->module_object()->type()->getMethod("__setstate__");
+void ScriptModuleDeserializer::moduleSetState(
+    const std::shared_ptr<script::Module>& module,
+    IValue state) {
+  auto setstate = module->find_method("__setstate__");
+
   AT_CHECK(
       setstate != nullptr,
       "Cannot call '__setstate__' method because"
       " it does not exist");
 
-  // TODO: validate schema
-  // validateGetSetStateSchema();
-
-  Stack stack;
-  stack.emplace_back(module->module_object());
-  stack.emplace_back(std::move(state));
-  setstate->run(stack);
+  module->run_method("__setstate__", state);
 }
 
 void ScriptModuleDeserializer::convertModule(
@@ -304,10 +297,16 @@ void ScriptModuleDeserializer::convertModule(
       continue;
     }
 
+    IValue ivalue;
+    if (attr_def.id() >= 0) {
+      // attribute has no value in the table, set it to None for now. After
+      // __getstate__, check that all the attributes that are not Optional
+      // can't be None
+      ivalue = pickled_ivalues_.at(attr_def.id());
+    }
+
     module->register_attribute(
-        attr_def.name(),
-        typeParser.parseType(attr_def.type()),
-        pickled_ivalues_.at(attr_def.id()));
+        attr_def.name(), typeParser.parseType(attr_def.type()), ivalue);
   }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
@@ -326,7 +325,24 @@ void ScriptModuleDeserializer::convertModule(
         import_callback);
   }
 
-  moduleSetState(module, pickled_ivalues_.at(module_def.id()));
+  if (module_def.has_id()) {
+    moduleSetState(module, pickled_ivalues_.at(module_def.id()));
+  }
+
+  for (const auto& slot : module->get_attributes()) {
+    // Verify that all the non-optional attributes have been initialized
+    // TODO: Issue #20497
+    if (slot.type()->kind() != TypeKind::OptionalType) {
+      AT_CHECK(
+          !slot.value().isNone(),
+          "The field '",
+          slot.name(),
+          "' was left unitialized after __setstate__, but expected a ",
+          "value of type '",
+          slot.type()->python_str(),
+          "'");
+    }
+  }
 }
 
 } // namespace
