@@ -249,7 +249,7 @@ Tensor & random_(Tensor& self, Generator * generator) {
   return at::legacy::th::_th_random_(self, generator);
 }
 
-Tensor & uniform_(Tensor& self, double from, double to, Generator * generator) {
+Tensor & uniform_cpu_(Tensor& self, double from, double to, Generator * generator) {
   return at::legacy::th::_th_uniform_(self, from, to, generator);
 }
 
