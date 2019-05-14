@@ -99,23 +99,16 @@ ENDIF(MKL_FOUND)
 IF (MKLDNN_THREADING STREQUAL "TBB")
   IF (USE_TBB)
     message(STATUS "MKL-DNN is using TBB")
-    add_library(TBB::tbb SHARED IMPORTED)
-    set_target_properties(TBB::tbb PROPERTIES
-                       IMPORTED_CONFIGURATIONS "RELEASE;DEBUG"
-                       IMPORTED_LOCATION_RELEASE     "${CMAKE_BINARY_DIR}/lib/libtbb.so"
-                       IMPORTED_LOCATION_DEBUG       "${CMAKE_BINARY_DIR}/lib/libtbb.so"
-                       INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/third_party/tbb/include")
-    list(APPEND TBB_IMPORTED_TARGETS TBB::tbb)
-    set(TBB_cmake_included true)
 
-    if(MKLDNN_THR_CURRENT)
-        remove_definitions(-DMKLDNN_THR=${MKLDNN_THR_CURRENT})
-    endif()
-    set(MKLDNN_THR_CURRENT MKLDNN_THR_TBB)
-    add_definitions(-DMKLDNN_THR=${MKLDNN_THR_CURRENT})
+    set(TBB_cmake_included TRUE)
+    set(Threading_cmake_included TRUE)
+
+    remove_definitions(-DMKLDNN_THR)
+    add_definitions(-DMKLDNN_THR=MKLDNN_THR_TBB)
+
     set(TBB_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/third_party/tbb/include")
     include_directories(${TBB_INCLUDE_DIRS})
-    list(APPEND EXTRA_SHARED_LIBS ${TBB_IMPORTED_TARGETS})
+    list(APPEND EXTRA_SHARED_LIBS tbb)
   ELSE()
     message(FATAL_ERROR "MKLDNN_THREADING is set to TBB but TBB is not used")
   ENDIF()
