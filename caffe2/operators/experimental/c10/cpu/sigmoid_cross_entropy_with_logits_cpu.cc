@@ -71,20 +71,12 @@ void sigmoid_cross_entropy_with_logits_op_cpu_impl(
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::SigmoidCrossEntropyWithLogits",
-        "",
-        (std::vector<c10::Argument>{
-            c10::Argument("input1"),
-            c10::Argument("input2"),
-            c10::Argument("output"),
-            c10::Argument("log_D_trick", BoolType::get()),
-            c10::Argument("unjoined_lr_loss", BoolType::get())}),
-        (std::vector<c10::Argument>{})),
-    c10::kernel<
+    "_c10_experimental::SigmoidCrossEntropyWithLogits",
+    c10::RegisterOperators::options()
+      .kernel<
         decltype(sigmoid_cross_entropy_with_logits_op_cpu_impl),
-        &sigmoid_cross_entropy_with_logits_op_cpu_impl>(),
-    c10::dispatchKey(CPUTensorId()));
+        &sigmoid_cross_entropy_with_logits_op_cpu_impl>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 
