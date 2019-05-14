@@ -21,10 +21,6 @@ std::shared_ptr<Function> as_function(const py::object& obj) {
   if (py::isinstance<Function>(obj)) {
     return py::cast<std::shared_ptr<Function>>(obj);
   }
-  if (py::isinstance(
-          obj, py::module::import("torch.jit").attr("ScriptFunction"))) {
-    return py::cast<std::shared_ptr<Function>>(obj.attr("forward"));
-  }
   return nullptr;
 }
 

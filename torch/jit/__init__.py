@@ -6,7 +6,7 @@ from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
-from torch._six import with_metaclass, get_function_from_type, \
+from torch._six import PY2, with_metaclass, get_function_from_type, \
     string_classes
 from torch._jit_internal import ignore  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
@@ -750,7 +750,6 @@ def trace(func,
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                   var_lookup_fn,
                                                   _force_outplace)
-    traced = TracedFunction(traced)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
@@ -976,7 +975,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         fn = torch._C._jit_script_compile(ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
-        return ScriptFunction(fn)
+        return fn
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -1642,7 +1641,7 @@ class TracedModule(ScriptModule):
                 check_unique(buf)
 
         if orig._backward_hooks or orig._forward_hooks or orig._forward_pre_hooks:
-            raise ValueError("Modules that have hooks assigned can't be traced")
+            raise ValueError("Modules that have hooks assigned can't be compiled")
 
         for name, submodule in orig._modules.items():
             if isinstance(submodule, ScriptModule) and not isinstance(submodule, TracedModule):
@@ -1665,29 +1664,6 @@ class TracedModule(ScriptModule):
         if not self.__frozen or hasattr(self, attr):
             return super(TracedModule, self).__setattr__(attr, value)
         raise RuntimeError("Cannot set new properties on a traced module.")
-
-
-class ScriptFunction(ScriptModule):
-    __frozen = False
-
-    def __init__(self, forward, optimize=True):
-        super(ScriptFunction, self).__init__(optimize=optimize)
-        self.forward = forward
-        self._freeze()
-
-    def _freeze(self):
-        self.__frozen = True
-
-    def __setattr__(self, attr, value):
-        if not self.__frozen or hasattr(self, attr):
-            return super(ScriptFunction, self).__setattr__(attr, value)
-        raise RuntimeError("Cannot set new properties on a {}".format(type(self)))
-
-
-# Just here to differentiate where the function was produced, the functionality
-# is the same as ScriptFunction
-class TracedFunction(ScriptFunction):
-    pass
 
 
 if _enabled:
@@ -1788,6 +1764,16 @@ def _get_builtin_table():
     _builtin_table[id(math.exp)] = "aten::exp"
     _builtin_table[id(math.sqrt)] = "aten::sqrt"
     _builtin_table[id(math.pow)] = "aten::pow"
+    _builtin_table[id(math.copysign)] = "aten::copysign"
+    _builtin_table[id(math.erf)] = "aten::erf"
+    _builtin_table[id(math.erfc)] = "aten::erfc"
+    _builtin_table[id(math.expm1)] = "aten::expm1"
+    _builtin_table[id(math.fabs)] = "aten::fabs"
+    _builtin_table[id(math.gamma)] = "aten::gamma"
+    _builtin_table[id(math.lgamma)] = "aten::lgamma"
+    if not PY2: 
+        _builtin_table[id(math.gcd)] = "aten::gcd"
+
     _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
     _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
