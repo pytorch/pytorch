@@ -431,6 +431,14 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeBroadcastingChunk(node);
     case prim::SetAttr:
       return analyzeSetAttr(node);
+    case prim::profile:
+      AT_ERROR("Analyzing prim::profile isn't yet implemented");
+      // TODO: simply mapping inputs' aliases to outputs'
+      // should work but a) we should probably avoid exposing
+      // prim::profile to optimizations b) the alias semantics
+      // might be more complicated than just mapAliases
+      // mapAliases(node->inputs(), node->outputs());
+      return;
     case aten::add:
     case aten::sub:
     case aten::mul:
@@ -1319,6 +1327,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::AutogradAdd,
       prim::GetAttr,
       prim::SetAttr,
+      prim::profile,
       aten::wait,
       aten::add,
       aten::sub,

@@ -118,12 +118,6 @@
 
 # Pooling
 
-- name: _thnn_adaptive_avg_pool3d(Tensor self, IntArrayRef[3] output_size)
-  cname: VolumetricAdaptiveAveragePooling
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 - name: _thnn_avg_pool2d(Tensor self, IntArrayRef[2] kernel_size, IntArrayRef[2] stride={}, IntArrayRef[2] padding=0, bool ceil_mode=false, bool count_include_pad=true)
   cname: SpatialAveragePooling
   default_init:

@@ -4,6 +4,13 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/Tensor.h>
 
+namespace torch {
+namespace jit {
+namespace script {
+struct Function;
+}
+} // namespace jit
+} // namespace torch
 namespace c10 {
 template<class Key, class Value> class Dict;
 struct IValue;

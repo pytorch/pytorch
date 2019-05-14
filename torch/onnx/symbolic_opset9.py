@@ -1,233 +1,28 @@
 import torch
 from torch._C import ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
-import warnings
 
 import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils
 
-from functools import partial, wraps
+from functools import partial
+
+import torch.onnx.symbolic_helper as sym_help
+from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
 
 import numpy
 import math
+import warnings
+
 
 # EDITING THIS FILE? READ THIS FIRST!
-#
-# - This file is ONLY for ATen operators (e.g., operators that show up in the
-#   trace as aten::blah).  If you need to special case a primitive operator,
-#   look at _run_symbolic_function
-# - Parameter ordering does NOT necessarily match what is in VariableType.cpp;
-#   tensors are always first, then non-tensor arguments.
-# - Parameter names must *exactly* match the names in VariableType.cpp, because
-#   dispatch is done with keyword arguments.
-# - Looking for inplace ops?  They're detected by the trailing underscore, and
-#   transparently dispatched to their non inplace versions in
-#   'run_symbolic_function'.   See Note [Export inplace]
-#
-# ----------------------------------------------------------------------------------
-# A note on Tensor types
-# ----------------------------------------------------------------------------------
-#
-# In general, we should avoid depending on the type of Tensor Values contained
-# within the trace graph. However, this is sometimes unavoidable (due to ONNX
-# spec requirements, etc). If you are implementing a symbolic and need Tensor
-# type information, note that there are several levels of Tensor types, defined
-# in aten/src/ATen/core/jit_type.h:
-#
-# TensorType - This is a Tensor, but we don't know anything about its
-#               properties (e.g. scalar type, # dims, shapes).
-#               Appears as `Tensor` in graph print-outs.
-# DimensionedTensorType <: TensorType - Denotes a Tensor for which we know the scalar
-#                             type and number of dimensions, but not the concrete
-#                             shapes. For example, appears as 'Float(*, *)' in
-#                             graph print-outs. Useful accessor methods include
-#                             dim() and scalarType()
-# CompleteTensorType <: DimensionedTensorType - Denotes a Tensor for which we know the
-#                                               concrete sizes in addition to the information
-#                                               contained in TensorTyper. This adds a sizes()
-#                                               method which can be used to retrieve the
-#                                               concrete sizes.
-#
-# In general, we should prefer to rely on the least specific information possible.
-# For example, not relying on tensor properties at all is better than relying
-# on the number of dimensions (DimensionedTensorType) which is better than relying on
-# concrete shapes (CompleteTensorType). Doing so will make the export symbolics
-# more robust to different graphs.
+# see Note [Edit Symbolic Files] in symbolic_helper.py
 
-# ---------------------------------------------------------------------------------
-# Helper functions
-# ---------------------------------------------------------------------------------
-
-# Save some builtins as locals, because we'll shadown them below
-_sum = sum
-
-
-def _parse_arg(value, desc):
-    if desc == 'none':
-        return value
-    if desc == 'v' or not _is_value(value):
-        return value
-    if value.node().kind() == 'onnx::Constant':
-        tval = value.node()['value']
-        if desc == 'i':
-            return int(tval)
-        elif desc == 'f':
-            return float(tval)
-        elif desc == 'b':
-            return bool(tval)
-        elif desc == 't':
-            return tval
-        elif desc == 'is':
-            return [int(v) for v in tval]
-        else:
-            raise RuntimeError("ONNX symbolic doesn't know to interpret Constant node")
-    elif value.node().kind() == 'prim::ListConstruct':
-        if desc == 'is':
-            for v in value.node().inputs():
-                if v.node().kind() != 'onnx::Constant':
-                    raise RuntimeError("Failed to export an ONNX attribute, "
-                                       "since it's not constant, please try to make "
-                                       "things (e.g., kernel size) static if possible")
-            return [int(v.node()['value']) for v in value.node().inputs()]
-        else:
-            raise RuntimeError("ONNX symbolic doesn't know to interpret ListConstruct node")
-
-    raise RuntimeError("Unexpected node type: {}".format(value.node().kind()))
-
-
-def _maybe_get_const(value, desc):
-    if _is_value(value) and value.node().kind() == 'onnx::Constant':
-        return _parse_arg(value, desc)
-    return value
-
-
-def _maybe_get_scalar(value):
-    value_t = _maybe_get_const(value, 't')
-    if isinstance(value_t, torch.Tensor) and value_t.shape == ():
-        return value_t
-    return value
-
-
-def _get_const(value, desc, arg_name):
-    if _is_value(value) and value.node().kind() != 'onnx::Constant':
-        raise RuntimeError("ONNX symbolic expected a constant value of the {} argument".format(arg_name))
-    return _parse_arg(value, desc)
-
-
-def _unpack_list(list_value):
-    list_node = list_value.node()
-    assert list_node.kind() == "prim::ListConstruct"
-    return list(list_node.inputs())
-
-
-def parse_args(*arg_descriptors):
-    def decorator(fn):
-        def wrapper(g, *args):
-            # some args may be optional, so the length may be smaller
-            assert len(arg_descriptors) >= len(args)
-            args = [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args, arg_descriptors)]
-            return fn(g, *args)
-        # In Python 2 functools.wraps chokes on partially applied functions, so we need this as a workaround
-        try:
-            wrapper = wraps(fn)(wrapper)
-        except Exception:
-            pass
-        return wrapper
-    return decorator
-
-
-def _scalar(x):
-    """Convert a scalar tensor into a Python value."""
-    assert x.numel() == 1
-    return x.item()
-
-
-def _if_scalar_type_as(g, self, tensor):
-    """
-    Convert self into the same type of tensor, as necessary.
-
-    We only support implicit casting for scalars, so we never
-    actually need to insert an ONNX cast operator here; just
-    fix up the scalar.
-    """
-    if isinstance(self, torch._C.Value):
-        return self
-    elif tensor.type().kind() == "DimensionedTensorType" or tensor.type().kind() == "CompleteTensorType":
-        ty = tensor.type().scalarType().lower()
-        return getattr(self, ty)()
-    else:
-        return self
-
-
-def _is_value(x):
-    return isinstance(x, torch._C.Value)
-
-
-def _is_tensor_list(x):
-    return x.type().isSubtypeOf(ListType.ofTensors())
-
-
-def _unimplemented(op, msg):
-    warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
-
-
-def _try_get_scalar_type(*args):
-    for arg in args:
-        try:
-            return arg.type().scalarType()
-        except RuntimeError:
-            pass
-    return None
-
-
-# ---------------------------------------------------------------------
-# ONNX operator version
-# ---------------------------------------------------------------------
-
-# READ ME BEFORE EDITING _default_onnx_opset_version:
-#
-# The variable below controls which ONNX operator set version we are
-# targeting. THIS VARIABLE HAS SEMANTIC EFFECT! Say a breaking
-# change occurred in version 8. As long as this variable < 8, you can
-# export models targeting the old behavior. However, if you bump
-# this variable to 8 or later, the breaking change will take into effect:
-# you MUST adjust any symbolic affected by breaking changes. The ONNX
-# spec publishes a *comprehensive* list of BC-breaking changes for every
-# operator revision at:
-#
-#   https://github.com/onnx/onnx/blob/master/docs/Changelog.md
-#
-# Please be sure to go through and check all of our implementations here before
-# increasing this number. This includes symbolic definitions NOT in this
-# file, so grep for "OpName" (with quotes)
-#
-# Besides, opset_version can be specified in the invocation of export()
-# and export_to_pretty_string(), and _export_onnx_opset_version will be set
-# and the symbolic functions should check it to determine the behavior
-# of the exporter.
-
-
-_default_onnx_opset_version = 9
-_onnx_master_opset = 10
-_onnx_stable_opsets = [9]
-_export_onnx_opset_version = _default_onnx_opset_version
-
-
-def _set_opset_version(opset_version):
-    global _export_onnx_opset_version
-    if opset_version == _export_onnx_opset_version:
-        return
-    if opset_version in _onnx_stable_opsets + [_onnx_master_opset]:
-        _export_onnx_opset_version = opset_version
-        return
-    raise ValueError("Unsupported ONNX opset version: " + str(opset_version))
-
-
-# ---------------------------------------------------------------------
-# Symbolic definitions
-# ---------------------------------------------------------------------
+# This file exports ONNX ops for opset 9
+# Opset 9 is supported by ONNX release 1.4.1
+# release on 01/23/19 
 
 
 # Note [Pointwise by scalar]
@@ -284,60 +79,60 @@ def reshape_as(g, self, other):
 
 def add(g, self, other, alpha=None):
     # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
-    if alpha and _scalar(_maybe_get_scalar(alpha)) != 1:
+    if alpha and sym_help._scalar(sym_help._maybe_get_scalar(alpha)) != 1:
         return _unimplemented("add", "alpha != 1")
     # See Note [Pointwise by scalar]
-    other = _maybe_get_scalar(other)
-    return g.op("Add", self, _if_scalar_type_as(g, other, self))
+    other = sym_help._maybe_get_scalar(other)
+    return g.op("Add", self, sym_help._if_scalar_type_as(g, other, self))
 
 
 def sub(g, self, other, alpha=None):
     # default alpha arg is to allow no-alpha sub (aten sub st overload no alpha)
-    if alpha and _scalar(_maybe_get_scalar(alpha)) != 1:
+    if alpha and sym_help._scalar(sym_help._maybe_get_scalar(alpha)) != 1:
         return _unimplemented("sub", "alpha != 1")
     # See Note [Pointwise by scalar]. Note that self or other may be scalars.
-    other = _maybe_get_scalar(other)
-    return g.op("Sub", self, _if_scalar_type_as(g, other, self))
+    other = sym_help._maybe_get_scalar(other)
+    return g.op("Sub", self, sym_help._if_scalar_type_as(g, other, self))
 
 
 def rsub(g, self, other, alpha=None):
-    other = _maybe_get_scalar(other)
-    other = _if_scalar_type_as(g, other, self)
+    other = sym_help._maybe_get_scalar(other)
+    other = sym_help._if_scalar_type_as(g, other, self)
     return sub(g, other, self, alpha=alpha)
 
 
 def mul(g, self, other):
     # See Note [Pointwise by scalar]
-    other = _maybe_get_scalar(other)
-    return g.op("Mul", self, _if_scalar_type_as(g, other, self))
+    other = sym_help._maybe_get_scalar(other)
+    return g.op("Mul", self, sym_help._if_scalar_type_as(g, other, self))
 
 
 def div(g, self, other):
     # See Note [Pointwise by scalar]
-    other = _maybe_get_scalar(other)
-    return g.op("Div", self, _if_scalar_type_as(g, other, self))
+    other = sym_help._maybe_get_scalar(other)
+    return g.op("Div", self, sym_help._if_scalar_type_as(g, other, self))
 
 
 def reciprocal(g, self):
-    return g.op("Div", _if_scalar_type_as(g, torch.ones(1), self), self)
+    return g.op("Div", sym_help._if_scalar_type_as(g, torch.ones(1), self), self)
 
 
 @parse_args('v', 'i')
 def cat(g, tensor_list, dim):
-    tensors = _unpack_list(tensor_list)
+    tensors = sym_help._unpack_list(tensor_list)
     return g.op("Concat", *tensors, axis_i=dim)
 
 
 @parse_args('v', 'i')
 def stack(g, tensor_list, dim):
-    unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in _unpack_list(tensor_list)]
+    unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in sym_help._unpack_list(tensor_list)]
     return g.op("Concat", *unsqueezed, axis_i=dim)
 
 
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = _try_get_scalar_type(self, other).lower()
+    ty = sym_help._try_get_scalar_type(self, other).lower()
     C = g.constant(0, [1], ty)
     return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
 
@@ -352,7 +147,7 @@ def matmul(g, self, other):
 
 @parse_args('v', 'v', 'v', 't', 't')
 def addmm(g, self, mat1, mat2, beta, alpha):
-    return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
+    return g.op("Gemm", mat1, mat2, self, beta_f=sym_help._scalar(beta), alpha_f=sym_help._scalar(alpha))
 
 
 def neg(g, self):
@@ -409,7 +204,7 @@ def _reduce_op_symbolic(onnx_op_name):
             return g.op(onnx_op_name, self, keepdims_i=0)
         else:
             # dim-reduce path
-            dim, keepdim = _get_const(dim, 'i', 'dim'), _get_const(keepdim, 'i', 'keepdim')
+            dim, keepdim = sym_help._get_const(dim, 'i', 'dim'), sym_help._get_const(keepdim, 'i', 'keepdim')
             return g.op(onnx_op_name, self, axes_i=[dim], keepdims_i=keepdim)
     return symbolic
 
@@ -442,8 +237,8 @@ def t(g, self):
 
 
 def expand(g, self, size, implicit):
-    size = _maybe_get_const(size, 'is')
-    if not _is_value(size):
+    size = sym_help._maybe_get_const(size, 'is')
+    if not sym_help._is_value(size):
         size = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Expand", self, size)
 
@@ -504,8 +299,8 @@ def permute(g, self, dims):
 
 
 def view(g, self, size):
-    size = _maybe_get_const(size, 'is')
-    if _is_value(size):
+    size = sym_help._maybe_get_const(size, 'is')
+    if sym_help._is_value(size):
         shape = size
     else:
         if self.isCompleteTensor():
@@ -570,7 +365,7 @@ def squeeze(g, self, dim=None):
             if size == 1:
                 dims.append(i)
     else:
-        dims = [_get_const(dim, 'i', 'dim')]
+        dims = [sym_help._get_const(dim, 'i', 'dim')]
         # Handle negative dims
         for i, dim in enumerate(dims):
             if dim < 0:
@@ -607,18 +402,18 @@ def floor(g, input):
 @parse_args('v', 't', 't')
 def threshold(g, self, threshold, value):
     # See Note [Export inplace]
-    if _scalar(threshold) != 0:
+    if sym_help._scalar(threshold) != 0:
         return _unimplemented("threshold", "non-zero threshold")
-    if _scalar(value) != 0:
+    if sym_help._scalar(value) != 0:
         return _unimplemented("threshold", "non-zero value")
     return g.op("Relu", self)
 
 
 def leaky_relu(g, input, negative_slope, inplace=False):
-    negative_slope = _get_const(negative_slope, 't', 'negative_slope')
+    negative_slope = sym_help._get_const(negative_slope, 't', 'negative_slope')
     # See Note [Export inplace]
     # TODO: Talk to ONNX about unconditional cast of scalar to float
-    return g.op("LeakyRelu", input, alpha_f=_scalar(negative_slope))
+    return g.op("LeakyRelu", input, alpha_f=sym_help._scalar(negative_slope))
 
 
 @parse_args('v', 'i')
@@ -655,13 +450,13 @@ def softmax(g, input, dim, dtype=None):
         if input.type().dim() == dim + 1:
             softmax = g.op('Softmax', input, axis_i=dim)
             if dtype:
-                softmax = g.op("Cast", softmax, to_i=scalar_type_to_onnx[dtype])
+                softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[dtype])
             return softmax
     exp = g.op('Exp', input)
     sum = g.op('ReduceSum', exp, axes_i=[dim])
     softmax = g.op('Div', exp, sum)
     if dtype:
-        softmax = g.op("Cast", softmax, to_i=scalar_type_to_onnx[dtype])
+        softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[dtype])
     return softmax
 
 
@@ -700,6 +495,8 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if ceil_mode and input.type().kind() != "CompleteTensorType":
             return _unimplemented(name, "input size not accesible")
+        if set(tuple_fn(dilation)) != {1}:
+            return _unimplemented(name, "dilation")
         if not stride:
             stride = kernel_size
         padding = tuple(tuple_fn(padding))
@@ -713,8 +510,6 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
             'pads_i': padding,
             'strides_i': tuple_fn(stride),
         }
-        if set(tuple_fn(dilation)) != {1}:
-            kwargs['dilations_i'] = tuple_fn(dilation)
         # easy but hacky way to get flattened indices values
         # to be used to convert the indices values to non-flattened.
         # In ONNX the indices are computed as a flatten 1-D tensor,
@@ -888,7 +683,7 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
 
 def wrap_logical_op_with_cast_to_uint8(func):
     def wrap_with_cast(g, input, other):
-        return g.op("Cast", func(g, input, other), to_i=cast_pytorch_to_onnx['Byte'])
+        return g.op("Cast", func(g, input, other), to_i=sym_help.cast_pytorch_to_onnx['Byte'])
     return wrap_with_cast
 
 
@@ -915,8 +710,8 @@ def gt(g, input, other):
 
 
 def gt_impl(g, input, other):
-    other = _maybe_get_scalar(other)
-    return g.op("Greater", input, _if_scalar_type_as(g, other, input))
+    other = sym_help._maybe_get_scalar(other)
+    return g.op("Greater", input, sym_help._if_scalar_type_as(g, other, input))
 
 
 @wrap_logical_op_with_cast_to_uint8
@@ -925,22 +720,22 @@ def lt(g, input, other):
 
 
 def lt_impl(g, input, other):
-    other = _maybe_get_scalar(other)
-    return g.op("Less", input, _if_scalar_type_as(g, other, input))
+    other = sym_help._maybe_get_scalar(other)
+    return g.op("Less", input, sym_help._if_scalar_type_as(g, other, input))
 
 
 @wrap_logical_op_with_cast_to_uint8
 @wrap_logical_op_with_negation
 def ge(g, input, other):
-    other = _maybe_get_scalar(other)
-    return lt_impl(g, input, _if_scalar_type_as(g, other, input))
+    other = sym_help._maybe_get_scalar(other)
+    return lt_impl(g, input, sym_help._if_scalar_type_as(g, other, input))
 
 
 @wrap_logical_op_with_cast_to_uint8
 @wrap_logical_op_with_negation
 def le(g, input, other):
-    other = _maybe_get_scalar(other)
-    return gt_impl(g, input, _if_scalar_type_as(g, other, input))
+    other = sym_help._maybe_get_scalar(other)
+    return gt_impl(g, input, sym_help._if_scalar_type_as(g, other, input))
 
 
 def where(g, condition, self, other):
@@ -957,7 +752,7 @@ def log_softmax(g, input, dim=None, dtype=None):
         return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
     return_op = g.op("LogSoftmax", input, axis_i=dim)
     if dtype:
-        return_op = g.op("Cast", return_op, to_i=scalar_type_to_onnx[dtype])
+        return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[dtype])
     return return_op
 
 
@@ -1064,7 +859,7 @@ def elu(g, input, alpha, scale, input_scale):
     if input_scale and input_scale != 1.:
         return _unimplemented("input_scale", "does not support input_scale in Elu")
     # See Note [Export inplace]
-    return g.op("Elu", input, alpha_f=_scalar(alpha))
+    return g.op("Elu", input, alpha_f=sym_help._scalar(alpha))
 
 
 def selu(g, input):
@@ -1077,7 +872,7 @@ def index_select(g, self, dim, index):
 
 
 def index_put(g, self, indices_list_value, values, accumulate):
-    indices_list = _unpack_list(indices_list_value)
+    indices_list = sym_help._unpack_list(indices_list_value)
     args = [self] + indices_list + [values, accumulate]
     return g.op("ATen", *args, operator_s='index_put')
 
@@ -1088,7 +883,7 @@ def type_as(g, self, other):
 
     if other.isCompleteTensor():
         other_type_name = other.type().scalarType()
-        return g.op("Cast", self, to_i=cast_pytorch_to_onnx[other_type_name])
+        return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[other_type_name])
     else:
         # We don't know the type of other, bail by emitting ATen
         return g.op("ATen", self, other, operator_s="type_as")
@@ -1114,8 +909,8 @@ def log(g, self):
 
 
 def pow(g, self, exponent):
-    exponent = _maybe_get_scalar(exponent)
-    return g.op("Pow", self, _if_scalar_type_as(g, exponent, self))
+    exponent = sym_help._maybe_get_scalar(exponent)
+    return g.op("Pow", self, sym_help._if_scalar_type_as(g, exponent, self))
 
 
 def clamp(g, self, min, max):
@@ -1152,8 +947,8 @@ def max(g, self, dim_or_y=None, keepdim=None):
         return g.op("Max", self, dim_or_y)
     # torch.max(input, dim, keepdim)
     else:
-        dim = _get_const(dim_or_y, 'i', 'dim')
-        keepdim = _get_const(keepdim, 'i', 'keepdim')
+        dim = sym_help._get_const(dim_or_y, 'i', 'dim')
+        keepdim = sym_help._get_const(keepdim, 'i', 'keepdim')
         max = g.op("ReduceMax", self, axes_i=[dim], keepdims_i=keepdim)
         indices = g.op('ArgMax', self, axis_i=dim, keepdims_i=keepdim)
         return max, indices
@@ -1168,8 +963,8 @@ def min(g, self, dim_or_y=None, keepdim=None):
         return g.op("Min", self, dim_or_y)
     # torch.min(input, dim, keepdim)
     else:
-        dim = _get_const(dim_or_y, 'i', 'dim')
-        keepdim = _get_const(keepdim, 'i', 'keepdim')
+        dim = sym_help._get_const(dim_or_y, 'i', 'dim')
+        keepdim = sym_help._get_const(keepdim, 'i', 'keepdim')
         min = g.op("ReduceMin", self, axes_i=[dim], keepdims_i=keepdim)
         indices = g.op('ArgMin', self, axis_i=dim, keepdims_i=keepdim)
         return min, indices
@@ -1191,7 +986,6 @@ def _unsupported_dropout(name):
     @parse_args('v', 'f', 'i')
     def feature_dropout(g, input, p, train):
         # NB: In inference mode, FeatureDropout is exported as an identity op.
-        from torch.onnx.symbolic import _unimplemented
         if train:
             return _unimplemented(name, "training mode")
         return input
@@ -1238,69 +1032,9 @@ def _unique2(g, input, sorted, return_inverse, return_counts):
                 outputs=3)
 
 
-# Metaprogram symbolics for each ATen native specialized cast operator.
-# For e.g. we specify a function named `_cast_uint8_t` that instantiates an
-# ONNX cast node with `to` attribute 'UINT8'
-#
-# TODO: remove these once we support Type's in the JIT IR and we can once again
-# use the unified toType operator
-cast_pytorch_to_onnx = {
-    'Byte': torch.onnx.TensorProtoDataType.UINT8,
-    'Char': torch.onnx.TensorProtoDataType.INT8,
-    'Double': torch.onnx.TensorProtoDataType.DOUBLE,
-    'Float': torch.onnx.TensorProtoDataType.FLOAT,
-    'Half': torch.onnx.TensorProtoDataType.FLOAT16,
-    'Int': torch.onnx.TensorProtoDataType.INT32,
-    'Long': torch.onnx.TensorProtoDataType.INT64,
-    'Short': torch.onnx.TensorProtoDataType.INT16,
-}
-
-scalar_name_to_pytorch = {
-    'uint8_t': 'Byte',
-    'int8_t': 'Char',
-    'double': 'Double',
-    'float': 'Float',
-    'half': 'Half',
-    'int': 'Int',
-    'int64_t': 'Long',
-    'int16_t': 'Short',
-}
-
-
-# This indicates each scalar type's corresponding
-# torch type. Related source:
-# https://github.com/pytorch/pytorch/blob/da7468853ae322252270bbb58032668bd21b7457/c10/core/ScalarType.h
-scalar_type_to_pytorch_type = [
-    torch.uint8,    # 0
-    torch.int8,     # 1
-    torch.short,    # 2
-    torch.int,      # 3
-    torch.int64,    # 4
-    torch.half,     # 5
-    torch.float,    # 6
-    torch.double,   # 7
-]
-
-
-def _cast_func_template(to_i, g, input, non_blocking):
-    return g.op("Cast", input, to_i=to_i)
-
-
-for k, v in cast_pytorch_to_onnx.items():
+for k, v in sym_help.cast_pytorch_to_onnx.items():
     name = '_cast_{}'.format(k)
-    globals()[name] = parse_args('v', 'i')(partial(_cast_func_template, v))
-
-
-scalar_type_to_onnx = [
-    cast_pytorch_to_onnx["Byte"],
-    cast_pytorch_to_onnx["Char"],
-    cast_pytorch_to_onnx["Short"],
-    cast_pytorch_to_onnx["Int"],
-    cast_pytorch_to_onnx["Long"],
-    cast_pytorch_to_onnx["Half"],
-    cast_pytorch_to_onnx["Float"],
-    cast_pytorch_to_onnx["Double"],
-]
+    globals()[name] = parse_args('v', 'i')(partial(sym_help._cast_func_template, v))
 
 
 @parse_args('v', 'i', 'v', 'v', 'b')
@@ -1309,7 +1043,7 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
         raise RuntimeError("onnx pin_memory support is not implemented")
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v', 'b')
@@ -1318,7 +1052,7 @@ def zeros_like(g, input, dtype, layout, device, pin_memory=False):
         raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v', 'b')
@@ -1326,7 +1060,7 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
     if pin_memory:
         raise RuntimeError("onnx pin_memory support is not implemented")
     return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v', 'b')
@@ -1335,20 +1069,20 @@ def ones_like(g, input, dtype, layout, device, pin_memory=False):
         raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     if pin_memory and _parse_arg(pin_memory, 'b'):
         raise RuntimeError("onnx pin_memory support is not implemented")
-    const_value = _maybe_get_const(value, 't')
-    if _is_value(const_value):
+    const_value = sym_help._maybe_get_const(value, 't')
+    if sym_help._is_value(const_value):
         tmp = zeros(sizes, dtype, layout, device)
         return add(tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
-        dtype = _get_const(dtype, 'i', 'dtype')
+        dtype = sym_help._get_const(dtype, 'i', 'dtype')
         return g.op("ConstantOfShape", sizes,
-                    value_t=torch.tensor([const_value], dtype=scalar_type_to_pytorch_type[dtype]))
+                    value_t=torch.tensor([const_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'f', 'i', 'v', 'v', 'b')
@@ -1357,7 +1091,7 @@ def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
         raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor([fill_value], dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
@@ -1422,32 +1156,32 @@ def to(g, self, *args):
             return self
         else:
             # aten::to(Tensor, ScalarType, bool, bool)
-            dtype = _get_const(args[0], 'i', 'dtype')
-            return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+            dtype = sym_help._get_const(args[0], 'i', 'dtype')
+            return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 4:
         # aten::to(Tensor, Device, ScalarType, bool, bool)
-        dtype = _get_const(args[1], 'i', 'dtype')
-        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+        dtype = sym_help._get_const(args[1], 'i', 'dtype')
+        return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 5:
         # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
-        dtype = _get_const(args[0], 'i', 'dtype')
+        dtype = sym_help._get_const(args[0], 'i', 'dtype')
         # Layout and device are ignored
-        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+        return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 6:
         # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool) -> Tensor
-        dtype = _get_const(args[0], 'i', 'dtype')
+        dtype = sym_help._get_const(args[0], 'i', 'dtype')
         # Layout and device are ignored
-        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+        return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     else:
         raise NotImplementedError("Unknown aten::to signature")
 
 
 def repeat(g, self, repeats):
-    if not _is_value(repeats):
+    if not sym_help._is_value(repeats):
         repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
-    const_repeats = _maybe_get_const(repeats, 'is')
+    const_repeats = sym_help._maybe_get_const(repeats, 'is')
 
-    if self.isCompleteTensor() and not _is_value(const_repeats):
+    if self.isCompleteTensor() and not sym_help._is_value(const_repeats):
         sizes = self.type().sizes()
         diff_dims = len(const_repeats) - len(sizes)
         if diff_dims > 0:
@@ -1600,20 +1334,20 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
 
 @parse_args('v', 'v', 'v', 'i', 'i', 'f', 'i', 'i', 'i')
 def _lstm_full(g, input, hidden_v, weight_v, has_biases, num_layers, dropout, train, bidirectional, batch_first):
-    hidden, weight = _unpack_list(hidden_v), _unpack_list(weight_v)
+    hidden, weight = sym_help._unpack_list(hidden_v), sym_help._unpack_list(weight_v)
     return _generic_rnn(g, 'LSTM', input, hidden, weight, has_biases, num_layers,
                         dropout, train, bidirectional, batch_first)
 
 
 @parse_args('v', 'v', 'v', 'v', 'i', 'i', 'f', 'i', 'i')
 def _lstm_packed(g, input, batch_sizes, hidden_v, weight_v, has_biases, num_layers, dropout, train, bidirectional):
-    hidden, weight = _unpack_list(hidden_v), _unpack_list(weight_v)
+    hidden, weight = sym_help._unpack_list(hidden_v), sym_help._unpack_list(weight_v)
     return _generic_rnn(g, 'LSTM', input, hidden, weight, has_biases, num_layers,
                         dropout, train, bidirectional, batch_sizes=batch_sizes)
 
 
 def lstm(g, *args):
-    if _is_tensor_list(args[3]):
+    if sym_help._is_tensor_list(args[3]):
         return _lstm_packed(g, *args)
     else:
         return _lstm_full(g, *args)
@@ -1622,18 +1356,18 @@ def lstm(g, *args):
 def _one_hidden_rnn(kind):
     @parse_args('v', 'v', 'v', 'i', 'i', 'f', 'i', 'i', 'i')
     def _rnn_full(g, input, hidden, weight_v, has_biases, num_layers, dropout, train, bidirectional, batch_first):
-        weight = _unpack_list(weight_v)
+        weight = sym_help._unpack_list(weight_v)
         return _generic_rnn(g, kind, input, hidden, weight, has_biases, num_layers,
                             dropout, train, bidirectional, batch_first)
 
     @parse_args('v', 'v', 'v', 'v', 'i', 'i', 'f', 'i', 'i')
     def _rnn_packed(g, input, batch_sizes, hidden, weight_v, has_biases, num_layers, dropout, train, bidirectional):
-        weight = _unpack_list(weight_v)
+        weight = sym_help._unpack_list(weight_v)
         return _generic_rnn(g, kind, input, hidden, weight, has_biases, num_layers,
                             dropout, train, bidirectional, batch_sizes=batch_sizes)
 
     def symbolic(g, *args):
-        if _is_tensor_list(args[3]):
+        if sym_help._is_tensor_list(args[3]):
             return _rnn_packed(g, *args)
         else:
             return _rnn_full(g, *args)
@@ -1692,7 +1426,7 @@ def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total
 
 def randn(g, *shapes):
     shapes_list = list(shapes)
-    shape = _maybe_get_const(shapes_list[0], "is")
+    shape = sym_help._maybe_get_const(shapes_list[0], "is")
     return g.op('RandomNormal', shape_i=shape)
 
 
@@ -1750,7 +1484,7 @@ def nonzero(g, input):
 @parse_args('v')
 def isnan(g, input):
     output = g.op('IsNaN', input)
-    output = _cast_func_template(cast_pytorch_to_onnx['Byte'], g, output, None)
+    output = sym_help._cast_func_template(sym_help.cast_pytorch_to_onnx['Byte'], g, output, None)
     return output
 
 

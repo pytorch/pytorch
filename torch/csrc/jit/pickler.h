@@ -90,6 +90,12 @@ enum PicklerClass : uint8_t {
   TENSOR = 0,
   // List[int]
   INTLIST = 1,
+  // List[Tensor]
+  TENSORLIST = 2,
+  // List[float]
+  DOUBLELIST = 3,
+  // List[bool]
+  BOOLLIST = 4
 };
 
 using ::c10::IValue;
@@ -122,6 +128,7 @@ class Pickler {
  private:
   void pushDict(const IValue& ivalue);
   void pushDouble(const IValue& ivalue);
+  void pushGenericList(const IValue& ivalue);
   void pushInt(const IValue& ivalue);
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
@@ -134,6 +141,10 @@ class Pickler {
 
   void pushBinGet(uint32_t memo_id);
   void pushClass(PicklerClass cls);
+  void pushSpecializedList(
+      const IValue& ivalue,
+      PicklerClass cls,
+      const std::function<void(const IValue&)>& item_pusher);
   void pushGlobal(const std::string& name);
   void pushMemoization(const void* item);
   void pushString(const std::string& string);
@@ -186,19 +197,19 @@ struct StackItem {
   StackItem(PicklerClass pickler_class)
       : pickler_class_(pickler_class), ivalue_(c10::nullopt) {}
 
-  IValue ivalue() {
+  IValue ivalue() const {
     return *ivalue_;
   }
 
-  PicklerClass pickler_class() {
+  PicklerClass pickler_class() const {
     return *pickler_class_;
   }
 
-  c10::optional<IValue> ivalue_opt() {
+  c10::optional<IValue> ivalue_opt() const {
     return ivalue_;
   }
 
-  c10::optional<PicklerClass> pickler_class_opt() {
+  c10::optional<PicklerClass> pickler_class_opt() const {
     return pickler_class_;
   }
 
