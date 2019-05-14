@@ -22,7 +22,7 @@ namespace {
 void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
   if (!elem_type->isSubtypeOf(NumberType::get()) &&
       elem_type != BoolType::get()) {
-    auto error = script::ErrorReport(node->getSourceLocation());
+    auto error = script::ErrorReport(node->sourceRange());
     error << "Input list to torch.tensor must be of ints, floats, or bools, "
           << "got " << elem_type->str();
     // special case empty list torch.tensor([])

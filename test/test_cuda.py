@@ -974,15 +974,22 @@ class TestCuda(TestCase):
         self._test_copy_sync_current_stream(x0, x2)
 
     def test_copy_non_blocking(self):
-        x = torch.randn(5, 5).cuda()
-        y = torch.zeros(5, 5)
-        y.copy_(x, non_blocking=True)
-        self.assertEqual(x, y)
+        def _test_copy_non_blocking(a, b):
+            event = torch.cuda.Event()
+            a.copy_(b, non_blocking=True)
+            event.record()
+            self.assertFalse(event.query())
+            event.synchronize()
+            self.assertEqual(a, b)
 
-        x = torch.randn(5, 5)
-        y = torch.zeros(5, 5).cuda()
-        y.copy_(x, non_blocking=True)
-        self.assertEqual(x, y)
+        # 10MB copies
+        x = torch.ones(10000000, dtype=torch.uint8).cuda()
+        y = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
+        _test_copy_non_blocking(x, y)
+
+        x = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
+        y = torch.ones(10000000, dtype=torch.uint8).cuda()
+        _test_copy_non_blocking(x, y)
 
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
