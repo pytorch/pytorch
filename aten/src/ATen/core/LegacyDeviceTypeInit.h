@@ -3,7 +3,7 @@
 // The legacy mechanism for initializing device types; this is used by
 // both LegacyTypeDispatch and LegacyTHDispatch.
 
-#include <c10/DeviceType.h>
+#include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Registry.h>
 #include <ATen/core/ScalarType.h>

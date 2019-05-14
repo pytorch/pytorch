@@ -36,10 +36,10 @@ BlobsQueue::BlobsQueue(
     stats_.queue_dequeued_bytes.setDetails(fieldNames);
   }
   queue_.reserve(capacity);
-  for (auto i = 0; i < capacity; ++i) {
+  for (size_t i = 0; i < capacity; ++i) {
     std::vector<Blob*> blobs;
     blobs.reserve(numBlobs);
-    for (auto j = 0; j < numBlobs; ++j) {
+    for (size_t j = 0; j < numBlobs; ++j) {
       const auto blobName = queueName + "_" + to_string(i) + "_" + to_string(j);
       if (enforceUniqueName) {
         CAFFE_ENFORCE(

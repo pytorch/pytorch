@@ -58,7 +58,8 @@ void SpatialBNGradientOp<CPUContext>::ComputeScaleBiasGradientsAndFusedParams(
     T* dbias,
     T* alpha,
     T* beta,
-    T* gamma) {
+    T* gamma,
+    T* /* scratch */) {
   ConstEigenVectorArrayMap<T> scale_arr(scale, C);
   ConstEigenVectorArrayMap<T> mean_arr(mean, C);
   ConstEigenVectorArrayMap<T> rstd_arr(rstd, C);

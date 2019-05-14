@@ -7,10 +7,6 @@
 #include <sstream>
 #include <vector>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
 namespace at {
 namespace native {
 
@@ -93,7 +89,7 @@ std::tuple<Tensor, Tensor> _weight_norm_differentiable_backward
 
   // ...but saved_norms might be Float when saved_g and saved_v are half.
   // To consider:  saved_norms.to(..., True /*non_blocking*/);
-  auto norms = saved_norms.to(saved_g.type().scalarType());
+  auto norms = saved_norms.to(saved_g.scalar_type());
 
   std::vector<int64_t> bcast_size(saved_v.dim(), 1);
 

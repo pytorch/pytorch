@@ -73,16 +73,16 @@ __global__ void NearestNeighborGradientKernel(
 template <>
 bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
   const auto& X = Input(0);
-  auto* Y = Output(0);
 
-  const auto inputDims = X.dims();
+
+  const auto inputDims = X.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = X.dim32(0), num_channels = X.dim32(1),
             input_height = X.dim32(2), input_width = X.dim32(3);
   if (InputSize() == 2) {
     const auto& scales = Input(1);
-    CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    CAFFE_ENFORCE_EQ(scales.dim(), 1);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
     float scales_data[2];
     context_.CopyToCPU<float>(2, scales.data<float>(), scales_data);
     height_scale_ = scales_data[0];
@@ -90,9 +90,9 @@ bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
   }
   int output_width = input_width * width_scale_;
   int output_height = input_height * height_scale_;
-  Y->Resize(batch_size, num_channels, output_height, output_width);
+  auto* Y = Output(0, {batch_size, num_channels, output_height, output_width}, at::dtype<float>());
 
-  const auto size = Y->size();
+  const auto size = Y->numel();
   NearestNeighborKernel<<<
       CAFFE_GET_BLOCKS(size),
       CAFFE_CUDA_NUM_THREADS,
@@ -116,9 +116,9 @@ template <>
 bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   const auto& dY = Input(0);
   const auto& X = Input(1);
-  auto* dX = Output(0);
 
-  const auto inputDims = dY.dims();
+
+  const auto inputDims = dY.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = dY.dim32(0), num_channels = dY.dim32(1),
             input_height = dY.dim32(2), input_width = dY.dim32(3);
@@ -126,18 +126,18 @@ bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   int output_width = X.dim32(3);
   if (InputSize() == 3) {
     const auto& scales = Input(2);
-    CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    CAFFE_ENFORCE_EQ(scales.dim(), 1);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
     float scales_data[2];
     context_.CopyToCPU<float>(2, scales.data<float>(), scales_data);
     height_scale_ = scales_data[0];
     width_scale_ = scales_data[1];
   }
-  dX->Resize(batch_size, num_channels, output_height, output_width);
+  auto* dX = Output(0, {batch_size, num_channels, output_height, output_width}, at::dtype<float>());
   math::Set<float, CUDAContext>(
-      dX->size(), 0.0f, dX->template mutable_data<float>(), &context_);
+      dX->numel(), 0.0f, dX->template mutable_data<float>(), &context_);
 
-  const auto size = dY.size();
+  const auto size = dY.numel();
   NearestNeighborGradientKernel<<<
       CAFFE_GET_BLOCKS(size),
       CAFFE_CUDA_NUM_THREADS,

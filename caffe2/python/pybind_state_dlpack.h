@@ -20,6 +20,7 @@ const DLDataType* CaffeToDLType(const TypeMeta& meta);
 
 const TypeMeta& DLTypeToCaffe(const DLDataType& dl_type);
 
+// TODO: remove context
 template <class Context>
 class DLPackWrapper {
  public:

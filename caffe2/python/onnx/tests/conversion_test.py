@@ -206,7 +206,9 @@ class TestConversion(TestCase):
                                             [3, 2],
                                             W.tolist())]
         )
-        model_def = helper.make_model(graph_def, producer_name='onnx-to-caffe2-test')
+        onnx_id = helper.make_opsetid("", 9)
+        model_def = helper.make_model(graph_def, producer_name='onnx-to-caffe2-test',
+                                      opset_imports=[onnx_id])
 
         p = c2.prepare(model_def)
         Y = np.matmul(X, W.reshape(3, 2))

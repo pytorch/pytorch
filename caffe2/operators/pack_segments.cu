@@ -185,8 +185,8 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
     presence_mask = Output(1);
   }
 
-  CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
+  CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
 
   // Find the length of the longest sequence.
   dev_max_length_.Resize(1);
@@ -219,9 +219,9 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
   }
 
   // create output tensor
-  auto shape = data.dims().vec(); // Shape of out is batch_size x max_len x ...
+  auto shape = data.sizes().vec(); // Shape of out is batch_size x max_len x ...
   shape[0] = max_length;
-  shape.insert(shape.begin(), lengths.size());
+  shape.insert(shape.begin(), lengths.numel());
   out->Resize(shape);
   Data_T* out_ptr = static_cast<Data_T*>(out->raw_mutable_data(data.meta()));
 
@@ -232,7 +232,7 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
 
   // Do padding
   Data_T padding = out->IsType<float>() ? padding_ : 0;
-  int64_t cell_size = data.size() / data.dim(0);
+  int64_t cell_size = data.numel() / data.dim(0);
   PackSegmentsKernel<<<
       CAFFE_GET_BLOCKS(num_seq * max_length * cell_size),
       CAFFE_CUDA_NUM_THREADS,
@@ -267,8 +267,8 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
   const T* lengths_ptr = lengths.data<T>();
   auto* out = Output(0);
 
-  CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
+  CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
   // Compute prefix sum over the lengths
   array_prefix_sum_exclusive<T>(
       lengths_ptr, num_seq, dev_buffer_, dev_lengths_prefix_sum_, context_);
@@ -310,7 +310,7 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
       context_);
 
   // create output tensor
-  auto shape = data.dims().vec();
+  auto shape = data.sizes().vec();
   CAFFE_ENFORCE_EQ(
       shape[0], lengths.dim(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());
@@ -324,7 +324,7 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
   }
 
   // Unpack
-  int64_t cell_size = data.size() / (data.dim(0) * data.dim(1));
+  int64_t cell_size = data.numel() / (data.dim(0) * data.dim(1));
   UnpackSegmentsKernel<<<
       CAFFE_GET_BLOCKS(num_seq * max_length * cell_size),
       CAFFE_CUDA_NUM_THREADS,

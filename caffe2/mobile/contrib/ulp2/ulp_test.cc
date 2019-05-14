@@ -185,7 +185,7 @@ void gemmTest(int64_t M, int64_t N, int64_t K) {
     Y.Resize(M, N);
     gemmNT(M, N, K, X.data<float>(), W.data<float>(), Y.mutable_data<float>());
   }
-  EXPECT_TRUE(Y.dims() == YQ.dims());
+  EXPECT_TRUE(Y.sizes() == YQ.sizes());
   for (auto i = 0; i < Y.size(); ++i) {
     EXPECT_NEAR(Y.data<float>()[i], YQ.data<float>()[i], 1e-3);
   }
@@ -214,7 +214,7 @@ TEST(QConv, ConvTest) {
     qconv(ConvArgs{}, XQ, WQ, nullptr, &YQ);
   }
   { conv(ConvArgs{}, X, W, nullptr, &Y); }
-  EXPECT_TRUE(Y.dims() == YQ.dims());
+  EXPECT_TRUE(Y.sizes() == YQ.sizes());
   for (auto i = 0; i < Y.size(); ++i) {
     EXPECT_NEAR(Y.data<float>()[i], YQ.data<float>()[i], 1e-3);
   }
@@ -304,9 +304,9 @@ void ConvTest2b1b(int IC, int KH, int KW, int H, int W, int OC, int N, ConvArgs 
 
   { conv(args, X, W_, &bias, &Y); }
 
-  EXPECT_TRUE(Y.dims() == YQ.dims());
-  EXPECT_TRUE(Y.dims() == Y2b1b.dims());
-  EXPECT_TRUE(Y.dims() == YOP.dims());
+  EXPECT_TRUE(Y.sizes() == YQ.sizes());
+  EXPECT_TRUE(Y.sizes() == Y2b1b.sizes());
+  EXPECT_TRUE(Y.sizes() == YOP.sizes());
 
   // for (auto i = 0; i < Y.size(); ++i) {
   //   LOG(INFO) << "i: " << i << ", y[i]: " << Y.data<float>()[i]

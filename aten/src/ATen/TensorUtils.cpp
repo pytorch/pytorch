@@ -47,7 +47,7 @@ void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts) {
   }
 }
 
-void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntList sizes) {
+void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
   checkDim(c, t, sizes.size());
   AT_CHECK(
     t->sizes().equals(sizes),
@@ -142,7 +142,7 @@ void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
 
 void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType ty) {
   AT_CHECK(
-    t->type().scalarType() == ty,
+    t->scalar_type() == ty,
     "Expected tensor for ", t, " to have scalar type ", toString(ty),
     "; but got ", t->toString(), " instead (while checking arguments for ", c,
     ")");
@@ -150,7 +150,7 @@ void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType ty) {
 
 void checkScalarTypes(CheckedFrom c, const TensorArg& t,
                       at::ArrayRef<ScalarType> l) {
-    if (std::find(l.begin(), l.end(), t->type().scalarType()) == l.end()) {
+    if (std::find(l.begin(), l.end(), t->scalar_type()) == l.end()) {
       std::ostringstream oss;
       oss << "Expected tensor for " << t << " to have one of the following "
           << "scalar types: ";
@@ -196,15 +196,43 @@ void checkAllDefined(CheckedFrom c, ArrayRef<TensorArg> ts) {
 
 void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
   AT_CHECK(
-    t.type().backend() == backend,
+    !t.defined() || t.type().backend() == backend,
     "Expected tensor to have ", toString(backend),
     " Backend, but got tensor with ", toString(t.type().backend()), " Backend ",
     "(while checking arguments for ", c, ")");
 }
 
-void checkBackend(CheckedFrom c, ArrayRef<Tensor> tensors, at::Backend backend) {
+void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Backend backend) {
   for (auto &t : tensors) {
     checkBackend(c, t, backend);
+  }
+}
+
+void checkDeviceType(CheckedFrom c, const Tensor& t, DeviceType device_type) {
+  AT_CHECK(
+      !t.defined() || t.type().device_type() == device_type,
+      "Expected tensor to have ", device_type,
+      " DeviceType, but got tensor with ", t.type().device_type(), " DeviceType ",
+      "(while checking arguments for ", c, ")");
+}
+
+void checkDeviceType(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::DeviceType device_type) {
+  for (auto &t : tensors) {
+    checkDeviceType(c, t, device_type);
+  }
+}
+
+void checkLayout(CheckedFrom c, const Tensor& t, Layout layout) {
+  AT_CHECK(
+    !t.defined() || t.layout() == layout,
+    "Expected tensor to have ", layout,
+    " Layout, but got tensor with ", t.layout(), " Layout ",
+    "(while checking arguments for ", c, ")");
+}
+
+void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout) {
+  for (auto &t : tensors) {
+    checkLayout(c, t, layout);
   }
 }
 
@@ -217,7 +245,7 @@ void * maybe_data_ptr(const TensorArg& tensor) {
 }
 
 // See TensorUtils.h on why this is useful now that we cache is_contiguous.
-bool geometry_is_contiguous(IntList sizes, IntList strides) {
+bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
   int64_t dim = sizes.size();
   int64_t expected_stride = 1;
   bool contig_if_nonempty = true;
@@ -235,4 +263,29 @@ bool geometry_is_contiguous(IntList sizes, IntList strides) {
   return contig_if_nonempty;
 }
 
+namespace detail {
+
+std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
+  std::vector<int64_t> strides(sizes.size());
+  int64_t stride = 1;
+  for(size_t i = sizes.size(); i > 0; --i) {
+    strides[i-1] = stride;
+    stride *= sizes[i-1];
+  }
+  return strides;
 }
+
+int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
+  // size of the underlying storage is 1 bigger than the offset
+  // of the last element according to stride
+  int64_t size = 1;
+  for(size_t i = 0; i < sizes.size(); i++) {
+    if(sizes[i] == 0) {
+      return 0;
+    }
+    size += strides[i]*(sizes[i]-1);
+  }
+  return size;
+}
+}  // namespace detail
+}  // namespace at

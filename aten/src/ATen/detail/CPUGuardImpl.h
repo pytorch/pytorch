@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 
 namespace at {
@@ -33,6 +33,9 @@ struct CPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   Stream exchangeStream(Stream s) const noexcept override {
     // no-op
     return Stream(Stream::DEFAULT, Device(DeviceType::CPU, -1));
+  }
+  DeviceIndex deviceCount() const noexcept override {
+    return 1;
   }
 };
 

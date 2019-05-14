@@ -1,13 +1,7 @@
 from functools import update_wrapper
 from numbers import Number
-import math
 import torch
 import torch.nn.functional as F
-
-
-# promote numbers to tensors of dtype torch.get_default_dtype()
-def _default_promotion(v):
-    return torch.tensor(v, dtype=torch.get_default_dtype())
 
 
 def broadcast_all(*values):
@@ -29,12 +23,13 @@ def broadcast_all(*values):
     if not all(torch.is_tensor(v) or isinstance(v, Number) for v in values):
         raise ValueError('Input arguments must all be instances of numbers.Number or torch.tensor.')
     if not all(map(torch.is_tensor, values)):
-        new_tensor = _default_promotion
+        options = dict(dtype=torch.get_default_dtype())
         for value in values:
             if torch.is_tensor(value):
-                new_tensor = value.new_tensor
+                options = dict(dtype=value.dtype, device=value.device)
                 break
-        values = [v if torch.is_tensor(v) else new_tensor(v) for v in values]
+        values = [v if torch.is_tensor(v) else torch.tensor(v, **options)
+                  for v in values]
     return torch.broadcast_tensors(*values)
 
 
@@ -88,18 +83,6 @@ def probs_to_logits(probs, is_binary=False):
     if is_binary:
         return torch.log(ps_clamped) - torch.log1p(-ps_clamped)
     return torch.log(ps_clamped)
-
-
-def batch_tril(bmat, diagonal=0):
-    """
-    Given a batch of matrices, returns the lower triangular part of each matrix, with
-    the other entries set to 0. The argument `diagonal` has the same meaning as in
-    `torch.tril`.
-    """
-    if bmat.dim() == 2:
-        return bmat.tril(diagonal=diagonal)
-    else:
-        return bmat * torch.tril(bmat.new(*bmat.shape[-2:]).fill_(1.0), diagonal=diagonal)
 
 
 class lazy_property(object):

@@ -124,6 +124,8 @@ __all__ = [
     'Gamma',
     'Geometric',
     'Gumbel',
+    'HalfCauchy',
+    'HalfNormal',
     'Independent',
     'Laplace',
     'LogNormal',

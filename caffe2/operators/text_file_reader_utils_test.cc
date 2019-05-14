@@ -66,7 +66,7 @@ TEST(TextFileReaderUtilsTest, TokenizeTest) {
     ChunkProvider(const std::string& str) : ch(str) {}
     std::string ch;
     size_t charIdx{0};
-    void operator()(CharRange& range) {
+    void operator()(CharRange& range) override {
       if (charIdx >= ch.size()) {
         range.start = nullptr;
         range.end = nullptr;
@@ -77,7 +77,7 @@ TEST(TextFileReaderUtilsTest, TokenizeTest) {
         charIdx = endIdx;
       }
     };
-    void reset() {
+    void reset() override {
       charIdx = 0;
     }
   };

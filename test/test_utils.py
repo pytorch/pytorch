@@ -2,22 +2,20 @@ from __future__ import print_function
 import sys
 import os
 import re
-import math
 import shutil
 import random
 import tempfile
 import unittest
-import traceback
+import contextlib
 import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.cuda
-import warnings
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common_utils import IS_WINDOWS, IS_PPC, skipIfRocm, load_tests
+from common_utils import skipIfRocm, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -34,7 +32,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common_utils import TestCase, run_tests, download_file
+from common_utils import TestCase, run_tests
 
 
 class RandomDatasetMock(object):
@@ -201,7 +199,7 @@ class TestCheckpoint(TestCase):
         )
 
     def test_checkpoint_rng_cpu(self):
-        for i in range(5):
+        for _ in range(5):
             inp = torch.randn(20000, device='cpu').requires_grad_()
             phase1 = torch.nn.Dropout()
             phase2 = torch.nn.Dropout()
@@ -228,9 +226,8 @@ class TestCheckpoint(TestCase):
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
-    @skipIfRocm
     def test_checkpoint_rng_cuda(self):
-        for i in range(5):
+        for _ in range(5):
             inp = torch.randn(20000, device='cuda').requires_grad_()
             phase1 = torch.nn.Dropout()
             phase2 = torch.nn.Dropout()
@@ -255,6 +252,17 @@ class TestCheckpoint(TestCase):
             grad_no_checkpointing = inp.grad
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    def test_checkpoint_non_tensor(self):
+
+        def run_fn(tensor1, tensor2):
+            if tensor2 is None:
+                return tensor1
+            return tensor1 + tensor2
+
+        input_var = torch.randn(1, 100, requires_grad=True)
+        out = checkpoint(run_fn, input_var, None)
+        out.sum().backward()
 
 
 class TestDataLoader(TestCase):
@@ -316,7 +324,7 @@ test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 class TestFFI(TestCase):
     def test_deprecated(self):
         with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension
+            from torch.utils.ffi import create_extension  # noqa: F401
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
@@ -326,7 +334,7 @@ class TestBottleneck(TestCase):
         import subprocess
         from common_utils import PY3
 
-        p = subprocess.Popen(command, stdout=subprocess.PIPE,
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
                              stderr=subprocess.PIPE, shell=True)
         output, err = p.communicate()
         rc = p.returncode
@@ -485,11 +493,26 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
+# Errors will still be raised and reported
+@contextlib.contextmanager
+def suppress_stderr():
+    original = sys.stderr
+    sys.stderr = open(os.devnull, 'w')
+    yield
+    sys.stderr = original
+
+
 class TestHub(TestCase):
     @classmethod
     @skipIfNoTorchVision
     def setUpClass(cls):
-        cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
+        # The current torchvision code does not provide a way to disable tqdm
+        # progress bar, leading this download printing a huge number of lines
+        # in CI.
+        # TODO: remove this context manager when torchvision provides a way.
+        #       See pytorch/torchvision#862
+        with suppress_stderr():
+            cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
 
     @skipIfNoTorchVision
     def test_load_from_github(self):
@@ -508,9 +531,12 @@ class TestHub(TestCase):
             'resnet18',
             pretrained=True)
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
-        assert os.path.exists(temp_dir + '/vision_master')
-        shutil.rmtree(temp_dir + '/vision_master')
+        assert os.path.exists(temp_dir + '/pytorch_vision_master')
+        shutil.rmtree(temp_dir + '/pytorch_vision_master')
 
+    def test_list_entrypoints(self):
+        entry_lists = hub.list('pytorch/vision', force_reload=True)
+        self.assertObjectIn('resnet18', entry_lists)
 
 if __name__ == '__main__':
     run_tests()

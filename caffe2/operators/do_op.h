@@ -17,7 +17,7 @@ namespace caffe2 {
 template <class Context>
 class DoOp final : public Operator<Context> {
  public:
-  DoOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit DoOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws), parent_ws_(ws) {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("net"),

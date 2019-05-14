@@ -2,7 +2,6 @@ import torch
 import numbers
 from torch.nn.parameter import Parameter
 from .module import Module
-from .batchnorm import _BatchNorm
 from .. import functional as F
 from .. import init
 from ..._jit_internal import weak_module, weak_script_method
@@ -25,8 +24,8 @@ class LocalResponseNorm(Module):
         k: additive factor. Default: 1
 
     Shape:
-        - Input: :math:`(N, C, ...)`
-        - Output: :math:`(N, C, ...)` (same shape as input)
+        - Input: :math:`(N, C, *)`
+        - Output: :math:`(N, C, *)` (same shape as input)
 
     Examples::
 
@@ -173,7 +172,7 @@ class GroupNorm(Module):
     The input channels are separated into :attr:`num_groups` groups, each containing
     ``num_channels / num_groups`` channels. The mean and standard-deviation are calculated
     separately over the each group. :math:`\gamma` and :math:`\beta` are learnable
-    per-channel affine transform parameter vectorss of size :attr:`num_channels` if
+    per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
 
     This layer uses statistics computed from input data in both training and
@@ -188,8 +187,8 @@ class GroupNorm(Module):
             and zeros (for biases). Default: ``True``.
 
     Shape:
-        - Input: :math:`(N, num\_channels, *)`
-        - Output: :math:`(N, num\_channels, *)` (same shape as input)
+        - Input: :math:`(N, C, *)` where :math:`C=\text{num\_channels}`
+        - Output: :math:`(N, C, *)` (same shape as input)
 
     Examples::
 

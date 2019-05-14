@@ -1,40 +1,23 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CPU_FUSER
 
-#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/utils/disallow_copy.h>
 
-#include <dlfcn.h>
-
-namespace torch { namespace jit { namespace fuser { namespace cpu {
-
-static void* checkDL(void* x) {
-  if (!x) {
-    AT_ERROR("error in dlopen or dlsym: ", dlerror());
-  }
-
-  return x;
-}
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cpu {
 
 struct DynamicLibrary {
   TH_DISALLOW_COPY_AND_ASSIGN(DynamicLibrary);
 
-  DynamicLibrary(const char* name) {
-    // NOLINTNEXTLINE(hicpp-signed-bitwise)
-    handle = checkDL(dlopen(name, RTLD_LOCAL | RTLD_NOW));
-  }
+  TORCH_API DynamicLibrary(const char* name);
 
-  void* sym(const char* name) {
-    JIT_ASSERT(handle);
-    return checkDL(dlsym(handle, name));
-  }
+  TORCH_API void* sym(const char* name);
 
-  ~DynamicLibrary() {
-    if (!handle) return;
-    dlclose(handle);
-  }
+  TORCH_API ~DynamicLibrary();
 
-private:
+ private:
   void* handle = nullptr;
 };
 
@@ -42,5 +25,3 @@ private:
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CPU_FUSER

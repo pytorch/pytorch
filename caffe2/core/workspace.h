@@ -308,7 +308,7 @@ class CAFFE2_API Workspace {
   }
 
  public:
-  std::atomic<int> last_failed_op_net_position;
+  std::atomic<int> last_failed_op_net_position{};
 
  private:
   struct Bookkeeper {

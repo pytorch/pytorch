@@ -83,6 +83,10 @@ class _StorageBase(object):
         """Casts this storage to byte type"""
         return self.type(type(self).__module__ + '.ByteStorage')
 
+    def bool(self):
+        """Casts this storage to bool type"""
+        return self.type(type(self).__module__ + '.BoolStorage')
+
     def pin_memory(self):
         """Copies the storage to pinned memory, if it's not already pinned."""
         if self.is_cuda:

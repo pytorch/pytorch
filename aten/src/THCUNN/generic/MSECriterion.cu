@@ -24,7 +24,7 @@ void THNN_(MSECriterion_updateOutput)(
     thrust::device_ptr<scalar_t> input_data(THCTensor_(data)(state, input));
     thrust::device_ptr<scalar_t> target_data(THCTensor_(data)(state, target));
     accreal sum = thrust::inner_product(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       input_data, input_data+size, target_data, (accreal) 0,
@@ -78,7 +78,7 @@ void THNN_(MSECriterion_updateGradInput)(
     thrust::device_ptr<scalar_t> gradInput_data(THCTensor_(data)(state, gradInput));
 
     thrust::transform(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       input_data, input_data+size, target_data, gradInput_data,
@@ -105,14 +105,14 @@ void THNN_(MSECriterion_updateGradInput)(
   thrust::device_ptr<scalar_t> gradInput_data(THCTensor_(data)(state, gradInput));
 
   thrust::transform(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     input_data, input_data+size, target_data, gradInput_data,
     mse_updateGradInput_functor<scalar_t, accreal>(2));
 
   thrust::transform(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     gradInput_data, gradInput_data+size, gradOutput_data, gradInput_data,

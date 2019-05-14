@@ -43,9 +43,6 @@ struct OpGraphNode {
 
 using ExecutionChains = std::unordered_map<int, std::vector<int>>;
 
-C10_EXPORT ExecutionChains computeChains(
-    const caffe2::NetDef& predict_net,
-    std::vector<OperatorNode>& orig_nodes);
 C10_EXPORT ExecutionChains computeChains(std::vector<OperatorNode>& orig_nodes);
 
 // Instead of breaking down the DAG into chains, we partition it into clusters

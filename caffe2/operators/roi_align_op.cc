@@ -373,3 +373,18 @@ Region of Interest (RoI) align operation as used in Mask R-CNN.
         "is a pooled feature map cooresponding to the r-th RoI.");
 
 } // namespace caffe2
+
+using RoIAlignOpFloatCPU = caffe2::RoIAlignOp<float, caffe2::CPUContext>;
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    RoIAlign,
+    "_caffe2::RoIAlign("
+      "Tensor features, "
+      "Tensor rois, "
+      "str order, "
+      "float spatial_scale, "
+      "int pooled_h, "
+      "int pooled_w, "
+      "int sampling_ratio"
+    ") -> Tensor",
+    RoIAlignOpFloatCPU);

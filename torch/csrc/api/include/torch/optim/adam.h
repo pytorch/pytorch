@@ -52,10 +52,10 @@ class TORCH_API Adam : public Optimizer {
 
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    TORCH_OPTIM_SERIALIZE(step_buffers);
-    TORCH_OPTIM_SERIALIZE(exp_average_buffers);
-    TORCH_OPTIM_SERIALIZE(exp_average_sq_buffers);
-    TORCH_OPTIM_SERIALIZE(max_exp_average_sq_buffers);
+    _TORCH_OPTIM_SERIALIZE(step_buffers);
+    _TORCH_OPTIM_SERIALIZE(exp_average_buffers);
+    _TORCH_OPTIM_SERIALIZE(exp_average_sq_buffers);
+    _TORCH_OPTIM_SERIALIZE(max_exp_average_sq_buffers);
   }
 };
 } // namespace optim

@@ -11,7 +11,7 @@
 #   MAX_JOBS
 #     maximum number of compile jobs we should use to compile your code
 #
-#   NO_CUDA
+#   USE_CUDA=0
 #     disables CUDA build
 #
 #   CFLAGS
@@ -27,35 +27,38 @@
 #
 # Environment variables for feature toggles:
 #
-#   NO_CUDNN
+#   USE_CUDNN=0
 #     disables the cuDNN build
 #
-#   NO_FBGEMM
+#   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
-#   NO_TEST
+#   BUILD_TEST=0
 #     disables the test build
 #
-#   NO_MIOPEN
+#   USE_MIOPEN=0
 #     disables the MIOpen build
 #
-#   NO_MKLDNN
+#   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
-#   NO_NNPACK
+#   MKLDNN_THREADING
+#     MKL-DNN threading mode (https://github.com/intel/mkl-dnn/)
+#
+#   USE_NNPACK=0
 #     disables NNPACK build
 #
-#   NO_QNNPACK
+#   USE_QNNPACK=0
 #     disables QNNPACK build (quantized 8-bit operators)
 #
-#   NO_DISTRIBUTED
+#   USE_DISTRIBUTED=0
 #     disables distributed (c10d, gloo, mpi, etc.) build
 #
-#   NO_SYSTEM_NCCL
+#   USE_SYSTEM_NCCL=0
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
-#   NO_CAFFE2_OPS
+#   BUILD_CAFFE2_OPS=0
 #     disable Caffe2 operators build
 #
 #   USE_GLOO_IBVERBS
@@ -63,6 +66,9 @@
 #
 #   USE_OPENCV
 #     enables use of OpenCV for additional operators
+#
+#   USE_OPENMP=0
+#     disables use of OpenMP for parallelization
 #
 #   USE_FFMPEG
 #     enables use of ffmpeg for additional operators
@@ -91,6 +97,23 @@
 #     specify a namespace for ONNX built here rather than the hard-coded
 #     one in this file; needed to build with other frameworks that share ONNX.
 #
+#   BLAS
+#     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, or OpenBLAS. If set
+#     then the build will fail if the requested BLAS is not found, otherwise
+#     the BLAS will be chosen based on what is found on your system.
+#
+#   MKL_SEQ=1
+#     chooses a sequential version of MKL library (in case of BLAS=MKL)
+#
+#   USE_FBGEMM
+#     Enables use of FBGEMM
+#
+#   USE_REDIS
+#     Whether to use Redis for distributed workflows (Linux only)
+#
+#   USE_ZSTD
+#     Enables use of ZSTD, if the libraries are found
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -101,6 +124,9 @@
 #   CUDAHOSTCXX
 #     specify a different compiler than the system one to use as the CUDA
 #     host compiler for nvcc.
+#
+#   CUDA_NVCC_EXECUTABLE
+#     Specify a NVCC to use. This is used in our CI to point to a cached nvcc
 #
 #   CUDNN_LIB_DIR
 #   CUDNN_INCLUDE_DIR
@@ -125,67 +151,60 @@
 #     we will search for libraries in these paths
 
 from __future__ import print_function
-from setuptools import setup, Extension, distutils, Command, find_packages
+from setuptools import setup, Extension, distutils, find_packages
+from distutils import core, dir_util
+from distutils.core import Distribution
+from distutils.errors import DistutilsArgError
 import setuptools.command.build_ext
 import setuptools.command.install
-import setuptools.command.develop
-import setuptools.command.build_py
-import distutils.unixccompiler
-import distutils.command.build
 import distutils.command.clean
 import distutils.sysconfig
 import filecmp
-import platform
 import subprocess
 import shutil
-import multiprocessing
 import sys
 import os
 import json
 import glob
 import importlib
 
-from tools.setup_helpers.env import (check_env_flag, check_negative_env_flag,
-                                     hotpatch_build_env_vars)
-
-
-hotpatch_build_env_vars()
-
+from tools.build_pytorch_libs import build_caffe2
+from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
+                                     check_env_flag,
+                                     DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN)
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
-from tools.setup_helpers.build import (BUILD_BINARY, BUILD_TEST,
-                                       BUILD_CAFFE2_OPS, USE_LEVELDB,
-                                       USE_LMDB, USE_OPENCV, USE_TENSORRT,
-                                       USE_FFMPEG, USE_FBGEMM)
-from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
-from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
-                                       CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
-from tools.setup_helpers.miopen import (USE_MIOPEN, MIOPEN_LIBRARY,
-                                        MIOPEN_LIB_DIR, MIOPEN_INCLUDE_DIR)
-from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_LIB_DIR, \
-    NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
-from tools.setup_helpers.nnpack import USE_NNPACK
-from tools.setup_helpers.qnnpack import USE_QNNPACK
-from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
-from tools.setup_helpers.generate_code import generate_code
-from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
-from tools.setup_helpers.dist_check import USE_DISTRIBUTED, \
-    USE_GLOO_IBVERBS
-
+from tools.setup_helpers.cudnn import USE_CUDNN, CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
+from tools.setup_helpers.rocm import USE_ROCM
+from tools.setup_helpers.miopen import USE_MIOPEN, MIOPEN_LIBRARY, MIOPEN_INCLUDE_DIR
+from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_SYSTEM_LIB, NCCL_INCLUDE_DIR
+from tools.setup_helpers.dist_check import USE_DISTRIBUTED
 ################################################################################
 # Parameters parsed from environment
 ################################################################################
 
-DEBUG = check_env_flag('DEBUG')
-REL_WITH_DEB_INFO = check_env_flag('REL_WITH_DEB_INFO')
-
 VERBOSE_SCRIPT = True
+RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
-for arg in sys.argv:
+EMIT_BUILD_WARNING = False
+RERUN_CMAKE = False
+filtered_args = []
+for i, arg in enumerate(sys.argv):
+    if arg == '--cmake':
+        RERUN_CMAKE = True
+        continue
+    if arg == 'rebuild' or arg == 'build':
+        arg = 'build'  # rebuild is gone, make it build
+        EMIT_BUILD_WARNING = True
     if arg == "--":
+        filtered_args += sys.argv[i:]
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
+    if arg == 'clean':
+        RUN_BUILD_DEPS = False
+    filtered_args.append(arg)
+sys.argv = filtered_args
 
 if VERBOSE_SCRIPT:
     def report(*args):
@@ -194,43 +213,10 @@ else:
     def report(*args):
         pass
 
-IS_WINDOWS = (platform.system() == 'Windows')
-IS_DARWIN = (platform.system() == 'Darwin')
-IS_LINUX = (platform.system() == 'Linux')
-IS_PPC = (platform.machine() == 'ppc64le')
-IS_ARM = (platform.machine() == 'aarch64')
-
-BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
-# ppc64le and aarch64 do not support MKLDNN
-if IS_PPC or IS_ARM:
-    USE_MKLDNN = check_env_flag('USE_MKLDNN', 'OFF')
-else:
-    USE_MKLDNN = check_env_flag('USE_MKLDNN', 'ON')
-
-USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
-RERUN_CMAKE = True
-
-NUM_JOBS = multiprocessing.cpu_count()
-max_jobs = os.getenv("MAX_JOBS")
-if max_jobs is not None:
-    NUM_JOBS = min(NUM_JOBS, int(max_jobs))
-
-ONNX_NAMESPACE = os.getenv("ONNX_NAMESPACE")
-if not ONNX_NAMESPACE:
-    ONNX_NAMESPACE = "onnx_torch"
-
-# Ninja
-try:
-    import ninja
-    USE_NINJA = True
-except ImportError:
-    USE_NINJA = False
-
 # Constant known variables used throughout this file
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
-tmp_install_path = lib_path + "/tmp_install"
 caffe2_build_dir = os.path.join(cwd, "build")
 # lib/pythonx.x/site-packages
 rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
@@ -248,60 +234,85 @@ else:
 cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 
 
-class PytorchCommand(setuptools.Command):
-    """
-    Base Pytorch command to avoid implementing initialize/finalize_options in
-    every subclass
-    """
-    user_options = []
-
-    def initialize_options(self):
-        pass
-
-    def finalize_options(self):
-        pass
-
-
 ################################################################################
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.0.0a0'
+version = '1.1.0a0'
+sha = 'Unknown'
+
+try:
+    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
+except Exception:
+    pass
+
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
     version = os.getenv('PYTORCH_BUILD_VERSION')
     if build_number > 1:
         version += '.post' + str(build_number)
-else:
-    try:
-        sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
-        version += '+' + sha[:7]
-    except Exception:
-        pass
+elif sha != 'Unknown':
+    version += '+' + sha[:7]
 report("Building wheel {}-{}".format(package_name, version))
 
 
-class create_version_file(PytorchCommand):
-    def run(self):
-        global version, cwd
-        report('-- Building version ' + version)
-        version_path = os.path.join(cwd, 'torch', 'version.py')
-        with open(version_path, 'w') as f:
-            f.write("__version__ = '{}'\n".format(version))
-            # NB: This is not 100% accurate, because you could have built the
-            # library code with DEBUG, but csrc without DEBUG (in which case
-            # this would claim to be a release build when it's not.)
-            f.write("debug = {}\n".format(repr(DEBUG)))
-            f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
+# all the work we need to do _before_ setup runs
+def build_deps():
+    report('-- Building version ' + version)
+    version_path = os.path.join(cwd, 'torch', 'version.py')
+    with open(version_path, 'w') as f:
+        f.write("__version__ = '{}'\n".format(version))
+        # NB: This is not 100% accurate, because you could have built the
+        # library code with DEBUG, but csrc without DEBUG (in which case
+        # this would claim to be a release build when it's not.)
+        f.write("debug = {}\n".format(repr(DEBUG)))
+        f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
+        f.write("git_version = {}\n".format(repr(sha)))
 
+    def check_file(f):
+        if not os.path.exists(f):
+            report("Could not find {}".format(f))
+            report("Did you run 'git submodule update --init --recursive'?")
+            sys.exit(1)
+
+    check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
+    check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
+    check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'foxi', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
+
+    check_pydep('yaml', 'pyyaml')
+    check_pydep('typing', 'typing')
+
+    build_caffe2(version=version,
+                 cmake_python_library=cmake_python_library,
+                 build_python=True,
+                 rerun_cmake=RERUN_CMAKE,
+                 build_dir='build')
+
+    # Use copies instead of symbolic files.
+    # Windows has very poor support for them.
+    sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
+    orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
+    for sym_file, orig_file in zip(sym_files, orig_files):
+        same = False
+        if os.path.exists(sym_file):
+            if filecmp.cmp(sym_file, orig_file):
+                same = True
+            else:
+                os.remove(sym_file)
+        if not same:
+            shutil.copyfile(orig_file, sym_file)
+
+    dir_util.copy_tree('third_party/pybind11/include/pybind11/',
+                       'torch/include/pybind11')
 
 ################################################################################
 # Building dependent libraries
 ################################################################################
-
-# All libraries that torch could depend on
-dep_libs = ['caffe2']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -316,228 +327,7 @@ def check_pydep(importname, module):
         raise RuntimeError(missing_pydep.format(importname=importname, module=module))
 
 
-# Calls build_pytorch_libs.sh/bat with the correct env variables
-def build_libs(libs):
-    for lib in libs:
-        assert lib in dep_libs, 'invalid lib: {}'.format(lib)
-    if IS_WINDOWS:
-        build_libs_cmd = ['tools\\build_pytorch_libs.bat']
-    else:
-        build_libs_cmd = ['bash', os.path.join('..', 'tools', 'build_pytorch_libs.sh')]
-    my_env = os.environ.copy()
-    my_env["PYTORCH_PYTHON"] = sys.executable
-    my_env["PYTORCH_PYTHON_LIBRARY"] = cmake_python_library
-    my_env["PYTORCH_PYTHON_INCLUDE_DIR"] = cmake_python_include_dir
-    my_env["PYTORCH_BUILD_VERSION"] = version
-
-    cmake_prefix_path = full_site_packages
-    if "CMAKE_PREFIX_PATH" in my_env:
-        cmake_prefix_path = my_env["CMAKE_PREFIX_PATH"] + ";" + cmake_prefix_path
-    my_env["CMAKE_PREFIX_PATH"] = cmake_prefix_path
-
-    my_env["NUM_JOBS"] = str(NUM_JOBS)
-    my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
-    if not IS_WINDOWS:
-        if USE_NINJA:
-            my_env["CMAKE_GENERATOR"] = '-GNinja'
-            my_env["CMAKE_INSTALL"] = 'ninja install'
-        else:
-            my_env['CMAKE_GENERATOR'] = ''
-            my_env['CMAKE_INSTALL'] = 'make install'
-    if USE_SYSTEM_NCCL:
-        my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
-        my_env["NCCL_INCLUDE_DIR"] = NCCL_INCLUDE_DIR
-        my_env["NCCL_SYSTEM_LIB"] = NCCL_SYSTEM_LIB
-    if USE_CUDA:
-        my_env["CUDA_BIN_PATH"] = CUDA_HOME
-        build_libs_cmd += ['--use-cuda']
-        if IS_WINDOWS:
-            my_env["NVTOOLEXT_HOME"] = NVTOOLEXT_HOME
-    if USE_CUDA_STATIC_LINK:
-        build_libs_cmd += ['--cuda-static-link']
-    if USE_FBGEMM:
-        build_libs_cmd += ['--use-fbgemm']
-    if USE_ROCM:
-        build_libs_cmd += ['--use-rocm']
-    if USE_NNPACK:
-        build_libs_cmd += ['--use-nnpack']
-    if USE_NUMPY:
-        my_env["NUMPY_INCLUDE_DIR"] = NUMPY_INCLUDE_DIR
-    if USE_CUDNN:
-        my_env["CUDNN_LIB_DIR"] = CUDNN_LIB_DIR
-        my_env["CUDNN_LIBRARY"] = CUDNN_LIBRARY
-        my_env["CUDNN_INCLUDE_DIR"] = CUDNN_INCLUDE_DIR
-    if USE_MIOPEN:
-        my_env["MIOPEN_LIB_DIR"] = MIOPEN_LIB_DIR
-        my_env["MIOPEN_LIBRARY"] = MIOPEN_LIBRARY
-        my_env["MIOPEN_INCLUDE_DIR"] = MIOPEN_INCLUDE_DIR
-    if USE_MKLDNN:
-        build_libs_cmd += ['--use-mkldnn']
-    if USE_QNNPACK:
-        build_libs_cmd += ['--use-qnnpack']
-    if USE_GLOO_IBVERBS:
-        build_libs_cmd += ['--use-gloo-ibverbs']
-    if not RERUN_CMAKE:
-        build_libs_cmd += ['--dont-rerun-cmake']
-
-    my_env["BUILD_TORCH"] = "ON"
-    my_env["BUILD_PYTHON"] = "ON"
-    my_env["BUILD_BINARY"] = "ON" if BUILD_BINARY else "OFF"
-    my_env["BUILD_TEST"] = "ON" if BUILD_TEST else "OFF"
-    my_env["BUILD_CAFFE2_OPS"] = "ON" if BUILD_CAFFE2_OPS else "OFF"
-    my_env["INSTALL_TEST"] = "ON" if BUILD_TEST else "OFF"
-    my_env["USE_LEVELDB"] = "ON" if USE_LEVELDB else "OFF"
-    my_env["USE_LMDB"] = "ON" if USE_LMDB else "OFF"
-    my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
-    my_env["USE_TENSORRT"] = "ON" if USE_TENSORRT else "OFF"
-    my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
-    my_env["USE_DISTRIBUTED"] = "ON" if USE_DISTRIBUTED else "OFF"
-    my_env["USE_SYSTEM_NCCL"] = "ON" if USE_SYSTEM_NCCL else "OFF"
-    if VERBOSE_SCRIPT:
-        my_env['VERBOSE_SCRIPT'] = '1'
-    try:
-        os.mkdir('build')
-    except OSError:
-        pass
-
-    kwargs = {'cwd': 'build'} if not IS_WINDOWS else {}
-
-    if subprocess.call(build_libs_cmd + libs, env=my_env, **kwargs) != 0:
-        report("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
-        sys.exit(1)
-
-
-# Build all dependent libraries
-class build_deps(PytorchCommand):
-    def run(self):
-        report('setup.py::build_deps::run()')
-        # Check if you remembered to check out submodules
-
-        def check_file(f):
-            if not os.path.exists(f):
-                report("Could not find {}".format(f))
-                report("Did you run 'git submodule update --init --recursive'?")
-                sys.exit(1)
-
-        check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
-        check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
-        check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
-
-        check_pydep('yaml', 'pyyaml')
-        check_pydep('typing', 'typing')
-
-        libs = []
-        libs += ['caffe2']
-        build_libs(libs)
-
-        # Use copies instead of symbolic files.
-        # Windows has very poor support for them.
-        sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
-        orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
-        for sym_file, orig_file in zip(sym_files, orig_files):
-            same = False
-            if os.path.exists(sym_file):
-                if filecmp.cmp(sym_file, orig_file):
-                    same = True
-                else:
-                    os.remove(sym_file)
-            if not same:
-                shutil.copyfile(orig_file, sym_file)
-
-        self.copy_tree('torch/lib/tmp_install/share', 'torch/share')
-        self.copy_tree('third_party/pybind11/include/pybind11/',
-                       'torch/lib/include/pybind11')
-
-
-build_dep_cmds = {}
-rebuild_dep_cmds = {}
-
-for lib in dep_libs:
-    # wrap in function to capture lib
-    class build_dep(build_deps):
-        description = 'Build {} external library'.format(lib)
-
-        def run(self):
-            build_libs([self.lib])
-    build_dep.lib = lib
-    build_dep_cmds['build_' + lib.lower()] = build_dep
-
-    class rebuild_dep(build_deps):
-        description = 'Rebuild {} external library'.format(lib)
-
-        def run(self):
-            global RERUN_CMAKE
-            RERUN_CMAKE = False
-            build_libs([self.lib])
-    rebuild_dep.lib = lib
-    rebuild_dep_cmds['rebuild_' + lib.lower()] = rebuild_dep
-
-
-class build_module(PytorchCommand):
-    def run(self):
-        report('setup.py::build_module::run()')
-        self.run_command('build_py')
-        self.run_command('build_ext')
-
-
-class build_py(setuptools.command.build_py.build_py):
-
-    def run(self):
-        report('setup.py::build_py::run()')
-        self.run_command('create_version_file')
-        setuptools.command.build_py.build_py.run(self)
-
-
-class develop(setuptools.command.develop.develop):
-
-    def run(self):
-        report('setup.py::develop::run()')
-        self.run_command('create_version_file')
-        setuptools.command.develop.develop.run(self)
-        self.create_compile_commands()
-
-    def create_compile_commands(self):
-        def load(filename):
-            with open(filename) as f:
-                return json.load(f)
-        ninja_files = glob.glob('build/*compile_commands.json')
-        cmake_files = glob.glob('torch/lib/build/*/compile_commands.json')
-        all_commands = [entry
-                        for f in ninja_files + cmake_files
-                        for entry in load(f)]
-
-        # cquery does not like c++ compiles that start with gcc.
-        # It forgets to include the c++ header directories.
-        # We can work around this by replacing the gcc calls that python
-        # setup.py generates with g++ calls instead
-        for command in all_commands:
-            if command['command'].startswith("gcc "):
-                command['command'] = "g++ " + command['command'][4:]
-
-        new_contents = json.dumps(all_commands, indent=2)
-        contents = ''
-        if os.path.exists('compile_commands.json'):
-            with open('compile_commands.json', 'r') as f:
-                contents = f.read()
-        if contents != new_contents:
-            with open('compile_commands.json', 'w') as f:
-                f.write(new_contents)
-
-        if not USE_NINJA:
-            report("WARNING: 'develop' is not building C++ code incrementally")
-            report("because ninja is not installed. Run this to enable it:")
-            report(" > pip install ninja")
-
-
-build_ext_parent = ninja_build_ext if USE_NINJA \
-    else setuptools.command.build_ext.build_ext
-
-
-class build_ext(build_ext_parent):
-
+class build_ext(setuptools.command.build_ext.build_ext):
     def run(self):
         # report build options
         if USE_NUMPY:
@@ -593,9 +383,16 @@ class build_ext(build_ext_parent):
             target_lib = os.path.join(
                 build_lib, 'torch', 'lib', '_C.lib').replace('\\', '/')
 
+            # Create "torch/lib" directory if not exists.
+            # (It is not created yet in "develop" mode.)
+            target_dir = os.path.dirname(target_lib)
+            if not os.path.exists(target_dir):
+                os.makedirs(target_dir)
+
             self.copy_file(export_lib, target_lib)
 
     def build_extensions(self):
+        self.create_compile_commands()
         # The caffe2 extensions are created in
         # tmp_install/lib/pythonM.m/site-packages/caffe2/python/
         # and need to be copied to build/lib.linux.... , which will be a
@@ -618,7 +415,7 @@ class build_ext(build_ext_parent):
             filename = self.get_ext_filename(fullname)
             report("\nCopying extension {}".format(ext.name))
 
-            src = os.path.join(tmp_install_path, rel_site_packages, filename)
+            src = os.path.join("torch", rel_site_packages, filename)
             if not os.path.exists(src):
                 report("{} does not exist".format(src))
                 del self.extensions[i]
@@ -638,31 +435,36 @@ class build_ext(build_ext_parent):
         report("setup.py::get_outputs returning {}".format(outputs))
         return outputs
 
+    def create_compile_commands(self):
+        def load(filename):
+            with open(filename) as f:
+                return json.load(f)
+        ninja_files = glob.glob('build/*compile_commands.json')
+        cmake_files = glob.glob('torch/lib/build/*/compile_commands.json')
+        all_commands = [entry
+                        for f in ninja_files + cmake_files
+                        for entry in load(f)]
 
-class build(distutils.command.build.build):
-    sub_commands = [
-        ('build_deps', lambda self: True),
-    ] + distutils.command.build.build.sub_commands
+        # cquery does not like c++ compiles that start with gcc.
+        # It forgets to include the c++ header directories.
+        # We can work around this by replacing the gcc calls that python
+        # setup.py generates with g++ calls instead
+        for command in all_commands:
+            if command['command'].startswith("gcc "):
+                command['command'] = "g++ " + command['command'][4:]
 
-
-class rebuild(distutils.command.build.build):
-    sub_commands = [
-        ('build_deps', lambda self: True),
-    ] + distutils.command.build.build.sub_commands
-
-    def run(self):
-        global RERUN_CMAKE
-        RERUN_CMAKE = False
-        distutils.command.build.build.run(self)
+        new_contents = json.dumps(all_commands, indent=2)
+        contents = ''
+        if os.path.exists('compile_commands.json'):
+            with open('compile_commands.json', 'r') as f:
+                contents = f.read()
+        if contents != new_contents:
+            with open('compile_commands.json', 'w') as f:
+                f.write(new_contents)
 
 
 class install(setuptools.command.install.install):
-
     def run(self):
-        report('setup.py::run()')
-        if not self.skip_build:
-            self.run_command('build_deps')
-
         setuptools.command.install.install.run(self)
 
 
@@ -770,7 +572,7 @@ if IS_WINDOWS:
     if USE_ROCM:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
 
-main_compile_args = ['-D_THP_CORE', '-DONNX_NAMESPACE=' + ONNX_NAMESPACE]
+main_compile_args = []
 main_libraries = ['shm', 'torch_python']
 main_link_args = []
 main_sources = ["torch/csrc/stub.cpp"]
@@ -816,8 +618,11 @@ if DEBUG:
         extra_link_args += ['-O0', '-g']
 
 if REL_WITH_DEB_INFO:
-    extra_compile_args += ['-g']
-    extra_link_args += ['-g']
+    if IS_WINDOWS:
+        extra_link_args.append('/DEBUG:FULL')
+    else:
+        extra_compile_args += ['-g']
+        extra_link_args += ['-g']
 
 
 def make_relative_rpath(path):
@@ -852,31 +657,6 @@ if not IS_WINDOWS:
                    )
     extensions.append(DL)
 
-
-if USE_CUDA:
-    thnvrtc_link_flags = extra_link_args + [make_relative_rpath('lib')]
-    if IS_LINUX:
-        thnvrtc_link_flags = thnvrtc_link_flags + ['-Wl,--no-as-needed']
-    # these have to be specified as -lcuda in link_flags because they
-    # have to come right after the `no-as-needed` option
-    if IS_WINDOWS:
-        thnvrtc_link_flags += ['cuda.lib', 'nvrtc.lib']
-    else:
-        thnvrtc_link_flags += ['-lcuda', '-lnvrtc']
-    cuda_stub_path = [cuda_lib_path + '/stubs']
-    if IS_DARWIN:
-        # on macOS this is where the CUDA stub is installed according to the manual
-        cuda_stub_path = ["/usr/local/cuda/lib"]
-    THNVRTC = Extension("torch._nvrtc",
-                        sources=['torch/csrc/nvrtc.cpp'],
-                        language='c++',
-                        extra_compile_args=main_compile_args + extra_compile_args,
-                        include_dirs=[cwd],
-                        library_dirs=library_dirs + cuda_stub_path,
-                        extra_link_args=thnvrtc_link_flags,
-                        )
-    extensions.append(THNVRTC)
-
 # These extensions are built by cmake and copied manually in build_extensions()
 # inside the build_ext implementaiton
 extensions.append(
@@ -898,19 +678,10 @@ if USE_ROCM:
     )
 
 cmdclass = {
-    'create_version_file': create_version_file,
-    'build': build,
-    'build_py': build_py,
     'build_ext': build_ext,
-    'build_deps': build_deps,
-    'build_module': build_module,
-    'rebuild': rebuild,
-    'develop': develop,
-    'install': install,
     'clean': clean,
+    'install': install,
 }
-cmdclass.update(build_dep_cmds)
-cmdclass.update(rebuild_dep_cmds)
 
 entry_points = {
     'console_scripts': [
@@ -919,7 +690,42 @@ entry_points = {
     ]
 }
 
+# post run, warnings, printed at the end to make them more visible
+build_update_message = """
+    It is no longer necessary to use the 'build' or 'rebuild' targets
+
+    To install:
+      $ python setup.py install
+    To develop locally:
+      $ python setup.py develop
+    To force cmake to re-run (off by default):
+      $ python setup.py develop --cmake
+"""
+
+
+def print_box(msg):
+    lines = msg.split('\n')
+    size = max(len(l) + 1 for l in lines)
+    print('-' * (size + 2))
+    for l in lines:
+        print('|{}{}|'.format(l, ' ' * (size - len(l))))
+    print('-' * (size + 2))
+
 if __name__ == '__main__':
+    # Parse the command line and check the arguments
+    # before we proceed with building deps and setup
+    dist = Distribution()
+    dist.script_name = sys.argv[0]
+    dist.script_args = sys.argv[1:]
+    try:
+        ok = dist.parse_command_line()
+    except DistutilsArgError as msg:
+        raise SystemExit(core.gen_usage(dist.script_name) + "\nerror: %s" % msg)
+    if not ok:
+        sys.exit()
+
+    if RUN_BUILD_DEPS:
+        build_deps()
     setup(
         name=package_name,
         version=version,
@@ -931,65 +737,84 @@ if __name__ == '__main__':
         entry_points=entry_points,
         package_data={
             'torch': [
+                'py.typed',
+                'bin/*',
+                'test/*',
+                '__init__.pyi',
+                'cuda/*.pyi',
+                'optim/*.pyi',
+                'autograd/*.pyi',
+                'utils/data/*.pyi',
                 'lib/*.so*',
                 'lib/*.dylib*',
                 'lib/*.dll',
                 'lib/*.lib',
+                'lib/*.pdb',
                 'lib/torch_shm_manager',
                 'lib/*.h',
-                'lib/include/ATen/*.h',
-                'lib/include/ATen/cpu/*.h',
-                'lib/include/ATen/core/*.h',
-                'lib/include/ATen/cuda/*.cuh',
-                'lib/include/ATen/cuda/*.h',
-                'lib/include/ATen/cuda/detail/*.cuh',
-                'lib/include/ATen/cuda/detail/*.h',
-                'lib/include/ATen/cudnn/*.h',
-                'lib/include/ATen/detail/*.h',
-                'lib/include/caffe2/utils/*.h',
-                'lib/include/c10/*.h',
-                'lib/include/c10/macros/*.h',
-                'lib/include/c10/core/*.h',
-                'lib/include/c10/util/*.h',
-                'lib/include/c10/impl/*.h',
-                'lib/include/c10/cuda/*.h',
-                'lib/include/c10/cuda/impl/*.h',
-                'lib/include/c10/hip/*.h',
-                'lib/include/c10/hip/impl/*.h',
-                'lib/include/caffe2/core/*.h',
-                'lib/include/caffe2/proto/*.h',
-                'lib/include/torch/*.h',
-                'lib/include/torch/csrc/*.h',
-                'lib/include/torch/csrc/api/include/torch/*.h',
-                'lib/include/torch/csrc/api/include/torch/data/*.h',
-                'lib/include/torch/csrc/api/include/torch/data/datasets/*.h',
-                'lib/include/torch/csrc/api/include/torch/data/detail/*.h',
-                'lib/include/torch/csrc/api/include/torch/data/samplers/*.h',
-                'lib/include/torch/csrc/api/include/torch/data/transforms/*.h',
-                'lib/include/torch/csrc/api/include/torch/detail/*.h',
-                'lib/include/torch/csrc/api/include/torch/detail/ordered_dict.h',
-                'lib/include/torch/csrc/api/include/torch/nn/*.h',
-                'lib/include/torch/csrc/api/include/torch/nn/modules/*.h',
-                'lib/include/torch/csrc/api/include/torch/nn/parallel/*.h',
-                'lib/include/torch/csrc/api/include/torch/optim/*.h',
-                'lib/include/torch/csrc/api/include/torch/serialize/*.h',
-                'lib/include/torch/csrc/autograd/*.h',
-                'lib/include/torch/csrc/autograd/generated/*.h',
-                'lib/include/torch/csrc/cuda/*.h',
-                'lib/include/torch/csrc/jit/*.h',
-                'lib/include/torch/csrc/jit/generated/*.h',
-                'lib/include/torch/csrc/jit/passes/*.h',
-                'lib/include/torch/csrc/jit/script/*.h',
-                'lib/include/torch/csrc/utils/*.h',
-                'lib/include/pybind11/*.h',
-                'lib/include/pybind11/detail/*.h',
-                'lib/include/TH/*.h*',
-                'lib/include/TH/generic/*.h*',
-                'lib/include/THC/*.cuh',
-                'lib/include/THC/*.h*',
-                'lib/include/THC/generic/*.h',
-                'lib/include/THCUNN/*.cuh',
-                'lib/include/THNN/*.h',
+                'include/ATen/*.h',
+                'include/ATen/cpu/*.h',
+                'include/ATen/cpu/vec256/*.h',
+                'include/ATen/core/*.h',
+                'include/ATen/cuda/*.cuh',
+                'include/ATen/cuda/*.h',
+                'include/ATen/cuda/detail/*.cuh',
+                'include/ATen/cuda/detail/*.h',
+                'include/ATen/cudnn/*.h',
+                'include/ATen/detail/*.h',
+                'include/caffe2/utils/*.h',
+                'include/c10/*.h',
+                'include/c10/macros/*.h',
+                'include/c10/core/*.h',
+                'include/ATen/core/dispatch/*.h',
+                'include/ATen/core/op_registration/*.h',
+                'include/c10/core/impl/*.h',
+                'include/c10/util/*.h',
+                'include/c10/cuda/*.h',
+                'include/c10/cuda/impl/*.h',
+                'include/c10/hip/*.h',
+                'include/c10/hip/impl/*.h',
+                'include/caffe2/**/*.h',
+                'include/torch/*.h',
+                'include/torch/csrc/*.h',
+                'include/torch/csrc/api/include/torch/*.h',
+                'include/torch/csrc/api/include/torch/data/*.h',
+                'include/torch/csrc/api/include/torch/data/dataloader/*.h',
+                'include/torch/csrc/api/include/torch/data/datasets/*.h',
+                'include/torch/csrc/api/include/torch/data/detail/*.h',
+                'include/torch/csrc/api/include/torch/data/samplers/*.h',
+                'include/torch/csrc/api/include/torch/data/transforms/*.h',
+                'include/torch/csrc/api/include/torch/detail/*.h',
+                'include/torch/csrc/api/include/torch/detail/ordered_dict.h',
+                'include/torch/csrc/api/include/torch/nn/*.h',
+                'include/torch/csrc/api/include/torch/nn/modules/*.h',
+                'include/torch/csrc/api/include/torch/nn/parallel/*.h',
+                'include/torch/csrc/api/include/torch/optim/*.h',
+                'include/torch/csrc/api/include/torch/serialize/*.h',
+                'include/torch/csrc/autograd/*.h',
+                'include/torch/csrc/autograd/functions/*.h',
+                'include/torch/csrc/autograd/generated/*.h',
+                'include/torch/csrc/autograd/utils/*.h',
+                'include/torch/csrc/cuda/*.h',
+                'include/torch/csrc/jit/*.h',
+                'include/torch/csrc/jit/generated/*.h',
+                'include/torch/csrc/jit/passes/*.h',
+                'include/torch/csrc/jit/passes/utils/*.h',
+                'include/torch/csrc/jit/script/*.h',
+                'include/torch/csrc/jit/testing/*.h',
+                'include/torch/csrc/onnx/*.h',
+                'include/torch/csrc/utils/*.h',
+                'include/pybind11/*.h',
+                'include/pybind11/detail/*.h',
+                'include/TH/*.h*',
+                'include/TH/generic/*.h*',
+                'include/THC/*.cuh',
+                'include/THC/*.h*',
+                'include/THC/generic/*.h',
+                'include/THCUNN/*.cuh',
+                'include/THCUNN/generic/*.h',
+                'include/THNN/*.h',
+                'include/THNN/generic/*.h',
                 'share/cmake/ATen/*.cmake',
                 'share/cmake/Caffe2/*.cmake',
                 'share/cmake/Caffe2/public/*.cmake',
@@ -1000,7 +825,9 @@ if __name__ == '__main__':
                 'share/cmake/Torch/*.cmake',
             ],
             'caffe2': [
-                'cpp_test/*',
+                'python/serialized_test/data/operator_test/*.zip',
             ]
         },
     )
+    if EMIT_BUILD_WARNING:
+        print_box(build_update_message)

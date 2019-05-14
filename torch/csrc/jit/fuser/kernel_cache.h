@@ -1,21 +1,22 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include <c10/util/Optional.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/fuser/kernel_spec.h>
+#include <torch/csrc/jit/ir.h>
 
-#include <cstdint> 
+#include <cstdint>
 #include <functional>
 
-namespace torch { namespace jit { namespace fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 // A thread-safe cache interface.
 
 // Normalizes the graph by canonicalizing and erasing shape information
-TORCH_API std::shared_ptr<Graph> normalizeGraphForCache(const std::shared_ptr<Graph>& graph);
+TORCH_API std::shared_ptr<Graph> normalizeGraphForCache(
+    const std::shared_ptr<Graph>& graph);
 
 // Stores the given graph, returning the key used to access it
 TORCH_API int64_t store(std::shared_ptr<Graph> graph);
@@ -33,5 +34,3 @@ TORCH_API int64_t debugNumCachedKernelSpecs();
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CUDA_FUSER || USE_CPU_FUSER

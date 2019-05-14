@@ -97,7 +97,7 @@ void RecurrentBaseOp<T>::initialize(
         rnnInput,
         rnnDirection,
         rnnMode,
-        miopenRNNwithBias, 
+        miopenRNNwithBias,
         miopenRNNdefault,
         miopenTypeWrapper<T>::type));
   }
@@ -154,7 +154,7 @@ void RecurrentBaseOp<T>::initialize(
         miopen_wrapper_.inline_miopen_handle(),
         rnnDesc_,
         xDesc_->descs()[0],
-        wDesc_, 
+        wDesc_,
         miopenTypeWrapper<T>::type));
   }
 
@@ -172,13 +172,13 @@ void RecurrentBaseOp<T>::initialize(
 template <typename T>
 bool RecurrentOp<T>::RunOnDevice() {
   const int seqLength = Input(INPUT).dim32(0);
-  if (Input(INPUT).dims() != cachedInputDims_) {
+  if (Input(INPUT).sizes() != cachedInputDims_) {
     initialize(
         Input(INPUT),
         Output(OUTPUT),
         Output(HIDDEN_OUTPUT),
         Output(CELL_OUTPUT));
-    cachedInputDims_ = Input(INPUT).dims().vec();
+    cachedInputDims_ = Input(INPUT).sizes().vec();
   }
 
   // Validation checks
@@ -189,7 +189,7 @@ bool RecurrentOp<T>::RunOnDevice() {
       xDesc_->descs()[0],
       &weightsSize,
       miopenTypeWrapper<T>::type));
-  
+
   CAFFE_ENFORCE_EQ(Input(WEIGHT).nbytes(), weightsSize);
 
   // Training reserve size
@@ -264,9 +264,9 @@ bool RecurrentOp<T>::RunOnDevice() {
 template <typename T>
 bool RecurrentGradientOp<T>::RunOnDevice() {
   const int seqLength = Input(INPUT).dim32(0);
-  if (Input(INPUT).dims() != cachedInputDims_) {
+  if (Input(INPUT).sizes() != cachedInputDims_) {
     initialize(Input(INPUT));
-    cachedInputDims_ = Input(INPUT).dims().vec();
+    cachedInputDims_ = Input(INPUT).sizes().vec();
   }
   MIOPEN_ENFORCE(miopenGetRNNTrainingReserveSize(
       miopen_wrapper_.inline_miopen_handle(),
@@ -386,7 +386,7 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         rnnDesc_,
         layer,
         param_id,
-        &bias_size)); 
+        &bias_size));
 
     void* bias;
     miopen_wrapper_.with_miopen_state(0, [&](MIOPENState* state) {
@@ -399,7 +399,7 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         xDesc_->descs()[0],
         wDesc_,
         Input(1).template data<T>(),
-        param_id, 
+        param_id,
         biasDesc,
         bias));
     std::array<int,3> biasDims {1,1,1};
@@ -438,7 +438,7 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         xDesc_->descs()[0],
         param_id,
         &param_size));
-    
+
     void* pmatrix;
     miopen_wrapper_.with_miopen_state(0, [&](MIOPENState* state) {
         pmatrix = state->workspace().get(param_size);
@@ -450,7 +450,7 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         xDesc_->descs()[0],
         wDesc_,
         Input(1).template data<T>(),
-        param_id, 
+        param_id,
         matrixParamDesc,
         pmatrix));
     std::array<int,3> matDims {1,1,1};
@@ -503,7 +503,7 @@ REGISTER_MIOPEN_OPERATOR(
 OPERATOR_SCHEMA(RecurrentParamGet)
     .NumInputs(2)
     .NumOutputs(1);
-    
+
 struct GetRecurrentGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {

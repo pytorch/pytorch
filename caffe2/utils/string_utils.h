@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "caffe2/core/common.h"
+#include "caffe2/core/types.h"
 
 namespace caffe2 {
 
@@ -19,6 +20,31 @@ CAFFE2_API size_t editDistance(
 CAFFE2_API inline bool StartsWith(const std::string& str, const std::string& prefix) {
   return std::mismatch(prefix.begin(), prefix.end(), str.begin()).first ==
       prefix.end();
+}
+
+CAFFE2_API inline bool EndsWith(
+    const std::string& full,
+    const std::string& ending) {
+  if (full.length() >= ending.length()) {
+    return (
+        0 ==
+        full.compare(full.length() - ending.length(), ending.length(), ending));
+  } else {
+    return false;
+  }
+}
+
+CAFFE2_API inline int32_t GetDimFromOrderString(const std::string& str) {
+  auto order = StringToStorageOrder(str);
+  switch (order) {
+    case StorageOrder::NHWC:
+      return 3;
+    case StorageOrder::NCHW:
+      return 1;
+    default:
+      CAFFE_THROW("Unsupported storage order: ", str);
+      return -1;
+  }
 }
 
 CAFFE2_API int32_t editDistanceHelper(const char* s1,

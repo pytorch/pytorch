@@ -11,8 +11,9 @@ namespace caffe2 {
 template <typename T, class Context>
 class SpatialSoftmaxWithLossOp final : public Operator<Context> {
  public:
-  SpatialSoftmaxWithLossOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SpatialSoftmaxWithLossOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         scale_(this->template GetSingleArgument<float>("scale", 1.)),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))) {
@@ -28,20 +29,20 @@ class SpatialSoftmaxWithLossOp final : public Operator<Context> {
   float scale_;
   StorageOrder order_;
 
-  Tensor losses_{Context::GetDeviceType()}; // Per example loss
-  Tensor rowmax_{Context::GetDeviceType()}; // per example row max
-  Tensor weights_{Context::GetDeviceType()}; // unignored weights
-  Tensor sum_multiplier_{
-      Context::GetDeviceType()}; // Vector of ones for summing via dot prod
-  Tensor total_weight_ptr_{Context::GetDeviceType()};
+  Tensor losses_; // Per example loss
+  Tensor rowmax_; // per example row max
+  Tensor weights_; // unignored weights
+  Tensor sum_multiplier_; // Vector of ones for summing via dot prod
+  Tensor total_weight_ptr_;
   Tensor scratch_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>
 class SpatialSoftmaxWithLossGradientOp final : public Operator<Context> {
  public:
-  SpatialSoftmaxWithLossGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit SpatialSoftmaxWithLossGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         scale_(this->template GetSingleArgument<float>("scale", 1.)),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),
@@ -56,9 +57,9 @@ class SpatialSoftmaxWithLossGradientOp final : public Operator<Context> {
 
  protected:
   float scale_;
-  Tensor sum_multiplier_{Context::GetDeviceType()};
-  Tensor weights_{Context::GetDeviceType()}; // unignored weights
-  Tensor total_weight_ptr_{Context::GetDeviceType()};
+  Tensor sum_multiplier_;
+  Tensor weights_; // unignored weights
+  Tensor total_weight_ptr_;
   StorageOrder order_;
   bool only_loss_;
   Tensor scratch_{Context::GetDeviceType()};

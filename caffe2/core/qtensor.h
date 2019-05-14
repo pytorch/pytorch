@@ -146,6 +146,11 @@ class C10_EXPORT QTensor {
     return precision_;
   }
 
+  inline at::ArrayRef<int> sizes() const {
+    return dims_;
+  }
+
+  // TODO: deprecate?
   inline at::ArrayRef<int> dims() const {
     return dims_;
   }

@@ -137,10 +137,32 @@ class ConvConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  virtual ~ConvConverter() {}
+  ~ConvConverter() override {}
+};
+
+class ConvTransposeConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    std::unique_ptr<repr::NeuralNetOperator> nnOp;
+    auto argMap = getArgumentsFromOperator(op);
+    auto kernelShape = getKernelShape(argMap);
+    nnOp = util::make_unique<repr::ConvTranspose>(kernelShape);
+    auto c = dyn_cast<repr::ConvTranspose>(nnOp.get());
+
+    c->setStrides(getStrides(argMap));
+    c->setPads(getPads(argMap));
+    c->setGroup(getGroup(argMap));
+
+    return nnOp;
+  }
+  // Does not override default converter to OperatorDef
+
+  virtual ~ConvTransposeConverter() {}
 };
 
 REGISTER_CONVERTER(Conv, ConvConverter);
+
+REGISTER_CONVERTER(ConvTranspose, ConvTransposeConverter);
 
 TRIVIAL_CONVERTER(Relu);
 REGISTER_CONVERTER(Relu, ReluConverter);
@@ -175,7 +197,7 @@ class ClipConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  virtual ~ClipConverter() {}
+  ~ClipConverter() override {}
 };
 REGISTER_CONVERTER(Clip, ClipConverter);
 
@@ -190,7 +212,7 @@ class AveragePoolConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  virtual ~AveragePoolConverter() {}
+  ~AveragePoolConverter() override {}
 };
 REGISTER_CONVERTER(AveragePool, AveragePoolConverter);
 
@@ -205,7 +227,7 @@ class MaxPoolConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  virtual ~MaxPoolConverter() {}
+  ~MaxPoolConverter() override {}
 };
 REGISTER_CONVERTER(MaxPool, MaxPoolConverter);
 
@@ -231,7 +253,7 @@ class ConcatConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  virtual ~ConcatConverter() {}
+  ~ConcatConverter() override {}
 };
 REGISTER_CONVERTER(Concat, ConcatConverter);
 
@@ -258,7 +280,7 @@ class FCConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  virtual ~FCConverter() {}
+  ~FCConverter() override {}
 };
 REGISTER_CONVERTER(FC, FCConverter);
 
@@ -384,10 +406,13 @@ repr::NNModule convertToNNModule(
 
   for (const auto& outputName : net.external_output()) {
     CAFFE_ENFORCE(
-        blobMap.count(outputName),
-        "NetDef has ill-formed external_output: \"",
-        outputName,
-        "\"");
+        !strict || blobMap.count(outputName),
+        "NetDef has ill-formed external_output:",
+        outputName);
+    if (!blobMap.count(outputName)) {
+      LOG(ERROR) << "NetDef has ill-formed external_output: " << outputName;
+      continue;
+    }
     module.outputs.insert(blobMap[outputName]);
   }
 

@@ -1,5 +1,6 @@
-#include <c10/core/dispatch/KernelRegistration.h>
-#include "caffe2/operators/experimental/c10/schemas/concat.h"
+#include <ATen/core/op_registration/op_registration.h>
+#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
 
 using caffe2::BaseContext;
@@ -12,43 +13,46 @@ namespace caffe2 {
 namespace {
 template <class DataType, class Context>
 void concat_op_cpu_impl(
-    at::ArrayRef<const Tensor*> inputs,
-    Tensor* output,
-    Tensor* split,
-    int axis,
-    int add_axis,
-    BaseContext* context) {
-  split->Resize(vector<int64_t>(1, inputs.size()));
-  int* axis_data = split->template mutable_data<int>();
-  int adj_size = inputs[0]->dim() + (add_axis ? 1 : 0);
+    ArrayRef<at::Tensor> inputs,
+    const at::Tensor& output_,
+    const at::Tensor& split_,
+    int64_t axis,
+    int64_t add_axis) {
+  Tensor output(output_);
+  Tensor split(split_);
+  CPUContext context;
+
+  split.Resize(vector<int64_t>(1, inputs.size()));
+  int* axis_data = split.template mutable_data<int>();
+  int adj_size = Tensor(inputs[0]).dim() + (add_axis ? 1 : 0);
   int canonical_axis = caffe2::canonical_axis_index_(axis, adj_size);
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
-  for (int i = 1; i < inputs.size(); ++i) {
+  for (size_t i = 1; i < inputs.size(); ++i) {
     CAFFE_ENFORCE(
-        inputs[i]->dtype() == inputs[0]->dtype(),
+        Tensor(inputs[i]).dtype() == Tensor(inputs[0]).dtype(),
         "All inputs must have the same type, expected: ",
-        inputs[0]->dtype().name(),
+        Tensor(inputs[0]).dtype().name(),
         " but got: ",
-        inputs[i]->dtype().name(),
+        Tensor(inputs[i]).dtype().name(),
         " for input: ",
         i);
   }
 
   int before = 1, after = 1;
-  vector<int64_t> output_dims(inputs[0]->sizes().vec());
-  for (int i = 0; i < inputs[0]->dim(); ++i) {
+  vector<int64_t> output_dims(Tensor(inputs[0]).sizes().vec());
+  for (int i = 0; i < Tensor(inputs[0]).dim(); ++i) {
     if (i == canonical_axis && !add_axis) {
       continue;
     }
-    int dim = inputs[0]->dim32(i);
+    int dim = Tensor(inputs[0]).dim32(i);
     if (i < canonical_axis) {
       before *= dim;
     } else { // i > canonical_axis || i == canonical_axis && add_axis
       after *= dim;
     }
     // check the input dims are compatible.
-    for (int j = 1; j < inputs.size(); ++j) {
-      int dim_j = inputs[j]->dim32(i);
+    for (size_t j = 1; j < inputs.size(); ++j) {
+      int dim_j = Tensor(inputs[j]).dim32(i);
       CAFFE_ENFORCE(
           dim == dim_j,
           "Expect dimension = ",
@@ -63,16 +67,16 @@ void concat_op_cpu_impl(
           "when arg 'add_axis' = 0 and along the axis = ",
           canonical_axis,
           " <",
-          inputs[0]->sizes(),
+          Tensor(inputs[0]).sizes(),
           "> vs <",
-          inputs[j]->sizes(),
+          Tensor(inputs[j]).sizes(),
           ">.");
     }
   }
 
   int output_channels = 0;
-  for (int i = 0; i < inputs.size(); ++i) {
-    axis_data[i] = add_axis ? 1 : inputs[i]->dim32(canonical_axis);
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    axis_data[i] = add_axis ? 1 : Tensor(inputs[i]).dim32(canonical_axis);
     output_channels += axis_data[i];
   }
   if (add_axis) {
@@ -80,10 +84,10 @@ void concat_op_cpu_impl(
   } else {
     output_dims[canonical_axis] = output_channels;
   }
-  output->Resize(output_dims);
+  output.Resize(output_dims);
   size_t output_offset = 0;
-  for (int i = 0; i < inputs.size(); ++i) {
-    auto& input = *inputs[i];
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    Tensor input(inputs[i]);
     auto axis_dim = add_axis ? 1 : input.dim32(canonical_axis);
     caffe2::math::CopyMatrix<Context>(
         input.itemsize(),
@@ -91,19 +95,35 @@ void concat_op_cpu_impl(
         axis_dim * after,
         input.raw_data(),
         axis_dim * after,
-        static_cast<char*>(output->raw_mutable_data(inputs[0]->dtype())) +
+        static_cast<char*>(output.raw_mutable_data(Tensor(inputs[0]).dtype())) +
             output_offset,
         output_channels * after,
-        static_cast<Context*>(context),
-        inputs[0]->dtype().copy());
+        static_cast<Context*>(&context),
+        Tensor(inputs[0]).dtype().copy());
     output_offset += axis_dim * after * input.itemsize();
   }
 }
-} // namespace
-} // namespace caffe2
 
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::Concat)
-    .kernel(&caffe2::concat_op_cpu_impl<float, CPUContext>)
-    .dispatchKey(c10::DeviceTypeId::CPU);
-} // namespace c10
+static auto registry = c10::RegisterOperators().op(
+    FunctionSchema(
+        "_c10_experimental::Concat",
+        "",
+        (std::vector<c10::Argument>{
+            c10::Argument("inputs", ListType::ofTensors()),
+            c10::Argument("output"),
+            c10::Argument("split_info"),
+            c10::Argument("add", IntType::get()),
+            c10::Argument("add_axis", IntType::get())}),
+        (std::vector<c10::Argument>{})),
+    c10::kernel<
+        decltype(concat_op_cpu_impl<float, CPUContext>),
+        &concat_op_cpu_impl<float, CPUContext>>(),
+    c10::dispatchKey(CPUTensorId()));
+
+} // namespace
+
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::Concat",
+    C10Concat_DontUseThisOpYet)
+
+} // namespace caffe2

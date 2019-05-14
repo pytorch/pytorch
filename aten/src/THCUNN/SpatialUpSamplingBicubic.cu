@@ -10,10 +10,14 @@
 #include <THC/THCAtomics.cuh>
 
 template<typename Dtype, typename Acctype>
+#if defined(__HIP_PLATFORM_HCC__)
+__launch_bounds__(1024)
+#endif
 __global__ void bicubic_interp2d_kernel(
   const int num_elements,
   const Acctype height_scale,
   const Acctype width_scale,
+  const bool align_corners,
   const THCDeviceTensor<Dtype, 4> in_data,
   THCDeviceTensor<Dtype, 4> out_data
 ) {
@@ -44,12 +48,12 @@ __global__ void bicubic_interp2d_kernel(
   }
 
   // Interpolation kernel
-  Acctype real_x = width_scale * output_x;
-  int in_x = real_x;
+  Acctype real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
+  int in_x = floorf(real_x);
   Acctype t_x = real_x - in_x;
 
-  Acctype real_y = height_scale * output_y;
-  int in_y = real_y;
+  Acctype real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
+  int in_y = floorf(real_y);
   Acctype t_y = real_y - in_y;
 
   for (int n = 0; n < batchsize ; n++) {
@@ -83,6 +87,9 @@ __global__ void bicubic_interp2d_kernel(
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename Dtype, typename Acctype>
+#if defined(__HIP_PLATFORM_HCC__)
+__launch_bounds__(1024)
+#endif
 __global__ void bicubic_interp2d_backward_kernel(
   const int num_elements,
   const Acctype height_scale,
@@ -117,12 +124,12 @@ __global__ void bicubic_interp2d_backward_kernel(
     return;
   }
 
-  Acctype real_x = width_scale * output_x;
-  int input_x = real_x;
+  Acctype real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
+  int input_x = floorf(real_x);
   Acctype t_x = real_x - input_x;
 
-  Acctype real_y = height_scale * output_y;
-  int input_y = real_y;
+  Acctype real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
+  int input_y = floorf(real_y);
   Acctype t_y = real_y - input_y;
 
   Acctype x_coeffs[4];

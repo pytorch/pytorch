@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/core/TensorOptions.h>
+
 namespace at { namespace native {
 // Different combinations of row, col, and offset can lead to two cases:
 //
@@ -54,6 +56,12 @@ inline void check_args(
       options.layout() == at::kStrided,
       "only support layout=torch.strided, got",
       options.layout())
+  }
+}
+
+inline void check_size_nonnegative(IntArrayRef size) {
+  for (auto x: size) {
+    AT_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
   }
 }
 } // namespace native

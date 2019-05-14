@@ -10,7 +10,7 @@ template <>
 void TypedAxpy<float, float>(int N, const float a, const float* x, float* y) {
   // This uses a hack that axpy implementation actually does not use the
   // CPUContext, so passing in a nullpointer works.
-  math::Axpy<float, CPUContext>(N, a, x, y, nullptr);
+  math::Axpy<float, float, CPUContext>(N, a, x, y, nullptr);
 }
 
 void TypedAxpyHalffloat__base(
@@ -36,6 +36,8 @@ void TypedAxpyHalffloat__base(
   }
 }
 
+decltype(TypedAxpyHalffloat__base) TypedAxpyHalffloat__avx2_fma;
+decltype(TypedAxpyHalffloat__base) TypedAxpyHalffloat__avx_f16c;
 template <>
 void TypedAxpy<at::Half, float>(
     int N,
@@ -57,6 +59,8 @@ void TypedAxpy_uint8_float__base(
   }
 }
 
+decltype(TypedAxpy_uint8_float__base) TypedAxpy_uint8_float__avx2_fma;
+decltype(TypedAxpy_uint8_float__base) TypedAxpy_uint8_float__avx_f16c;
 template <>
 void TypedAxpy<std::uint8_t, float>(
     int N,

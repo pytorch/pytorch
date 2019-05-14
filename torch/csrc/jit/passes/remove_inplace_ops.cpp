@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
 namespace jit {
@@ -50,7 +49,7 @@ void RemoveInplaceOps(Block* block) {
     }
   }
 }
-}
+} // namespace
 
 void RemoveInplaceOps(const std::shared_ptr<Graph>& graph) {
   RemoveInplaceOps(graph->block());

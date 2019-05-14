@@ -1,15 +1,21 @@
 #pragma once
 
-#include <torch/csrc/python_headers.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <memory>
 #include <string>
 
-namespace torch { namespace jit { namespace tracer {
-void initPythonTracerBindings(PyObject *module);
+namespace torch {
+namespace jit {
 
+namespace script {
+  struct Module;
+}
+
+namespace tracer {
+void initPythonTracerBindings(PyObject* module);
 
 std::string getPythonInterpreterStackTrace();
 Node* preRecordPythonTrace(
@@ -20,9 +26,10 @@ Node* preRecordPythonTrace(
 
 std::shared_ptr<Graph> createGraphByTracing(
     const py::function& func,
-    Stack inputs,
+    TypedStack inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
-    const c10::optional<size_t>& num_real_inputs = c10::nullopt);
+    const std::shared_ptr<script::Module>& self = nullptr);
 } // namespace tracer
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

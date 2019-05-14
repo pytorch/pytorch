@@ -4,7 +4,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "caffe2/core/THCCachingAllocator_gpu.h"
+#include <c10/cuda/CUDACachingAllocator.h>
 #include "cub/util_allocator.cuh"
 
 // Needed to be included first to check the CAFFE2_USE_CUDNN macros.
@@ -112,7 +112,7 @@ void CUDAContext::CopyBytesSync(
   // This emulates Caffe2 original behavior where sync copy doesn't change the
   // device. It's probably better for clarity to switch to the target device
   // explicitly here, but in the worst case CUDA would sync for us.
-  // TODO: change it to DeviceGuard
+  // TODO: change it to CUDAGuard
   CUDAContext context(-1); // take current device
   CUDA_ENFORCE(cudaMemcpyAsync(
       dst, src, nbytes, cudaMemcpyDefault, context.cuda_stream()));
@@ -159,8 +159,6 @@ CudaMemoryPoolType g_cuda_memory_pool_type;
 
 std::unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
 
-std::unique_ptr<THCCachingAllocator> g_thc_allocator;
-
 // an unordered map that holds the map from the cuda memory pointer to the
 // device id that it is allocated from. This is used in the cuda memory pool
 // cases, where we need the device id to carry out the deletion.
@@ -178,8 +176,8 @@ static std::unordered_map<void*, uint8_t> g_cuda_device_affiliation;
 // Data structures for optional memory tracking. Access to these structures
 // is garded by the CUDAContext::mutex.
 static std::unordered_map<void*, long> g_size_map;
-static std::vector<long> g_total_by_gpu_map(CAFFE2_COMPILE_TIME_MAX_GPUS, 0);
-static std::vector<long> g_max_by_gpu_map(CAFFE2_COMPILE_TIME_MAX_GPUS, 0);
+static std::vector<long> g_total_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
+static std::vector<long> g_max_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
 
 static long g_total_mem = 0;
 static long g_last_rep = 0;
@@ -207,14 +205,14 @@ static void Caffe2InitializeCuda() {
   // of GPUs.
   CAFFE_ENFORCE_LE(
       NumCudaDevices(),
-      CAFFE2_COMPILE_TIME_MAX_GPUS,
+      C10_COMPILE_TIME_MAX_GPUS,
       "Number of CUDA devices on the machine is larger than the compiled "
       "max number of gpus expected (",
-      CAFFE2_COMPILE_TIME_MAX_GPUS,
-      "). Increase that and recompile the caffe binary.");
+      C10_COMPILE_TIME_MAX_GPUS,
+      "). Increase that and recompile.");
 
   for (DeviceIndex i = 0; i < NumCudaDevices(); ++i) {
-    DeviceGuard g(i);
+    CUDAGuard g(i);
     // Enable peer access.
     const int peer_group = i / CAFFE2_CUDA_MAX_PEER_SIZE;
     const int peer_start = peer_group * CAFFE2_CUDA_MAX_PEER_SIZE;
@@ -233,7 +231,13 @@ static void Caffe2InitializeCuda() {
         // Note: just for future reference, the 0 here is not a gpu id, it is
         // a reserved flag for cudaDeviceEnablePeerAccess that should always be
         // zero currently.
-        CUDA_ENFORCE(cudaDeviceEnablePeerAccess(j, 0));
+        // It is ok if peer access is already enabled...
+        cudaError_t err = cudaDeviceEnablePeerAccess(j, 0);
+        if ((err != cudaErrorPeerAccessAlreadyEnabled) &&
+            (err != cudaSuccess)) {
+          CAFFE_THROW(cudaGetErrorString(err));
+        }
+        cudaGetLastError(); // reset cuda error code
       }
     }
   }
@@ -274,12 +278,87 @@ static void Caffe2SetCUDAMemoryPool() {
     SetUpCub();
   } else if (FLAGS_caffe2_cuda_memory_pool == "thc") {
     g_cuda_memory_pool_type = CudaMemoryPoolType::THC;
-    g_thc_allocator.reset(new THCCachingAllocator());
   } else {
     CAFFE_THROW(
         "Unrecognized cuda memory pool type: ", FLAGS_caffe2_cuda_memory_pool);
   }
 }
+
+/**
+ * An allocator that does the CPU memory allocation with pinned memory.
+ *
+ * This is needed because if we want to do any asynchronous cuda memcpy,
+ * the underlying CPU memory also needs to be allocated into pinned memory
+ * space. As a result, whenever Caffe2 is built with GPU and there is
+ * GPU present during runtime, at global initialization time we will set
+ * the CPU memory allocator to allocate pinned memory.
+ *
+ * NB: This behavior is probably too agressive. We should consider asking users
+ * to do on-demand memory pinning (like exposed in PyTorch APIs) instead.
+ */
+struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
+  PinnedCPUAllocator() {
+    baseAllocator_ = GetDefaultCPUAllocator();
+  }
+  ~PinnedCPUAllocator() override {}
+  at::DataPtr allocate(size_t nbytes) const override {
+    if (nbytes == 0) {
+      // replicate c10::alloc_cpu behavior - return nullptr
+      return {nullptr, nullptr, &Delete, at::Device(CPU)};
+    }
+    void* data;
+    at::DataPtr data_ptr;
+    std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+    if (IsNUMAEnabled()) {
+      at::DeleterFnPtr expected_deleter = baseAllocator_->raw_deleter();
+      data_ptr = baseAllocator_->allocate(nbytes);
+      data = data_ptr.get();
+      CAFFE_ENFORCE(data);
+      CUDA_ENFORCE(cudaHostRegister(data, nbytes, cudaHostRegisterDefault));
+      CAFFE_ENFORCE(
+          data_ptr.compare_exchange_deleter(expected_deleter, &Delete),
+          "Failed to swap deleter (already swapped?)");
+    } else {
+      CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
+      data_ptr = {data, data, &Delete, at::Device(CPU)};
+    }
+    memset(data, 0, nbytes);
+    return data_ptr;
+  }
+
+  at::DeleterFnPtr raw_deleter() const override {
+    return &Delete;
+  }
+
+ private:
+  static void Delete(void* data) {
+    if (!data) {
+      return;
+    }
+    // Caffe2 uses a lazy way to figure out if one is actually going to use GPUs
+    // or not. If a CUDAContext::New() call is made, inside the CUDAContext
+    // function we will switch the cpu side allocator to a PinnedCPUAllocator.
+    // But, if one calls CPUContext::New() before any cuda allocations,
+    // PinnedCPUAllocator can still delete the corresponding memory.
+    std::lock_guard<std::mutex> lock(CUDAContext::mutex());
+    if (IsNUMAEnabled()) {
+      CUDA_ENFORCE(cudaHostUnregister(data));
+      GetDefaultCPUAllocator()->raw_deleter()(data);
+    } else {
+      cudaError_t err = cudaFreeHost(data);
+      if (err == cudaErrorInvalidValue) {
+        free(data);
+        // Calling cudaGetLastError will reset the cuda error.
+        cudaError_t _err = cudaGetLastError();
+      } else {
+        // For all other errors, still do a cuda check.
+        CUDA_ENFORCE(err);
+      }
+    }
+  }
+
+  at::Allocator* baseAllocator_;
+};
 
 static PinnedCPUAllocator g_pinned_cpu_alloc;
 
@@ -412,14 +491,18 @@ struct DefaultCUDAAllocator final : public at::Allocator {
     }
     switch (g_cuda_memory_pool_type) {
       case CudaMemoryPoolType::NONE:
-        CUDA_ENFORCE(cudaMalloc(&ptr, nbytes));
+        if (nbytes != 0) {
+          CUDA_ENFORCE(cudaMalloc(&ptr, nbytes));
+        }
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
         return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::CUB:
-        CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
+        if (nbytes != 0) {
+          CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
+        }
         g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         VLOG(2) << "CUB allocating pointer " << ptr << " on device "
                 << CaffeCudaGetDevice();
@@ -428,7 +511,33 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         }
         return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::THC:
-        CUDA_ENFORCE(g_thc_allocator->Alloc(&ptr, nbytes, 0 /* stream */));
+        {
+          // The reason we have this stream guard here is to preserve
+          // the historical behavior of the 'thc' allocator in Caffe2,
+          // which is to put all allocations on the same (default)
+          // stream.  This behavior is morally wrong (since passing
+          // allocations between streams allows for the possibility
+          // of you handing out some memory that an old stream
+          // is still working on), but it doesn't seem to cause issues
+          // in Caffe2 today.  Our hypothesis for why this is the case
+          // is that Caffe2 doesn't really do very many allocations
+          // on the fly; instead they allocate once and then reuse
+          // the allocations for the whole program.  In this case,
+          // the hazard is avoided.
+          //
+          // We intend to remove this stream guard, but the benefit
+          // to putting all allocations on the same stream is it
+          // reduces per-stream fragmentation, and this helps
+          // some models that are currently running with the thc
+          // allocator fit in memory.  We will need to find some
+          // way of resolving this problem.
+          cuda::CUDAStreamGuard g(
+            Stream(
+              Stream::DEFAULT,
+              Device(kCUDA, CaffeCudaGetDevice())
+            ));
+          ptr = cuda::CUDACachingAllocator::raw_alloc(nbytes);
+        }
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
@@ -486,7 +595,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         break;
       }
       case CudaMemoryPoolType::THC: {
-        CUDA_ENFORCE(g_thc_allocator->Free(ptr));
+        cuda::CUDACachingAllocator::raw_delete(ptr);
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_cuda_device_affiliation.erase(g_cuda_device_affiliation.find(ptr));
         }

@@ -1,15 +1,17 @@
 #pragma once
+#include <ATen/core/Macros.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/script/strtod.h>
+#include <torch/csrc/jit/source_range.h>
 #include <algorithm>
-#include <iostream>
+#include <clocale>
+#include <cstdlib>
 #include <memory>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/source_range.h>
-#include <torch/csrc/utils/memory.h>
-#include <clocale>
 
 namespace torch {
 namespace jit {
@@ -39,6 +41,7 @@ namespace script {
   _(TK_STRINGLITERAL, "string_literal", "")      \
   _(TK_CONST, "const", "")                       \
   _(TK_LIST, "list", "")                         \
+  _(TK_DICT, "dict", "")                         \
   _(TK_OPTION, "option", "")                     \
   _(TK_APPLY, "apply", "")                       \
   _(TK_COMPREHENSION, "comprehension", "")       \
@@ -79,6 +82,7 @@ namespace script {
   _(TK_SUBSCRIPT, "subscript", "")               \
   _(TK_VAR, "variable", "")                      \
   _(TK_NOTHING, "nothing", "")                   \
+  _(TK_DICT_LITERAL, "dict-literal", "")         \
   _(TK_LIST_LITERAL, "list-literal", "")         \
   _(TK_TUPLE_LITERAL, "tuple-literal", "")       \
   _(TK_FOR, "for", "for")                        \
@@ -93,8 +97,10 @@ namespace script {
   _(TK_RAISE, "raise", "raise")                  \
   _(TK_ASSERT, "assert", "assert")               \
   _(TK_DOTS, "dots", "...")                      \
-  _(TK_PASS, "pass", "pass")
-
+  _(TK_LIST_COMP, "list comprehension", "")      \
+  _(TK_PASS, "pass", "pass")                     \
+  _(TK_CLASS_DEF, "class", "class")              \
+  _(TK_IMPORT, "import", "import")
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|";
 
@@ -108,8 +114,8 @@ enum TokenKind {
 #undef DEFINE_TOKEN
 };
 
-std::string kindToString(int kind);
-int stringToKind(const std::string& str);
+CAFFE2_API std::string kindToString(int kind);
+CAFFE2_API int stringToKind(const std::string& str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;
@@ -118,7 +124,7 @@ struct TokenTrie {
   TokenTrie() : kind(0) {}
   void insert(const char* str, int tok) {
     if (*str == '\0') {
-      JIT_ASSERT(kind == 0);
+      AT_ASSERT(kind == 0);
       kind = tok;
       return;
     }
@@ -131,7 +137,7 @@ struct TokenTrie {
     }
 
     child_chars.emplace_back(*str);
-    child_tries.emplace_back(torch::make_unique<TokenTrie>());
+    child_tries.emplace_back(c10::guts::make_unique<TokenTrie>());
     child_tries.back()->insert(str + 1, tok);
   }
   int kind; // 0 == invalid token
@@ -142,7 +148,7 @@ struct TokenTrie {
 
 // stuff that is shared against all TC lexers/parsers and is initialized only
 // once.
-struct SharedParserData {
+struct CAFFE2_API SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
     std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
@@ -150,26 +156,14 @@ struct SharedParserData {
       head->insert(str.c_str(), *c);
     }
 
-#define ADD_CASE(tok, _, tokstring) \
+#define ADD_CASE(tok, _, tokstring)   \
   if (*(tokstring) != '\0') {         \
-    head->insert((tokstring), (tok));   \
+    head->insert((tokstring), (tok)); \
   }
     TC_FORALL_TOKEN_KINDS(ADD_CASE)
 #undef ADD_CASE
   }
-#ifdef _WIN32
-  static double strtod_c(const char * str, char** end) {
-    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
-    static _locale_t loc = _create_locale(LC_ALL, "C");
-    return _strtod_l(str, end, loc);
-  }
-#else
-  static double strtod_c(const char * str, char** end) {
-    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
-    static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
-    return strtod_l(str, end, loc);
-  }
-#endif
+
   // 1. skip whitespace
   // 2. handle comment or newline
   //
@@ -183,14 +177,15 @@ struct SharedParserData {
       return false;
     const char* startptr = str.c_str() + start;
     char* endptr;
-    strtod_c(startptr, &endptr);
+    torch::jit::script::strtod_c(startptr, &endptr);
     *len = endptr - startptr;
     return *len > 0;
   }
 
   bool isCharCount(char c, const std::string& str, size_t start, int len) {
-    //count checks from [start, start + len)
-    return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
+    // count checks from [start, start + len)
+    return start + len <= str.size() &&
+        std::count(str.begin() + start, str.begin() + start + len, c) == len;
   }
 
   // python concatenates all adjacent strings "a" "b" == "ab"
@@ -203,25 +198,25 @@ struct SharedParserData {
       return false;
     int quote_len = isCharCount(quote, str, start, 3) ? 3 : 1;
 
-    //end is now set past the opening quotation marks
+    // end is now set past the opening quotation marks
     size_t end = start + quote_len;
-    while(end < str.size() && !isCharCount(quote, str, end, quote_len)) {
+    while (end < str.size() && !isCharCount(quote, str, end, quote_len)) {
       if (str[end] == '\n' && quote_len != 3) {
         return false;
       }
-      //handle escaped characters. advances past escaped quotation marks,
-      //escaped newlines and escaped backslashes
-      //multi-char escapes like \x1A are handled fine here because the
-      //remainder of the escape are valid string characters anyway
+      // handle escaped characters. advances past escaped quotation marks,
+      // escaped newlines and escaped backslashes
+      // multi-char escapes like \x1A are handled fine here because the
+      // remainder of the escape are valid string characters anyway
       if (str[end] == '\\') {
         end++;
       }
       end++;
     }
-    //set length equal to the complete string including quotations
+    // set length equal to the complete string including quotations
     *len = end - start + quote_len;
-    //if end finished without going past the last character of the string than
-    //there is a match
+    // if end finished without going past the last character of the string than
+    // there is a match
     return end < str.size();
   }
 
@@ -238,8 +233,7 @@ struct SharedParserData {
     return match_string == type_string;
   }
   // find the longest match of str.substring(pos) against a token, return true
-  // if successful
-  // filling in kind, start,and len
+  // if successful filling in kind, start,and len
   bool match(
       const std::string& str,
       size_t pos,
@@ -273,9 +267,8 @@ struct SharedParserData {
             str, pos + 1, continuation, !continuation, kind, start, len);
       }
     }
-    // we handle white space before EOF because in the case we have something like
-    // the following where we need to generate the dedent token
-    // if foo:
+    // we handle white space before EOF because in the case we have something
+    // like the following where we need to generate the dedent token if foo:
     //   ...
     // else:
     //   pass
@@ -321,14 +314,15 @@ struct SharedParserData {
       // identifier 'max'
       if (cur) {
         size_t child_offset = 0;
-        for (size_t e = cur->child_chars.size(); child_offset < e; ++child_offset) {
+        for (size_t e = cur->child_chars.size(); child_offset < e;
+             ++child_offset) {
           if (cur->child_chars[child_offset] == str[pos + i])
-          break;
+            break;
         }
 
         cur = (child_offset == cur->child_chars.size())
-          ? nullptr
-          : cur->child_tries[child_offset].get();
+            ? nullptr
+            : cur->child_tries[child_offset].get();
 
         if (cur && cur->kind != 0) {
           matched = true;
@@ -358,7 +352,7 @@ struct SharedParserData {
   TokenTrieRef head;
 };
 
-SharedParserData& sharedParserData();
+CAFFE2_API SharedParserData& sharedParserData();
 
 struct Token {
   int kind;
@@ -405,7 +399,8 @@ struct Lexer {
 
   [[noreturn]] void reportError(const std::string& what) {
     reportError(what, cur());
-  }[[noreturn]] void reportError(const std::string& what, const Token& t) {
+  }
+  [[noreturn]] void reportError(const std::string& what, const Token& t) {
     std::stringstream ss;
     ss << what << ":\n";
     t.range.highlight(ss);
@@ -417,7 +412,8 @@ struct Lexer {
        << "' here:\n";
     t.range.highlight(ss);
     throw std::runtime_error(ss.str());
-  }[[noreturn]] void expected(const std::string& what) {
+  }
+  [[noreturn]] void expected(const std::string& what) {
     expected(what, cur());
   }
   // Check that the current token has a given kind, return the current token,
@@ -473,7 +469,8 @@ struct Lexer {
             indent_stack.pop_back();
             next_tokens.emplace_back(TK_DEDENT, r.range);
             if (indent_stack.size() == 0) {
-              reportError("invalid indent level " + std::to_string(depth), r);
+              reportError(
+                  "invalid indent level " + c10::guts::to_string(depth), r);
             }
           }
           return; // We've already queued the tokens
@@ -488,7 +485,7 @@ struct Lexer {
     int kind;
     size_t start;
     size_t length;
-    JIT_ASSERT(file);
+    AT_ASSERT(file);
     if (!shared.match(
             *file,
             pos,
