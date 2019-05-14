@@ -416,6 +416,10 @@ class TestOperators(TestCase):
         x = torch.rand(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x[:, 1:2], x)
 
+    def test_sign(self):
+        x = torch.rand(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x.sign(), x)
+
     def test_narrow(self):
         x = torch.randn(3, 3, requires_grad=True)
         self.assertONNX(lambda x: torch.narrow(x, 0, 0, 2), x)
