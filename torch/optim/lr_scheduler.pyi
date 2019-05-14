@@ -23,6 +23,9 @@ class ExponentialLR(_LRScheduler):
 class CosineAnnealingLr(_LRScheduler):
     def __init__(self, optimizer: Optimizer, T_max: int, eta_min: float, last_epoch: int=...) -> None: ...
 
+class LinearLR(_LRScheduler):
+    def __init__(self, optimizer: Optimizer, T: int, last_epoch: int=...) -> None: ...
+
 class ReduceLROnPlateau:
     in_cooldown: bool
 

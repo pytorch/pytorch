@@ -729,3 +729,37 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.last_epoch = math.floor(epoch)
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
+
+
+class LinearLR(_LRScheduler):
+    r"""Set the learning rate of each parameter group with a linear
+    schedule: :math:`\eta_{t} = \eta_0*(1 - t/T)`, where :math:`\eta_0` is the
+    initial lr, :math:`t` is the current epoch or iteration (zero-based) and
+    :math:`T` is the total training epochs or iterations. It is recommended to
+    use the iteration based calculation if the total number of epochs is small,
+    in which case, the scheduler needs to be stepped after each iteration.
+    When last_epoch=-1, sets initial lr as lr.
+
+    It has been proposed in
+    `Budgeted Training: Rethinking Deep Neural Network Training Under Resource
+     Constraints`_.
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        T (int): Total number of training epochs or iterations.
+        last_epoch (int): The index of last epoch or iteration. Default: -1.
+
+    .. _Budgeted Training\: Rethinking Deep Neural Network Training Under
+    Resource Constraints:
+        https://arxiv.org/abs/1905.04753
+    """
+
+    def __init__(self, optimizer, T, last_epoch=-1):
+        self.T = float(T)
+        super(LinearLR, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        if self.last_epoch == 0:
+            return self.base_lrs
+        rate = 1 - self.last_epoch/self.T
+        return [base_lr * rate for base_lr in self.base_lrs]

@@ -12,7 +12,7 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
     ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler, \
-    CyclicLR, CosineAnnealingWarmRestarts
+    CyclicLR, CosineAnnealingWarmRestarts, LinearLR
 from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
 
@@ -562,6 +562,13 @@ class TestLRScheduler(TestCase):
                           for x in range(epochs)]
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
+        self._test(scheduler, targets, epochs)
+
+    def test_linear_lr(self):
+        epochs = 10
+        single_targets = [0.05 * (1 - x/float(epochs)) for x in range(epochs)]
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = LinearLR(self.opt, T=epochs)
         self._test(scheduler, targets, epochs)
 
     def test_legacy_step_lr(self):
