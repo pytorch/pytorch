@@ -18,8 +18,13 @@ namespace at {
 namespace internal {
   tbb::task_scheduler_init tbb_init(
       tbb::task_scheduler_init::deferred);
+  tbb::task_arena arena;
 
   std::atomic<int> num_intraop_threads{-1};
+
+  tbb::task_arena& _get_arena() {
+    return arena;
+  }
 }
 
 //TODO: use OMP and MKL env. vars as default values
@@ -43,6 +48,8 @@ void set_num_threads(int nthreads) {
   if (internal::num_intraop_threads.compare_exchange_strong(no_value, nthreads)) {
     if (!internal::tbb_init.is_active()) {
       internal::tbb_init.initialize(nthreads);
+      internal::arena.terminate();
+      internal::arena.initialize(nthreads);
       return;
     }
   }
@@ -52,11 +59,11 @@ void set_num_threads(int nthreads) {
 }
 
 int get_num_threads() {
-  return tbb::this_task_arena::max_concurrency();
+  return internal::arena.max_concurrency();
 }
 
 int get_thread_num() {
-  return tbb::this_task_arena::current_thread_index();
+  return internal::arena.current_thread_index();
 }
 
 bool in_parallel_region() {
