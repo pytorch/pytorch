@@ -2142,7 +2142,6 @@ struct to_ir {
       if (trees.size() < 1) {
         throw ErrorReport(loc) << "Expected at least one argument to fork()";
       }
-      // std::cout << "emit fork = " << apply << std::endl;
       auto forked = emitSugaredExpr(Expr(trees[0]), 1);
       TreeList sliced_trees(trees.begin() + 1, trees.end());
       auto inputs = getNamedValues(sliced_trees, true);
@@ -2389,21 +2388,15 @@ struct to_ir {
     {
       WithInsertPoint guard(body_block);
       auto fn_sugared_output = forked->call(loc, method, inputs, attributes, 1);
-      //std::cout << "body_block before = \n";
-      //std::cout << *fork_node;
       auto fn_simple_output = fn_sugared_output->asValue(loc, method);
       body_block->registerOutput(fn_simple_output);
       node_output = fork_node->output()->setType(
           FutureType::create(fn_simple_output->type()));
       Inline(body_block);
-      //std::cout << "body_block after = \n";
-      //std::cout << *fork_node;
     }
     // Lambda lift block(0) into attr::Subgraph
     lambdaLiftFork(fork_node);
     runCleanupPasses(fork_node->g(attr::Subgraph));
-    //std::cout << "after liftfork\n";
-    //graph->dump();
     return std::make_shared<SimpleValue>(node_output);
   }
 

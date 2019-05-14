@@ -92,14 +92,12 @@ void Module::to(at::Device device, bool non_blocking) {
 }
 
 void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) {
-  //std::cout << "calling Module::save (out)\n";
   ExportModule(*this, out, extra_files);
 }
 
 void Module::save(
     const std::string& filename,
     const ExtraFilesMap& extra_files) {
-  //std::cout << "calling Module::save (filename)\n";
   ExportModule(*this, filename, extra_files);
 }
 

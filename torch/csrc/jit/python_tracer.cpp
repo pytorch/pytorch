@@ -66,8 +66,6 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     }
     tracer::exit({toIValue(out)});
     Inline(graph->block());
-    // std::cout << "No LowerSimpleTuples\n";
-    // graph->dump();
     LowerSimpleTuples(graph);
     EliminateDeadCode(graph);
     return graph;

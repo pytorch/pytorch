@@ -191,13 +191,7 @@ class DeadCodeEliminator {
       // Reverse_block is inlined in grad_desc.f before it's separated
       // to grad_desc.df.
       if (!(marked_.count(node) || node->hasUses())) {
-
-        //if (node->kind() != prim::GetAttr)
-        {
-          //raise(SIGINT);
-          //std::cout << "destroying " << *node;
-          it.destroyCurrent();
-        }
+        it.destroyCurrent();
       }
     }
   }

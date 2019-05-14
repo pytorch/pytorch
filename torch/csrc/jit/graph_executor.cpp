@@ -549,6 +549,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
+
     // Phase 1. Specialize to input definedness (this is very important for
     //          gradient graphs), and run required passes to bring the graph
     //          to an executable form.
@@ -560,7 +561,6 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     //          constants, and constant propagation doesn't need shape
     //          information anyway, so it's better to run it first.
     ConstantPropagation(opt_graph);
-
     PropagateInputShapes(opt_graph);
     PropagateRequiresGrad(opt_graph);
 

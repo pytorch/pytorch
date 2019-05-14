@@ -42,10 +42,6 @@ std::shared_ptr<SugaredValue> MethodValue::call(
     inputsWithSelf.insert(inputsWithSelf.begin(), self_val);
   }
 
-  //std::cerr << "method " << method.name() << std::endl;
-  //std::cerr << "inputs " << callee_graph->inputs().size() << std::endl;
-  //std::cerr << "schema " << schema << std::endl;
-
   std::stringstream failure_messages;
   auto matched_schema = tryMatchSchema(
       schema,
@@ -71,7 +67,6 @@ std::shared_ptr<SugaredValue> MethodValue::call(
   }
 
   auto fun_constant = graph.create(prim::Constant);
-  //std::cerr << "accessing fun_constant output\n";
   fun_constant->output()->setType(FunctionType::create(&(*method_.get())));
   graph.insertNode(fun_constant);
   fun_constant->setSourceRange(SourceRange(loc));
@@ -80,7 +75,6 @@ std::shared_ptr<SugaredValue> MethodValue::call(
   call_node->setSourceRange(SourceRange(loc));
 
   //add fun_constant
-  //std::cerr << "accessing fun_constant output\n";
   call_node->addInput(fun_constant->output());
   auto& matched_inputs = matched_schema.value().inputs;
   for (auto input : matched_inputs)
@@ -90,11 +84,9 @@ std::shared_ptr<SugaredValue> MethodValue::call(
 
   for (const auto& result : schema.returns())
   {
-    //std::cerr << "adding output to " << call_node << std::endl;
     call_node->addOutput()->setType(result.type());
   }
 
-  //std::cerr << "call_node output " << call_node << std::endl;
   return std::make_shared<SimpleValue>(call_node->output());
 }
 

@@ -349,12 +349,6 @@ class JitTestCase(TestCase):
     def emitModuleHook(self, module):
         import zipfile
 
-        #print(dir(module))
-        # for m in module._c._get_methods():
-        #     print ("some method")
-        #     print (m.graph.__repr__)
-        # if module._has_method('forward'):
-        #     print(module._get_method('forward').graph.__repr__)
         def copy_structure_and_params(m):
             c = torch.jit.ScriptModule()
             for name, v in m._get_parameters():
@@ -395,13 +389,9 @@ class JitTestCase(TestCase):
                     return
 
             # import the model again (from a the copy we made of the original)
-            #print("before load")
             buffer2 = io.BytesIO(buffer_copy)
             imported = torch.jit.load(buffer2)
-            # print(type(imported).__name__)
-            # print ("imported")
-            # if imported._has_method('forward'):
-            #     print(imported._get_method('forward').graph.__repr__)
+
             # save it again
             saved_module_buffer_2 = io.BytesIO()
             torch.jit.save(imported, saved_module_buffer_2)

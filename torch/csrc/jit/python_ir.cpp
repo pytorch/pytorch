@@ -269,9 +269,6 @@ void initPythonIRBindings(PyObject* module_) {
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool google_printer) {
-
-            // std::cout << "pretty_print_onnx\n";
-            // g->dump();
             return pretty_print_onnx(
                 g,
                 initializers,
