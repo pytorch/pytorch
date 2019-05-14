@@ -122,7 +122,7 @@ class TestQuantizedOps(unittest.TestCase):
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
         zero_point = 1
-        qX = X.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.qint8)
+        qX = X.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.quint8)
 
         Y = X.numpy().copy()
         Y[Y < 0] = 0
@@ -139,8 +139,8 @@ class TestQuantizedOps(unittest.TestCase):
         B = torch.arange(-25, 25, dtype=torch.float)
         scale = 2.0
         zero_point = 127
-        qA = A.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.qint8)
-        qB = A.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.qint8)
+        qA = A.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        qB = A.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.quint8)
 
         # Add ReLU ground truth
         C = (qA.dequantize() + qB.dequantize()).numpy()
@@ -172,8 +172,8 @@ class TestQuantizedOps(unittest.TestCase):
         scale_C = 0.5
         zero_point_C = 5
 
-        qA = A.quantize_linear(scale=scale_A, zero_point=zero_point_A, dtype=torch.qint8)
-        qB = A.quantize_linear(scale=scale_B, zero_point=zero_point_B, dtype=torch.qint8)
+        qA = A.quantize_linear(scale=scale_A, zero_point=zero_point_A, dtype=torch.quint8)
+        qB = A.quantize_linear(scale=scale_B, zero_point=zero_point_B, dtype=torch.quint8)
 
         # Add ground truth
         C = (qA.dequantize() + qB.dequantize()).numpy()
