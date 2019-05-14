@@ -35,9 +35,6 @@ int main() {
   t3.join();
   t2.join();
 
-  at::set_num_threads(5);
-  test(at::get_num_threads());
-
   // test inter-op settings
   ASSERT_EQ(at::get_num_interop_threads(), std::thread::hardware_concurrency());
   at::set_num_interop_threads(5);
