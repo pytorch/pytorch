@@ -96,6 +96,22 @@ namespace detail {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral argument type. Please use int64_t instead.");
   };
 
+  // legacy_ivalue_to_arg_type is like ivalue_to_arg_type but additionally
+  // allows a few deprecated types like std::vector.
+  template<class T>
+  struct legacy_ivalue_to_arg_type final {
+    static auto call(IValue&& v) -> decltype(ivalue_to_arg_type<T>::call(std::move(v))) {
+      return ivalue_to_arg_type<T>::call(std::move(v));
+    }
+  };
+  template<class T>
+  struct legacy_ivalue_to_arg_type<std::vector<T>> final {
+    static const std::vector<T>& call(const IValue& v) {
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported argument type: c10::ArrayRef<T> and T is not one of the supported primitive types.");
+      return v.to<intrusive_ptr<ivalue::List<T>>>()->elements();
+    }
+  };
+
   template<class T, class Enable = void>
   struct return_type_to_ivalue_ {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type.");
@@ -149,22 +165,24 @@ namespace detail {
     return return_type_to_ivalue_<guts::decay_t<T>>::call(std::move(v));
   }
 
-  template<class Functor, size_t... ivalue_arg_indices>
+  template<bool AllowDeprecatedTypes, class T> using ivalue_to_arg = guts::conditional_t<AllowDeprecatedTypes, legacy_ivalue_to_arg_type<T>, ivalue_to_arg_type<T>>;
+
+  template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
   typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack_(Functor* functor, Stack* stack, guts::index_sequence<ivalue_arg_indices...>) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
     constexpr size_t num_ivalue_args = sizeof...(ivalue_arg_indices);
 
     using IValueArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
-    return (*functor)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(
+    return (*functor)(ivalue_to_arg<AllowDeprecatedTypes, guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(
       std::move(torch::jit::peek(*stack, ivalue_arg_indices, num_ivalue_args))
     )...);
   }
 
-  template<class Functor>
+  template<class Functor, bool AllowDeprecatedTypes>
   typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack(Functor* functor, Stack* stack) {
     constexpr size_t num_ivalue_args = guts::infer_function_traits_t<Functor>::number_of_parameters;
-    return call_functor_with_args_from_stack_<Functor>(functor, stack, guts::make_index_sequence<num_ivalue_args>());
+    return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, stack, guts::make_index_sequence<num_ivalue_args>());
   }
 
   template<class OutputType>
@@ -186,31 +204,31 @@ namespace detail {
     }
   };
 
-  template<class KernelFunctor, class Enable = void> struct wrap_kernel_functor final {};
+  template<class KernelFunctor, bool AllowDeprecatedTypes, class Enable = void> struct wrap_kernel_functor final {};
 
   // SFINAE version for kernels that return an output
-  template<class KernelFunctor>
-  struct wrap_kernel_functor<KernelFunctor, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  template<class KernelFunctor, bool AllowDeprecatedTypes>
+  struct wrap_kernel_functor<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(Stack* stack, KernelCache* cache) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
-      auto output = call_functor_with_args_from_stack<KernelFunctor>(functor, stack);
+      auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, stack);
       torch::jit::drop(*stack, num_inputs);
       push_outputs<typename guts::infer_function_traits_t<KernelFunctor>::return_type>::call(std::move(output), stack);
     }
   };
 
   // SFINAE version for kernels that don't return an output
-  template<class KernelFunctor>
-  struct wrap_kernel_functor<KernelFunctor, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  template<class KernelFunctor, bool AllowDeprecatedTypes>
+  struct wrap_kernel_functor<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(Stack* stack, KernelCache* cache) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
-      call_functor_with_args_from_stack<KernelFunctor>(functor, stack);
+      call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, stack);
       torch::jit::pop(*stack, num_inputs);
     }
   };
@@ -241,11 +259,11 @@ namespace detail {
     }
   };
 
-  template<class KernelFunctor, class... ConstructorParameters>
+  template<class KernelFunctor, bool AllowDeprecatedTypes = false, class... ConstructorParameters>
   detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>
   kernelFunctor(ConstructorParameters&&... constructorParameters) {
     return {
-      &detail::wrap_kernel_functor<KernelFunctor>::call,
+      &detail::wrap_kernel_functor<KernelFunctor, AllowDeprecatedTypes>::call,
       detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
       detail::FunctionSchemaInferer<KernelFunctor>()
     };
@@ -296,7 +314,7 @@ kernel(ConstructorParameters&&... constructorParameters) {
   static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
   static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
 
-  return detail::kernelFunctor<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...);
+  return detail::kernelFunctor<KernelFunctor, false>(std::forward<ConstructorParameters>(constructorParameters)...);
 }
 
 }

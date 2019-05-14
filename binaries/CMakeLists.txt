@@ -2,6 +2,11 @@ caffe2_binary_target("convert_caffe_image_db.cc")
 caffe2_binary_target("convert_db.cc")
 caffe2_binary_target("make_cifar_db.cc")
 caffe2_binary_target("make_mnist_db.cc")
+if (NOT ANDROID)
+  caffe2_binary_target("parallel_info.cc")
+  target_include_directories(parallel_info PUBLIC
+    ${CMAKE_BINARY_DIR}/aten/src) # provides "ATen/TypeExtendedInterface.h" to ATen.h
+endif()
 caffe2_binary_target("predictor_verifier.cc")
 caffe2_binary_target("print_registered_core_operators.cc")
 caffe2_binary_target("run_plan.cc")

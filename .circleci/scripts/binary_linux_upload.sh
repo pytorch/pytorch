@@ -1,6 +1,7 @@
 #!/bin/bash
-# Do NOT set -e
+# Do NOT set -x
 source /home/circleci/project/env
+set +x
 declare -x "AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
 declare -x "AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
 cat >/home/circleci/project/login_to_anaconda.sh <<EOL
@@ -14,7 +15,7 @@ EOL
 chmod +x /home/circleci/project/login_to_anaconda.sh
 
 #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
-# DO NOT TURN -e ON BEFORE THIS LINE
+# DO NOT TURN -x ON BEFORE THIS LINE
 #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
 set -ex
 export PATH="$MINICONDA_ROOT/bin:$PATH"

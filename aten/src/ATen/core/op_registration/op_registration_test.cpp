@@ -208,17 +208,183 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernelsWithoutTensorInputs_whenRegi
   ASSERT_TRUE(op.has_value()); // assert schema is registered
 }
 
-TEST(OperatorRegistrationTest, givenOpWithMultipleKernels_whenKernelsHaveSameDispatchKey_thenFails) {
+TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenRegistering_thenShowsWarning) {
   auto registrar = c10::RegisterOperators()
       .op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value()); // assert schema is registered
 
-  expectThrows<c10::Error>([&] {
-    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
-  }, "Tried to register multiple kernels with same dispatch key");
+  testing::internal::CaptureStderr();
+  c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
+  std::string output = testing::internal::GetCapturedStderr();
+  EXPECT_THAT(output, testing::HasSubstr("Registered a kernel that overwrote a previoulsy registered kernel with same dispatch key"));
 }
+
+TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenCalled_thenCallsNewerKernel) {
+  bool called_kernel1 = false;
+  bool called_kernel2 = false;
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1), dispatchKey(TensorType1()));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2), dispatchKey(TensorType1()));
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  callOp(*op, dummyTensor(TensorType1()));
+  EXPECT_FALSE(called_kernel1);
+  EXPECT_TRUE(called_kernel2);
+}
+
+TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenCalled_thenCallsNewerKernel) {
+  bool called_kernel1 = false;
+  bool called_kernel2 = false;
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2));
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  callOp(*op, dummyTensor(TensorType1()));
+  EXPECT_FALSE(called_kernel1);
+  EXPECT_TRUE(called_kernel2);
+}
+
+TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenNewerKernelDeletedAndOpCalled_thenCallsOlderKernel) {
+  bool called_kernel1 = false;
+  bool called_kernel2 = false;
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1), dispatchKey(TensorType1()));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2), dispatchKey(TensorType1()));
+
+  registrar2 = c10::RegisterOperators(); // destruct the registrar
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  callOp(*op, dummyTensor(TensorType1()));
+  EXPECT_TRUE(called_kernel1);
+  EXPECT_FALSE(called_kernel2);
+}
+
+TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenNewerKernelDeletedAndOpCalled_thenCallsOlderKernel) {
+  bool called_kernel1 = false;
+  bool called_kernel2 = false;
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2));
+
+  registrar2 = c10::RegisterOperators(); // destruct the registrar
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  callOp(*op, dummyTensor(TensorType1()));
+  EXPECT_TRUE(called_kernel1);
+  EXPECT_FALSE(called_kernel2);
+}
+
+TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenOlderKernelDeletedAndOpCalled_thenCallsNewerKernel) {
+  bool called_kernel1 = false;
+  bool called_kernel2 = false;
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1), dispatchKey(TensorType1()));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2), dispatchKey(TensorType1()));
+
+  registrar1 = c10::RegisterOperators(); // destruct the registrar
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  callOp(*op, dummyTensor(TensorType1()));
+  EXPECT_FALSE(called_kernel1);
+  EXPECT_TRUE(called_kernel2);
+}
+
+TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenOlderKernelDeletedAndOpCalled_thenCallsNewerKernel) {
+  bool called_kernel1 = false;
+  bool called_kernel2 = false;
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2));
+
+  registrar1 = c10::RegisterOperators(); // destruct the registrar
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  callOp(*op, dummyTensor(TensorType1()));
+  EXPECT_FALSE(called_kernel1);
+  EXPECT_TRUE(called_kernel2);
+}
+
+TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenOlderAndThenNewerKernelDeletedAndOpCalled_thenFails) {
+  bool called_kernel1 = false;
+  bool called_kernel2 = false;
+  auto registrar0 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1), dispatchKey(TensorType1()));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2), dispatchKey(TensorType1()));
+
+  registrar1 = c10::RegisterOperators(); // destruct the registrar
+  registrar2 = c10::RegisterOperators(); // destruct the registrar
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  expectThrows<c10::Error>([&] {
+    callOp(*op, dummyTensor(TensorType1()));
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+}
+
+TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenOlderAndThenNewerKernelDeletedAndOpCalled_thenFails) {
+  bool called_kernel1 = false;
+  bool called_kernel2 = false;
+  auto registrar0 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2));
+
+  registrar1 = c10::RegisterOperators(); // destruct the registrar
+  registrar2 = c10::RegisterOperators(); // destruct the registrar
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  expectThrows<c10::Error>([&] {
+    callOp(*op, dummyTensor(TensorType1()));
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+}
+
+TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenNewerAndThenOlderKernelDeletedAndOpCalled_thenFails) {
+  bool called_kernel1 = false;
+  bool called_kernel2 = false;
+  auto registrar0 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1), dispatchKey(TensorType1()));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2), dispatchKey(TensorType1()));
+
+  registrar2 = c10::RegisterOperators(); // destruct the registrar
+  registrar1 = c10::RegisterOperators(); // destruct the registrar
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  expectThrows<c10::Error>([&] {
+    callOp(*op, dummyTensor(TensorType1()));
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+}
+
+TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenNewerAndThenOlderKernelDeletedAndOpCalled_thenFails) {
+  bool called_kernel1 = false;
+  bool called_kernel2 = false;
+  auto registrar0 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2));
+
+  registrar2 = c10::RegisterOperators(); // destruct the registrar
+  registrar1 = c10::RegisterOperators(); // destruct the registrar
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  expectThrows<c10::Error>([&] {
+    callOp(*op, dummyTensor(TensorType1()));
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+}
+
 
 
 /**

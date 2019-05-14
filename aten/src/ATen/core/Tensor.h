@@ -193,7 +193,7 @@ class CAFFE2_API Tensor {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
         tensorTypeIdToBackend(type_id()),
         scalar_type(),
-        is_variable() && !at::NonVariableTypeMode::is_enabled());
+        is_variable());
   }
   Type & dispatch_type() const {
     return legacyTensorType(*impl_);
@@ -581,7 +581,6 @@ class CAFFE2_API Tensor {
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
   Tensor quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const;
-  Tensor quantize_linear(double scale, int64_t zero_point) const;
   Tensor dequantize() const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;

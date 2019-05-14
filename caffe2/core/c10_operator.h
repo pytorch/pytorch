@@ -2,7 +2,9 @@
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/op_registration/op_registration.h>
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/script/function_schema_parser.h>
+#endif
 #include <vector>
 
 namespace caffe2 {
@@ -88,6 +90,9 @@ void call_caffe2_op_from_c10(
 }
 
 inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
+#if defined(CAFFE2_IS_XPLAT_BUILD)
+  throw std::logic_error("We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
+#else
   c10::FunctionSchema parsed_schema = torch::jit::parseSchema(schema_str);
   std::vector<c10::Argument> arguments = parsed_schema.arguments();
   arguments.emplace_back(
@@ -104,6 +109,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
     parsed_schema.is_vararg(),
     parsed_schema.is_varret()
   );
+#endif
 }
 
 inline std::unique_ptr<c10::KernelCache> noCache() {
@@ -150,7 +156,7 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
  * - If your operator has a variable number of input tensors, make the first (!)
  *   input an input of type TensorList. There must be no other tensor inputs.
  */
-#ifndef C10_MOBILE
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 #define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)                  \
   namespace caffe2 {                                               \
   namespace _c10_ops {                                             \

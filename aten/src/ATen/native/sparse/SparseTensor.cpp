@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Layout.h>
+#include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
@@ -324,6 +325,9 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
 // NB: Dropped the resizeNd variants
 
 Tensor sparse_to_dense(const SparseTensor& self) {
+  if(self.scalar_type() == ScalarType::Half && self.options().device().is_cpu()) {
+    AT_ERROR("to_dense() not supported for float16 on CPU");
+  }
   Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
   return dst.add_(self);
 }
@@ -427,16 +431,16 @@ void inline sparse_mask_out_cpu_kernel(
   auto r_values_accessor = r_values.accessor<scalar_t, 1>();
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
   scalar_t* t_ptr = t.data<scalar_t>();
-  int64_t i;
 
-  #pragma omp parallel for private(i) if (r_nnz > 1000)
-  for (i = 0; i < r_nnz; i++) {
-    int64_t idx = 0;
-    for (int64_t d = 0; d < sparse_dim; d++) {
-      idx += mask_indices_accessor[d][i] * t.stride(d);
+  at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
+    for (auto i = start; i < end; i++) {
+      int64_t idx = 0;
+      for (int64_t d = 0; d < sparse_dim; d++) {
+        idx += mask_indices_accessor[d][i] * t.stride(d);
+      }
+      r_values_accessor[i] = t_ptr[idx];
     }
-    r_values_accessor[i] = t_ptr[idx];
-  }
+  });
 }
 
 SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const SparseTensor& mask) {
