@@ -20,12 +20,7 @@ void stop_gradient_op_cpu_impl(
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::StopGradient",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("input"),
-                                    c10::Argument("output")}),
-        (std::vector<c10::Argument>{})),
+    "_c10_experimental::StopGradient",
     c10::kernel<
         decltype(stop_gradient_op_cpu_impl<float>),
         &stop_gradient_op_cpu_impl<float>>(),
