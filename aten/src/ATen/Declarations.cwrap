@@ -2625,7 +2625,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: uniform
   variants: function
   return: self

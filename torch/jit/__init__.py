@@ -6,7 +6,7 @@ from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
-from torch._six import with_metaclass, get_function_from_type, \
+from torch._six import PY2, with_metaclass, get_function_from_type, \
     string_classes
 from torch._jit_internal import ignore  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
@@ -1764,6 +1764,16 @@ def _get_builtin_table():
     _builtin_table[id(math.exp)] = "aten::exp"
     _builtin_table[id(math.sqrt)] = "aten::sqrt"
     _builtin_table[id(math.pow)] = "aten::pow"
+    _builtin_table[id(math.copysign)] = "aten::copysign"
+    _builtin_table[id(math.erf)] = "aten::erf"
+    _builtin_table[id(math.erfc)] = "aten::erfc"
+    _builtin_table[id(math.expm1)] = "aten::expm1"
+    _builtin_table[id(math.fabs)] = "aten::fabs"
+    _builtin_table[id(math.gamma)] = "aten::gamma"
+    _builtin_table[id(math.lgamma)] = "aten::lgamma"
+    if not PY2: 
+        _builtin_table[id(math.gcd)] = "aten::gcd"
+
     _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
     _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"

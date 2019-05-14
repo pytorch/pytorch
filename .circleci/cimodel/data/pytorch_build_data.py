@@ -28,7 +28,6 @@ CONFIG_TREE_DATA = [
             ("5", [X("3.6")]),
         ]),
         ("cuda", [
-            ("8", [X("3.6")]),
             ("9", [
                 # Note there are magic strings here
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L21

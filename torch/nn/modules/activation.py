@@ -691,6 +691,8 @@ class MultiheadAttention(Module):
     Args:
         embed_dim: total dimension of the model.
         num_heads: parallel attention heads.
+        dropout: a Dropout layer on attn_output_weights. Default: 0.0.
+        bias: add bias as module parameter. Default: True.
         add_bias_kv: add bias to the key and value sequences at dim=0.
         add_zero_attn: add a new batch of zeros to the key and 
                        value sequences at dim=1.
@@ -742,23 +744,19 @@ class MultiheadAttention(Module):
             xavier_normal_(self.bias_v)
 
     @weak_script_method
-    def forward(self, query, key, value, key_padding_mask=None, incremental_state=None,
-                need_weights=True, static_kv=False, attn_mask=None):
+    def forward(self, query, key, value, key_padding_mask=None,
+                need_weights=True, attn_mask=None):
         r"""
     Args:
         query, key, value: map a query and a set of key-value pairs to an output. 
             See "Attention Is All You Need" for more details. 
         key_padding_mask: if provided, specified padding elements in the key will 
             be ignored by the attention.
-        incremental_state: if provided, previous time steps are cached.
         need_weights: output attn_output_weights.
-        static_kv: if true, key and value are static. The key and value in previous 
-            states will be used.
         attn_mask: mask that prevents attention to certain positions.
 
     Shape:
-        - Inputs:
-
+        Inputs:
         - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is 
           the embedding dimension.
         - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is 
@@ -766,11 +764,9 @@ class MultiheadAttention(Module):
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is 
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
-        - incremental_state: a dictionary used for storing states.
         - attn_mask: :math:`(L, L)` where L is the target sequence length.
 
-        - Outputs:
-
+        Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, 
           E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
@@ -783,17 +779,6 @@ class MultiheadAttention(Module):
         assert embed_dim == self.embed_dim
         assert list(query.size()) == [tgt_len, bsz, embed_dim]
         assert key.size() == value.size()
-
-        if incremental_state is not None:
-            saved_state = self._get_input_buffer(incremental_state)
-            if 'prev_key' in saved_state:
-                # previous time steps are cached - no need to recompute
-                # key and value if they are static
-                if static_kv:
-                    assert kv_same and not qkv_same
-                    key = value = None
-        else:
-            saved_state = None
 
         if qkv_same:
             # self-attention
@@ -827,25 +812,6 @@ class MultiheadAttention(Module):
             k = k.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1)
         if v is not None:
             v = v.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-
-        if saved_state is not None:
-            # saved states are stored with shape (bsz, num_heads, seq_len, head_dim)
-            if 'prev_key' in saved_state:
-                prev_key = saved_state['prev_key'].view(bsz * self.num_heads, -1, self.head_dim)
-                if static_kv:
-                    k = prev_key
-                else:
-                    k = torch.cat((prev_key, k), dim=1)
-            if 'prev_value' in saved_state:
-                prev_value = saved_state['prev_value'].view(bsz * self.num_heads, -1, self.head_dim)
-                if static_kv:
-                    v = prev_value
-                else:
-                    v = torch.cat((prev_value, v), dim=1)
-            saved_state['prev_key'] = k.view(bsz, self.num_heads, -1, self.head_dim)
-            saved_state['prev_value'] = v.view(bsz, self.num_heads, -1, self.head_dim)
-
-            self._set_input_buffer(incremental_state, saved_state)
 
         src_len = k.size(1)
 
