@@ -8,6 +8,3 @@
 
 #include <TH/generic/THTensorEvenMoreMath.cpp>
 #include <TH/THGenerateBoolType.h>
-
-#include <TH/generic/THTensorEvenMoreMath.cpp>
-#include <TH/THGenerateHalfType.h>

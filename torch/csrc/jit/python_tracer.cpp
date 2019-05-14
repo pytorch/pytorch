@@ -101,7 +101,9 @@ Node* preRecordPythonTrace(
 }
 
 void pythonRecordSourceLocation(Node* n) {
-  n->setSourceRange(SourceRange(getPythonInterpreterStackTrace()));
+  auto sl =
+      std::make_shared<StringSourceLocation>(getPythonInterpreterStackTrace());
+  n->setSourceLocation(sl);
 }
 
 void pythonWarn(const std::string& reason) {

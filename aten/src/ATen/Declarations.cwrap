@@ -149,7 +149,6 @@
 [[
   name: _th_nonzero
   cname: nonzero
-  cpu_half: True
   cpu_bool: True
   cuda_bool: True
   variants:

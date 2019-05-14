@@ -249,7 +249,7 @@ struct TORCH_API Node {
   std::vector<Block*> blocks_;
   Graph* graph_;
   Block* owning_block_;
-  c10::optional<SourceRange> source_range_;
+  std::shared_ptr<SourceLocation> source_location_;
   ScopePtr scope_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
@@ -287,12 +287,13 @@ struct TORCH_API Node {
   NodeKind kind() const {
     return kind_;
   }
-  Node* setSourceRange(SourceRange r) {
-    source_range_ = std::move(r);
+  Node* setSourceLocation(std::shared_ptr<SourceLocation> sl) {
+    source_location_ = std::move(sl);
     return this;
   }
-  SourceRange sourceRange() const;
-
+  std::shared_ptr<SourceLocation> getSourceLocation() const {
+    return source_location_;
+  }
   Graph* owningGraph() {
     return graph_;
   }
@@ -590,6 +591,8 @@ struct TORCH_API Node {
   // template variable, returning nullptr if the cast is invalid..
   //
   // Example usage: if(auto s = n.cast<Select>()) { ... }
+  //
+  // TODO: Make this const correct
   template <typename T>
   T* cast() {
     if (T::Kind == kind()) {
@@ -597,14 +600,6 @@ struct TORCH_API Node {
     }
     return nullptr;
   }
-  template <typename T>
-  const T* cast() const {
-    if (T::Kind == kind()) {
-      return static_cast<const T*>(this);
-    }
-    return nullptr;
-  }
-
   template <typename T>
   T* expect() {
     AT_CHECK(
@@ -1265,10 +1260,6 @@ struct ProfileOp : public Node {
 
   const std::function<void(std::vector<IValue>&)>& getCallback() const {
     return callback_;
-  }
-
-  void setCallback(std::function<void(std::vector<IValue>&)> callback) {
-    callback_ = callback;
   }
 
  private:

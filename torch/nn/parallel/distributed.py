@@ -3,7 +3,7 @@ import itertools
 
 import torch
 
-import torch.cuda.comm
+from torch.cuda.comm import broadcast_coalesced
 import torch.distributed as dist
 
 if dist.is_available():
@@ -282,9 +282,8 @@ class DistributedDataParallel(Module):
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())
         if len(module_states) > 0:
-            self._distributed_broadcast_coalesced(
-                module_states,
-                self.broadcast_bucket_size)
+            self._dist_broadcast_coalesced(module_states,
+                                           self.broadcast_bucket_size)
 
         self._ddp_init_helper()
 
@@ -407,8 +406,8 @@ class DistributedDataParallel(Module):
         for module in self._module_copies[1:]:
             module.train(mode)
 
-    def _distributed_broadcast_coalesced(self, tensors, buffer_size):
-        dist._broadcast_coalesced(self.process_group, tensors, buffer_size)
+    def _dist_broadcast_coalesced(self, tensors, buffer_size):
+        dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size, False)
 
     def _sync_params(self):
         with torch.no_grad():
@@ -416,10 +415,9 @@ class DistributedDataParallel(Module):
             # CUDA modules
             if self.device_ids and len(self.device_ids) > 1:
                 # intra-node parameter sync
-                result = torch.cuda.comm.broadcast_coalesced(
-                    self.modules_params[0],
-                    self.device_ids,
-                    self.broadcast_bucket_size)
+                result = broadcast_coalesced(self.modules_params[0],
+                                             self.device_ids,
+                                             self.broadcast_bucket_size)
                 for tensors, module_params in zip(result[1:],
                                                   self.modules_params[1:]):
                     for tensor, param in zip(tensors, module_params):
@@ -434,19 +432,16 @@ class DistributedDataParallel(Module):
 
             # module buffer sync
             if self.broadcast_buffers and len(self.modules_buffers[0]) > 0:
-                # Synchronize buffers across processes.
-                # The process with rank 0 is considered the authoritative copy.
-                self._distributed_broadcast_coalesced(
-                    self.modules_buffers[0],
-                    self.broadcast_bucket_size)
+                # cross-node buffer sync
+                self._dist_broadcast_coalesced(self.modules_buffers[0],
+                                               self.broadcast_bucket_size)
                 # only do intra-node buffer sync for replicated single-device
                 # CUDA modules
                 if self.device_ids and len(self.device_ids) > 1:
                     # intra-node buffer sync
-                    result = torch.cuda.comm.broadcast_coalesced(
-                        self.modules_buffers[0],
-                        self.device_ids,
-                        self.broadcast_bucket_size)
+                    result = broadcast_coalesced(self.modules_buffers[0],
+                                                 self.device_ids,
+                                                 self.broadcast_bucket_size)
                     for tensors, module_buffers in zip(result[1:],
                                                        self.modules_buffers[1:]):
                         for tensor, buffer in zip(tensors, module_buffers):

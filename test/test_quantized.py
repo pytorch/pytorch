@@ -123,6 +123,8 @@ class TestQuantizedOps(unittest.TestCase):
         scale = 2.0
         zero_point = 1
         qX = X.quantize_linear(scale=scale, zero_point=zero_point)
+        # print("X:\n{}".format(X))
+        # print("\nQuantized:\n{}\nFake:\n{}".format(qX.int_repr(), _quantize(X.numpy(), scale, zero_point)))
 
         Y = X.numpy().copy()
         Y[Y < 0] = 0
@@ -130,10 +132,9 @@ class TestQuantizedOps(unittest.TestCase):
         qY_hat = relu(qX)
         np.testing.assert_equal(qY, qY_hat.int_repr())
 
-    """Tests the correctness of the add and add_relu op."""
-    def test_qadd_relu_same_qparams(self):
-        add_relu = torch.ops.quantized.add_relu
-        add = torch.ops.quantized.add
+    """Tests the correctness of the quantized::sum_relu op."""
+    def test_qsumrelu_same_qparams(self):
+        sum_relu = torch.ops.quantized.sum_relu
 
         A = torch.arange(-25, 25, dtype=torch.float)
         B = torch.arange(-25, 25, dtype=torch.float)
@@ -142,25 +143,17 @@ class TestQuantizedOps(unittest.TestCase):
         qA = A.quantize_linear(scale=scale, zero_point=zero_point)
         qB = A.quantize_linear(scale=scale, zero_point=zero_point)
 
-        # Add ReLU ground truth
+        # Sum + ReLU ground truth
         C = (qA.dequantize() + qB.dequantize()).numpy()
+        C[C < 0] = 0
         qC = _quantize(C, scale, zero_point)
-        qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
-        np.testing.assert_equal(qC, qC_hat.int_repr(),
-                                "Quantized addition failed.")
 
-        # Add + ReLU ground truth
-        Crelu = C.copy()
-        Crelu[C < 0] = 0
-        qCrelu = _quantize(Crelu, scale, zero_point)
-        qCrelu_hat = add_relu(qA, qB, scale=scale, zero_point=zero_point)
-        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
-                                "Quantized addition with ReLU failed.")
+        qC_hat = sum_relu(qA, qB, scale=scale, zero_point=zero_point)
+        np.testing.assert_equal(qC, qC_hat.int_repr())
 
-    """Tests the correctness of the add and add_relu op."""
-    def test_qadd_relu_different_qparams(self):
-        add_relu = torch.ops.quantized.add_relu
-        add = torch.ops.quantized.add
+    """Tests the correctness of the quantized::sum_relu op."""
+    def test_qsumrelu_different_qparams(self):
+        sum_relu = torch.ops.quantized.sum_relu
 
         A = torch.arange(-25, 25, dtype=torch.float)
         B = torch.arange(-25, 25, dtype=torch.float)
@@ -175,20 +168,13 @@ class TestQuantizedOps(unittest.TestCase):
         qA = A.quantize_linear(scale=scale_A, zero_point=zero_point_A)
         qB = A.quantize_linear(scale=scale_B, zero_point=zero_point_B)
 
-        # Add ground truth
+        # Sum + ReLU ground truth
         C = (qA.dequantize() + qB.dequantize()).numpy()
+        C[C < 0] = 0
         qC = _quantize(C, scale_C, zero_point_C)
-        qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point_C)
-        np.testing.assert_equal(qC, qC_hat.int_repr(),
-                                "Quantized addition failed.")
 
-        # Add + ReLU ground truth
-        Crelu = C.copy()
-        Crelu[C < 0] = 0
-        qCrelu = _quantize(Crelu, scale_C, zero_point_C)
-        qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
-        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
-                                "Quantized addition with ReLU failed.")
+        qC_hat = sum_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
+        np.testing.assert_equal(qC, qC_hat.int_repr())
 
 
 @unittest.skipIf(

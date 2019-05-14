@@ -100,7 +100,7 @@ Value* tryConvertToType(
         value->type()->isSubtypeOf(TensorType::get())) {
       auto n = graph.createImplicitTensorToNum(concrete_type, value);
       value = graph.insertNode(n)
-                  ->setSourceRange(loc)
+                  ->setSourceLocation(std::make_shared<SourceRange>(loc))
                   ->output();
     }
     if (value->type()->isSubtypeOf(StringType::get()) &&
@@ -355,7 +355,7 @@ static Value* emitBuiltinNode(
     Graph& graph,
     Symbol name) {
   auto n = graph.insertNode(graph.create(name, matched_schema.inputs, 0))
-               ->setSourceRange(loc);
+               ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
   for (auto& ret : matched_schema.return_types) {
     n->addOutput()->setType(ret);

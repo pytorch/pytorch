@@ -19,6 +19,7 @@ from caffe2.python.task import (
 )
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 

@@ -697,7 +697,7 @@ adaptive_max_pool1d = torch._jit_internal.boolean_dispatch(
 
 @weak_script
 def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList2[int], bool) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -714,7 +714,7 @@ def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
 
 @weak_script
 def _adaptive_max_pool2d(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList2[int], bool) -> Tensor
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
     return adaptive_max_pool2d_with_indices(input, output_size)[0]
 
 adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
@@ -729,7 +729,7 @@ adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
 
 @weak_script
 def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList3[int], bool) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -746,7 +746,7 @@ def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
 
 @weak_script
 def _adaptive_max_pool3d(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList3[int], bool) -> Tensor
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
     return adaptive_max_pool3d_with_indices(input, output_size)[0]
 
 adaptive_max_pool3d = torch._jit_internal.boolean_dispatch(
@@ -1930,11 +1930,22 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     """
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
+    if log_input:
+        loss = torch.exp(input) - target * input
+    else:
+        loss = input - target * torch.log(input + eps)
+    if full:
+        mask = target > 1
+        loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
+    if reduction == 'none':
+        ret = loss
+    elif reduction == 'mean':
+        ret = torch.mean(loss)
+    elif reduction == 'sum':
+        ret = torch.sum(loss)
+    else:
         ret = input
         raise ValueError(reduction + " is not valid")
-
-    ret = torch.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
     return ret
 
 

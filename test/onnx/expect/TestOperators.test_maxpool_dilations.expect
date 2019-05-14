@@ -7,11 +7,6 @@ graph {
     output: "1"
     op_type: "MaxPool"
     attribute {
-      name: "ceil_mode"
-      i: 0
-      type: INT
-    }
-    attribute {
       name: "dilations"
       ints: 2
       type: INTS

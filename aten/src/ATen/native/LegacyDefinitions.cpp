@@ -33,23 +33,23 @@ bool is_set_to(const Tensor& self, const Tensor & tensor) {
 }
 
 Tensor clone(const Tensor& self) {
-  return legacy::th::_th_clone(self);
+  return at::legacy::th::_th_clone(self);
 }
 
 Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
-  return legacy::th::_th_resize_as_(self, the_template);
+  return at::legacy::th::_th_resize_as_(self, the_template);
 }
 
 Tensor& pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
-  return legacy::th::_th_pow_out(result, self, exponent);
+  return at::legacy::th::_th_pow_out(result, self, exponent);
 }
 
 Tensor pow(const Tensor& self, Scalar exponent) {
-  return legacy::th::_th_pow(self, exponent);
+  return at::legacy::th::_th_pow(self, exponent);
 }
 
 Tensor& zero_(Tensor& self) {
-  return legacy::th::_th_zero_(self);
+  return at::legacy::th::_th_zero_(self);
 }
 
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, Scalar value) {
@@ -83,9 +83,6 @@ Tensor & masked_scatter_(Tensor& self, const Tensor & mask, const Tensor & sourc
 }
 
 Tensor view(const Tensor& self, IntArrayRef size) {
-  if (self.is_mkldnn()) {
-    return mkldnn_view(self, size);
-  }
   return at::legacy::th::_th_view(self, size);
 }
 
@@ -826,6 +823,137 @@ Tensor & __irshift__(Tensor & self, Scalar other) {
 
 Tensor & __irshift__(Tensor & self, const Tensor & other) {
   return at::legacy::th::_th_irshift_(self, other);
+}
+
+Tensor _getri_single(const Tensor &self) {
+  return at::legacy::th::_th_getri_single(self);
+}
+
+Tensor & _index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return at::legacy::th::_th_index_copy_(self, dim, index, source);
+}
+
+Tensor _ger(const Tensor& self, const Tensor& vec2) {
+  return at::legacy::th::_th_ger(self, vec2);
+}
+
+Tensor& _ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
+  return at::legacy::th::_th_ger_out(result, self, vec2);
+}
+
+Tensor _mm(const Tensor& self, const Tensor& mat2) {
+  return at::legacy::th::_th_mm(self, mat2);
+}
+
+Tensor & _mm_out(Tensor& result, const Tensor& self, const Tensor& mat2) {
+  return at::legacy::th::_th_mm_out(result, self, mat2);
+}
+
+Tensor _mv(const Tensor& self, const Tensor& vec) {
+  return at::legacy::th::_th_mv(self, vec);
+}
+
+Tensor& _mv_out(Tensor& result, const Tensor& self, const Tensor& vec) {
+  return at::legacy::th::_th_mv_out(result, self, vec);
+}
+
+Tensor _addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
+  return at::legacy::th::_th_addmv(self, mat, vec, beta, alpha);
+}
+
+Tensor& _addmv_(Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
+  return at::legacy::th::_th_addmv_(self, mat, vec, beta, alpha);
+}
+
+Tensor& _addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
+  return at::legacy::th::_th_addmv_out(result, self, mat, vec, beta, alpha);
+}
+
+Tensor _addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
+  return at::legacy::th::_th_addr(self, vec1, vec2, beta, alpha);
+}
+
+Tensor& _addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
+  return at::legacy::th::_th_addr_(self, vec1, vec2, beta, alpha);
+}
+
+Tensor& _addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
+  return at::legacy::th::_th_addr_out(result, self, vec1, vec2, beta, alpha);
+}
+
+Tensor _dot(const Tensor& self, const Tensor& tensor) {
+  return at::legacy::th::_th_dot(self, tensor);
+}
+
+Tensor _cumsum(const Tensor& self, int64_t dim) {
+  return at::legacy::th::_th_cumsum(self, dim);
+}
+
+Tensor& _cumsum_out(Tensor& result, const Tensor& self, int64_t dim) {
+  return at::legacy::th::_th_cumsum_out(result, self, dim);
+}
+
+Tensor _cumprod(const Tensor& self, int64_t dim) {
+  return at::legacy::th::_th_cumprod(self, dim);
+}
+
+Tensor& _cumprod_out(Tensor& result, const Tensor& self, int64_t dim) {
+  return at::legacy::th::_th_cumprod_out(result, self, dim);
+}
+
+Tensor _var(const Tensor& self, bool unbiased) {
+  return at::legacy::th::_th_var(self, unbiased);
+}
+
+Tensor _std(const Tensor& self, bool unbiased) {
+  return at::legacy::th::_th_std(self, unbiased);
+}
+
+Tensor& _addmm_out(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  return at::legacy::th::_th_addmm_out(result, self, mat1, mat2, beta, alpha);
+}
+
+Tensor _addmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  return at::legacy::th::_th_addmm(self, mat1, mat2, beta, alpha);
+}
+
+Tensor& _addmm_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  return at::legacy::th::_th_addmm_(self, mat1, mat2, beta, alpha);
+}
+
+Tensor & _cat_out(Tensor & result, TensorList tensors, int64_t dim) {
+  return at::legacy::th::_th_cat_out(result, tensors, dim);
+}
+
+Tensor _cat(TensorList tensors, int64_t dim) {
+  return at::legacy::th::_th_cat(tensors, dim);
+}
+
+std::tuple<Tensor, Tensor> _mode(const Tensor& self, int64_t dim, bool keepdim) {
+  return at::legacy::th::_th_mode(self, dim, keepdim);
+}
+
+std::tuple<Tensor &,Tensor &> _mode_out(Tensor& values, Tensor& indices,
+                                       const Tensor& self, int64_t dim, bool keepdim) {
+  return at::legacy::th::_th_mode_out(values, indices, self, dim, keepdim);
+}
+
+std::tuple<Tensor, Tensor> _max(const Tensor& self, int64_t dim, bool keepdim) {
+  return at::legacy::th::_th_max(self, dim, keepdim);
+}
+
+std::tuple<Tensor &,Tensor &> _max_out(Tensor& values, Tensor& indices,
+                                       const Tensor& self, int64_t dim, bool keepdim) {
+  return at::legacy::th::_th_max_out(values, indices, self, dim, keepdim);
+}
+
+std::tuple<Tensor, Tensor> _min(const Tensor& self, int64_t dim, bool keepdim) {
+  return at::legacy::th::_th_min(self, dim, keepdim);
+}
+
+std::tuple<Tensor &,Tensor &> _min_out(Tensor& values, Tensor& indices,
+                                       const Tensor& self, int64_t dim, bool keepdim) {
+  return at::legacy::th::_th_min_out(values, indices, self, dim, keepdim);
 }
 
 }} // namespace at::native

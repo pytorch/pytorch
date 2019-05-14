@@ -44,7 +44,7 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
     auto maybe_int = constant_as<int64_t>(idx);
     if (!maybe_int) {
       if (must_remove_tuples) {
-        AT_ERROR(n->sourceRange(), "tuple index with non-constant index");
+        AT_ERROR(n->getSourceLocation(), "tuple index with non-constant index");
       }
       return;
     }

@@ -11,7 +11,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   int64_t *subscript_data;
   int64_t i = 0;
 #ifdef TH_REAL_IS_HALF
-#define IS_NONZERO(val) (c10::Half(0)!=val)
+#define IS_NONZERO(val) ((val.x & 0x7fff) != 0)
 #else
 #define IS_NONZERO(val) ((val)!=0)
 #endif
@@ -65,11 +65,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                 );
   delete [] sizes;
   delete [] idx;
-
-#undef IS_NONZERO
 }
-
-#if !defined(TH_REAL_IS_HALF) /* non half only part */
 
 accreal THTensor_(sumall)(THTensor *tensor)
 {
@@ -78,7 +74,8 @@ accreal THTensor_(sumall)(THTensor *tensor)
     scalar_t, tensor, *tensor_data, sum, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
   return sum;
 }
-#if !defined(TH_REAL_IS_BOOL)
+
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 {
@@ -906,8 +903,6 @@ void THTensor_(bitand)(THTensor *r_, THTensor *t, scalar_t value)
   }
 #endif
 }
-
-#endif
 
 #endif
 

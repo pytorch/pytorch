@@ -80,8 +80,7 @@ namespace jit {
   _(SubgraphMatching)              \
   _(ModuleDefine)                  \
   _(QualifiedName)                 \
-  _(ClassImport)                   \
-  _(ScriptObject)
+  _(ClassImport)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

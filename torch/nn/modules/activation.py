@@ -1109,7 +1109,7 @@ class Softmax(Module):
 
     Examples::
 
-        >>> m = nn.Softmax(dim=1)
+        >>> m = nn.Softmax()
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
