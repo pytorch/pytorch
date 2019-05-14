@@ -212,7 +212,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #define TORCH_CHECK(cond, ...)                              \
   if (!(cond)) {                                            \
     C10_THROW_ERROR(Error,                                  \
-        ::c10::str(__VA_ARGS__),                            \
+        ::c10::str(__VA_ARGS__)                             \
     ); \
   }
 
@@ -220,7 +220,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #define TORCH_CHECK_INDEX(cond, ...)                        \
   if (!(cond)) {                                            \
     C10_THROW_ERROR(IndexError,                             \
-        ::c10::str(__VA_ARGS__),                            \
+        ::c10::str(__VA_ARGS__)                             \
     );                                                      \
   }
 
