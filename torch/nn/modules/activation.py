@@ -754,7 +754,7 @@ class MultiheadAttention(Module):
 
 
     Shape:
-        Inputs:
+        - Inputs:
         - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
           the embedding dimension.
         - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
@@ -764,7 +764,7 @@ class MultiheadAttention(Module):
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
         - attn_mask: :math:`(L, L)` where L is the target sequence length.
 
-        Outputs:
+        - Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
