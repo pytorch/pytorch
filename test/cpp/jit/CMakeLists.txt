@@ -18,7 +18,7 @@ if (USE_CUDA)
   target_link_libraries(test_jit PRIVATE caffe2_gpu)
 
   target_compile_definitions(test_jit PRIVATE USE_CUDA)
-else if (USE_ROCM)
+elseif (USE_ROCM)
   target_link_libraries(test_jit PRIVATE
     ${ROCM_HIPRTC_LIB}
     ${PYTORCH_HIP_HCC_LIBRARIES}
