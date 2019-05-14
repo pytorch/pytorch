@@ -416,6 +416,72 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
   EXPECT_EQ(2, outputs[0].toInt());
 }
 
+void kernelWithLegacyTensorListRefInputWithoutOutput(const std::vector<Tensor>& input1) {
+  captured_input_list_size = input1.size();
+}
+
+TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTensorListRefInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::tensor_list_input(Tensor[] input) -> ()", &kernelWithLegacyTensorListRefInputWithoutOutput);
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  captured_input_list_size = 0;
+  auto outputs = callOp(*op, TensorList::create({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  EXPECT_EQ(0, outputs.size());
+  EXPECT_EQ(2, captured_input_list_size);
+}
+
+int64_t kernelWithLegacyTensorListRefInputWithOutput(const std::vector<Tensor>& input1) {
+  return input1.size();
+}
+
+TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTensorListRefInput_withOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::tensor_list_input(Tensor[] input) -> int", &kernelWithLegacyTensorListRefInputWithOutput);
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  auto outputs = callOp(*op, TensorList::create({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  EXPECT_EQ(1, outputs.size());
+  EXPECT_EQ(2, outputs[0].toInt());
+}
+
+void kernelWithLegacyTensorListInputWithoutOutput(std::vector<Tensor> input1) {
+  captured_input_list_size = input1.size();
+}
+
+TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::tensor_list_input(Tensor[] input) -> ()", &kernelWithLegacyTensorListInputWithoutOutput);
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  captured_input_list_size = 0;
+  auto outputs = callOp(*op, TensorList::create({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  EXPECT_EQ(0, outputs.size());
+  EXPECT_EQ(2, captured_input_list_size);
+}
+
+int64_t kernelWithLegacyTensorListInputWithOutput(std::vector<Tensor> input1) {
+  return input1.size();
+}
+
+TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTensorListInput_withOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::tensor_list_input(Tensor[] input) -> int", &kernelWithLegacyTensorListInputWithOutput);
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  auto outputs = callOp(*op, TensorList::create({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  EXPECT_EQ(1, outputs.size());
+  EXPECT_EQ(2, outputs[0].toInt());
+}
+
 bool called = false;
 
 void kernelWithoutInputs() {

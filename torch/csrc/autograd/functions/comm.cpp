@@ -59,7 +59,9 @@ variable_list Scatter::apply(variable_list&& inputs) {
     }
   }
 
-  set_history(variables, grad_fn);
+  if (grad_fn) {
+    set_history(variables, grad_fn);
+  }
 
   return variables;
 }
@@ -120,7 +122,9 @@ variable_list Gather::apply(variable_list&& inputs) {
   const auto destination_index =
       destination_device_.is_cpu() ? -1 : destination_device_.index();
   auto variable = torch::cuda::gather(tensors, dim_, destination_index);
-  set_history(variable, grad_fn);
+  if (grad_fn) {
+    set_history(variable, grad_fn);
+  }
   return {variable};
 }
 

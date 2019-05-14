@@ -8,7 +8,7 @@ import argparse
 
 from caffe2.python import workspace
 
-from operator_benchmark import benchmark_core
+from operator_benchmark import benchmark_core, benchmark_utils
 
 """Performance microbenchmarks's main binary.
 
@@ -73,13 +73,14 @@ def main():
 
     parser.add_argument(
         '--framework',
-        help='Run PyTorch or Caffe2 operators',
-        default=None)
+        help='Comma-delimited list of frameworks to test (Caffe2, PyTorch)',
+        default="Caffe2,PyTorch")
 
     args = parser.parse_args()
 
-    workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
-    workspace.ClearGlobalNetObserver()
+    if benchmark_utils.is_caffe2_enabled(args.framework):
+        workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
+        workspace.ClearGlobalNetObserver()
 
     benchmark_core.BenchmarkRunner(args).run()
 

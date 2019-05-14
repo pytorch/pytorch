@@ -486,6 +486,14 @@ std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tens
   return builder.build();
 }
 
+std::unique_ptr<TensorIterator> TensorIterator::nullary_op(Tensor& out) {
+  auto builder = TensorIterator::Builder();
+  builder.add_output(out);
+  // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
+  builder.iter_->resize_outputs_ = false;
+  return builder.build();
+}
+
 std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   AT_ASSERT(out.defined());
   auto builder = TensorIterator::Builder();

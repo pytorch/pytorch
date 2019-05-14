@@ -77,7 +77,7 @@ class ExpRelaxedCategorical(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
-        log_scale = (self.temperature.new_tensor(float(K)).lgamma() -
+        log_scale = (torch.full_like(self.temperature, float(K)).lgamma() -
                      self.temperature.log().mul(-(K - 1)))
         score = logits - value.mul(self.temperature)
         score = (score - score.logsumexp(dim=-1, keepdim=True)).sum(-1)
