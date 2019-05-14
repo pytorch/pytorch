@@ -353,8 +353,11 @@ Tensor VariableType::sparse_mask(const Tensor & self, SparseTensorRef mask) cons
   if (compute_requires_grad( self )) {
     grad_fn = std::shared_ptr<SparseMaskBackward>(new SparseMaskBackward(), deleteFunction);
     grad_fn->set_next_edges(collect_next_edges( self ));
+    // modified code:
+    //grad_fn->mask = mask;
     auto variable = make_variable(mask_.tref);
     grad_fn->mask_ = SavedVariable(variable, false);
+    // end modified code
   }
   torch::jit::Node* node = nullptr;
   std::shared_ptr<jit::tracer::TracingState> tracer_state;

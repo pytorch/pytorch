@@ -2435,21 +2435,6 @@ graph(%Ra, %Rb):
         ten = torch.rand(3, 3)
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
-    def test_sparse_tensors_error(self):
-        def get_sparse():
-            return torch.sparse.FloatTensor(2, 3)
-
-        @torch.jit.script
-        def sparse(input):
-            output = get_sparse()
-            return output, input
-
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            sparse(get_sparse())
-
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            sparse(torch.tensor([1]))
-
     def test_tuple_specialization(self):
         @torch.jit.script
         def f(t, s):
@@ -13977,7 +13962,8 @@ def add_autograd_test(
                 args_tensor = deepcopy(unpack_variables(args_variable))
 
                 def fn(*inputs, **kwargs):
-                    output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
+                    attr = getattr(inputs[0], name)
+                    output = attr(*inputs[1:], **kwargs)
                     return output_process_fn(output)
 
                 check_types = test_name not in EXCLUDE_TYPE_CHECK
@@ -13991,8 +13977,10 @@ def add_autograd_test(
                         should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
 
                         if test_name not in EXCLUDE_TRACED:
+                            print("creating traced fn")
                             traced_fn = create_traced_fn(self, fn)
 
+                            print("checking traced fn")
                             check_against_reference(self, traced_fn,
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
