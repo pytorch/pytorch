@@ -104,6 +104,9 @@ class Conf(object):
         if build_or_test == "test" or self.is_important:
             resource_class = "large"
 
+        if self.is_important:
+            resource_class = "xlarge"
+
         if self.gpu_resource:
             resource_class = "gpu." + self.gpu_resource
             if self.gpu_resource == "large":
