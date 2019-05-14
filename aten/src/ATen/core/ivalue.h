@@ -12,6 +12,13 @@
 
 #include <ATen/core/Tensor.h>
 
+namespace torch {
+namespace jit {
+namespace script {
+struct Function;
+}
+} // namespace jit
+} // namespace torch
 namespace c10 {
 struct IValue;
 struct ClassType;
@@ -324,6 +331,7 @@ struct CAFFE2_API IValue final {
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
+  IValue(const char* v): IValue(std::string(v)) {}
   bool isString() const { return Tag::String == tag; }
   c10::intrusive_ptr<ivalue::ConstantString> toString() && {
     AT_ASSERT(isString());
@@ -490,7 +498,7 @@ struct CAFFE2_API IValue final {
   optional<T> toOptional();
 
   // this is a shallow comparison of two IValues to test the object identity
-  bool isSameIdentity(IValue& rhs);
+  bool isSameIdentity(const IValue& rhs) const;
 
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
@@ -694,6 +702,14 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return c10::make_intrusive<Object>(std::move(type), numSlots);
   }
 
+  /**
+   * Slot API.
+   *
+   * Attributes are stored as a simple vector so that lookups are fast at
+   * runtime. A "slot" is just an index into that vector, which can be computed
+   * statically if you have access to the class type. Use this API if you are
+   * writing compiler stuff.
+   */
   void setSlot(size_t slot, IValue v) {
     if (slot >= slots_.size()) {
       // for module types, it is possible that the members of the class have
@@ -707,6 +723,19 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   const IValue& getSlot(size_t slot) const {
     return slots_.at(slot);
   }
+
+  /**
+   * Attribute API.
+   *
+   * Wrappers around the slot stuff so that users can access attributes
+   * directly. Use this API if you are a user.
+   *
+   * Note: Unlike in Python, TorchScript must make a distinction between
+   * attributes (which are IValues) and methods (which are Methods). If you
+   * want a method, use `obj.type()->getMethod()`
+   */
+  IValue getAttr(const std::string& name) const;
+  void setAttr(const std::string& name, IValue v);
 
   std::string name() const;
 
@@ -949,7 +978,7 @@ inline optional<T> IValue::toOptional() {
   return this->to<T>();
 }
 
-inline bool IValue::isSameIdentity(IValue& rhs) {
+inline bool IValue::isSameIdentity(const IValue& rhs) const {
   // We choose to not use memcmp for payload check due to potential random padding characters on union type
 
   // Semantics:

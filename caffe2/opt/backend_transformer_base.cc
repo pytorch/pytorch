@@ -119,9 +119,9 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
       shape_map.emplace(s, shape_info);
     }
   }
-  BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(*pred_net, shape_map);
-  const auto& out_map = eng.shape_info();
+  auto eng = BoundShapeInferencerRegistry()->Create("C10", spec);
+  eng->InferBoundShapeAndType(*pred_net, shape_map);
+  const auto& out_map = eng->shape_info();
   shape_map.clear();
   for (const auto& kv : out_map) {
     shape_map.emplace(
@@ -156,6 +156,6 @@ void BackendTransformerBase::dumpNet(
       qshape_arg->mutable_qtensors()->Add()->CopyFrom(t);
     }
   }
-  WriteProtoToTextFile(shape_net, "debug_ssa_net.pb_txt");
+  WriteProtoToTextFile(shape_net, fname);
 }
 } // namespace caffe2

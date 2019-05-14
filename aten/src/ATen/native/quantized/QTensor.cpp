@@ -7,17 +7,9 @@
 namespace at {
 namespace native {
 
-Tensor quantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point, optional<ScalarType> dtype) {
+Tensor quantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point, ScalarType dtype) {
   auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point, dtype);
   return quantizer->quantize(self);
-}
-
-Tensor quantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point, ScalarType dtype) {
-  return quantize_linear_cpu(self, scale, zero_point, optional<ScalarType>(dtype));
-}
-
-Tensor quantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point) {
-  return quantize_linear_cpu(self, scale, zero_point, c10::nullopt);
 }
 
 Tensor dequantize_quant(const Tensor& self) {
@@ -44,7 +36,9 @@ Tensor int_repr_quant(const Tensor& self) {
   Tensor dst = at::empty(self.sizes(), self.options().dtype(at::kByte));
   uint8_t* self_data = reinterpret_cast<uint8_t *>(self.data<quint8>());
   uint8_t* dst_data = dst.data<uint8_t>();
-  memcpy(dst_data, self_data, self.numel());
+  if (self.numel() > 0) {
+    memcpy(dst_data, self_data, self.numel());
+  }
   return dst;
 }
 

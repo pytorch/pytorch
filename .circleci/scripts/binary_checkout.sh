@@ -27,13 +27,12 @@ if [[ -n "$CIRCLE_PR_NUMBER" ]]; then
   git checkout -q -B "$CIRCLE_BRANCH"
   git reset --hard "$CIRCLE_SHA1"
 elif [[ -n "$CIRCLE_SHA1" ]]; then
-  # "smoke" binary build on master on PR merges
+  # Scheduled workflows & "smoke" binary build on master on PR merges
   git reset --hard "$CIRCLE_SHA1"
   git checkout -q -B master
 else
-  # nightly binary builds. These run at 05:05 UTC every day. 
-  last_commit="$(git rev-list --before "$(date -u +%Y-%m-%d) 05:00" --max-count 1 HEAD)"
-  git checkout "$last_commit"
+  echo "Can't tell what to checkout"
+  exit 1
 fi
 git submodule update --init --recursive --quiet
 echo "Using Pytorch from "

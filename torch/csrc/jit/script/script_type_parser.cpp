@@ -1,5 +1,6 @@
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/parser.h>
 
 namespace torch {
 namespace jit {

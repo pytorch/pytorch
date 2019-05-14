@@ -2,19 +2,15 @@
 #include <ATen/core/Macros.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/script/strtod.h>
 #include <torch/csrc/jit/source_range.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <ATen/core/Macros.h>
 #include <algorithm>
 #include <clocale>
 #include <cstdlib>
-#include <cstring>
-#include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace torch {
