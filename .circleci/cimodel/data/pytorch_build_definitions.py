@@ -241,7 +241,7 @@ def instantiate_configs():
             is_namedtensor=is_namedtensor,
         )
 
-        if cuda_version == "8":
+        if cuda_version == "9" and python_version == "3.6":
             c.dependent_tests = gen_dependent_configs(c)
 
         config_list.append(c)

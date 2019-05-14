@@ -332,22 +332,6 @@ Tensor softshrink_backward(const Tensor & grad_output, const Tensor & self, Scal
   return at::legacy::th::_thnn_softshrink_backward(grad_output, self, lambd);
 }
 
-Tensor & adaptive_avg_pool3d_out(Tensor & output, const Tensor & self, IntArrayRef output_size) {
-  return at::legacy::th::_thnn_adaptive_avg_pool3d_forward_out(output, self, output_size);
-}
-
-Tensor adaptive_avg_pool3d(const Tensor & self, IntArrayRef output_size) {
-  return at::legacy::th::_thnn_adaptive_avg_pool3d_forward(self, output_size);
-}
-
-Tensor & adaptive_avg_pool3d_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self) {
-  return at::legacy::th::_thnn_adaptive_avg_pool3d_backward_out(grad_input, grad_output, self);
-}
-
-Tensor adaptive_avg_pool3d_backward(const Tensor & grad_output, const Tensor & self) {
-  return at::legacy::th::_thnn_adaptive_avg_pool3d_backward(grad_output, self);
-}
-
 Tensor & avg_pool2d_out(Tensor & output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad) {
   return at::legacy::th::_thnn_avg_pool2d_forward_out(output, self, kernel_size, stride, padding, ceil_mode, count_include_pad);
 }
