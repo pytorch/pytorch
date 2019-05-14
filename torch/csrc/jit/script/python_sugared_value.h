@@ -101,8 +101,8 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   Value* the_list_;
 };
 
-struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
-  OverloadedFunctionValue(Value* module, std::vector<std::string> method_names)
+struct VISIBILITY_HIDDEN OverloadedMethodValue : public SugaredValue {
+  OverloadedMethodValue(Value* module, std::vector<std::string> method_names)
       : module_(module), method_names_(std::move(method_names)) {}
 
   std::string kind() const override {

@@ -50,8 +50,10 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
           export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
 
           # This IAM user allows write access to S3 bucket for sccache
-          export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}
-          export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}
+          set +x
+          export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+          export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+          set -x
 
           export SCCACHE_BIN=${PWD}/sccache_bin
           mkdir -p ${SCCACHE_BIN}

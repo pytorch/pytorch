@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
 
 #include <stack>
 
@@ -11,8 +10,13 @@ namespace torch {
 namespace jit {
 namespace {
 // QuantizerUtils
+struct param_info_t {
+  Value* v;
+  Node* n; // Value consumer
+  size_t idx; // Index in input param vector
+};
 
-bool checkIfNodeQuantizable(Node* n) {
+Operator* checkIfNodeQuantizable(Node* n) {
   AT_ASSERT(n != nullptr);
   // This is map for quantizable nodes. It will be expanded in future to
   // support more ops and patterns.
@@ -26,72 +30,218 @@ int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"};
   return quantnodeLookup.find(n);
 }
 
-void insertQuantNodeParams(Node* quant, std::tuple<float, int> qparam) {
-  WithInsertPoint ins(quant);
-  Value* scale = quant->owningGraph()->insertConstant(std::get<0>(qparam));
-  Value* zeropoint = quant->owningGraph()->insertConstant(std::get<1>(qparam));
-  quant->addInput(scale);
-  quant->addInput(zeropoint);
+// Look for index of particular param in op schema
+size_t getParamIndexinOpArgs(Node* n, const std::string& param_name) {
+  AT_ASSERT(n != nullptr);
+  Operator* optr = checkIfNodeQuantizable(n);
+  if (optr == nullptr) {
+    return static_cast<size_t>(-1);
+  }
+  auto& opargs = optr->schema().arguments();
+  for (size_t idx = 0; idx < opargs.size(); idx++) {
+    if (opargs[idx].name() == param_name) {
+      return idx;
+    }
+  }
+  return static_cast<size_t>(-1);
 }
 
-// Create Quant-Dequant node pair for quantizable Value
-std::pair<Node*, Node*> createQuantDeQuantNodes(Value* v, Node* n) {
+std::vector<param_info_t> getQuantizableParamsofName(
+    script::Method& method,
+    const std::string& param_name) {
+  std::vector<param_info_t> params_to_insert_qdq;
+  auto graph = method.graph();
+  // Parameters input to this method
+  size_t param_input_len = method.initial_ivalues().size();
+  // External inputs to this method
+  size_t ext_input_len = method.num_inputs();
+  std::unordered_map<Node*, size_t> node_paramidx_map;
+
+  for (size_t idx = 0; idx < param_input_len; idx++) {
+    auto& v = graph->inputs()[idx + ext_input_len];
+    if (!v->type()->isSubtypeOf(TensorType::get()) || !v->hasUses()) {
+      continue;
+    }
+    Node* n = v->uses()[0].user;
+
+    // For every param name, we match it against the quantizable op schema and
+    // find its position. if the param is present we store it in vector so
+    // later we can insert quant-dequant nodes. Caching the param index helps
+    // faster lookup for same kind of node visited multiple timees.
+    size_t param_idx;
+    auto it = node_paramidx_map.find(n);
+    if (it != node_paramidx_map.end()) {
+      param_idx = it->second;
+    } else {
+      param_idx = getParamIndexinOpArgs(n, param_name);
+      node_paramidx_map.emplace(n, param_idx);
+    }
+    if (param_idx >= n->inputs().size() || n->inputs()[param_idx] != v) {
+      // Either node does not contain param or this Value
+      // is not of type param_name
+      continue;
+    }
+    params_to_insert_qdq.emplace_back(param_info_t{v, n, idx});
+  }
+  return params_to_insert_qdq;
+}
+
+std::vector<Value*> insertQuantParamNodes(
+    Node* quant,
+    const std::tuple<std::string, float, int>& qparam) {
+  std::vector<Value*> qparam_vals;
+  auto& scale = std::get<1>(qparam);
+  auto& zero_point = std::get<2>(qparam);
+
+  // All params inserted before quant node which is
+  // beginning of the quant-dequant pattern
+  WithInsertPoint ins(quant);
+  Value* scale_v = quant->owningGraph()->insertConstant(scale);
+  qparam_vals.emplace_back(scale_v);
+  Value* zeropoint_v = quant->owningGraph()->insertConstant(zero_point);
+  qparam_vals.emplace_back(zeropoint_v);
+  return qparam_vals;
+}
+
+Value* insertScalarType(Node* ins_node, at::ScalarType t) {
+  AT_ASSERT(t != at::ScalarType::Undefined);
+  WithInsertPoint ins(ins_node);
+  // ScalarType inserted before ins_node node which is
+  // beginning of the quant-dequant pattern
+  Value* scalartype_v =
+      ins_node->owningGraph()->insertConstant(IValue(static_cast<int>(t)));
+  return scalartype_v;
+}
+
+// Create Quant Node
+Node* createQuantNode(Value* v, Node* n) {
   Node* quant = n->owningGraph()->create(
       at::Symbol::fromQualString("aten::quantize_linear"));
   AT_ASSERTM(quant != nullptr, "Failed to create quant node");
   quant->output()->setUniqueName(v->uniqueName() + ".quant");
+  quant->setScope(n->scope());
+  return quant;
+}
 
-  Node* dequant =
-      n->owningGraph()->create(at::Symbol::fromQualString("aten::dequantize"));
+// Create Dequant node
+Node* createDeQuantNode(Value* v, Node* n) {
+  Node* dequant = n->owningGraph()->create(
+      at::Symbol::fromQualString("aten::dequantize_linear"));
   AT_ASSERTM(dequant != nullptr, "Failed to create dequant node");
   dequant->output()->setUniqueName(v->uniqueName() + ".dequant");
-
-  quant->setScope(n->scope());
   dequant->setScope(n->scope());
-
-  return std::make_pair(quant, dequant);
+  return dequant;
 }
 
-// Insert Quant-Dequant node pair for quantizable node outputs
-void addQuantDeQuantNodes(Value* v) {
+// Create IntTensor Node
+Node* createIntReprNode(Value* v, Node* n) {
+  Node* intrepr =
+      n->owningGraph()->create(at::Symbol::fromQualString("aten::int_repr"));
+  AT_ASSERTM(intrepr != nullptr, "Failed to create inttensor node");
+  intrepr->output()->setUniqueName(v->uniqueName() + ".intrepr");
+  intrepr->setScope(n->scope());
+  return intrepr;
+}
+
+// Insert Quant-Dequant node pattern for quantizable node outputs
+void addQuantDeQuantNodes(
+    Value* v,
+    const std::tuple<std::string, float, int>& qparam,
+    at::ScalarType t = at::ScalarType::Undefined) {
   AT_ASSERT(v != nullptr);
   Node* n = v->node();
-  auto qdq = createQuantDeQuantNodes(v, n);
-  Node* quant = qdq.first;
-  Node* dequant = qdq.second;
+  Node* quant = createQuantNode(v, n);
+  Node* intrepr = createIntReprNode(v, n);
+  Node* dequant = createDeQuantNode(v, n);
 
-  // Add quant-dequant nodes and replace for all uses of Value
+  // Add quant-intrepr-dequant nodes and replace for all uses of Value
   quant->insertAfter(n);
-  dequant->insertAfter(quant);
+  intrepr->insertAfter(quant);
+  dequant->insertAfter(intrepr);
   v->replaceAllUsesWith(dequant->output());
 
-  // Attach inputs to quant and dequant nodes
+  // Attach inputs to quantization pattern nodes
   quant->addInput(v);
-  // Default Quant Params <Scale:1.0, ZeroPoint:0>
-  insertQuantNodeParams(quant, std::make_tuple(1.0, 0));
-  dequant->addInput(quant->output());
+  intrepr->addInput(quant->output());
+  dequant->addInput(intrepr->output());
+  // Insert qparam nodes
+  auto qparam_values = insertQuantParamNodes(quant, qparam);
+  for (Value* qparam_value : qparam_values) {
+    quant->addInput(qparam_value);
+    dequant->addInput(qparam_value);
+  }
+  // optional argument required only for quantization
+  // of specific attributes eg: bias.
+  if (t != at::ScalarType::Undefined) {
+    Value* scalartype_v = insertScalarType(quant, t);
+    AT_ASSERT(scalartype_v != nullptr);
+    quant->addInput(scalartype_v);
+    dequant->addInput(scalartype_v);
+  }
 }
 
-// Insert Quant-Dequant node pair for specific input to node n
-void addQuantDeQuantNodesForInput(Value* v, Node* n) {
+// Insert Quant-Dequant node pattern for specific input to node n
+void addQuantDeQuantNodesForInput(
+    Value* v,
+    Node* n,
+    const std::tuple<std::string, float, int>& qparam,
+    at::ScalarType t = at::ScalarType::Undefined) {
   AT_ASSERT(v != nullptr);
   AT_ASSERT(n != nullptr);
-  auto qdq = createQuantDeQuantNodes(v, n);
-  Node* quant = qdq.first;
-  Node* dequant = qdq.second;
+  Node* quant = createQuantNode(v, n);
+  Node* intrepr = createIntReprNode(v, n);
+  Node* dequant = createDeQuantNode(v, n);
 
-  // Insert the quant-dequant node for the V->N
+  // Insert the quant-intrepr-dequant node for the V->N
   // pair which is identified as quantizable during
   // graph iteration
   dequant->insertBefore(n);
-  quant->insertBefore(dequant);
+  intrepr->insertBefore(dequant);
+  quant->insertBefore(intrepr);
   n->replaceInputWith(v, dequant->output());
 
-  // Attach inputs to quant and dequant nodes
+  // Attach inputs to quantization pattern nodes
   quant->addInput(v);
-  // Default Quant Params <Scale:1.0, ZeroPoint:0>
-  insertQuantNodeParams(quant, std::make_tuple(1.0, 0));
-  dequant->addInput(quant->output());
+  intrepr->addInput(quant->output());
+  dequant->addInput(intrepr->output());
+  // Insert qparam nodes
+  auto qparam_values = insertQuantParamNodes(quant, qparam);
+  for (Value* qparam_value : qparam_values) {
+    quant->addInput(qparam_value);
+    dequant->addInput(qparam_value);
+  }
+  if (t != at::ScalarType::Undefined) {
+    Value* scalartype_v = insertScalarType(quant, t);
+    AT_ASSERT(scalartype_v != nullptr);
+    quant->addInput(scalartype_v);
+    dequant->addInput(scalartype_v);
+  }
+}
+
+template <typename... ArgT>
+bool matchQParamDictKeytoObserver(
+    Node* n,
+    const std::unordered_map<std::string, std::tuple<ArgT...>>& qparam_dict,
+    std::tuple<ArgT...>& qparam_value) {
+  // Observer nodes have two inputs
+  if (n->kind() != prim::PythonOp || n->inputs().size() != 2) {
+    return false;
+  }
+  // For observer node, qparam dict key matches the
+  // second input name for observer node
+  Value* vname = n->inputs()[1];
+  AT_ASSERT(toIValue(vname).has_value());
+  IValue valuekey = toIValue(vname).value();
+  if (!valuekey.isString()) {
+    return false;
+  }
+  auto it = qparam_dict.find(valuekey.toStringRef());
+  if (it == qparam_dict.end()) {
+    return false;
+  }
+  // Extract the qparam_dict value
+  qparam_value = it->second;
+  return true;
 }
 
 } // namespace
@@ -215,7 +365,10 @@ void InsertObserverNodes(
       function_var->graph(), observer_node, function_var->num_inputs());
 }
 
-void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
+void InsertQuantDequantNodes(
+    std::shared_ptr<Graph>& graph,
+    const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
+        qparam_dict) {
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   // For storing quantizable values - node pairs that are external
@@ -227,6 +380,14 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
   std::vector<Value*> quantOutputs;
   std::unordered_set<Value*> valueLookup;
 
+  // Observer nodes to remove from graph
+  std::vector<Node*> nodes_to_remove;
+
+  // Create value:qparam dict. Once qparam dict key is matched
+  // to the observer node, we create value node to qparam for lookup.
+  std::unordered_map<Value*, std::tuple<std::string, float, int>>
+      qparam_value_dict;
+
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
@@ -235,6 +396,18 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
       // Schedule the sub blocks
       for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);
+      }
+
+      std::tuple<std::string, float, int> qparam_data;
+      if (matchQParamDictKeytoObserver<std::string, float, int>(
+              n, qparam_dict, qparam_data)) {
+        // This is the observer node. Mark it and the second input
+        // constant node for deletion.
+        Value* qparam_value = n->inputs()[0];
+        qparam_value_dict.emplace(qparam_value, qparam_data);
+        nodes_to_remove.emplace_back(n);
+        nodes_to_remove.emplace_back(n->inputs()[1]->node());
+        continue;
       }
 
       // We iterate over node inputs to identify which Values
@@ -284,14 +457,24 @@ void InsertQuantDequantNodes(std::shared_ptr<Graph>& graph) {
     } // end for
   } // end Block traversal
 
+  // Destory Observer Nodes
+  for (auto& n : nodes_to_remove) {
+    n->destroy();
+  }
+
   // Insert the quant-dequant pair for values output from quantizable nodes
   for (auto& ele : quantOutputs) {
-    addQuantDeQuantNodes(ele);
+    if (qparam_value_dict.count(ele) != 0) {
+      addQuantDeQuantNodes(ele, qparam_value_dict[ele]);
+    }
   }
 
   // Insert the quant-dequant pair for values inputs to quantizable nodes
   for (auto& ele : quantInputs) {
-    addQuantDeQuantNodesForInput(ele.first, ele.second);
+    if (qparam_value_dict.count(ele.first) != 0) {
+      addQuantDeQuantNodesForInput(
+          ele.first, ele.second, qparam_value_dict[ele.first]);
+    }
   }
 }
 
@@ -302,6 +485,46 @@ void QuantLinting(std::shared_ptr<Graph>& graph) {
 void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
+
+void InsertQuantDequantNodesForParam(
+    script::Method& method,
+    const std::string& param_name,
+    const std::function<std::tuple<std::string, float, int>(at::Tensor)>&
+        getQParamFunc,
+    at::ScalarType t) {
+  AT_ASSERT(getQParamFunc != nullptr);
+  auto params_to_insert_qdq = getQuantizableParamsofName(method, param_name);
+
+  for (auto& param_info : params_to_insert_qdq) {
+    auto& param_slot = method.initial_ivalues()[param_info.idx];
+    const auto& itensor = param_slot.value();
+    at::Tensor tensor_var = itensor.toTensor().detach();
+    auto qparam = getQParamFunc(tensor_var);
+    addQuantDeQuantNodesForInput(param_info.v, param_info.n, qparam, t);
+  }
+}
+
+// Exposing the template api helps reuse the same interface for different
+// qparamfunc for different qschemes.
+template <typename Fn>
+void InsertQuantDequantNodesForParam(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::string& param_name,
+    const Fn& getQParamFunc,
+    at::ScalarType t) {
+  auto& method = moduleObj->get_method(method_name);
+  InsertQuantDequantNodesForParam(method, param_name, getQParamFunc, t);
+}
+
+// Explicit Supported Template specialization for getQParamFunc.
+template TORCH_API void InsertQuantDequantNodesForParam(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::string& param_name,
+    const std::function<std::tuple<std::string, float, int>(at::Tensor)>&
+        getQParamFunc,
+    at::ScalarType t);
 
 } // namespace jit
 } // namespace torch
