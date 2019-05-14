@@ -445,7 +445,7 @@ Tensor matmul(
 
     const Tensor t2_T = tensor2.permute(perm);
     const Tensor t1_T = dim_tensor1 == 2 ? tensor1.t() : tensor1.reshape({n, m}).t();
-    const Tensor res_T = matmul(c10::nullopt, t2_T, t1_T);
+    const Tensor res_T = matmul(out_opt, t2_T, t1_T);
 
     if (dim_tensor1 == 2) {
       Tensor res = res_T.permute(perm).contiguous();
