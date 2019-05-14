@@ -1523,7 +1523,7 @@ def scatter_add(g, self, dim, index, src):
     if self.type().kind() != "CompleteTensorType":
         return _unimplemented("scatter_add", "input size not accesible")
     dtype = self.type().scalarType()
-    dtype = scalar_type_to_onnx.index(cast_pytorch_to_onnx[dtype])
+    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     dims = self.type().sizes()
     to_add = torch.zeros(dims)
     to_add = g.op("Constant", value_t=to_add)
