@@ -3306,16 +3306,32 @@ def foo(x):
         class B(A):
             def __init__(self):
                 super(B, self).__init__()
+           
             @torch.jit.script_method
             def bar(self, x):
                 return x * x
 
         with self.assertRaisesRegex(RuntimeError, 'attribute'):
-            A() # cannot use because bar is not defined
+            A()  # cannot use because bar is not defined
+
         v = torch.rand(3, 4)
         b = B()
         self.assertEqual(b(v), v + v * v)
->>>>>>> Allow static inheritence for ScriptModules
+
+        class C(torch.jit.ScriptModule):
+            def __init__(self):
+               super(C, self).__init__()
+             
+            @torch.jit.script_method
+            def bar(self, x):
+                return x
+        
+        class D(C, B):
+            def __init__(self):
+                super(D, self).__init__()
+        
+        self.assertEqual(D()(v), v + v)
+
 
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
