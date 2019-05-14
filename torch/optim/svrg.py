@@ -73,10 +73,10 @@ class SVRG(Optimizer):
                 # gradient data
                 d_p = p.grad.data
                 # subtract the average gradient
-                d_p.add_(-1, average_gradient)
+                d_p.add_(average_gradient)
                 # add the snapshot gradient
                 if snapshot_params.grad is not None:
-                    d_p.add_(snapshot_params.grad.data)
+                    d_p.add_(-1, snapshot_params.grad.data)
                 if weight_decay != 0:
                     d_p.add_(weight_decay, p.data)
                 if momentum != 0:
@@ -123,6 +123,7 @@ class SVRG(Optimizer):
             closure(data, target)
             for group in self.param_groups:
                 for idx, p in enumerate(group['snapshot_params']):
+                    state = self.state[p]
                     if p.grad is None:
                         continue
                     if i == 0:
