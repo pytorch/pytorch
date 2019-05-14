@@ -73,12 +73,11 @@ std::shared_ptr<SugaredValue> MethodValue::call(
   auto fun_constant = graph.create(prim::Constant);
   //std::cerr << "accessing fun_constant output\n";
   fun_constant->output()->setType(FunctionType::create(&(*method_.get())));
-  auto range = std::make_shared<SourceRange>(loc);
   graph.insertNode(fun_constant);
-  fun_constant->setSourceLocation(range);
+  fun_constant->setSourceRange(SourceRange(loc));
   auto call_node = graph.create(prim::CallFunction, 0);
   graph.insertNode(call_node);
-  call_node->setSourceLocation(range);
+  call_node->setSourceRange(SourceRange(loc));
 
   //add fun_constant
   //std::cerr << "accessing fun_constant output\n";
