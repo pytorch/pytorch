@@ -212,12 +212,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #define TORCH_CHECK(cond, ...)                              \
   if (!(cond)) {                                            \
     C10_THROW_ERROR(Error,                                  \
-      ::c10::detail::if_empty_then(                         \
         ::c10::str(__VA_ARGS__),                            \
-        ::c10::str("Expected ", #cond, " to be true, but got false.  " \
-        "(Could this error message be improved?  If so, "   \
-        "please report an enhancement request to PyTorch.)") \
-      ) \
     ); \
   }
 
@@ -225,12 +220,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #define TORCH_CHECK_INDEX(cond, ...)                        \
   if (!(cond)) {                                            \
     C10_THROW_ERROR(IndexError,                             \
-      ::c10::detail::if_empty_then(                         \
         ::c10::str(__VA_ARGS__),                            \
-        ::c10::str("Expected, " #cond, " to be true, but got false.  " \
-        "(Could this error message be improved?  If so, "   \
-        "please report an enhancement request to PyTorch.)") \
-      )                                                     \
     );                                                      \
   }
 
