@@ -127,11 +127,7 @@ def _check_capability():
         capability = get_device_capability(d)
         major = capability[0]
         name = get_device_name(d)
-        if CUDA_VERSION < 8000 and major >= 6:
-            warnings.warn(incorrect_binary_warn % (d, name, 8000, CUDA_VERSION))
-        elif CUDA_VERSION < 9000 and major >= 7:
-            warnings.warn(incorrect_binary_warn % (d, name, 9000, CUDA_VERSION))
-        elif capability == (3, 0) or major < 3:
+        if capability == (3, 0) or major < 3:
             warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
 
 
