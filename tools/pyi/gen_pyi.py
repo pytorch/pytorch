@@ -63,6 +63,7 @@ blacklist = [
     'margin_ranking_loss',
     'triplet_margin_loss',
     # Somehow, these are defined in both _C and in functional. Ick!
+    'nonzero',
     'broadcast_tensors',
     'meshgrid',
     'cartesian_prod',
