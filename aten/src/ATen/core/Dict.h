@@ -2,45 +2,19 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeTraits.h>
-#include <ATen/core/ivalue_base.h>
 #include <c10/util/flat_hash_map.h>
 
 namespace c10 {
+class IValue;
 template<class Key, class Value> class Dict;
 namespace impl {
-inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
-  if (lhs.isNone()) {
-    return rhs.isNone();
-  } else if (lhs.isInt()) {
-    return rhs.isInt() && lhs.toInt() == rhs.toInt();
-  } else if (lhs.isString()) {
-    return rhs.isString() && lhs.toStringRef() == rhs.toStringRef();
-  } else if (lhs.isDouble()) {
-    return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
-  } else if (lhs.isBool()) {
-    return rhs.isBool() && lhs.toBool() == rhs.toBool();
-  } else {
-    AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
-  }
-}
+bool shallowEquals(const IValue& lhs, const IValue& rhs);
 }
 
 namespace detail {
 
 struct DictHash {
-  size_t operator()(const IValue& ivalue) const {
-    if (ivalue.isInt()) {
-      return std::hash<int>()(ivalue.toInt());
-    } else if (ivalue.isString()) {
-      return std::hash<std::string>()(ivalue.toStringRef());
-    } else if (ivalue.isDouble()) {
-      return std::hash<double>()(ivalue.toDouble());
-    } else if (ivalue.isBool()) {
-      return std::hash<bool>()(ivalue.toBool());
-    } else {
-      throw std::runtime_error("Can't hash IValues with this tag");
-    }
-  }
+  size_t operator()(const IValue& ivalue) const;
 };
 
 struct DictEqualTo {
@@ -201,71 +175,53 @@ public:
    * Returns an iterator to the first element of the container.
    * If the container is empty, the returned iterator will be equal to end().
    */
-  iterator begin() {
-    return iterator{map_.begin()};
-  }
+  iterator begin();
 
   /**
    * Returns an iterator to the first element of the container.
    * If the container is empty, the returned iterator will be equal to end().
    */
-  const_iterator begin() const {
-    return const_iterator{map_.begin()};
-  }
+  const_iterator begin() const;
 
   /**
    * Returns an iterator to the first element of the container.
    * If the container is empty, the returned iterator will be equal to end().
    */
-  const_iterator cbegin() const {
-    return const_iterator{map_.cbegin()};
-  }
+  const_iterator cbegin() const;
 
   /**
    * Returns an iterator to the element following the last element of the container.
    * This element acts as a placeholder; attempting to access it results in undefined behavior.
    */
-  iterator end() {
-    return iterator{map_.end()};
-  }
+  iterator end();
 
   /**
    * Returns an iterator to the element following the last element of the container.
    * This element acts as a placeholder; attempting to access it results in undefined behavior.
    */
-  const_iterator end() const {
-    return const_iterator{map_.end()};
-  }
+  const_iterator end() const;
 
   /**
    * Returns an iterator to the element following the last element of the container.
    * This element acts as a placeholder; attempting to access it results in undefined behavior.
    */
-  const_iterator cend() const {
-    return const_iterator{map_.cend()};
-  }
+  const_iterator cend() const;
 
   /**
    * Checks if the container has no elements.
    */
-  bool empty() const {
-    return map_.empty();
-  }
+  bool empty() const;
 
   /**
    * Returns the number of elements in the container.
    */
-  size_type size() const {
-    return map_.size();
-  }
+  size_type size() const;
 
   /**
    * Erases all elements from the container. After this call, size() returns zero.
    * Invalidates any references, pointers, or iterators referring to contained elements. May also invalidate past-the-end iterators.
    */
-  void clear() {
-    map_.clear();
-  }
+  void clear();
 
   /**
    * Inserts element(s) into the container, if the container doesn't already contain an element with an equivalent key.
@@ -274,14 +230,7 @@ public:
    * @return A pair consisting of an iterator to the inserted element (or to the element that prevented the insertion) and a bool denoting whether the insertion took place.
    */
   template<class Key_, class Value_>
-  std::pair<iterator, bool> insert(Key_&& key, Value_&& value) {
-    static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of Dict::insert");
-    static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of Dict::insert");
-    auto inserted = map_.insert({
-      Key(std::forward<Key_>(key)),
-      Value(std::forward<Value_>(value))});
-    return {iterator{inserted.first}, inserted.second};
-  }
+  std::pair<iterator, bool> insert(Key_&& key, Value_&& value);
 
   /**
    * If an element with the given key already exists, it is overwritten with the given value.
@@ -291,23 +240,14 @@ public:
    * @return The bool component is true if the insertion took place and false if the assignment took place. The iterator component is pointing at the element that was inserted or updated.
    */
   template<class Key_, class Value_>
-  std::pair<iterator, bool> insert_or_assign(Key_&& key, Value_&& value) {
-    static_assert(std::is_constructible<Key, Key_>::value, "Wrong type for the key argument of Dict::insert_or_assign");
-    static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of Dict::insert_or_assign");
-    auto inserted = map_.insert_or_assign(
-      Key(std::forward<Key_>(key)),
-      Value(std::forward<Value_>(value)));
-    return {iterator{inserted.first}, inserted.second};
-  }
+  std::pair<iterator, bool> insert_or_assign(Key_&& key, Value_&& value);
 
   /**
    * Removes the element pointed to by iter.
    * May invalidate any references, pointers, or iterators referring to contained elements.
    * The iterator iter must be valid and dereferenceable. Thus the end() iterator (which is valid, but is not dereferenceable) cannot be used as a value for iter.
    */
-  void erase(const_iterator iter) {
-    map_.erase(iter.entryRef_.iterator_);
-  }
+  void erase(const_iterator iter);
 
   /**
    * Removes the element with the given key, if it exists.
@@ -315,17 +255,13 @@ public:
    *
    * @return The number of elements removed. This is either '1' if an element with the key existed, or '0' if it didn't.
    */
-  C10_NODISCARD size_t erase(const Key& key) {
-    return map_.erase(key);
-  }
+  C10_NODISCARD size_t erase(const Key& key);
 
   /**
    * Returns the mapped value of the element with key equivalent to key.
    * If no such element exists, an exception of type std::out_of_range is thrown.
    */
-  Value at(const Key& key) {
-    return map_.at(key).template to<Value>();
-  }
+  Value at(const Key& key);
 
   /**
    * Finds an element with key equivalent to key.
@@ -333,9 +269,7 @@ public:
    * @return Iterator to an element with key equivalent to key.
    *         If no such element is found, past-the-end (see end()) iterator is returned.
    */
-  iterator find(const Key& key) {
-    return iterator{map_.find(key)};
-  }
+  iterator find(const Key& key);
 
   /**
    * Finds an element with key equivalent to key.
@@ -343,26 +277,20 @@ public:
    * @return Iterator to an element with key equivalent to key.
    *         If no such element is found, past-the-end (see end()) iterator is returned.
    */
-  const_iterator find(const Key& key) const {
-    return const_iterator{map_.find(key)};
-  }
+  const_iterator find(const Key& key) const;
 
   /**
    * Checks if there is an element with key equivalent to key in the container.
    *
    * @return true if there is such an element, otherwise false.
    */
-  bool contains(const Key& key) const {
-    return end() != find(key);
-  }
+  bool contains(const Key& key) const;
 
   /**
    * Increase the capacity so that at least count elements can be stored without
    * having to reallocate or rehash.
    */
-  void reserve(size_type count) {
-    map_.reserve(count);
-  }
+  void reserve(size_type count);
 };
 
 namespace impl {
@@ -374,4 +302,4 @@ using GenericDict = Dict<IValue, IValue>;
 
 }
 
-#include <ATen/core/ivalue.h>
+#include <ATen/core/Dict_inl.h>
