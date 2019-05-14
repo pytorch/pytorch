@@ -5,7 +5,7 @@
 #include <c10/util/flat_hash_map.h>
 
 namespace c10 {
-class IValue;
+struct IValue;
 template<class Key, class Value> class Dict;
 namespace impl {
 bool shallowEquals(const IValue& lhs, const IValue& rhs);
