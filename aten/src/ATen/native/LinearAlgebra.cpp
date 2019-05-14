@@ -452,7 +452,7 @@ Tensor matmul(
       return has_out ? out.set_(res) : res;
     }
     else {
-      const IntArrayRef& sizes = tensor2.sizes();
+      const IntArrayRef sizes = tensor2.sizes();
 
       std::vector<int64_t> shape;
       shape.insert(shape.end(), sizes.begin(), sizes.end() - 2);
