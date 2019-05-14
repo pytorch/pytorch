@@ -1930,22 +1930,11 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     """
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    if log_input:
-        loss = torch.exp(input) - target * input
-    else:
-        loss = input - target * torch.log(input + eps)
-    if full:
-        mask = target > 1
-        loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
-    if reduction == 'none':
-        ret = loss
-    elif reduction == 'mean':
-        ret = torch.mean(loss)
-    elif reduction == 'sum':
-        ret = torch.sum(loss)
-    else:
+    if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
         ret = input
         raise ValueError(reduction + " is not valid")
+
+    ret = torch.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
     return ret
 
 

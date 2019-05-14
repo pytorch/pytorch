@@ -4,7 +4,7 @@ from test_pytorch_common import TestCase, run_tests
 import torch
 import torch.onnx
 from torch.onnx import utils
-from torch.onnx.symbolic import _set_opset_version
+from torch.onnx.symbolic_helper import _set_opset_version
 
 import onnx
 
