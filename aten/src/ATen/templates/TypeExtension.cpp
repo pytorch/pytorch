@@ -36,4 +36,5 @@ TypeID ${Type}::ID() const {
 
 ${type_method_definitions}
 
+${function_registrations}
 } // namespace at

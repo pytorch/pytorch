@@ -5,6 +5,7 @@
 #include <ATen/core/SparseTensorRef.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
+#include <ATen/core/ATenDispatch.h>
 
 namespace at {
 

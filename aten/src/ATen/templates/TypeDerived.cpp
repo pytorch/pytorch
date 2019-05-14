@@ -30,6 +30,16 @@ $extra_cuda_headers
 
 namespace at {
 
+namespace {
+  ScalarType infer_scalar_type(const Tensor & t) {
+    return t.scalar_type();
+  }
+  ScalarType infer_scalar_type(const TensorList & tl) {
+    AT_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+    return tl[0].scalar_type();
+}
+} // namespace
+
 ${Type}::${Type}()
   : ${DeviceType}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 
@@ -54,4 +64,5 @@ Tensor * ${Type}::add(Tensor & a, Tensor & b) {
 
 ${type_derived_method_definitions}
 
+${function_registrations}
 }

@@ -52,4 +52,5 @@ Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
 
 ${type_method_definitions}
 
+${function_registrations}
 }

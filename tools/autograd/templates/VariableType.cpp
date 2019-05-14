@@ -29,4 +29,5 @@ namespace torch { namespace autograd {
 
 ${type_derived_method_definitions}
 
+${wrapper_registrations}
 }} // namespace torch::autograd
