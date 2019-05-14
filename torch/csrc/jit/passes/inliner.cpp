@@ -19,6 +19,8 @@ class Inliner {
     {
       if (it->kind() == prim::Constant && it->output()->type()->isSubclass(TypeKind::FunctionType))
       {
+        //Inliner inlined all possible function constants
+        AT_ASSERT(it->output()->uses().size() == 0);
         it.destroyCurrent();
       }
       else
@@ -61,7 +63,7 @@ class Inliner {
     }
 
   }
-  void run(Block* block, bool recurse) {
+  void inlineCalls(Block* block) {
     Node* cur = block->nodes().front();
     Node* end = block->return_node();
 
@@ -87,14 +89,14 @@ class Inliner {
         old_output.at(0)->replaceAllUsesWith(new_output);
         next = cur->next();
         cur->destroy();
-      } else if (recurse) {
+      } else {
         if (cur->hasAttribute(attr::Subgraph)) {
           auto fg = cur->g(attr::Subgraph);
-          run(fg->block(), recurse);
+          inlineCalls(fg->block());
         }
 
         for (auto b : cur->blocks()) {
-          run(b, recurse);
+          inlineCalls(b);
         }
       }
       cur = next;
@@ -102,12 +104,11 @@ class Inliner {
   }
 };
 
-void Inline(Block* block, bool recurse) {
+void Inline(Block* block) {
   Inliner inliner{};
-  inliner.run(block, recurse);
+  inliner.inlineCalls(block);
   inliner.unifyIfs(block);
   inliner.removeFunctionConstants(block);
-
 }
 
 } // namespace jit

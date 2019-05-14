@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void Inline(Block* block, bool recurse = true);
+TORCH_API void Inline(Block* block);
 
 } // namespace jit
 } // namespace torch
