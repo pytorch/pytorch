@@ -190,6 +190,31 @@ class TestQuantizedOps(unittest.TestCase):
         np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
                                 "Quantized addition with ReLU failed.")
 
+    """Tests max pool operation on quantized tensors."""
+    def test_max_pool2d(self):
+        import torch.nn.functional as F
+
+        k = (2, 2)
+        s = (2, 2)
+        d = (1, 1)
+        p = (0, 0)
+
+        q_max_pool = torch.ops.quantized.max_pool2d
+
+        a = torch.empty(10, 3, 12, 12).uniform_(-1, 1).type(torch.float)
+        scale = 1.0 / 128
+        zero_point = 127
+
+        qa = a.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.qint8)
+
+        a_hat = qa.dequantize()
+        a_pool = F.max_pool2d(a_hat, kernel_size=k, stride=s, padding=p, dilation=d)
+
+        qa_pool_hat = q_max_pool(qa, kernel_size=k, stride=s, padding=p, dilation=d)
+        a_pool_hat = qa_pool_hat.dequantize()
+
+        np.testing.assert_equal(a_pool.numpy(), a_pool_hat.numpy())
+
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
@@ -355,7 +380,6 @@ class TestQuantizedFC(unittest.TestCase):
 
         # Assert equal
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
-
 
 if __name__ == "__main__":
     run_tests()
