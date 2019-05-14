@@ -193,7 +193,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       e.n->removeInput(e.offset);
       continue;
     }
-    if (e.n->kind() != prim::GetAttr) {
+    if (e.n->kind() != prim::GetAttr && e.n->kind() != prim::SetAttr) {
       throw ErrorReport(e.n->sourceRange())
           << "temporary: the only valid use of a module is looking up an attribute";
     }

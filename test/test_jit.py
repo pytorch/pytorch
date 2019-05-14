@@ -11261,6 +11261,31 @@ a")
                     raise Exception("Hi")
                 return a
 
+    def test_out_of_place_assign(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.x = torch.jit.Attribute(2, int)
+                self.y = torch.jit.Attribute(torch.ones(2, 2), torch.Tensor)
+                self.z = torch.nn.Parameter(torch.ones(2, 2))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                # type: (int) -> None
+                self.x = x
+                self.y = torch.ones(2, 2) + x
+                self.z = torch.ones(2, 2) - x
+
+        m = M()
+        self.assertEqual(m.x, 2)
+        self.assertEqual(m.y, torch.ones(2, 2))
+        self.assertEqual(m.z, torch.ones(2, 2))
+        m(100)
+        self.assertEqual(m.x, 100)
+        self.assertEqual(m.y, torch.ones(2, 2) + 100)
+        self.assertEqual(m.z, torch.ones(2, 2) - 100)
+
+
     def test_assertions(self):
         cu = torch.jit.CompilationUnit('''
             def foo(cond):
