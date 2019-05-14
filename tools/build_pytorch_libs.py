@@ -287,7 +287,7 @@ def build_caffe2(version,
             check_call(build_cmd, cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
-            ninja_cmd = ['ninja', 'install', '-v']
+            ninja_cmd = ['ninja', 'install']
             if max_jobs is not None:
                 ninja_cmd += ['-j', max_jobs]
             check_call(ninja_cmd, cwd=build_dir, env=my_env)
