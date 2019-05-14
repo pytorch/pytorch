@@ -13,22 +13,6 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
 }
 
 
-static std::string shapes_as_str(TensorList tensors) {
-  std::ostringstream os;
-  bool first = true;
-  for (auto& tensor : tensors) {
-    if (tensor.defined()) {
-      if (!first) {
-        os << ", ";
-      }
-      os << tensor.sizes();
-      first = false;
-    }
-  }
-  return os.str();
-}
-
-
 static std::vector<Tensor> expandTensors(const Tensor & self, TensorList indices) {
   // Expands ByteTensor (masks) or BoolTensor (masks) into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
@@ -133,26 +117,6 @@ transposeToFrontAndInvPerm(Tensor self, TensorList indices) {
     invPerm[dims[i]] = i;
   }
   return std::make_tuple(self.permute(dims), std::move(transposedIndices), std::move(invPerm));
-}
-
-static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
-  // computes the stride as if tensor were contigous
-  auto sizes = tensor.sizes();
-  std::vector<int64_t> stride(tensor.dim());
-  stride[tensor.dim() - 1] = 1;
-  std::partial_sum(sizes.rbegin(), sizes.rend() - 1, stride.rbegin() + 1, std::multiplies<int64_t>());
-  return stride;
-}
-
-// Unsqueezes src `before` times at the front and `after` times at the end
-static Tensor unsqueezeN(const Tensor & src, int64_t before, int64_t after) {
-  auto srcSizes = src.sizes();
-  auto nDim = src.dim();
-  std::vector<int64_t> sizes(nDim + before + after, 1);
-  for (int64_t i = 0; i < nDim; i++) {
-    sizes[i + before] = srcSizes[i];
-  }
-  return src.view(sizes);
 }
 
 struct AdvancedIndex {

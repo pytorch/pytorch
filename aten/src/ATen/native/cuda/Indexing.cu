@@ -108,9 +108,19 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size,
   return index.remainder(dim_size);
 }
 
+static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
+  // computes the stride as if tensor were contigous
+  auto sizes = tensor.sizes();
+  std::vector<int64_t> stride(tensor.dim());
+  stride[tensor.dim() - 1] = 1;
+  std::partial_sum(sizes.rbegin(), sizes.rend() - 1, stride.rbegin() + 1, std::multiplies<int64_t>());
+  return stride;
+}
+
 static std::tuple<Tensor, int64_t, int64_t, int64_t> 
 computeLinearIndex(const Tensor & src, TensorList indices) {
   auto strides = computeLinearStride(src);
+  const auto& backend = src.type().backend();
 
   // Compute the linear index by multiplying the indexing tensors by the
   // stride and summing them. All the indexing tensors have the same shape at
@@ -122,7 +132,7 @@ computeLinearIndex(const Tensor & src, TensorList indices) {
     if (indices[i].defined()) {
       // Cast index to the longType matching src's backend
       // This allows us to support ie indexing a cuda tensor with a cpu tensor
-      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i), false) * strides[i]).to(kLong);
+      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i), false) * strides[i]).toBackend(backend);
       if (linearIndex.defined()) {
         linearIndex += index;
       } else {
@@ -180,16 +190,14 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
   int64_t num_indices = linearIndex.numel();
   if (num_indices > 0 && sliceSize > 0) {
       bool permuted = !src.is_contiguous();
-      auto src_ = permuted ? src.contiguous() : src;
+//src is all zeros at this point, so src.zeros_like has the same effect as src.contiguous and is more efficient
+      auto src_ = permuted ? at::zeros_like(src) : src;
       linearIndex = linearIndex.view(-1);
       auto sorted_indices = at::empty_like(linearIndex);
       auto orig_indices = at::empty_like(linearIndex);
       using device_ptr = thrust::device_ptr<int64_t>;
       cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     
-    // Sort the inputs into sorted with the corresponding indices; we
-    // don't need a stable or multidimensional sort, so just use Thrust
-    // directly
       linearIndex.div_(sliceSize);
       {
       sorted_indices.copy_(linearIndex);
@@ -201,7 +209,11 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       auto orig_data = device_ptr(orig_indices.data<int64_t>());
       thrust::copy(policy, count_iter, count_iter + num_indices, orig_data);
     
+      // Sort the inputs into sorted with the corresponding indices; we
+      // don't need a stable or multidimensional sort, so just use Thrust
+      // directly
       // Sort; a stable sort is not required
+      // NB - not passing comparator causes thrust to use radix sort, and it hurts perf A LOT, at least for medium (few K) sized indices
       auto sorted_data = device_ptr(sorted_indices.data<int64_t>());
       thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
       }
