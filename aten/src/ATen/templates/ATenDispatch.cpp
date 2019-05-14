@@ -10,11 +10,6 @@ static void* wrapper_table[${function_count}];
 
 int64_t _register_op(Backend backend, const char* schema, void* fn) {
   auto id = schema_to_id[schema];
-  if (backend == Backend::Undefined) {
-    for (int i = 0; i < static_cast<int>(Backend::NumOptions); i++) {
-      function_table[i][id] = fn;
-    }
-  }
   function_table[static_cast<int64_t>(backend)][id] = fn;
   return id;
 }
@@ -27,7 +22,10 @@ int64_t _register_variable_wrapper(const char* schema, void* fn) {
 
 void* get_op(Backend backend, int64_t id) {
   if (function_table[static_cast<int64_t>(backend)][id] == nullptr) {
-    AT_ERROR("asdf");
+    if (function_table[static_cast<int64_t>(Backend::Undefined)][id] == nullptr) {
+      AT_ERROR("asdf");
+    }
+    function_table[static_cast<int64_t>(backend)][id] = function_table[static_cast<int64_t>(Backend::Undefined)][id];
   }
   return function_table[static_cast<int64_t>(backend)][id];
 }
