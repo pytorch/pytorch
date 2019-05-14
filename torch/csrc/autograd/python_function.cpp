@@ -44,8 +44,9 @@ PyObject *THPFunctionClass = nullptr;
 namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
-  : type(&var.type())
+  : type(&var.dispatch_type())
   , device(var.device())
+  , scalar_type(var.scalar_type())
   , size(var.sizes().vec())
   , requires_grad(var.requires_grad()) {
 }
@@ -53,7 +54,7 @@ VariableInfo::VariableInfo(const Variable& var)
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   // NB: This will NOT work if we ever get mixed device gradients
   device_guard.reset_device(device);
-  return at::zeros(size, type->options());
+  return at::zeros(size, type->options(scalar_type));
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
@@ -607,7 +608,7 @@ static void _trace_post_record(
   auto graph = node->owningGraph();
   node->addOutput();
   if (!unpack_output) {
-    std::vector<TypePtr> tuple_values(num_outputs, DynamicType::get());
+    std::vector<TypePtr> tuple_values(num_outputs, TensorType::get());
     TypePtr tuple_type = TupleType::create(std::move(tuple_values));
     node->output()->setType(tuple_type);
     auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
@@ -671,8 +672,10 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
 PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 {
   HANDLE_TH_ERRORS
-  torch::autograd::profiler::RecordFunction record(Py_TYPE(self)->tp_name,
-                                                   Function::peek_at_next_sequence_nr());
+  RECORD_FUNCTION(
+    Py_TYPE(self)->tp_name,
+    std::vector<c10::IValue>(),
+    Function::peek_at_next_sequence_nr());
 
   auto info_pair = unpack_input<true>(_inputs);
   auto& unpacked_input = info_pair.first;
@@ -702,8 +705,10 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
-  torch::autograd::profiler::RecordFunction record(((PyTypeObject*)cls)->tp_name,
-                                                   Function::peek_at_next_sequence_nr());
+  RECORD_FUNCTION(
+    ((PyTypeObject*)cls)->tp_name,
+    std::vector<c10::IValue>(),
+    Function::peek_at_next_sequence_nr());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;

@@ -19,8 +19,8 @@
 
 namespace c10d {
 
-// Turns at::IntList into "(1, 2, 3, 4)".
-inline std::string toString(at::IntList l) {
+// Turns at::IntArrayRef into "(1, 2, 3, 4)".
+inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
   ss << "(";
   for (size_t i = 0; i < l.size(); i++) {
@@ -34,7 +34,7 @@ inline std::string toString(at::IntList l) {
 }
 
 inline void assertSameType(
-    const at::Type& type,
+    const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
   for (size_t i = 0; i < tensors.size(); i++) {
     if (tensors[i].type() != type) {
@@ -47,7 +47,7 @@ inline void assertSameType(
 }
 
 inline void assertSameSizes(
-    const at::IntList& sizes,
+    const at::IntArrayRef& sizes,
     const std::vector<at::Tensor>& tensors) {
   for (size_t i = 0; i < tensors.size(); i++) {
     if (!tensors[i].sizes().equals(sizes)) {
@@ -66,7 +66,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   }
 
   // Ensure all tensors have identical type and shape
-  auto& type = tensors[0].type();
+  auto type = tensors[0].type();
   auto sizes = tensors[0].sizes();
   for (size_t i = 1; i < tensors.size(); i++) {
     if (tensors[i].type() != type) {
@@ -88,7 +88,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
 
 inline void assertTypeMatch(
     std::function<void(const std::string&)> fn,
-    const at::Type& type,
+    const at::DeprecatedTypeProperties& type,
     const at::ArrayRef<at::Tensor>& tensors,
     size_t index) {
   if (tensors[index].type() != type) {
@@ -99,7 +99,7 @@ inline void assertTypeMatch(
 
 inline void assertSizesMatch(
     std::function<void(const std::string&)> fn,
-    const at::IntList& sizes,
+    const at::IntArrayRef& sizes,
     const at::ArrayRef<at::Tensor>& tensors,
     size_t index) {
   if (tensors[index].sizes() != sizes) {
@@ -179,8 +179,8 @@ inline void assertCPU(
 inline void assertTypeAndSizesMatch(
     std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor>& tensors,
-    const at::Type& type,
-    const at::IntList& sizes) {
+    const at::DeprecatedTypeProperties& type,
+    const at::IntArrayRef& sizes) {
   for (size_t i = 0; i < tensors.size(); i++) {
     assertTypeMatch(fn, type, tensors, i);
     assertSizesMatch(fn, sizes, tensors, i);
@@ -195,7 +195,7 @@ inline void assertTypeAndSizesMatch(
   assertTypeAndSizesMatch(fn, tensors.slice(1), type, sizes);
 }
 
-// Copied from torch/csrc/utils/functional.h.
+// Copied from ATen/core/functional.h.
 template <typename F, typename T>
 inline auto fmap(T& inputs, const F& fn)
     -> std::vector<decltype(fn(*inputs.begin()))> {
@@ -289,16 +289,34 @@ using RankType = uint32_t;
 using PortType = uint16_t;
 using SizeType = uint64_t;
 
-#define SYSCHECK(expr)                                        \
-  {                                                           \
-    do {                                                      \
-      errno = 0;                                              \
-      auto ___output = (expr);                                \
-      (void)___output;                                        \
-    } while (errno == EINTR);                                 \
-    if (errno != 0)                                           \
+// `errno` is only meaningful when it fails. E.g., a  successful `fork()` sets
+// `errno` to `EINVAL` in child process on some macos
+// (https://stackoverflow.com/a/20295079), and thus `errno` should really only
+// be inspected if an error occured.
+//
+// `success_cond` is an expression used to check if an error has happend. So for
+// `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
+// is stored in variable `__output` and may be used in `success_cond`.
+#define SYSCHECK(expr, success_cond)                          \
+while (true) {                                                \
+  auto __output = (expr);                                     \
+  (void) __output;                                            \
+  if (!(success_cond)) {                                      \
+    if (errno == EINTR) {                                     \
+      continue;                                               \
+    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
+      throw std::runtime_error("Socket Timeout");             \
+    } else {                                                  \
       throw std::system_error(errno, std::system_category()); \
-  }
+    }                                                         \
+  } else {                                                    \
+    break;                                                    \
+  }                                                           \
+}
+
+// Most functions indicate error by returning `-1`. This is a helper macro for
+// this common case with `SYSCHECK`.
+#define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
 
 // Helper resource guard class
 class ResourceGuard {
@@ -350,7 +368,7 @@ void sendBytes(
 
   while (bytesToSend > 0) {
     ssize_t bytesSent;
-    SYSCHECK(bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
+    SYSCHECK_ERR_RETURN_NEG1(bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }
@@ -372,7 +390,7 @@ void recvBytes(int socket, T* buffer, size_t length) {
 
   while (bytesToReceive > 0) {
     ssize_t bytesReceived;
-    SYSCHECK(bytesReceived = ::recv(socket, currentBytes, bytesToReceive, 0))
+    SYSCHECK_ERR_RETURN_NEG1(bytesReceived = ::recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }

@@ -1,4 +1,4 @@
-This `./upstream` subdolder contains fixes for `FindCUDA` that are introduced in
+This `./upstream` subfolder contains fixes for `FindCUDA` that are introduced in
 later versions of cmake but cause generator expression errors in earlier CMake
 versions. Specifically:
 

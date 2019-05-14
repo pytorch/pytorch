@@ -1,7 +1,5 @@
 #pragma once
 
-#include <torch/csrc/utils/tempfile.h>
-
 #include <c10/util/Exception.h>
 
 #include <gtest/gtest.h>

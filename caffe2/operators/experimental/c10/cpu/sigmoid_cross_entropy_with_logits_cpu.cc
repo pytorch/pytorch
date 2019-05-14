@@ -1,5 +1,6 @@
-#include <c10/core/dispatch/KernelRegistration.h>
-#include "caffe2/operators/experimental/c10/schemas/sigmoid_cross_entropy_with_logits.h"
+#include <ATen/core/op_registration/op_registration.h>
+#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
 
 using caffe2::Tensor;
@@ -25,22 +26,26 @@ inline float unjoined_sigmoid_xent_forward(float lgt, float tgt) {
 }
 
 void sigmoid_cross_entropy_with_logits_op_cpu_impl(
-    const Tensor& logits,
-    const Tensor& targets,
-    Tensor* out,
+    const at::Tensor& logits_,
+    const at::Tensor& targets_,
+    const at::Tensor& out_,
     bool log_D_trick,
     bool unjoined_lr_loss) {
+  Tensor logits(logits_);
+  Tensor targets(targets_);
+  Tensor out(out_);
+
   CAFFE_ENFORCE_EQ(logits.sizes(), targets.sizes());
   const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
   const auto outer_size = logits.numel() / inner_size;
 
   if (logits.dim() == 0) {
-    out->Resize(std::vector<int64_t>{});
+    out.Resize(std::vector<int64_t>{});
   } else {
     std::vector<int64_t> dims(logits.sizes().begin(), logits.sizes().end() - 1);
-    out->Resize(dims);
+    out.Resize(dims);
   }
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out_ptr = out.mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -64,18 +69,27 @@ void sigmoid_cross_entropy_with_logits_op_cpu_impl(
     out_ptr[i] = -value / inner_size;
   }
 }
-} // namespace
-} // namespace caffe2
 
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::SigmoidCrossEntropyWithLogits)
-    .kernel(&caffe2::sigmoid_cross_entropy_with_logits_op_cpu_impl)
-    .dispatchKey(c10::DispatchKey<2>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<float>()}});
-} // namespace c10
+static auto registry = c10::RegisterOperators().op(
+    FunctionSchema(
+        "_c10_experimental::SigmoidCrossEntropyWithLogits",
+        "",
+        (std::vector<c10::Argument>{
+            c10::Argument("input1"),
+            c10::Argument("input2"),
+            c10::Argument("output"),
+            c10::Argument("log_D_trick", BoolType::get()),
+            c10::Argument("unjoined_lr_loss", BoolType::get())}),
+        (std::vector<c10::Argument>{})),
+    c10::kernel<
+        decltype(sigmoid_cross_entropy_with_logits_op_cpu_impl),
+        &sigmoid_cross_entropy_with_logits_op_cpu_impl>(),
+    c10::dispatchKey(CPUTensorId()));
+
+} // namespace
+
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::SigmoidCrossEntropyWithLogits",
+    C10SigmoidCrossEntropyWithLogits_DontUseThisOpYet)
+
+} // namespace caffe2

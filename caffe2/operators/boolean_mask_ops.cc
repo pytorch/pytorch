@@ -9,8 +9,9 @@ template <class Context>
 class BooleanMaskLengthsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  BooleanMaskLengthsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit BooleanMaskLengthsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
@@ -52,7 +53,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   auto* dataOut = Output(0);
   CAFFE_ENFORCE(data.dim() >= 1);
   CAFFE_ENFORCE_EQ(mask.dim(), 1);
-  CAFFE_ENFORCE(data.sizes()[0] == mask.sizes()[0]);
+  CAFFE_ENFORCE(data.size(0) == mask.size(0));
 
   const auto* maskPtr = mask.template data<bool>();
   int numOutputs = 0;

@@ -40,14 +40,14 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
   THPStoragePtr self((THPStorage *)type->tp_alloc(type, 0));
   THPUtils_assert(self, "failed to allocate a " THPStorageStr " object");
-  THAllocator* allocator = nullptr;
+  c10::Allocator* allocator = nullptr;
 
   // Internally we allow constructing with a keywoard only argument cdata
   if (kwargs != nullptr) {
     PyObject *allocator_ptr = PyDict_GetItemString(kwargs, "allocator");
     if (allocator_ptr) {
       THPUtils_assert(THPUtils_checkLong(allocator_ptr), "invalid allocator");
-      allocator = (THAllocator*) PyLong_AsVoidPtr(allocator_ptr);
+      allocator = static_cast<c10::Allocator*>(PyLong_AsVoidPtr(allocator_ptr));
       PyDict_DelItemString(kwargs, "allocator");
     }
 
@@ -283,6 +283,28 @@ static struct PyMemberDef THPStorage_(members)[] = {
   {nullptr}
 };
 
+static PyObject * THPStorage_(device)(THPStorage* self) {
+  HANDLE_TH_ERRORS
+  return THPDevice_New(self->cdata->device());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPStorage_(dtype)(THPStorage *self)
+{
+  HANDLE_TH_ERRORS
+  return torch::autograd::utils::wrap(
+      torch::getDtype(at::typeMetaToScalarType(self->cdata->dtype())));
+  END_HANDLE_TH_ERRORS
+}
+
+typedef PyObject *(*getter)(PyObject *, void *);
+
+static struct PyGetSetDef THPStorage_(properties)[] = {
+  {"device", (getter)THPStorage_(device), nullptr, nullptr, nullptr},
+  {"dtype",  (getter)THPStorage_(dtype), nullptr, nullptr, nullptr},
+  {nullptr}
+};
+
 extern THPCopyList THWStorage_(copy_functions);
 THPCopyList THWStorage_(copy_functions);
 
@@ -299,6 +321,7 @@ void THPStorage_(initCopyMethods)()
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPHalfStorageType, h, &THWStorage_(copyHalf));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPFloatStorageType, h, &THWStorage_(copyFloat));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPDoubleStorageType, h, &THWStorage_(copyDouble));
+  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBoolStorageType, h, &THWStorage_(copyBool));
 #ifdef THC_GENERIC_FILE
   // copy from GPU types
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPByteStorageType, h, &THWStorage_(copyCudaByte));
@@ -309,6 +332,7 @@ void THPStorage_(initCopyMethods)()
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPFloatStorageType, h, &THWStorage_(copyCudaFloat));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPDoubleStorageType, h, &THWStorage_(copyCudaDouble));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPHalfStorageType, h, &THWStorage_(copyCudaHalf));
+  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBoolStorageType, h, &THWStorage_(copyCudaBool));
   // add CPU <- GPU copies to base type
   /// #define THPCpuStorage TH_CONCAT_3(THP, Real, Storage)
   #define THCpuStorage_(name) TH_CONCAT_4(TH, Real, Storage_, name)
@@ -322,6 +346,7 @@ void THPStorage_(initCopyMethods)()
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPFloatStorageType, b, &THCpuStorage_(copyCudaFloat));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPDoubleStorageType, b, &THCpuStorage_(copyCudaDouble));
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPHalfStorageType, b, &THCpuStorage_(copyCudaHalf));
+  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBoolStorageType, b, &THCpuStorage_(copyCudaBool));
   #undef THCpuStorage
   #undef THCpuStorage_
 #endif
@@ -343,6 +368,7 @@ bool THPStorage_(init)(PyObject *module)
 
   THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_members = THPStorage_(members);
+  THPStorageType.tp_getset = THPStorage_(properties);
   if (PyType_Ready(&THPStorageType) < 0)
     return false;
   Py_INCREF(&THPStorageType);

@@ -2,44 +2,45 @@
 
 #include <c10/util/Exception.h>
 
+#include <mutex>
 #include <string>
 #include <unordered_map>
-#include <mutex>
 
 namespace torch {
 namespace jit {
 namespace script {
 
 static const std::unordered_map<int, int> binary_prec = {
-    {TK_IF,         1},
-    {TK_AND,        2},
-    {TK_OR,         2},
+    {TK_IF, 1},
+    {TK_FOR, 1},
+    {TK_AND, 2},
+    {TK_OR, 2},
     // reserve a level for unary not
-    {'<',           4},
-    {'>',           4},
-    {TK_IS,         4},
-    {TK_ISNOT,      4},
-    {TK_EQ,         4},
-    {TK_LE,         4},
-    {TK_GE,         4},
-    {TK_NE,         4},
-    {'|',           5},
-    {'^',           6},
-    {'&',           7},
-    {'+',           8},
-    {'-',           8},
-    {'*',           9},
-    {'/',           9},
-    {TK_FLOOR_DIV,  9},
-    {'%',           9},
-    {'@',           9},
-    {TK_POW,       10},
+    {'<', 4},
+    {'>', 4},
+    {TK_IS, 4},
+    {TK_ISNOT, 4},
+    {TK_EQ, 4},
+    {TK_LE, 4},
+    {TK_GE, 4},
+    {TK_NE, 4},
+    {'|', 5},
+    {'^', 6},
+    {'&', 7},
+    {'+', 8},
+    {'-', 8},
+    {'*', 9},
+    {'/', 9},
+    {TK_FLOOR_DIV, 9},
+    {'%', 9},
+    {'@', 9},
+    {TK_POW, 10},
 };
 
 static const std::unordered_map<int, int> unary_prec = {
-    {TK_NOT,        3},
-    {'-',           9},
-    {'*',           9},
+    {TK_NOT, 3},
+    {'-', 9},
+    {'*', 9},
 };
 
 bool SharedParserData::isUnary(int kind, int* prec) {
@@ -59,14 +60,15 @@ bool SharedParserData::isBinary(int kind, int* prec) {
   return false;
 }
 
-int stringToKind(const std::string& str) {
+C10_EXPORT int stringToKind(const std::string& str) {
   static std::once_flag init_flag;
   static std::unordered_map<std::string, int> str_to_kind;
   std::call_once(init_flag, []() {
     for (char tok : std::string(valid_single_char_tokens))
       str_to_kind[std::string(1, tok)] = tok;
 #define DEFINE_CASE(tok, _, str) \
-    if (std::string(str) != "") str_to_kind[str] = tok;
+  if (std::string(str) != "")    \
+    str_to_kind[str] = tok;
     TC_FORALL_TOKEN_KINDS(DEFINE_CASE)
 #undef DEFINE_CASE
   });
@@ -77,7 +79,7 @@ int stringToKind(const std::string& str) {
   }
 }
 
-std::string kindToString(int kind) {
+C10_EXPORT std::string kindToString(int kind) {
   if (kind < 256)
     return std::string(1, kind);
   switch (kind) {
@@ -87,14 +89,15 @@ std::string kindToString(int kind) {
     TC_FORALL_TOKEN_KINDS(DEFINE_CASE)
 #undef DEFINE_CASE
     default:
-      throw std::runtime_error("Unknown kind: " + std::to_string(kind));
+      throw std::runtime_error("Unknown kind: " + c10::guts::to_string(kind));
   }
 }
 
-SharedParserData& sharedParserData() {
+C10_EXPORT SharedParserData& sharedParserData() {
   static SharedParserData data; // safely handles multi-threaded init
   return data;
 }
+
 } // namespace script
 } // namespace jit
 } // namespace torch

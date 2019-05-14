@@ -23,8 +23,8 @@ TEST(Sigmoid, SigmoidUnitTest) {
       uint8_t x_q = fbgemm::Quantize<uint8_t>(
           x, sigmoid_approx.GetInputQuantizationParams());
       uint8_t y_q = sigmoid_approx.Compute(x_q);
-      float y =
-          fbgemm::Dequantize(y_q, sigmoid_approx.GetOutputQuantizationParams());
+      float y = fbgemm::Dequantize<uint8_t>(
+          y_q, sigmoid_approx.GetOutputQuantizationParams());
       float sigmoid = exp(x) / (exp(x) + 1);
       float err = fabs(sigmoid - y);
       sq_err_sum += err * err;

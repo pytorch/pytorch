@@ -21,15 +21,15 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   bool is_sparse() const override {
     return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA || backend() == Backend::SparseHIP;
   }
+  bool is_quantized() const override {
+    return backend() == Backend::QuantizedCPU;
+  }
   bool is_distributed() const override {
     return false;
   }
 
   Type & toBackend(Backend b) const override;
   Type & toScalarType(ScalarType s) const override;
-
-  Tensor copy(const Tensor & src, bool non_blocking=false, optional<Device> to_device={}) const override;
-  Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const override;
 
   void backward(
       Tensor& self,
@@ -38,13 +38,6 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
       bool create_graph) const override;
   void set_data(Tensor & self, Tensor new_data) const override;
 
-  Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const override;
-  Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const override;
-  Tensor tensorWithAllocator(IntList sizes, Allocator* allocator) const override;
-  Tensor tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const override;
-
-  Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
-  Storage storageWithAllocator(int64_t size, Allocator* allocator) const override;
   Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
   Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/Device.h>
+#include <c10/core/Device.h>
 
 namespace c10 {
 

@@ -9,6 +9,7 @@
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/utils/python_arg_parser.h"
+#include "torch/csrc/utils/structseq.h"
 
 #include "python_nn_functions_dispatch.h"
 

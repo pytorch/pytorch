@@ -7,6 +7,7 @@ import struct
 import sys
 import torch
 import tarfile
+import zipfile
 import tempfile
 import warnings
 from contextlib import closing, contextmanager
@@ -92,7 +93,12 @@ def validate_cuda_device(location):
 def _cuda_deserialize(obj, location):
     if location.startswith('cuda'):
         device = validate_cuda_device(location)
-        return obj.cuda(device)
+        if getattr(obj, "_torch_load_uninitialized", False):
+            storage_type = getattr(torch.cuda, type(obj).__name__)
+            with torch.cuda.device(device):
+                return storage_type(obj.size())
+        else:
+            return obj.cuda(device)
 
 
 register_package(10, _cpu_tag, _cpu_deserialize)
@@ -365,16 +371,18 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         # Map tensors from GPU 1 to GPU 0
         >>> torch.load('tensors.pt', map_location={'cuda:1':'cuda:0'})
         # Load tensor from io.BytesIO object
-        >>> with open('tensor.pt') as f:
+        >>> with open('tensor.pt', 'rb') as f:
                 buffer = io.BytesIO(f.read())
         >>> torch.load(buffer)
     """
     new_fd = False
     if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+            (sys.version_info[0] == 2 and isinstance(f, unicode)):
         new_fd = True
         f = open(f, 'rb')
+    elif (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+        new_fd = True
+        f = f.open('rb')
     try:
         return _load(f, map_location, pickle_module, **pickle_load_args)
     finally:
@@ -524,8 +532,9 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
             data_type, root_key, location, size, view_metadata = data
             location = maybe_decode_ascii(location)
             if root_key not in deserialized_objects:
-                deserialized_objects[root_key] = restore_location(
-                    data_type(size), location)
+                obj = data_type(size)
+                obj._torch_load_uninitialized = True
+                deserialized_objects[root_key] = restore_location(obj, location)
             storage = deserialized_objects[root_key]
             if view_metadata is not None:
                 view_key, offset, view_size = view_metadata
@@ -546,6 +555,9 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
         try:
             return legacy_load(f)
         except tarfile.TarError:
+            if zipfile.is_zipfile(f):
+                # .zip is used for torch.jit.save and will throw an un-pickling error here
+                raise RuntimeError("{} is a zip archive (did you mean to use torch.jit.load()?)".format(f.name))
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 
@@ -567,6 +579,7 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
     for key in deserialized_storage_keys:
         assert key in deserialized_objects
         deserialized_objects[key]._set_from_file(f, offset, f_should_read_directly)
-        offset = None
+        if offset is not None:
+            offset = f.tell()
 
     return result

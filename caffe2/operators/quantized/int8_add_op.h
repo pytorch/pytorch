@@ -15,9 +15,8 @@ namespace int8 {
 template <Activation Ac>
 class Int8AddOp final : public Operator<CPUContext> {
  public:
-  Int8AddOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
-        ws_(ws) {}
+  explicit Int8AddOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
   ~Int8AddOp() {
     if (this->qnnpackOperator_ != nullptr) {
@@ -68,6 +67,7 @@ class Int8AddOp final : public Operator<CPUContext> {
         static_cast<uint8_t>(Y_zero_point), Y_scale,
         activationLimits(Y_scale, Y_zero_point, Ac).first,
         activationLimits(Y_scale, Y_zero_point, Ac).second,
+        0 /* flags */,
         &qnnpackOperator_);
       CAFFE_ENFORCE(
           createStatus == qnnp_status_success,

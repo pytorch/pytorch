@@ -1,7 +1,6 @@
 import os
 import platform
 import ctypes.util
-from subprocess import Popen, PIPE
 
 from .cuda import USE_CUDA
 

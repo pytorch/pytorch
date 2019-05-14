@@ -5,7 +5,7 @@ import collections
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep, workspace
+from caffe2.python import core, dyndep, utils, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import check_quantized_results_close
 from hypothesis import given
@@ -46,7 +46,7 @@ class DNNLowPOpGroupNormTest(hu.HypothesisTestCase):
 
         X = np.random.rand(N, C, H, W).astype(np.float32) * 5.0 - 1.0
         if order == "NHWC":
-            X = np.transpose(X, [0, 2, 3, 1])
+            X = utils.NCHW2NHWC(X)
         gamma = np.random.rand(C).astype(np.float32) * 2.0 - 1.0
         beta = np.random.randn(C).astype(np.float32) - 0.5
 

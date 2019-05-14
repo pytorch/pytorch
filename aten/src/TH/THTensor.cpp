@@ -6,6 +6,9 @@
 #include <TH/generic/THTensor.cpp>
 #include <TH/THGenerateHalfType.h>
 
+#include <TH/generic/THTensor.cpp>
+#include <TH/THGenerateBoolType.h>
+
 #include <ATen/native/Resize.h>
 
 #include <numeric>
@@ -17,7 +20,7 @@ void THTensor_free(THTensor *self)
   c10::raw::intrusive_ptr::decref(self);
 }
 
-void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_) {
+void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_) {
   if (stride_.data()) {
     THArgCheck(size_.size() == stride_.size(), 5, "inconsistent size/stride sizes");
   }
@@ -53,15 +56,16 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
   }
 
   /* storageOffset */
-  if(storageOffset < 0)
+  if(storageOffset < 0) {
     THError("Tensor: invalid storage offset");
-    self->set_storage_offset(storageOffset);
+  }
+  self->set_storage_offset(storageOffset);
 
   /* size and stride */
   THTensor_resizeNd(self, nDimension, size, stride);
 }
 
-void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
+void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride)
 {
   if (stride.data()) {
     THArgCheck(stride.size() == size.size(), 3, "invalid stride");
@@ -76,10 +80,10 @@ void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride)
 void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
   AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
-  at::IntList sizes(size, nDimension);
-  at::optional<at::IntList> strides;
+  at::IntArrayRef sizes(size, nDimension);
+  at::optional<at::IntArrayRef> strides;
   if (stride) {
-    strides = at::IntList(stride, nDimension);
+    strides = at::IntArrayRef(stride, nDimension);
   }
   at::native::resize_impl_cpu_(self, sizes, strides);
 }
@@ -91,9 +95,9 @@ void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, cons
 //    where each chunk of newshape has matching ``numel'', i.e., number of subspaces,
 //    as the corresponding chunk of oldshape.
 c10::optional<std::vector<int64_t>> THTensor_compute_stride(
-    at::IntList oldshape,
-    at::IntList oldstride,
-    at::IntList newshape) {
+    at::IntArrayRef oldshape,
+    at::IntArrayRef oldstride,
+    at::IntArrayRef newshape) {
   if (oldshape.empty()) {
     return std::vector<int64_t>(newshape.size(), 1);
   }
@@ -157,5 +161,15 @@ void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   // Caffe2 might have tensors whose storages are null, but we
   // don't allow it in PyTorch.
   AT_ASSERT(storage);
-  tensor->storage_ = at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage));
+  // Caffe2 also has uninitialized dtype states, which we disallow here
+  AT_ASSERT(tensor->storage().dtype() == storage->dtype());
+
+  // We used to allow this, but this breaks device caching,
+  // see Note [We regret making Variable hold a Tensor]
+  // Let's put an actual error message for this one.
+  AT_CHECK(tensor->storage().device() == storage->device(),
+            "Attempted to set the storage of a tensor on device \"", tensor->storage().device(),
+             "\" to a storage on different device \"", storage->device(),
+            "\".  This is no longer allowed; the devices must match.");
+  tensor->set_storage(at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage)));
 }

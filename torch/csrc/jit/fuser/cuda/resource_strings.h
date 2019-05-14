@@ -1,15 +1,17 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CUDA_FUSER
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/code_template.h>
 
-namespace torch { namespace jit { namespace fuser { namespace cuda {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cuda {
 
-/*with type_as not checking type of its input, a fusion group can have non-fp32 tensor as input.
-Correct code for this case is generated, however, nvrtc does not know how to handle int*_t integer types,
-so typedefs help it handle those cases*/
+/*with type_as not checking type of its input, a fusion group can have non-fp32
+tensor as input. Correct code for this case is generated, however, nvrtc does
+not know how to handle int*_t integer types, so typedefs help it handle those
+cases*/
 
 static auto type_declarations_template = CodeTemplate(R"(
 typedef unsigned char uint8_t;
@@ -132,7 +134,8 @@ constexpr auto rand_support_literal = R"(
   }
 )";
 
-constexpr auto rand_param = ",unsigned long long seed, unsigned long long offset";
+constexpr auto rand_param =
+    ",unsigned long long seed, unsigned long long offset";
 
 constexpr auto rand_init = R"(
   int idx = blockIdx.x*blockDim.x + threadIdx.x;
@@ -156,13 +159,12 @@ void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
 }
 )");
 
-
 // This snippet enables half support in the jit. Following the pattern for
 // reductions, fp16 input data is immediately upconverted to float
 // with __half2float(). All mathematical operations are done on float
 // values, and if needed the intermediate float representation is
 // converted to half with __float2half() when writing to a half tensor.
-constexpr auto half_support_literal  = R"(
+constexpr auto half_support_literal = R"(
 #define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
 #define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short *>(&(var)))
 #if defined(__cplusplus)
@@ -187,6 +189,15 @@ constexpr auto half_support_literal  = R"(
       asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__HALF_TO_CUS(h)));
       return val;
     }
+)"
+// MSVC's preprocesor (but not the standard compiler) has a bug
+// where it incorrectly tokenizes raw string literals, ending when it sees a "
+// this causes the #endif in this string literal to be treated as a preprocessor
+// token which, in turn, cause sccache on windows CI to fail.
+// See https://godbolt.org/z/eVTIJq as an example.
+// This workaround uses string-pasting to separate the " and the #endif into different
+// strings
+R"(
   #endif /* defined(__CUDACC__) */
 #endif /* defined(__cplusplus) */
 #undef __HALF_TO_US
@@ -197,7 +208,5 @@ typedef __half half;
 
 } // namespace cuda
 } // namespace fuser
-} // namespace jit 
+} // namespace jit
 } // namespace torch
-
-#endif // USE_CUDA_FUSER

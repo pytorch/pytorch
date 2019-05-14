@@ -184,7 +184,7 @@ struct GlooCache {
   }
 
   static void memcpy_input(value_type& info, at::Tensor& t) {
-    uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
+    uint64_t tensor_bytes = t.element_size() * t.numel();
     auto t_dev = getDeviceType(t);
     auto input_buffer = GlooCache::input_buffer(info).get();
 
@@ -206,7 +206,7 @@ struct GlooCache {
   }
 
   static void memcpy_output(value_type& info, at::Tensor& t) {
-    uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
+    uint64_t tensor_bytes = t.element_size() * t.numel();
     auto t_dev = getDeviceType(t);
     auto output_buffer = GlooCache::output_buffer(info).get();
 
@@ -321,10 +321,12 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
       size_t unused_count,
       THDReduceOp op) {
     int stream = UNUSED_STREAM;
+#ifdef USE_CUDA
     if (device == DeviceType::CUDA) {
       auto cuda_stream = THCState_getCurrentStream(THDGetCudaState());
       stream = THDGetStreamId(cuda_stream);
     }
+#endif
     return std::make_tuple(
         CollectiveType::ALL_REDUCE,
         group_id,
@@ -406,10 +408,12 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
       size_t unused_count,
       rank_type src_rank) {
     int stream = UNUSED_STREAM;
+#ifdef USE_CUDA
     if (device == DeviceType::CUDA) {
       auto cuda_stream = THCState_getCurrentStream(THDGetCudaState());
       stream = THDGetStreamId(cuda_stream);
     }
+#endif
     return std::make_tuple(
         CollectiveType::BROADCAST,
         group_id,

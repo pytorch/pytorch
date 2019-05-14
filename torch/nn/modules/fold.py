@@ -12,9 +12,9 @@ class Fold(Module):
     Consider a batched :attr:`input` tensor containing sliding local blocks,
     e.g., patches of images, of shape :math:`(N, C \times  \prod(\text{kernel\_size}), L)`,
     where :math:`N` is batch dimension, :math:`C \times \prod(\text{kernel\_size})`
-    is the number of values with in a block (a block has :math:`\prod(\text{kernel\_size})`
+    is the number of values within a block (a block has :math:`\prod(\text{kernel\_size})`
     spatial locations each containing a :math:`C`-channeled vector), and
-    :math:`L` is the total number of blocks. (This is exacly the
+    :math:`L` is the total number of blocks. (This is exactly the
     same specification as the output shape of :class:`~torch.nn.Unfold`.) This
     operation combines these local blocks into the large :attr:`output` tensor
     of shape :math:`(N, C, \text{output\_size}[0], \text{output\_size}[1], \dots)`
@@ -46,7 +46,7 @@ class Fold(Module):
 
     Args:
         output_size (int or tuple): the shape of the spatial dimensions of the
-                                    output (i.e., ``input.sizes()[2:]``)
+                                    output (i.e., ``output.sizes()[2:]``)
         kernel_size (int or tuple): the size of the sliding blocks
         stride (int or tuple): the stride of the sliding blocks in the input
                                spatial dimensions. Default: 1
@@ -81,9 +81,10 @@ class Fold(Module):
     Examples::
 
         >>> fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 2))
-        >>> input = torch.randn(1, 3 * 2 * 2, 1)
+        >>> input = torch.randn(1, 3 * 2 * 2, 12)
         >>> output = fold(input)
         >>> output.size()
+        torch.Size([1, 3, 4, 5])
 
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
@@ -123,7 +124,7 @@ class Unfold(Module):
     of :attr:`input` into a column (i.e., last dimension) of a 3-D :attr:`output`
     tensor of shape :math:`(N, C \times \prod(\text{kernel\_size}), L)`, where
     :math:`C \times \prod(\text{kernel\_size})` is the total number of values
-    with in each block (a block has :math:`\prod(\text{kernel\_size})` spatial
+    within each block (a block has :math:`\prod(\text{kernel\_size})` spatial
     locations each containing a :math:`C`-channeled vector), and :math:`L` is
     the total number of such blocks:
 

@@ -17,7 +17,7 @@
 #include <cfloat>
 
 #include "caffe2/core/context_gpu.h"
-#include "softmax_focal_loss_op.h"
+#include "modules/detectron/softmax_focal_loss_op.h"
 
 namespace caffe2 {
 
@@ -69,7 +69,7 @@ __global__ void SoftmaxFocalLossKernel(
     int n = i / (W * H * A);
     const int label = static_cast<int>(targets[i]);
 
-    float Np = max(weight_pos[0], 1.0);
+    float Np = c10::cuda::compat::max(weight_pos[0], static_cast<float>(1.0));
     float z = (label == 0) * (1 - alpha) / Np +
               (label >= 1) * alpha / Np;
 
@@ -79,7 +79,7 @@ __global__ void SoftmaxFocalLossKernel(
       int idx = n * (H * W * D) + (offset + label) * (H * W) + y * W + x;
       losses[i] =
           -(pow(1.0f - Pdata[idx], gamma) *
-          log(max(Pdata[idx], FLT_MIN))) * z;
+          log(c10::cuda::compat::max(Pdata[idx], FLT_MIN))) * z;
     }
   }
 }
@@ -97,7 +97,7 @@ __global__ void SoftmaxFocalLossGradientWeightKernel(
     int a = (i / (W * H)) % A;
     int n = i / (W * H * A);
     const int label = static_cast<int>(targets[i]);
-    float Np = max(weight_pos[0], 1.0);
+    float Np = c10::cuda::compat::max(weight_pos[0], static_cast<float>(1.0));
     float z =  (label == 0) * (1 - alpha) / Np +
                (label >= 1) * alpha / Np;
 
@@ -109,7 +109,7 @@ __global__ void SoftmaxFocalLossGradientWeightKernel(
       float p = Pdata[idx];
       buff[i] =
           (-pow(onemp, gamma) +
-          gamma * pow(onemp, gamma - 1) * p * log(max(p, FLT_MIN))) * z;
+          gamma * pow(onemp, gamma - 1) * p * log(c10::cuda::compat::max(p, FLT_MIN))) * z;
     }
   }
 }
@@ -147,8 +147,8 @@ bool SoftmaxFocalLossOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);         // Logits
   auto& T = Input(1);         // Labels
   auto& wp = Input(2);        // num of foregound
-  auto* avg_loss = Output(0); // average loss as output
-  auto* P = Output(1);        // softmax probability, going to be re-used in gradient
+   // average loss as output
+          // softmax probability, going to be re-used in gradient
 
   int N = X.dim32(0);
   int D = X.dim32(1);
@@ -156,9 +156,9 @@ bool SoftmaxFocalLossOp<float, CUDAContext>::RunOnDevice() {
   int W = X.dim32(3);
   int A = D / num_classes_;
 
-  losses_.Resize(N * A * H * W);
-  P->Resize(N * D * H * W);
-  avg_loss->Resize(vector<int64_t>());
+  ReinitializeTensor(&losses_, {N * A * H * W}, at::dtype<float>().device(CUDA));
+  auto* P = Output(1, {N * D * H * W}, at::dtype<float>());
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   math::Set<float, CUDAContext>(
       avg_loss->size(), 0.f, avg_loss->mutable_data<float>(), &context_);
   math::Set<float, CUDAContext>(
@@ -203,7 +203,6 @@ bool SoftmaxFocalLossGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& wp = Input(2);   // num of foreground example
   auto& P = Input(3);    // Softmax Probability
   auto& d_avg_loss = Input(4);
-  auto* dX = Output(0);  // gradient wrt logits
 
 
   int N = X.dim32(0);
@@ -212,9 +211,9 @@ bool SoftmaxFocalLossGradientOp<float, CUDAContext>::RunOnDevice() {
   int W = X.dim32(3);
   int A = D / num_classes_;
 
-  buff_.Resize(N * A * H * W);
+  ReinitializeTensor(&buff_, {N * A * H * W}, at::dtype<float>().device(CUDA));
 
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>()); // gradient wrt logits
 
   const float* Xdata = X.data<float>();
   const int* Tdata = T.data<int>();

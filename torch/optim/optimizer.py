@@ -51,6 +51,7 @@ class Optimizer(object):
 
     def __getstate__(self):
         return {
+            'defaults': self.defaults,
             'state': self.state,
             'param_groups': self.param_groups,
         }

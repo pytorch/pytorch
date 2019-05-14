@@ -49,18 +49,20 @@ def default_collate(batch):
             if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
                 raise TypeError(error_msg_fmt.format(elem.dtype))
 
-            return torch.stack([torch.from_numpy(b) for b in batch], 0)
+            return default_collate([torch.from_numpy(b) for b in batch])
         if elem.shape == ():  # scalars
             py_type = float if elem.dtype.name.startswith('float') else int
             return numpy_type_map[elem.dtype.name](list(map(py_type, batch)))
-    elif isinstance(batch[0], int_classes):
-        return torch.LongTensor(batch)
     elif isinstance(batch[0], float):
-        return torch.DoubleTensor(batch)
+        return torch.tensor(batch, dtype=torch.float64)
+    elif isinstance(batch[0], int_classes):
+        return torch.tensor(batch)
     elif isinstance(batch[0], string_classes):
         return batch
     elif isinstance(batch[0], container_abcs.Mapping):
         return {key: default_collate([d[key] for d in batch]) for key in batch[0]}
+    elif isinstance(batch[0], tuple) and hasattr(batch[0], '_fields'):  # namedtuple
+        return type(batch[0])(*(default_collate(samples) for samples in zip(*batch)))
     elif isinstance(batch[0], container_abcs.Sequence):
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]

@@ -18,7 +18,6 @@ class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
   using BaseType = ConvDNNLowPOp<std::uint8_t, ReluFused>;
   using BaseType::BIAS;
   using BaseType::col_buffer_;
-  using BaseType::dequantize_output_;
   using BaseType::FILTER;
   using BaseType::in_qparams_;
   using BaseType::INPUT;
@@ -34,23 +33,22 @@ class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
 
-  bool GetQuantizationParameters_() override;
-
-  template <typename InType>
-  bool RunOnDeviceWithOrderNCHWAndType_();
-  template <typename InType>
-  bool RunOnDeviceWithOrderNHWCAndType_();
+  bool GetQuantizationParameters_();
 
   template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
-  void DispatchFBGEMM(
+  void DispatchFBGEMM_(
       PackAMatrix& packA,
-      const std::uint8_t* col_buffer_quantized_data,
+      const std::uint8_t* col_buffer_data,
       vector<std::int32_t>* Y_int32,
       uint8_t* Y_uint8_data);
 
   void ConvOutlier_(
       const std::uint8_t* col_buffer,
       vector<std::int32_t>* Y_int32);
+
+  virtual bool Acc16() const override {
+    return !fallback_to_32_bit_accumulation_;
+  }
 
   std::shared_ptr<fbgemm::PackBMatrix<std::int8_t, std::int16_t>>
       Wq_acc16_packed_;
@@ -66,7 +64,11 @@ class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
   int nbits_in_non_outlier_;
   int copy_to_32bit_frequency_;
 
-  bool first_invocation_ = true;
+  bool first_invocation_{true};
+  // If outlier matrix is not sparse enough, using 16-bit accumulation won't
+  // give speedup due to too much overhead of sparse matrix multiplication or
+  // sparse convolution anyway, so fallback to 32-bit accumulation
+  bool fallback_to_32_bit_accumulation_{false};
 }; // class ConvDNNLowPAcc16Op
 
 } // namespace caffe2

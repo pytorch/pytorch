@@ -24,34 +24,39 @@ float HSoftmaxOp<float, CPUContext>::RunForwardSingle(const float* X,
   //Softmax
   float* softmax_output_data = int_output + int_output_offset;
 
-  if (scale_.numel() != 1) {
-    scale_.Resize(1);
+  if (!scale_.has_value()) {
+    scale_ = caffe2::empty({1}, at::dtype<float>().device(CPU));
   }
-  if (sum_multiplier_.numel() != dim_out) {
-    sum_multiplier_.Resize(dim_out);
+
+  if (!sum_multiplier_.has_value()) {
+    sum_multiplier_ = caffe2::empty({dim_out}, at::dtype<float>().device(CPU));
     math::Set<float, CPUContext>(dim_out, 1.f,
-      sum_multiplier_.mutable_data<float>(), &context_);
+      sum_multiplier_->mutable_data<float>(), &context_);
+  } else if (sum_multiplier_->numel() != dim_out) {
+    sum_multiplier_->Resize(dim_out);
+    math::Set<float, CPUContext>(dim_out, 1.f,
+      sum_multiplier_->mutable_data<float>(), &context_);
   }
   math::RowwiseMax<float, CPUContext>(1, dim_out, fc_output_data,
-    scale_.mutable_data<float>(), &context_);
+    scale_->mutable_data<float>(), &context_);
 
   // Put the intermediate result X - max(X) into Y
   context_.template CopyFromCPU<float>(
       dim_out, fc_output_data, softmax_output_data);
   // Subtract the scale
   math::Gemv<float, CPUContext>(CblasNoTrans, dim_out, 1, -1,
-    sum_multiplier_.data<float>(), scale_.data<float>(), 1, softmax_output_data,
+    sum_multiplier_->data<float>(), scale_->data<float>(), 1, softmax_output_data,
     &context_);
 
   // Exponentiation
   math::Exp<float, CPUContext>(dim_out, softmax_output_data,
     softmax_output_data, &context_);
   math::Gemv<float, CPUContext>(CblasNoTrans, 1, dim_out, 1,
-    softmax_output_data, sum_multiplier_.data<float>(), 0,
-    scale_.mutable_data<float>(), &context_);
+    softmax_output_data, sum_multiplier_->data<float>(), 0,
+    scale_->mutable_data<float>(), &context_);
 
   // Do division
-  const float scale = *scale_.data<float>();
+  const float scale = *(scale_->data<float>());
   for (int j = 0; j < dim_out; ++j) {
     softmax_output_data[j] /= scale;
   }
@@ -94,10 +99,14 @@ bool HSoftmaxOp<float, CPUContext>::RunOnDevice() {
   float* int_output_data = intermediate_output->template mutable_data<float>();
   int int_output_offset = 0;
 
-  if (bias_multiplier_.numel() != M) {
-    bias_multiplier_.Resize(M);
+  if (!bias_multiplier_.has_value()) {
+    bias_multiplier_ = caffe2::empty({M}, at::dtype<float>().device(CPU));
     math::Set<float, CPUContext>(M, static_cast<float>(1),
-        bias_multiplier_.mutable_data<float>(), &context_);
+        bias_multiplier_->mutable_data<float>(), &context_);
+  } else if (bias_multiplier_->numel() != M) {
+    bias_multiplier_->Resize(M);
+    math::Set<float, CPUContext>(M, static_cast<float>(1),
+        bias_multiplier_->mutable_data<float>(), &context_);
   }
 
   for (int sample = 0; sample < M; ++sample) {
@@ -112,7 +121,7 @@ bool HSoftmaxOp<float, CPUContext>::RunOnDevice() {
       //Adding log probabilities
       Ydata[sample] += RunForwardSingle(X.data<float>() + sample*K,
         W.data<float>() + w_offset*K, b.data<float>() + w_offset, target,
-        int_output_data, bias_multiplier_.data<float>()+sample, w_length, K,
+        int_output_data, bias_multiplier_->data<float>()+sample, w_length, K,
         int_output_offset);
     }
   }
@@ -137,15 +146,19 @@ void HSoftmaxGradientOp<float, CPUContext>::RunBackwardSingle(const float* X,
   int_output_offset -= dim_out;
 
   //Softmax
-  if (scale_.numel() != 1) {
-    scale_.Resize(1);
+  if (!scale_.has_value()) {
+    scale_ = caffe2::empty({1}, at::dtype<float>().device(CPU));
   }
-  float* scaledata = scale_.mutable_data<float>();
+  float* scaledata = scale_->mutable_data<float>();
 
-  if (sum_multiplier_.numel() != dim_out) {
-    sum_multiplier_.Resize(dim_out);
+  if (!sum_multiplier_.has_value()) {
+    sum_multiplier_ = caffe2::empty({dim_out}, at::dtype<float>().device(CPU));
     math::Set<float, CPUContext>(dim_out, 1.f,
-      sum_multiplier_.mutable_data<float>(), &context_);
+      sum_multiplier_->mutable_data<float>(), &context_);
+  } else if (sum_multiplier_->numel() != dim_out) {
+    sum_multiplier_->Resize(dim_out);
+    math::Set<float, CPUContext>(dim_out, 1.f,
+      sum_multiplier_->mutable_data<float>(), &context_);
   }
 
   float* dX_softmax = dint_output + int_output_offset - dim_out;
@@ -154,19 +167,19 @@ void HSoftmaxGradientOp<float, CPUContext>::RunBackwardSingle(const float* X,
   math::Dot<float, CPUContext>(dim_out, X_entropy, dX_entropy, scaledata,
     &context_);
   math::Gemv<float, CPUContext>(CblasTrans, 1, dim_out, -1,
-    sum_multiplier_.data<float>(), scaledata , 1, dX_softmax, &context_);
+    sum_multiplier_->data<float>(), scaledata , 1, dX_softmax, &context_);
   math::Mul<float, CPUContext>(dim_out, dX_softmax, X_entropy, dX_softmax,
     &context_);
 
   int_output_offset -= dim_out;
 
   //FC
-  if (bias_multiplier_.numel() != 1) {
+  if (!bias_multiplier_.has_value()) {
     // If the helper bias multiplier has not been created, reshape and fill
     // it with 1
-    bias_multiplier_.Resize(1);
+    bias_multiplier_ = caffe2::empty({1}, at::dtype<float>().device(CPU));
     math::Set<float, CPUContext>(1, static_cast<float>(1),
-        bias_multiplier_.template mutable_data<float>(), &context_);
+        bias_multiplier_->template mutable_data<float>(), &context_);
   }
 
   // Compute dW and add incrementally
@@ -177,7 +190,7 @@ void HSoftmaxGradientOp<float, CPUContext>::RunBackwardSingle(const float* X,
   // Compute dB and add incrementally
   // db = db + dX_softmax*bias_multiplier_
   math::Gemv<float, CPUContext>(CblasTrans, 1, dim_out, 1, dX_softmax,
-    bias_multiplier_.template data<float>(), 1, db, &context_);
+    bias_multiplier_->template data<float>(), 1, db, &context_);
 
   // Compute dX and add incrementally
   // dX = dX + W'dX_softmax
@@ -265,7 +278,7 @@ bool HSoftmaxSearchOp<float, CPUContext>::pruning(
       b + w_offset,
       -1,
       int_output_data,
-      bias_multiplier_.template data<float>() + sample,
+      bias_multiplier_->template data<float>() + sample,
       w_length,
       K,
       int_output_offset);
@@ -351,13 +364,14 @@ bool HSoftmaxSearchOp<float, CPUContext>::RunOnDevice() {
   auto* Y_names = Output(0, {M, top_n_}, at::dtype<string>());
   auto* Y_scores = Output(1, {M, top_n_}, at::dtype<float>());
 
-  if (bias_multiplier_.numel() != M) {
-    bias_multiplier_.Resize(M);
-    math::Set<float, CPUContext>(
-        M,
-        static_cast<float>(1),
-        bias_multiplier_.mutable_data<float>(),
-        &context_);
+  if (!bias_multiplier_.has_value()) {
+    bias_multiplier_ = caffe2::empty({M}, at::dtype<float>().device(CPU));
+    math::Set<float, CPUContext>(M, static_cast<float>(1),
+        bias_multiplier_->mutable_data<float>(), &context_);
+  } else if (bias_multiplier_->numel() != M) {
+    bias_multiplier_->Resize(M);
+    math::Set<float, CPUContext>(M, static_cast<float>(1),
+        bias_multiplier_->mutable_data<float>(), &context_);
   }
 
   for (int sample = 0; sample < M; ++sample) {

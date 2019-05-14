@@ -136,7 +136,7 @@ class Iterator {
   using value_type = Batch;
   using pointer = Batch*;
   using reference = Batch&;
-  using iterator_category = std::output_iterator_tag;
+  using iterator_category = std::input_iterator_tag;
 
   explicit Iterator(std::unique_ptr<detail::IteratorImpl<Batch>> impl)
       : impl_(std::move(impl)) {}

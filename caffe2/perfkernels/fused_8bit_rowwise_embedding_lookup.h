@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/core/common.h"
+#include <cstdint>
 
 namespace caffe2 {
 
@@ -42,10 +42,10 @@ template <
     typename OutType,
     bool IS_WEIGHT_POSITIONAL = false>
 void Fused8BitRowwiseEmbeddingLookup(
-    const int64_t block_size,
-    const int64_t output_size,
-    const int64_t index_size,
-    const int64_t data_size,
+    const std::int64_t block_size,
+    const std::int64_t output_size,
+    const std::int64_t index_size,
+    const std::int64_t data_size,
     const InType* input,
     const IndexType* indices,
     const int* lengths,

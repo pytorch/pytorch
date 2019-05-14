@@ -12,14 +12,21 @@ foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    foreach(THC_FILE TensorSort TensorMathCompareT TensorMathPointwise TensorMathCompare TensorMathReduce TensorMasked)
       if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
          FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu"
-           "#include \"../THC${THC_FILE}.cuh\"\n#include \"THCTensor.hpp\"\n#include \"../generic/THC${THC_FILE}.cu\"\n#include \"../THCGenerate${THC_TYPE}Type.h\"\n")
+           "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerate${THC_TYPE}Type.h>\n")
       endif()
       LIST(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
    endforeach()
 endforeach()
 
+foreach(THC_FILE TensorMathCompareT TensorMathCompare TensorMathReduce TensorMasked)
+   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
+      FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu"
+        "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerateBoolType.h>\n")
+   endif()
+   LIST(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
+endforeach()
+
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCCachingAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCCachingHostAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCGeneral.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cpp
@@ -72,7 +79,6 @@ INSTALL(FILES
           THCScanUtils.cuh
           THCSortUtils.cuh
           THCAllocator.h
-          THCCachingAllocator.h
           THCCachingHostAllocator.h
           THCDeviceUtils.cuh
           THCDeviceTensor.cuh
@@ -80,6 +86,7 @@ INSTALL(FILES
           THCDeviceTensorUtils.cuh
           THCDeviceTensorUtils-inl.cuh
           THCGenerateAllTypes.h
+          THCGenerateBoolType.h
           THCGenerateByteType.h
           THCGenerateCharType.h
           THCGenerateShortType.h
@@ -100,7 +107,6 @@ INSTALL(FILES
           THCThrustAllocator.cuh
           THCTensorMode.cuh
           THCTensorTopK.cuh
-          THCCachingAllocator.h
           # See Note [TH abstraction violation]
           THCGenerator.hpp
           THCTensor.hpp

@@ -16,12 +16,18 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/copy_utils.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/CudaIPCTypes.h>
+#include <torch/csrc/Device.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 
 #include <torch/csrc/generic/Storage.cpp>
 #include <TH/THGenerateAllTypes.h>
 
 #include <torch/csrc/generic/Storage.cpp>
 #include <TH/THGenerateHalfType.h>
+
+#include <torch/csrc/generic/Storage.cpp>
+#include <TH/THGenerateBoolType.h>
 
 template<>
 void THPPointer<THStorage>::free() {

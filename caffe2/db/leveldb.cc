@@ -18,7 +18,7 @@ class LevelDBCursor : public Cursor {
       : iter_(db->NewIterator(leveldb::ReadOptions())) {
     SeekToFirst();
   }
-  ~LevelDBCursor() {}
+  ~LevelDBCursor() override {}
   void Seek(const string& key) override { iter_->Seek(key); }
   bool SupportsSeek() override { return true; }
   void SeekToFirst() override { iter_->SeekToFirst(); }
@@ -37,7 +37,9 @@ class LevelDBTransaction : public Transaction {
     CAFFE_ENFORCE(db_);
     batch_.reset(new leveldb::WriteBatch());
   }
-  ~LevelDBTransaction() { Commit(); }
+  ~LevelDBTransaction() override {
+    Commit();
+  }
   void Put(const string& key, const string& value) override {
     batch_->Put(key, value);
   }

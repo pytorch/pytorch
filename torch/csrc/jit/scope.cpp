@@ -1,19 +1,7 @@
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/scope.h>
 
-
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/assertions.h>
-
-#include <iostream>
-#include <unordered_map>
-#include <unordered_set>
-#include <set>
-#include <stack>
-#include <sstream>
-#include <algorithm>
-#include <string>
-
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 ScopePtr Scope::push(Symbol name) {
   return c10::make_intrusive<Scope>(intrusive_from_this(), name);
@@ -52,4 +40,5 @@ std::string Scope::namesFromRoot(const std::string& separator) const {
   return out;
 }
 
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

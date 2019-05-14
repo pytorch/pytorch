@@ -50,30 +50,29 @@ signature.
   `Tensor` arguments, these tensors are assumed to be the same type (e.g.,
   if one argument is a `FloatTensor`, all other arguments are checked
   to be `FloatTensor`s.)
-- Tensors of specific types.  At the moment, valid type names are:
-    - `IntegerTensor` (a.k.a. `LongTensor`)
-    - `BoolTensor` (a.k.a. `ByteTensor`)
-    - `IndexTensor` (a.k.a. `IntTensor`)
-  These type names were inherited from TH, and may be renamed soon, so
-  don't commit them to memory.
-- `TensorList`.  A `TensorList` argument translates into a C++ argument of type `ArrayRef<Tensor>`
+  `Tensor` or `Tensor?` must sometimes be annotated to indicate aliasing and mutability.
+  In general annotations can be defined via the following four situtations
+  `Tensor(a)` - `a` is a set of Tensors that may alias to the same data.
+  `Tensor(a!)` - `a` members of a may be written to thus mutating the underlying data.
+  `Tensor!` - shorthand for Tensor(fresh\_identifier!)
+  `Tensor(a! -> a|b)` - Tensor is in set `a`, written to, and after the write is in set `a` AND `b`.
+  For more details on when and why this needs to happen, please see the section on annotations.
+- `Tensor[]`.  A `Tensor[]` argument translates into a C++ argument of type `ArrayRef<Tensor>`
   (a.k.a. `TensorList`)
-- `IntList`.  `IntList` accepts an optional length specifier, e.g., `IntList[2]`, which
+- `int[]`.  `int[]` accepts an optional length specifier, e.g., `int[2]`, which
   has no effect in C++ but extends our Python bindings to accept a bare number, which will be
   expanded into an appropriately sized list by repeating the number.
-- `int64_t`. There is no `int`; ATen policy is to use `int64_t` in the API anywhere you would
-  have ordinarily passed an `int` or `size_t`.
-- `double`. There is no `float`; ATen policy is to use `double` anywhere you would have used `float`.
+- `int`. Think about this like a Python int. This is translated into a C++ argument of type `int64_t`.
+- `float`. Think about this like a Python `float`. It is translated into a C++ argument of type `double`.
 - `bool`
+- `str`
 - `Scalar`. `Scalar` supports binding to any numerical types from Python, including integral types,
-  floating point types, and zero dimensional tensors. `int64_t` and `double` can only bind to the
-  corresponding Python numerical types. However, you probably don't want to use `Scalar`. It's
-  really used for binding to TH/THC code "real" types where the Python APIs you are binding to are
-  actually different types. `double` and `int64_t` argument types should suffice for most algorithms.
-- `Generator*`, the state for a random number generator,
-- `std::array<bool,N>` (where N is `1-4`).  NB: you MUST NOT put a space after the comma, otherwise
-  this argument will not parse correctly.  (If you decide to fix this, make sure you fix the
-  argument parser both in ATen and in PyTorch.)
+  floating point types, and zero dimensional tensors. `int` and `float` bind to the corresponding Python
+  numerical types. However, you probably don't want to use `Scalar`. It's really used for binding
+  to TH/THC code "real" types where the Python APIs you are binding to are actually different types.
+  `float` and `int` argument types should suffice for most algorithms.
+- `Generator?`, the state for a random number generator,
+- `bool[N]` (where N is `1-4`).
 - `TensorOptions`.  Tensor options provide information about how a
   tensor should be constructed; it is most useful when you are writing a
   factory function, where you have no `Tensor` inputs and thus
@@ -90,7 +89,7 @@ signature.
       backend if one of the parameters is `None`. Optional type can accept a `None` type
       (`nullopt` in C++) from Python and use the [C++ Optional class](https://en.cppreference.com/w/cpp/utility/optional) to interact with the parameters.
     - You want a default value which is fine in Python but would cause ambiguity in C++.
-      For example, `norm(Tensor self, Scalar p=2, int64_t dim, bool keepdim=false)` would
+      For example, `norm(Tensor self, Scalar p=2, int dim, bool keepdim=False)` would
       cause ambiguity in C++ since it default args must be adjacent and `p` could not
       have a default value when `dim` does not. Therefore, we need to make `p` as a
       optional Scalar, and make `p=2` when `p` is not passed in (nullopt).
@@ -105,9 +104,13 @@ factory while another is not.
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
 change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
-least). In `native_functions.yaml`, if your function (usually functions named with 'out' affix) args
-include the result Tensor, you need to call the argument `Tensor result`. And if there are more
-than one result Tensors, you need to name the args `Tensor result0, Tensor result1, ...`.
+least). For more details please see the section on `variants`.
+
+As a convention we use 'out' to indicate an output argument. This aligns with the
+Python bindings. Even if a function might not be used in the Python bindings, we
+still advise to follow this convention. Check the generated code when making a change
+to make sure you're not breaking the API when renaming an argument name of an
+existing function.
 
 TODO: Do argument names affect Python keyword arguments?
 
@@ -117,15 +120,15 @@ are applied when those positional arguments are not specified.
 
 Here are the supported default values:
 
-* Numbers (e.g., `0` or `5.0` for `int64_t`, `double` and `IntList`
-  with an explicit length (e.g., `IntList[2]`)--in the case of IntList,
-  a number is replicated to fill the length (e.g., `IntList[2] x=2`
-  is equivalent to `IntList[2] x={2,2}`.
-* Lists of numbers (e.g., `{0, 0}`) for `IntList`.
-* Booleans (e.g., `true`) for `bool`.
-* Empty initializer lists (e.g., `{}`) for `Tensor` (this implicitly changes
+* Numbers (e.g., `0` or `5.0` for `int`, `float` and `int[]`
+  with an explicit length (e.g., `int[2]`)--in the case of `int[]`
+  a number is replicated to fill the length (e.g., `int[2] x=2`
+  is equivalent to `int[2] x=[2,2]`.
+* Lists of numbers (e.g., `[0, 0]`) for `IntList`.
+* Booleans (e.g., `True`) for `bool`.
+* Empty initializer lists (e.g., `[]`) for `Tensor` (this implicitly changes
   a `Tensor` argument to accept undefined tensors).
-* `nullptr` for pointer types (e.g., `Generator*`)
+* `None` for pointer types (e.g., `Generator?`)
 
 **Returns.** The following are permissible on Return:
 
@@ -140,7 +143,7 @@ Tuple return:
 ```
 
 The following are permissible on ReturnType:
-- `Tensor` and `TensorList`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
+- `Tensor` and `Tensor[]`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
   respectively (unless the operation is in-place, in which case the return type
   is `Tensor&`.
 - A tuple of any number of `Tensor`, e.g., `(Tensor, Tensor)`, translating into
@@ -149,11 +152,18 @@ The following are permissible on ReturnType:
 If you need a type that is not listed in this list, it may be possible to extend ATen's
 code generation to support it.  ATen's philosophy on types to support is that it supports
 only simple, universal types, as well as a handful of fundamental Tensor structures
-(e.g., `Tensor` and `Generator*`), because these types can be easily ported to any language
+(e.g., `Tensor` and `Generator?`), because these types can be easily ported to any language
 bound to ATen (in practice, C++ and Python.)
 
-Return also supports specifying (optional) return argument names; these are useful for writing
-derivatives in terms of return arguments in `tools/autograd/derivatives.yaml`.
+Return also supports specifying (optional) return argument names. These serve
+two functions:
+
+- They let you easily write derivatives in terms of return arguments in
+  `tools/autograd/derivatives.yaml`
+
+- They correspond to the named field the output can be referred to from
+  Python.  (This means that changing a return argument name is
+  BC-breaking, be careful!)
 
 Note that argument type modifiers such as defaults and optional are not currently supported on Return.
 
@@ -175,10 +185,55 @@ this generates the function `at::where(cond, self, other)` and the method
 `self.where(cond, other)`.
 
 By default, ATen generates only the function variant for a native function.
-When should you also generate a method variant?  Tensor operations as methods
+When should you also generate a method variant? Tensor operations as methods
 are appropriate for "core" Tensor operations (e.g., add, sub, etc.), but not for
 more complicated neural network layers (e.g., `conv2d`) and internal functions
 designed specifically for binding (e.g., `cudnn_convolution`).
+
+As we progress along our schema unification of the `func` schema with the JIT
+signatue schema, we must introduce features that allow us to increase compliance.
+One of these features are Tensor annotations. As of now we use naming conventions
+to indicate whether an argument of a function is going to be mutated and returned.
+
+### `annotations`
+
+There are two typical situations in which we mutate the memory of an argument in the Python
+frontend:
+a) For an inplace operations such as `self.abs_()`
+b) for a function with an output keyword argument such as `torch.abs(input, out=None)`.
+
+In order to provide implementations for these Python functions the legacy schema
+requires C++ implementations for three situations `abs(Tensor self)  -> Tensor`, 
+`abs_(Tensor self) -> Tensor` and `abs_out(Tensor out, Tensor self) -> Tensor`.
+
+Now, as we move towards the unification, we start to use a different syntax to represent
+this by using annotations. In the end we still translate to the legacy schema for the downstream
+consumers such as the C++ code generation, but this will soon change.
+
+If two Tensors carry the same annotation, they both *may* represent the same memory.
+A write annotation, as indicated by an exclamation mark, indicates that they both *may*
+also be written to.
+
+Let's revisit the previous native function declarations and see the conventions of adding annotations.
+  - `abs(Tensor self) -> Tensor` stays the same as it will always allocate new memory.
+  - `abs_(Tensor(a!) self) -> Tensor(a!)`
+    `self` may be written to and returned. Further, the annotation indicates that the return value
+    may alias the input. This indicates an inplace function and by convention ends in a single '\_'.
+  - `abs(Tensor self, *, Tensor(a!) out) -> Tensor(a!)`
+    In the Python frontend `out` can be passed as a keyword argument and may be written to. 
+    In this case it indicates the schema for a function that must accept `out` as this does not
+    provide a default argument. The idea behind representing this as a optional argument is to
+    document the intended usage. This maps to the legacy `abs_out(Tensor out, Tensor self) -> Tensor`.
+    As with the legacy `_out` function you must call the argument `Tensor out` or `Tensor out0`,
+    `Tensor out1` in the context of multiple arguments.
+
+There is also another situtation in which we use annotations, namely views.
+  - `transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)`
+    An alias to the memory represented by `self` may be also returned, however it is not mutated.
+
+We have some asserts to check whether a developer uses these annotations correctly and throw asserts
+if she doesn't. For example, any out function must use the `(a!)` annotation as described above.
+ If this causes a lot of confusion please add @cpuhrsch to your PR.
 
 ### `dispatch`
 
@@ -198,25 +253,39 @@ them the same thing!)
 ### `device_guard`
 
 ```
-device_guard: false
+device_guard: False
 ```
 
 By default, ATen code generation will generate a DeviceGuard invocation,
 which will ensure that kernel code will run with the current device set
 to match the device of the first Tensor argument (or first tensor of
-the first TensorList argument, if the function takes a list of tensors).
+the first Tensor[] argument, if the function takes a list of tensors).
 For the most part, this means kernel authors do not have to worry about
 setting devices.
 
 However, in some cases, setting the device is unnecessary, because,
 e.g., you call a function already manages device guard setting, or
-you're a function that simply does not interact with any devices.  In
+you're a function that simply does not interact with any devices. In
 that case, code generation of the device guard can be disabled by adding
-`device_guard: false` to your function definition.
+`device_guard: False` to your function definition.
 
 **Note.** We are considering eliminating automatic generation of DeviceGuard,
-in which case this field would go away.  If you have an opinion on the
+in which case this field would go away. If you have an opinion on the
 matter, please write in at https://github.com/pytorch/pytorch/issues/14234
+
+### `matches_jit_signature`
+
+```
+matches_jit_signature: False
+```
+
+This will indicate that the func syntax does not follow the JIT signature schema.
+If you are a triggering an assert related to JIT signature compliance
+try adding this field and setting it to False. In general, this serves as a means
+of tracking an ongoing schema unification with the goal of aligning func syntax
+with other components of PyTorch in order to reduce overall complexity.
+If you find yourself having to set this field to False add @gchanan to your PR's
+set of reviewers.
 
 ## Writing an implementation in C++
 
@@ -244,7 +313,7 @@ you will have to write an entry correlating them together in
 `tools/autograd/derivatives.yaml`.
 
 However, in some situations, you can write a function in ATen and it
-will be automatically differentiated!  This can be the case if the function implementation
+will be automatically differentiated! This can be the case if the function implementation
 only calls other operations which are themselves differentiable.  In this
 case, you don't have to write an entry in `tools/autograd/derivatives.yaml`.
 
@@ -321,7 +390,8 @@ Tensor& s_add_(Tensor& self, const Tensor& other) {
 
 By default, `Tensor` arguments to ATen functions are always defined, unless
 you explicitly specified that an undefined tensor was permissible by writing
-`Tensor?` or `Tensor? x={}`, the latter one is needed when you have to assign a default value in C++ (e.g. in the middle of other parameters with default values).
+`Tensor?` or `Tensor? x=[]`, the latter one is needed when you have to assign
+a default value in C++ (e.g. in the middle of other parameters with default values).
 
 The rules for returning undefined Tensors are a bit more subtle, but there
 is only one case you have to remember:

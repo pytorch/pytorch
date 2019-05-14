@@ -231,7 +231,8 @@ def GetContentFromProtoString(s, function_map):
 
 def ConvertProtoToBinary(proto_class, filename, out_filename):
     """Convert a text file of the given protobuf class to binary."""
-    proto = TryReadProtoWithClass(proto_class, open(filename).read())
+    with open(filename) as f:
+        proto = TryReadProtoWithClass(proto_class, f.read())
     with open(out_filename, 'w') as fid:
         fid.write(proto.SerializeToString())
 
@@ -407,3 +408,13 @@ def ArgsToDict(args):
         else:
             ans[arg.name] = None
     return ans
+
+
+def NHWC2NCHW(tensor):
+    assert tensor.ndim >= 1
+    return tensor.transpose((0, tensor.ndim - 1) + tuple(range(1, tensor.ndim - 1)))
+
+
+def NCHW2NHWC(tensor):
+    assert tensor.ndim >= 2
+    return tensor.transpose((0,) + tuple(range(2, tensor.ndim)) + (1,))

@@ -43,7 +43,7 @@ TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {
   const int nbytes = 1048576;
   for (int i = 0; i < NumCudaDevices(); ++i) {
     LOG(INFO) << "Device " << i << " of " << NumCudaDevices();
-    DeviceGuard guard(i);
+    CUDAGuard guard(i);
     auto allocated = CUDAContext::New(nbytes);
     EXPECT_NE(allocated, nullptr);
     cudaPointerAttributes attr;
@@ -132,6 +132,7 @@ namespace {
 // after thread exit.
 void TEST_GetStreamAddress(cudaStream_t* ptr) {
   CUDAContext context(0);
+  context.SwitchToDevice();
   *ptr = context.cuda_stream();
   // Sleep for a while so we have concurrent thread executions
   std::this_thread::sleep_for(std::chrono::seconds(1));

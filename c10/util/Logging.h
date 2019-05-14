@@ -40,6 +40,13 @@ C10_DECLARE_bool(caffe2_use_fatal_for_enforce);
 #define C10_LOG_EVERY_MS(severity, ms) LOG(severity)
 #endif
 
+// Same for LOG_FIRST_N
+#ifdef LOG_FIRST_N
+#define C10_LOG_FIRST_N(severity, n) LOG_FIRST_N(severity, n)
+#else
+#define C10_LOG_FIRST_N(severity, n) LOG(severity)
+#endif
+
 namespace c10 {
 
 using std::string;
@@ -168,7 +175,7 @@ class C10_API EnforceFailMessage {
   }
 
  private:
-  std::string* msg_;
+  std::string* msg_{};
 };
 
 #define BINARY_COMP_HELPER(name, op)                         \

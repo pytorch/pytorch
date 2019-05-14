@@ -1,6 +1,3 @@
-import functools
-import types
-
 import torch._C as _C
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
@@ -8,6 +5,13 @@ OperatorExportTypes = _C._onnx.OperatorExportTypes
 PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
+
+# TODO: Update these variables when there 
+# is a new ir_version and producer_version
+# and use these values in the exporter
+ir_version = 4
+producer_name = "pytorch"
+producer_version = "1.1"
 
 
 class ExportTypes:
@@ -19,7 +23,8 @@ class ExportTypes:
 
 def _export(*args, **kwargs):
     from torch.onnx import utils
-    return utils._export(*args, **kwargs)
+    result = utils._export(*args, **kwargs)
+    return result
 
 
 def export(*args, **kwargs):
@@ -55,3 +60,13 @@ def _run_symbolic_function(*args, **kwargs):
 def _run_symbolic_method(*args, **kwargs):
     from torch.onnx import utils
     return utils._run_symbolic_method(*args, **kwargs)
+
+
+def is_in_onnx_export():
+    from torch.onnx import utils
+    return utils.is_in_onnx_export()
+
+
+def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
+    from torch.onnx import utils
+    return utils.register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version)

@@ -16,11 +16,11 @@ ConcatDNNLowPOp<T>::ConcatDNNLowPOp(
     Workspace* ws)
     : BaseType(operator_def, ws) {
   if (HasArgument("axis")) {
-    axis_ = OperatorBase::GetSingleArgument<int>("axis", -1);
-    add_axis_ = OperatorBase::GetSingleArgument<int>("add_axis", 0);
+    axis_ = this->template GetSingleArgument<int>("axis", -1);
+    add_axis_ = this->template GetSingleArgument<int>("add_axis", 0);
   } else {
     axis_ = GetDimFromOrderString(
-        OperatorBase::GetSingleArgument<string>("order", "NCHW"));
+        this->template GetSingleArgument<string>("order", "NCHW"));
     add_axis_ = 0;
   }
   CAFFE_ENFORCE_GE(axis_, 0);
@@ -35,7 +35,7 @@ bool ConcatDNNLowPOp<T>::RunOnDevice() {
   Tensor* split = nullptr;
   int* axis_data = nullptr;
   if (OutputSize() >= 2) {
-    split = OperatorBase::Output<Tensor>(1, CPU);
+    split = this->template Output<Tensor>(1, CPU);
     split->Resize(vector<int64_t>(1, InputSize()));
     axis_data = split->template mutable_data<int>();
   }

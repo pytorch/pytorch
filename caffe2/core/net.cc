@@ -157,7 +157,7 @@ unique_ptr<NetBase> CreateNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws) {
   std::string net_type;
-  if (net_def->has_type()) {
+  if (net_def->has_type() && !net_def->type().empty()) {
     net_type = net_def->type();
   } else {
     // By default, we will return a simple network that just runs all operators
@@ -188,6 +188,15 @@ std::vector<OperatorBase*> ExecutorHelper::GetOperators() const {
 
 int ExecutorHelper::GetNumWorkers() const {
   CAFFE_THROW("Not implemented");
+}
+
+// benchmark an individual run so that we can FeedBlobs with new inputs
+// no warmup
+// return time taken in microseconds
+float NetBase::TEST_Benchmark_One_Run() {
+  Timer timer;
+  CAFFE_ENFORCE(Run(), "Run has failed.");
+  return timer.MicroSeconds();
 }
 
 std::vector<float> NetBase::TEST_Benchmark(

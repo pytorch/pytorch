@@ -4,16 +4,9 @@
 
 /* a la lua? dim, storageoffset, ...  et les methodes ? */
 
-#ifdef __cplusplus
 #include <c10/core/TensorImpl.h>
-#endif
 
-#ifdef __cplusplus
 #define THTensor at::TensorImpl
-#else
-typedef struct at_Tensor_Impl at_Tensor_Impl;
-#define THTensor at_Tensor_Impl
-#endif
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THTensor type.
@@ -25,6 +18,7 @@ typedef struct at_Tensor_Impl at_Tensor_Impl;
 #define THShortTensor THTensor
 #define THIntTensor THTensor
 #define THLongTensor THTensor
+#define THBoolTensor THTensor
 
 /**** access methods ****/
 TH_API THStorage* THTensor_(storage)(const THTensor *self);
@@ -68,7 +62,6 @@ TH_API THTensor *THTensor_(newContiguous)(THTensor *tensor);
 TH_API THTensor *THTensor_(newSelect)(THTensor *tensor, int dimension_, int64_t sliceIndex_);
 TH_API THTensor *THTensor_(newNarrow)(THTensor *tensor, int dimension_, int64_t firstIndex_, int64_t size_);
 TH_API THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimension2_);
-TH_API THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, int64_t size_, int64_t step_);
 
 // resize* methods simply resize the storage. So they may not retain the current data at current indices.
 // This is especially likely to happen when the tensor is not contiguous. In general, if you still need the
@@ -131,6 +124,10 @@ TH_API scalar_t THTensor_(get1d)(const THTensor *tensor, int64_t x0);
 TH_API scalar_t THTensor_(get2d)(const THTensor *tensor, int64_t x0, int64_t x1);
 TH_API scalar_t THTensor_(get3d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2);
 TH_API scalar_t THTensor_(get4d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3);
+
+/* Shape manipulation methods */
+TH_API void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension);
+TH_API void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int dimension);
 
 /* Debug methods */
 TH_API THDescBuff THTensor_(desc)(const THTensor *tensor);

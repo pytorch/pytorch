@@ -139,7 +139,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-enum class RNNActivation : uint32_t TORCH_API{ReLU, Tanh};
+enum class RNNActivation : uint32_t {ReLU, Tanh};
 
 /// Options for RNN modules.
 struct TORCH_API RNNOptions {

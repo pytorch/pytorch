@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from functools import partial
+
 import caffe2.python.hypothesis_test_util as hu
 import numpy as np
 from caffe2.python import core
@@ -14,6 +16,7 @@ def ref_adagrad(
     using_fp16=False,
     output_effective_lr=False,
     output_effective_lr_and_update=False,
+    decay=1.0,
     row_wise=False,
 ):
     mom_in_f32 = mom_in
@@ -23,9 +26,9 @@ def ref_adagrad(
         param_in_f32 = param_in.astype(np.float32)
 
     if row_wise:
-        mom_out = mom_in_f32 + np.mean(np.square(grad))
+        mom_out = decay * mom_in_f32 + np.mean(np.square(grad))
     else:
-        mom_out = mom_in_f32 + np.square(grad)
+        mom_out = decay * mom_in_f32 + np.square(grad)
     effective_lr = lr / (np.sqrt(mom_out) + epsilon)
     grad_adj = effective_lr * grad
     param_out = param_in_f32 + grad_adj
@@ -101,19 +104,25 @@ def adagrad_sparse_test_helper(
     def ref_sparse(param, momentum, indices, grad, lr, ref_using_fp16=False):
         param_out = np.copy(param)
         momentum_out = np.copy(momentum)
+        # Need to do this because it's possible ref_adagrad's using_fp16 could
+        # have been already specialized.
+        ref_adagrad_temp = (
+            partial(ref_adagrad, using_fp16=ref_using_fp16)
+            if ref_using_fp16
+            else ref_adagrad
+        )
         for i, index in enumerate(indices):
-            param_out[index], momentum_out[index] = ref_adagrad(
+            param_out[index], momentum_out[index] = ref_adagrad_temp(
                 param[index],
                 momentum[index],
                 grad[i],
                 lr,
                 epsilon,
-                using_fp16=ref_using_fp16,
             )
         return (param_out, momentum_out)
 
     ref_using_fp16_values = [False]
-    if dc == hu.gpu_do:
+    if gc == hu.gpu_do and not row_wise:
         ref_using_fp16_values.append(True)
 
     for ref_using_fp16 in ref_using_fp16_values:

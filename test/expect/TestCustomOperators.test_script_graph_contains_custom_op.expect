@@ -1,4 +1,0 @@
-graph(%x : Dynamic) {
-  %1 : Dynamic = aten::relu(%x)
-  return (%1);
-}

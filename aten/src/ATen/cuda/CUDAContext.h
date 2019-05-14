@@ -36,22 +36,20 @@ It is expected that the modules whose functions compose this interface will
 manage their own state. There is only a single CUDA context/state.
 */
 
-/* Device info */
+/**
+ * DEPRECATED: use device_count() instead
+ */
 inline int64_t getNumGPUs() {
     return c10::cuda::device_count();
 }
 
 /**
- * In some situations, you may have compiled with CUDA, but no CUDA
- * device is actually available.  Test for this case using is_available().
+ * CUDA is available if we compiled with CUDA, and there are one or more
+ * devices.  If we compiled with CUDA but there is a driver problem, etc.,
+ * this function will report CUDA is not available (rather than raise an error.)
  */
 inline bool is_available() {
-    int count;
-    cudaError_t err = cudaGetDeviceCount(&count);
-    if (err == cudaErrorInsufficientDriver) {
-      return false;
-    }
-    return count > 0;
+    return c10::cuda::device_count() > 0;
 }
 
 CAFFE2_API cudaDeviceProp* getCurrentDeviceProperties();

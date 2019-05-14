@@ -21,15 +21,15 @@ namespace math {
 void quantize_and_compress(
     const float* input_data,
     std::uint8_t* output_data,
-    std::size_t input_size,
-    std::size_t bitwidth,
+    std::uint64_t input_size,
+    std::uint64_t bitwidth,
     bool random,
     const float* random_buffer);
 
 void decompress_and_dequantize(
     const std::uint8_t* input_data,
     float* output_data,
-    std::size_t input_size);
+    std::uint64_t input_size);
 
 } // namespace math
 } // namespace caffe2

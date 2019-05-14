@@ -1,13 +1,10 @@
 #pragma once
 
 #include <exception>
-#include <stdexcept>
 #include <string>
 
 #include <torch/csrc/THP_export.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/utils/auto_gil.h>
-#include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #define HANDLE_TH_ERRORS                                                       \
@@ -15,6 +12,11 @@
 #define END_HANDLE_TH_ERRORS_RET(retval)                           \
   }                                                                \
   catch (python_error & e) {                                       \
+    return retval;                                                 \
+  }                                                                \
+  catch (const c10::IndexError& e) {                               \
+    auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
+    PyErr_SetString(PyExc_IndexError, msg.c_str());                \
     return retval;                                                 \
   }                                                                \
   catch (const c10::Error& e) {                                    \

@@ -1,5 +1,4 @@
 #include <torch/csrc/utils/tensor_numpy.h>
-
 #include <torch/csrc/utils/numpy_stub.h>
 
 #ifndef USE_NUMPY
@@ -19,6 +18,7 @@ bool is_numpy_scalar(PyObject* obj) {
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/object_ptr.h>
 
 #include <ATen/ATen.h>
 #include <memory>
@@ -30,7 +30,7 @@ using namespace torch::autograd;
 
 namespace torch { namespace utils {
 
-static std::vector<npy_intp> to_numpy_shape(IntList x) {
+static std::vector<npy_intp> to_numpy_shape(IntArrayRef x) {
   // shape and stride conversion from int64_t to npy_intp
   auto nelem = x.size();
   auto result = std::vector<npy_intp>(nelem);
@@ -49,14 +49,27 @@ static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
   return result;
 }
 
-static int aten_to_dtype(const at::Type& type);
+static int aten_to_dtype(const ScalarType scalar_type);
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
-  auto dtype = aten_to_dtype(tensor.type());
+  if (tensor.is_cuda()) {
+    throw TypeError(
+        "can't convert CUDA tensor to numpy. Use Tensor.cpu() to "
+        "copy the tensor to host memory first.");
+  }
+  if (tensor.is_sparse()) {
+    throw TypeError(
+        "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
+        "convert to a dense tensor first.");
+  }
+  if (tensor.type().backend() != Backend::CPU) {
+      throw TypeError("NumPy conversion for %s is not supported", tensor.type().toString().c_str());
+  }
+  auto dtype = aten_to_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
   auto strides = to_numpy_shape(tensor.strides());
   // NumPy strides use bytes. Torch strides use element counts.
-  auto element_size_in_bytes = tensor.type().elementSizeInBytes();
+  auto element_size_in_bytes = tensor.element_size();
   for (auto& stride : strides) {
     stride *= element_size_in_bytes;
   }
@@ -120,44 +133,38 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   }
 
   void* data_ptr = PyArray_DATA(array);
-  auto& type = CPU(numpy_dtype_to_aten(PyArray_TYPE(array)));
   if (!PyArray_EquivByteorders(PyArray_DESCR(array)->byteorder, NPY_NATIVE)) {
     throw ValueError(
         "given numpy array has byte order different from the native byte order. "
         "Conversion between byte orders is currently not supported.");
   }
   Py_INCREF(obj);
-  return type.tensorFromBlob(data_ptr, sizes, strides, [obj](void* data) {
-    AutoGIL gil;
-    Py_DECREF(obj);
-  });
+  return at::from_blob(
+      data_ptr,
+      sizes,
+      strides,
+      [obj](void* data) {
+          AutoGIL gil;
+          Py_DECREF(obj);
+      },
+      at::device(kCPU).dtype(numpy_dtype_to_aten(PyArray_TYPE(array)))
+  );
 }
 
-static int aten_to_dtype(const at::Type& type) {
-  if (type.is_cuda()) {
-    throw TypeError(
-        "can't convert CUDA tensor to numpy. Use Tensor.cpu() to "
-        "copy the tensor to host memory first.");
+static int aten_to_dtype(const ScalarType scalar_type) {
+  switch (scalar_type) {
+    case kDouble: return NPY_DOUBLE;
+    case kFloat: return NPY_FLOAT;
+    case kHalf: return NPY_HALF;
+    case kLong: return NPY_INT64;
+    case kInt: return NPY_INT32;
+    case kShort: return NPY_INT16;
+    case kChar: return NPY_INT8;
+    case kByte: return NPY_UINT8;
+    case kBool: return NPY_BOOL;
+    default:
+      throw ValueError("Got unsupported ScalarType ", toString(scalar_type));
   }
-  if (type.is_sparse()) {
-    throw TypeError(
-        "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
-        "convert to a dense tensor first.");
-  }
-  if (type.backend() == Backend::CPU) {
-    switch (type.scalarType()) {
-      case kDouble: return NPY_DOUBLE;
-      case kFloat: return NPY_FLOAT;
-      case kHalf: return NPY_HALF;
-      case kLong: return NPY_INT64;
-      case kInt: return NPY_INT32;
-      case kShort: return NPY_INT16;
-      case kByte: return NPY_UINT8;
-      case kChar: return NPY_INT8;
-      default: break;
-    }
-  }
-  throw TypeError("NumPy conversion for %s is not supported", type.toString());
 }
 
 ScalarType numpy_dtype_to_aten(int dtype) {
@@ -169,6 +176,7 @@ ScalarType numpy_dtype_to_aten(int dtype) {
     case NPY_INT16: return kShort;
     case NPY_INT8: return kChar;
     case NPY_UINT8: return kByte;
+    case NPY_BOOL: return kBool;
     default:
       // Workaround: MSVC does not support two switch cases that have the same value
       if (dtype == NPY_LONGLONG || dtype == NPY_INT64) {
@@ -187,7 +195,7 @@ ScalarType numpy_dtype_to_aten(int dtype) {
 
 bool is_numpy_scalar(PyObject* obj) {
   return (PyArray_IsIntegerScalar(obj) ||
-	  PyArray_IsScalar(obj, Floating));
+          PyArray_IsScalar(obj, Floating));
 }
 
 }} // namespace torch::utils
