@@ -16,6 +16,14 @@ class SVRG(Optimizer):
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
 
+    Example:
+        >>> optimizer = torch.optim.SVRG(model.parameters(), snapshot_model.parameters(), lr=0.1)
+        >>> optimizer.zero_grad()
+        >>> optimizer.update_snapshot(dataloader, snapshot_training_closure)
+        >>> loss_fn(model(input), target).backward()
+        >>> loss_fn(snapshot_model(input), target).backward()
+        >>> optimizer.step()
+
     .. _Accelerating stochastic gradient descent using predictive variance reduction:
     https://papers.nips.cc/paper/4937-accelerating-stochastic-gradient-descent-using-predictive-variance-reduction.pdf
     """
