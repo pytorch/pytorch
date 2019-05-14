@@ -2,20 +2,24 @@
 
 namespace at {
 
-static std::map<std::string, int64_t> schema_to_id = {
-  ${schema_to_id_pairs}
-};
 static void* function_table[static_cast<int64_t>(Backend::NumOptions)][${function_count}];
 static void* wrapper_table[${function_count}];
 
+int64_t get_schema_id(std::string schema) {
+  static std::map<std::string, int64_t> schema_to_id = {
+    ${schema_to_id_pairs}
+  };
+  return schema_to_id[schema];
+}
+
 int64_t _register_op(Backend backend, const char* schema, void* fn) {
-  auto id = schema_to_id[schema];
+  auto id = get_schema_id(schema);
   function_table[static_cast<int64_t>(backend)][id] = fn;
   return id;
 }
 
 int64_t _register_variable_wrapper(const char* schema, void* fn) {
-  auto id = schema_to_id[schema];
+  auto id = get_schema_id(schema);
   wrapper_table[id] = fn;
   return id;
 }
