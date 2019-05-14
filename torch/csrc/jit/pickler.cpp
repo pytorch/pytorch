@@ -89,7 +89,6 @@ void Pickler::endTuple() {
 void Pickler::finish() {
   push<OpCode>(OpCode::STOP);
 
-
   // Add the binary data for all the tensors to be included in the same binary
   // TODO: The pickler should be refactored to stream out to a stream directly
   // instead of staging in the stack_ array
@@ -123,7 +122,8 @@ void Pickler::pushTensorData(const at::Tensor& tensor) {
   uint64_t record_size;
   at::Tensor storage_tensor;
   std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
-  auto storage_byte_ptr = reinterpret_cast<uint8_t*>(storage_tensor.storage().data());
+  auto storage_byte_ptr =
+      reinterpret_cast<uint8_t*>(storage_tensor.storage().data());
   stack_.insert(stack_.end(), storage_byte_ptr, storage_byte_ptr + record_size);
 }
 
@@ -293,29 +293,25 @@ IValue getObjectState(const IValue& ivalue) {
 }
 
 void Pickler::pushObject(const IValue& ivalue) {
-  auto obj = ivalue.toObject();
-  at::ClassTypePtr class_type = obj->type();
+  auto object = ivalue.toObject();
+  at::ClassTypePtr class_type = object->type();
   if (std::find(class_table_->cbegin(), class_table_->cend(), class_type) ==
       class_table_->cend()) {
     class_table_->push_back(class_type);
   }
 
-  // pushGlobal("idk");
+  // Sadly the qualname on the function is not the actual qualname from Python,
+  // so we can't just insert an OBJECT/BUILD opcode like pickle usually makes
+  // for objects
   pushClass(PicklerClass::OBJECT);
 
-  // call to '__new__'
-  push<OpCode>(OpCode::EMPTY_TUPLE);
-  push<OpCode>(OpCode::NEWOBJ);
-
   // call '__getstate__', push arguments
+  push<OpCode>(OpCode::MARK);
+  pushMemoizedString(object->type()->qualname());
   addIValue(getObjectState(ivalue));
+  push<OpCode>(OpCode::TUPLE);
 
-  // call to '__setstate__'
-  push<OpCode>(OpCode::BUILD);
-
-  // addIValue(c10::ivalue::Tuple::create(
-  //     {class_type->python_str(), static_cast<int64_t>(obj->slots().size())}));
-  //     push<OpCode>(OpCode::BUILD);
+  push<OpCode>(OpCode::REDUCE);
 }
 
 void Pickler::pushBinGet(uint32_t memo_id) {
@@ -802,22 +798,37 @@ OpCode Unpickler::readInstruction() {
         case PicklerClass::INTLIST:
           stack_.emplace_back(data->elements().at(0).toIntListRef());
           break;
-        // case PicklerClass::OBJECT: {
-        //   auto data = setitem_data.toTuple();
-        //
-        //   auto class_type =
-        //       at::ClassType::get(data->elements().at(0).toStringRef());
-        //   auto num_slots = data->elements().at(1).toInt();
-        //
-        //   AT_CHECK(
-        //       class_type != nullptr,
-        //       "Unpickler could not find class '",
-        //       setitem_data.toStringRef(),
-        //       "'");
-        //   stack_.emplace_back(
-        //       c10::ivalue::Object::create(class_type, num_slots));
+        case PicklerClass::OBJECT: {
+          auto qualname =
+              at::QualifiedName(data->elements().at(0).toStringRef());
+          auto class_type = compilation_unit_->get_class(qualname);
+          AT_CHECK(
+              class_type != nullptr,
+              "Could not find class '",
+              qualname.qualifiedName(),
+              "'");
+
+          auto state = data->elements().at(1);
+          auto object = c10::ivalue::Object::create(
+              class_type, class_type->numAttributes());
+
+          if (auto setstate = class_type->getMethod("__setstate__")) {
+            Stack stack;
+            stack.push_back(object);
+            stack.push_back(state);
+            setstate->run(stack);
+          } else {
+            // Do equivalent of 'self.__dict__ = state'
+            if (state.isGenericDict()) {
+              for (auto entry : state.toGenericDictRef()) {
+                object->setAttr(entry.first.toStringRef(), entry.second);
+              }
+            }
+          }
+
+          stack_.emplace_back(object);
           break;
-        // }
+        }
         case PicklerClass::TENSORLIST:
           stack_.emplace_back(data->elements().at(0).toTensorListRef());
           break;

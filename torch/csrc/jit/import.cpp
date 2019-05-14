@@ -159,7 +159,11 @@ void ScriptModuleDeserializer::loadAttributeTable() {
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) =
       reader_.getRecord("attributes.pkl");
-  Unpickler unpickler(attributes_ptr.get(), attributes_size, &tensor_table_);
+  Unpickler unpickler(
+      attributes_ptr.get(),
+      attributes_size,
+      &tensor_table_,
+      &main_module_->class_compilation_unit());
   attribute_table_ = unpickler.parse_ivalue_list();
 }
 

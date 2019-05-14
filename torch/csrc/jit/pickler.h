@@ -239,11 +239,13 @@ class Unpickler {
   Unpickler(
       void* data,
       size_t size,
-      const std::vector<at::Tensor>* tensor_table)
+      const std::vector<at::Tensor>* tensor_table,
+      const at::CompilationUnit* compilation_unit)
       : bytes_(static_cast<const uint8_t*>(data)),
         end_ptr_(bytes_ + size),
         tensor_table_(tensor_table),
-        last_opcode_(OpCode::STOP) {}
+        last_opcode_(OpCode::STOP),
+        compilation_unit_(compilation_unit) {}
 
   std::vector<IValue> parse_ivalue_list();
 
@@ -277,6 +279,8 @@ class Unpickler {
 
   // [unpickler refactor]
   OpCode last_opcode_;
+
+  const at::CompilationUnit* compilation_unit_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
