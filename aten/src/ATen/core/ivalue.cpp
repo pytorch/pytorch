@@ -11,7 +11,8 @@ CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
-}
+
+}  // namespace ivalue
 
 namespace {
 

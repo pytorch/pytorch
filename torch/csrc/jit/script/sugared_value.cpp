@@ -21,7 +21,6 @@ std::shared_ptr<SugaredValue> MethodValue::call(
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
 
-  //std::cerr << "entering call\n";
   Graph& graph = *caller.graph();
   auto& callee = *method_;
   try {
