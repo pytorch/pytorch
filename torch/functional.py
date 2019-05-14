@@ -984,7 +984,7 @@ def nonzero(input, **kwargs):
                 [ 3,  3]])
         >>> torch.nonzero(torch.tensor([1, 1, 1, 0, 1]), as_tuple=True)
         (tensor([0, 1, 2, 4]),)
-        >>> torch.nonzero_tuple(torch.tensor([[0.6, 0.0, 0.0, 0.0],
+        >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
                                               [0.0, 0.4, 0.0, 0.0],
                                               [0.0, 0.0, 1.2, 0.0],
                                               [0.0, 0.0, 0.0,-0.4]]), as_tuple=True)
