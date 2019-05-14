@@ -65,6 +65,10 @@ class CAFFE2_API DeprecatedTypeProperties {
 
   std::string toString() const {
     std::stringstream ss;
+    if (is_variable_) {
+      ss << "Variable[" << at::toString(backend()) << at::toString(scalarType()) << "Type" << "]";
+      return ss.str();
+    }
     ss << at::toString(backend()) << at::toString(scalarType()) << "Type";
     return ss.str();
   }
