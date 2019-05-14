@@ -218,7 +218,7 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenRegistering_t
   testing::internal::CaptureStderr();
   c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
   std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_THAT(output, testing::HasSubstr("Registered a kernel that overwrote a previoulsy registered kernel with same dispatch key"));
+  EXPECT_THAT(output, testing::HasSubstr("Registered a kernel that overwrote a previously registered kernel with same dispatch key"));
 }
 
 TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenCalled_thenCallsNewerKernel) {
@@ -383,6 +383,16 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenNewer
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType1()));
   }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+}
+
+TEST(OperatorRegistrationTest, givenKernelWithDispatchKey_whenCalledDirectlyWithoutCache_thenCallsKernel) {
+  bool called_kernel = false;
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()));
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+  callOp(*op, dummyTensor(TensorType1()));
+  EXPECT_TRUE(called_kernel);
 }
 
 

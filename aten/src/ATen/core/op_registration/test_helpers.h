@@ -63,6 +63,13 @@ inline std::vector<c10::IValue> callOp(const c10::OperatorHandle& op, Args... ar
   return stack;
 }
 
+template<class... Args>
+inline std::vector<c10::IValue> callOpDirectly(const c10::OperatorHandle& op, Args... args) {
+  auto stack = makeStack(std::forward<Args>(args)...);
+  auto kernel = c10::Dispatcher::singleton().call(op, &stack);
+  return stack;
+}
+
 inline void expectDoesntFindKernel(const char* op_name, c10::TensorTypeId dispatch_key) {
   auto op = c10::Dispatcher::singleton().findSchema(op_name, "");
   EXPECT_ANY_THROW(

@@ -134,6 +134,11 @@ public:
   OpKernel lookup(const OperatorHandle& op, const Stack* stack) const;
 
   /**
+   * Dispatch to and call the correct kernel directly, without a kernel cache
+   */
+  void call(const OperatorHandle& op, Stack* stack) const;
+
+  /**
    * Add a listener that gets called whenever a new op is registered or an existing
    * op is deregistered. Immediately after registering, this listener gets called
    * for all previously registered ops, so it can be used to keep track of ops
@@ -195,6 +200,11 @@ inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack)
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(stack);
   return OpKernel(kernel.kernel_func, kernel.cache_creator_func);
+}
+
+inline void Dispatcher::call(const OperatorHandle& op, Stack* stack) const {
+  const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(stack);
+  (*kernel.kernel_func)(stack, nullptr);
 }
 
 } // namespace c10
