@@ -8,7 +8,7 @@ CONFIG_TREE_DATA = [
         (None, [
             X("2.7.9"),
             X("2.7"),
-            X("3.5"),
+            ("3.5", [("important", [X(True)])]),
             X("nightly"),
         ]),
         ("gcc", [
@@ -36,7 +36,7 @@ CONFIG_TREE_DATA = [
                 # and
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
-                X("2.7"),
+                ("2.7", [("important", [X(True)])]),
                 X("3.6"),
             ]),
             ("9.2", [X("3.6")]),
@@ -135,6 +135,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
         next_nodes = {
             "xla": XlaConfigNode,
             "namedtensor": NamedTensorConfigNode,
+            "important": ImportantConfigNode,
         }
         return next_nodes[experimental_feature]
 
@@ -153,6 +154,14 @@ class NamedTensorConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_namedtensor"] = node_name
+
+
+class ImportantConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "IMPORTANT=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_important"] = node_name
 
 
 class XenialCompilerConfigNode(TreeConfigNode):
