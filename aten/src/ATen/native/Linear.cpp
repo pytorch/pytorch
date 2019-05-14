@@ -33,7 +33,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
 static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArrayRef sum_dims_, bool keepdim) {
   // assumes that tensors have been pre-unsqueezed (so that all dimensions match - after broadcasting)
   // but makes no other assumptions on the order of dimensions
-  AT_CHECK(left_.dim()==right_.dim(), "number of dimensions must match");
+  TORCH_CHECK(left_.dim()==right_.dim(), "number of dimensions must match");
   if (sum_dims_.size() == 0)
     return at::mul(left_, right_);
   int64_t dim = left_.dim();
@@ -50,7 +50,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
     auto sr = right.size(i)>1;
     if (sum_dims[i]) { // first dimensions that will be summed over after multiplication
       if (sl && sr) {  // dimensions nontrivially in both left and right must be of the same size
-        AT_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
+        TORCH_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
         sum_size *= left.size(i);
       } else if (sl) { // if it is only in one of left and right, we can sum right away
         left = left.sum(i, true);
@@ -59,7 +59,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
       }
     } else if (sl && sr) { // now deal with dimensions  dimensions that will be in the output
       // dimensions nontrivially in both left and right must be of the same size
-      AT_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
+      TORCH_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
       lro.push_back(i);
       lro_size *= left.size(i);
     } else if (sl) { // keep track of dimensions appearing only once
@@ -168,7 +168,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   int64_t num_total_idxes = 0;
   while (! eqn_stream.eof()) {
     std::getline(eqn_stream, term, ',');  // term = string with indices of current term
-    AT_CHECK((int64_t) tensors.size()>operand, "more operands in equation than tensors"); // we cannot have a longer equation than operands. We need to check here before we use the dimension
+    TORCH_CHECK((int64_t) tensors.size()>operand, "more operands in equation than tensors"); // we cannot have a longer equation than operands. We need to check here before we use the dimension
 
     int64_t ell_char_count = 0;            // handling of ellipsis '...' is a bit tedious, we count the '.'
     // if there is an ellipsis, the number of dimensions it represents must be total dim - letter dimensions
@@ -178,7 +178,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
     for (auto &c : term) {                 // c = character with a single letter or '.'
       if (c == '.') {
         ell_char_count++;
-        AT_CHECK(ell_char_count <= 3, "can only have '.' in one ellispis '...' in term ", operand, " of the equation");
+        TORCH_CHECK(ell_char_count <= 3, "can only have '.' in one ellispis '...' in term ", operand, " of the equation");
         if (ell_char_count == 3) {        // this completes the ellipsis
           if (num_ell_idxes == -1) {      // if we have not seen an ellipsis before, keep track of indices and size
             first_ell_idx = num_total_idxes;
@@ -186,7 +186,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
             num_total_idxes += num_ell_idxes;
           }
           else {                          // we have seen an ellipsis before, so we check compatibility
-            AT_CHECK(candidate_num_ell_idxes == num_ell_idxes,
+            TORCH_CHECK(candidate_num_ell_idxes == num_ell_idxes,
                      "ellipsis must represent ", num_ell_idxes, " dimensions in all terms");
           }
           for (int64_t i = 0; i < num_ell_idxes; ++i) { // map ellipsis dimensions in operand to indices
@@ -196,8 +196,8 @@ Tensor einsum(std::string eqn, TensorList tensors) {
           dims_in_term += num_ell_idxes;                // keep track of dimensions
         }
       } else {                                          // a letter (hopefully)
-        AT_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis, operand ", operand);
-        AT_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
+        TORCH_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis, operand ", operand);
+        TORCH_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
         int64_t letter_num = c-'a';                     // letter_num  = position in letter_mapping
         if (letter_mapping[letter_num] == -1) {         // new letter, add internal index and mapping
           letter_mapping[letter_num] = num_total_idxes;
@@ -211,12 +211,12 @@ Tensor einsum(std::string eqn, TensorList tensors) {
         dims_in_term++;
       }
     }
-    AT_CHECK(dims_in_term == tensors[operand].dim(), "dimension mismatch for operand ", operand, ": equation ", dims_in_term, " tensor ", tensors[operand].dim());
+    TORCH_CHECK(dims_in_term == tensors[operand].dim(), "dimension mismatch for operand ", operand, ": equation ", dims_in_term, " tensor ", tensors[operand].dim());
     input_op_idxes.push_back(std::move(current_op_idxes));
     operand++;
   }
   // in the check below, we need ==, but > is captured above, so the error message can be specific that it is <.
-  AT_CHECK((int64_t) tensors.size()==operand, "more tensors than operands in equation");
+  TORCH_CHECK((int64_t) tensors.size()==operand, "more tensors than operands in equation");
 
   // the following parses or infers output (right hand side)
   // it also assigns the idxes_to_preprocessed_dims (index -> dimension in preprocessed / output tensors)
@@ -228,19 +228,19 @@ Tensor einsum(std::string eqn, TensorList tensors) {
     for (auto &c : eqn.substr(pos+2)) {
       if (c == '.') {                        // '.' as part of ellipsis
         ell_char_count++;
-        AT_CHECK(ell_char_count <= 3, "can only have '.' in one ellispis '...' in right hand side of the equation");
+        TORCH_CHECK(ell_char_count <= 3, "can only have '.' in one ellispis '...' in right hand side of the equation");
         if (ell_char_count == 3) {           // ellipsis complete
-          AT_CHECK(num_ell_idxes >= 0, "ellipsis '...' may only appear in right hand side if it does in left hand side");
+          TORCH_CHECK(num_ell_idxes >= 0, "ellipsis '...' may only appear in right hand side if it does in left hand side");
           for (int64_t i = 0; i < num_ell_idxes; ++i) {
             idxes_to_preprocessed_dims[first_ell_idx + i] = num_output_dims;
             num_output_dims++;
           }
         }
       } else if (! isspace(c)) {                              // letter (hopefully)
-        AT_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis in the right hand side");
-        AT_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
+        TORCH_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis in the right hand side");
+        TORCH_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
         int64_t letter_num = c-'a';
-        AT_CHECK(idxes_to_preprocessed_dims[letter_mapping[letter_num]] == -1, "index ", c, "occurs twice in output");
+        TORCH_CHECK(idxes_to_preprocessed_dims[letter_mapping[letter_num]] == -1, "index ", c, "occurs twice in output");
         idxes_to_preprocessed_dims[letter_mapping[letter_num]] = num_output_dims;
         num_output_dims++;
       }
@@ -293,11 +293,11 @@ Tensor einsum(std::string eqn, TensorList tensors) {
           size_of_dims[idx] = preprocessed_op.size(dim);
         }
         else {
-          AT_CHECK(size_of_dims[idx] == preprocessed_op.size(dim), "size of dimension does not match previous size, operand ", op, ", dim ", i);
+          TORCH_CHECK(size_of_dims[idx] == preprocessed_op.size(dim), "size of dimension does not match previous size, operand ", op, ", dim ", i);
         }
         dim++;
       } else { // duplicate dimension in tensor --> take diagonal of idx_to_dim[dim_out] and dim and put the diagonal dimension to idx_to_dim[dim_out]
-        AT_CHECK(size_of_dims[idx] == preprocessed_op.size(dim), "size of dimension does not match previous size, operand ", op, ", dim ", i);
+        TORCH_CHECK(size_of_dims[idx] == preprocessed_op.size(dim), "size of dimension does not match previous size, operand ", op, ", dim ", i);
         preprocessed_op = preprocessed_op.diagonal(0, idx_to_dim[dim_out], dim);
         // diagonal moves the diagonal dimension to the back
         // now we permute the last dim back to idx_to_dim[dim_out]
@@ -367,7 +367,7 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
                   IntArrayRef expand1_, IntArrayRef expand2_, IntArrayRef expand3_,
                   IntArrayRef sumdim_, int64_t unroll_dim) {
   int64_t total_dim = i1_.dim()+expand1_.size();
-  AT_CHECK((unroll_dim >= 0) && (unroll_dim < total_dim), "unroll_dim must be in [0,", total_dim-1, "]");
+  TORCH_CHECK((unroll_dim >= 0) && (unroll_dim < total_dim), "unroll_dim must be in [0,", total_dim-1, "]");
   auto expand1 = at::dim_list_to_bitset(expand1_, total_dim);
   auto expand2 = at::dim_list_to_bitset(expand2_, total_dim);
   auto expand3 = at::dim_list_to_bitset(expand3_, total_dim);
@@ -433,7 +433,7 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 }
 
 Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const Tensor& bias) {
-  AT_CHECK(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
+  TORCH_CHECK(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
   for (int64_t i = 0; i < input1.dim() - 1; i++) {
     AT_CHECK(input1.size(i) == input2.size(i),
               "bilinear(): input batch dimensions do not match at dim ", i, ": got ", input1.size(i), " and ", input2.size(i));
