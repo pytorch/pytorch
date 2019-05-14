@@ -147,7 +147,7 @@ Node* createIntReprNode(Value* v, Node* n) {
 void addQuantDeQuantNodes(
     Value* v,
     const std::tuple<std::string, float, int>& qparam,
-    at::ScalarType t = at::ScalarType::Undefined) {
+    at::ScalarType t) {
   AT_ASSERT(v != nullptr);
   Node* n = v->node();
   Node* quant = createQuantNode(v, n);
@@ -170,14 +170,11 @@ void addQuantDeQuantNodes(
     quant->addInput(qparam_value);
     dequant->addInput(qparam_value);
   }
-  // optional argument required only for quantization
-  // of specific attributes eg: bias.
-  if (t != at::ScalarType::Undefined) {
-    Value* scalartype_v = insertScalarType(quant, t);
-    AT_ASSERT(scalartype_v != nullptr);
-    quant->addInput(scalartype_v);
-    dequant->addInput(scalartype_v);
-  }
+  // Add ScalarType Node
+  Value* scalartype_v = insertScalarType(quant, t);
+  AT_ASSERT(scalartype_v != nullptr);
+  quant->addInput(scalartype_v);
+  dequant->addInput(scalartype_v);
 }
 
 // Insert Quant-Dequant node pattern for specific input to node n
@@ -185,7 +182,7 @@ void addQuantDeQuantNodesForInput(
     Value* v,
     Node* n,
     const std::tuple<std::string, float, int>& qparam,
-    at::ScalarType t = at::ScalarType::Undefined) {
+    at::ScalarType t) {
   AT_ASSERT(v != nullptr);
   AT_ASSERT(n != nullptr);
   Node* quant = createQuantNode(v, n);
@@ -210,12 +207,11 @@ void addQuantDeQuantNodesForInput(
     quant->addInput(qparam_value);
     dequant->addInput(qparam_value);
   }
-  if (t != at::ScalarType::Undefined) {
-    Value* scalartype_v = insertScalarType(quant, t);
-    AT_ASSERT(scalartype_v != nullptr);
-    quant->addInput(scalartype_v);
-    dequant->addInput(scalartype_v);
-  }
+  // Add ScalarType Node
+  Value* scalartype_v = insertScalarType(quant, t);
+  AT_ASSERT(scalartype_v != nullptr);
+  quant->addInput(scalartype_v);
+  dequant->addInput(scalartype_v);
 }
 
 template <typename... ArgT>
@@ -465,7 +461,7 @@ void InsertQuantDequantNodes(
   // Insert the quant-dequant pair for values output from quantizable nodes
   for (auto& ele : quantOutputs) {
     if (qparam_value_dict.count(ele) != 0) {
-      addQuantDeQuantNodes(ele, qparam_value_dict[ele]);
+      addQuantDeQuantNodes(ele, qparam_value_dict[ele], at::ScalarType::QUInt8);
     }
   }
 
@@ -473,7 +469,10 @@ void InsertQuantDequantNodes(
   for (auto& ele : quantInputs) {
     if (qparam_value_dict.count(ele.first) != 0) {
       addQuantDeQuantNodesForInput(
-          ele.first, ele.second, qparam_value_dict[ele.first]);
+          ele.first,
+          ele.second,
+          qparam_value_dict[ele.first],
+          at::ScalarType::QUInt8);
     }
   }
 }

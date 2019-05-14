@@ -1327,12 +1327,13 @@ graph(%x : Tensor,
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
                    .check("conv2d").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
-                   .run(str(trace.graph))
+                   .check_next("Constant").check_next("Constant") \
+                   .check_next("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear").run(str(trace.graph))
         FileCheck().check("relu").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("Constant").check_next("Constant") \
+                   .check_next("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear") \
                    .check_next("return").run(str(trace.graph))
 
     def test_insert_quantdequant_consecutive_qnodes_trace(self):
@@ -1360,13 +1361,14 @@ graph(%x : Tensor,
         # quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
-                   .check("_convolution").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
-                   .run(str(trace.graph))
+                   .check("conv2d").check_next("Constant") \
+                   .check_next("Constant").check_next("Constant") \
+                   .check_next("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear").run(str(trace.graph))
         FileCheck().check("relu").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("Constant").check_next("Constant") \
+                   .check_next("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear") \
                    .check_next("return").run(str(trace.graph))
 
     def test_insert_quantdequant_single_qnode(self):
@@ -1399,10 +1401,10 @@ graph(%x : Tensor,
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
                    .check("conv2d").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
-                   .check_next("add").check_next("return") \
-                   .run(str(trace.graph))
+                   .check_next("Constant").check_next("Constant") \
+                   .check_next("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear") \
+                   .check_next("add").check_next("return").run(str(trace.graph))
 
     def test_insert_quantdequant_alternate_qnode(self):
         input_data = torch.ones([1, 1, 5, 5])
@@ -1435,9 +1437,10 @@ graph(%x : Tensor,
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
                    .check("conv2d").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("Constant").check_next("Constant") \
+                   .check_next("quantize_linear") \
                    .check_next("int_repr").run(str(trace.graph))
-        FileCheck().check("add").check_next("Constant")\
+        FileCheck().check("add").check_next("Constant").check_next("Constant") \
                    .check_next("Constant").check_next("quantize_linear") \
                    .check_next("int_repr").check("dequantize_linear") \
                    .run(str(trace.graph))
