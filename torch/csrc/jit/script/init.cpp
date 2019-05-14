@@ -481,9 +481,10 @@ void initJitScriptBindings(PyObject* module) {
           [](std::shared_ptr<Function> self,
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            Module m;
-            // m->
-            m.save(filename, _extra_files);
+            Module module;
+            module.module_object()->type()->compilation_unit().create_function(
+                "forward", self->graph());
+            module.save(filename, _extra_files);
           },
           py::arg("filename"),
           py::arg("_extra_files") = ExtraFilesMap())
@@ -492,8 +493,10 @@ void initJitScriptBindings(PyObject* module) {
           [](std::shared_ptr<Function> self,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
-            Module m;
-            m.save(buf, _extra_files);
+            Module module;
+            module.module_object()->type()->compilation_unit().create_function(
+                "forward", self->graph());
+            module.save(buf, _extra_files);
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
