@@ -100,19 +100,14 @@ class Conf(object):
             "<<": "*" + "_".join(["pytorch", "linux", build_or_test, "defaults"]),
         }
 
-        resource_class = None
-        if build_or_test == "test" or self.is_important:
+        if build_or_test == "test":
             resource_class = "large"
+            if self.gpu_resource:
+                resource_class = "gpu." + self.gpu_resource
 
-        if self.is_important:
-            resource_class = "large"
+                if self.gpu_resource == "large":
+                    env_dict["MULTI_GPU"] = miniutils.quote("1")
 
-        if self.gpu_resource:
-            resource_class = "gpu." + self.gpu_resource
-            if self.gpu_resource == "large":
-                env_dict["MULTI_GPU"] = miniutils.quote("1")
-
-        if resource_class is not None:
             d["resource_class"] = resource_class
 
         return d
