@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/symbolic_script.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/script/compiler.h>
 
 namespace torch {
 namespace jit {
@@ -1044,7 +1046,8 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
-        def layer_norm(input : Tensor,
+        # disable the layernorm AD temporarily because of bug in https://github.com/pytorch/pytorch/issues/19769
+        def layer_norm_disabled(input : Tensor,
                        normalized_shape : List[int],
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
@@ -1330,7 +1333,7 @@ void loadModule(const script::CompilationUnit& module) {
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw script::ErrorReport(forward_tuple->getSourceLocation())
+      throw script::ErrorReport(forward_tuple->sourceRange())
           << "gradient must return literal a tuple";
     }
 
