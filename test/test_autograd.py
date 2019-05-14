@@ -2441,10 +2441,6 @@ class TestAutograd(TestCase):
 
         events.populate_cpu_children()
 
-        print()
-        for event in events:
-            print(event)
-
         # Note that [1, 3] pushes out [0, 2] first. Then we record [1, 2]
         # as a child of [1, 3]
         res = [[], [], [], [], [4]]
@@ -2454,10 +2450,34 @@ class TestAutograd(TestCase):
 
         assert([get_children_ids(event) for event in events] == res)
 
+    def test_profiler_shapes(self):
+        print("")
+        layer1 = torch.nn.Linear(20, 30)
+        layer2 = torch.nn.Linear(30, 40)
+        input = torch.randn(128, 20)
+        with profile(record_shapes=True) as prof:
+            layer2(layer1(input))
+
+        # type conversion
+        assert(prof.function_events[0].input_shapes == [[30, 20]])
+        # fc (addmm)
+        assert(
+            prof.function_events[1].input_shapes ==
+            [[30], [128, 20], [20, 30], [], []]
+        )
+        assert(prof.function_events[2].input_shapes == [[40, 30]])
+        assert(
+            prof.function_events[3].input_shapes ==
+            [[40], [128, 30], [30, 40], [], []]
+        )
+        print(prof.table())
+        print(prof.key_averages(group_by_input_shape=True).table())
+
     def test_profiler_aggregation_lstm(self):
+        print("")
         rnn = torch.nn.LSTM(10, 20, 2)
         total_time_s = 0
-        with profile() as prof:
+        with profile(record_shapes=True) as prof:
             for i in range(20):
                 input = torch.randn(5, 3, 10)
                 h = torch.randn(2, 3, 20)
@@ -2467,8 +2487,10 @@ class TestAutograd(TestCase):
                 end = time.time()
                 total_time_s += end - start
 
-        print(prof.table(sort_by="self_cpu_time_total", row_limit=10))
-        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+        print(prof.table(
+            sort_by="self_cpu_time_total", row_limit=10, header="TEST"))
+        print(prof.key_averages(group_by_input_shape=True).table(
+            sort_by="self_cpu_time_total", row_limit=10))
 
         total_time_us = total_time_s * 1000.0 * 1000.0  # make it us which is profiler default
         print(

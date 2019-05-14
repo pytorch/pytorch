@@ -148,6 +148,17 @@ class TestMkldnn(TestCase):
                 avg_pool2d(x),
                 avg_pool2d(x.to_mkldnn()).to_dense())
 
+    def test_adaptive_avg_pool2d(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+        x = torch.randn(N, C, 224, 224, dtype=torch.float32) * 100
+
+        adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d(7)
+
+        self.assertEqual(
+            adaptive_avg_pool2d(x),
+            adaptive_avg_pool2d(x.to_mkldnn()).to_dense())
+
     def test_batch_norm2d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 100, (1,)).item()

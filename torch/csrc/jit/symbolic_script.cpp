@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/symbolic_script.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/script/compiler.h>
 
 namespace torch {
 namespace jit {
@@ -1330,7 +1332,7 @@ void loadModule(const script::CompilationUnit& module) {
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw script::ErrorReport(forward_tuple->getSourceLocation())
+      throw script::ErrorReport(forward_tuple->sourceRange())
           << "gradient must return literal a tuple";
     }
 

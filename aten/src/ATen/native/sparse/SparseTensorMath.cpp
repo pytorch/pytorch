@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
@@ -17,21 +18,22 @@ using namespace at::sparse;
 
 namespace {
   LongTensor _to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
-    int64_t h, i, hp0, hp1;
     LongTensor csr = native::zeros({dim + 1}, kLong);
 
     // TODO: eliminate this conditional when zero-size dims supported correctly
     if (nnz > 0) {
       auto csr_accessor = csr.accessor<int64_t, 1>();
       // Convert the sparse matrix to CSR format
-#pragma omp parallel for private(i, h, hp0, hp1) schedule(static) if (nnz > 10000)
-      for (i=0; i<nnz; i++) {
-        hp0 = indices[i];
-        hp1 = (i+1 == nnz) ?  dim : indices[i+1];
-        if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
-          csr_accessor[h+1] = i+1;
+      at::parallel_for(0, nnz, 10000, [&](int64_t start, int64_t end) {
+        int64_t h, hp0, hp1;
+        for (auto i = start; i < end; i++) {
+          hp0 = indices[i];
+          hp1 = (i+1 == nnz) ?  dim : indices[i+1];
+          if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
+            csr_accessor[h+1] = i+1;
+          }
         }
-      }
+      });
     }
     return csr;
   }
@@ -309,22 +311,21 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
 
 template <typename scalar_t>
 void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sparse, const Tensor& indices, const Tensor& values) {
-  int64_t k;
-
   auto indices_accessor = indices.accessor<int64_t, 2>();
   auto values_accessor = values.accessor<scalar_t, 1>();
 
   scalar_t* r_ptr = r.data<scalar_t>();
   scalar_t cast_value = value.to<scalar_t>();
 
-  #pragma omp parallel for private(k)
-  for (k = 0; k < sparse._nnz(); k++) {
-    int64_t index = r.storage_offset();
-    for (int64_t d = 0; d < sparse.sparse_dim(); d++) {
-      index += r.stride(d) * indices_accessor[d][k];
+  at::parallel_for(0, sparse._nnz(), 0, [&](int64_t start, int64_t end) {
+    for (auto k = start; k < end; k++) {
+      int64_t index = r.storage_offset();
+      for (int64_t d = 0; d < sparse.sparse_dim(); d++) {
+        index += r.stride(d) * indices_accessor[d][k];
+      }
+      r_ptr[index] += cast_value * values_accessor[k];
     }
-    r_ptr[index] += cast_value * values_accessor[k];
-  }
+  });
 }
 
 Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef sparse__, Scalar value) {
@@ -479,7 +480,6 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
 // D = beta * D1 + alpha * mm(S, D2)
 // --------------------------------------------------------------------
 
-// NB: OMP pragmas have to get their own functions; can't put them in lambdas
 template <typename scalar_t>
 void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, int64_t dim_k, Tensor& r, Scalar beta, const Tensor& t, Scalar alpha, const Tensor& indices, const Tensor& values, const Tensor& dense) {
   int64_t i;
@@ -1053,25 +1053,26 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
       auto input_indices_1D_accessor = input_indices_1D.accessor<int64_t, 1>();
 
       // binary search to find matching indices
-      int64_t i;
-      #pragma omp parallel for private(i)
-      for (i = 0; i < input_nnz; i++) {
-        int64_t input_idx = input_indices_1D_accessor[i];
-        int64_t l = 0, r = grad_nnz - 1;
-        while (l <= r) {
-          int64_t m = l + (r - l) / 2;
-          if (grad_indices_1D_accessor[m] == input_idx) {
-            grad_input_values[i].copy_(grad_values_expand[m]);
-            break;
-          }
-          if (grad_indices_1D_accessor[m] < input_idx) {
-            l = m + 1;
-          }
-          else {
-            r = m - 1;
+
+      at::parallel_for(0, input_nnz, 0, [&](int64_t start, int64_t end) {
+        for (auto i = start; i < end; i++) {
+          int64_t input_idx = input_indices_1D_accessor[i];
+          int64_t l = 0, r = grad_nnz - 1;
+          while (l <= r) {
+            int64_t m = l + (r - l) / 2;
+            if (grad_indices_1D_accessor[m] == input_idx) {
+              grad_input_values[i].copy_(grad_values_expand[m]);
+              break;
+            }
+            if (grad_indices_1D_accessor[m] < input_idx) {
+              l = m + 1;
+            }
+            else {
+              r = m - 1;
+            }
           }
         }
-      }
+      });
     }
     else {
       grad_input_values = grad_values_expand;

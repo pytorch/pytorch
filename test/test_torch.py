@@ -148,6 +148,16 @@ class _TestTorchMixin(object):
     def test_dir(self):
         dir(torch)
 
+    def test_type_conversion_via_dtype_name(self):
+        x = torch.tensor([1])
+        self.assertEqual(x.byte().dtype, torch.uint8)
+        self.assertEqual(x.bool().dtype, torch.bool)
+        self.assertEqual(x.char().dtype, torch.int8)
+        self.assertEqual(x.double().dtype, torch.float64)
+        self.assertEqual(x.float().dtype, torch.float32)
+        self.assertEqual(x.half().dtype, torch.float16)
+        self.assertEqual(x.int().dtype, torch.int32)
+
     def test_doc(self):
         checked_types = (types.MethodType, types.FunctionType,
                          types.BuiltinFunctionType, types.BuiltinMethodType)
@@ -890,6 +900,18 @@ class _TestTorchMixin(object):
 
     def test_max(self):
         self._testSelection(torch.max, max)
+
+    def test_log_normal(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.tensor([10], dtype=torch.float, device=device).log_normal_()
+            self.assertEqual(a.dtype, torch.float)
+            self.assertEqual(a.size(), torch.Size([1]))
+
+    def test_geometric(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.tensor([10], dtype=torch.float, device=device).geometric_(0.5)
+            self.assertEqual(a.dtype, torch.float)
+            self.assertEqual(a.size(), torch.Size([1]))
 
     @staticmethod
     def _test_max_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):
@@ -2687,6 +2709,15 @@ class _TestTorchMixin(object):
         # Copying from a float Tensor
         qr[:] = x
         self.assertEqual(qr.item(), 15)
+        # we can also print a qtensor
+        self.assertEqual(str(qr),
+                         "tensor([15.], size=(1,), dtype=torch.qint8, " +
+                         "scale=1.0, zero_point=2)")
+        empty_r = torch.ones((0, 1), dtype=torch.float)
+        empty_qr = empty_r.quantize_linear(scale, zero_point)
+        self.assertEqual(str(empty_qr),
+                         "tensor([], size=(0, 1), dtype=torch.qint8, " +
+                         "scale=1.0, zero_point=2)")
 
     def test_qtensor_quant_dequant(self):
         r = np.random.rand(3, 2) * 2 - 4
@@ -9256,33 +9287,45 @@ class _TestTorchMixin(object):
 
     def test_serialization_offset(self):
         a = torch.randn(5, 5)
-        i = 41
-        for use_name in (False, True):
-            # Passing filename to torch.save(...) will cause the file to be opened twice,
-            # which is not supported on Windows
-            if sys.platform == "win32" and use_name:
-                continue
-            with tempfile.NamedTemporaryFile() as f:
-                handle = f if not use_name else f.name
-                pickle.dump(i, f)
-                torch.save(a, f)
-                f.seek(0)
-                j = pickle.load(f)
-                b = torch.load(f)
-            self.assertTrue(torch.equal(a, b))
-            self.assertEqual(i, j)
+        b = torch.randn(2, 2)
+        m = torch.nn.Conv2d(1, 1, (1, 3))
+        i, j = 41, 43
+        with tempfile.NamedTemporaryFile() as f:
+            pickle.dump(i, f)
+            torch.save(a, f)
+            pickle.dump(j, f)
+            torch.save(b, f)
+            torch.save(m, f)
+            f.seek(0)
+            i_loaded = pickle.load(f)
+            a_loaded = torch.load(f)
+            j_loaded = pickle.load(f)
+            b_loaded = torch.load(f)
+            m_loaded = torch.load(f)
+        self.assertTrue(torch.equal(a, a_loaded))
+        self.assertTrue(torch.equal(b, b_loaded))
+        self.assertTrue(m.kernel_size == m_loaded.kernel_size)
+        self.assertEqual(i, i_loaded)
+        self.assertEqual(j, j_loaded)
 
     def test_serialization_offset_filelike(self):
         a = torch.randn(5, 5)
-        i = 41
+        b = torch.randn(2, 3)
+        i, j = 41, 43
         with BytesIOContext() as f:
             pickle.dump(i, f)
-            torch.save(a, f)
+            torch.save(a, f)            
+            pickle.dump(j, f)
+            torch.save(b, f)
             f.seek(0)
-            j = pickle.load(f)
-            b = torch.load(f)
-        self.assertTrue(torch.equal(a, b))
-        self.assertEqual(i, j)
+            i_loaded = pickle.load(f)
+            a_loaded = torch.load(f)
+            j_loaded = pickle.load(f)
+            b_loaded = torch.load(f)
+        self.assertTrue(torch.equal(a, a_loaded))
+        self.assertTrue(torch.equal(b, b_loaded))
+        self.assertEqual(i, i_loaded)
+        self.assertEqual(j, j_loaded)
 
     def test_serialization_offset_gzip(self):
         a = torch.randn(5, 5)
@@ -10965,6 +11008,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         # We can't usefully test the output; just make sure this doesn't crash
         torch.__config__.show()
 
+    def test_parallel_info(self):
+        torch.__config__.parallel_info()
+
     @staticmethod
     def _test_bincount(self, device):
         # negative input throws
@@ -11301,6 +11347,19 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             torch.ops._caffe2.LayerNorm(torch.tensor(X), torch.tensor(
                 weight), torch.tensor(bias), 1, epsilon, True)
         torch.testing.assert_allclose(expected_norm, actual_norm)
+
+    def test_subclass_tensors(self):
+        # raise an error when trying to subclass FloatTensor
+        with self.assertRaisesRegex(TypeError, "type 'torch.FloatTensor' is not an acceptable base type"):
+            class Foo1(torch.FloatTensor):
+                pass
+
+        # but allow subclassing Tensor:
+        class Foo2(torch.Tensor):
+            def foo(self):
+                return 5
+        f = Foo2()
+        self.assertEqual(f.foo(), 5)
 
 # Functions to test negative dimension wrapping
 METHOD = 1
