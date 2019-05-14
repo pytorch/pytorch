@@ -350,7 +350,11 @@ void Module::train(bool on) {
  for (auto& submod : get_modules()) {
    submod->train(on);
  }
- register_attribute("training", BoolType::get(), on);
+ if (auto slot = find_attribute("training")) {
+   slot->setValue(on);
+ } else{
+   register_attribute("training", BoolType::get(), on);
+ }
 }
 
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
