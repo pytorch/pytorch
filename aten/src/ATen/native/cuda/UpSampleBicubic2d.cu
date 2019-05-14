@@ -12,9 +12,7 @@ namespace native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void upsample_bicubic2d_out_frame(
     const int num_elements,
     const accscalar_t height_scale,
@@ -92,9 +90,7 @@ __global__ void upsample_bicubic2d_out_frame(
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void upsample_bicubic2d_backward_out_frame(
     const int num_elements,
     const accscalar_t height_scale,
@@ -207,7 +203,7 @@ static void upsample_bicubic2d_out_cuda_template(
 
   const int num_output_elements = output_height * output_width;
   const int max_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock / 2;
+      std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
 
   // Launch kernel
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -287,8 +283,8 @@ static void upsample_bicubic2d_backward_out_cuda_template(
   grad_input.zero_();
 
   const int num_kernels = output_height * output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock / 2;
+  const int num_threads = 
+      std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
