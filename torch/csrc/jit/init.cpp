@@ -194,7 +194,7 @@ void initJITBindings(PyObject* module) {
                   method_name,
                   param_name,
                   getQParamFunc,
-                  at::ScalarType::QInt8);
+                  at::ScalarType::QInt32);
             }
           })
       .def(

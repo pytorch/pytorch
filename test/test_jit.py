@@ -75,9 +75,7 @@ if torch.cuda.is_available():
     CUDA_VERSION = torch._C._cuda_getCompiledVersion()
     for d in range(torch.cuda.device_count()):
         major = torch.cuda.get_device_capability(d)[0]
-        if (CUDA_VERSION < 8000 and major >= 6) or (CUDA_VERSION < 9000 and major >= 7):
-            RUN_CUDA = False
-        if (CUDA_VERSION < 9000 or major < 6):
+        if (major < 6):
             RUN_CUDA_HALF = False
 
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
@@ -1329,12 +1327,13 @@ graph(%x : Tensor,
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
                    .check("conv2d").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
-                   .run(str(trace.graph))
+                   .check_next("Constant").check_next("Constant") \
+                   .check_next("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear").run(str(trace.graph))
         FileCheck().check("relu").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("Constant").check_next("Constant") \
+                   .check_next("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear") \
                    .check_next("return").run(str(trace.graph))
 
     def test_insert_quantdequant_consecutive_qnodes_trace(self):
@@ -1362,13 +1361,14 @@ graph(%x : Tensor,
         # quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
-                   .check("_convolution").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
-                   .run(str(trace.graph))
+                   .check("conv2d").check_next("Constant") \
+                   .check_next("Constant").check_next("Constant") \
+                   .check_next("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear").run(str(trace.graph))
         FileCheck().check("relu").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("Constant").check_next("Constant") \
+                   .check_next("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear") \
                    .check_next("return").run(str(trace.graph))
 
     def test_insert_quantdequant_single_qnode(self):
@@ -1401,10 +1401,10 @@ graph(%x : Tensor,
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
                    .check("conv2d").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
-                   .check_next("add").check_next("return") \
-                   .run(str(trace.graph))
+                   .check_next("Constant").check_next("Constant") \
+                   .check_next("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear") \
+                   .check_next("add").check_next("return").run(str(trace.graph))
 
     def test_insert_quantdequant_alternate_qnode(self):
         input_data = torch.ones([1, 1, 5, 5])
@@ -1437,9 +1437,10 @@ graph(%x : Tensor,
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
                    .check("conv2d").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("Constant").check_next("Constant") \
+                   .check_next("quantize_linear") \
                    .check_next("int_repr").run(str(trace.graph))
-        FileCheck().check("add").check_next("Constant")\
+        FileCheck().check("add").check_next("Constant").check_next("Constant") \
                    .check_next("Constant").check_next("quantize_linear") \
                    .check_next("int_repr").check("dequantize_linear") \
                    .run(str(trace.graph))
@@ -1479,23 +1480,24 @@ graph(%x : Tensor,
                    .check("conv2d").run(str(scriptModule.graph))
 
     def test_insert_quantdequant_for_bias(self):
-        input_data = torch.ones([1, 1, 1, 1])
-
         class testModule(torch.jit.ScriptModule):
             def __init__(self):
                 super(testModule, self).__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1, 1)
+                self.conv1 = nn.Conv2d(1, 1, 1, 1).float()
 
             @torch.jit.script_method
             def forward(self, x):
+                x = x.quantize_linear(1.0, 0, torch.uint8)
+                x = x.int_repr()
+                x = x.dequantize_linear(1.0, 0, torch.uint8)
                 x = self.conv1(x)
                 return x
 
+        def getQParamFuncW(value):
+            return 'per_tensor_quant', 0.5, 1
+
         def getQParamFunc(input_scale, weight_scale):
-            if input_scale == 0 or weight_scale == 0:
-                scale = 0.75
-            else:
-                scale = 1 / input_scale / weight_scale
+            scale = 1 / input_scale / weight_scale
             zero_point = 0
             return 'per_tensor_quant', scale, zero_point
 
@@ -1504,14 +1506,15 @@ graph(%x : Tensor,
         torch._C._jit_pass_constant_propagation(scriptModule.graph)
         torch._C._jit_pass_insert_quantdequant_for_param(scriptModule._c,
                                                          "forward",
+                                                         "weight",
+                                                         getQParamFuncW)
+        torch._C._jit_pass_insert_quantdequant_for_param(scriptModule._c,
+                                                         "forward",
                                                          "bias",
                                                          getQParamFunc)
 
-        # This is negation test. We dont expect to see q-dq terms because
-        # activation and weight pass to insert q-dq nodes is not run
-        # TODO: Add positive testcase once dequantize_linear exposed to python
-        FileCheck().check_not("quantize_linear").check_not("int_repr") \
-                   .check_not("dequantize_linear") \
+        FileCheck().check("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear") \
                    .check("conv2d").run(str(scriptModule.graph))
 
     def test_pattern_based_rewrite(self):
@@ -5954,6 +5957,61 @@ a")
         self.checkScript(test_sqrt_float, (2.0,))
         self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
+
+    @unittest.skipIf(PY2, "Requires python 3")
+    def test_math_gcd(self):
+        def test_gcd(x, y):
+            # type: (int, int) -> int
+            return math.gcd(x, y)
+
+        for inputs in [(2, 4), (-5, -15), (-5, 15), (10, 0), (0, 10), (-5, 0), (0, -5), (0, 0), (0, -0)]:
+            self.checkScript(test_gcd, inputs)
+
+    def test_math_ops1(self):
+        funcs_template = dedent('''
+        def func():
+            return math.{func}({scalar})
+        ''')
+
+        def run_test(code):
+            scope = {}
+            execWrapper(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            self.assertEqual(cu.func(), scope['func']())
+
+        special_domain = ['gamma', 'lgamma']
+
+        for func in ['erf', 'erfc', 'expm1', 'fabs', 'gamma', 'lgamma']:
+            for scalar in [1, 10, 0, -1, -1.5, 5.0, 1.5]:
+                if func in special_domain and scalar in [0, -1]:
+                    continue
+                code = funcs_template.format(func=func, scalar=scalar)
+                run_test(code)
+
+    def test_math_copysign(self):
+
+        def func1(x, y):
+            # type: (int, int) -> float
+            return math.copysign(x, y)
+
+        def func2(x, y):
+            # type: (int, float) -> float
+            return math.copysign(x, y)
+
+        def func3(x, y):
+            # type: (float, int) -> float
+            return math.copysign(x, y)
+
+        def func4(x, y):
+            # type: (float, float) -> float
+            return math.copysign(x, y)
+
+        inputs = [(3.3, 5.5), (3.3, -5.5), (-3.3, 5.5), (-3.3, -5.5), (3.3, 0.0), (0.0, 3.3)]
+        for a, b in inputs:
+            self.checkScript(func1, (int(a), int(b)))
+            self.checkScript(func2, (int(a), b))
+            self.checkScript(func3, (a, int(b)))
+            self.checkScript(func4, (a, b))
 
     def test_if_nest_while(self):
         def func(a, b):
@@ -10886,7 +10944,7 @@ a")
                               c   # type: Tensor
                               ):
                 # type: (int, int, int) -> Tensor
-                # type: bad type line
+                # type: bad type line  # noqa: F723
 
                 return a + b + c
 
@@ -14010,14 +14068,14 @@ nn_functional_tests = [
         '', (True, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
-     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
     ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),), 'with_only_weight',
-     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
     ('layer_norm', (S, S, S, S), ([5], None, non_differentiable(torch.rand(S)),), 'with_only_bias',
-     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
     ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),
                                   non_differentiable(torch.rand(S))), 'with_weight_and_bias',
-     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index', 'aten::addcmul'])),
+     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index', 'aten::addcmul'])),
     ('group_norm', (S, S, S), (1, torch.rand(5),),),
     ('local_response_norm', (S, S, S), (2, ),),
     ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '', (True, 'aten::nll_loss_forward')),
