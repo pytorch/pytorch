@@ -291,7 +291,7 @@ void initJitScriptBindings(PyObject* module) {
             auto attr = self.find_attribute(name);
             AT_CHECK(attr != nullptr, "Could not find attribute '", name, "'");
             auto ivalue = toIValue(value, attr->type());
-            self.set_attribute(name, ivalue);
+            attr->setValue(ivalue);
           })
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
