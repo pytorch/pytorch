@@ -1263,6 +1263,14 @@ void addGlobalMethods(py::module& m) {
             net->TEST_Benchmark(warmup_runs, main_runs, run_individual);
         return stat;
       });
+  m.def("benchmark_net_once", [](const std::string& name) {
+    CAFFE_ENFORCE(gWorkspace);
+    auto* net = gWorkspace->GetNet(name);
+    CAFFE_ENFORCE(net, "Didn't find net: ", name);
+    py::gil_scoped_release g;
+    float stat = net->TEST_Benchmark_One_Run();
+    return stat;
+  });
 
   m.def("delete_net", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
