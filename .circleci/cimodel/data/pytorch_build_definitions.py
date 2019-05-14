@@ -101,11 +101,8 @@ class Conf(object):
         }
 
         resource_class = None
-        if build_or_test == "test":
+        if build_or_test == "test" or self.is_important:
             resource_class = "large"
-
-        if self.is_important:
-            resource_class = "vlarge"
 
         if self.gpu_resource:
             resource_class = "gpu." + self.gpu_resource
