@@ -961,6 +961,15 @@ class TestLRScheduler(TestCase):
                              mode='exp_range', gamma=gamma)
         self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target))
 
+    def test_cycle_lr_with_momentumless_optimizer(self):
+        adam_opt = optim.Adam(self.net.parameters())
+        scheduler = CyclicLR(adam_opt, cycle_momentum=False)
+
+    def test_cycle_lr_cycle_momentum_fail_with_momentumless_optimizer(self):
+        with self.assertRaises(ValueError):
+            adam_opt = optim.Adam(self.net.parameters())
+            scheduler = CyclicLR(adam_opt, cycle_momentum=True)
+
     def test_lambda_lr(self):
         epochs = 10
         self.opt.param_groups[0]['lr'] = 0.05
