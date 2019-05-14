@@ -40,7 +40,9 @@ SET(INTEL_MKL_TBB OFF CACHE BOOL
   "Force using TBB library")
 
 IF (INTEL_MKL_TBB)
-  IF (NOT USE_TBB)
+  IF (USE_TBB)
+    message(STATUS "MKL is using TBB")
+  ELSE()
     message(FATAL_ERROR "INTEL_MKL_TBB is set to true but TBB is not used")
   ENDIF()
 ENDIF()

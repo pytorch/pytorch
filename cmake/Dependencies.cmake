@@ -73,6 +73,27 @@ else()
       "Cannot find threading library. Caffe2 requires Threads to compile.")
 endif()
 
+if (USE_TBB)
+  message(STATUS "Compiling TBB from source")
+  # Unset our restrictive C++ flags here and reset them later.
+  # Remove this once we use proper target_compile_options.
+  set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+  set(CMAKE_CXX_FLAGS)
+
+  set(TBB_ROOT_DIR "${CMAKE_SOURCE_DIR}/third_party/tbb")
+  set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
+  set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
+
+  install(TARGETS tbb EXPORT Caffe2Targets DESTINATION lib)
+
+  set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
+endif()
+
 # ---[ protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_LITE_PROTO)
@@ -1066,27 +1087,6 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_trt_library)
     set(CAFFE2_USE_TRT 1)
   endif()
-endif()
-
-if (USE_TBB)
-  message(STATUS "Compiling TBB from source")
-  # Unset our restrictive C++ flags here and reset them later.
-  # Remove this once we use proper target_compile_options.
-  set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-  set(CMAKE_CXX_FLAGS)
-
-  set(TBB_ROOT_DIR "${CMAKE_SOURCE_DIR}/third_party/tbb")
-  set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
-  set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
-  set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
-  set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
-  set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-  add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
-  set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
-
-  install(TARGETS tbb EXPORT Caffe2Targets DESTINATION lib)
-
-  set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
 endif()
 
 # --[ ATen checks
