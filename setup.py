@@ -155,6 +155,7 @@
 #     possible values:
 #       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
+#       NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
 #
 #   USE_EIGEN_THEADPOOL
 #      use Eigen thread pool as a native implementation of thread pool
