@@ -138,10 +138,10 @@ def run_cmake(version,
         cmake_args.append('-GNinja')
     elif IS_WINDOWS:
         if IS_64BIT:
-            cmake_args.append('-GVisual Studio 15 2017 Win64')
+            cmake_args.append('-GVisual Studio 16 2019 Win64')
             cmake_args.append('-Thost=x64')
         else:
-            cmake_args.append('-GVisual Studio 15 2017')
+            cmake_args.append('-GVisual Studio 16 2019')
     try:
         import numpy as np
         NUMPY_INCLUDE_DIR = np.get_include()
