@@ -11,6 +11,7 @@ TARGET_COMPILE_DEFINITIONS(shm PRIVATE
 )
 
 target_include_directories(shm PRIVATE
+  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
   ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
   ${CMAKE_CURRENT_SOURCE_DIR}

@@ -5,8 +5,11 @@
 #include <unordered_map>
 #include <algorithm>
 
-#include <ATen/core/aten_interned_strings.h>
 #include <c10/macros/Macros.h>
+
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
+#include <ATen/core/aten_interned_strings.h>
+#endif
 
 namespace c10 {
 
@@ -63,6 +66,7 @@ namespace c10 {
   _(prim, Bool)                    \
   _(prim, Int)                     \
   _(prim, Float)                   \
+  _(prim, str)                     \
   _(prim, device)                  \
   _(prim, dtype)                   \
   _(prim, shape)                   \
@@ -123,6 +127,7 @@ namespace c10 {
   _(aten, len)                     \
   _(aten, list)                    \
   _(aten, wait)                    \
+  _(aten, save)                    \
   _(aten, ord)                     \
   _(prim, unchecked_unwrap_optional)\
   FORALL_ATEN_BASE_SYMBOLS(_)      \
@@ -202,7 +207,7 @@ namespace c10 {
 // 'onnx' symbols correspond to ONNX operators.  Their semantics
 // are defined in https://github.com/onnx/onnx/blob/master/docs/Operators.md
 // The particular version we are targeting is specified by '_onnx_opset_version'
-// in torch.onnx.symbolic
+// in torch.onnx.symbolic_helper
 //
 // In general, most ONNX operators won't get an entry here, because they
 // are handled from the Python end.  However, you may occasionally need

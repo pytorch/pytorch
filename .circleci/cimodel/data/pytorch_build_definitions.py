@@ -24,7 +24,9 @@ class Conf(object):
                  restrict_phases=None,
                  gpu_resource=None,
                  dependent_tests=None,
-                 parent_build=None):
+                 parent_build=None,
+                 is_namedtensor=False,
+                 is_important=False):
 
         self.distro = distro
         self.pyver = pyver
@@ -35,6 +37,8 @@ class Conf(object):
         #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
         # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
         self.is_xla = is_xla
+        self.is_namedtensor = is_namedtensor
+        self.is_important = is_important
 
         self.restrict_phases = restrict_phases
         self.gpu_resource = gpu_resource
@@ -44,9 +48,14 @@ class Conf(object):
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
     def get_parms(self, for_docker):
-        leading = ["pytorch"]
+        leading = []
+        if self.is_important and not for_docker:
+            leading.append("AAA")
+        leading.append("pytorch")
         if self.is_xla and not for_docker:
             leading.append("xla")
+        if self.is_namedtensor and not for_docker:
+            leading.append("namedtensor")
 
         cuda_parms = []
         if self.cuda_version:
@@ -105,8 +114,10 @@ class Conf(object):
 
     def gen_workflow_yaml_item(self, phase):
 
+        # All jobs require the setup job
+        parameters = OrderedDict({"requires": ["setup"]})
+
         if phase == "test":
-            val = OrderedDict()
 
             # TODO When merging the caffe2 and pytorch jobs, it might be convenient for a while to make a
             #  caffe2 test job dependent on a pytorch build job. This way we could quickly dedup the repeated
@@ -114,11 +125,9 @@ class Conf(object):
             #  pytorch build job (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259452641)
 
             dependency_build = self.parent_build or self
-            val["requires"] = [dependency_build.gen_build_name("build")]
+            parameters["requires"].append(dependency_build.gen_build_name("build"))
 
-            return {self.gen_build_name(phase): val}
-        else:
-            return self.gen_build_name(phase)
+        return {self.gen_build_name(phase): parameters}
 
 
 # TODO This is a hack to special case some configs just for the workflow list
@@ -220,6 +229,8 @@ def instantiate_configs():
             parms_list.append("gcc7")
 
         is_xla = fc.find_prop("is_xla") or False
+        is_namedtensor = fc.find_prop("is_namedtensor") or False
+        is_important = fc.find_prop("is_important") or False
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
@@ -233,9 +244,11 @@ def instantiate_configs():
             is_xla,
             restrict_phases,
             gpu_resource,
+            is_namedtensor=is_namedtensor,
+            is_important=is_important,
         )
 
-        if cuda_version == "8":
+        if cuda_version == "9" and python_version == "3.6":
             c.dependent_tests = gen_dependent_configs(c)
 
         config_list.append(c)
@@ -279,7 +292,7 @@ def get_workflow_list():
 
     config_list = instantiate_configs()
 
-    x = []
+    x = ["setup"]
     for conf_options in config_list:
 
         phases = conf_options.restrict_phases or dimensions.PHASES

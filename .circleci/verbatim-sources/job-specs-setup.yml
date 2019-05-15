@@ -1,0 +1,12 @@
+  setup:
+    docker:
+      - image: circleci/python:3.7.3
+    steps:
+      - checkout
+      - run:
+          name: Ensure config is up to date
+          command: ./ensure-consistency.py
+          working_directory: .circleci
+      - persist_to_workspace:
+          root: .
+          paths: .circleci/scripts

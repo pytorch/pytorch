@@ -1,4 +1,5 @@
 #include <ATen/core/jit_type.h>
+#include <ATen/core/Dict.h>
 
 #include <iostream>
 
@@ -156,6 +157,8 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
     return TupleType::create(fmap(value.toTuple()->elements(), incompleteInferTypeFrom));
   } else if (value.isDevice()) {
     return DeviceObjType::get();
+  } else if (value.isObject()) {
+    return value.toObject()->type();
   }
   AT_ERROR("Type cannot be accurately recovered from this IValue.");
 }
@@ -180,7 +183,7 @@ TypePtr attemptToRecoverType(const IValue& ivalue) {
     }
     auto item = dict.begin();
     return DictType::create(
-        attemptToRecoverType(item->first), attemptToRecoverType(item->second));
+        attemptToRecoverType(item->key()), attemptToRecoverType(item->value()));
   }
   return incompleteInferTypeFrom(ivalue);
 }
@@ -224,9 +227,9 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
     auto dict_type = type->expect<DictType>();
     const auto& dict = ivalue.toGenericDictRef();
     return std::all_of(
-        dict.begin(), dict.end(), [=](const std::pair<IValue, IValue>& item) {
-          return isSubvalueOf(item.first, dict_type->getKeyType()) &&
-              isSubvalueOf(item.second, dict_type->getValueType());
+        dict.begin(), dict.end(), [=](const c10::impl::GenericDict::const_iterator::value_type& item) {
+          return isSubvalueOf(item.key(), dict_type->getKeyType()) &&
+              isSubvalueOf(item.value(), dict_type->getValueType());
         });
   }
   return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
@@ -469,46 +472,10 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
   return *this == *rhs;
 }
 
-namespace {
-class ClassTypeRegistry {
- public:
-  void registerType(QualifiedName name, ClassTypePtr type) {
-    std::lock_guard<std::mutex> g(mutex_);
-    // TODO: new type registrations will override the old ones. Is this safe?
-    reg_[std::move(name)] = type;
-  }
-
-  ClassTypePtr getType(const QualifiedName& name) {
-    std::lock_guard<std::mutex> g(mutex_);
-    if (reg_.count(name)) {
-      return reg_.at(name);
-    }
-    return nullptr;
-  }
-
-  void clear() {
-    std::lock_guard<std::mutex> g(mutex_);
-    reg_.clear();
-  }
-
- private:
-  std::mutex mutex_;
-  std::unordered_map<QualifiedName, ClassTypePtr> reg_;
-};
-
-ClassTypeRegistry& getRegistry() {
-  static ClassTypeRegistry r;
-  return r;
-}
-} // namespace
-
 ClassTypePtr ClassType::create(
     QualifiedName qualifiedName,
     std::shared_ptr<CompilationUnit> cu) {
-  auto ptr =
-      ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
-  getRegistry().registerType(std::move(qualifiedName), ptr);
-  return ptr;
+  return ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
 }
 
 ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
@@ -524,14 +491,6 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
     ptr->addAttribute(attributeNames_[i], refined_slots[i]);
   }
   return ptr;
-}
-
-ClassTypePtr ClassType::get(const QualifiedName& name) {
-  return getRegistry().getType(name);
-}
-
-void ClassType::clearRegistry() {
-  getRegistry().clear();
 }
 
 std::string ProfiledTensorType::str() const {

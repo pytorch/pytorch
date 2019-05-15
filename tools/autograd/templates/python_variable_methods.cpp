@@ -5,10 +5,11 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
+#include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/jit/tracer.h"
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
@@ -320,7 +321,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
-  AT_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
+  TORCH_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
   torch::utils::cuda_lazy_init();
   return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false));
   END_HANDLE_TH_ERRORS
