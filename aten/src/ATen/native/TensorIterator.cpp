@@ -468,7 +468,7 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   auto builder = TensorIterator::Builder();
   if (a.device().is_cuda() && b.device().is_cuda()) {
-    AT_CHECK(a.device() == b.device(),
+    TORCH_CHECK(a.device() == b.device(),
       "binary_op(): expected both inputs to be on same device, but input a "
       "is on ", a.device(), " and input b is on ", b.device());
   }
@@ -483,6 +483,14 @@ std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tens
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   builder.add_input(a);
+  return builder.build();
+}
+
+std::unique_ptr<TensorIterator> TensorIterator::nullary_op(Tensor& out) {
+  auto builder = TensorIterator::Builder();
+  builder.add_output(out);
+  // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
+  builder.iter_->resize_outputs_ = false;
   return builder.build();
 }
 

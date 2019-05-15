@@ -8,10 +8,10 @@
 namespace at {
 namespace native {
 Tensor& _s_copy__quantized(Tensor& self, const Tensor& src, bool /* unused */) {
-  AT_CHECK(
+  TORCH_CHECK(
       self.scalar_type() == at::kQInt8,
       "Quantized copy only works with kQInt8 as target Tensor");
-  AT_CHECK(
+  TORCH_CHECK(
       src.scalar_type() == at::kFloat,
       "Quantized copy only works with kFloat as source Tensor");
   qint8* self_data = self.data<qint8>();
