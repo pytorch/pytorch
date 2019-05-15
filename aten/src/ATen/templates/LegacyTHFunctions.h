@@ -9,11 +9,11 @@ namespace th {
 namespace detail {
 
 static inline LegacyTHDispatcher & infer_dispatcher(const Tensor & t) {
-  AT_CHECK(t.defined(), "undefined Tensor");
+  TORCH_CHECK(t.defined(), "undefined Tensor");
   return getLegacyTHDispatcher(t);
 }
 static inline LegacyTHDispatcher & infer_dispatcher(const TensorList & tl) {
-  AT_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
   return getLegacyTHDispatcher(tl[0]);
 }
 
