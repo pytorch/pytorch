@@ -890,6 +890,22 @@ def _try_get_overloaded_fn(mod, field):
     return mod._overloads.get(field, None) if isinstance(mod, ScriptModule) else None
 
 
+def _try_compile_weak_script(fn):
+    entry = _jit_internal.compiled_weak_fns.get(fn)
+    if entry is None:
+        return None
+    if entry["status"] == _jit_internal.COMPILATION_PENDING:
+        compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
+        del entry["rcb"]
+        _jit_internal.compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
+        entry["status"] = _jit_internal.COMPILED
+        return compiled_fn
+        # TODO: use fn.__closure__
+        raise RuntimeError("Cannot make resolutionCallback in Python 2")
+    else:
+        return entry["compiled_fn"]
+
+
 class ScriptWarning(Warning):
     pass
 
@@ -997,7 +1013,7 @@ def _qualified_name(obj):
 
 
 def _recursive_script(fn):
-    return torch.jit.script(fn, _recurse=True)
+    return torch.jit.script(fn, _frames_up=1, _recurse=True)
 
 
 def script(obj, optimize=True, _frames_up=0, _rcb=None, _recurse=False):
@@ -1010,12 +1026,12 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None, _recurse=False):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
         qualified_name = _qualified_name(obj)
         ast = get_jit_class_def(obj, obj.__name__)
-        _jit_script_class_compile(qualified_name, ast, _rcb, _recurse)
+        _jit_script_class_compile(qualified_name, ast, _rcb)
         _add_script_class(obj, qualified_name)
         return obj
     else:
         ast = get_jit_def(obj)
-        fn = torch._C._jit_script_compile(ast, _rcb, get_default_args(obj))
+        fn = torch._C._jit_script_compile(ast, _rcb, get_default_args(obj), _recurse)
         # Forward docstrings
         fn.__doc__ = obj.__doc__
         return fn

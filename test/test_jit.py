@@ -12520,7 +12520,9 @@ a")
         def a_script_fn(d, e, f):
             return a_python_fn(d, e, f)
 
-        FileCheck().check("aten::add").run(a_script_fn.graph())
+        graph = str(a_script_fn.graph)
+        FileCheck().check("aten::add").run(graph)
+        FileCheck().check_not("a_python_fn").run(graph)
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):

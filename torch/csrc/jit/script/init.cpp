@@ -56,7 +56,8 @@ namespace {
 
 // A resolver that will inspect the outer Python scope to find `name`.
 struct PythonResolver : public Resolver {
-  explicit PythonResolver(ResolutionCallback rcb) : rcb_(std::move(rcb)) {}
+  explicit PythonResolver(ResolutionCallback rcb, bool recurse)
+      : rcb_(std::move(rcb)), recurse_(recurse) {}
 
   /**
    * While compiling classes, the class type we're compiling will not be
@@ -89,8 +90,7 @@ struct PythonResolver : public Resolver {
     if (obj.is(py::none())) {
       return nullptr;
     }
-    std::cout << "Resolving value " << name << "\n";
-    return toSugaredValue(obj, m, loc, recurse_);
+    return toSugaredValue(obj, m, loc, /*is_constant=*/false, recurse_);
   }
 
   TypePtr resolveType(const std::string& name) const override {
@@ -121,8 +121,10 @@ struct PythonResolver : public Resolver {
   bool recurse_;
 };
 
-std::shared_ptr<PythonResolver> pythonResolver(ResolutionCallback rcb) {
-  return std::make_shared<PythonResolver>(rcb);
+std::shared_ptr<PythonResolver> pythonResolver(
+    ResolutionCallback rcb,
+    bool recurse = false) {
+  return std::make_shared<PythonResolver>(rcb, recurse);
 }
 
 std::shared_ptr<PythonResolver> pythonResolver(
@@ -529,9 +531,12 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_jit_script_compile",
-      [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
+      [](const Def& def,
+         ResolutionCallback rcb,
+         FunctionDefaults defaults,
+         bool recurse) {
         CompilationUnit cu;
-        cu.define({def}, {pythonResolver(rcb)}, nullptr);
+        cu.define({def}, {pythonResolver(rcb, recurse)}, nullptr);
         std::shared_ptr<Function> defined = cu.get_functions().at(0);
         defined->setSchema(getSchemaWithNameAndDefaults(
             def.range(), defined->getSchema(), def.name().name(), defaults));

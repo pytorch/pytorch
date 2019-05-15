@@ -25,7 +25,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
     SourceRange loc,
-    bool is_constant = false);
+    bool is_constant = false,
+    bool recurse = false);
 
 std::shared_ptr<Function> as_function(const py::object& obj);
 
