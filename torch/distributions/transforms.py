@@ -1,7 +1,6 @@
 import numbers
 import weakref
 
-import torch
 from torch.distributions import constraints
 from torch.distributions import functional as F
 from torch.distributions.utils import (broadcast_all,
@@ -555,45 +554,23 @@ class StackTransform(Transform):
         self.transforms = list(tseq)
         self.dim = dim
 
-    def _slice(self, z):
-        return [z.select(self.dim, i) for i in range(z.size(self.dim))]
-
     def _call(self, x):
-        assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == len(self.transforms)
-        yslices = []
-        for xslice, trans in zip(self._slice(x), self.transforms):
-            yslices.append(trans(xslice))
-        return torch.stack(yslices, dim=self.dim)
+        return F.stack_transform_call(self.dim, self.transforms, x)
 
     def _inverse(self, y):
-        assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == len(self.transforms)
-        xslices = []
-        for yslice, trans in zip(self._slice(y), self.transforms):
-            xslices.append(trans.inv(yslice))
-        return torch.stack(xslices, dim=self.dim)
+        return F.stack_transform_inverse(self.dim, self.transforms, y)
 
     def log_abs_det_jacobian(self, x, y):
-        assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == len(self.transforms)
-        assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == len(self.transforms)
-        logdetjacs = []
-        yslices = self._slice(y)
-        xslices = self._slice(x)
-        for xslice, yslice, trans in zip(xslices, yslices, self.transforms):
-            logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
-        return torch.stack(logdetjacs, dim=self.dim)
+        return F.stack_transform_log_abs_det_jacobian(self.dim, self.transforms, x, y)
 
     @property
     def bijective(self):
-        return all(t.bijective for t in self.transforms)
+        return F.stack_transform_bijective(self.transforms)
 
     @constraints.dependent_property
     def domain(self):
-        return constraints.stack([t.domain for t in self.transforms], self.dim)
+        return F.stack_transform_domain(self.dim, self.transforms)
 
     @constraints.dependent_property
     def codomain(self):
-        return constraints.stack([t.codomain for t in self.transforms], self.dim)
+        return F.stack_transform_codomain(self.dim, self.transforms)

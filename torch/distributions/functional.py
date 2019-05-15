@@ -230,6 +230,54 @@ def cat_transform_domain(dim, lengths, transforms):
     return constraints.cat([t.domain for t in transforms],
                            dim, lengths)
 
+
 def cat_transform_codomain(dim, lengths, transforms):
     return constraints.cat([t.codomain for t in transforms],
                            dim, lengths)
+
+
+def stack_transform_slice(dim, z):
+    return [z.select(dim, i) for i in range(z.size(dim))]
+
+
+def stack_transform_call(dim, transforms, x):
+    assert -x.dim() <= dim < x.dim()
+    assert x.size(dim) == len(transforms)
+    yslices = []
+    for xslice, trans in zip(stack_transform_slice(x), transforms):
+        yslices.append(trans(xslice))
+    return torch.stack(yslices, dim=dim)
+
+
+def stack_transform_inverse(dim, transforms, y):
+    assert -y.dim() <= dim < y.dim()
+    assert y.size(dim) == len(transforms)
+    xslices = []
+    for yslice, trans in zip(stack_transform_slice(y), transforms):
+        xslices.append(trans.inv(yslice))
+    return torch.stack(xslices, dim=dim)
+
+
+def stack_transform_log_abs_det_jacobian(dim, transforms, x, y):
+    assert -x.dim() <= dim < x.dim()
+    assert x.size(dim) == len(transforms)
+    assert -y.dim() <= dim < y.dim()
+    assert y.size(dim) == len(transforms)
+    logdetjacs = []
+    yslices = stack_transform_slice(y)
+    xslices = stack_transform_slice(x)
+    for xslice, yslice, trans in zip(xslices, yslices, transforms):
+        logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
+    return torch.stack(logdetjacs, dim=dim)
+
+
+def stack_transform_bijective(transforms):
+    return all(t.bijective for t in transforms)
+
+
+def stack_transform_domain(dim, transforms):
+    return constraints.stack([t.domain for t in transforms], dim)
+
+
+def stack_transform_codomain(dim, transforms):
+    return constraints.stack([t.codomain for t in transforms], dim)
