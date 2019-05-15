@@ -3,8 +3,7 @@ import weakref
 
 from torch.distributions import constraints
 from torch.distributions import functional as F
-from torch.distributions.utils import (broadcast_all,
-                                       lazy_property)
+from torch.distributions.utils import (broadcast_all, lazy_property)
 
 __all__ = [
     'AbsTransform',

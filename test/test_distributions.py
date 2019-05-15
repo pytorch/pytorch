@@ -37,7 +37,7 @@ from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
                                  Exponential, ExponentialFamily,
-                                 FisherSnedecor, Gamma, Geometric, Gumbel,
+                                 FisherSnedecor, functional, Gamma, Geometric, Gumbel,
                                  HalfCauchy, HalfNormal,
                                  Independent, Laplace, LogisticNormal,
                                  LogNormal, LowRankMultivariateNormal,
@@ -4092,6 +4092,103 @@ class TestTransforms(TestCase):
             x = self._generate_data(transform).requires_grad_()
             self.assertEqual(f(x), traced_f(x))
 
+class TestTransformFunctions(TestCase):
+    def setUp(self):
+        super(TestTransformFunctions, self).setUp()
+        np.set_printoptions(precision=3, suppress=True)
+        data_1 = [
+            [[3, 7], [5, 2]],
+            [[2, 9], [2, 7]],
+            [[5, 1], [6, 8]]]
+
+        self.data_1 = [torch.FloatTensor(x) for x in data_1]
+
+        # exp transform
+        self.exp_y = [
+            torch.tensor([[20.086, 1096.633], [148.413, 7.389]], dtype=torch.float32),
+            torch.tensor([[7.389, 8103.084], [7.389, 1096.633]], dtype=torch.float32),
+            torch.tensor([[148.413, 2.718], [403.429, 2980.958]], dtype=torch.float32)]
+        self.exp_log_abs_det_jacobian = self.data_1
+
+        # power transform
+        self.pow_y = [
+            torch.tensor([[9., 49.], [25., 4.]], dtype=torch.float32),
+            torch.tensor([[4., 81.], [4., 49.]], dtype=torch.float32),
+            torch.tensor([[25., 1.], [36., 64.]], dtype=torch.float32)]
+        self.pow_log_abs_det_jacobian = [
+            torch.tensor([[1.792, 2.639], [2.303, 1.386]], dtype=torch.float32),
+            torch.tensor([[1.386, 2.89], [1.386, 2.639]], dtype=torch.float32),
+            torch.tensor([[2.303, 0.693], [2.485, 2.773]], dtype=torch.float32)]
+
+        # sigmoid transform
+        self.sigmoid_y = [
+            torch.tensor([[0.953, 0.999], [0.993, 0.881]], dtype=torch.float32),
+            torch.tensor([[0.881, 1.], [0.881, 0.999]], dtype=torch.float32),
+            torch.tensor([[0.993, 0.731], [0.998, 1.]], dtype=torch.float32)]
+        self.sigmoid_log_abs_det_jacobian = [
+            torch.tensor([[-3.097, -7.002], [-5.013, -2.254]], dtype=torch.float32),
+            torch.tensor([[-2.254, -9.], [-2.254, -7.002]], dtype=torch.float32),
+            torch.tensor([[-5.013, -1.627], [-6.005, -8.001]], dtype=torch.float32)]
+
+    def test_exp_transform_call(self):
+        for i in range(len(self.data_1)):
+            x = self.data_1[i]
+            y = functional.exp_transform_call(x)
+            self.assertAlmostEqual(self.exp_y[i], y, places=2)
+
+    def test_exp_transform_inverse(self):
+        for i in range(len(self.exp_y)):
+            x = self.data_1[i]
+            y = functional.exp_transform_call(x)
+            y_inv = functional.exp_transform_inverse(y)
+            self.assertAlmostEqual(y_inv, x, places=2)
+
+    def test_exp_transform_log_abs_det_jacobian(self):
+        for i in range(len(self.data_1)):
+            x = self.data_1[i]
+            y = functional.exp_transform_call(x)
+            log_abs_det_jacobian = functional.exp_transform_log_abs_det_jacobian(x, y)
+            self.assertAlmostEqual(self.exp_log_abs_det_jacobian[i], log_abs_det_jacobian, places=2)
+
+    def test_power_transform_call(self):
+        for i in range(len(self.data_1)):
+            x = self.data_1[i]
+            y = functional.power_transform_call(2, x)
+            self.assertAlmostEqual(self.pow_y[i], y, places=2)
+
+    def test_power_transform_inverse(self):
+        for i in range(len(self.pow_y)):
+            x = self.data_1[i]
+            y = functional.power_transform_call(2, x)
+            y_inv = functional.power_transform_inverse(2, y)
+            self.assertAlmostEqual(y_inv, x, places=2)
+
+    def test_power_transform_log_abs_det_jacobian(self):
+        for i in range(len(self.data_1)):
+            x = self.data_1[i]
+            y = functional.power_transform_call(2, x)
+            log_abs_det_jacobian = functional.power_transform_log_abs_det_jacobian(2, x, y)
+            self.assertAlmostEqual(self.pow_log_abs_det_jacobian[i], log_abs_det_jacobian, places=2)
+
+    def test_sigmoid_transform_call(self):
+        for i in range(len(self.data_1)):
+            x = self.data_1[i]
+            y = functional.sigmoid_transform_call(x)
+            self.assertAlmostEqual(self.sigmoid_y[i], y, places=2)
+
+    def test_sigmoid_transform_inverse(self):
+        for i in range(len(self.sigmoid_y)):
+            x = self.data_1[i]
+            y = functional.sigmoid_transform_call(x)
+            y_inv = functional.sigmoid_transform_inverse(y)
+            self.assertAlmostEqual(y_inv, x, places=2)
+
+    def test_sigmoid_transform_log_abs_det_jacobian(self):
+        for i in range(len(self.data_1)):
+            x = self.data_1[i]
+            y = functional.sigmoid_transform_call(x)
+            log_abs_det_jacobian = functional.sigmoid_transform_log_abs_det_jacobian(x, y)
+            self.assertAlmostEqual(self.sigmoid_log_abs_det_jacobian[i], log_abs_det_jacobian, places=2)
 
 class TestFunctors(TestCase):
     def test_cat_transform(self):
