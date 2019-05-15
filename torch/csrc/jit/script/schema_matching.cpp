@@ -249,9 +249,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-  std::cout << "Matching to " << schema << "\n";
+  bool print = schema.arguments().size() > 0 && schema.arguments().at(0).type()->kind() == TypeKind::ListType;
+  if (print) std::cout << "Matching to " << schema << "\n";
   for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
-    std::cout << "MATCHING ARGUMENT " << schema_i << "\n";
+    if (print) std::cout << "MATCHING ARGUMENT " << schema_i << "\n";
     const auto& arg = schema.arguments()[schema_i];
     c10::optional<NamedValue> v;
     if (arg.name() == "self" && self) {
@@ -275,11 +276,13 @@ c10::optional<MatchedSchema> tryMatchSchema(
           argument_is_list & !arg_is_broadcasting_list) {
         auto value = args[used_args].value(graph);
         auto actual_type = value->type();
+        bool is_iterable = actual_type->kind() == TypeKind::ListType ||
+            actual_type->kind() == TypeKind::TupleType;
         // The actual cannot already be a list
-        if (!bool(actual_type->cast<ListType>())) {
+        if (!is_iterable) {
           auto formal_type =
               unwrapOptional(arg.type())->expect<ListType>()->getElementType();
-          std::cout << "Creating " << formal_type->python_str() << " for " << schema << "\n";
+          if (print) std::cout << "Creating " << formal_type->python_str() << " for " << schema << "\n";
 
           if (formal_type->kind() == TypeKind::VarType) {
             return c10::nullopt;
@@ -294,10 +297,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
               allow_conversions,
               type_env);
           if (!list) {
-            std::cout << "It didn't work\n";
+            if (print) std::cout << "It didn't work\n";
             return c10::nullopt;
           }
-          std::cout << "It worked\n";
+          if (print) std::cout << "It worked\n";
           used_args = args.size();
           positional_inputs.push_back(list);
           continue;
