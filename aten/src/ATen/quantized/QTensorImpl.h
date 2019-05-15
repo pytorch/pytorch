@@ -35,7 +35,6 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
     impl->refresh_numel();
     impl->refresh_contiguous();
     impl->set_version_counter(version_counter);
-
     return impl;
   }
 
