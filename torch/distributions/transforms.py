@@ -334,13 +334,13 @@ class SigmoidTransform(Transform):
         return isinstance(other, SigmoidTransform)
 
     def _call(self, x):
-        return torch.sigmoid(x)
+        return F.sigmoid_transformation_call(x)
 
     def _inverse(self, y):
-        return y.log() - (-y).log1p()
+        return F.sigmoid_transformation_inverse(y)
 
     def log_abs_det_jacobian(self, x, y):
-        return -(y.reciprocal() + (1 - y).reciprocal()).log()
+        return F.sigmoid_transformation_log_abs_det_jacobian(x, y)
 
 
 class AbsTransform(Transform):
