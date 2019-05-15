@@ -117,3 +117,16 @@ class GetSparseToDenseMaskGradient : public GradientMakerBase {
 REGISTER_GRADIENT(SparseToDenseMask, GetSparseToDenseMaskGradient);
 } // namespace
 } // namespace caffe2
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    SparseToDenseMask,
+    "_caffe2::SparseToDenseMask("
+    "Tensor indices, "
+    "Tensor values, "
+    "Tensor default, "
+    "Tensor? lengths, "
+    "int[] mask, "
+    "bool return_presence_mask = True, "
+    "int max_skipped_indices = 5"
+    ") -> (Tensor dense, Tensor? presence_mask)",
+    caffe2::SparseToDenseMaskOp<caffe2::CPUContext>);

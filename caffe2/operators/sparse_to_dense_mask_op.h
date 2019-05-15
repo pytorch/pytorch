@@ -4,10 +4,13 @@
 #include <algorithm>
 #include <unordered_map>
 #include <vector>
+#include "caffe2/core/c10_operator.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
+
+C10_DECLARE_CAFFE2_OPERATOR(SparseToDenseMask)
 
 namespace caffe2 {
 

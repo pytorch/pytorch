@@ -2185,6 +2185,63 @@ graph(%Ra, %Rb):
         self.assertEqual(traced_model(*inputs), model(*inputs))
         self.assertExportImport(traced_model.graph, (scores, bbox_deltas, im_info, anchors))
 
+
+    def test_trace_c10_ops_sparse_to_dense(self):
+        try:
+            _ = torch.ops._caffe2.GenerateProposals
+        except RuntimeError:
+            self.skipTest("Skip the test since c2 ops are not registered.")
+
+        class MyModel(torch.jit.ScriptModule):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit.script_method
+            def forward(self, indices, values, lengths):
+                dense, presence_mask = torch.ops._caffe2.SparseToDenseMask(
+                    indices, values, torch.tensor(0.0), lengths,
+                    mask=[1, 2, 4],
+                )
+                return dense, presence_mask
+
+
+        indices = torch.tensor([2, 1, 3, 4, 1], dtype=torch.int64)
+        values = torch.tensor([2., 1., 3., 4., 1.])
+        lengths = torch.tensor([3, 2, 0], dtype=torch.int32)
+
+        inputs = (indices, values, lengths)
+        model = MyModel()
+        self.assertEqual(model(*inputs), model(*inputs))
+        self.assertExportImportModule(model, (indices, values, lengths))
+
+    def test_trace_c10_ops_sparse_to_dense_module(self):
+        try:
+            _ = torch.ops._caffe2.GenerateProposals
+        except RuntimeError:
+            self.skipTest("Skip the test since c2 ops are not registered.")
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, indices, values, lengths):
+                dense, presence_mask = torch.ops._caffe2.SparseToDenseMask(
+                    indices, values, torch.tensor(0.0), lengths,
+                    mask=[1, 2, 4],
+                )
+                return dense, presence_mask
+
+
+        indices = torch.tensor([2, 1, 3, 4, 1], dtype=torch.int64)
+        values = torch.tensor([2., 1., 3., 4., 1.])
+        lengths = torch.tensor([3, 2, 0], dtype=torch.int32)
+
+        inputs = (indices, values, lengths)
+        model = MyModel()
+        traced_model = torch.jit.trace(model, inputs)
+        self.assertEqual(traced_model(*inputs), model(*inputs))
+        self.assertExportImport(traced_model.graph, (indices, values, lengths))
+
     def test_nested_inplace(self):
         x = torch.randn(2, 2)
         trace, outputs, inputs = torch.jit.get_trace_graph(

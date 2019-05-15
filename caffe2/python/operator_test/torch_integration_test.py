@@ -471,6 +471,105 @@ class TorchIntegration(hu.HypothesisTestCase):
     def test_gelu_op_cuda(self):
         self._test_gelu_op(device="cuda")
 
+    @given(n=st.integers(1, 10), k=st.integers(1, 5),
+           use_length=st.booleans(), return_presence_mask=st.booleans())
+    def test_sparse_to_dense_mask(self, n, k, use_length, return_presence_mask):
+        lengths = np.random.randint(k, size=n).astype(np.int32) + 1
+        N = sum(lengths)
+        indices = np.random.randint(5, size=N)
+        values = np.random.rand(N, 2).astype(np.float32)
+        default = np.random.rand(2).astype(np.float32)
+        mask = np.arange(3)
+        np.random.shuffle(mask)
+
+        def sparse_to_dense_ref():
+            input_str = ['indices', 'values', 'default']
+            input_data = [indices, values, default]
+            if use_length and n > 1:
+                input_str.append('lengths')
+                input_data.append(lengths)
+            output_str = ['output']
+            if return_presence_mask:
+                output_str.append('presence_mask')
+
+            op = core.CreateOperator(
+                'SparseToDenseMask',
+                input_str,
+                output_str,
+                mask=mask,
+                return_presence_mask=return_presence_mask,
+            )
+            for blob, data in zip(input_str, input_data):
+                workspace.FeedBlob(blob, data)
+            workspace.RunOperatorOnce(op)
+            return [workspace.FetchBlob(blob) for blob in output_str]
+
+        ref_outputs = sparse_to_dense_ref()
+
+        actual_output, presence_mask = torch.ops._caffe2.SparseToDenseMask(
+            torch.tensor(indices),
+            torch.tensor(values),
+            torch.tensor(default),
+            lengths=torch.tensor(lengths) if use_length and n > 1 else None,
+            mask=mask,
+            return_presence_mask=return_presence_mask,
+        )
+        torch.testing.assert_allclose(ref_outputs[0], actual_output)
+        if return_presence_mask:
+            self.assertTrue((ref_outputs[1] == presence_mask.numpy()).all())
+        else:
+            self.assertIsNone(presence_mask)
+
+
+    @given(n=st.integers(1, 10), k=st.integers(1, 5),
+           use_length=st.booleans(), return_presence_mask=st.booleans())
+    def test_sparse_to_dense_mask_with_int64(self, n, k, use_length, return_presence_mask):
+        lengths = np.random.randint(k, size=n).astype(np.int32) + 1
+        N = sum(lengths)
+        int64_mask = 10000000000
+        indices = np.random.randint(5, size=N) + int64_mask
+        values = np.random.rand(N, 2).astype(np.float32)
+        default = np.random.rand(2).astype(np.float32)
+        mask = np.arange(3) + int64_mask
+        np.random.shuffle(mask)
+
+        def sparse_to_dense_ref():
+            input_str = ['indices', 'values', 'default']
+            input_data = [indices, values, default]
+            if use_length and n > 1:
+                input_str.append('lengths')
+                input_data.append(lengths)
+            output_str = ['output']
+            if return_presence_mask:
+                output_str.append('presence_mask')
+
+            op = core.CreateOperator(
+                'SparseToDenseMask',
+                input_str,
+                output_str,
+                mask=mask,
+                return_presence_mask=return_presence_mask,
+            )
+            for blob, data in zip(input_str, input_data):
+                workspace.FeedBlob(blob, data)
+            workspace.RunOperatorOnce(op)
+            return [workspace.FetchBlob(blob) for blob in output_str]
+
+        ref_outputs = sparse_to_dense_ref()
+
+        actual_output, presence_mask = torch.ops._caffe2.SparseToDenseMask(
+            torch.tensor(indices),
+            torch.tensor(values),
+            torch.tensor(default),
+            lengths=torch.tensor(lengths) if use_length and n > 1 else None,
+            mask=mask,
+            return_presence_mask=return_presence_mask,
+        )
+        torch.testing.assert_allclose(ref_outputs[0], actual_output)
+        if return_presence_mask:
+            self.assertTrue((ref_outputs[1] == presence_mask.numpy()).all())
+        else:
+            self.assertIsNone(presence_mask)
 
 if __name__ == '__main__':
     unittest.main()

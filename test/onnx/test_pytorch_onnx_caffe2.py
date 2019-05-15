@@ -1574,6 +1574,23 @@ class TestCaffe2Backend(unittest.TestCase):
 
         self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3)
 
+    def test_c2_sparse_to_dense(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, indices, values, lengths):
+                dense, presence_mask = torch.ops._caffe2.SparseToDenseMask(
+                    indices, values, torch.tensor([0.0]), lengths,
+                    mask=[1, 2, 4],
+                )
+                return dense, presence_mask
+
+
+        indices = torch.tensor([2, 1, 3, 4, 1], dtype=torch.int64)
+        values = torch.tensor([2., 1., 3., 4., 1.])
+        lengths = torch.tensor([3, 2, 0], dtype=torch.int32)
+
+        inputs = (indices, values, lengths)
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+
     def test_topk(self):
         class TopKModel(torch.nn.Module):
             def forward(self, input):
