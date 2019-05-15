@@ -981,7 +981,7 @@ class TestLRScheduler(TestCase):
     def test_cycle_lr_cycle_momentum_fail_with_momentumless_optimizer(self):
         with self.assertRaises(ValueError):
             adam_opt = optim.Adam(self.net.parameters())
-            scheduler = CyclicLR(adam_opt, cycle_momentum=True)
+            scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=True)
 
     def test_lambda_lr(self):
         epochs = 10
