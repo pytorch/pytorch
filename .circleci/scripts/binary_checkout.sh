@@ -34,7 +34,7 @@ else
   echo "Can't tell what to checkout"
   exit 1
 fi
-git submodule update --init --recursive --quiet
+git submodule sync && git submodule update -q --init --recursive
 echo "Using Pytorch from "
 git --no-pager log --max-count 1
 popd
