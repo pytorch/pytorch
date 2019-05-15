@@ -369,7 +369,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
     SourceRange loc,
-    bool is_constant) {
+    bool is_constant,
+    bool recurse) {
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
   // f = python_constant
@@ -445,7 +446,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  if (py::isinstance<py::function>(obj)) {
+  if (recurse && py::isinstance<py::function>(obj)) {
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_fn")(obj);
     if (auto callee = as_function(compiled_fn)) {

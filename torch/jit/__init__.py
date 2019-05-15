@@ -746,8 +746,15 @@ class ScriptWarning(Warning):
 
 
 def make_rcb(fn):
-    # TODO: a getclosurevars polyfill for < Python 3.3
-    closure = inspect.getclosurevars(fn)
+    """
+    Create a resolutionCallback by introspecting the function instead of
+    looking up the stack for the enclosing scope
+    """
+    if PY2:
+        # TODO: use fn.__closure__
+        raise RuntimeError("Cannot make resolutionCallback in Python 2")
+    else:
+        closure = inspect.getclosurevars(fn)
     f_globals = closure.globals
     f_unbound = closure.unbound
     f_builtins = closure.builtins
@@ -781,6 +788,8 @@ def _try_compile_fn(fn):
             name = fn.__name__
         else:
             name = '<unknown>'
+        # Compile error, display as a warning so the user knows why it didn't
+        # compile and that it was inserted as a Python op
         message = "Inserting a call to Python for '{}' since it could not be compiled:\n{}".format(name, e)
         warnings.warn(message, category=ScriptWarning, stacklevel=3)
 
@@ -838,7 +847,11 @@ def _qualified_name(obj):
     return module_name + "." + name
 
 
-def script(obj, optimize=True, _frames_up=0, _rcb=None):
+def _recursive_script(fn):
+    return torch.jit.script(fn, _recurse=True)
+
+
+def script(obj, optimize=True, _frames_up=0, _rcb=None, _recurse=False):
     if not _enabled:
         return obj
     if _rcb is None:
@@ -848,7 +861,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
         name = _qualified_name(obj)
         ast = get_jit_class_def(obj, name)
-        _jit_script_class_compile(ast, _rcb)
+        _jit_script_class_compile(ast, _rcb, _recurse)
         _add_script_class(obj, name)
         return obj
     else:

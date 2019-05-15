@@ -56,7 +56,8 @@ namespace {
 
 // A resolver that will inspect the outer Python scope to find `name`.
 struct PythonResolver : public Resolver {
-  explicit PythonResolver(ResolutionCallback rcb) : rcb_(std::move(rcb)) {}
+  explicit PythonResolver(ResolutionCallback rcb, bool recurse = false)
+      : rcb_(std::move(rcb)), recurse_(recurse) {}
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
@@ -66,7 +67,7 @@ struct PythonResolver : public Resolver {
     if (obj.is(py::none())) {
       return nullptr;
     }
-    return toSugaredValue(obj, m, loc);
+    return toSugaredValue(obj, m, loc, recurse_);
   }
 
   TypePtr resolveType(const std::string& name) const override {
@@ -88,10 +89,13 @@ struct PythonResolver : public Resolver {
 
  private:
   ResolutionCallback rcb_;
+  bool recurse_;
 };
 
-std::shared_ptr<PythonResolver> pythonResolver(ResolutionCallback rcb) {
-  return std::make_shared<PythonResolver>(rcb);
+std::shared_ptr<PythonResolver> pythonResolver(
+    ResolutionCallback rcb,
+    bool recurse) {
+  return std::make_shared<PythonResolver>(rcb, recurse);
 }
 } // namespace
 
@@ -516,7 +520,7 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_jit_script_class_compile",
-      [](const ClassDef& classDef, ResolutionCallback rcb) {
+      [](const ClassDef& classDef, ResolutionCallback rcb, bool recurse) {
         auto cu = std::make_shared<CompilationUnit>();
         auto classType =
             ClassType::create(c10::QualifiedName(classDef.name().name()), cu);
@@ -524,7 +528,7 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
           methodDefs.push_back(def);
-          rcbs.push_back(pythonResolver(rcb));
+          rcbs.push_back(pythonResolver(rcb, recurse));
         }
         cu->define(methodDefs, rcbs, simpleSelf(classType));
       });
