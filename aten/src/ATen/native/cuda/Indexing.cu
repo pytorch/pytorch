@@ -225,9 +225,9 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       auto sorted_data = device_ptr(sorted_indices.data<int64_t>());
       thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
       }
-      AT_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel());
-      AT_ASSERT(self.numel() < std::numeric_limits<int>::max());
-      AT_ASSERT(value.numel() < std::numeric_limits<int>::max());
+      TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
+      TORCH_INTERNAL_ASSERT(self.numel() < std::numeric_limits<int>::max(), "index_put_ with accumulation is not supported on large tensors, number of source elements =", self.numel());
+      TORCH_INTERNAL_ASSERT(value.numel() < std::numeric_limits<int>::max(), "index_put_ with accumulation is not supported on large tensors, number of source elements =", value.numel());
       dim3 grid(THCCeilDiv(num_indices, (int64_t) 4),
            std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], THCCeilDiv(sliceSize, (int64_t) 128)),
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
