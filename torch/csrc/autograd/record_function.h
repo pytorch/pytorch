@@ -93,7 +93,13 @@ TORCH_API bool hasCallbacks();
 TORCH_API bool needsInputs();
 
 TORCH_API void setSamplingProbability(double);
-TORCH_API bool checkCallbacksEnabled();
+TORCH_API double getSamplingProbability();
+TORCH_API bool checkCallbacksSampled();
+
+inline bool checkCallbacksEnabled() {
+  return !checkCallbacksSampled() ||
+      (((double) std::rand() / RAND_MAX) < getSamplingProbability());
+}
 
 // optional argument - function's seq_no
 #define RECORD_FUNCTION(fn, inputs, ...) \

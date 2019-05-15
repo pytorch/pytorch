@@ -16,11 +16,6 @@ double sampling_prob = 1.0;
 constexpr double kEps = 1e-10;
 }
 
-bool checkCallbacksEnabled() {
-  return !is_sampled_callbacks ||
-      (((double) std::rand() / RAND_MAX) < sampling_prob);
-}
-
 void setSamplingProbability(double prob) {
   if (std::abs(prob - 1.0) < kEps) {
     is_sampled_callbacks = false;
@@ -29,6 +24,14 @@ void setSamplingProbability(double prob) {
     is_sampled_callbacks = true;
   }
   sampling_prob = prob;
+}
+
+double getSamplingProbability() {
+  return sampling_prob;
+}
+
+bool checkCallbacksSampled() {
+  return is_sampled_callbacks;
 }
 
 void pushCallback(
