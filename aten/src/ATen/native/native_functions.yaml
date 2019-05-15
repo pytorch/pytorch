@@ -921,7 +921,7 @@
 - func: hamming_window(int window_length, bool periodic, float alpha, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
-  use_c10_dispatcher: True
+  use_c10_dispatcher: False
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
   variants: function, method
@@ -1020,7 +1020,7 @@
   device_guard: False
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  use_c10_dispatcher: True
+  use_c10_dispatcher: False
 
 - func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean) -> Tensor
   dispatch:

@@ -394,11 +394,81 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_null4_c10(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "null4_c10(Tensor input, Tensor a, Tensor b, Tensor c)",
+  }, /*traceable=*/true);
+
+  ParsedArgs<4> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (r.idx == 0) {
+    static auto op = c10::Dispatcher::singleton().findSchema("aten::null4_c10", "");
+    AT_CHECK(op.has_value(), "Schema aten::null4_c10(Tensor self, Tensor a, Tensor b, Tensor c) -> Tensor is not registered");
+    static torch::jit::Stack s;
+    s.reserve(10);
+    torch::jit::push(s, r.tensor_ivalue(0), r.tensor_ivalue(1), r.tensor_ivalue(2), r.tensor_ivalue(3));
+    c10::Dispatcher::singleton().callOp(*op, &s);
+    return THPVariable_Wrap(torch::jit::pop(s).toTensor());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+static PyObject * THPVariable_null_c10(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "null_c10(Tensor input)",
+  }, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (r.idx == 0) {
+    static auto op = c10::Dispatcher::singleton().findSchema("aten::null_c10", "");
+    AT_CHECK(op.has_value(), "Schema aten::null_c10(Tensor self) -> Tensor is not registered");
+    static torch::jit::Stack s;
+    s.reserve(10);
+    torch::jit::push(s, r.tensor_ivalue(0));
+    c10::Dispatcher::singleton().callOp(*op, &s);
+    return THPVariable_Wrap(torch::jit::pop(s).toTensor());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+static PyObject * THPVariable_null_back_c10(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "null_back_c10(Tensor input)",
+  }, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (r.idx == 0) {
+    static auto op = c10::Dispatcher::singleton().findSchema("aten::null_back_c10", "");
+    AT_CHECK(op.has_value(), "Schema aten::null_back_c10(Tensor self) -> Tensor is not registered");
+    static torch::jit::Stack s;
+    s.reserve(10);
+    torch::jit::push(s, r.tensor_ivalue(0));
+    c10::Dispatcher::singleton().callOp(*op, &s);
+    return THPVariable_Wrap(torch::jit::pop(s).toTensor());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // generated methods start here
 
 ${py_methods}
 
 static PyMethodDef torch_functions[] = {
+  {"null_back_c10", (PyCFunction)THPVariable_null_back_c10, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"null_c10", (PyCFunction)THPVariable_null_c10, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"null4_c10", (PyCFunction)THPVariable_null4_c10, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"arange", (PyCFunction)THPVariable_arange, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"as_tensor", (PyCFunction)THPVariable_as_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"dsmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},

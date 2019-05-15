@@ -155,7 +155,7 @@ TYPE_DEFINITION_BODY_NATIVE = CodeTemplate("""\
 ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
 """)
 TYPE_DEFINITION_BODY_NATIVE_C10 = CodeTemplate("""\
-${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${moved_native_actuals});
+${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
 """)
 
 # Overrideable stubs to be used in user-extendable backends
@@ -197,7 +197,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static torch::jit::Stack s;
     s.clear();
     s.reserve(10);
-    torch::jit::push(s, ${stack_args});
+    torch::jit::push(s, ${type_method_actuals});
     c10::Dispatcher::singleton().callOp(*op, &s);
     return torch::jit::pop(s).toTensor();
 }
@@ -1079,20 +1079,20 @@ def create_generic(top_env, declarations):
                     'TensorList': 'TensorList',
                 }
 
-            def translate_map_c10():
+            def translate_map_c10(const):
                 # type: (bool) -> Dict[str, str]
                 return {
-                    'Tensor': 'Tensor',
-                    'Type': 'Type',
-                    'TensorOptions': 'TensorOptions',
+                    'Tensor': 'Tensor' if const else 'Tensor &',
+                    'Type': 'Type' if const else 'Type &',
+                    'TensorOptions': 'TensorOptions' if const else 'TensorOptions &',
                     'TensorList': 'TensorList',
                 }
 
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
                 argument['type'] = "c10::optional<{}>".format(argument['type'])
 
-            if option['use_c10_dispatcher']:
-                argument['type'] = translate_map_c10().get(argument['type'], argument['type'])
+            if option['use_c10_dispatcher'] or option['kek']:
+                argument['type'] = translate_map_c10(True).get(argument['type'], argument['type'])
             elif (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):
                 argument['type'] = translate_map(False).get(argument['type'], argument['type'])
             else:
@@ -1230,14 +1230,13 @@ def create_generic(top_env, declarations):
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
         else:
-            if use_c10:
-                moved_native_actuals = []
-                for f in formals:
+            if option['use_c10_dispatcher'] or option['kek']:
+                for i, f in enumerate(formals):
                     if f['dynamic_type'] == 'Tensor':
-                        moved_native_actuals.append('std::move({})'.format(f['name']))
-                    else:
-                        moved_native_actuals.append(f['name'])
-                body = TYPE_DEFINITION_BODY_NATIVE_C10.substitute(env, moved_native_actuals=moved_native_actuals)
+                        option['native_actuals'][i] = ('std::move({})'.format(f['name']))
+                        option['type_method_actuals'][i] = ('std::move({})'.format(f['name']))
+            if use_c10:
+                body = TYPE_DEFINITION_BODY_NATIVE_C10.substitute(env)
                 top_env['type_method_definitions'].append(
                     TYPE_METHOD_DEFINITION_CONCRETE_C10.substitute(
                         env, type_definition_body=body))
@@ -1282,13 +1281,7 @@ def create_generic(top_env, declarations):
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             top_env['function_declarations'].append(declaration.substitute(env))
             if option['use_c10_dispatcher']:
-                stack_args = []
-                for f in formals:
-                    if f['dynamic_type'] == 'Tensor':
-                        stack_args.append('std::move({})'.format(f['name']))
-                    else:
-                        stack_args.append(f['name'])
-                top_env['function_definitions'].append(FUNCTION_DEFINITION_C10.substitute(env, stack_args=stack_args))
+                top_env['function_definitions'].append(FUNCTION_DEFINITION_C10.substitute(env))
             else:
                 top_env['function_definitions'].append(FUNCTION_DEFINITION.substitute(env))
             method_of.append('namespace')

@@ -30,7 +30,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cholesky.*', '_triangular_solve.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
-    'copy_sparse_to_sparse_', 'copy_',
+    'copy_sparse_to_sparse_', 'copy_', 'null_c10', 'null4_c10', 'null_back_c10',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -353,7 +353,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if type_args and len(outputs) > 1:
             raise RuntimeError("Not supported: type dispatched parameter with multiple outputs")
 
-        def parse_arg(arg, arg_index, unpack_args=False, use_c10_dispatcher=False):
+        def parse_arg(arg, arg_index, unpack_args=False):
             name = arg['name']
             typename = arg['type']
             if typename.startswith('IntArrayRef['):
@@ -379,9 +379,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 expr = 'SparseTensorRef({})'.format(expr)
 
             dispatch_type = typename
-            #if dispatch_type == 'Tensor' and use_c10_dispatcher:
-            #    dispatch_type = 'Tensor'
-            if dispatch_type == 'Tensor':
+            if "null" in declaration['name'] and dispatch_type == 'Tensor':
+                dispatch_type = 'Tensor'
+            elif dispatch_type == 'Tensor':
                 dispatch_type = 'const Tensor &'
             elif dispatch_type == 'Tensor &':
                 dispatch_type = 'Tensor'
@@ -400,15 +400,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if arg['simple_type'] in ['Type', 'TensorOptions']:
                 continue
             if has_self and arg['name'] == 'self':
-                #if declaration['use_c10_dispatcher']:
-                #    formal_args.append('Tensor self')
-                #    actuals.append('self')
-                #    continue
                 formal_args.append('Tensor & self')
                 actuals.append('self')
                 continue
-            #append_actuals_formals(*parse_arg(arg, arg_idx, unpack, use_c10_dispatcher=declaration['use_c10_dispatcher']))
-            append_actuals_formals(*parse_arg(arg, arg_idx, unpack, use_c10_dispatcher=declaration['use_c10_dispatcher']))
+            append_actuals_formals(*parse_arg(arg, arg_idx, unpack))
             arg_idx += 1
 
         if len(outputs) == 1:
@@ -496,15 +491,15 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['initialize_cuda'] = ''
 
         if 'call_args' in declaration:
-            #if declaration['use_c10_dispatcher']:
-            #    env['dispatch_args'] = ['std::move({})'.format(arg) for arg in declaration['call_args']]
-            #else:
-            env['dispatch_args'] = declaration['call_args']
+            if 'null' in declaration['name']:
+                env['dispatch_args'] = ['std::move({})'.format(arg) for arg in declaration['call_args']]
+            else:
+                env['dispatch_args'] = declaration['call_args']
         else:
-            #if declaration['use_c10_dispatcher']:
-            #    env['dispatch_args'] = ['std::move({})'.format(arg['name']) for arg in declaration['arguments']]
-            #else:
-            env['dispatch_args'] = [arg['name'] for arg in declaration['arguments']]
+            if 'null' in declaration['name']:
+                env['dispatch_args'] = ['std::move({})'.format(arg['name']) for arg in declaration['arguments']]
+            else:
+                env['dispatch_args'] = [arg['name'] for arg in declaration['arguments']]
 
         if 'Tensor' in declaration['method_of']:
             env['dispatch_args'] = [arg for arg in env['dispatch_args'] if arg != 'self']

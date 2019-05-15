@@ -388,6 +388,7 @@ def run(paths):
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
                 declaration['matches_jit_signature'] = func.get('matches_jit_signature', True)
                 declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', False)
+                declaration['kek'] = func.get('kek', False)
                 declaration['cpu_half'] = func.get('cpu_half', False)
                 declaration['cpu_bool'] = func.get('cpu_bool', False)
                 declaration['cuda_bool'] = func.get('cuda_bool', False)
