@@ -962,8 +962,21 @@ class TestLRScheduler(TestCase):
         self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target))
 
     def test_cycle_lr_with_momentumless_optimizer(self):
-        adam_opt = optim.Adam(self.net.parameters())
-        scheduler = CyclicLR(adam_opt, cycle_momentum=False)
+        # temporarily set optimizer to Adam
+        old_opt = self.opt
+        self.opt = optim.Adam(
+            [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
+            lr=0.05)
+
+        lr_target = [1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3]
+        lr_targets = [lr_target, lr_target]
+        momentum_target = [None] * len(lr_target)
+        momentum_targets = [momentum_target, momentum_target]
+        scheduler = CyclicLR(self.opt, base_lr=1, max_lr=5, step_size_up=4,
+                             cycle_momentum=False, mode='triangular')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target))
+
+        self.opt = old_opt  # set optimizer back to SGD
 
     def test_cycle_lr_cycle_momentum_fail_with_momentumless_optimizer(self):
         with self.assertRaises(ValueError):
@@ -1167,17 +1180,23 @@ class TestLRScheduler(TestCase):
         for batch_num in range(batch_iterations):
             scheduler.step(batch_num)
             if verbose:
-                print('batch{}:\tlr={},momentum={}'.format(batch_num, self.opt.param_groups[0]['lr'],
-                                                           self.opt.param_groups[0]['momentum']))
+                if 'momentum' in self.opt.param_groups[0].keys():
+                    print('batch{}:\tlr={},momentum={}'.format(batch_num, self.opt.param_groups[0]['lr'],
+                                                               self.opt.param_groups[0]['momentum']))
+                else:
+                    print('batch{}:\tlr={}'.format(batch_num, self.opt.param_groups[0]['lr']))
+
             for param_group, lr_target, momentum_target in zip(self.opt.param_groups, lr_targets, momentum_targets):
                 self.assertAlmostEqual(
                     lr_target[batch_num], param_group['lr'],
                     msg='LR is wrong in batch_num {}: expected {}, got {}'.format(
                         batch_num, lr_target[batch_num], param_group['lr']), delta=1e-5)
-                self.assertAlmostEqual(
-                    momentum_target[batch_num], param_group['momentum'],
-                    msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
-                        batch_num, momentum_target[batch_num], param_group['momentum']), delta=1e-5)
+
+                if 'momentum' in param_group.keys():
+                    self.assertAlmostEqual(
+                        momentum_target[batch_num], param_group['momentum'],
+                        msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
+                            batch_num, momentum_target[batch_num], param_group['momentum']), delta=1e-5)
 
 if __name__ == '__main__':
     run_tests()
