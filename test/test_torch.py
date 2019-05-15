@@ -8143,7 +8143,7 @@ class _TestTorchMixin(object):
     def check_single_matmul(self, x, y, shape):
         a = np.array(x, copy=False)
         b = np.array(y, copy=False)
-        expected = a @ b
+        expected = np.matmul(a, b)
         self.assertTrue(expected.flags['C_CONTIGUOUS'])
 
         ans = torch.matmul(x, y)
@@ -8165,33 +8165,33 @@ class _TestTorchMixin(object):
                 for o in range(1, 5):
                     # 1d, 3d, inner dimensions C
                     x = torch.arange(m)
-                    y = torch.arange(o*m*p).reshape(o, m, p)
+                    y = torch.arange(o * m * p).reshape(o, m, p)
                     self.check_single_matmul(x, y, (o, n, p))
 
                     # 1d, 3d, inner dimensions Fortran
                     x = torch.arange(m)
-                    y = torch.arange(o*p*m).reshape(o, p, m).transpose(-1, -2)
+                    y = torch.arange(o * p * m).reshape(o, p, m).transpose(-1, -2)
                     self.check_single_matmul(x, y, (o, n, p))
 
                     # 1d, 3d, inner dimensions non-contiguous
-                    x = torch.arange(2*m)[::2]
-                    y = torch.arange(o*m*2*p).reshape(o, m, 2*p)[:, :, ::2]
+                    x = torch.arange(2 * m)[::2]
+                    y = torch.arange(o * m * 2 * p).reshape(o, m, 2 * p)[:, :, ::2]
                     self.check_single_matmul(x, y, (o, n, p))
 
                     for r in range(1, 5):
                         # 1d, 4d, inner dimensions C
                         x = torch.arange(m)
-                        y = torch.arange(r*o*m*p).reshape(r, o, m, p)
+                        y = torch.arange(r * o * m * p).reshape(r, o, m, p)
                         self.check_single_matmul(x, y, (r, o, n, p))
 
                         # 1d, 4d, inner dimensions Fortran
                         x = torch.arange(m)
-                        y = torch.arange(r*o*p*m).reshape(r, o, p, m).transpose(-1, -2)
+                        y = torch.arange(r * o * p * m).reshape(r, o, p, m).transpose(-1, -2)
                         self.check_single_matmul(x, y, (r, o, n, p))
 
                         # 1d, 4d, inner dimensions non-contiguous
-                        x = torch.arange(2*m)[::2]
-                        y = torch.arange(r*o*m*2*p).reshape(r, o, m, 2*p)[:, :, :, ::2]
+                        x = torch.arange(2 * m)[::2]
+                        y = torch.arange(r * o * m * 2 * p).reshape(r, o, m, 2 * p)[:, :, :, ::2]
                         self.check_single_matmul(x, y, (r, o, n, p))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -8202,34 +8202,34 @@ class _TestTorchMixin(object):
                 for p in range(1, 5):
                     for o in range(1, 3):
                         # 2d, 3d, inner dimensions C
-                        x = torch.arange(n*m).reshape(n, m)
-                        y = torch.arange(o*m*p).reshape(o, m, p)
+                        x = torch.arange(n * m).reshape(n, m)
+                        y = torch.arange(o * m * p).reshape(o, m, p)
                         self.check_single_matmul(x, y, (o, n, p))
 
                         # 2d, 3d, inner dimensions Fortran
-                        x = torch.arange(m*n).reshape(m, n).transpose(-1, -2)
-                        y = torch.arange(o*p*m).reshape(o, p, m).transpose(-1, -2)
+                        x = torch.arange(m * n).reshape(m, n).transpose(-1, -2)
+                        y = torch.arange(o * p * m).reshape(o, p, m).transpose(-1, -2)
                         self.check_single_matmul(x, y, (o, n, p))
 
                         # 2d, 3d, inner dimensions non-contiguous
-                        x = torch.arange(n*2*m).reshape(n, 2*m)[:, ::2]
-                        y = torch.arange(o*m*2*p).reshape(o, m, 2*p)[:, :, ::2]
+                        x = torch.arange(n * 2 * m).reshape(n, 2 * m)[:, ::2]
+                        y = torch.arange(o * m * 2 * p).reshape(o, m, 2 * p)[:, :, ::2]
                         self.check_single_matmul(x, y, (o, n, p))
 
                         for r in range(1, 2):
                             # 2d, 4d, inner dimensions C
-                            x = torch.arange(n*m).reshape(n, m)
-                            y = torch.arange(r*o*m*p).reshape(r, o, m, p)
+                            x = torch.arange(n * m).reshape(n, m)
+                            y = torch.arange(r * o * m * p).reshape(r, o, m, p)
                             self.check_single_matmul(x, y, (r, o, n, p))
 
                             # 2d, 4d, inner dimensions Fortran
-                            x = torch.arange(m*n).reshape(m, n).transpose(-1, -2)
-                            y = torch.arange(r*o*p*m).reshape(r, o, p, m).transpose(-1, -2)
+                            x = torch.arange(m * n).reshape(m, n).transpose(-1, -2)
+                            y = torch.arange(r * o * p * m).reshape(r, o, p, m).transpose(-1, -2)
                             self.check_single_matmul(x, y, (r, o, n, p))
 
                             # 2d, 4d, inner dimensions non-contiguous
-                            x = torch.arange(n*2*m).reshape(n, 2*m)[:, ::2]
-                            y = torch.arange(r*o*m*2*p).reshape(r, o, m, 2*p)[:, :, :, ::2]
+                            x = torch.arange(n * 2 * m).reshape(n, 2 * m)[:, ::2]
+                            y = torch.arange(r * o * m * 2 * p).reshape(r, o, m, 2 * p)[:, :, :, ::2]
                             self.check_single_matmul(x, y, (r, o, n, p))
 
     @skipIfRocm
