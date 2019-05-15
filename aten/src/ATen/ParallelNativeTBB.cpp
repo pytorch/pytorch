@@ -63,12 +63,12 @@ int get_num_threads() {
 }
 
 int get_thread_num() {
-  return internal::arena.current_thread_index();
+  auto index = internal::arena.current_thread_index();
+  return (index >= 0) ? index : 0;
 }
 
 bool in_parallel_region() {
-  // no need to check for nested parallelism in TBB
-  return false;
+  return internal::arena.current_thread_index() != -1;
 }
 
 } // namespace at
