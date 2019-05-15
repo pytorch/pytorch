@@ -694,7 +694,7 @@ class MultiheadAttention(Module):
         dropout: a Dropout layer on attn_output_weights. Default: 0.0.
         bias: add bias as module parameter. Default: True.
         add_bias_kv: add bias to the key and value sequences at dim=0.
-        add_zero_attn: add a new batch of zeros to the key and 
+        add_zero_attn: add a new batch of zeros to the key and
                        value sequences at dim=1.
 
     Examples::
@@ -708,9 +708,6 @@ class MultiheadAttention(Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.dropout = dropout
-        self.head_dim = embed_dim // num_heads
-        assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
-        self.scaling = self.head_dim ** -0.5
 
         self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
         if bias:
@@ -748,143 +745,36 @@ class MultiheadAttention(Module):
                 need_weights=True, attn_mask=None):
         r"""
     Args:
-        query, key, value: map a query and a set of key-value pairs to an output. 
-            See "Attention Is All You Need" for more details. 
-        key_padding_mask: if provided, specified padding elements in the key will 
+        query, key, value: map a query and a set of key-value pairs to an output.
+            See "Attention Is All You Need" for more details.
+        key_padding_mask: if provided, specified padding elements in the key will
             be ignored by the attention.
         need_weights: output attn_output_weights.
         attn_mask: mask that prevents attention to certain positions.
 
+
     Shape:
         Inputs:
-        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is 
+        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
           the embedding dimension.
-        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is 
+        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
-        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is 
+        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
         - attn_mask: :math:`(L, L)` where L is the target sequence length.
 
         Outputs:
-        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, 
+        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
           L is the target sequence length, S is the source sequence length.
         """
-        qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
-        kv_same = key.data_ptr() == value.data_ptr()
-
-        tgt_len, bsz, embed_dim = query.size()
-        assert embed_dim == self.embed_dim
-        assert list(query.size()) == [tgt_len, bsz, embed_dim]
-        assert key.size() == value.size()
-
-        if qkv_same:
-            # self-attention
-            q, k, v = self._in_proj_qkv(query)
-        elif kv_same:
-            # encoder-decoder attention
-            q = self._in_proj_q(query)
-            if key is None:
-                assert value is None
-                k = v = None
-            else:
-                k, v = self._in_proj_kv(key)
-        else:
-            q = self._in_proj_q(query)
-            k = self._in_proj_k(key)
-            v = self._in_proj_v(value)
-        q *= self.scaling
-
-        if self.bias_k is not None:
-            assert self.bias_v is not None
-            k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
-            v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
-            if attn_mask is not None:
-                attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
-            if key_padding_mask is not None:
-                key_padding_mask = torch.cat(
-                    [key_padding_mask, key_padding_mask.new_zeros(key_padding_mask.size(0), 1)], dim=1)
-
-        q = q.contiguous().view(tgt_len, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-        if k is not None:
-            k = k.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-        if v is not None:
-            v = v.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-
-        src_len = k.size(1)
-
-        if key_padding_mask is not None:
-            assert key_padding_mask.size(0) == bsz
-            assert key_padding_mask.size(1) == src_len
-
-        if self.add_zero_attn:
-            src_len += 1
-            k = torch.cat([k, k.new_zeros((k.size(0), 1) + k.size()[2:])], dim=1)
-            v = torch.cat([v, v.new_zeros((v.size(0), 1) + v.size()[2:])], dim=1)
-            if attn_mask is not None:
-                attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
-            if key_padding_mask is not None:
-                key_padding_mask = torch.cat(
-                    [key_padding_mask, torch.zeros(key_padding_mask.size(0), 1).type_as(key_padding_mask)], dim=1)
-
-        attn_output_weights = torch.bmm(q, k.transpose(1, 2))
-        assert list(attn_output_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
-
-        if attn_mask is not None:
-            attn_mask = attn_mask.unsqueeze(0)
-            attn_output_weights += attn_mask
-
-        if key_padding_mask is not None:
-            attn_output_weights = attn_output_weights.view(bsz, self.num_heads, tgt_len, src_len)
-            attn_output_weights = attn_output_weights.masked_fill(
-                key_padding_mask.unsqueeze(1).unsqueeze(2),
-                float('-inf'),
-            )
-            attn_output_weights = attn_output_weights.view(bsz * self.num_heads, tgt_len, src_len)
-
-        attn_output_weights = F.softmax(
-            attn_output_weights.float(), dim=-1,
-            dtype=torch.float32 if attn_output_weights.dtype == torch.float16 else attn_output_weights.dtype)
-        attn_output_weights = F.dropout(attn_output_weights, p=self.dropout, training=self.training)
-
-        attn_output = torch.bmm(attn_output_weights, v)
-        assert list(attn_output.size()) == [bsz * self.num_heads, tgt_len, self.head_dim]
-        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
-        attn_output = self.out_proj(attn_output)
-
-        if need_weights:
-            # average attention weights over heads
-            attn_output_weights = attn_output_weights.view(bsz, self.num_heads, tgt_len, src_len)
-            attn_output_weights = attn_output_weights.sum(dim=1) / self.num_heads
-        else:
-            attn_output_weights = None
-
-        return attn_output, attn_output_weights
-
-    def _in_proj_qkv(self, query):
-        return self._in_proj(query).chunk(3, dim=-1)
-
-    def _in_proj_kv(self, key):
-        return self._in_proj(key, start=self.embed_dim).chunk(2, dim=-1)
-
-    def _in_proj_q(self, query):
-        return self._in_proj(query, end=self.embed_dim)
-
-    def _in_proj_k(self, key):
-        return self._in_proj(key, start=self.embed_dim, end=2 * self.embed_dim)
-
-    def _in_proj_v(self, value):
-        return self._in_proj(value, start=2 * self.embed_dim)
-
-    def _in_proj(self, input, start=0, end=None):
-        weight = self.in_proj_weight
-        bias = self.in_proj_bias
-        weight = weight[start:end, :]
-        if bias is not None:
-            bias = bias[start:end]
-        return F.linear(input, weight, bias)
+        return F.multi_head_attention_forward(
+            query, key, value, self.embed_dim, self.num_heads,
+            self.in_proj_weight, self.in_proj_bias, self.bias_k, self.bias_v, self.add_zero_attn,
+            self.dropout, self.out_proj, training=self.training,
+            key_padding_mask=key_padding_mask, need_weights=need_weights, attn_mask=attn_mask)
 
 
 @weak_module
