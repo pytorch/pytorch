@@ -88,7 +88,7 @@ void Variable::set_data(const at::Tensor &new_data) {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` has the same derived
   // type of TensorImpl as `var`.
-  AT_CHECK(
+  TORCH_CHECK(
     typeid(*this->unsafeGetTensorImpl()) == typeid(*new_data.unsafeGetTensorImpl()),
     "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have different types of TensorImpl.");
 
