@@ -1057,6 +1057,68 @@ class TestNN(NNTestCase):
                                                    ('0.block', block), ('0.block.linear1', l1),
                                                    ('0.block.linear2', l2)])
 
+    def test_sequential_extentions(self):
+        l1 = nn.Linear(4, 3)
+        l2 = nn.Conv2d(2, 3, kernel_size=3)
+        l3 = nn.Linear(1, 2)
+        l4 = nn.Conv2d(2, 3, kernel_size=3)
+        # append test
+        k = nn.Sequential(l1, l2)
+        k_empty = nn.Sequential()
+
+        k.append()
+        self.assertEqual(list(k), [l1, l2])
+
+        k.append(l3, l4)
+        self.assertEqual(list(k), [l1, l2, l3, l4])
+
+        k_empty.append()
+        self.assertEqual(list(k_empty), [])
+
+        k_empty.append(l1, l2)
+        self.assertEqual(list(k_empty), [l1, l2])
+
+        # extend test
+        k = nn.Sequential(l1, l2)
+        k_empty = nn.Sequential()
+        temp_seq = nn.Sequential(l3, l4)
+        temp_seq_empty = nn.Sequential()
+
+        k.extend(temp_seq_empty)
+        self.assertEqual(list(k), [l1, l2])
+
+        k.extend(temp_seq)
+        self.assertEqual(list(k), [l1, l2, l3, l4])
+
+        k_empty.extend(temp_seq_empty)
+        self.assertEqual(list(k_empty), [])
+
+        k_empty.extend(temp_seq)
+        self.assertEqual(list(k_empty), [l3, l4])
+
+        # pop test
+        k = nn.Sequential(l1, l2)
+        k_empty = nn.Sequential()
+
+        k.pop(1)
+        self.assertEqual(list(k), [l1])
+
+        k.pop(0)
+        self.assertEqual(list(k), [])
+
+        with self.assertRaises(IndexError):
+            k.pop(1)
+
+        # test extend
+
+        k = nn.Sequential(l1, l3)
+        k.insert(1, l2)
+        self.assertEqual(list(k), [l1, l2, l3])
+
+        with self.assertRaises(IndexError):
+            k.insert(3, l4)
+
+
     def test_register_buffer_raises_error_if_name_is_not_string(self):
         m = nn.Module()
         expected_error = 'buffer name should be a string. Got '

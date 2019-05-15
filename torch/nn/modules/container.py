@@ -87,38 +87,51 @@ class Sequential(Module):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
-    # need to add code, just a starter
-    def append(self,*args):
+    def append(self, *args):
         prev_len = self.__len__()
         if len(args) == 1 and isinstance(args[0], OrderedDict):
             for key, module in args[0].items():
                 self.add_module(key, module)
         else:
             for idx, module in enumerate(args):
-                self.add_module(str(idx+prev_len), module)
-        
-    
-    def extend(self,sequential):
+                self.add_module(str(idx + prev_len), module)
+
+
+    def extend(self, sequential):
         prev_len = self.__len__()
-        if isinstance(sequential,Sequential):
-            for idx,layer in enumerate(sequential):
-                self.add_module(str(idx + prev_len),layer)
+        if isinstance(sequential, Sequential):
+            for idx, layer in enumerate(sequential):
+                self.add_module(str(idx + prev_len), layer)
         else:
-            raise ValueError('The given parameter {}, is of type {},\n expected it to be of type torch.nn.Sequential'.format(sequential,torch.typename(sequential)))
+            raise ValueError('The given parameter {}, is of type {},\n expected it to be of type torch.nn.Sequential'.format(sequential, torch.typename(sequential)))
 
-    def insert(self,i,layer):
-        pass
+    def insert(self, idx, new_layer):
+        if idx >= self.__len__():
+            raise IndexError('Given Index is out of range. Total length is {}'.format(self.__len__()))
 
-    def pop(self,idx=-1):
+        old_modules = self._modules
+        self._modules = OrderedDict()
+        for j, (key, layer) in enumerate(old_modules.items()):
+            print(j)
+            if idx == j:
+                self.add_module(str(idx), new_layer)
+            # if str(i)==key, then change key to 'key.a' otherwise, the newer layer will be overwriten
+            if str(idx) == key:
+                key = key + 'a'
+            self._modules[key] = layer
+        del old_modules
+
+    def pop(self, idx=-1):
+        if idx >= self.__len__():
+            raise IndexError('Given Index is out of range. Total length is {}'.format(self.__len__()))
         layer = self.__getitem__(idx)
         self.__delitem__(idx)
         return layer
-    
+
     def forward(self, input):
         for module in self._modules.values():
             input = module(input)
         return input
-
 
 class ModuleList(Module):
     r"""Holds submodules in a list.
