@@ -440,50 +440,6 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   }
 }
 
-void THTensor_(getri)(THTensor *ra_, THTensor *a)
-{
-  if (a == NULL) a = ra_;
-  THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
-
-  int m, n, lda, info, lwork;
-  scalar_t wkopt;
-  THIntTensor *ipiv;
-  THTensor *work;
-  THTensor *ra__ = NULL;
-
-  ra__ = THTensor_(cloneColumnMajor)(ra_, a);
-
-  m = ra__->size(0);
-  n = ra__->size(1);
-  lda = m;
-  ipiv = THIntTensor_newWithSize1d((int64_t)m);
-
-  /* Run LU */
-  THLapack_(getrf)(n, n, ra__->data<scalar_t>(), lda, THIntTensor_data(ipiv), &info);
-  THLapackCheckWithCleanup("Lapack Error %s : U(%d,%d) is 0, U is singular",
-                           THCleanup(
-                               c10::raw::intrusive_ptr::decref(ra__);
-                               THIntTensor_free(ipiv);),
-                           "getrf", info, info);
-
-  /* Run inverse */
-  THLapack_(getri)(n, ra__->data<scalar_t>(), lda, THIntTensor_data(ipiv), &wkopt, -1, &info);
-  lwork = (int)wkopt;
-  work = THTensor_(newWithSize1d)(lwork);
-  THLapack_(getri)(n, ra__->data<scalar_t>(), lda, THIntTensor_data(ipiv), work->data<scalar_t>(), lwork, &info);
-  THLapackCheckWithCleanup("Lapack Error %s : U(%d,%d) is 0, U is singular",
-                           THCleanup(
-                               c10::raw::intrusive_ptr::decref(ra__);
-                               c10::raw::intrusive_ptr::decref(work);
-                               THIntTensor_free(ipiv);),
-                           "getri", info, info);
-
-  THTensor_(freeCopyTo)(ra__, ra_);
-  c10::raw::intrusive_ptr::decref(work);
-  THIntTensor_free(ipiv);
-}
-
 void THTensor_(clearUpLoTriangle)(THTensor *a, const char *uplo)
 {
   THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
