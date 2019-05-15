@@ -81,11 +81,22 @@ def power_transform_inverse(exponent, y):
 def power_transform_log_abs_det_jacobian(exponent, x, y):
     return (exponent * y / x).abs().log()
 
+
 def sigmoid_transformation_call(x):
     return torch.sigmoid(x)
+
 
 def sigmoid_transformation_inverse(y):
     return y.log() - (-y).log1p()
 
+
 def sigmoid_transformation_log_abs_det_jacobian(x, y):
     return -(y.reciprocal() + (1 - y).reciprocal()).log()
+
+
+def abs_transform_call(x):
+    return x.abs()
+
+
+def abs_transform_inverse(y):
+    return y
