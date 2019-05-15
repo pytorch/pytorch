@@ -182,7 +182,7 @@ class C10OperatorWrapper final : public Operator<Context> {
     if (default_value.has_value()) {
       return this->template GetSingleArgument<T>(name, default_value->to<T>());
     } else {
-      AT_CHECK(
+      TORCH_CHECK(
           this->template HasSingleArgumentOfType<T>(name),
           "Error in caffe2->c10 wrapper: Expected argument '",
           name,
