@@ -497,7 +497,7 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_solve_cuda", [&]{
     apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, info);
   });
-  AT_CHECK(info == 0, "MAGMA cholesky_solve : invalid argument: ", -info);
+  TORCH_CHECK(info == 0, "MAGMA cholesky_solve : invalid argument: ", -info);
   return self_working_copy;
 }
 
@@ -633,7 +633,7 @@ AT_ERROR("lu: MAGMA library not found in "
 }
 
 std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cuda(const Tensor& self, bool pivot, bool check_errors) {
-  AT_CHECK(self.dim() >= 2,
+  TORCH_CHECK(self.dim() >= 2,
            "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
            " instead");
   squareCheckInputs(self);
