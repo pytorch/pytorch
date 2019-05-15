@@ -4171,6 +4171,7 @@ class TestTransformFunctions(TestCase):
         self.cat_y = self.exp_y
         self.cat_log_abs_det_jacobian = self.exp_log_abs_det_jacobian
 
+        # stack transform
         self.stack_y = self.exp_y
         self.stack_log_abs_det_jacobian = self.exp_log_abs_det_jacobian
 
