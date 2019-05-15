@@ -19,6 +19,8 @@
 namespace torch {
 namespace jit {
 
+Symbol ConcretePythonOp::Kind = prim::PythonOp;
+
 using c10::Type;
 
 std::string getPythonName(const PyObject* obj_) {
@@ -344,13 +346,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def("param_node", [](Graph& g) { return g.block()->param_node(); })
       .def("return_node", [](Graph& g) { return g.block()->return_node(); })
       .def(
-          "pretty_print",
-          [](Graph& g) {
-            std::ostringstream oss;
-            g.prettyPrint(oss);
-            return oss.str();
-          })
-      .GS(createFusionGroup)
+          "createFusionGroup",
+          [](Graph& g) { return g.createWithSubgraph(prim::FusionGroup); })
       .def(
           "createClone",
           [](Graph& g, Node* n, py::object fn) {
@@ -442,15 +439,9 @@ void initPythonIRBindings(PyObject* module_) {
             return ss.str();
           })
       .def(
-          "getSourceLocation",
-          [](Node& n) -> py::object {
-            std::stringstream ss;
-            if (auto sl = n.getSourceLocation()) {
-              sl->highlight(ss);
-              return py::str(ss.str());
-            } else {
-              return py::none();
-            }
+          "sourceRange",
+          [](Node& n) {
+            return n.sourceRange().str();
           })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })

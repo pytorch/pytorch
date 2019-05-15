@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include <torch/csrc/jit/script/lexer.h>
@@ -62,7 +63,7 @@ struct Tree : std::enable_shared_from_this<Tree> {
   }
   template <typename... Args>
   void matchD(int k, const char* filename, int lineno, Args&... args) {
-    std::initializer_list<TreeRef*> vars = {&args...};
+    std::initializer_list<TreeRef*> vars = {args...};
     matchNumSubtreesD(k, filename, lineno, vars.size(), true);
     size_t i = 0;
     for (TreeRef* v : vars) {

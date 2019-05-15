@@ -222,6 +222,7 @@ void VariableType::set_data(Tensor & self, Tensor new_data) const {
   as_variable_ref(self).set_data(new_data);
 }
 
+// We don't have an outplace copy, so this can't be generated automatically
 Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   jit::Value* output = nullptr;
   if(torch::jit::tracer::isTracing()) {

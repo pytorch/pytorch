@@ -39,7 +39,7 @@ inline Tensor new_qtensor_cpu(
   auto* allocator = at::getCPUAllocator();
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
-  AT_CHECK(isQIntType(typeMetaToScalarType(dtype)),
+  TORCH_CHECK(isQIntType(typeMetaToScalarType(dtype)),
            "ScalarType is not supported in new_qtensor_cpu.");
   auto storage = c10::make_intrusive<StorageImpl>(
       dtype,
@@ -69,7 +69,7 @@ qint8 quantize_uint8(float scale, uint8_t zero_point, float value) {
 #else
   constexpr int32_t qmin = std::numeric_limits<uint8_t>::min();
   constexpr int32_t qmax = std::numeric_limits<uint8_t>::max();
-  qvalue = zero_point + static_cast<int32_t>(std::nearbyint(value / scale));
+  qvalue = static_cast<int32_t>(std::nearbyint(value / scale + zero_point));
   qvalue = std::max(qvalue, qmin);
   qvalue = std::min(qvalue, qmax);
 #endif
@@ -80,7 +80,7 @@ Tensor PerTensorAffineQuantizer::quantize(Tensor tensor) {
   IntArrayRef sizes = tensor.sizes();
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
-  AT_CHECK(
+  TORCH_CHECK(
       tensor.options().device() == kCPU,
       "quantize only works for CPU backend right now.");
   Tensor qv = new_qtensor_cpu(

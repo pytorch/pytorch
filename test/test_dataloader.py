@@ -63,7 +63,7 @@ if not NO_MULTIPROCESSING_SPAWN:
 # Yes, in environments where physical CPU resources are shared, e.g., CI, the
 # time for a inter-process communication can be highly varying.  With 15~17s of
 # timeout, we have observed flakiness in some CI builds (see
-# pytorch/pytorch#14501, pytoch/pytorch#16608).  We follow the CPython
+# pytorch/pytorch#14501, pytorch/pytorch#16608).  We follow the CPython
 # multiprocessing setup and set the timeout to 60s here:
 #
 # https://github.com/python/cpython/blob/e8113f51a8bdf33188ee30a1c038a298329e7bfa/Lib/test/_test_multiprocessing.py#L73
@@ -454,6 +454,10 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
 def init_fn(worker_id):
     torch.manual_seed(12345)
 
+# used with test_error_in_init
+def error_worker_init_fn(_):
+    raise RuntimeError("Error in worker_init_fn")
+
 
 class TestDataLoader(TestCase):
 
@@ -508,6 +512,11 @@ class TestDataLoader(TestCase):
                 setattr(dl, attr, {})
 
             self.assertRaises(ValueError, fn)
+
+    def test_error_in_init(self):
+        loader = DataLoader(self.dataset, num_workers=2, worker_init_fn=error_worker_init_fn)
+        with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
+            list(iter(loader))
 
     def test_sequential(self):
         self._test_sequential(DataLoader(self.dataset))
@@ -791,11 +800,14 @@ class TestDataLoader(TestCase):
             #   - `None` means that no error happens.
             # In all cases, all processes should end properly.
             if use_workers:
-                exit_methods = [None, 'loader_error', 'loader_kill', 'worker_kill', 'worker_error']
+                exit_methods = [None, 'loader_error', 'loader_kill', 'worker_error', 'worker_kill']
             else:
                 exit_methods = [None, 'loader_error', 'loader_kill']
 
             for exit_method in exit_methods:
+                if exit_method == 'worker_kill' and hold_iter_reference:
+                    # FIXME: this combination sometimes hangs.
+                    continue
 
                 desc = []
                 desc.append('use_workers={}'.format(use_workers))

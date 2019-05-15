@@ -5,10 +5,11 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
+#include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/jit/tracer.h"
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
@@ -172,6 +173,26 @@ static Tensor dispatch_contiguous(const Tensor & self) {
   END_HANDLE_TH_ERRORS
 }
 
+static Tensor dispatch_copy_(Tensor & self, const Tensor & other, bool non_blocking) {
+  AutoNoGIL no_gil;
+  OptionalDeviceGuard device_guard(device_of(self));
+  return self.copy_(other, non_blocking);
+}
+
+ static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "copy_(Tensor other, bool non_blocking=False)",
+    "copy_(Tensor other, bool async=False)|deprecated"
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  return THPVariable_Wrap(dispatch_copy_(self_, r.tensor(0), r.toBool(1)));
+  END_HANDLE_TH_ERRORS
+}
+
 static double dispatch_to_CDouble(const Tensor & self) {
   AutoNoGIL no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
@@ -300,7 +321,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
-  AT_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
+  TORCH_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
   torch::utils::cuda_lazy_init();
   return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false));
   END_HANDLE_TH_ERRORS
@@ -342,6 +363,10 @@ static PyObject * THPVariable_long(PyObject* self, PyObject* args) {
 
 static PyObject * THPVariable_short(PyObject* self, PyObject* args) {
   return THPVariable_to_type(self, ScalarType::Short);
+}
+
+static PyObject * THPVariable_bool(PyObject* self, PyObject* args) {
+  return THPVariable_to_type(self, ScalarType::Bool);
 }
 
 static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
@@ -483,7 +508,6 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
 static PyObject * THPVariable_new_empty(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("new_empty", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_empty(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
@@ -493,7 +517,6 @@ static PyObject * THPVariable_new_empty(PyObject* self, PyObject* args, PyObject
 static PyObject * THPVariable_new_full(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("new_full", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_full(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
@@ -503,7 +526,6 @@ static PyObject * THPVariable_new_full(PyObject* self, PyObject* args, PyObject*
 static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("new_ones", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_ones(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
@@ -513,7 +535,6 @@ static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject*
 static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("new_tensor", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_tensor(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
@@ -523,7 +544,6 @@ static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObjec
 static PyObject * THPVariable_new_zeros(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("new_zeros", jit::tracer::LEGACY_CONSTRUCTOR);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::new_zeros(self_.dispatch_type(), self_.scalar_type(), args, kwargs));
@@ -636,7 +656,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
 
 ${py_methods}
 
-static PyObject * THPVariable_bool(PyObject* self, PyObject* args) {
+static PyObject * THPVariable_bool_scalar(PyObject* self, PyObject* args) {
   jit::tracer::warn("Converting a tensor to a Python boolean", jit::tracer::WARN_PYTHON_DATAFLOW);
   return THPVariable_is_nonzero(self, args);
 }
@@ -654,12 +674,12 @@ PyMethodDef variable_methods[] = {
   {"__truediv__", (PyCFunction)THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__idiv__", (PyCFunction)THPVariable_div_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", (PyCFunction)THPVariable_remainder, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__bool__", (PyCFunction)THPVariable_bool, METH_NOARGS, NULL},
+  {"__bool__", (PyCFunction)THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__index__", (PyCFunction)THPVariable_index_scalar, METH_NOARGS, NULL},
-  {"__nonzero__", (PyCFunction)THPVariable_bool, METH_NOARGS, NULL},
+  {"__nonzero__", (PyCFunction)THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__invert__", (PyCFunction)THPVariable_invert, METH_NOARGS, NULL},
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
   {"_is_view", (PyCFunction)THPVariable__is_view, METH_NOARGS, NULL},
@@ -667,6 +687,7 @@ PyMethodDef variable_methods[] = {
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
+  {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
   {"cuda", (PyCFunction)THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
@@ -674,6 +695,7 @@ PyMethodDef variable_methods[] = {
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},
   {"get_device", (PyCFunction)THPVariable_get_device, METH_NOARGS, NULL},
+  {"bool", (PyCFunction)THPVariable_bool, METH_NOARGS, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
   {"is_contiguous", (PyCFunction)THPVariable_is_contiguous, METH_NOARGS, NULL},

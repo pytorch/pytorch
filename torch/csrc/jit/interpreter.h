@@ -47,11 +47,11 @@ struct TORCH_API Code {
 };
 
 struct InterpreterState {
-  InterpreterState(const Code& code);
-  void run(Stack& stack);
+  TORCH_API InterpreterState(const Code& code);
+  TORCH_API void run(Stack& stack);
   c10::intrusive_ptr<Future> runAsync(Stack& stack);
   c10::intrusive_ptr<Future> getFuture();
-  ~InterpreterState();
+  TORCH_API ~InterpreterState();
 
  private:
   InterpreterState(c10::intrusive_ptr<c10::intrusive_ptr_target> pImpl);

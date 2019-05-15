@@ -54,7 +54,7 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
     }
 
     bool weights_changed = (cached_weights_descriptor_ != filter.get_descriptor());
-    if (weights_changed || (input_changed && algo_ == ialgo::convolution_winograd)) {
+    if (weights_changed) {
       op_key_.clear();
       cached_weights_descriptor_ = filter.dup_descriptor();
       CAFFE_ENFORCE(filter.get_data_type() == idtype::s8 && filter.has_scale());

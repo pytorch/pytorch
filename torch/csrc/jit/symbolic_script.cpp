@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/symbolic_script.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/script/compiler.h>
 
 namespace torch {
 namespace jit {
@@ -1008,6 +1010,18 @@ const std::vector<std::string> functions = {
 
             return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad), backward
 
+        def max_pool2d(self,
+                       kernel_size: List[int],
+                       stride: List[int],
+                       padding: List[int],
+                       dilation: List[int],
+                       ceil_mode: bool):
+            output, indices = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
+            def backward(grad_output):
+                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
+                return grad_self, None, None, None, None, None
+            return output, backward
+
         def batch_norm(input : Tensor,
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
@@ -1032,7 +1046,8 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
-        def layer_norm(input : Tensor,
+        # disable the layernorm AD temporarily because of bug in https://github.com/pytorch/pytorch/issues/19769
+        def layer_norm_disabled(input : Tensor,
                        normalized_shape : List[int],
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
@@ -1260,20 +1275,20 @@ std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 } // anonymous namespace
 
 std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
-  AT_CHECK(
+  TORCH_CHECK(
       closure->node()->kind() == prim::TupleConstruct,
       "closure must be a literal tuple construct");
   Value* fn = closure->node()->inputs().at(0);
   Value* context = closure->node()->inputs().at(1);
 
-  AT_CHECK(
+  TORCH_CHECK(
       fn->node()->kind() == prim::Function,
       "closure tuple must contain a prim::Function");
   return std::make_pair(fn->node()->g(attr::Subgraph), context);
 }
 
 Argument originalReturnType(const TupleTypePtr& tup) {
-  AT_CHECK(tup->elements().size() > 1);
+  TORCH_CHECK(tup->elements().size() > 1);
   if (tup->elements().size() == 2)
     return Argument("", tup->elements().at(0));
   std::vector<TypePtr> types = tup->elements().vec();
@@ -1318,7 +1333,7 @@ void loadModule(const script::CompilationUnit& module) {
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw script::ErrorReport(forward_tuple->getSourceLocation())
+      throw script::ErrorReport(forward_tuple->sourceRange())
           << "gradient must return literal a tuple";
     }
 

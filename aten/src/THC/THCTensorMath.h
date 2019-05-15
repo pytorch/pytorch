@@ -25,6 +25,9 @@
 #include <THC/generic/THCTensorMathReduce.h>
 #include <THC/THCGenerateAllTypes.h>
 
+#include <THC/generic/THCTensorMathReduce.h>
+#include <THC/THCGenerateBoolType.h>
+
 #include <THC/generic/THCTensorMathCompare.h>
 #include <THC/THCGenerateAllTypes.h>
 
