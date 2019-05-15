@@ -627,7 +627,7 @@ Tensor _cudnn_rnn_flatten_weight(
     bool fn_bidirectional
     ) {
 
-  AT_CHECK(weight_arr.size() > 0,
+  TORCH_CHECK(weight_arr.size() > 0,
            "_cudnn_rnn_flatten_weight_: cannot flatten empty weight list");
 
   auto any_param = weight_arr[0];
@@ -701,7 +701,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   // TODO: Set device to input
 
   if (fn.rnn.mode != CUDNN_LSTM) {
-    AT_CHECK(!cx.defined(),
+    TORCH_CHECK(!cx.defined(),
              "rnn: illegal defined cx for non-LSTM RNN");
   }
 
@@ -714,9 +714,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
   auto output_size = _output_size(fn.rnn, fn.tensors);
 
-  AT_CHECK(hx.is_contiguous(),
+  TORCH_CHECK(hx.is_contiguous(),
            "rnn: hx is not contiguous");
-  AT_CHECK(!cx.defined() || cx.is_contiguous(),
+  TORCH_CHECK(!cx.defined() || cx.is_contiguous(),
            "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
@@ -750,7 +750,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     w_desc.set(weight_buf, 3);
   }
 
-  AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
+  TORCH_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
            "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
 
   size_t workspace_size;
@@ -842,7 +842,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto handle = getCudnnHandle();
 
   if (fn.rnn.mode != CUDNN_LSTM) {
-    AT_CHECK(!cx.defined(),
+    TORCH_CHECK(!cx.defined(),
              "rnn: illegal defined cx for non-LSTM RNN");
   }
 
@@ -857,9 +857,9 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
   auto output_size = _output_size(fn.rnn, fn.tensors);
 
-  AT_CHECK(hx.is_contiguous(),
+  TORCH_CHECK(hx.is_contiguous(),
            "rnn: hx is not contiguous");
-  AT_CHECK(!cx.defined() || cx.is_contiguous(),
+  TORCH_CHECK(!cx.defined() || cx.is_contiguous(),
            "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
@@ -873,15 +873,15 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   AT_ASSERTM(cx.defined() || !output_mask[2], "illegally required grad of cx for non-LSTM RNN");
   auto dcx = cx.defined() ? at::empty(hidden_size, cx.options()) : Tensor();
 
-  AT_CHECK(fn_train,
+  TORCH_CHECK(fn_train,
            "cudnn RNN backward can only be called in training mode");
 
-  AT_CHECK(input.sizes().equals(input_size),
+  TORCH_CHECK(input.sizes().equals(input_size),
            "Expected input size ", IntArrayRef{input_size}, ", got ", input.sizes());
-  AT_CHECK(output.sizes().equals(output_size),
+  TORCH_CHECK(output.sizes().equals(output_size),
            "Expected output size ", IntArrayRef{output_size}, ", got ", output.sizes());
 
-  AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
+  TORCH_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
            "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
   AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
            "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
