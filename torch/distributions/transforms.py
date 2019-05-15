@@ -334,13 +334,13 @@ class SigmoidTransform(Transform):
         return isinstance(other, SigmoidTransform)
 
     def _call(self, x):
-        return F.sigmoid_transformation_call(x)
+        return F.sigmoid_transform_call(x)
 
     def _inverse(self, y):
-        return F.sigmoid_transformation_inverse(y)
+        return F.sigmoid_transform_inverse(y)
 
     def log_abs_det_jacobian(self, x, y):
-        return F.sigmoid_transformation_log_abs_det_jacobian(x, y)
+        return F.sigmoid_transform_log_abs_det_jacobian(x, y)
 
 
 class AbsTransform(Transform):
@@ -354,10 +354,10 @@ class AbsTransform(Transform):
         return isinstance(other, AbsTransform)
 
     def _call(self, x):
-        return x.abs()
+        return F.abs_transform_call(x)
 
     def _inverse(self, y):
-        return y
+        return F.abs_transform_inverse(y)
 
 
 class AffineTransform(Transform):
@@ -403,28 +403,16 @@ class AffineTransform(Transform):
 
     @property
     def sign(self):
-        if isinstance(self.scale, numbers.Number):
-            return 1 if self.scale > 0 else -1 if self.scale < 0 else 0
-        return self.scale.sign()
+        return F.affine_transform_sign(self.scale)
 
     def _call(self, x):
-        return self.loc + self.scale * x
+        return F.affine_transform_call(self.scale, self.loc, x)
 
     def _inverse(self, y):
-        return (y - self.loc) / self.scale
+        return F.affine_transform_inverse(self.scale, self.loc, y)
 
     def log_abs_det_jacobian(self, x, y):
-        shape = x.shape
-        scale = self.scale
-        if isinstance(scale, numbers.Number):
-            result = torch.full_like(x, math.log(abs(scale)))
-        else:
-            result = torch.abs(scale).log()
-        if self.event_dim:
-            result_size = result.size()[:-self.event_dim] + (-1,)
-            result = result.view(result_size).sum(-1)
-            shape = shape[:-self.event_dim]
-        return result.expand(shape)
+        return F.affine_transform_log_abs_det_jacobian(self.scale, self.event_dim, x, y)
 
 
 class SoftmaxTransform(Transform):
