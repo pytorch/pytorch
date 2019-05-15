@@ -119,7 +119,7 @@ std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
 
 std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
                                        const Tensor& self, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "mode only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
@@ -154,7 +154,7 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
 
 std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
                                       const Tensor& self, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "max only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
@@ -193,7 +193,7 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
 
 std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
                                       const Tensor& self, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "min only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {

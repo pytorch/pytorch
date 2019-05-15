@@ -756,15 +756,15 @@ jobs:
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_trusty_py3_5_build:
+  AAA_pytorch_linux_trusty_py3_5_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.5-build
+      BUILD_ENVIRONMENT: AAA-pytorch-linux-trusty-py3.5-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:300"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_trusty_py3_5_test:
+  AAA_pytorch_linux_trusty_py3_5_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.5-test
+      BUILD_ENVIRONMENT: AAA-pytorch-linux-trusty-py3.5-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:300"
     resource_class: large
     <<: *pytorch_linux_test_defaults
@@ -862,16 +862,16 @@ jobs:
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
-  pytorch_linux_xenial_cuda9_cudnn7_py2_build:
+  AAA_pytorch_linux_xenial_cuda9_cudnn7_py2_build:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2-build
+      BUILD_ENVIRONMENT: AAA-pytorch-linux-xenial-cuda9-cudnn7-py2-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:300"
       PYTHON_VERSION: "2.7"
     <<: *pytorch_linux_build_defaults
 
-  pytorch_linux_xenial_cuda9_cudnn7_py2_test:
+  AAA_pytorch_linux_xenial_cuda9_cudnn7_py2_test:
     environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2-test
+      BUILD_ENVIRONMENT: AAA-pytorch-linux-xenial-cuda9-cudnn7-py2-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:300"
       PYTHON_VERSION: "2.7"
       USE_CUDA_DOCKER_RUNTIME: "1"
@@ -2821,13 +2821,13 @@ workflows:
           requires:
             - setup
             - pytorch_linux_trusty_py2_7_build
-      - pytorch_linux_trusty_py3_5_build:
+      - AAA_pytorch_linux_trusty_py3_5_build:
           requires:
             - setup
-      - pytorch_linux_trusty_py3_5_test:
+      - AAA_pytorch_linux_trusty_py3_5_test:
           requires:
             - setup
-            - pytorch_linux_trusty_py3_5_build
+            - AAA_pytorch_linux_trusty_py3_5_build
       - pytorch_linux_trusty_pynightly_build:
           requires:
             - setup
@@ -2877,13 +2877,13 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_py3_clang5_asan_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_build:
+      - AAA_pytorch_linux_xenial_cuda9_cudnn7_py2_build:
           requires:
             - setup
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
+      - AAA_pytorch_linux_xenial_cuda9_cudnn7_py2_test:
           requires:
             - setup
-            - pytorch_linux_xenial_cuda9_cudnn7_py2_build
+            - AAA_pytorch_linux_xenial_cuda9_cudnn7_py2_build
       - pytorch_linux_xenial_cuda9_cudnn7_py3_build:
           requires:
             - setup

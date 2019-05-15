@@ -97,7 +97,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
     std::vector<IValue>& inputs,
     const std::unordered_map<std::string, IValue>& kwargs) const {
   // Do we have more inputs than the schema accepts?
-  AT_CHECK(
+  TORCH_CHECK(
       inputs.size() <= arguments().size(),
       "Expected at most ",
       arguments().size(),
