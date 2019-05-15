@@ -415,10 +415,10 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
 {
   // These checks should always succeed, because weight_norm_fused_backward should only
   // ever be recorded in the autograd graph via weight_norm, which passes contiguous v and g.
-  AT_CHECK(saved_v.is_contiguous(), "saved_v must be contiguous");
-  AT_CHECK(saved_g.is_contiguous(), "saved_g must be contiguous");
-  AT_CHECK(saved_norms.is_contiguous(), "saved_norms must be contiguous");
-  AT_CHECK(dim == 0 || dim == saved_v.dim() - 1, "fused kernels can only be applied for first or last dim")
+  TORCH_CHECK(saved_v.is_contiguous(), "saved_v must be contiguous");
+  TORCH_CHECK(saved_g.is_contiguous(), "saved_g must be contiguous");
+  TORCH_CHECK(saved_norms.is_contiguous(), "saved_norms must be contiguous");
+  TORCH_CHECK(dim == 0 || dim == saved_v.dim() - 1, "fused kernels can only be applied for first or last dim")
 
   auto grad_v = at::empty_like(saved_v);
   auto grad_g = at::empty_like(saved_g);

@@ -72,7 +72,7 @@ void RegisterOperators::checkSchemaAndRegisterOp_(FunctionSchema&& schema, Optio
 }
 
 void RegisterOperators::registerOp_(FunctionSchema&& schema, Options&& options) {
-  AT_CHECK(!options.config.dispatch_key.has_value() || options.config.kernel_func != nullptr,
+  TORCH_CHECK(!options.config.dispatch_key.has_value() || options.config.kernel_func != nullptr,
     "Tried to register an operator with a dispatch key but without a kernel. "
     "Please either specify a kernel or omit the dispatch key to only register the schema.");
 

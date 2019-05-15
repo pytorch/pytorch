@@ -15,7 +15,7 @@ namespace at { namespace native {
 
 namespace {
   void check_dims_match_num_input_features(const char* arg_name, int64_t expected, int64_t actual){
-    AT_CHECK(actual == expected,
+    TORCH_CHECK(actual == expected,
              arg_name, " should contain ", expected, " elements not ", actual);
   }
 
@@ -434,7 +434,7 @@ Tensor instance_norm(
     const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool use_input_stats, double momentum, double eps, bool cudnn_enabled) {
-  AT_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
+  TORCH_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
            "Expected running_mean and running_var to be defined when use_input_stats is false");
   std::vector<int64_t> shape = input.sizes().vec();
   int64_t b = input.size(0);
@@ -468,16 +468,16 @@ Tensor layer_norm(const Tensor& input, IntArrayRef normalized_shape,
 
     int64_t normalized_ndim = normalized_shape.size();
 
-    AT_CHECK(normalized_ndim >= 1,
+    TORCH_CHECK(normalized_ndim >= 1,
              "Expected normalized_shape to be at least 1-dimensional, i.e., ",
              "containing at least one element, but got normalized_shape=",
              normalized_shape);
 
-    AT_CHECK(!weight.defined() || weight.sizes().equals(normalized_shape),
+    TORCH_CHECK(!weight.defined() || weight.sizes().equals(normalized_shape),
              "Expected weight to be of same shape as normalized_shape, but got ",
              "weight of shape ", weight.sizes(), " and normalized_shape=",
              normalized_shape);
-    AT_CHECK(!bias.defined() || bias.sizes().equals(normalized_shape),
+    TORCH_CHECK(!bias.defined() || bias.sizes().equals(normalized_shape),
              "Expected bias to be of same shape as normalized_shape, but got ",
              "bias of shape ", bias.sizes(), " and normalized_shape=",
              normalized_shape);
@@ -528,16 +528,16 @@ Tensor group_norm(const Tensor& input, int64_t num_groups,
     int64_t b = input.size(0);
     int64_t c = input.size(1);
 
-    AT_CHECK(c % num_groups == 0,
+    TORCH_CHECK(c % num_groups == 0,
              "Expected number of channels in input to be divisible by ",
              "num_groups, but got input of shape ", input.sizes(), " and "
              "num_groups=", num_groups);
 
-    AT_CHECK(!weight.defined() || (weight.dim() == 1 && weight.numel() == c),
+    TORCH_CHECK(!weight.defined() || (weight.dim() == 1 && weight.numel() == c),
              "Expected weight to be a vector of size equal to the number of ",
              "channels in input, but got weight of shape ", weight.sizes(),
              " and input of shape ", input.sizes());
-    AT_CHECK(!bias.defined() || (bias.dim() == 1 && bias.numel() == c),
+    TORCH_CHECK(!bias.defined() || (bias.dim() == 1 && bias.numel() == c),
              "Expected bias to be a vector of size equal to the number of ",
              "channels in input, but got bias of shape ", weight.sizes(),
              " and input of shape ", input.sizes());

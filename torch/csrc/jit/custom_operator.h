@@ -83,7 +83,7 @@ inline void checkArgumentVector(
     const FunctionSchema& inferredSchema,
     const FunctionSchema& providedSchema) {
   // clang-format off
-  AT_CHECK(
+  TORCH_CHECK(
       inferred.size() == provided.size(),
       "Inferred ", inferred.size(), " ", what,
       "(s) for operator implementation, but the provided schema specified ",
@@ -92,7 +92,7 @@ inline void checkArgumentVector(
   // clang-format on
   for (size_t i = 0; i < provided.size(); ++i) {
     // clang-format off
-    AT_CHECK(
+    TORCH_CHECK(
         provided[i].type()->isSubtypeOf(inferred[i].type()),
         "Inferred type for ", what, " #", i, " was ", *inferred[i].type(),
         ", but the provided schema specified type ", *provided[i].type(),
