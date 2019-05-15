@@ -1,0 +1,112 @@
+# =================== The following code **should** be executed inside Docker container ===================
+
+# This is where the local pytorch install in the docker image is located
+pt_checkout="/var/lib/jenkins/workspace"
+
+# Since we're cat-ing this file, we need to escape all $'s
+echo "doc_push_script.sh: Invoked with \$*"
+
+git clone https://github.com/pytorch/pytorch.github.io -b site
+pushd pytorch.github.io
+
+set -ex
+
+# Argument 1: Where to copy the built documentation to
+# (pytorch.github.io/$install_path)
+install_path="\$1"
+if [ -z "\$install_path" ]; then
+echo "error: doc_push_script.sh: install_path (arg1) not specified"
+  exit 1
+fi
+
+# Argument 2: What version of the docs we are building.
+version="\$2"
+if [ -z "\$version" ]; then
+echo "error: doc_push_script.sh: version (arg2) not specified"
+  exit 1
+fi
+
+is_master_doc=false
+if [ "\$version" == "master" ]; then
+  is_master_doc=true
+fi
+
+# Argument 3: (optional) If present, we will NOT do any pushing. Used for testing.
+dry_run=false
+if [ "\$3" != "" ]; then
+  dry_run=true
+fi
+
+echo "install_path: \$install_path  version: \$version  dry_run: \$dry_run"
+
+export LC_ALL=C
+export PATH=/opt/conda/bin:$PATH
+
+rm -rf pytorch || true
+
+# Install TensorBoard in python 3 so torch.utils.tensorboard classes render
+pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
+
+# Get all the documentation sources, put them in one place
+pushd "\$pt_checkout"
+git clone https://github.com/pytorch/vision
+pushd vision
+conda install -q pillow
+time python setup.py install
+popd
+pushd docs
+rm -rf source/torchvision
+cp -a ../vision/docs/source source/torchvision
+
+# Build the docs
+pip -q install -r requirements.txt || true
+if [ "\$is_master_doc" = true ]; then
+  make html
+else
+  make html-stable
+fi
+
+# Move them into the docs repo
+popd
+popd
+git rm -rf "\$install_path" || true
+mv "\$pt_checkout/docs/build/html" "\$install_path"
+
+# Add the version handler by search and replace.
+# XXX: Consider moving this to the docs Makefile or site build
+if [ "\$is_master_doc" = true ]; then
+  find "\$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>\1 \&#x25BC</a>@g"
+else
+  find "\$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>\$version \&#x25BC</a>@g"
+fi
+
+git add "\$install_path" || true
+git status
+git config user.email "soumith+bot@pytorch.org"
+git config user.name "pytorchbot"
+# If there aren't changes, don't make a commit; push is no-op
+git commit -m "auto-generating sphinx docs" || true
+git status
+
+export dry_run=false  # yf225 TODO: remove this when ready to merge
+
+if [ "\$dry_run" = false ]; then
+  echo "Pushing to pytorch.github.io:site"
+  set +x
+  expect <<DONE
+    spawn git push origin master_test
+    expect "Username*"
+    send "pytorchbot\n"
+    expect "Password*"
+    send "${GITHUB_PYTORCHBOT_TOKEN}\n"
+    expect eof
+  DONE
+  set -x
+else
+  echo "Skipping push due to dry_run"
+fi
+
+exit 1  # yf225 TODO: remove this when ready to merge
+
+popd
+# =================== The above code **should** be executed inside Docker container ===================
