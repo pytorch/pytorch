@@ -8,9 +8,8 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/pickler.h>
-#include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/error_report.h>
@@ -27,12 +26,12 @@
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <ostream>
-#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <typeinfo>
@@ -98,13 +97,13 @@ static int64_t floordiv(int64_t a, int64_t b) {
 }
 
 static int gcd(int a, int b) {
-    while (b != 0) {
-        int r = a % b;
-        a = b;
-        b = r;
-    }
-    // in python gcd returns non-negative values
-    return std::abs(a);
+  while (b != 0) {
+    int r = a % b;
+    a = b;
+    b = r;
+  }
+  // in python gcd returns non-negative values
+  return std::abs(a);
 }
 
 // reference function THPVariable_to in python_variable_methods.cpp
@@ -1723,7 +1722,7 @@ RegisterOperators reg2({
       listSelect<Shared<c_type>>),                                          \
       Operator(                                                             \
           "aten::append( " decl_type "[](a!) self, " decl_type              \
-          "(c) el) -> " decl_type "[](a!)",                                 \
+          "(c -> *) el) -> " decl_type "[](a!)",                            \
           listAppend<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
           "aten::reverse( " decl_type "[](a!) self) -> ()",                 \
@@ -1739,7 +1738,7 @@ RegisterOperators reg2({
           listCopy<Shared<c_type>>),                                        \
       Operator(                                                             \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type      \
-          " el) -> " decl_type "[](a!)",                                    \
+          "(b -> *) el) -> " decl_type "[](a!)",                            \
           listSetItem<Shared<c_type>, c_type::ElemType>),                   \
       Operator(                                                             \
           "aten::clear( " decl_type "[](a!) self) -> ()",                   \
@@ -1747,7 +1746,7 @@ RegisterOperators reg2({
       Operator(                                                             \
           "aten::insert( " decl_type                                        \
           "[](a!) self, int idx,                 \
-          " decl_type " el) -> ()",                                         \
+          " decl_type "(b -> *) el) -> ()",                                 \
           listInsert<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
           "aten::pop(" decl_type                                            \
@@ -1894,13 +1893,13 @@ RegisterOperators reg2({
           return 0;
         }),
     Operator(
-      "prim::str(t elem) -> str",
-      [](Stack& stack) {
-        std::stringstream ss;
-        ss << pop(stack);
-        push(stack, ss.str());
-        return 0;
-      }),
+        "prim::str(t elem) -> str",
+        [](Stack& stack) {
+          std::stringstream ss;
+          ss << pop(stack);
+          push(stack, ss.str());
+          return 0;
+        }),
     Operator(
         "aten::ord(str string) -> int",
         [](Stack& stack) {
@@ -2131,24 +2130,28 @@ RegisterOperators reg2({
 
     DEFINE_INT_OP(aten::gcd, gcd(a, b)),
 
-    DEFINE_GENERIC_OP(aten::copysign, std::copysign(a, b), std::copysign(a, b), float, float),
-    DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a,b), float),
+    DEFINE_GENERIC_OP(
+        aten::copysign,
+        std::copysign(a, b),
+        std::copysign(a, b),
+        float,
+        float),
+    DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a, b), float),
 
-#define DEFINE_MATH_OP(aten_op, op, int_result, float_result)              \
-  Operator(                                                                \
-      #aten_op "(int a) -> " #int_result,                                  \
-      [](Stack& stack) {                                                   \
-        int64_t a;                                                         \
-        pop(stack, a);                                                     \
-        push(stack, op);                                                   \
-        return 0;                                                          \
-      }),                                                                  \
-      Operator(#aten_op "(float a) -> " #float_result,                     \
-      [](Stack& stack) {                                                   \
-        double a;                                                          \
-        pop(stack, a);                                                     \
-        push(stack, op);                                                   \
-        return 0;                                                          \
+#define DEFINE_MATH_OP(aten_op, op, int_result, float_result)             \
+  Operator(                                                               \
+      #aten_op "(int a) -> " #int_result,                                 \
+      [](Stack& stack) {                                                  \
+        int64_t a;                                                        \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
+      }),                                                                 \
+      Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) { \
+        double a;                                                         \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
       })
 
     DEFINE_MATH_OP(aten::gamma, std::tgamma(a), float, float),
@@ -2249,7 +2252,7 @@ RegisterOperators reg2({
           dictGetDefault),                                                    \
       Operator(                                                               \
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
-          " idx, t v) -> ()",                                                 \
+          " idx, t(b -> *) v) -> ()",                                         \
           dictSetItem)
 
     CREATE_DICT_OPS("str"),
