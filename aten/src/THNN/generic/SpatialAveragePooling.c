@@ -54,7 +54,7 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   }
 }
 
-void THNN_(SpatialAveragePooling_updateOutput)(
+void THNN_(SpatialSumAveragePooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
@@ -140,13 +140,6 @@ void THNN_(SpatialAveragePooling_updateOutput)(
           wend = std::min(wend, inputWidth);
 
           scalar_t sum = 0;
-
-          int divide_factor;
-          if(count_include_pad)
-            divide_factor = pool_size;
-          else
-            divide_factor = (hend - hstart) * (wend - wstart);
-
           int64_t kx, ky;
 
           for(ky = hstart; ky < hend; ky++)
@@ -155,12 +148,41 @@ void THNN_(SpatialAveragePooling_updateOutput)(
               sum += ptr_input[ky*inputWidth + kx];
           }
           /* Update output */
+#if !defined(TH_REAL_IS_LONG)
+          int divide_factor;
+          if(count_include_pad)
+            divide_factor = pool_size;
+          else
+            divide_factor = (hend - hstart) * (wend - wstart);
+
           *ptr_output++ += sum/divide_factor;
+#else
+          *ptr_output++ += sum;
+#endif
         }
       }
     }
   }
   c10::raw::intrusive_ptr::decref(input);
+}
+
+#if !defined(TH_REAL_IS_LONG)
+
+void THNN_(SpatialAveragePooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int kW,
+          int kH,
+          int dW,
+          int dH,
+          int padW,
+          int padH,
+          bool ceil_mode,
+          bool count_include_pad)
+{
+  THNN_(SpatialSumAveragePooling_updateOutput)
+    (state, input, output, kW, kH, dW, dH, padW, padH, ceil_mode, count_include_pad);
 }
 
 void THNN_(SpatialAveragePooling_updateGradInput)(
@@ -275,5 +297,5 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
 
   c10::raw::intrusive_ptr::decref(gradOutput);
 }
-
+#endif
 #endif

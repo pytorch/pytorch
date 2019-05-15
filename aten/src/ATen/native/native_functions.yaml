@@ -3629,6 +3629,16 @@
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
   python_module: nn
 
+- func: sum_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU: sum_pool2d_out
+
+- func: sum_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU: sum_pool2d
+
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:

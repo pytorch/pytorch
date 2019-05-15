@@ -425,7 +425,9 @@ def run(paths):
 
             base = base_declaration(func, fwd_function, backends, defualt_scalar_types)
             declarations.append(forward_declaration(base, fwd_function, forward_backend_types))
-            declarations.append(backward_declaration(base, bwd_functions, backward_backend_types))
+            if bwd_functions:
+                declarations.append(backward_declaration(base, bwd_functions, backward_backend_types))
+
 
             if func.get('has_inplace', False):
                 declarations.append(base_declaration(func, fwd_function, backends, forward_backend_types, True))
