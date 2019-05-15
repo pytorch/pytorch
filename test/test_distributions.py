@@ -4161,19 +4161,29 @@ class TestTransformFunctions(TestCase):
             torch.tensor([-12.333, -10.334], dtype=torch.float32),
             torch.tensor([-10.28, -18.629], dtype=torch.float32)]
 
+        # lower cholesky transform
+        self.lower_cholesky_y = [
+            torch.tensor([[20.086, 0.], [5., 7.389]], dtype=torch.float32),
+            torch.tensor([[7.389, 0.], [2., 1096.633]], dtype=torch.float32),
+            torch.tensor([[148.413, 0.], [6., 2980.958]], dtype=torch.float32)]
+
+        # cat transform
+        self.cat_y = self.exp_y
+        self.cat_log_abs_det_jacobian = self.exp_log_abs_det_jacobian
+
+        self.stack_y = self.exp_y
+        self.stack_log_abs_det_jacobian = self.exp_log_abs_det_jacobian
+
     def _test_call_helper(self, x_data, y_data, call_fn):
         for i in range(len(x_data)):
             x = x_data[i]
             y = call_fn(x)
-            # print(repr(y.numpy()))
             self.assertAlmostEqual(y_data[i], y, places=2)
 
     def _test_inverse_helper(self, x_data, call_fn, inv_fn):
         for x in x_data:
             y = call_fn(x)
             y_inv = inv_fn(y)
-            # print('y_inv', repr(y_inv.numpy()))
-            # print('x', repr(x.numpy()))
             self.assertAlmostEqual(y_inv, x, places=2)
 
     def _test_log_abs_det_jacobian(self, x_data, out_data, call_fn, log_abs_det_jacobian_fn):
@@ -4181,90 +4191,121 @@ class TestTransformFunctions(TestCase):
             x = x_data[i]
             y = call_fn(x)
             log_abs_det_jacobian = log_abs_det_jacobian_fn(x, y)
-            # print(repr(log_abs_det_jacobian.numpy()))
             self.assertAlmostEqual(out_data[i], log_abs_det_jacobian, places=2)
 
-    # def test_exp_transform_call(self):
-    #     self._test_call_helper(self.data_1, self.exp_y,
-    #                            functional.exp_transform_call)
-    #
-    # def test_exp_transform_inverse(self):
-    #     self._test_inverse_helper(self.data_1,
-    #                               functional.exp_transform_call,
-    #                               functional.exp_transform_inverse)
-    #
-    # def test_exp_transform_log_abs_det_jacobian(self):
-    #     self._test_log_abs_det_jacobian(self.data_1, self.exp_log_abs_det_jacobian,
-    #                                     functional.exp_transform_call,
-    #                                     functional.exp_transform_log_abs_det_jacobian)
-    #
-    # def test_power_transform_call(self):
-    #     self._test_call_helper(self.data_1, self.pow_y,
-    #                            lambda x: functional.power_transform_call(2, x))
-    #
-    # def test_power_transform_inverse(self):
-    #     self._test_inverse_helper(self.data_1,
-    #                               lambda x: functional.power_transform_call(2, x),
-    #                               lambda y: functional.power_transform_inverse(2, y))
-    #
-    # def test_power_transform_log_abs_det_jacobian(self):
-    #     self._test_log_abs_det_jacobian(self.data_1, self.pow_log_abs_det_jacobian,
-    #                                     lambda x: functional.power_transform_call(2, x),
-    #                                     lambda x, y: functional.power_transform_log_abs_det_jacobian(2, x, y))
-    #
-    # def test_sigmoid_transform_call(self):
-    #     self._test_call_helper(self.data_1, self.sigmoid_y,
-    #                            functional.sigmoid_transform_call)
-    #
-    # def test_sigmoid_transform_inverse(self):
-    #     self._test_inverse_helper(self.data_1,
-    #                               functional.sigmoid_transform_call,
-    #                               functional.sigmoid_transform_inverse)
-    #
-    # def test_sigmoid_transform_log_abs_det_jacobian(self):
-    #     self._test_log_abs_det_jacobian(self.data_1, self.sigmoid_log_abs_det_jacobian,
-    #                                     functional.sigmoid_transform_call,
-    #                                     functional.sigmoid_transform_log_abs_det_jacobian)
-    #
-    # def test_abs_transform_call(self):
-    #     self._test_call_helper(self.data_2, self.data_1, functional.abs_transform_call)
-    #
-    # def test_abs_transform_inverse(self):
-    #     self._test_inverse_helper(self.data_1,
-    #                               functional.abs_transform_call,
-    #                               functional.abs_transform_inverse)
-    #
-    # def test_affine_transform_call(self):
-    #     self._test_call_helper(self.data_1, self.affine_y,
-    #                            lambda x: functional.affine_transform_call(1.0, 2, x))
-    #
-    # def test_affine_transform_inverse(self):
-    #     self._test_inverse_helper(self.data_1,
-    #                               lambda x: functional.affine_transform_call(1.0, 2, x),
-    #                               lambda y: functional.affine_transform_inverse(1.0, 2, y))
-    #
-    # def test_affine_transform_log_abs_det_jacobian(self):
-    #     self._test_log_abs_det_jacobian(self.data_1, self.affine_log_abs_det_jacobian,
-    #                                     lambda x: functional.affine_transform_call(1.0, 2, x),
-    #                                     lambda x, y: functional.affine_transform_log_abs_det_jacobian(1.0, 2, x, y))
-    #
-    # def test_soft_max_transform_call(self):
-    #     self._test_call_helper(self.data_1, self.soft_max_y,
-    #                            functional.soft_max_transform_call)
-    #
-    # def test_stick_breaking_transform_call(self):
-    #     self._test_call_helper(self.data_1, self.stick_breaking_y,
-    #                            functional.stick_breaking_transform_call)
-    #
-    # def test_stick_breaking_transform_inverse(self):
-    #     self._test_inverse_helper(self.data_1,
-    #                               functional.stick_breaking_transform_call,
-    #                               functional.stick_breaking_transform_inverse)
-    #
-    # def test_stick_breaking_transform_log_abs_det_jacobian(self):
-    #     self._test_log_abs_det_jacobian(self.data_1, self.stick_breaking_log_abs_det_jacobian,
-    #                                     functional.stick_breaking_transform_call,
-    #                                     functional.stick_breaking_transform_log_abs_det_jacobian)
+    def test_exp_transform_call(self):
+        self._test_call_helper(self.data_1, self.exp_y,
+                               functional.exp_transform_call)
+
+    def test_exp_transform_inverse(self):
+        self._test_inverse_helper(self.data_1,
+                                  functional.exp_transform_call,
+                                  functional.exp_transform_inverse)
+
+    def test_exp_transform_log_abs_det_jacobian(self):
+        self._test_log_abs_det_jacobian(self.data_1, self.exp_log_abs_det_jacobian,
+                                        functional.exp_transform_call,
+                                        functional.exp_transform_log_abs_det_jacobian)
+
+    def test_power_transform_call(self):
+        self._test_call_helper(self.data_1, self.pow_y,
+                               lambda x: functional.power_transform_call(2, x))
+
+    def test_power_transform_inverse(self):
+        self._test_inverse_helper(self.data_1,
+                                  lambda x: functional.power_transform_call(2, x),
+                                  lambda y: functional.power_transform_inverse(2, y))
+
+    def test_power_transform_log_abs_det_jacobian(self):
+        self._test_log_abs_det_jacobian(self.data_1, self.pow_log_abs_det_jacobian,
+                                        lambda x: functional.power_transform_call(2, x),
+                                        lambda x, y: functional.power_transform_log_abs_det_jacobian(2, x, y))
+
+    def test_sigmoid_transform_call(self):
+        self._test_call_helper(self.data_1, self.sigmoid_y,
+                               functional.sigmoid_transform_call)
+
+    def test_sigmoid_transform_inverse(self):
+        self._test_inverse_helper(self.data_1,
+                                  functional.sigmoid_transform_call,
+                                  functional.sigmoid_transform_inverse)
+
+    def test_sigmoid_transform_log_abs_det_jacobian(self):
+        self._test_log_abs_det_jacobian(self.data_1, self.sigmoid_log_abs_det_jacobian,
+                                        functional.sigmoid_transform_call,
+                                        functional.sigmoid_transform_log_abs_det_jacobian)
+
+    def test_abs_transform_call(self):
+        self._test_call_helper(self.data_2, self.data_1, functional.abs_transform_call)
+
+    def test_abs_transform_inverse(self):
+        self._test_inverse_helper(self.data_1,
+                                  functional.abs_transform_call,
+                                  functional.abs_transform_inverse)
+
+    def test_affine_transform_call(self):
+        self._test_call_helper(self.data_1, self.affine_y,
+                               lambda x: functional.affine_transform_call(1.0, 2, x))
+
+    def test_affine_transform_inverse(self):
+        self._test_inverse_helper(self.data_1,
+                                  lambda x: functional.affine_transform_call(1.0, 2, x),
+                                  lambda y: functional.affine_transform_inverse(1.0, 2, y))
+
+    def test_affine_transform_log_abs_det_jacobian(self):
+        self._test_log_abs_det_jacobian(self.data_1, self.affine_log_abs_det_jacobian,
+                                        lambda x: functional.affine_transform_call(1.0, 2, x),
+                                        lambda x, y: functional.affine_transform_log_abs_det_jacobian(1.0, 2, x, y))
+
+    def test_soft_max_transform_call(self):
+        self._test_call_helper(self.data_1, self.soft_max_y,
+                               functional.soft_max_transform_call)
+
+    def test_stick_breaking_transform_call(self):
+        self._test_call_helper(self.data_1, self.stick_breaking_y,
+                               functional.stick_breaking_transform_call)
+
+    def test_stick_breaking_transform_inverse(self):
+        self._test_inverse_helper(self.data_1,
+                                  functional.stick_breaking_transform_call,
+                                  functional.stick_breaking_transform_inverse)
+
+    def test_stick_breaking_transform_log_abs_det_jacobian(self):
+        self._test_log_abs_det_jacobian(self.data_1, self.stick_breaking_log_abs_det_jacobian,
+                                        functional.stick_breaking_transform_call,
+                                        functional.stick_breaking_transform_log_abs_det_jacobian)
+
+    def test_lower_cholesky_transform_call(self):
+        self._test_call_helper(self.data_1, self.lower_cholesky_y,
+                               functional.lower_cholesky_transform_call)
+
+    def test_cat_transform_call(self):
+        self._test_call_helper(self.data_1, self.cat_y,
+                               lambda x: functional.cat_transform_call(0, 2, [2], [ExpTransform()], x))
+
+    def test_cat_transform_inverse(self):
+        self._test_inverse_helper(self.data_1,
+                                  lambda x: functional.cat_transform_call(0, 2, [2], [ExpTransform()], x),
+                                  lambda y: functional.cat_transform_inverse(0, 2, [2], [ExpTransform()], y))
+
+    def test_cat_transform_log_abs_det_jacobian(self):
+        self._test_log_abs_det_jacobian(self.data_1, self.cat_log_abs_det_jacobian,
+                                        lambda x: functional.cat_transform_call(0, 2, [2], [ExpTransform()], x),
+                                        lambda x, y: functional.cat_transform_log_abs_det_jacobian(0, 2, [2], [ExpTransform()], x, y))
+
+    def test_stack_transform_call(self):
+        self._test_call_helper(self.data_1, self.stack_y,
+                               lambda x: functional.stack_transform_call(0, [ExpTransform(), ExpTransform()], x))
+
+    def test_stack_transform_inverse(self):
+        self._test_inverse_helper(self.data_1,
+                                  lambda x: functional.stack_transform_call(0, [ExpTransform(), ExpTransform()], x),
+                                  lambda y: functional.stack_transform_inverse(0, [ExpTransform(), ExpTransform()], y))
+
+    def test_stack_transform_log_abs_det_jacobian(self):
+        self._test_log_abs_det_jacobian(self.data_1, self.stack_log_abs_det_jacobian,
+                                        lambda x: functional.stack_transform_call(0, [ExpTransform(), ExpTransform()], x),
+                                        lambda x, y: functional.stack_transform_log_abs_det_jacobian(0, [ExpTransform(), ExpTransform()], x, y))
 
 class TestFunctors(TestCase):
     def test_cat_transform(self):

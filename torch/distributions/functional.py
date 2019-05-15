@@ -286,7 +286,7 @@ def stack_transform_call(dim, transforms, x):
     assert -x.dim() <= dim < x.dim()
     assert x.size(dim) == len(transforms)
     yslices = []
-    for xslice, trans in zip(stack_transform_slice(x), transforms):
+    for xslice, trans in zip(stack_transform_slice(dim, x), transforms):
         yslices.append(trans(xslice))
     return torch.stack(yslices, dim=dim)
 
@@ -295,7 +295,7 @@ def stack_transform_inverse(dim, transforms, y):
     assert -y.dim() <= dim < y.dim()
     assert y.size(dim) == len(transforms)
     xslices = []
-    for yslice, trans in zip(stack_transform_slice(y), transforms):
+    for yslice, trans in zip(stack_transform_slice(dim, y), transforms):
         xslices.append(trans.inv(yslice))
     return torch.stack(xslices, dim=dim)
 
@@ -306,8 +306,8 @@ def stack_transform_log_abs_det_jacobian(dim, transforms, x, y):
     assert -y.dim() <= dim < y.dim()
     assert y.size(dim) == len(transforms)
     logdetjacs = []
-    yslices = stack_transform_slice(y)
-    xslices = stack_transform_slice(x)
+    yslices = stack_transform_slice(dim, y)
+    xslices = stack_transform_slice(dim, x)
     for xslice, yslice, trans in zip(xslices, yslices, transforms):
         logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
     return torch.stack(logdetjacs, dim=dim)
