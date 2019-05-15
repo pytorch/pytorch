@@ -105,7 +105,7 @@ struct PythonResolver : public Resolver {
     }
 
     py::str qualifiedName =
-        py::module::import("torch.jit").attr("_qualified_name")(obj);
+        py::module::import("torch._jit_internal").attr("qualified_name")(obj);
 
     return CompilationUnit::_get_python_cu().get_class(
         c10::QualifiedName(qualifiedName));
