@@ -12,6 +12,7 @@ __all__ = [
     'btriunpack',
     'cartesian_prod',
     'chain_matmul',
+    'interp1d',
     'einsum',
     'gesv',
     'isfinite',
@@ -740,6 +741,10 @@ def chain_matmul(*matrices):
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
     return torch._C._VariableFunctions.chain_matmul(matrices)
+
+
+def interp1d(x_in, y_in, x_out):
+    return torch._C._VariableFunctions.interp1d(x_in, y_in, x_out)
 
 
 def pstrf(a, upper=True, out=None):

@@ -662,5 +662,44 @@ Tensor chain_matmul(TensorList matrices) {
   }
 }
 
+Tensor interp1d(const Tensor& tensor_x_in, const Tensor& tensor_y_in, const Tensor& tensor_x_out) {
+    AT_CHECK(tensor_x_in.dim() == 1, "input x is required to have dim = 1")
+    AT_CHECK(tensor_y_in.dim() == 1, "input y is required to have dim = 1")
+    AT_CHECK(tensor_x_in.size(0) == tensor_y_in.size(0), "input x and y should have same length")
+    Tensor tensor_y_out = at::empty({tensor_x_out.size(0)}, tensor_y_in.options());
+
+    auto x_i = tensor_x_in.accessor<float, 1>();
+    auto y_i = tensor_y_in.accessor<float, 1>();
+    auto x_o = tensor_x_out.accessor<float, 1>();
+    
+    bool isMonotonicIncrease = true;
+    bool isMonotonicDecrease = true;
+    for (int64_t i = 0; i < x_i.size(0) - 1; i++)
+    {
+        if (x_i[i] > x_i[i+1])
+            isMonotonicIncrease = false;
+        if (x_i[i] < x_i[i+1]) 
+            isMonotonicDecrease = false;
+    }
+    AT_CHECK(isMonotonicIncrease||isMonotonicDecrease, "input x is required to be monotonic")
+
+    for (int64_t i = 0; i < x_o.size(0); i++)
+    {
+        // binary search
+        int64_t j = 0, k = x_i.size(0), m;
+        while (j != k)
+        {
+            m = (j + k) / 2;
+            if (x_i[m] > x_o[i])
+                k = m - 1;
+            else
+                j = m;
+        }
+        m = j;
+        tensor_y_out[i] = y_i[m] + (y_i[m+1] - y_i[m])/(x_i[m+1] - x_i[m])*(x_o[i] - x_i[m]);
+    }
+    return tensor_y_out;
+}
+
 } // namespace native
 } // namespace at
