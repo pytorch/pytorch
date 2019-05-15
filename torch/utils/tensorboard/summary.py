@@ -483,16 +483,17 @@ def _get_tensor_summary(name, display_name, description, tensor, content_type, j
       Tensor summary with metadata.
     """
     import torch
+    from tensorboard.plugins.mesh import metadata
+
     tensor = torch.as_tensor(tensor)
 
-    tensor_metadata = SummaryMetadata(plugin_data=SummaryMetadata.PluginData(
-                                      plugin_name='mesh',
-                                      content=MeshPluginData(name=name,
-                                                             content_type=content_type,
-                                                             shape=tensor.shape,
-                                                             json_config=json_config
-                                                             ).SerializeToString())
-                                      )
+    tensor_metadata = metadata.create_summary_metadata(
+        name,
+        display_name,
+        content_type,
+        tensor.shape,
+        description,
+        json_config=json_config)
 
     tensor = TensorProto(dtype='DT_FLOAT',
                          float_val=tensor.reshape(-1).tolist(),
@@ -502,10 +503,11 @@ def _get_tensor_summary(name, display_name, description, tensor, content_type, j
                              TensorShapeProto.Dim(size=tensor.shape[2]),
                          ]))
 
-    from tensorboard.plugins.mesh import metadata
     tensor_summary = Summary(value=[Summary.Value(
         tag=metadata.get_instance_name(name, content_type),
-        metadata=tensor_metadata, tensor=tensor)])
+        tensor=tensor,
+        metadata=tensor_metadata,
+    )])
 
     return tensor_summary
 
@@ -547,6 +549,6 @@ def mesh(tag, vertices, colors, faces, config_dict, display_name=None, descripti
             _get_tensor_summary(tag, display_name, description, tensor, content_type, json_config))
 
     # todo: merge summaries without using tensorflow
-    all_summaries = tf.summary.merge(summaries, name=tag)
+    # all_summaries = tf.summary.merge(summaries, name=tag)
 
-    return all_summaries
+    return summaries[0]  # return only vertices for testing
