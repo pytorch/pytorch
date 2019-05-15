@@ -54,8 +54,8 @@ IntArrayRef Variable::Impl::strides() const {
   return data_.strides();
 }
 
-bool Variable::Impl::is_contiguous() const {
-  return data_.is_contiguous();
+bool Variable::Impl::is_contiguous(MemoryFormat memory_format) const {
+  return data_.is_contiguous(memory_format);
 }
 
 int64_t Variable::Impl::dim() const {

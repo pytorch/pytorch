@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Scalar.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/macros/Macros.h>
 #include <ATen/core/SparseTensorRef.h>
 #include <c10/core/TensorOptions.h>
@@ -176,8 +177,8 @@ inline Tensor Tensor::clamp_min(Scalar min) const {
 inline Tensor & Tensor::clamp_min_(Scalar min) {
     return dispatch_type().clamp_min_(*this, min);
 }
-inline Tensor Tensor::contiguous() const {
-    return dispatch_type().contiguous(*this);
+inline Tensor Tensor::contiguous(MemoryFormat memory_format) const {
+    return dispatch_type().contiguous(*this, memory_format);
 }
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
     return dispatch_type().copy_(*this, src, non_blocking);

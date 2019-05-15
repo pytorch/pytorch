@@ -5,6 +5,7 @@
 #include <numeric>
 
 #include <c10/core/Backend.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeId.h>
@@ -387,12 +388,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * compute_contiguous() for the exact definition of whether or not
    * a tensor is contiguous or not.
    */
-  virtual bool is_contiguous() const {
-#ifdef DEBUG
-    AT_ASSERT(compute_contiguous() == is_contiguous_);
-#endif
-    return is_contiguous_;
-  }
+  virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const;
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
