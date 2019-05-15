@@ -284,13 +284,13 @@ class ExpTransform(Transform):
         return isinstance(other, ExpTransform)
 
     def _call(self, x):
-        return x.exp()
+        return F.exp_transform_call(x)
 
     def _inverse(self, y):
-        return y.log()
+        return F.exp_transform_inverse(y)
 
     def log_abs_det_jacobian(self, x, y):
-        return x
+        return F.exp_transform_log_abs_det_jacobian(x, y)
 
 
 class PowerTransform(Transform):

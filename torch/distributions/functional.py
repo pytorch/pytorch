@@ -56,3 +56,15 @@ def compose_transformation_repr_(parts, class_name):
     fmt_string += ',\n    '.join([p.__repr__() for p in parts])
     fmt_string += '\n)'
     return fmt_string
+
+
+def exp_transform_call(x):
+    return x.exp()
+
+
+def exp_transform_inverse(y):
+    return y.log()
+
+
+def exp_transform_log_abs_det_jacobian(x, y):
+    return x
