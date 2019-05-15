@@ -519,8 +519,6 @@ std::tuple<Tensor, Tensor, Tensor> miopen_rnn_backward_input(
 	    const Tensor& fn_dropout_state, const Tensor& fn_reserve,
 	    std::array<bool, 3> output_mask
 	    ) {
-	AT_ERROR("miopen_rnn_backward_input: not implemented yet.");
-
 	auto input = input_r;
 	auto grad_output = grad_output_r;
 	auto output = output_r;
@@ -577,7 +575,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_rnn_backward_input(
 	AT_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
         "Expected d_cell size ", IntArrayRef{hidden_size}, ", got ", dcy.sizes());
 
-	AT_CHECK(dhy.is_hip() && dy.is_hip() && (!dcy.defined() || dcy.is_hip()),
+	AT_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
         "Gradients aren't HIP tensors");
 
 	miopenRNNAlgo_t algo = miopenRNNdefault;
@@ -634,8 +632,6 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 	    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
 	    const Tensor& fn_dropout_state, const Tensor& fn_reserve
 	    ) {
-	AT_ERROR("miopen_rnn_backward_weight: not implemented yet.");
-
 	MatrixRef<Tensor> weight{ weight_arr, static_cast<size_t>(weight_stride0) };
 
 	auto input = input_r;
@@ -734,8 +730,6 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
         double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor& dropout_state, 
         const Tensor& reserve, std::array<bool, 4> output_mask
         ) {
-    AT_ERROR("miopen_rnn_backward: not implemented yet.");
-
     auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output);
     auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx);
     auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx)) : grad_cy_r;
