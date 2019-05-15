@@ -2434,6 +2434,50 @@ class _TestTorchMixin(object):
         expected = torch.tensor([[0.]], dtype=torch.float16)
         self.assertEqual(halfTensor, expected)
 
+    def test_std_mean(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 50, 20, device=device)
+            for dim in range(x.dim()):
+                for unbiased in [False, True]:
+                    for keepdim in [False, True]:
+                        std1, mean1 = torch.std_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        std2 = x.std(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        mean2 = x.mean(dim=dim, keepdim=keepdim)
+                        self.assertEqual(std1, std2)
+                        self.assertEqual(mean1, mean2)
+
+    def test_std_mean_all_dims(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 50, 20, device=device)
+            for unbiased in [False, True]:
+                std1, mean1 = torch.std_mean(x, unbiased=unbiased)
+                std2 = x.std(unbiased=unbiased)
+                mean2 = x.mean()
+                self.assertEqual(std1, std2)
+                self.assertEqual(mean1, mean2)
+
+    def test_var_mean(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 300, 50, device=device)
+            for dim in range(x.dim()):
+                for unbiased in [False, True]:
+                    for keepdim in [False, True]:
+                        var1, mean1 = torch.var_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        var2 = x.var(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        mean2 = x.mean(dim=dim, keepdim=keepdim)
+                        self.assertEqual(var1, var2)
+                        self.assertEqual(mean1, mean2)
+
+    def test_var_mean_all_dims(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 50, 20, device=device)
+            for unbiased in [False, True]:
+                var1, mean1 = torch.var_mean(x, unbiased=unbiased)
+                var2 = x.var(unbiased=unbiased)
+                mean2 = x.mean()
+                self.assertEqual(var1, var2)
+                self.assertEqual(mean1, mean2)
+
     def test_zeros_like(self):
         expected = torch.zeros(100, 100)
 
