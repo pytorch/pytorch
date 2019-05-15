@@ -76,12 +76,12 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     AT_ERROR("opaque tensors do not have storage");
   }
 
-// NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer, because it is unique
-// for each Variable.
-//
-// yf225 TODO: fix comment!
-// NOTE: `version_counter_mode` determines the source of value for the TensorImpl shallow-copy's
-// version counter. See NOTE [ Version Counter Behavior in TensorImpl Shallow-Copy ] for more details.
+// NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
+// 1. the AutogradMeta pointer, because it is unique for each Variable.
+// 2. the version counter, because although it lives in TensorImpl, the version counter is managed
+// by autograd, and the call sites of `shallow_copy_and_detach()` (from autograd) should decide what
+// the version counter should be for each new TensorImpl, by passing the correct version counter as
+// `version_counter` into this function. See NOTE [ Version Counter Sharing ] for details.
 //
 // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
 // to this function that need to change the shallow copy's size or storage afterwards, and setting
