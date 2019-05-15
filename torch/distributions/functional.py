@@ -175,8 +175,61 @@ def lower_cholesky_transform_call(x):
     flat_x = x.reshape((-1,) + x.shape[-2:])
     return torch.stack([_call_on_event(flat_x[i]) for i in range(flat_x.size(0))]).view(x.shape)
 
+
 def lower_cholesky_transform_inverse(y):
     def _inverse_on_event(y):
         return y.tril(-1) + y.diag().log().diag()
     flat_y = y.contiguous().view((-1,) + y.shape[-2:])
     return torch.stack([_inverse_on_event(flat_y[i]) for i in range(flat_y.size(0))]).view(y.shape)
+
+
+def cat_transform_call(dim, length_to_check, lengths, transforms, x):
+    assert -x.dim() <= dim < x.dim()
+    assert x.size(dim) == length_to_check
+    yslices = []
+    start = 0
+    for trans, length in zip(transforms, lengths):
+        xslice = x.narrow(dim, start, length)
+        yslices.append(trans(xslice))
+        start = start + length  # avoid += for jit compat
+    return torch.cat(yslices, dim=dim)
+
+
+def cat_transform_inverse(dim, length_to_check, lengths, transforms, y):
+    assert -y.dim() <= dim < y.dim()
+    assert y.size(dim) == length_to_check
+    xslices = []
+    start = 0
+    for trans, length in zip(transforms, lengths):
+        yslice = y.narrow(dim, start, length)
+        xslices.append(trans.inv(yslice))
+        start = start + length  # avoid += for jit compat
+    return torch.cat(xslices, dim=dim)
+
+
+def cat_transform_log_abs_det_jacobian(dim, length_to_check, lengths, transforms, x, y):
+    assert -x.dim() <= dim < x.dim()
+    assert x.size(dim) == length_to_check
+    assert -y.dim() <= dim < y.dim()
+    assert y.size(dim) == length_to_check
+    logdetjacs = []
+    start = 0
+    for trans, length in zip(transforms, lengths):
+        xslice = x.narrow(dim, start, length)
+        yslice = y.narrow(dim, start, length)
+        logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
+        start = start + length  # avoid += for jit compat
+    return torch.cat(logdetjacs, dim=dim)
+
+
+def cat_transform_bijective(transforms):
+    return all(t.bijective for t in transforms)
+
+
+def cat_transform_domain(dim, lengths, transforms):
+    return constraints.cat([t.domain for t in transforms],
+                           dim, lengths)
+
+def cat_transform_codomain(dim, lengths, transforms):
+    return constraints.cat([t.codomain for t in transforms],
+                           dim, lengths)

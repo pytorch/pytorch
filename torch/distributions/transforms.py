@@ -517,54 +517,25 @@ class CatTransform(Transform):
         return sum(self.lengths)
 
     def _call(self, x):
-        assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == self.length
-        yslices = []
-        start = 0
-        for trans, length in zip(self.transforms, self.lengths):
-            xslice = x.narrow(self.dim, start, length)
-            yslices.append(trans(xslice))
-            start = start + length  # avoid += for jit compat
-        return torch.cat(yslices, dim=self.dim)
+        return F.cat_transform_call(self.dim, self.length, self.lengths, self.transforms, x)
 
     def _inverse(self, y):
-        assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == self.length
-        xslices = []
-        start = 0
-        for trans, length in zip(self.transforms, self.lengths):
-            yslice = y.narrow(self.dim, start, length)
-            xslices.append(trans.inv(yslice))
-            start = start + length  # avoid += for jit compat
-        return torch.cat(xslices, dim=self.dim)
+        return F.cat_transform_inverse(self.dim, self.length, self.lengths, self.transforms, y)
 
     def log_abs_det_jacobian(self, x, y):
-        assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == self.length
-        assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == self.length
-        logdetjacs = []
-        start = 0
-        for trans, length in zip(self.transforms, self.lengths):
-            xslice = x.narrow(self.dim, start, length)
-            yslice = y.narrow(self.dim, start, length)
-            logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
-            start = start + length  # avoid += for jit compat
-        return torch.cat(logdetjacs, dim=self.dim)
+        return F.cat_transform_log_abs_det_jacobian(self.dim, self.length, self.lengths, self.transforms, x, y)
 
     @property
     def bijective(self):
-        return all(t.bijective for t in self.transforms)
+        return F.cat_transform_bijective(self.transforms)
 
     @constraints.dependent_property
     def domain(self):
-        return constraints.cat([t.domain for t in self.transforms],
-                               self.dim, self.lengths)
+        return F.cat_transform_domain(self.dim, self.lengths, self.transforms)
 
     @constraints.dependent_property
     def codomain(self):
-        return constraints.cat([t.codomain for t in self.transforms],
-                               self.dim, self.lengths)
+        return F.cat_transform_codomain(self.dim, self.lengths, self.transforms)
 
 
 class StackTransform(Transform):
