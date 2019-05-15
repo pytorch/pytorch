@@ -1,4 +1,3 @@
-
 # Nighlty build smoke tests defaults
 # These are the second-round smoke tests. These make sure that the binaries are
 # correct from a user perspective, testing that they exist from the cloud are
@@ -10,14 +9,10 @@ smoke_linux_test: &smoke_linux_test
   steps:
   - attach_workspace:
       at: ~/workspace
-  - attach_workspace:
-      at: /home/circleci/project
   - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
-  - run:
-      <<: *binary_checkout
   - run:
       <<: *binary_populate_env
   - run:
@@ -27,7 +22,8 @@ smoke_linux_test: &smoke_linux_test
         set -ex
         cat >/home/circleci/project/ci_test_script.sh <<EOL
         # The following code will be executed inside Docker container
-        set -eux -o pipefail
+        set -ex
+        git clone https://github.com/pytorch/builder.git /builder
         /builder/smoke_test.sh
         # The above code will be executed inside Docker container
         EOL
@@ -40,21 +36,15 @@ smoke_mac_test: &smoke_mac_test
   steps:
     - attach_workspace:
         at: ~/workspace
-    - attach_workspace: # TODO - we can `cp` from ~/workspace
-        at: /Users/distiller/project
-    - run:
-        <<: *binary_checkout
     - run:
         <<: *binary_populate_env
     - run:
         <<: *binary_macos_brew_update
-    - run:
-        <<: *binary_install_miniconda
     - run:
         name: Build
         no_output_timeout: "1h"
         command: |
           set -ex
           source "/Users/distiller/project/env"
+          git clone https://github.com/pytorch/builder.git
           unbuffer ./builder/smoke_test.sh | ts
-

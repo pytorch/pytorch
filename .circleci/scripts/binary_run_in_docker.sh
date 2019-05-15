@@ -9,15 +9,13 @@
 source /home/circleci/project/env
 echo "Running the following code in Docker"
 cat /home/circleci/project/ci_test_script.sh
-echo
-echo
-set -eux -o pipefail
+set -ex -o pipefail
 
 # Expect actual code to be written to this file
 chmod +x /home/circleci/project/ci_test_script.sh
 
 # Run the docker
-if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
+if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
   export id=$(docker run --runtime=nvidia -t -d "${DOCKER_IMAGE}")
 else
   export id=$(docker run -t -d "${DOCKER_IMAGE}")
