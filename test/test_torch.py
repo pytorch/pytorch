@@ -1447,6 +1447,18 @@ class _TestTorchMixin(object):
 
         self.assertEqual(res1, res2)
 
+    def test_numpy_args(self):
+        x1 = torch.randn(10)
+        x2 = torch.randn(10)
+        res1 = torch.add(input=x1, other=x2)
+        res2 = torch.add(x1=x1, x2=x2)
+        self.assertEqual(res1, res2)
+
+        x1 = torch.randn(10, 10, 10)
+        res1 = x1.sum(dim=(0, 2), keepdim=True)
+        res2 = x1.sum(axis=(0, 2), keepdims=True)
+        self.assertEqual(res1, res2)
+
     def test_add(self):
         # [res] torch.add([res,] tensor1, tensor2)
         m1 = torch.randn(100, 100)

@@ -73,10 +73,10 @@ std::vector<Tensor> parallel_apply(
     std::vector<ModuleType>& modules,
     const std::vector<Tensor>& inputs,
     const optional<std::vector<Device>>& devices = nullopt) {
-  AT_CHECK(
+  TORCH_CHECK(
       modules.size() == inputs.size(), "Must have as many inputs as modules");
   if (devices) {
-    AT_CHECK(
+    TORCH_CHECK(
         modules.size() == devices->size(),
         "Must have as many devices as modules");
   }
@@ -140,7 +140,7 @@ Tensor data_parallel(
     int64_t dim = 0) {
   if (!devices) {
     const auto device_count = torch::cuda::device_count();
-    AT_CHECK(
+    TORCH_CHECK(
         device_count > 0, "Expected at least one CUDA device to be available");
     devices = std::vector<Device>();
     devices->reserve(device_count);

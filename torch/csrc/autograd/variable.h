@@ -137,14 +137,14 @@ struct TORCH_API Variable : public at::Tensor {
   // "Downcasts" a `Tensor` into a `Variable`. Only call this on tensors you
   // know are Variables.
   /*implicit*/ Variable(at::Tensor const& rhs) : at::Tensor(rhs) {
-    AT_CHECK(
+    TORCH_CHECK(
         is_variable() || !defined(),
         "Tensor that was converted to Variable was not actually a Variable");
   }
 
   /*implicit*/ Variable(at::Tensor&& rhs)
       : at::Tensor(std::move(rhs)) {
-    AT_CHECK(
+    TORCH_CHECK(
         is_variable() || !defined(),
         "Tensor that was converted to Variable was not actually a Variable");
   }
@@ -355,7 +355,7 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   /// leaf variables that want to accumulate gradients, and false for all other
   /// variables.
   void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) override {
-    AT_CHECK(
+    TORCH_CHECK(
       !requires_grad || at::isFloatingType(at::typeMetaToScalarType(self_impl->dtype())),
       "Only Tensors of floating point dtype can require gradients");
     requires_grad_ = requires_grad;
@@ -571,7 +571,7 @@ inline Variable make_variable(
     at::Tensor data,
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
-  AT_CHECK(
+  TORCH_CHECK(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
@@ -588,7 +588,7 @@ inline Variable make_variable_consuming(
     at::Tensor data,
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
-  AT_CHECK(
+  TORCH_CHECK(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
@@ -604,7 +604,7 @@ inline Variable make_variable(
     at::Tensor data,
     Edge gradient_edge,
     bool allow_tensor_metadata_change = true) {
-  AT_CHECK(
+  TORCH_CHECK(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
@@ -624,7 +624,7 @@ inline Variable make_variable(
 /// in DEBUG mode and the tensor's dynamic type is not in fact `Variable`,
 /// throws a `std::invalid_argument` exception.
 inline Variable& as_variable_ref(at::Tensor& tensor) {
-  AT_CHECK(
+  TORCH_CHECK(
       tensor.is_variable(),
       "Attempted to cast a Tensor to a Variable, but "
       "the dynamic type of the value is not Variable.");
@@ -632,7 +632,7 @@ inline Variable& as_variable_ref(at::Tensor& tensor) {
 }
 
 inline const Variable& as_variable_ref(const at::Tensor& tensor) {
-  AT_CHECK(
+  TORCH_CHECK(
       tensor.is_variable(),
       "Attempted to cast a Tensor to a Variable, but "
       "the dynamic type of the value is not Variable.");
@@ -767,7 +767,7 @@ inline Variable::Variable(c10::intrusive_ptr<Variable::Impl> self)
     : at::Tensor(std::move(self)) {}
 
 inline Variable::Impl* Variable::get() const {
-  AT_CHECK(defined(), "Called Variable::get() on an undefined Variable");
+  TORCH_CHECK(defined(), "Called Variable::get() on an undefined Variable");
   return static_cast<Variable::Impl*>(impl_.get());
 }
 }} // namespace torch::autograd

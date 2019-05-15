@@ -468,7 +468,7 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   auto builder = TensorIterator::Builder();
   if (a.device().is_cuda() && b.device().is_cuda()) {
-    AT_CHECK(a.device() == b.device(),
+    TORCH_CHECK(a.device() == b.device(),
       "binary_op(): expected both inputs to be on same device, but input a "
       "is on ", a.device(), " and input b is on ", b.device());
   }
