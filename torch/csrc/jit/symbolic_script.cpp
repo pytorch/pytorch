@@ -1275,20 +1275,20 @@ std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 } // anonymous namespace
 
 std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
-  AT_CHECK(
+  TORCH_CHECK(
       closure->node()->kind() == prim::TupleConstruct,
       "closure must be a literal tuple construct");
   Value* fn = closure->node()->inputs().at(0);
   Value* context = closure->node()->inputs().at(1);
 
-  AT_CHECK(
+  TORCH_CHECK(
       fn->node()->kind() == prim::Function,
       "closure tuple must contain a prim::Function");
   return std::make_pair(fn->node()->g(attr::Subgraph), context);
 }
 
 Argument originalReturnType(const TupleTypePtr& tup) {
-  AT_CHECK(tup->elements().size() > 1);
+  TORCH_CHECK(tup->elements().size() > 1);
   if (tup->elements().size() == 2)
     return Argument("", tup->elements().at(0));
   std::vector<TypePtr> types = tup->elements().vec();

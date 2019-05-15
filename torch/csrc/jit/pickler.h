@@ -242,7 +242,7 @@ class Unpickler {
   // so that the number of bytes read / type read is explicit
   template <typename T>
   T read() {
-    AT_CHECK(
+    TORCH_CHECK(
         bytes_ + sizeof(T) <= end_ptr_,
         "Unpickler overran buffer while reading a value");
     T item;

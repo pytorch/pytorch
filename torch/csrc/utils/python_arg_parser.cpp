@@ -201,7 +201,7 @@ static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int6
   // case 2. s is a list of dims (e.g., s={1,2})
 
   // since already checked left brace '{' above, here only checks right brace '}'
-  AT_CHECK(s[n - 1] == '}', "Default value of IntArrayRef is missing right brace '}', found ", s[n - 1]);
+  TORCH_CHECK(s[n - 1] == '}', "Default value of IntArrayRef is missing right brace '}', found ", s[n - 1]);
 
   auto args = std::vector<int64_t>();
   std::istringstream ss(s.substr(1, s.length() - 2)); // exclude '{' and '}'

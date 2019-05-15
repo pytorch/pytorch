@@ -382,12 +382,11 @@ void THPStorage_(postInit)(PyObject *module)
   THPStorageClass = PyObject_GetAttrString(module,(char*)TH_CONCAT_STRING_2(Real,Storage));
   if (!THPStorageClass) throw python_error();
 
-  bool is_cuda = false;
+  at::Backend backend = at::Backend::CPU;
 #ifdef THC_GENERIC_FILE
-  is_cuda = true;
+  backend = at::Backend::CUDA;
 #endif
-  const char *type_name = TH_CONCAT_STRING_2(Real,);
-  torch::registerStoragePyTypeObject((PyTypeObject*)THPStorageClass, type_name, is_cuda, false);
+  torch::registerStoragePyTypeObject((PyTypeObject*)THPStorageClass, backend, TH_CONCAT_2(at::k, Real));
 }
 
 #endif

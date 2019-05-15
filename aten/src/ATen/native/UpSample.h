@@ -1,32 +1,10 @@
 #include <math.h>
 
 #include <ATen/ATen.h>
+#include <ATen/TensorUtils.h>
 
 namespace at {
 namespace native {
-
-// Corresponds to THNN_CHECK_DIM_SIZE
-static inline void check_dim_size(
-    const Tensor& data,
-    int64_t dim,
-    int64_t dim_size,
-    int64_t size) {
-  /* Check dimension size of a tensor */
-  AT_CHECK(
-      data.dim() == dim && data.size(dim_size) == size,
-      "Expected tensor of dimension ",
-      dim,
-      " and tensor.size[",
-      dim_size,
-      "] == ",
-      size,
-      " but got: dimension ",
-      data.dim(),
-      " and tensor.size[",
-      dim_size,
-      "] = ",
-      data.size(dim_size));
-}
 
 static inline void upsample_1d_shape_check(
     const Tensor& input,
