@@ -1366,6 +1366,8 @@ if _enabled:
         def __getattr__(self, attr):
             if '_c' not in self.__dict__:
                 raise RuntimeError("ScriptModule has not been initialized, did you forget to call super's init?")
+            if self._c._has_attribute(attr):
+                return self._c._get_attribute(attr)
             if self._c._has_method(attr):
                 if attr in self.__class__._original_methods:
                     original_method = self.__class__._original_methods[attr]
@@ -1377,9 +1379,6 @@ if _enabled:
                 # to improve invocation performance
                 self.__dict__[attr] = script_method
                 return script_method
-
-            if self._c._has_attribute(attr):
-                return self._c._get_attribute(attr)
             return Module.__getattr__(self, attr)
 
         def __setattr__(self, attr, value):
@@ -1771,7 +1770,7 @@ def _get_builtin_table():
     _builtin_table[id(math.fabs)] = "aten::fabs"
     _builtin_table[id(math.gamma)] = "aten::gamma"
     _builtin_table[id(math.lgamma)] = "aten::lgamma"
-    if not PY2: 
+    if not PY2:
         _builtin_table[id(math.gcd)] = "aten::gcd"
 
     _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
