@@ -396,46 +396,6 @@ Tensor max_pool3d_with_indices_backward(const Tensor & grad_output, const Tensor
   return at::legacy::th::_thnn_max_pool3d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices);
 }
 
-Tensor & upsample_bicubic2d_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList output_size, IntList input_size, bool align_corners) {
-  return at::legacy::th::_thnn_upsample_bicubic2d_backward_out(grad_input, grad_output, output_size, input_size, align_corners);
-}
-
-Tensor & upsample_nearest1d_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList output_size, IntList input_size) {
-  return at::legacy::th::_thnn_upsample_nearest1d_backward_out(grad_input, grad_output, output_size, input_size);
-}
-
-Tensor & upsample_nearest2d_out(Tensor & output, const Tensor & self, IntList output_size) {
-  return at::legacy::th::_thnn_upsample_nearest2d_forward_out(output, self, output_size);
-}
-
-Tensor upsample_nearest2d(const Tensor & self, IntList output_size) {
-  return at::legacy::th::_thnn_upsample_nearest2d_forward(self, output_size);
-}
-
-Tensor & upsample_nearest2d_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList output_size, IntList input_size) {
-  return at::legacy::th::_thnn_upsample_nearest2d_backward_out(grad_input, grad_output, output_size, input_size);
-}
-
-Tensor upsample_nearest2d_backward(const Tensor & grad_output, IntList output_size, IntList input_size) {
-  return at::legacy::th::_thnn_upsample_nearest2d_backward(grad_output, output_size, input_size);
-}
-
-Tensor & upsample_nearest3d_out(Tensor & output, const Tensor & self, IntList output_size) {
-  return at::legacy::th::_thnn_upsample_nearest3d_forward_out(output, self, output_size);
-}
-
-Tensor upsample_nearest3d(const Tensor & self, IntList output_size) {
-  return at::legacy::th::_thnn_upsample_nearest3d_forward(self, output_size);
-}
-
-Tensor & upsample_nearest3d_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList output_size, IntList input_size) {
-  return at::legacy::th::_thnn_upsample_nearest3d_backward_out(grad_input, grad_output, output_size, input_size);
-}
-
-Tensor upsample_nearest3d_backward(const Tensor & grad_output, IntList output_size, IntList input_size) {
-  return at::legacy::th::_thnn_upsample_nearest3d_backward(grad_output, output_size, input_size);
-}
-
 Tensor & sigmoid_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & output) {
   return at::legacy::th::_thnn_sigmoid_backward_out(grad_input, grad_output, output);
 }
