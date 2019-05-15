@@ -229,23 +229,23 @@ class ComposeTransform(Transform):
 
     @constraints.dependent_property
     def domain(self):
-        return F.compose_transformation_domain(self.parts)
+        return F.compose_transform_domain(self.parts)
 
     @constraints.dependent_property
     def codomain(self):
-        return F.compose_transformation_codomain(self.parts)
+        return F.compose_transform_codomain(self.parts)
 
     @lazy_property
     def bijective(self):
-        return F.compose_transformation_bijective(self.parts)
+        return F.compose_transform_bijective(self.parts)
 
     @lazy_property
     def sign(self):
-        return F.compose_transformation_sign(self.parts)
+        return F.compose_transform_sign(self.parts)
 
     @lazy_property
     def event_dim(self):
-        return F.compose_transformation_event_dim(self.parts)
+        return F.compose_transform_event_dim(self.parts)
 
     @property
     def inv(self):
@@ -259,13 +259,13 @@ class ComposeTransform(Transform):
         return inv
 
     def __call__(self, x):
-        return F.compose_transformation_call_(self.parts, x)
+        return F.compose_transform_call_(self.parts, x)
 
     def log_abs_det_jacobian(self, x, y):
-        return F.compose_transformation_log_abs_det_jacobian(self.parts, self.event_dim, x, y)
+        return F.compose_transform_log_abs_det_jacobian(self.parts, self.event_dim, x, y)
 
     def __repr__(self):
-        return F.compose_transformation_repr_(self.parts, self.__class__.__name__)
+        return F.compose_transform_repr_(self.parts, self.__class__.__name__)
 
 
 identity_transform = ComposeTransform([])
@@ -312,13 +312,13 @@ class PowerTransform(Transform):
         return self.exponent.eq(other.exponent).all().item()
 
     def _call(self, x):
-        return x.pow(self.exponent)
+        return F.power_transform_call(self.exponent, x)
 
     def _inverse(self, y):
-        return y.pow(1 / self.exponent)
+        return F.power_transform_inverse(self.exponent, y)
 
     def log_abs_det_jacobian(self, x, y):
-        return (self.exponent * y / x).abs().log()
+        return F.power_transform_log_abs_det_jacobian(self.exponent, x, y)
 
 
 class SigmoidTransform(Transform):
