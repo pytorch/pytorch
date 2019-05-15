@@ -14,7 +14,7 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop);
 static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop);
 
 void TensorIterator::parallel_reduce(const loop2d_t& loop) {
-  AT_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
+  TORCH_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
   int64_t numel = this->numel();
   if (numel < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
       at::in_parallel_region()) {

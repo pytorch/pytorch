@@ -79,7 +79,7 @@ void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef strid
 
 void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
-  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
+  TORCH_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
   at::IntArrayRef sizes(size, nDimension);
   at::optional<at::IntArrayRef> strides;
   if (stride) {
@@ -167,7 +167,7 @@ void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   // We used to allow this, but this breaks device caching,
   // see Note [We regret making Variable hold a Tensor]
   // Let's put an actual error message for this one.
-  AT_CHECK(tensor->storage().device() == storage->device(),
+  TORCH_CHECK(tensor->storage().device() == storage->device(),
             "Attempted to set the storage of a tensor on device \"", tensor->storage().device(),
              "\" to a storage on different device \"", storage->device(),
             "\".  This is no longer allowed; the devices must match.");

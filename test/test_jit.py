@@ -3306,7 +3306,7 @@ def foo(x):
         class B(A):
             def __init__(self):
                 super(B, self).__init__()
-           
+
             @torch.jit.script_method
             def bar(self, x):
                 return x * x
@@ -3320,16 +3320,16 @@ def foo(x):
 
         class C(torch.jit.ScriptModule):
             def __init__(self):
-               super(C, self).__init__()
-             
+                super(C, self).__init__()
+
             @torch.jit.script_method
             def bar(self, x):
                 return x
-        
+
         class D(C, B):
             def __init__(self):
                 super(D, self).__init__()
-        
+
         self.assertEqual(D()(v), v + v)
 
 

@@ -1203,7 +1203,7 @@ class ScriptMeta(type):
             if type(self) == cls:
                 # this is the init of the concrete type of self,
                 # we have already resolved all _methods
-                methods = [v for k,v in sorted(cls._methods.items())]
+                methods = [v for k, v in sorted(cls._methods.items())]
                 _create_methods_from_stubs(self, methods)
 
         cls.__init__ = init_then_register
@@ -1779,7 +1779,7 @@ def _get_builtin_table():
     _builtin_table[id(math.fabs)] = "aten::fabs"
     _builtin_table[id(math.gamma)] = "aten::gamma"
     _builtin_table[id(math.lgamma)] = "aten::lgamma"
-    if not PY2: 
+    if not PY2:
         _builtin_table[id(math.gcd)] = "aten::gcd"
 
     _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"

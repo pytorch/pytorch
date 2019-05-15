@@ -263,6 +263,29 @@ bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
   return contig_if_nonempty;
 }
 
+// Correspond to THCUNN_check_dim_size/THNN_check_dim_size
+void check_dim_size(
+    const Tensor& tensor,
+    int64_t dim,
+    int64_t dim_size,
+    int64_t size) {
+  /* Check dimension size of a tensor */
+  AT_CHECK(
+      tensor.dim() == dim && tensor.size(dim_size) == size,
+      "Expected a tensor of dimension ",
+      dim,
+      " and tensor.size[",
+      dim_size,
+      "] == ",
+      size,
+      " but got: dimension ",
+      tensor.dim(),
+      " and tensor.size[",
+      dim_size,
+      "] = ",
+      tensor.size(dim_size));
+}
+
 namespace detail {
 
 std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
@@ -287,5 +310,6 @@ int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
   }
   return size;
 }
+
 }  // namespace detail
 }  // namespace at
