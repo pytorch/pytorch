@@ -139,11 +139,6 @@ setup_ci_environment: &setup_ci_environment
   no_output_timeout: "1h"
   command: ~/workspace/.circleci/scripts/setup_ci_environment.sh
 
-# Installs expect and moreutils so that we can call `unbuffer` and `ts`.
-# Also installs OpenMP
-# !!!!NOTE!!!! this is copied into a binary_macos_brew_update job which is the
-# same but does not install libomp. If you are changing this, consider if you
-# need to change that step as well.
 macos_brew_update: &macos_brew_update
   name: Brew update and install moreutils, expect and libomp
   no_output_timeout: "1h"
@@ -159,6 +154,21 @@ macos_brew_update: &macos_brew_update
     brew install expect
     brew install libomp
 
+# In version 2.1 and above we could make this a command and pass a parameter to
+# it, but in this version there is no way to pass a parameter to a step
+binary_macos_brew_update: &binary_macos_brew_update
+  name: Brew update and install moreutils and expect
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    # moreutils installs a `parallel` executable by default, which conflicts
+    # with the executable from the GNU `parallel`, so we must unlink GNU
+    # `parallel` first, and relink it afterwards
+    brew update
+    brew unlink parallel
+    brew install moreutils
+    brew link parallel --overwrite
+    brew install expect
 
 
 ##############################################################################
@@ -377,7 +387,6 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
-
 ##############################################################################
 # Macos build defaults
 ##############################################################################
@@ -489,13 +498,13 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
 # do not need both the pytorch and builder repos, so this is a little wasteful
 # (smoke tests and upload jobs do not need the pytorch repo).
 binary_checkout: &binary_checkout
-  name: Checkout pytorch/builder repo
+  name: Checkout
   command: ~/workspace/.circleci/scripts/binary_checkout.sh
 
 # Parses circleci arguments in a consistent way, essentially routing to the
 # correct pythonXgccXcudaXos build we want
 binary_populate_env: &binary_populate_env
-  name: Set up binary env variables
+  name: Set up env
   command: ~/workspace/.circleci/scripts/binary_populate_env.sh
 
 binary_install_miniconda: &binary_install_miniconda
@@ -512,25 +521,6 @@ binary_run_in_docker: &binary_run_in_docker
   # This step only runs on circleci linux machine executors that themselves
   # need to start docker images
   command: ~/workspace/.circleci/scripts/binary_run_in_docker.sh
-
-# This is copied almost verbatim from the macos_brew_update job
-# In version 2.1 and above we could make this a command and pass a parameter to
-# it, but in this version there is no way to pass a parameter to a step
-binary_macos_brew_update: &binary_macos_brew_update
-  name: Brew update and install moreutils and expect
-  no_output_timeout: "1h"
-  command: |
-    set -eux -o pipefail
-    # moreutils installs a `parallel` executable by default, which conflicts
-    # with the executable from the GNU `parallel`, so we must unlink GNU
-    # `parallel` first, and relink it afterwards
-    brew update
-    brew unlink parallel
-    brew install moreutils
-    brew link parallel --overwrite
-    brew install expect
-
-
 # binary linux build defaults
 ##############################################################################
 binary_linux_build: &binary_linux_build
@@ -545,14 +535,14 @@ binary_linux_build: &binary_linux_build
   - run:
       name: Install unbuffer and ts
       command: |
-        set -eux -o pipefail
+        set -ex
         source /env
         retry yum -q -y install epel-release
         retry yum -q -y install expect moreutils
   - run:
       name: Upgrade gcc version (based on env var)
       command: |
-        set -eux -o pipefail
+        set -ex
         source /env
         if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
           source "/builder/upgrade_gcc_abi.sh"
@@ -560,11 +550,6 @@ binary_linux_build: &binary_linux_build
           # Env variables are not persisted into the next step
           echo "export PATH=$PATH" >> /env
           echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> /env
-
-          # We need to set this variable manually because
-          # https://github.com/pytorch/pytorch/blob/master/torch/abi-check.cpp
-          # sets the ABI to 0 by default
-          echo "export _GLIBCXX_USE_CXX11_ABI=1" >> /env
         else
           echo "Not upgrading gcc version"
         fi
@@ -626,7 +611,6 @@ binary_linux_upload: &binary_linux_upload
       no_output_timeout: "1h"
       command: ~/workspace/.circleci/scripts/binary_linux_upload.sh
 
-
 ##############################################################################
 # Macos binary build defaults
 # The root of everything is /Users/distiller/pytorch-ci-env/workspace
@@ -650,7 +634,7 @@ binary_mac_build: &binary_mac_build
       name: Build
       no_output_timeout: "1h"
       command: |
-        set -eux -o pipefail
+        set -ex
         script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_build.sh"
         cat "$script"
         source "$script"
@@ -659,7 +643,7 @@ binary_mac_build: &binary_mac_build
       name: Test
       no_output_timeout: "1h"
       command: |
-        set -eux -o pipefail
+        set -ex
         script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_test.sh"
         cat "$script"
         source "$script"
@@ -691,8 +675,6 @@ binary_mac_upload: &binary_mac_upload
         script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_upload.sh"
         cat "$script"
         source "$script"
-
-
 # Nighlty build smoke tests defaults
 # These are the second-round smoke tests. These make sure that the binaries are
 # correct from a user perspective, testing that they exist from the cloud are
@@ -704,14 +686,10 @@ smoke_linux_test: &smoke_linux_test
   steps:
   - attach_workspace:
       at: ~/workspace
-  - attach_workspace:
-      at: /home/circleci/project
   - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
-  - run:
-      <<: *binary_checkout
   - run:
       <<: *binary_populate_env
   - run:
@@ -721,7 +699,8 @@ smoke_linux_test: &smoke_linux_test
         set -ex
         cat >/home/circleci/project/ci_test_script.sh <<EOL
         # The following code will be executed inside Docker container
-        set -eux -o pipefail
+        set -ex
+        git clone https://github.com/pytorch/builder.git /builder
         /builder/smoke_test.sh
         # The above code will be executed inside Docker container
         EOL
@@ -734,24 +713,18 @@ smoke_mac_test: &smoke_mac_test
   steps:
     - attach_workspace:
         at: ~/workspace
-    - attach_workspace: # TODO - we can `cp` from ~/workspace
-        at: /Users/distiller/project
-    - run:
-        <<: *binary_checkout
     - run:
         <<: *binary_populate_env
     - run:
         <<: *binary_macos_brew_update
-    - run:
-        <<: *binary_install_miniconda
     - run:
         name: Build
         no_output_timeout: "1h"
         command: |
           set -ex
           source "/Users/distiller/project/env"
+          git clone https://github.com/pytorch/builder.git
           unbuffer ./builder/smoke_test.sh | ts
-
 ##############################################################################
 # Job specifications job specs
 ##############################################################################
@@ -996,7 +969,6 @@ jobs:
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
-  
   setup:
     docker:
       - image: circleci/python:3.7.3
@@ -1009,8 +981,6 @@ jobs:
       - persist_to_workspace:
           root: .
           paths: .circleci/scripts
-
-  
   pytorch_short_perf_test_gpu:
     environment:
       BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
@@ -1213,7 +1183,6 @@ jobs:
             git submodule sync && git submodule update -q --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
-
   caffe2_py2_gcc4_8_ubuntu14_04_build:
     environment:
       BUILD_ENVIRONMENT: "caffe2-py2-gcc4.8-ubuntu14.04-build"
@@ -1357,7 +1326,6 @@ jobs:
       PYTHON_VERSION: "2"
     <<: *caffe2_macos_build_defaults
 
-  
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -1396,7 +1364,7 @@ jobs:
           echo "declare -x \"AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}\"" >> /home/circleci/project/env
           echo "declare -x \"AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}\"" >> /home/circleci/project/env
           source /home/circleci/project/env
-          set -eux -o pipefail
+          set -ex
           retry () {
               $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
           }
@@ -1445,7 +1413,7 @@ jobs:
           echo "declare -x \"AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}\"" >> /home/circleci/project/env
           echo "declare -x \"AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}\"" >> /home/circleci/project/env
           source /home/circleci/project/env
-          set -eux -o pipefail
+          set -ex
 
           # Not any awscli will work. Most won't. This one will work
           export PATH="$MINICONDA_ROOT/bin:$PATH"
@@ -1454,7 +1422,6 @@ jobs:
           pip install awscli==1.16.46
 
           "/home/circleci/project/builder/cron/upload_binary_sizes.sh"
-
 ##############################################################################
 # Binary build specs individual job specifications
 ##############################################################################
@@ -2069,7 +2036,6 @@ jobs:
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *binary_linux_test
-
 
 # There is currently no testing for libtorch TODO
 #  binary_linux_libtorch_2.7m_cpu_test:
@@ -2976,7 +2942,6 @@ workflows:
       - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
           requires:
             - setup
-            
       - caffe2_py2_gcc4_8_ubuntu14_04_build:
           requires:
             - setup
@@ -3086,7 +3051,6 @@ workflows:
       #     requires:
       #       - setup
       #       - binary_linux_conda_3.6_cu90_build
-
 ##############################################################################
 # Daily smoke test trigger
 ##############################################################################
@@ -3912,4 +3876,3 @@ workflows:
           context: org-member
           requires:
             - setup
-

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "RUNNING ON $(uname -a) WITH $(nproc) CPUS AND $(free -m)"
-set -eux -o pipefail
+set -ex
 source /env
 
 # Defaults here so they can be changed in one place

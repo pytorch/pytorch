@@ -1,4 +1,3 @@
-  
   setup:
     docker:
       - image: circleci/python:3.7.3
@@ -11,4 +10,3 @@
       - persist_to_workspace:
           root: .
           paths: .circleci/scripts
-

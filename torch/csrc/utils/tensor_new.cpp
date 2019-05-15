@@ -205,7 +205,7 @@ Tensor internal_new_from_data(
   }
 
   if (THPVariable_Check(data)) {
-    AT_CHECK(!pin_memory, "Can't pin tensor constructed from a variable");
+    TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from a variable");
     auto var = reinterpret_cast<THPVariable*>(data)->cdata;
     if (copy_variables) {
       var = var.detach();
@@ -221,7 +221,7 @@ Tensor internal_new_from_data(
 
 #ifdef USE_NUMPY
   if (PyArray_Check(data)) {
-    AT_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
+    TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
@@ -264,7 +264,7 @@ Tensor legacy_new_from_sequence(
 
 void check_legacy_ctor_device(const Type& type, c10::optional<Device> device) {
   if (device.has_value()) {
-    AT_CHECK(type.device_type() == device.value().type(),
+    TORCH_CHECK(type.device_type() == device.value().type(),
              "legacy constructor for device type: ", type.device_type(),
              " was passed device type: ", device.value().type(),
              ", but device type must be: ", type.device_type());

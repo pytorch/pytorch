@@ -74,7 +74,7 @@ Gather::~Gather() {}
 variable_list Gather::apply(variable_list&& inputs) {
   bool all_are_zero_dim = true;
   for (const auto& input : inputs) {
-    AT_CHECK(
+    TORCH_CHECK(
         input.is_cuda(),
         "All inputs to Gather must be CUDA tensors, got ",
         input.type());
