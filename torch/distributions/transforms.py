@@ -4,7 +4,8 @@ import weakref
 
 import torch
 from torch.distributions import constraints
-from torch.distributions.utils import (_sum_rightmost, broadcast_all,
+from torch.distributions import functional as F
+from torch.distributions.utils import (broadcast_all,
                                        lazy_property)
 from torch.nn.functional import pad
 
@@ -228,30 +229,23 @@ class ComposeTransform(Transform):
 
     @constraints.dependent_property
     def domain(self):
-        if not self.parts:
-            return constraints.real
-        return self.parts[0].domain
+        return F.compose_transformation_domain(self.parts)
 
     @constraints.dependent_property
     def codomain(self):
-        if not self.parts:
-            return constraints.real
-        return self.parts[-1].codomain
+        return F.compose_transformation_codomain(self.parts)
 
     @lazy_property
     def bijective(self):
-        return all(p.bijective for p in self.parts)
+        return F.compose_transformation_bijective(self.parts)
 
     @lazy_property
     def sign(self):
-        sign = 1
-        for p in self.parts:
-            sign = sign * p.sign
-        return sign
+        return F.compose_transformation_sign(self.parts)
 
     @lazy_property
     def event_dim(self):
-        return max(p.event_dim for p in self.parts) if self.parts else 0
+        return F.compose_transformation_event_dim(self.parts)
 
     @property
     def inv(self):
@@ -265,26 +259,13 @@ class ComposeTransform(Transform):
         return inv
 
     def __call__(self, x):
-        for part in self.parts:
-            x = part(x)
-        return x
+        return F.compose_transformation_call_(self.parts, x)
 
     def log_abs_det_jacobian(self, x, y):
-        if not self.parts:
-            return torch.zeros_like(x)
-        result = 0
-        for part in self.parts:
-            y = part(x)
-            result = result + _sum_rightmost(part.log_abs_det_jacobian(x, y),
-                                             self.event_dim - part.event_dim)
-            x = y
-        return result
+        return F.compose_transformation_log_abs_det_jacobian(self.parts, self.event_dim, x, y)
 
     def __repr__(self):
-        fmt_string = self.__class__.__name__ + '(\n    '
-        fmt_string += ',\n    '.join([p.__repr__() for p in self.parts])
-        fmt_string += '\n)'
-        return fmt_string
+        return F.compose_transformation_repr_(self.parts, self.__class__.__name__)
 
 
 identity_transform = ComposeTransform([])
