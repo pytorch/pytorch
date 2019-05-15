@@ -56,11 +56,11 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
     return c10::intrusive_ptr<Quantizer>::reclaim(this);
   }
 
-  virtual QScheme qscheme() {
+  QScheme qscheme() {
     return qscheme_;
   }
 
-  virtual ScalarType scalar_type() {
+  ScalarType scalar_type() {
     return scalar_type_;
   }
 
