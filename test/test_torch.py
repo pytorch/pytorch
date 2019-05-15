@@ -9231,6 +9231,10 @@ class _TestTorchMixin(object):
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
 
+        r = torch.normal(2, 3, (100, 100))
+        self.assertEqual(r.mean(), 2, 0.2)
+        self.assertEqual(r.std(), 3, 0.2)
+
     def test_sobolengine_unscrambled_lowdim(self):
         engine_1d = torch.quasirandom.SobolEngine(1)
         expected_1d = torch.tensor([0.5, 0.75, 0.25, 0.375, 0.875, 0.625, 0.125, 0.1875, 0.6875, 0.9375])
