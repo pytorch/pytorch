@@ -459,7 +459,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_fn")(obj);
     if (auto callee = as_function(compiled_fn)) {
-      return std::make_shared<MethodValue>(c10::nullopt, callee);
+      return std::make_shared<FunctionValue>(callee);
     }
   }
 

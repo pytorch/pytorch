@@ -122,15 +122,11 @@ struct PythonResolver : public Resolver {
 
 std::shared_ptr<PythonResolver> pythonResolver(
     ResolutionCallback rcb,
-    bool recurse) {
-  return std::make_shared<PythonResolver>(rcb, recurse);
-}
-std::shared_ptr<PythonResolver> pythonResolver(
-    ResolutionCallback rcb,
     std::string classname,
-    ClassTypePtr classType) {
+    ClassTypePtr classType,
+    bool recurse) {
   return std::make_shared<PythonResolver>(
-      rcb, std::move(classname), std::move(classType));
+      rcb, std::move(classname), std::move(classType), recurse);
 }
 } // namespace
 
