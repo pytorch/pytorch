@@ -1,6 +1,8 @@
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/autograd/function.h>
 
+#include <cstdlib>
+
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {

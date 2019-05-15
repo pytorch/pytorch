@@ -4,8 +4,6 @@
 #include <c10/util/SmallVector.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <cstdlib>
-
 namespace torch { namespace autograd {
 
 struct Function;
