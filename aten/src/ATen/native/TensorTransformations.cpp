@@ -107,13 +107,13 @@ Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
 Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
   const int64_t total_dims = self.dim(), total_rot_dims = dims.size();
 
-  AT_CHECK(total_rot_dims == 2,
+  TORCH_CHECK(total_rot_dims == 2,
     "expected total rotation dims == 2, but got dims = ", total_rot_dims);
 
-  AT_CHECK(total_dims >= 2,
+  TORCH_CHECK(total_dims >= 2,
     "expected total dims >= 2, but got total dims = ", total_dims);
 
-  AT_CHECK(dims[0] != dims[1] && std::abs(dims[0] - dims[1]) != total_dims,
+  TORCH_CHECK(dims[0] != dims[1] && std::abs(dims[0] - dims[1]) != total_dims,
     "expected rotation dims to be different, but got dim0 = ", dims[0],
     " and dim1 = ", dims[1]);
 

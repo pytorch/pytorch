@@ -76,7 +76,7 @@ Tensor& lerp_cuda_tensor_(Tensor& self, const Tensor& end, const Tensor& weight)
 Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, Scalar weight) {
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp__cuda");
-  AT_CHECK(b_self.sizes() == self.sizes(),
+  TORCH_CHECK(b_self.sizes() == self.sizes(),
            "output with shape ", self.sizes(),
            " doesn't match the broadcast shape ", b_self.sizes());
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp__cuda", [&]{
@@ -87,7 +87,7 @@ Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, Scalar weight) {
 
 Tensor lerp_cuda_tensor(const Tensor& self, const Tensor& end, const Tensor& weight) {
   Tensor b_self, b_end, b_weight;
-  AT_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
+  TORCH_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
            "weight should be of dimension max(self.dim(), end.dim()) or lesser");
   std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_cuda");
   Tensor result = at::empty_like(b_self);

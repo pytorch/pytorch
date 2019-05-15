@@ -138,6 +138,11 @@ struct C10_API AutogradMetaInterface {
   virtual ~AutogradMetaInterface();
 };
 
+struct C10_API NonVariableTypeMode {
+  static bool is_enabled();
+  static void set_enabled(bool enabled);
+};
+
 // NOTE [ Version Counter Sharing ]
 //
 // Every Tensor has a version counter. Version counters are incremented whenever the
@@ -871,7 +876,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
-  bool is_variable() const { return autograd_meta_ != nullptr; };
+  bool is_variable() const {
+    return autograd_meta_ != nullptr && !at::NonVariableTypeMode::is_enabled();
+  }
 
   /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).

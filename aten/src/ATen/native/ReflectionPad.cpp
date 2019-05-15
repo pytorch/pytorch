@@ -313,7 +313,7 @@ void reflection_pad2d_out_template(
     "input dimension, but got: padding (", pad_t, ", ", pad_b,
     ") at dimension ", dim_h, " of input ", input_.ndimension());
 
-  AT_CHECK(output_w >= 1 || output_h >= 1,
+  TORCH_CHECK(output_w >= 1 || output_h >= 1,
     "input (H: ", input_h, ", W: ", input_w, ")is too small. Calculated "
     "output H: ", output_h, " W: ", output_w);
 
@@ -435,11 +435,11 @@ void reflection_pad2d_backward_out_template(
   int64_t output_h = input_h + pad_t + pad_b;
   int64_t output_w  = input_w + pad_l + pad_r;
 
-  AT_CHECK(output_w == grad_output_.size(dim_w),
+  TORCH_CHECK(output_w == grad_output_.size(dim_w),
     "gradOutput width unexpected. Expected: ", output_w, ", Got: ",
     grad_output_.size(dim_w));
 
-  AT_CHECK(output_h == grad_output_.size(dim_h),
+  TORCH_CHECK(output_h == grad_output_.size(dim_h),
     "gradOutput height unexpected. Expected: ", output_h, ", Got: ",
     grad_output_.size(dim_h));
 
