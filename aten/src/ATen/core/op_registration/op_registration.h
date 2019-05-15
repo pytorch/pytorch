@@ -120,7 +120,10 @@ public:
     }
 
     /**
-     * Use this to register an operator whose kernel is implemented as a stateless lambda.
+     * Use this to register an operator whose kernel is implemented as a lambda.
+     * The lambda must be stateless, i.e. not have a capture. If your kernel
+     * needs to store some configuration parameters, write the kernel as a
+     * functor instead.
      *
      * Example:
      *
@@ -226,53 +229,42 @@ public:
   /**
    * Call this to register an operator. See class doc comment for examples.
    */
-  RegisterOperators op(const std::string& schemaOrName, Options&& options = {}) && {
+  RegisterOperators&& op(const std::string& schemaOrName, Options&& options = RegisterOperators::options()) && {
     checkSchemaAndRegisterOp_(schemaOrName, std::move(options));
     return std::move(*this);
   }
 
   // internal only for registering caffe2 ops
-  RegisterOperators op(FunctionSchema schema, Options&& options) && {
+  RegisterOperators&& op(FunctionSchema schema, Options&& options) && {
     checkSchemaAndRegisterOp_(std::move(schema), std::move(options));
     return std::move(*this);
   }
 
   template<class FuncType>
-  C10_DEPRECATED_MESSAGE("Registering kernels via passing arguments to RegisterOperators(...) is deprecated. " \
-                         "Please use RegisterOperators().op(...) instead.")
-  // enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
-  explicit RegisterOperators(guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, const std::string&> schemaOrName, FuncType* func)
+  explicit RegisterOperators(const std::string& schemaOrName, FuncType&& func, Options&& options = RegisterOperators::options())
   : RegisterOperators() {
-    legacyAPIOp_(schemaOrName, func);
-  }
-
-  template<class FuncType>
-  C10_DEPRECATED_MESSAGE("Registering kernels via passing arguments to RegisterOperators(...) is deprecated. " \
-                         "Please use RegisterOperators().op(...) instead.")
-  // enable_if: only enable it if FuncType is actually a functor
-  explicit RegisterOperators(guts::enable_if_t<guts::is_functor<FuncType>::value, const std::string&> schemaOrName, FuncType&& func)
-  : RegisterOperators() {
-    legacyAPIOp_(schemaOrName, std::forward<FuncType>(func));
+    std::move(*this).op(schemaOrName, std::forward<FuncType>(func), std::move(options));
   }
 
   /**
-   * Deprecated. For backwards compatibility only.
-   * Don't use this, it introduces a performance overhead on each kernel call
-   * due to the kernel being stored in the wrapper as a runtime function pointer.
+   * This API registers an operator based on a kernel function pointer.
    *
    * Given a kernel
    *
    * > namespace { Tensor my_kernel_cpu(Tensor a, Tensor b) {...} }
    *
-   * This deprecated API looks like:
+   * This API looks like:
    *
    * > static auto registry = c10::RegisterOperators()
    * >     .op("my_op", &my_kernel_cpu);
    *
-   * But you should use the new API instead:
+   * If your kernel is small and the overhead of calling it matters,
+   * then this API might be the wrong choice since the followig API
+   * has a slightly lower overhead for calling into the kernel:
    *
    * > static auto registry = c10::RegisterOperators()
-   * >     .op("my_op", c10::RegisterOperators::options().kernel<decltype(my_kernel_cpu), &my_kernel_cpu>());
+   * >     .op("my_op", c10::RegisterOperators::options()
+   * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>());
    *
    * Or, alternatively, write your kernel as a functor:
    *
@@ -284,70 +276,43 @@ public:
    * > }
    * >
    * > static auto registry = c10::RegisterOperators()
-   * >     .op("my_op", c10::RegisterOperators::options().kernel<my_kernel_cpu>());
+   * >     .op("my_op", c10::RegisterOperators::options()
+   * >         .kernel<my_kernel_cpu>());
    */
-   template<class FuncType, class...  OtherArgs>
-   C10_DEPRECATED_MESSAGE("Registering kernels via passing function pointers to op() directly is deprecated. " \
-                          "Please use the new RegisterOperators::options().kernel() based API instead.")
+   template<class FuncType>
    // enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
-   guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, RegisterOperators>
-   op(const std::string& schemaOrName, FuncType* func, OtherArgs...) && {
-     // We intentionally don't extend this deprecated API to support dispatch keys
-     // and the like to push people towards using the new API.
-     static_assert(sizeof...(OtherArgs) == 0, "The deprecated function pointer based API to register kernels doesn't allow additional arguments for dispatch keys or other things. Please use the new RegisterOperators::options().kernel() based API instead.");
-
-     legacyAPIOp_(schemaOrName, func);
-     return std::move(*this);
+   guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, RegisterOperators&&>
+   op(const std::string& schemaOrName, FuncType* func, Options&& options = RegisterOperators::options()) && {
+     constexpr bool AllowLegacyTypes = true;
+     return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(func));
    }
 
    /**
-    * Deprecated. For backwards compatibility only.
+    * This API registers an operator based on a kernel lambda.
     *
-    * This deprecated API looks like:
+    * This API looks like:
     *
     * > static auto registry = c10::RegisterOperators()
     * >     .op("my_op", [] (Tensor a, Tensor b) {...});
     *
-    * But you should use the new API instead:
+    * This is equivalent to:
     *
     * > static auto registry = c10::RegisterOperators()
-    * >     .op("my_op", c10::RegisterOperators::options().kernel([] (Tensor a, Tensor b) {...}));
+    * >     .op("my_op", c10::RegisterOperators::options()
+    * >         .kernel([] (Tensor a, Tensor b) {...}));
     *
-    * Or, alternatively, write your kernel as a functor:
-    *
-    * > namespace {
-    * >   class my_kernel_cpu final : public c10::OperatorKernel {
-    * >   public:
-    * >     Tensor operator()(Tensor a, Tensor b) {...}
-    * >   };
-    * > }
-    * >
-    * > static auto registry = c10::RegisterOperators()
-    * >     .op("my_op", c10::RegisterOperators::options().kernel<my_kernel_cpu>());
     */
-    template<class FuncType, class...  OtherArgs>
-    C10_DEPRECATED_MESSAGE("Registering kernels via passing lambdas to op() directly is deprecated. " \
-                           "Please use the new RegisterOperators::options().kernel() based API instead.")
+    template<class FuncType>
     // enable_if: only enable it if FuncType is actually a functor
-    guts::enable_if_t<guts::is_functor<FuncType>::value, RegisterOperators>
-    op(const std::string& schemaOrName, FuncType&& func, OtherArgs...) && {
-      // We intentionally don't extend this deprecated API to support dispatch keys
-      // and the like to push people towards using the new API.
-      static_assert(sizeof...(OtherArgs) == 0, "The deprecated lambda based API to register kernels doesn't allow additional arguments for dispatch keys or other things. Please use the new RegisterOperators::options().kernel() based API instead.");
-
+    guts::enable_if_t<guts::is_functor<FuncType>::value, RegisterOperators&&>
+    op(const std::string& schemaOrName, FuncType&& func, Options&& options = RegisterOperators::options()) && {
       static_assert(!std::is_base_of<OperatorKernel, FuncType>::value, "c10::OperatorKernel is part of the new kernel registration API and shouldn't be used together with the deprecated registration API. Please use the new RegisterOperators::options().kernel() based API instead.");
 
-      legacyAPIOp_(schemaOrName, std::forward<FuncType>(func));
-      return std::move(*this);
+      constexpr bool AllowLegacyTypes = true;
+      return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(std::forward<FuncType>(func)));
     }
 
 private:
-  template<class FuncType>
-  void legacyAPIOp_(const std::string& schemaOrName, FuncType&& func) {
-    constexpr bool AllowLegacyTypes = true;
-    checkSchemaAndRegisterOp_(schemaOrName, options().kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(std::forward<FuncType>(func)));
-  }
-
   void checkSchemaAndRegisterOp_(FunctionSchema&& schema, Options&& config);
   void checkSchemaAndRegisterOp_(const std::string& schemaOrName, Options&& config);
 

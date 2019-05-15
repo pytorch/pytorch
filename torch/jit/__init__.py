@@ -1177,25 +1177,34 @@ class ScriptMeta(type):
     # issues because ScriptModule inherits from torch._C.ScriptModule,
     # a pybind11 type
     def __init__(cls, name, bases, attrs):
-        # find all the script methods
-        cls._original_methods = {}
-        methods = []
+        # initialize inherited properties
+        cls._methods = {}
+        cls._constants_set = set(getattr(cls, '__constants__', ()))
+        for base in reversed(bases):
+            for k, v in getattr(base, '_methods', {}).items():
+                cls._methods[k] = v
+            base_constants = getattr(base, '_constants_set', set())
+            cls._constants_set = cls._constants_set.union(base_constants)
+
+        # find all the script methods of the current class
         for k, v in sorted(attrs.items()):
             if isinstance(v, ScriptMethodStub):
                 delattr(cls, k)
-                methods.append(v)
-                cls._original_methods[v.original_method.__name__] = v.original_method
-        # after the user's __init__ register all the script methods
-        # with the module
+                cls._methods[v.original_method.__name__] = v
+
         original_init = getattr(cls, '__init__', lambda self: None)
-        super_constants = getattr(super(cls), '_constants_set', set())
-        cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
         cls._overloads = dict(getattr(cls, '__overloads__', {}))
 
+        # after the user's __init__ register all the script methods
+        # with the module
         @functools.wraps(original_init)
         def init_then_register(self, *args, **kwargs):
             original_init(self, *args, **kwargs)
-            _create_methods_from_stubs(self, methods)
+            if type(self) == cls:
+                # this is the init of the concrete type of self,
+                # we have already resolved all _methods
+                methods = [v for k, v in sorted(cls._methods.items())]
+                _create_methods_from_stubs(self, methods)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
@@ -1335,7 +1344,6 @@ if _enabled:
                       input = F.relu(self.conv2(input))
                       return input
         """
-
         def __init__(self, optimize=True):
             self.__dict__['_c'] = torch._C.ScriptModule()
             Module.__init__(self)
@@ -1367,8 +1375,8 @@ if _enabled:
             if '_c' not in self.__dict__:
                 raise RuntimeError("ScriptModule has not been initialized, did you forget to call super's init?")
             if self._c._has_method(attr):
-                if attr in self.__class__._original_methods:
-                    original_method = self.__class__._original_methods[attr]
+                if attr in self.__class__._methods:
+                    original_method = self.__class__._methods[attr].original_method
                     script_method = self._c._get_method(attr)
                     script_method = functools.wraps(original_method)(script_method)
                 else:
@@ -1771,7 +1779,7 @@ def _get_builtin_table():
     _builtin_table[id(math.fabs)] = "aten::fabs"
     _builtin_table[id(math.gamma)] = "aten::gamma"
     _builtin_table[id(math.lgamma)] = "aten::lgamma"
-    if not PY2: 
+    if not PY2:
         _builtin_table[id(math.gcd)] = "aten::gcd"
 
     _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
