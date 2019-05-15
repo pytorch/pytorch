@@ -184,7 +184,6 @@ public:
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
 
   // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
-  //
   // 1. the AutogradMeta pointer, because it is unique for each Variable.
   // 2. the version counter, because it is set to the passed in `version_counter`.
   //    See NOTE [ Version Counter Sharing ] for details.
