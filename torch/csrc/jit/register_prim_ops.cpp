@@ -1851,12 +1851,10 @@ RegisterOperators reg2({
           pop(stack, x);
           for(int i = 0; i < sizeof(x)/sizeof(x[0]); i++){
             if((x[i].item().toInt()) == 0) {      
-              std::cout << "nope!" << std::endl;
               push(stack, false);
               break;
             }
             else if(i == sizeof(x)/sizeof(x[0])-1 && (x[(sizeof(x)/sizeof(x[0]))-1]).item().toInt() != 0){
-              std::cout << "kewl" << std::endl;
               push(stack, true);
               break;
             }
