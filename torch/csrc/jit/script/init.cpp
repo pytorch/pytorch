@@ -89,6 +89,7 @@ struct PythonResolver : public Resolver {
     if (obj.is(py::none())) {
       return nullptr;
     }
+    std::cout << "Resolving value " << name << "\n";
     return toSugaredValue(obj, m, loc, recurse_);
   }
 
@@ -119,6 +120,10 @@ struct PythonResolver : public Resolver {
   ClassTypePtr classType_;
   bool recurse_;
 };
+
+std::shared_ptr<PythonResolver> pythonResolver(ResolutionCallback rcb) {
+  return std::make_shared<PythonResolver>(rcb);
+}
 
 std::shared_ptr<PythonResolver> pythonResolver(
     ResolutionCallback rcb,
