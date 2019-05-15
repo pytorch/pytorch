@@ -436,26 +436,16 @@ Tensor matmul(
     const int64_t m = tensor1.size(-1);
     const int64_t p = tensor2.size(-1);
 
-    std::vector<int64_t> perm(dim_tensor2);
-    for (int64_t i = 0; i < dim_tensor2-2; i++) {
-        perm[i] = i;
-    }
-    perm[dim_tensor2-2] = dim_tensor2-1;
-    perm[dim_tensor2-1] = dim_tensor2-2;
-
-    const Tensor t2_T = tensor2.permute(perm);
+    const Tensor t2_T = tensor2.transpose(-1, -2);
     const Tensor t1_T = dim_tensor1 == 2 ? tensor1.t() : tensor1.reshape({n, m}).t();
     const Tensor res_T = matmul(out_opt, t2_T, t1_T);
 
     if (dim_tensor1 == 2) {
-      Tensor res = res_T.permute(perm).contiguous();
+      Tensor res = res_T.transpose(-1, -2).contiguous();
       return has_out ? out.set_(res) : res;
     }
     else {
-      const IntArrayRef sizes = tensor2.sizes();
-
-      std::vector<int64_t> shape;
-      shape.insert(shape.end(), sizes.begin(), sizes.end() - 2);
+      std::vector<int64_t> shape = tensor2.sizes().slice(0, dim_tensor2 - 2).vec();
       shape.push_back(p);
 
       Tensor res = res_T.reshape(shape).contiguous();
