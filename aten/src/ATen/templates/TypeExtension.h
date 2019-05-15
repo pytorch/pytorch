@@ -38,6 +38,8 @@ struct CAFFE2_API ${Type} : public TypeDefault {
   virtual Backend backend() const override;
   virtual const char * toString() const override;
   virtual TypeID ID() const override;
+
+  ${type_method_declarations}
 };
 
 } // namespace at

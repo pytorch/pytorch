@@ -41,6 +41,9 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
   Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
+  // example
+  // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
+  ${type_method_declarations}
 };
 
 } // namespace at

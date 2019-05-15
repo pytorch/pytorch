@@ -76,24 +76,19 @@ case ScalarType::${ScalarName}: {
 }
 """)
 
-# Native functions are generated on Type. Add a virtual dispatch declaration to Type.h
-#
-# If the function has backend dependent dispatch, we define a "not implemented" stub on
-# TypeDefault.cpp and the actual implementations will be on derived types. Otherwise,
-# we define the actual implementations on TypeDefault.
-#
-# TODO: Some stuff like method_prefix_derived can probably be cleaned up here.
-TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
-static ${return_type} ${api_name}_${id}(${type_method_formals}) {
+NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
+static ${return_type} ${api_name}_${id}(${type_method_formals});
+""")
+
+NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
+${return_type} TypeDefault::${api_name}_${id}(${type_method_formals}) {
     ${device_guard_declaration}
     ${type_definition_body}
 }
 """)
 
-# For backend dependent dispatch, override declaration in TypeDerived.h and
-# override definition in TypeDerived.cpp
-TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
-static ${return_type} ${api_name}_${id}(${type_method_formals}) {
+NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
+${return_type} ${Type}::${api_name}_${id}(${type_method_formals}) {
     ${device_guard_declaration}
     ${dispatch_scalar_type_declaration}
     switch (dispatch_scalar_type) {
@@ -105,23 +100,23 @@ static ${return_type} ${api_name}_${id}(${type_method_formals}) {
     }
 }
 """)
-TYPE_DERIVED_DEFINITION_NATIVE_CASE = CodeTemplate("""\
+NATIVE_DISPATCH_DEFINITION_NATIVE_CASE = CodeTemplate("""\
 case ScalarType::${ScalarName}:
 """)
-TYPE_DEFINITION_BODY_NATIVE = CodeTemplate("""\
+NATIVE_DISPATCH_DEFINITION_BODY_NATIVE = CodeTemplate("""\
 ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-static auto register_${id} = register_op(Backend::Undefined, "${schema_string}", &${api_name}_${id});
+static auto register_${id} = register_op(Backend::Undefined, "${schema_string}", &TypeDefault::${api_name}_${id});
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-static auto register_${id} = register_op(Backend::${Backend}, "${schema_string}", &${api_name}_${id});
+static auto register_${id} = register_op(Backend::${Backend}, "${schema_string}", &${Type}::${api_name}_${id});
 """)
 
 # Overrideable stubs to be used in user-extendable backends
-TYPE_DEFINITION_EXTENSION_BACKEND = CodeTemplate("""\
-static ${return_type} ${method_prefix_derived}${api_name}_${id}(${type_method_formals}) {
+NATIVE_DISPATCH_DEFINITION_EXTENSION_BACKEND = CodeTemplate("""\
+${return_type} ${Type}::${api_name}_${id}(${type_method_formals}) {
     return ${Type}Dispatch::get_function<${return_type} (*)(${formals_types})>("${schema}")(${native_actuals});
 }
 """)
@@ -404,6 +399,7 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'type_registrations': List[str],
     'type_headers': List[str],
     'function_registrations': List[str],
+    'type_method_declarations': List[str],
     'type_method_definitions': List[str],
     'tensor_method_declarations': List[str],
     'tensor_method_definitions': List[str],
@@ -1064,6 +1060,7 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
+        top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(env))
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1077,10 +1074,12 @@ def create_generic(top_env, declarations):
         abstract = False
         if isinstance(type_method_dispatch, dict):
             abstract = True
-        else:
-            body = TYPE_DEFINITION_BODY_NATIVE.substitute(env)
             top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_CONCRETE.substitute(
+                NATIVE_DISPATCH_DECLARATION.substitute(env))
+        else:
+            body = NATIVE_DISPATCH_DEFINITION_BODY_NATIVE.substitute(env)
+            top_env['type_method_definitions'].append(
+                NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(
                     env, type_definition_body=body))
             top_env['function_registrations'].append(
                 DEFAULT_FUNCTION_REGISTRATION.substitute(env))
@@ -1170,6 +1169,7 @@ def create_generic(top_env, declarations):
 
 def create_derived(backend_type_env, declarations):
     # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str]]
+    type_object_declarations = []
     type_object_definitions = []
     function_registrations = []
     legacy_th_declarations = []
@@ -1578,11 +1578,13 @@ def create_derived(backend_type_env, declarations):
             if backend in option['backend_types']:
                 native_dispatch = dispatch.get(backend)
                 if native_dispatch:
+                    type_object_declarations.append(
+                        NATIVE_DISPATCH_DECLARATION.substitute(env))
                     option['native_type_method_dispatch'] = native_dispatch
                     cases = []
                     for scalar_type in option['backend_types'][backend]:
-                        cases.append(TYPE_DERIVED_DEFINITION_NATIVE_CASE.substitute(env, ScalarName=scalar_type))
-                    type_object_definitions.append(TYPE_DERIVED_DEFINITION_NATIVE.substitute(env, cases=cases))
+                        cases.append(NATIVE_DISPATCH_DEFINITION_NATIVE_CASE.substitute(env, ScalarName=scalar_type))
+                    type_object_definitions.append(NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env, cases=cases))
                     function_registrations.append(
                         BACKEND_FUNCTION_REGISTRATION.substitute(env))
 
@@ -1598,13 +1600,15 @@ def create_derived(backend_type_env, declarations):
                         process_native(option)
                 except NYIError:
                     pass
-    return type_object_definitions, function_registrations, legacy_th_declarations, legacy_th_definitions
+    return (type_object_declarations, type_object_definitions, function_registrations, legacy_th_declarations,
+            legacy_th_definitions)
 
 
 def create_extension_backend(backend_type_env, declarations):
     # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str]]
-    function_registrations = []
+    type_object_declarations = []
     type_object_definitions = []
+    function_registrations = []
 
     for declaration in declarations:
         for option in declaration['options']:
@@ -1615,10 +1619,12 @@ def create_extension_backend(backend_type_env, declarations):
                     return_type = NATIVE_DYNAMIC_TYPE.get(option['return_type'], option['return_type'])
                     option['schema'] = "{}({}) -> {}".format(option['api_name'], schema_args, return_type)
                     env = nested_dict(option, backend_type_env)
+                    type_object_declarations.append(
+                        NATIVE_DISPATCH_DECLARATION.substitute(env))
                     function_registrations.append(
                         BACKEND_FUNCTION_REGISTRATION.substitute(env))
                     type_object_definitions.append(
-                        TYPE_DEFINITION_EXTENSION_BACKEND.substitute(env))
+                        NATIVE_DISPATCH_DEFINITION_EXTENSION_BACKEND.substitute(env))
                 except NYIError:
                     pass
-    return type_object_definitions, function_registrations
+    return type_object_declarations, type_object_definitions, function_registrations

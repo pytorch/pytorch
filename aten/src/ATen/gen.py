@@ -203,6 +203,7 @@ top_env = {
     'cuda_type_registrations': [],
     'cuda_type_headers': [],
     'function_registrations': [],
+    'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
     'tensor_method_definitions': [],
@@ -321,8 +322,9 @@ def generate_storage_type_and_tensor(backend, density, declarations):
         env['Generator'] = 'CPUGenerator'
         env['allocator'] = 'getCPUAllocator()'
 
-    definitions, registrations, th_declarations, th_definitions = function_wrapper.create_derived(
+    declarations, definitions, registrations, th_declarations, th_definitions = function_wrapper.create_derived(
         env, declarations)
+    env['type_derived_method_declarations'] = declarations
     env['type_derived_method_definitions'] = definitions
     env['function_registrations'] = registrations
     env['legacy_th_declarations'] = th_declarations
@@ -363,8 +365,9 @@ def generate_type_extension_backend(backend, declarations):
     env['TypeID'] = 'TypeID::' + backend
     top_env['type_ids'].append(backend + ',')
 
-    definitions, registrations = function_wrapper.create_extension_backend(
+    declarations, definitions, registrations = function_wrapper.create_extension_backend(
         env, declarations)
+    env['type_method_declarations'] = declarations
     env['type_method_definitions'] = definitions
     env['function_registrations'] = registrations
 
@@ -407,7 +410,7 @@ def generate_aten_dispatch(declarations):
                 env['schema_to_id_pairs'].append(
                     '{{"{}", {}}},'.format(option['schema_string'], option['id']))
                 max_id = max(max_id, option['id'])
-    env['function_count'] = max_id
+    env['function_count'] = max_id + 1
     file_manager.write("ATenDispatch.cpp", ATEN_DISPATCH_CPP, env)
 
 
