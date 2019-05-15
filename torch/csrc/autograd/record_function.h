@@ -93,7 +93,7 @@ TORCH_API bool hasCallbacks();
 TORCH_API bool needsInputs();
 
 TORCH_API void setSamplingProbability(double);
-TORCH_API bool checkCallbacksEnabled();
+bool checkCallbacksEnabled();
 
 // optional argument - function's seq_no
 #define RECORD_FUNCTION(fn, inputs, ...) \
