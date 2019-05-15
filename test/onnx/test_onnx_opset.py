@@ -127,6 +127,22 @@ class TestONNXOpset(TestCase):
         x = torch.randn(3)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
+    def test_flip(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return torch.flip(x, dims=[0])
+
+        ops_10 = [{"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Slice",
+                   "input" : ["input1", "2", "3", "1", "4"]}]
+        ops = {10 : ops_10}
+        import numpy
+        x = torch.tensor(numpy.arange(6.0).reshape(2, 3))
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[10])
+
 
 if __name__ == '__main__':
     run_tests()

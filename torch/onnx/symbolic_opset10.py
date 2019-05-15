@@ -153,3 +153,8 @@ def slice(g, self, dim, start, end, step):
         dim = sym_help._parse_arg(dim, 'i')
         step = sym_help._parse_arg(step, 'i')
         return _slice_op(g, self, axes=[dim], starts=[start], ends=[end], steps=[step])
+
+
+@parse_args('v', 'is')
+def flip(g, input, dims):
+    return _slice_op(g, input, axes=dims, starts=[-1] * len(dims), ends=[-9223372036854775807] * len(dims), steps=[-1] * len(dims))
