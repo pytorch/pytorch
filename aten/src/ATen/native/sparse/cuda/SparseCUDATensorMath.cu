@@ -52,14 +52,14 @@ namespace {
 
 Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseTensor& sparse_, const Tensor& dense, Scalar beta, Scalar alpha) {
   AT_ASSERT(t.is_cuda()); // dispatch argument
-  AT_CHECK(r_.is_cuda(), "addmm: expected 'out' to be CUDA, but got CPU");
-  AT_CHECK(sparse_.is_cuda(), "addmm: expected 'mat1' to be CUDA, but got CPU");
-  AT_CHECK(dense.is_cuda(), "addmm: expected 'mat2' to be CUDA, but got CPU");
+  TORCH_CHECK(r_.is_cuda(), "addmm: expected 'out' to be CUDA, but got CPU");
+  TORCH_CHECK(sparse_.is_cuda(), "addmm: expected 'mat1' to be CUDA, but got CPU");
+  TORCH_CHECK(dense.is_cuda(), "addmm: expected 'mat2' to be CUDA, but got CPU");
 
-  AT_CHECK(cuda::check_device({sparse_, r_, t, dense}));
+  TORCH_CHECK(cuda::check_device({sparse_, r_, t, dense}));
 
-  AT_CHECK(dense.dim() == 2, "addmm: 2D tensor expected, got ", dense.dim(), "D tensor");
-  AT_CHECK(sparse_.sparse_dim() == 2, "addmm: expected first two dims to be sparse (indices has size 2 at first dim), but got ", sparse_.sparse_dim(), " spase dims");
+  TORCH_CHECK(dense.dim() == 2, "addmm: 2D tensor expected, got ", dense.dim(), "D tensor");
+  TORCH_CHECK(sparse_.sparse_dim() == 2, "addmm: expected first two dims to be sparse (indices has size 2 at first dim), but got ", sparse_.sparse_dim(), " spase dims");
   // no need to check dense_dim because dense_dim + sparse_dim = dim
 
   // mxk * kxn = mxn
@@ -67,11 +67,11 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   int64_t k = sparse_.size(1);
   int64_t n = dense.size(1);
 
-  AT_CHECK(t.size(0) == m,
+  TORCH_CHECK(t.size(0) == m,
       "addmm: Argument #1 (t): Expected dim 0 size ", m, ", got ", t.size(0));
-  AT_CHECK(t.size(1) == n,
+  TORCH_CHECK(t.size(1) == n,
       "addmm: Argument #1 (t): Expected dim 1 size ", n, ", got ", t.size(1));
-  AT_CHECK(dense.size(0) == k,
+  TORCH_CHECK(dense.size(0) == k,
       "addmm: Argument #3 (dense): Expected dim 0 size ", k, ", got ", dense.size(0));
 
   r_.resize_({m, n});
