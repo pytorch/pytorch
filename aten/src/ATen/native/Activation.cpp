@@ -147,8 +147,8 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   auto input = self.contiguous();
   auto weight = weight_.contiguous();
 
-  AT_CHECK(input.is_contiguous());
-  AT_CHECK(weight.is_contiguous());
+  TORCH_CHECK(input.is_contiguous());
+  TORCH_CHECK(weight.is_contiguous());
 
   int64_t weight_num = weight.numel();
   Tensor result = at::empty_like(input);
@@ -162,7 +162,7 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   }
   else { // case2: multiple weights, one for each channel
     int64_t input_ndim = input.dim();
-    AT_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
+    TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
 
     int64_t channel_size = 1; // channel_size default to 1
     int64_t input_dim0_size = 1, input_stride0 = 1, input_stride1 = 1;
@@ -173,7 +173,7 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
       input_stride0 = strides[0];
       input_stride1 = strides[1];
     }
-    AT_CHECK(channel_size == weight_num,
+    TORCH_CHECK(channel_size == weight_num,
       "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
       " and channel size = ", channel_size, ".");
 
@@ -276,9 +276,9 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
   auto grad_out = grad_out_.contiguous();
   auto weight = weight_.contiguous();
 
-  AT_CHECK(input.is_contiguous());
-  AT_CHECK(grad_out.is_contiguous());
-  AT_CHECK(weight.is_contiguous());
+  TORCH_CHECK(input.is_contiguous());
+  TORCH_CHECK(grad_out.is_contiguous());
+  TORCH_CHECK(weight.is_contiguous());
 
   int64_t weight_num = weight.numel();
   auto strides = input.strides();
@@ -296,7 +296,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
   }
   else { // case2: multiple parameters, one for each channel
     int64_t input_ndim = input.dim();
-    AT_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
+    TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
 
     int64_t channel_size = 1; // channel_size default to 1
     int64_t input_dim0_size = 1, input_stride0 = 1, input_stride1 = 1;
@@ -307,7 +307,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
       input_stride0 = strides[0];
       input_stride1 = strides[1];
     }
-    AT_CHECK(channel_size == weight_num,
+    TORCH_CHECK(channel_size == weight_num,
       "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
       " and channel size = ", channel_size, ".");
 

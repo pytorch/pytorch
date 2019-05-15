@@ -29,7 +29,7 @@ Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_gr
 
   // set_requires_grad also checks error conditions.
   set_requires_grad(requires_grad, self_impl);
-  AT_CHECK(
+  TORCH_CHECK(
       !grad_fn_ || !requires_grad_,
       "requires_grad should be false if grad_fn is set");
 }
@@ -116,7 +116,7 @@ void Variable::set_data(const at::Tensor &new_data) {
 Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)
     : Variable::AutogradMeta(self_impl, false, std::move(gradient_edge)) {
   base_ = std::move(base);
-  AT_CHECK(base_.defined(), "base is undefined");
+  TORCH_CHECK(base_.defined(), "base is undefined");
   if (base_.is_view()) {
     base_ = base_.base();
   }
@@ -160,7 +160,7 @@ void Variable::rebase_history(Edge gradient_edge) {
     auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
     AT_ASSERT(gradient_edge.input_nr == 0);
     AT_ASSERT(gradient_edge.function);
-    AT_CHECK(
+    TORCH_CHECK(
         gradient_edge.function->num_inputs() == 1,
         "Functions which modify views in-place must return a single Variable");
     diff_view_meta->output_nr_ = gradient_edge.input_nr;

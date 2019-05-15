@@ -642,22 +642,22 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
     const auto& sizes = std::get<1>(input);
     if (fn == "test") {
       found_test = true;
-      AT_CHECK(sizes.size() == 1);
-      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes.size() == 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
     } else if (fn == "test::pow") {
       found_pow = true;
-      AT_CHECK(sizes.size() == 2);
-      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
-      AT_CHECK(sizes[1].empty());
+      TORCH_CHECK(sizes.size() == 2);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes[1].empty());
     } else if (fn.find("::mul") != std::string::npos) {
       found_mul = true;
-      AT_CHECK(sizes.size() > 1);
-      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes.size() > 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
     }
   }
-  AT_CHECK(found_test);
-  AT_CHECK(found_pow);
-  AT_CHECK(found_mul);
+  TORCH_CHECK(found_test);
+  TORCH_CHECK(found_pow);
+  TORCH_CHECK(found_mul);
 }
 
 std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
@@ -736,7 +736,7 @@ void testAutogradProfiler() {
   for (size_t pos = 0; (pos = result.find("tanh", pos)) != std::string::npos;
        count++, pos++) {
   }
-  AT_CHECK(count == 200);
+  TORCH_CHECK(count == 200);
 }
 
 void testNoneSchemaMatch() {

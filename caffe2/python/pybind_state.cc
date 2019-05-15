@@ -427,8 +427,8 @@ void addObjectMethods(py::module& m) {
         // tensor into Caffe2 workspace, and don't need to perform shallow-copying
         // here anymore.
         p = p->shallow_copy_and_detach();
-        AT_CHECK(p.defined(), "Can't wrap undefined tensor");
-        AT_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
+        TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
+        TORCH_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
         auto at_tensor = at::Tensor::wrap_tensor_impl(std::move(p));
         BlobSetTensor(blob, Tensor(std::move(at_tensor)));
       });
