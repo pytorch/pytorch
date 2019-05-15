@@ -11,6 +11,22 @@ thread_local RecordFunction* thread_local_func_ = nullptr;
 
 bool is_sampled_callbacks = false;
 double sampling_prob = 1.0;
+constexpr double kEps = 1e-10;
+}
+
+bool checkCallbacksEnabled() {
+  return !is_sampled_callbacks ||
+      (((double) std::rand() / RAND_MAX) < sampling_prob);
+}
+
+void setSamplingProbability(double prob) {
+  if (std::abs(prob - 1.0) < kEps) {
+    is_sampled_callbacks = false;
+  } else {
+    AT_CHECK(prob > -kEps && prob < 1.0);
+    is_sampled_callbacks = true;
+  }
+  sampling_prob = prob;
 }
 
 void pushCallback(
@@ -41,22 +57,6 @@ bool hasCallbacks() {
 
 bool needsInputs() {
   return callback_needs_inputs > 0;
-}
-
-bool isSampledCallbacks() {
-  return is_sampled_callbacks;
-}
-
-void setSampledCallbacks(bool is_sampled) {
-  is_sampled_callbacks = is_sampled;
-}
-
-double getSamplingProbability() {
-  return sampling_prob;
-}
-
-void setSamplingProbability(double prob) {
-  sampling_prob = prob;
 }
 
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
