@@ -549,7 +549,6 @@ void AliasDb::analyzeImpl(Node* node) {
     // We don't support composite types for alias analysis yet.
     AT_ASSERT(formal->containedTypes().size() == 0);
 
-    // TODO
     if (formal->isWildcardBefore() || formal->isWildcardAfter()) {
       setWildcard(actual);
       continue;

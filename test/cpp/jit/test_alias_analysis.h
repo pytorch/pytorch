@@ -681,6 +681,7 @@ graph():
     AT_ASSERT(!aliasDb.mayContainAlias(second_st, tup_st));
   }
   {
+    // Test list container aliasing
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
     script::parseIR(
