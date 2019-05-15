@@ -4100,8 +4100,13 @@ class TestTransformFunctions(TestCase):
             [[3, 7], [5, 2]],
             [[2, 9], [2, 7]],
             [[5, 1], [6, 8]]]
+        data_2 = [
+            [[-3, 7], [5, -2]],
+            [[2, -9], [2, 7]],
+            [[5, -1], [-6, 8]]]
 
         self.data_1 = [torch.FloatTensor(x) for x in data_1]
+        self.data_2 = [torch.FloatTensor(x) for x in data_2]
 
         # exp transform
         self.exp_y = [
@@ -4130,65 +4135,100 @@ class TestTransformFunctions(TestCase):
             torch.tensor([[-2.254, -9.], [-2.254, -7.002]], dtype=torch.float32),
             torch.tensor([[-5.013, -1.627], [-6.005, -8.001]], dtype=torch.float32)]
 
-    def test_exp_transform_call(self):
-        for i in range(len(self.data_1)):
-            x = self.data_1[i]
-            y = functional.exp_transform_call(x)
-            self.assertAlmostEqual(self.exp_y[i], y, places=2)
+        # affine transform
+        self.affine_y = [
+            torch.tensor([[5., 9.], [7., 4.]], dtype=torch.float32),
+            torch.tensor([[4., 11.], [4., 9.]], dtype=torch.float32),
+            torch.tensor([[7., 3.], [8., 10.]], dtype=torch.float32)]
+        self.affine_log_abs_det_jacobian = [
+            torch.tensor(0., dtype=torch.float32),
+            torch.tensor(0., dtype=torch.float32),
+            torch.tensor(0., dtype=torch.float32)]
 
-    def test_exp_transform_inverse(self):
-        for i in range(len(self.exp_y)):
-            x = self.data_1[i]
-            y = functional.exp_transform_call(x)
-            y_inv = functional.exp_transform_inverse(y)
+    def _test_call_helper(self, x_data, y_data, call_fn):
+        for i in range(len(x_data)):
+            x = x_data[i]
+            y = call_fn(x)
+            # print(repr(y.numpy()))
+            self.assertAlmostEqual(y_data[i], y, places=2)
+
+    def _test_inverse_helper(self, x_data, call_fn, inv_fn):
+        for x in x_data:
+            y = call_fn(x)
+            y_inv = inv_fn(y)
             self.assertAlmostEqual(y_inv, x, places=2)
 
-    def test_exp_transform_log_abs_det_jacobian(self):
-        for i in range(len(self.data_1)):
-            x = self.data_1[i]
-            y = functional.exp_transform_call(x)
-            log_abs_det_jacobian = functional.exp_transform_log_abs_det_jacobian(x, y)
-            self.assertAlmostEqual(self.exp_log_abs_det_jacobian[i], log_abs_det_jacobian, places=2)
+    def _test_log_abs_det_jacobian(self, x_data, out_data, call_fn, log_abs_det_jacobian_fn):
+        for i in range(len(x_data)):
+            x = x_data[i]
+            y = call_fn(x)
+            log_abs_det_jacobian = log_abs_det_jacobian_fn(x, y)
+            # print(repr(log_abs_det_jacobian.numpy()))
+            self.assertAlmostEqual(out_data[i], log_abs_det_jacobian, places=2)
 
-    def test_power_transform_call(self):
-        for i in range(len(self.data_1)):
-            x = self.data_1[i]
-            y = functional.power_transform_call(2, x)
-            self.assertAlmostEqual(self.pow_y[i], y, places=2)
+    # def test_exp_transform_call(self):
+    #     self._test_call_helper(self.data_1, self.exp_y,
+    #                            functional.exp_transform_call)
+    #
+    # def test_exp_transform_inverse(self):
+    #     self._test_inverse_helper(self.data_1,
+    #                               functional.exp_transform_call,
+    #                               functional.exp_transform_inverse)
+    #
+    # def test_exp_transform_log_abs_det_jacobian(self):
+    #     self._test_log_abs_det_jacobian(self.data_1, self.exp_log_abs_det_jacobian,
+    #                                     functional.exp_transform_call,
+    #                                     functional.exp_transform_log_abs_det_jacobian)
+    #
+    # def test_power_transform_call(self):
+    #     self._test_call_helper(self.data_1, self.pow_y,
+    #                            lambda x: functional.power_transform_call(2, x))
+    #
+    # def test_power_transform_inverse(self):
+    #     self._test_inverse_helper(self.data_1,
+    #                               lambda x: functional.power_transform_call(2, x),
+    #                               lambda y: functional.power_transform_inverse(2, y))
+    #
+    # def test_power_transform_log_abs_det_jacobian(self):
+    #     self._test_log_abs_det_jacobian(self.data_1, self.pow_log_abs_det_jacobian,
+    #                                     lambda x: functional.power_transform_call(2, x),
+    #                                     lambda x, y: functional.power_transform_log_abs_det_jacobian(2, x, y))
+    #
+    # def test_sigmoid_transform_call(self):
+    #     self._test_call_helper(self.data_1, self.sigmoid_y,
+    #                            functional.sigmoid_transform_call)
+    #
+    # def test_sigmoid_transform_inverse(self):
+    #     self._test_inverse_helper(self.data_1,
+    #                               functional.sigmoid_transform_call,
+    #                               functional.sigmoid_transform_inverse)
+    #
+    # def test_sigmoid_transform_log_abs_det_jacobian(self):
+    #     self._test_log_abs_det_jacobian(self.data_1, self.sigmoid_log_abs_det_jacobian,
+    #                                     functional.sigmoid_transform_call,
+    #                                     functional.sigmoid_transform_log_abs_det_jacobian)
+    #
+    # def test_abs_transform_call(self):
+    #     self._test_call_helper(self.data_2, self.data_1, functional.abs_transform_call)
+    #
+    # def test_abs_transform_inverse(self):
+    #     self._test_inverse_helper(self.data_1,
+    #                               functional.abs_transform_call,
+    #                               functional.abs_transform_inverse)
+    #
+    # def test_affine_transform_call(self):
+    #     self._test_call_helper(self.data_1, self.affine_y,
+    #                            lambda x: functional.affine_transform_call(1.0, 2, x))
 
-    def test_power_transform_inverse(self):
-        for i in range(len(self.pow_y)):
-            x = self.data_1[i]
-            y = functional.power_transform_call(2, x)
-            y_inv = functional.power_transform_inverse(2, y)
-            self.assertAlmostEqual(y_inv, x, places=2)
+    def test_affine_transform_inverse(self):
+        self._test_inverse_helper(self.data_1,
+                                  lambda x: functional.affine_transform_call(1.0, 2, x),
+                                  lambda y: functional.affine_transform_inverse(1.0, 2, y))
 
-    def test_power_transform_log_abs_det_jacobian(self):
-        for i in range(len(self.data_1)):
-            x = self.data_1[i]
-            y = functional.power_transform_call(2, x)
-            log_abs_det_jacobian = functional.power_transform_log_abs_det_jacobian(2, x, y)
-            self.assertAlmostEqual(self.pow_log_abs_det_jacobian[i], log_abs_det_jacobian, places=2)
-
-    def test_sigmoid_transform_call(self):
-        for i in range(len(self.data_1)):
-            x = self.data_1[i]
-            y = functional.sigmoid_transform_call(x)
-            self.assertAlmostEqual(self.sigmoid_y[i], y, places=2)
-
-    def test_sigmoid_transform_inverse(self):
-        for i in range(len(self.sigmoid_y)):
-            x = self.data_1[i]
-            y = functional.sigmoid_transform_call(x)
-            y_inv = functional.sigmoid_transform_inverse(y)
-            self.assertAlmostEqual(y_inv, x, places=2)
-
-    def test_sigmoid_transform_log_abs_det_jacobian(self):
-        for i in range(len(self.data_1)):
-            x = self.data_1[i]
-            y = functional.sigmoid_transform_call(x)
-            log_abs_det_jacobian = functional.sigmoid_transform_log_abs_det_jacobian(x, y)
-            self.assertAlmostEqual(self.sigmoid_log_abs_det_jacobian[i], log_abs_det_jacobian, places=2)
+    def test_affine_transform_log_abs_det_jacobian(self):
+        self._test_log_abs_det_jacobian(self.data_1, self.affine_log_abs_det_jacobian,
+                                        lambda x: functional.affine_transform_call(1.0, 2, x),
+                                        lambda x, y: functional.affine_transform_log_abs_det_jacobian(1.0, 2, x, y))
 
 class TestFunctors(TestCase):
     def test_cat_transform(self):
