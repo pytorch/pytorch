@@ -32,6 +32,28 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"std::string", ParameterType::STRING},
 };
 
+// Default arg name translations for compatibility with NumPy.
+//
+// Example:
+// ```python
+// t = torch.randn(10,10)
+// torch.sum(a=t, axis=0, keepdim=True)
+// ```
+//
+// A vector is necessary, because we might need to try multiple values.
+// In particular, NumPy sometimes uses "x" and sometimes "a" for the main input tensor.
+// Rather than annotate each function separately with whether it should take "x" or "a",
+// just try both.
+//
+// TODO: Allow individual functions to specify non-default translations:
+// For example, `torch.pow` should translate "exponent" to "x2".
+static const std::unordered_map<std::string, std::vector<std::string>> numpy_compatibility_arg_names = {
+  {"dim", {"axis"}},
+  {"keepdim", {"keepdims"}},
+  {"input", {"x", "a", "x1"}},
+  {"other", {"x2"}},
+};
+
 // TODO: remove this. This is a temporary list of functions that allow Python
 // numbers to bind to Tensors. Some binary ops have separate Tensor and Scalar
 // overloads and binding to the Tensor overload with a number of a different
@@ -94,11 +116,13 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   } else {
     name = name_str;
   }
-#if PY_MAJOR_VERSION == 2
-  python_name = PyString_InternFromString(name.c_str());
-#else
-  python_name = PyUnicode_InternFromString(name.c_str());
-#endif
+  python_name = THPUtils_internString(name);
+  auto np_compat_it = numpy_compatibility_arg_names.find(name);
+  if (np_compat_it != numpy_compatibility_arg_names.end()) {
+    for (const auto& str: np_compat_it->second) {
+      numpy_python_names.push_back(THPUtils_internString(str));
+    }
+  }
 }
 
 bool FunctionParameter::check(PyObject* obj) {
@@ -461,6 +485,12 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       obj = PyTuple_GET_ITEM(args, arg_pos);
     } else if (kwargs) {
       obj = PyDict_GetItem(kwargs, param.python_name);
+      for (PyObject *numpy_name: param.numpy_python_names) {
+        if (obj) {
+          break;
+        }
+        obj = PyDict_GetItem(kwargs, numpy_name);
+      }
       is_kwd = true;
     }
 
