@@ -1130,6 +1130,7 @@ const std::vector<std::string> functions = {
                 res = mask * input / p1m
 
             def backward(grad_output):
+                use_cuda = grad_output.is_cuda
                 if use_cuda:
                     grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
                 else:
