@@ -4291,7 +4291,8 @@ class TestTransformFunctions(TestCase):
     def test_cat_transform_log_abs_det_jacobian(self):
         self._test_log_abs_det_jacobian(self.data_1, self.cat_log_abs_det_jacobian,
                                         lambda x: functional.cat_transform_call(0, 2, [2], [ExpTransform()], x),
-                                        lambda x, y: functional.cat_transform_log_abs_det_jacobian(0, 2, [2], [ExpTransform()], x, y))
+                                        lambda x, y: functional.cat_transform_log_abs_det_jacobian(
+                                            0, 2, [2], [ExpTransform()], x, y))
 
     def test_stack_transform_call(self):
         self._test_call_helper(self.data_1, self.stack_y,
@@ -4299,13 +4300,17 @@ class TestTransformFunctions(TestCase):
 
     def test_stack_transform_inverse(self):
         self._test_inverse_helper(self.data_1,
-                                  lambda x: functional.stack_transform_call(0, [ExpTransform(), ExpTransform()], x),
-                                  lambda y: functional.stack_transform_inverse(0, [ExpTransform(), ExpTransform()], y))
+                                  lambda x: functional.stack_transform_call(
+                                      0, [ExpTransform(), ExpTransform()], x),
+                                  lambda y: functional.stack_transform_inverse(
+                                      0, [ExpTransform(), ExpTransform()], y))
 
     def test_stack_transform_log_abs_det_jacobian(self):
         self._test_log_abs_det_jacobian(self.data_1, self.stack_log_abs_det_jacobian,
-                                        lambda x: functional.stack_transform_call(0, [ExpTransform(), ExpTransform()], x),
-                                        lambda x, y: functional.stack_transform_log_abs_det_jacobian(0, [ExpTransform(), ExpTransform()], x, y))
+                                        lambda x: functional.stack_transform_call(
+                                            0, [ExpTransform(), ExpTransform()], x),
+                                        lambda x, y: functional.stack_transform_log_abs_det_jacobian(
+                                            0, [ExpTransform(), ExpTransform()], x, y))
 
 class TestFunctors(TestCase):
     def test_cat_transform(self):
