@@ -1391,13 +1391,10 @@ def detach(g, input):
     # Erase aten::detach nodes because ONNX is inference only
     return input
 
-
 @parse_args('v', 'i')
 def contiguous(g, input, memory_format):
     if memory_format != 2:  # default value torch.contiguous_format
         raise RuntimeError("onnx memory_format support is not implemented")
-    return input
-
 
 @parse_args('v', 'v', 'i')
 def _pack_padded_sequence(g, input, lengths, batch_first):

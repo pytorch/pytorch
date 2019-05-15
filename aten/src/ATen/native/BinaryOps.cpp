@@ -39,7 +39,8 @@ Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
   }
   auto iter = TensorIterator::binary_op(result, self, other);
   add_stub(iter->device_type(), *iter, alpha);
-  return iter->output();
+  auto res = iter->output();
+  return res;
 }
 
 Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {

@@ -825,6 +825,9 @@ inline Tensor Tensor::to(ScalarType dtype, bool non_blocking, bool copy) const {
 inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) const {
     return dispatch_type().to(*this, other, non_blocking, copy);
 }
+inline Tensor Tensor::to(MemoryFormat memory_format) const {
+    return dispatch_type().to(*this, memory_format);
+}
 inline Scalar Tensor::item() const {
     return dispatch_type().item(*this);
 }

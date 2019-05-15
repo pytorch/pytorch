@@ -169,7 +169,17 @@ class CAFFE2_API Tensor {
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const {
     return impl_->is_contiguous(memory_format);
   }
+  void set_memory_format_tag(at::MemoryFormat memory_format) {
+    impl_->set_memory_format_tag(memory_format);
+  }
+  void reset_memory_format_tag() {
+    impl_->reset_memory_format_tag();
+  }
 
+  // This functions completly ignores current data, can be used on empty tensor only
+  inline bool maybe_as_channels_last() {
+    return impl_->maybe_as_channels_last();
+  }
   // Total bytes consumed by the "view" of elements of the array.  Does not
   // include size of metadata.  The number reported here does not necessarily
   // correspond to the true physical memory consumed by a tensor; instead,

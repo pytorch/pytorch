@@ -100,6 +100,7 @@ c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
   impl->is_contiguous_ = is_contiguous_;
   impl->is_wrapped_number_ = is_wrapped_number_;
   impl->reserved_ = reserved_;
+  impl->memory_format_tag_ = memory_format_tag_;
 
   // OpaqueTensorImpl-specific fields (none currently).
   return impl;

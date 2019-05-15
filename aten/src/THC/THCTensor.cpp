@@ -98,8 +98,12 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
     }
   }
 
-  if(!isSame)
+  if (!isSame)
     THCTensor_resizeNd(state, self, src->dim(), THTensor_getSizePtr(src), NULL);
+
+  if (src->is_contiguous(at::MemoryFormat::ChannelsLast)) {
+    self->maybe_as_channels_last();
+  }
 }
 
 void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)

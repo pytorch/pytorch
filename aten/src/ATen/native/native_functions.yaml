@@ -2596,6 +2596,10 @@
   variants: method
   device_guard: False
 
+- func: to(Tensor self, MemoryFormat memory_format) -> Tensor
+  variants: method
+  device_guard: False
+
 - func: meshgrid(Tensor[] tensors) -> Tensor[]
 
 - func: cartesian_prod(Tensor[] tensors) -> Tensor
