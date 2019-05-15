@@ -1,10 +1,9 @@
 #pragma once
 
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/function_schema.h>
 #include <ATen/core/op_registration/op_registration.h>
-#if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/script/function_schema_parser.h>
-#endif
 #include <vector>
 
 namespace caffe2 {
@@ -156,7 +155,6 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
  * - If your operator has a variable number of input tensors, make the first (!)
  *   input an input of type TensorList. There must be no other tensor inputs.
  */
-#if !defined(CAFFE2_IS_XPLAT_BUILD)
 #define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)                  \
   namespace caffe2 {                                               \
   namespace _c10_ops {                                             \

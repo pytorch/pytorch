@@ -482,7 +482,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
   static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
   if (input.dim() == 0) input = input.view(1);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
-  AT_CHECK(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
+  TORCH_CHECK(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
 
@@ -557,7 +557,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
   auto grad = grad_.contiguous();
   static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
   if (grad.dim() == 0) grad = grad.view(1);
-  AT_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
+  TORCH_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
   auto output = output_.contiguous();
   if (output.dim() == 0) output = output.view(1);
   int64_t outer_size = 1;
