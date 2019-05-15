@@ -1,6 +1,8 @@
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/autograd/function.h>
 
+#include <cstdlib>
+
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {
@@ -8,6 +10,28 @@ std::vector<RecordFunctionCallback> start_callbacks;
 std::vector<RecordFunctionCallback> end_callbacks;
 size_t callback_needs_inputs = 0;
 thread_local RecordFunction* thread_local_func_ = nullptr;
+
+bool is_sampled_callbacks = false;
+double sampling_prob = 1.0;
+constexpr double kEps = 1e-10;
+}
+
+void setSamplingProbability(double prob) {
+  if (std::abs(prob - 1.0) < kEps) {
+    is_sampled_callbacks = false;
+  } else {
+    AT_CHECK(prob > -kEps && prob < 1.0);
+    is_sampled_callbacks = true;
+  }
+  sampling_prob = prob;
+}
+
+double getSamplingProbability() {
+  return sampling_prob;
+}
+
+bool checkCallbacksSampled() {
+  return is_sampled_callbacks;
 }
 
 void pushCallback(
