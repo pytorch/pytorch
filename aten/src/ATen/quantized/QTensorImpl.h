@@ -25,7 +25,7 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
     return quantizer_;
   }
 
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(ShallowCopyVersionCounterMode version_counter_mode) const override {
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(const c10::VariableVersion& version_counter) const override {
     auto impl = c10::make_intrusive<QTensorImpl>(
         Storage(storage()), type_id(), quantizer_);
     impl->set_sizes_and_strides(sizes(), strides());
@@ -34,16 +34,7 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
     impl->reserved_ = reserved_;
     impl->refresh_numel();
     impl->refresh_contiguous();
-    switch (version_counter_mode) {
-      case ShallowCopyVersionCounterMode::kShareVersionCounter:
-        impl->set_version_counter(version_counter());
-        break;
-      case ShallowCopyVersionCounterMode::kCreateNewVersionCounter:
-        impl->set_version_counter(0);
-        break;
-      default:
-        AT_ERROR("Unsupported version_counter_mode: ", version_counter_mode);
-    }
+    impl->set_version_counter(version_counter);
 
     return impl;
   }

@@ -171,7 +171,7 @@ void Variable::Impl::set_data(const at::Tensor &new_data) {
   type_id_ = new_data.dispatch_type().type_id();
 
   auto new_data_impl_copy = new_data.getIntrusivePtr()->shallow_copy_and_detach(
-    at::ShallowCopyVersionCounterMode::kCreateNewVersionCounter);
+    /*version_counter=*/0);
   // Version counter is not shared when we replace a `Variable`'s underlying `Tensor`
   // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
   // See NOTE [ Version Counter Sharing ] for details.

@@ -546,7 +546,7 @@ inline Variable make_variable_view(
   if (data.defined()) {
     if (is_differentiable) {
       /// Differentiable view. Track history with DifferentiableViewImpl.
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(at::ShallowCopyVersionCounterMode::kCreateNewVersionCounter);
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(/*version_counter=*/0);
       data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
       auto data_copy = at::Tensor(data_impl_copy);
       auto diff_view_meta = c10::guts::make_unique<Variable::DifferentiableViewMeta>();
@@ -554,7 +554,7 @@ inline Variable make_variable_view(
               std::move(base), std::move(data_copy), std::move(gradient_edge), std::move(diff_view_meta)));
     } else {
       /// Non-differentiable view. Just share version counter.
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(at::ShallowCopyVersionCounterMode::kCreateNewVersionCounter);
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(/*version_counter=*/0);
       data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
       auto data_copy = at::Tensor(data_impl_copy);
       auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
@@ -575,7 +575,7 @@ inline Variable make_variable(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(at::ShallowCopyVersionCounterMode::kCreateNewVersionCounter);
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(/*version_counter=*/0);
     data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
     auto data_copy = at::Tensor(data_impl_copy);
     auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
@@ -608,7 +608,7 @@ inline Variable make_variable(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(at::ShallowCopyVersionCounterMode::kCreateNewVersionCounter);
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(/*version_counter=*/0);
     data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
     auto data_copy = at::Tensor(data_impl_copy);
     auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
