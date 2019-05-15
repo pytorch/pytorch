@@ -30,8 +30,12 @@ static const int WARP_SIZE = 32;
 template <typename scalar_t>
 __global__ void indexing_backward_kernel(
   int64_t* input, int64_t* indices, scalar_t* grad_output, scalar_t* grad_weight,
-  int64_t numel, int64_t stride, int64_t stride_before) {
-
+  int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim) {
+//numel is total number of flattened indices, not expanded to dimensions that are not indexed.
+//stride is the cumulative size of the not-indexed last dimensions
+//stride_before is the stride of the dimension immediately preceding first indexed dimension
+//if indexing starts from the 0th dimension, stride_before does not matter because blockIdx.z will be 0 in thei case
+//outer_dim is number of elements in the first unindexed dimensions
   using accscalar_t = at::acc_type<scalar_t, true>;
   int idx = blockIdx.x * 4 + threadIdx.y;
 
@@ -48,42 +52,46 @@ __global__ void indexing_backward_kernel(
 
   // Number of values proceessed by each thread (grain size)
   const int SZ = 4;
+  for (int z = blockIdx.z; z < outer_dim; z += gridDim.z){
+    if (idx < numel
+        && (idx == 0 || input[idx] != input[idx - 1])){
+      do {
+        int start_feature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
+        const int weight_row = ((int) input[idx]) * stride + z * stride_before;
+        const int grad_row = ((int) indices[idx]) * stride + z * numel * stride;
+        const accscalar_t scale = (accscalar_t)1.0;
 
-  if (idx < numel
-      && (idx == 0 || input[idx] != input[idx - 1])){
-    do {
-      const int start_feature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-      const int weight_row = ((int) input[idx]) * stride + blockIdx.z * stride_before;
-      const int grad_row = ((int) indices[idx]) * stride + blockIdx.z * numel * stride;
-      const accscalar_t scale = (accscalar_t)1.0;
+        accscalar_t gradient[SZ];
+        accscalar_t weight[SZ];
 
-      accscalar_t gradient[SZ];
-      accscalar_t weight[SZ];
+        while (start_feature < stride) {
+          #pragma unroll
+          for (int ii = 0; ii < SZ; ii++) {
+            int feature_dim = start_feature + ii * WARP_SIZE;
+            if (feature_dim < stride) {
+              gradient[ii] = static_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
+              weight[ii] = static_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
+            }
+          }
 
-      #pragma unroll
-      for (int ii = 0; ii < SZ; ii++) {
-        int feature_dim = start_feature + ii * WARP_SIZE;
-        if (feature_dim < stride) {
-          gradient[ii] = static_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
-          weight[ii] = static_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
+          #pragma unroll
+          for (int ii = 0; ii < SZ; ii++) {
+            weight[ii] += gradient[ii] * scale;
+          }
+
+          #pragma unroll
+          for (int ii = 0; ii < SZ; ii++) {
+            int feature_dim = start_feature + ii * WARP_SIZE;
+            if (feature_dim < stride) {
+                grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);
+            }
+          }
+          start_feature += gridDim.y * blockDim.x * SZ;
         }
-      }
 
-      #pragma unroll
-      for (int ii = 0; ii < SZ; ii++) {
-        weight[ii] += gradient[ii] * scale;
-      }
-
-      #pragma unroll
-      for (int ii = 0; ii < SZ; ii++) {
-        int feature_dim = start_feature + ii * WARP_SIZE;
-        if (feature_dim < stride) {
-            grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);
-        }
-      }
-
-      idx++;
-    } while (idx < numel && input[idx] == input[idx - 1]);
+        idx++;
+      } while (idx < numel && input[idx] == input[idx - 1]);
+    }
   }
 }
 
@@ -128,7 +136,7 @@ computeLinearIndex(const Tensor & src, TensorList indices) {
   // are not being index.
   Tensor linearIndex;
   int64_t emptyBefore = 0, emptyAfter = 0, nElemBefore = 1, nElemAfter = 1, strideBefore =0;
-  for (int64_t i = 0; i < src.dim(); i++) {
+  for (auto i = decltype(src.dim()){0}; i < src.dim(); i++) {
     if (indices[i].defined()) {
       // Cast index to the longType matching src's backend
       // This allows us to support ie indexing a cuda tensor with a cpu tensor
@@ -189,14 +197,14 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
   std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices);
   int64_t num_indices = linearIndex.numel();
   if (num_indices > 0 && sliceSize > 0) {
-      bool permuted = !src.is_contiguous();
+      const bool permuted = !src.is_contiguous();
 //src is all zeros at this point, so src.zeros_like has the same effect as src.contiguous and is more efficient
       auto src_ = permuted ? at::zeros_like(src) : src;
       linearIndex = linearIndex.view(-1);
       auto sorted_indices = at::empty_like(linearIndex);
       auto orig_indices = at::empty_like(linearIndex);
       using device_ptr = thrust::device_ptr<int64_t>;
-      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+      const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     
       linearIndex.div_(sliceSize);
       {
@@ -205,7 +213,7 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       auto policy = thrust::cuda::par(allocator).on(stream);
     
       // Fill sortedOrigIndices with sequential indices
-      auto count_iter = thrust::counting_iterator<int64_t>(0);
+      const auto count_iter = thrust::counting_iterator<int64_t>(0);
       auto orig_data = device_ptr(orig_indices.data<int64_t>());
       thrust::copy(policy, count_iter, count_iter + num_indices, orig_data);
     
@@ -218,7 +226,11 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
       }
       AT_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel());
-      dim3 grid(THCCeilDiv(num_indices, (int64_t) 4), THCCeilDiv(sliceSize, (int64_t) 128), std::max<int>(1,nElemBefore));
+      AT_ASSERT(self.numel() < std::numeric_limits<int>::max());
+      AT_ASSERT(value.numel() < std::numeric_limits<int>::max());
+      dim3 grid(THCCeilDiv(num_indices, (int64_t) 4),
+           std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], THCCeilDiv(sliceSize, (int64_t) 128)),
+           std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(32, 4);
   
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(value_.scalar_type(), "embedding_backward", [&] {
@@ -229,7 +241,8 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
         src_.data<scalar_t>(),
         num_indices,
         sliceSize,
-        strideBefore);
+        strideBefore,
+        nElemBefore);
       });
       THCudaCheck(cudaGetLastError());
       if (permuted)
