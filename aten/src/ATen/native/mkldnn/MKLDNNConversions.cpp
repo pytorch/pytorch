@@ -15,7 +15,9 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
   Tensor cpu_tensor = at::empty(
     std::vector<int64_t>(dims.begin(), dims.end()),
     mkldnn_tensor.options().layout(c10::kStrided));
-  stensor.to_public(cpu_tensor.template data_ptr<float>());
+  if (!stensor.is_empty()) {
+    stensor.to_public(cpu_tensor.template data_ptr<float>());
+  }
   return cpu_tensor;
 }
 
