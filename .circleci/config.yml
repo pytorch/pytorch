@@ -197,7 +197,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         docker pull ${DOCKER_IMAGE} >/dev/null
         export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
-        git submodule sync && git submodule update -q --init
+        git submodule sync && git submodule update -q --init --recursive
 
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
@@ -1180,7 +1180,7 @@ jobs:
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             set -x
 
-            git submodule sync && git submodule update -q --init
+            git submodule sync && git submodule update -q --init --recursive
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
   caffe2_py2_gcc4_8_ubuntu14_04_build:
