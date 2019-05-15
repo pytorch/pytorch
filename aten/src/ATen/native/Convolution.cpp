@@ -270,11 +270,11 @@ static void check_shape_forward(const at::Tensor& input,
                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
     }
   } else { // transposed
-    AT_CHECK(input.size(1) == weight_sizes[0],
+    TORCH_CHECK(input.size(1) == weight_sizes[0],
              "Given transposed=", transposed, ", weight of size ", weight_sizes,
              ", expected input", input.sizes(), " to have ", weight_sizes[0],
              " channels, but got ", input.size(1), " channels instead");
-    AT_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[1] * groups),
+    TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[1] * groups),
              "Given transposed=", transposed, ", weight of size ", weight_sizes,
              ", expected bias to be 1-dimensional with ", weight_sizes[1] * groups, " elements",
              ", but got bias of size ", bias.sizes(), " instead");
@@ -282,14 +282,14 @@ static void check_shape_forward(const at::Tensor& input,
 }
 
 static auto view4d(const at::Tensor& tensor) -> at::Tensor {
-  AT_CHECK(tensor.ndimension() == 3,
+  TORCH_CHECK(tensor.ndimension() == 3,
            "expected 3D tensor, got tensor with ", tensor.ndimension(),
            " dimensions instead");
   return tensor.unsqueeze(2);
 }
 
 static auto view3d(const at::Tensor& tensor) -> at::Tensor {
-  AT_CHECK(tensor.ndimension() == 4,
+  TORCH_CHECK(tensor.ndimension() == 4,
            "expected 4D tensor, got tensor with ", tensor.ndimension(),
            " dimensions instead");
   return tensor.squeeze(2);
@@ -378,7 +378,7 @@ at::Tensor _convolution(
   }
   int64_t dim = k - 2;
 
-  AT_CHECK(dim > 0, "weight should have at least three dimensions");
+  TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
 
   ConvParams params;
   params.stride = expand_param_if_needed(stride_, "stride", dim);
@@ -409,10 +409,10 @@ at::Tensor _convolution(
       auto dilation = params.dilation;
       output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
   } else if (params.use_cudnn(input)) {
-    AT_CHECK(input.type() == weight.type(),
+    TORCH_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");
-    AT_CHECK(!bias.defined() || (input.type() == bias.type()),
+    TORCH_CHECK(!bias.defined() || (input.type() == bias.type()),
              "Input type (", input.type().toString(), ") and bias type (", bias.type().toString(),
              ") should be the same");
 
@@ -426,10 +426,10 @@ at::Tensor _convolution(
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_miopen(input)) {
-    AT_CHECK(input.type() == weight.type(),
+    TORCH_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");
-    AT_CHECK(!bias.defined() || (input.type() == bias.type()),
+    TORCH_CHECK(!bias.defined() || (input.type() == bias.type()),
              "Input type (", input.type().toString(), ") and bias type (", bias.type().toString(),
              ") should be the same");
 
@@ -444,10 +444,10 @@ at::Tensor _convolution(
     }
   } else if (params.use_mkldnn(input)) {
 #if AT_MKLDNN_ENABLED()
-    AT_CHECK(input.type() == weight.type(),
+    TORCH_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");
-    AT_CHECK(!bias.defined() || (input.type() == bias.type()),
+    TORCH_CHECK(!bias.defined() || (input.type() == bias.type()),
              "Input type (", input.type().toString(), ") and bias type (", bias.type().toString(),
              ") should be the same");
     if (!input_is_mkldnn) {
