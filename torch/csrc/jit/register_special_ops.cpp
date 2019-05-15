@@ -23,8 +23,9 @@ void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
   if (!elem_type->isSubtypeOf(NumberType::get()) &&
       elem_type != BoolType::get()) {
     auto error = script::ErrorReport(node->sourceRange());
+    std::cout << *node->owningGraph() << "\n";
     error << "Input list to torch.tensor must be of ints, floats, or bools, "
-          << "got " << elem_type->str();
+          << "got " << elem_type->python_str();
     // special case empty list torch.tensor([])
     if (elem_type->isSubtypeOf(TensorType::get())) {
       auto input = node->inputs().at(0);

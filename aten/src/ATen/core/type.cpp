@@ -404,7 +404,9 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       // unknown type).
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
     } else {
-      ret.errMsg = "cannot match an Optional[T] to None, because there is no way to determine T from None.";
+      ret.errMsg =
+          "cannot match an Optional[T] to None, because there is no "
+          "way to determine T from None.";
       return ret;
     }
   } else if (auto dict_formal = formal->cast<DictType>()) {

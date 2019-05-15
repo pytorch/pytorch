@@ -139,13 +139,13 @@ public:
   template<typename T>
   std::shared_ptr<T> expect() {
     auto r = cast<T>();
-    AT_ASSERT(r);
+    AT_CHECK(r);
     return r;
   }
   template<typename T>
   std::shared_ptr<const T> expect() const {
     auto r = cast<const T>();
-    AT_ASSERT(r);
+    AT_CHECK(r);
     return r;
   }
   virtual ~Type() = default;
