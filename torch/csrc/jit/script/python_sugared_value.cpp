@@ -110,7 +110,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     auto python_op = static_cast<PythonOp*>(new_node);
     python_op->ignore_on_export = true;
   }
-  new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
+  new_node->setSourceRange(loc);
   for (auto& i : matched_schema->inputs)
     new_node->addInput(i);
 
@@ -199,7 +199,7 @@ Value* ConstantPythonTupleValue::asValue(const SourceRange& loc, Function& m) {
   return m.graph()->insertNode(node)->output();
 }
 
-std::shared_ptr<SugaredValue> OverloadedFunctionValue::call(
+std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
     const SourceRange& loc,
     Function& caller,
     at::ArrayRef<NamedValue> inputs,
@@ -267,7 +267,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   py::object overloads =
       py_module_.attr("_overloads").attr("get")(field, py::none());
   if (!overloads.is_none()) {
-    return std::make_shared<OverloadedFunctionValue>(
+    return std::make_shared<OverloadedMethodValue>(
         self_, py::cast<std::vector<std::string>>(overloads));
   }
 
@@ -411,7 +411,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     obj = weak_obj;
   }
   if (auto callee = as_function(obj)) {
-    return std::make_shared<MethodValue>(c10::nullopt, callee);
+    return std::make_shared<FunctionValue>(callee);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
@@ -431,6 +431,14 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
   }
 
+  if (py::isinstance<py::function>(obj)) {
+    auto compiled_fn =
+        py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
+    if (auto callee = as_function(compiled_fn)) {
+      return std::make_shared<FunctionValue>(callee);
+    }
+  }
+
   py::object dispatched_fn =
       py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
   if (!dispatched_fn.is_none()) {
@@ -441,7 +449,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
-    if (auto classType = ClassType::get(c10::QualifiedName(qualifiedName))) {
+    auto& pyCu = CompilationUnit::_get_python_cu();
+    if (auto classType = pyCu.get_class(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
     }
   }

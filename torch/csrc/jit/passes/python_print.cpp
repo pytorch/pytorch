@@ -1,10 +1,9 @@
+#include <torch/csrc/jit/passes/python_print.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
-#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
@@ -532,7 +531,7 @@ struct PythonPrintPass {
       // this must be a while loop, but check that there isn't _also_ a trip
       // count
       if (trip_count_is_specified) {
-        throw script::ErrorReport(stmt.node()->getSourceLocation())
+        throw script::ErrorReport(stmt.node()->sourceRange())
             << "loop cannot be printed as python "
             << "because it has gone through an optimization "
             << "that combined while and for loops. File a bug.";
@@ -670,7 +669,7 @@ struct PythonPrintPass {
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
               << "Normal use of ScriptMethods should enforce this.";
         }
@@ -725,7 +724,7 @@ struct PythonPrintPass {
       } break;
       case prim::Function: {
         if (enforce_importable_) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(node->sourceRange())
               << "closures are not exportable";
         }
         assignValuesToTheirUniqueNames(node->outputs());
@@ -842,7 +841,7 @@ struct PythonPrintPass {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_ && !value->ignore_on_export) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(node->sourceRange())
               << "could not export python function call " << value->name()
               << ". Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "
@@ -878,6 +877,9 @@ struct PythonPrintPass {
       case prim::Bool: {
         printValueList(stmt, node->inputs(), "bool(", ")");
       } break;
+      case prim::str: {
+        printValueList(stmt, node->inputs(), "str(", ")");
+      } break;
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");
       } break;
@@ -886,8 +888,8 @@ struct PythonPrintPass {
             stmt, node->inputs(), "(", node->inputs().size() == 1 ? ",)" : ")");
       } break;
       case prim::TupleIndex: {
-        stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::index)
-             << "]";
+        stmt << "(" << useOf(node->inputs().at(0)) << ")["
+             << useOf(node->inputs().at(1)) << "]";
       } break;
       case prim::TupleSlice: {
         stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::beg) << ":"
@@ -1026,7 +1028,7 @@ struct PythonPrintPass {
   }
 
  public:
-  void printFunction(script::Function& func) {
+  void printFunction(const script::Function& func) {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
@@ -1090,7 +1092,7 @@ struct PythonPrintPass {
     }
   }
 
-  void printCompilationUnit(script::CompilationUnit& cu) {
+  void printCompilationUnit(const script::CompilationUnit& cu) {
     for (auto& func : cu.get_functions()) {
       printFunction(*func);
     }
@@ -1123,8 +1125,7 @@ void PythonPrint(
     std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  pp.printFunction(const_cast<script::Function&>(func));
+  pp.printFunction(func);
   pp.print(out);
 }
 
@@ -1136,8 +1137,7 @@ void PythonPrint(
     std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  pp.printCompilationUnit(const_cast<script::CompilationUnit&>(cu));
+  pp.printCompilationUnit(cu);
   pp.print(out);
 }
 
@@ -1199,6 +1199,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
       prim::Store, // used in interpreter only
+      prim::profile, // used in interpreter only
 
   };
 
@@ -1213,6 +1214,5 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   return handled.count(sym) || unneeded.count(sym) ||
       !required_namespaces.count(sym.ns());
 }
-
 } // namespace jit
 } // namespace torch

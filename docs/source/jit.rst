@@ -246,7 +246,7 @@ similar to how you would declare a TorchScript function: ::
 
     @torch.jit.script
     class Foo:
-      def __init__(self, x, y)
+      def __init__(self, x, y):
         self.x = x
 
       def aug_add_x(self, inc):
@@ -286,16 +286,16 @@ like any other TorchScript type:
 
     @torch.jit.script
     class Pair:
-      def __init__(self, first, second)
+      def __init__(self, first, second):
         self.first = first
         self.second = second
 
     @torch.jit.script
     def sum_pair(p):
-      # type : (Pair) -> Tensor
+      # type: (Pair) -> Tensor
       return p.first + p.second
 
-    p = Pair(torch.rand(2, 3), torch.rand(2, 3)
+    p = Pair(torch.rand(2, 3), torch.rand(2, 3))
     print(sum_pair(p))
 
 
@@ -1099,6 +1099,36 @@ Q: How do I store attributes on a ``ScriptModule``?
     the model. See `Module Attributes`_.
 
 
+
+Q: I would like to trace module's method but I keep getting this error:
+
+``RuntimeError: Cannot insert a Tensor that requires grad as a constant. Consider making it a parameter or input, or detaching the gradient``
+
+    This error usually means that, the method you are tracing, uses module's parameters and
+    you are passing module's method instead of a module instance (e.g. ``my_module_instance.forward`` vs ``my_module_instance``). 
+      - Invoking ``trace`` with module's method captures module parameters (which may require gradients) as **constants**. 
+      - On the other hand, invoking ``trace`` with module's instance (e.g. ``my_module``) creates a new module and correctly copies parameters into the new module, so they can accumulate gradients if required.
+    Given that ``trace`` treats ``my_module_instance.forward`` as a standalone function, it also means there is **not** currently a way to trace
+    arbitrary methods in the module except for ``forward`` that use module's parameters.
+    Version **1.1.1** will add a new API ``trace_module`` that will allow users to trace any method in the module and more than one method ::
+
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.conv = nn.Conv2d(1, 1, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+            def weighted_kernel_sum(self, weight):
+                return weight * self.conv.weight
+
+        example_weight = torch.rand(1, 1, 3, 3)
+        example_forward_input = torch.rand(1, 1, 3, 3)
+        n = Net()
+        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+        module = torch.jit.trace_module(n, inputs)
+        
 
 Builtin Functions
 ~~~~~~~~~~~~~~~~~

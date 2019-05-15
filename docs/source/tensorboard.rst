@@ -48,13 +48,46 @@ and runnable with::
     pip install tb-nightly  # Until 1.14 moves to the release channel
     tensorboard --logdir=runs
 
+
+Lots of information can be logged for one experiment. To avoid cluttering
+the UI and have better result clustering, we can group plots by naming them
+hierarchically. For example, "Loss/train" and "Loss/test" will be grouped
+together, while "Accuracy/train" and "Accuracy/test" will be grouped separately
+in the TensorBoard interface.
+
+.. code:: python
+
+
+    from torch.utils.tensorboard import SummaryWriter
+    import numpy as np
+
+    writer = SummaryWriter()
+
+    for n_iter in range(100):
+        writer.add_scalar('Loss/train', np.random.random(), n_iter)
+        writer.add_scalar('Loss/test', np.random.random(), n_iter)
+        writer.add_scalar('Accuracy/train', np.random.random(), n_iter)
+        writer.add_scalar('Accuracy/test', np.random.random(), n_iter)
+
+
+Expected result:
+
+.. image:: _static/img/tensorboard/hier_tags.png
+    :scale: 75 %
+
+|
+|
+
 .. currentmodule:: torch.utils.tensorboard.writer
 
 .. autoclass:: SummaryWriter
 
+   .. automethod:: __init__
    .. automethod:: add_scalar
+   .. automethod:: add_scalars
    .. automethod:: add_histogram
    .. automethod:: add_image
+   .. automethod:: add_images
    .. automethod:: add_figure
    .. automethod:: add_video
    .. automethod:: add_audio

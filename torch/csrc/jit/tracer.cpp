@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/script/module.h>
+#include <ATen/core/Dict.h>
 
 #include <memory>
 #include <sstream>
@@ -229,6 +230,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
     return Tuple::create(std::move(elems));
   } else if (auto dict_type = type->cast<DictType>()) {
     auto dict = input.toGenericDict();
+
     auto dict_size = dict->elements().size();
     auto unpack_to_list = state->graph->insert(aten::values, {value});
     auto list_unpack = state->graph->createListUnpack(unpack_to_list, dict_size);
@@ -240,7 +242,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
 
     size_t i = 0;
     for (const auto &pair : order) {
-      dict->elements()[pair.first] = addInput(state, pair.second, dict_type->getValueType(), elem_values[i++]);
+      dict->elements().insert_or_assign(pair.first, addInput(state, pair.second, dict_type->getValueType(), elem_values[i++]));
     }
 
     return c10::ivalue::GenericDict::create(std::move(dict->elements()));
@@ -675,8 +677,6 @@ const char* WARN_RESIZE =
     " can't be represented in the JIT at the moment, so we won't connect any uses of "
     "this value with its current trace. If you happen to use it again, it will show "
     "up as a constant in the graph.";
-const char* LEGACY_CONSTRUCTOR =
-    " is a legacy constructor and is not supported in the JIT.";
 
 // XXX: _kind can be a nullptr
 void _do_warn(const char* _reason, const char* _kind) {

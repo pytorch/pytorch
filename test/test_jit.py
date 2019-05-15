@@ -3323,6 +3323,7 @@ def foo(x):
         with self.assertRaisesRegex(AttributeError, "trace doesn't support compiling individual module's functions"):
             module = torch.jit.trace(n.weighted_kernel_sum, inputs)
 
+
     def test_submodule_twice(self):
         @torch.jit.script
         def foo(x):

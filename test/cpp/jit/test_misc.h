@@ -350,6 +350,39 @@ void testATenNativeBatchNorm() {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
+void testCustomFusion() {
+  auto graph = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto c = a * b;
+  auto d = c * a;
+  graph->registerOutput(d.value());
+
+  torch::jit::overrideCanFuseOnCPU(true);
+  CustomFuseGraph(
+      graph,
+      [](Node* n) { return n->kind() != prim::Param; },
+      Symbol::fromQualString("prim::FusionGroup"));
+  torch::jit::overrideCanFuseOnCPU(false);
+
+  const auto& nodes = graph->nodes();
+  auto fusion_group =
+      std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
+        return node->kind() == Symbol::fromQualString("prim::FusionGroup");
+      });
+  AT_ASSERT(fusion_group != nodes.end());
+
+  auto subgraph = fusion_group->g(attr::Subgraph);
+  auto hits = 0;
+  // two multiplications
+  for (const auto& n : subgraph->nodes()) {
+    hits++;
+  }
+  AT_ASSERT(hits == 2);
+}
+
 static const auto cf_examples = R"JIT(
   def if_test(a, b):
       # FIXME: use 0 instead of a.
@@ -609,22 +642,22 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
     const auto& sizes = std::get<1>(input);
     if (fn == "test") {
       found_test = true;
-      AT_CHECK(sizes.size() == 1);
-      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes.size() == 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
     } else if (fn == "test::pow") {
       found_pow = true;
-      AT_CHECK(sizes.size() == 2);
-      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
-      AT_CHECK(sizes[1].empty());
+      TORCH_CHECK(sizes.size() == 2);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes[1].empty());
     } else if (fn.find("::mul") != std::string::npos) {
       found_mul = true;
-      AT_CHECK(sizes.size() > 1);
-      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes.size() > 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
     }
   }
-  AT_CHECK(found_test);
-  AT_CHECK(found_pow);
-  AT_CHECK(found_mul);
+  TORCH_CHECK(found_test);
+  TORCH_CHECK(found_pow);
+  TORCH_CHECK(found_mul);
 }
 
 std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
@@ -703,7 +736,7 @@ void testAutogradProfiler() {
   for (size_t pos = 0; (pos = result.find("tanh", pos)) != std::string::npos;
        count++, pos++) {
   }
-  AT_CHECK(count == 200);
+  TORCH_CHECK(count == 200);
 }
 
 void testNoneSchemaMatch() {
@@ -764,7 +797,7 @@ void testModuleConversion() {
     // test cuda to cpu for params and buffers
     m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
     m->register_buffer("bar", torch::ones({}, at::kCUDA));
-    
+
     m->to(at::kCUDA);
     m->to(at::kCPU);
     AT_ASSERT(m->get_parameter("foo").data().device().is_cpu());
@@ -774,7 +807,7 @@ void testModuleConversion() {
     // test cpu to cuda for params and buffers
     m->register_parameter("foo", torch::ones({}), false);
     m->register_buffer("bar", torch::ones({}));
-    
+
     m->to(at::kCUDA);
     AT_ASSERT(m->get_parameter("foo").data().device().is_cuda());
     AT_ASSERT(m->get_buffer("bar").data().device().is_cuda());
@@ -809,7 +842,9 @@ graph(%a):
 }
 
 static void checkShape(Node* n, std::vector<int64_t> expected) {
-  auto tp = n->output()->type();
+  auto profile = n->inputs().at(0)->node();
+  AT_ASSERT(profile->kind() == prim::profile);
+  auto tp = profile->output()->type();
   auto ptp = tp->expect<ProfiledTensorType>();
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
@@ -835,7 +870,7 @@ void testProfiler() {
   ArgumentSpecCreator arg_spec_creator(opt_graph);
   ArgumentSpec spec =
       arg_spec_creator.create(autograd::GradMode::is_enabled(), stack);
-  arg_spec_creator.setInputTypes(opt_graph, spec);
+  arg_spec_creator.specializeTypes(opt_graph, spec);
   auto pr = ProfilingRecord::instrumentGraph(g);
   Code cd(pr->profiled_graph_);
   InterpreterState is{cd};
@@ -846,7 +881,7 @@ void testProfiler() {
   auto mm =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mm; });
   ASSERT_NE(mm, end);
-  std::vector<int64_t> mm_expected{4, 2048};
+  std::vector<int64_t> mm_expected{4, 256};
   std::vector<int64_t> eltwise{4, 512};
   checkShape(*mm, mm_expected);
   auto sigmoid_n = std::find_if(
