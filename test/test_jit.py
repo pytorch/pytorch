@@ -13977,10 +13977,8 @@ def add_autograd_test(
                         should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
 
                         if test_name not in EXCLUDE_TRACED:
-                            print("creating traced fn")
                             traced_fn = create_traced_fn(self, fn)
 
-                            print("checking traced fn")
                             check_against_reference(self, traced_fn,
                                                     fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
