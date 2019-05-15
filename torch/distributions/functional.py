@@ -4,6 +4,7 @@ import torch
 
 from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost)
+from torch.nn.functional import pad
 
 __all__ = [
 
@@ -132,3 +133,50 @@ def affine_transform_log_abs_det_jacobian(scale, event_dim, x, y):
         result = result.view(result_size).sum(-1)
         shape = shape[:-event_dim]
     return result.expand(shape)
+
+
+def soft_max_transform_call(x):
+    logprobs = x
+    probs = (logprobs - logprobs.max(-1, True)[0]).exp()
+    return probs / probs.sum(-1, True)
+
+
+def soft_max_transform_inverse(y):
+    probs = y
+    return probs.log()
+
+
+def stick_breaking_transform_call(x):
+    offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
+    z = torch.sigmoid(x - offset.log())
+    z_cumprod = (1 - z).cumprod(-1)
+    y = pad(z, (0, 1), value=1) * pad(z_cumprod, (1, 0), value=1)
+    return y
+
+
+def stick_breaking_transform_inverse(y):
+    shape = y.shape[:-1] + (y.shape[-1] - 1,)
+    offset = (shape[-1] + 1) - y.new([1]).expand(shape).cumsum(-1)
+    sf = (1 - y.cumsum(-1))[..., :-1]
+    x = y[..., :-1].log() - sf.log() + offset.log()
+    return x
+
+
+def stick_breaking_transform_log_abs_det_jacobian(x, y):
+    offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
+    z = torch.sigmoid(x - offset.log())
+    detJ = ((1 - z).log() + y[..., :-1].log()).sum(-1)
+    return detJ
+
+
+def lower_cholesky_transform_call(x):
+    def _call_on_event(x):
+        return x.tril(-1) + x.diag().exp().diag()
+    flat_x = x.reshape((-1,) + x.shape[-2:])
+    return torch.stack([_call_on_event(flat_x[i]) for i in range(flat_x.size(0))]).view(x.shape)
+
+def lower_cholesky_transform_inverse(y):
+    def _inverse_on_event(y):
+        return y.tril(-1) + y.diag().log().diag()
+    flat_y = y.contiguous().view((-1,) + y.shape[-2:])
+    return torch.stack([_inverse_on_event(flat_y[i]) for i in range(flat_y.size(0))]).view(y.shape)

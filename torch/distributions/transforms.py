@@ -1,4 +1,3 @@
-import math
 import numbers
 import weakref
 
@@ -7,7 +6,6 @@ from torch.distributions import constraints
 from torch.distributions import functional as F
 from torch.distributions.utils import (broadcast_all,
                                        lazy_property)
-from torch.nn.functional import pad
 
 __all__ = [
     'AbsTransform',
@@ -432,13 +430,10 @@ class SoftmaxTransform(Transform):
         return isinstance(other, SoftmaxTransform)
 
     def _call(self, x):
-        logprobs = x
-        probs = (logprobs - logprobs.max(-1, True)[0]).exp()
-        return probs / probs.sum(-1, True)
+        return F.soft_max_transform_call(x)
 
     def _inverse(self, y):
-        probs = y
-        return probs.log()
+        return F.soft_max_transform_inverse(y)
 
 
 class StickBreakingTransform(Transform):
@@ -463,24 +458,13 @@ class StickBreakingTransform(Transform):
         return isinstance(other, StickBreakingTransform)
 
     def _call(self, x):
-        offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
-        z = torch.sigmoid(x - offset.log())
-        z_cumprod = (1 - z).cumprod(-1)
-        y = pad(z, (0, 1), value=1) * pad(z_cumprod, (1, 0), value=1)
-        return y
+        return F.stick_breaking_transform_call(x)
 
     def _inverse(self, y):
-        shape = y.shape[:-1] + (y.shape[-1] - 1,)
-        offset = (shape[-1] + 1) - y.new([1]).expand(shape).cumsum(-1)
-        sf = (1 - y.cumsum(-1))[..., :-1]
-        x = y[..., :-1].log() - sf.log() + offset.log()
-        return x
+        return F.stick_breaking_transform_inverse(y)
 
     def log_abs_det_jacobian(self, x, y):
-        offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
-        z = torch.sigmoid(x - offset.log())
-        detJ = ((1 - z).log() + y[..., :-1].log()).sum(-1)
-        return detJ
+        return F.stick_breaking_transform_log_abs_det_jacobian(x, y)
 
 
 class LowerCholeskyTransform(Transform):
@@ -498,19 +482,11 @@ class LowerCholeskyTransform(Transform):
     def __eq__(self, other):
         return isinstance(other, LowerCholeskyTransform)
 
-    def _call_on_event(self, x):
-        return x.tril(-1) + x.diag().exp().diag()
-
-    def _inverse_on_event(self, y):
-        return y.tril(-1) + y.diag().log().diag()
-
     def _call(self, x):
-        flat_x = x.reshape((-1,) + x.shape[-2:])
-        return torch.stack([self._call_on_event(flat_x[i]) for i in range(flat_x.size(0))]).view(x.shape)
+        return F.lower_cholesky_transform_call(x)
 
     def _inverse(self, y):
-        flat_y = y.contiguous().view((-1,) + y.shape[-2:])
-        return torch.stack([self._inverse_on_event(flat_y[i]) for i in range(flat_y.size(0))]).view(y.shape)
+        return F.lower_cholesky_transform_inverse(y)
 
 
 class CatTransform(Transform):
