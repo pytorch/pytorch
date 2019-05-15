@@ -41,11 +41,24 @@ namespace c10 {
 class Scalar;
 struct Storage;
 
-// yf225 TODO: add comments for usage of this enum
-typedef enum {
-  kShareVersionCounter = 1,
-  kCreateNewVersionCounter = 2,
-} ShallowCopyVersionCounterMode;
++// NOTE [ Version Counter Behavior in TensorImpl Shallow-Copy ]
++//
++// `ShallowCopyVersionCounterMode` is used in functions that shallow-copy a
++// TensorImpl, to decide the right source of value for the destination
++// TensorImpl's version counter.
++// The enum can take one of the following values:
++//
++// 1. `kShareVersionCounter`: the destination TensorImpl will share the version
++// counter with the source TensorImpl.
++// 2. `kCreateNewVersionCounter`: the destination TensorImpl will have a new
++// version counter with initial count 0.
++//
++// For why we need to have different sources of value for the destination
++// TensorImpl's version counter, see NOTE [ Version Counter Sharing ].
++typedef enum {
++  kShareVersionCounter = 1,
++  kCreateNewVersionCounter = 2,
++} ShallowCopyVersionCounterMode;
 
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
@@ -166,7 +179,10 @@ struct C10_API NonVariableTypeMode {
 // 2. `x.data` does not share the version counter of `x`. (See discussion at
 // https://github.com/pytorch/pytorch/issues/5396)
 //
-// yf225 TODO: improve comment here!
+// All functions that shallow-copy a TensorImpl (e.g. `shallow_copy_and_detach()`)
+// takes a parameter of type `ShallowCopyVersionCounterMode` to decide the right
+// source of value for the destination TensorImpl's version counter. For more details
+// on this, see NOTE [ Version Counter Behavior in TensorImpl Shallow-Copy ].
 //
 // Question: Why do we put the version counter in TensorImpl instead of AutogradMeta?
 //
@@ -923,17 +939,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return std::move(autograd_meta_);
   }
 
-  // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer, because it is unique for each Variable.
-
-  // NOTE: `version_counter_mode` controls ...
-  // 2. [yf225 TODO: fix comment here!] the version counter, because although it lives in TensorImpl, the version counter is managed
-  // by autograd, and the call sites of `shallow_copy_and_detach()` (from autograd) should decide what
-  // the version counter should be for each new TensorImpl. See NOTE [ Version Counter Sharing ] for details.
+  // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer, because it is unique
+  // for each Variable.
   //
-
-  // 2. [yf225 TODO fix comment here!] the version counter, because although it lives in TensorImpl, the version counter is managed
-  // by autograd, and the call sites of `shallow_copy_and_detach()` (from autograd) should decide what
-  // the version counter should be for each new TensorImpl. See NOTE [ Version Counter Sharing ] for details.
+  // NOTE: `version_counter_mode` determines the source of value for the TensorImpl shallow-copy's
+  // version counter. See NOTE [ Version Counter Behavior in TensorImpl Shallow-Copy ] for more details.
   //
   // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
   // to this function that need to change the shallow copy's size or storage afterwards, and setting
