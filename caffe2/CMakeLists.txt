@@ -460,7 +460,7 @@ if (NOT INTERN_BUILD_MOBILE)
       target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
       install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
     elseif(USE_ROCM)
-      list(APPEND Caffe2_GPU_SRCS
+	    list(APPEND Caffe2_HIP_SRCS
         ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
       )
       add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
