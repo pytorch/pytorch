@@ -198,8 +198,7 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
   int64_t num_indices = linearIndex.numel();
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
-//src is all zeros at this point, so src.zeros_like has the same effect as src.contiguous and is more efficient
-      auto src_ = permuted ? at::zeros_like(src) : src;
+      auto src_ = permuted ? src.contiguous() : src;
       linearIndex = linearIndex.view(-1);
       auto sorted_indices = at::empty_like(linearIndex);
       auto orig_indices = at::empty_like(linearIndex);
