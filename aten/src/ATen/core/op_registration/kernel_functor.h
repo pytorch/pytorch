@@ -93,9 +93,9 @@ namespace detail {
   };
   template<class Key, class Value>
   struct ivalue_to_arg_type<std::unordered_map<Key, Value>> {
-    // We don't support std::vector because that would prevent us from doing
-    // internal optimization to how we represent lists (e.g. SmallVector).
-    // Users should use ArrayRef instead.
+    // We don't support std::unordered_map because that would prevent us from doing
+    // internal optimization to how we represent dicts.
+    // Users should use Dict<Key, Value> instead.
     static_assert(guts::false_t<std::unordered_map<Key, Value>>::value, "You tried to register a kernel with an unsupported argument type: std::unordered_map<Key, Value>. Please use c10::Dict<Key, Value> instead.");
   };
   template<class T>
@@ -213,7 +213,7 @@ namespace detail {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral return argument type. Please use int64_t instead.");
   };
   // legacy_return_type_to_ivalue is like return_type_to_ivalue but additionally
-  // allows a few deprecated types like std::vector.
+  // allows a few deprecated types like std::unordered_map.
   template<class T, class Enable = void>
   struct legacy_return_type_to_ivalue final {
     static IValue call(T&& v) {
