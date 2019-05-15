@@ -17,7 +17,6 @@
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/simple_queue.h"
 
