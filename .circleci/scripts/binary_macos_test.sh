@@ -1,5 +1,5 @@
 #!/bin/bash
-set -eux -o pipefail
+set -ex
 
 source "/Users/distiller/project/env"
 export "PATH=$workdir/miniconda/bin:$PATH"
