@@ -147,7 +147,7 @@ struct CAFFE2_API PerChannelSymmetricQuantizer : public SymmetricQuantizer {
       const std::vector<float>& scales,
       const std::vector<int64_t>& axis)
     : SymmetricQuantizer(kPerChannelSymmetric, scalar_type), scales_(scales), axis_(axis) {
-    AT_CHECK(
+    TORCH_CHECK(
         axis_.size() == 1,
         "Per channel symmetric quantization in multiple axis is not supported yet.");
   }
@@ -207,7 +207,7 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
     scales_(scales),
     zero_points_(zero_points),
     axis_(axis) {
-    AT_CHECK(
+    TORCH_CHECK(
         axis_.size() == 1,
         "Per channel affine quantization in multiple axis is not supported yet.");
   }

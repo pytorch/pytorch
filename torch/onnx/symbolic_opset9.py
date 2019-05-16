@@ -22,7 +22,7 @@ import warnings
 
 # This file exports ONNX ops for opset 9
 # Opset 9 is supported by ONNX release 1.4.1
-# release on 01/23/19 
+# release on 01/23/19
 
 
 # Note [Pointwise by scalar]
@@ -1392,7 +1392,10 @@ def detach(g, input):
     return input
 
 
-def contiguous(g, input):
+@parse_args('v', 'i')
+def contiguous(g, input, memory_format):
+    if memory_format > 2:  # allower values are any, preserve and contiguous_format
+        raise RuntimeError("onnx memory_format support is not implemented")
     return input
 
 

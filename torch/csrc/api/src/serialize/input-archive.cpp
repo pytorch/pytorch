@@ -30,7 +30,7 @@ bool InputArchive::try_read(
   // clang-format off
   auto read_param = is_buffer ? buffer : param;
   auto read_tensor = read_param->value().toTensor();
-  AT_CHECK(
+  TORCH_CHECK(
       bool(buffer) == is_buffer,
       "Expected deserialized tensor for key '", key,
       "' to ", is_buffer ? "not " : "", "be a buffer, but it was not");
@@ -52,7 +52,7 @@ void InputArchive::read(
     const std::string& key,
     Tensor& tensor,
     bool is_buffer) {
-  AT_CHECK(
+  TORCH_CHECK(
     try_read(key, tensor, is_buffer),
     "No such serialized tensor '",
     key,
@@ -69,7 +69,7 @@ bool InputArchive::try_read(const std::string& key, InputArchive& archive) {
 }
 
 void InputArchive::read(const std::string& key, InputArchive& archive) {
-  AT_CHECK(
+  TORCH_CHECK(
     try_read(key, archive),
     "No such serialized submodule: '", key, "'");
 }

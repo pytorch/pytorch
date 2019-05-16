@@ -1447,6 +1447,18 @@ class _TestTorchMixin(object):
 
         self.assertEqual(res1, res2)
 
+    def test_numpy_args(self):
+        x1 = torch.randn(10)
+        x2 = torch.randn(10)
+        res1 = torch.add(input=x1, other=x2)
+        res2 = torch.add(x1=x1, x2=x2)
+        self.assertEqual(res1, res2)
+
+        x1 = torch.randn(10, 10, 10)
+        res1 = x1.sum(dim=(0, 2), keepdim=True)
+        res2 = x1.sum(axis=(0, 2), keepdims=True)
+        self.assertEqual(res1, res2)
+
     def test_add(self):
         # [res] torch.add([res,] tensor1, tensor2)
         m1 = torch.randn(100, 100)
@@ -2421,6 +2433,50 @@ class _TestTorchMixin(object):
         halfTensor = torch.zeros(1, 1, dtype=torch.half)
         expected = torch.tensor([[0.]], dtype=torch.float16)
         self.assertEqual(halfTensor, expected)
+
+    def test_std_mean(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 50, 20, device=device)
+            for dim in range(x.dim()):
+                for unbiased in [False, True]:
+                    for keepdim in [False, True]:
+                        std1, mean1 = torch.std_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        std2 = x.std(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        mean2 = x.mean(dim=dim, keepdim=keepdim)
+                        self.assertEqual(std1, std2)
+                        self.assertEqual(mean1, mean2)
+
+    def test_std_mean_all_dims(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 50, 20, device=device)
+            for unbiased in [False, True]:
+                std1, mean1 = torch.std_mean(x, unbiased=unbiased)
+                std2 = x.std(unbiased=unbiased)
+                mean2 = x.mean()
+                self.assertEqual(std1, std2)
+                self.assertEqual(mean1, mean2)
+
+    def test_var_mean(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 300, 50, device=device)
+            for dim in range(x.dim()):
+                for unbiased in [False, True]:
+                    for keepdim in [False, True]:
+                        var1, mean1 = torch.var_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        var2 = x.var(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        mean2 = x.mean(dim=dim, keepdim=keepdim)
+                        self.assertEqual(var1, var2)
+                        self.assertEqual(mean1, mean2)
+
+    def test_var_mean_all_dims(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 50, 20, device=device)
+            for unbiased in [False, True]:
+                var1, mean1 = torch.var_mean(x, unbiased=unbiased)
+                var2 = x.var(unbiased=unbiased)
+                mean2 = x.mean()
+                self.assertEqual(var1, var2)
+                self.assertEqual(mean1, mean2)
 
     def test_zeros_like(self):
         expected = torch.zeros(100, 100)
@@ -11364,6 +11420,40 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 weight), torch.tensor(bias), 1, epsilon, True)
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
+    def test_memory_format(self):
+        x = torch.randn(10, 3, 32, 32)
+        nhwc = x.contiguous(memory_format=torch.channels_last)
+        self.assertFalse(nhwc.is_contiguous())
+        self.assertTrue(nhwc.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(nhwc, x)
+
+    ## These sections are intentionally commented, as they suppose to pass when we
+    ## switch from the computational check of the tensor memory format to the
+    ## actual layout support
+    #
+    #
+    #     def fake_nhwc(N, C, H, W):
+    #         alloc = torch.randn(N, H, W, C)
+    #         return alloc.permute(0, 3, 1, 2)
+    #
+    #     fake = fake_nhwc(10, 3, 32, 32)
+    #     self.assertFalse(
+    #         fake.is_contiguous(memory_format=torch.channels_last),
+    #         " must be tagged to be identified as channels_last")
+    #
+    # def test_memory_format_permute(self):
+    #     x = torch.randn(10, 3, 32, 32)
+    #     nhwc = x.contiguous(memory_format=torch.channels_last)
+    #     y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
+    #     self.assertFalse(y.is_contiguous(memory_format=torch.channels_last))
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_memory_format_permute_cuda(self):
+        x = torch.randn(10, 3, 32, 32)
+        nhwc = x.contiguous(memory_format=torch.channels_last).cuda()
+        y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
+        self.assertFalse(y.is_contiguous(memory_format=torch.channels_last))
+
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
         with self.assertRaisesRegex(TypeError, "type 'torch.FloatTensor' is not an acceptable base type"):
@@ -11382,7 +11472,6 @@ METHOD = 1
 INPLACE_METHOD = 2
 FUNCTIONAL = 4
 DIM_ARG = None
-
 
 def make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim=0):
     def neg_dim_test(self):

@@ -8,7 +8,7 @@
 namespace at {
 namespace native {
 Tensor& _s_copy__quantized(Tensor& self, const Tensor& src, bool /* unused */) {
-  AT_CHECK(
+  TORCH_CHECK(
       src.scalar_type() == at::kFloat,
       "Quantized copy only works with kFloat as source Tensor");
   float* src_data = src.data<float>();

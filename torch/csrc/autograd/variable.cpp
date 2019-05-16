@@ -30,7 +30,7 @@ Variable::Impl::Impl(at::Tensor data, std::unique_ptr<Variable::AutogradMeta> au
 
   // set_requires_grad also checks error conditions.
   autograd_meta->set_requires_grad(requires_grad, this);
-  AT_CHECK(
+  TORCH_CHECK(
       !autograd_meta->grad_fn_ || !autograd_meta->requires_grad_,
       "requires_grad should be false if grad_fn is set");
   if (!data_.defined()) {
@@ -54,8 +54,8 @@ IntArrayRef Variable::Impl::strides() const {
   return data_.strides();
 }
 
-bool Variable::Impl::is_contiguous() const {
-  return data_.is_contiguous();
+bool Variable::Impl::is_contiguous(MemoryFormat memory_format) const {
+  return data_.is_contiguous(memory_format);
 }
 
 int64_t Variable::Impl::dim() const {
@@ -170,12 +170,12 @@ void Variable::Impl::set_data(const at::Tensor &new_data) {
   device_opt_ = new_data.device();
   type_id_ = new_data.dispatch_type().type_id();
 
-  auto new_data_impl_copy = new_data.getIntrusivePtr()->shallow_copy_and_detach();
   // Version counter is not shared when we replace a `Variable`'s underlying `Tensor`
   // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
   // See NOTE [ Version Counter Sharing ] for details.
-  auto saved_version_counter = data_.unsafeGetTensorImpl()->version_counter();
-  new_data_impl_copy->set_version_counter(saved_version_counter);
+  auto new_data_impl_copy = new_data.getIntrusivePtr()->shallow_copy_and_detach(
+    /*version_counter=*/data_.unsafeGetTensorImpl()->version_counter(),
+    /*allow_tensor_metadata_change=*/true);
   data_ = std::move(at::Tensor(new_data_impl_copy));
 }
 
@@ -188,7 +188,7 @@ Variable::DifferentiableViewImpl::DifferentiableViewImpl(Variable base, at::Tens
     : Variable::Impl(std::move(data), std::move(autograd_meta), false, std::move(gradient_edge)) {
   auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
   diff_view_meta->base_ = std::move(base);
-  AT_CHECK(diff_view_meta->base_.defined(), "base is undefined");
+  TORCH_CHECK(diff_view_meta->base_.defined(), "base is undefined");
   if (diff_view_meta->base_.is_view()) {
     diff_view_meta->base_ = diff_view_meta->base_.base();
   }
@@ -238,7 +238,7 @@ void Variable::rebase_history(Edge gradient_edge) {
     auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
     AT_ASSERT(gradient_edge.input_nr == 0);
     AT_ASSERT(gradient_edge.function);
-    AT_CHECK(
+    TORCH_CHECK(
         gradient_edge.function->num_inputs() == 1,
         "Functions which modify views in-place must return a single Variable");
     diff_view_meta->output_nr_ = gradient_edge.input_nr;

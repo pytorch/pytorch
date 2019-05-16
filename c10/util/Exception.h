@@ -169,6 +169,15 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike assert()).
 //
+#ifdef C10_MOBILE
+#define TORCH_INTERNAL_ASSERT(cond, ...)      \
+  if (!(cond)) {                              \
+    C10_THROW_ERROR(Error,                    \
+        #cond " INTERNAL ASSERT FAILED at"    \
+        __FILE__                              \
+    );                                        \
+  }
+#else
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
   if (!(cond)) {                              \
     C10_THROW_ERROR(Error, ::c10::str(        \
@@ -180,6 +189,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
         ::c10::str(__VA_ARGS__)               \
     ));                                       \
   }
+#endif
 
 // A utility macro to make it easier to test for error conditions from user
 // input.  Like TORCH_INTERNAL_ASSERT, it supports an arbitrary number of extra
@@ -201,6 +211,15 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike CHECK() from glog.)
 //
+#ifdef C10_MOBILE
+#define TORCH_CHECK(cond, ...)                \
+  if (!(cond)) {                              \
+    C10_THROW_ERROR(Error,                    \
+        #cond " CHECK FAILED at "             \
+        __FILE__                              \
+    );                                        \
+  }
+#else
 #define TORCH_CHECK(cond, ...)                              \
   if (!(cond)) {                                            \
     C10_THROW_ERROR(Error,                                  \
@@ -212,10 +231,20 @@ inline std::string if_empty_then(std::string x, std::string y) {
       ) \
     ); \
   }
+#endif
 // TODO: We're going to get a lot of similar looking string literals
 // this way; check if this actually affects binary size.
 
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
+#ifdef C10_MOBILE
+#define TORCH_CHECK_INDEX(cond, ...)          \
+  if (!(cond)) {                              \
+    C10_THROW_ERROR(Error,                    \
+        #cond " INDEX CHECK FAILED at "       \
+        __FILE__                              \
+    );                                        \
+  }
+#else
 #define TORCH_CHECK_INDEX(cond, ...)                        \
   if (!(cond)) {                                            \
     C10_THROW_ERROR(IndexError,                             \
@@ -227,6 +256,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
       )                                                     \
     );                                                      \
   }
+#endif
 
 
 // Report a warning to the user.  Accepts an arbitrary number of extra
