@@ -270,7 +270,7 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
 
     Returns:
         seq (sequence of Tensors): If the input has :math:`k` tensors of size
-        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also has :math:`k` tensors,
+        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also have :math:`k` tensors,
         where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
 
     Example::

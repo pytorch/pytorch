@@ -728,10 +728,6 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
 
     rearrangeDims(&aInfo);
     aInfo.collapseDims();
-#if CUDA_VERSION < 9000
-    if (!aInfo.isContiguous())
-        grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
 
     HANDLE_A_CASE(unsigned int, aInfo.dims);
   } else {
@@ -748,9 +744,6 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
     if (aInfo.dims == 1) {
       HANDLE_CASE(uint64_t, 1);
     } else {
-#if CUDA_VERSION < 9000
-      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
       HANDLE_CASE(uint64_t, -1);
     }
   }
@@ -881,10 +874,6 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
     rearrangeDims(&aInfo, &bInfo);
     aInfo.collapseDims();
     bInfo.collapseDims();
-#if CUDA_VERSION < 9000
-    if (!(aInfo.isContiguous() && bInfo.isContiguous()))
-        grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
 
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims);
   } else {
@@ -904,9 +893,6 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
     if (aInfo.dims == 1 && bInfo.dims == 1) {
       HANDLE_CASE(uint64_t, 1, 1);
     } else {
-#if CUDA_VERSION < 9000
-      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
       HANDLE_CASE(uint64_t, -1, -1);
     }
   }
@@ -1071,10 +1057,6 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     bInfo.collapseDims();
     cInfo.collapseDims();
 
-#if CUDA_VERSION < 9000
-    if (!(aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous()))
-      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims);
   } else {
     detail::TensorInfo<scalar1, uint64_t> aInfo =
@@ -1098,10 +1080,6 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1) {
       HANDLE_CASE(uint64_t, 1, 1, 1);
     } else {
-#if CUDA_VERSION < 9000
-  grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
-
       HANDLE_CASE(uint64_t, -1, -1, -1);
     }
   }
@@ -1311,10 +1289,6 @@ inline bool CUDA_tensor_apply4(at::Tensor a,
     cInfo.collapseDims();
     dInfo.collapseDims();
 
-#if CUDA_VERSION < 9000
-    if (!(aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous() && dInfo.isContiguous()))
-      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims, dInfo.dims);
   } else {
     detail::TensorInfo<scalar1, uint64_t> aInfo =
@@ -1342,9 +1316,6 @@ inline bool CUDA_tensor_apply4(at::Tensor a,
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1 && dInfo.dims == 1) {
       HANDLE_CASE(uint64_t, 1, 1, 1, 1);
     } else {
-#if CUDA_VERSION < 9000
-  grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
       HANDLE_CASE(uint64_t, -1, -1, -1, -1);
     }
   }
