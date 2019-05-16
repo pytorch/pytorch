@@ -374,8 +374,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
     SourceRange loc,
-    bool is_constant,
-    bool recurse) {
+    bool is_constant) {
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
   // f = python_constant

@@ -939,8 +939,6 @@ def _try_compile_fn(fn):
     if inspect.ismethod(fn) or _is_ignored_function(fn):
         # Skip methods
         return None
-    if not hasattr(fn, '_jit_recurse') or not getattr(fn, '_jit_recurse'):
-        return None
     rcb = createResolutionCallbackFromClosure(fn)
     return torch.jit.script(fn, _rcb=rcb)
 
@@ -998,9 +996,9 @@ def _qualified_name(obj):
 
 
 def _recursive_script(fn):
-    torch._C._jit_recursive_script = True
+    torch._C._jit_recursive_script(True)
     result = torch.jit.script(fn, _frames_up=1)
-    torch._C._jit_recursive_script = False
+    torch._C._jit_recursive_script(False)
     return result
 
 
