@@ -1,13 +1,15 @@
   pytorch_short_perf_test_gpu:
     environment:
       BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:300"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:300"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     machine:
       image: ubuntu-1604:201903-01
     steps:
+    - attach_workspace:
+        at: ~/workspace
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -36,11 +38,13 @@
   pytorch_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:300"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:300"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
     steps:
+    - attach_workspace:
+        at: ~/workspace
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -193,7 +197,6 @@
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             set -x
 
-            git submodule sync && git submodule update -q --init
+            git submodule sync && git submodule update -q --init --recursive
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
-

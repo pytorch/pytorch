@@ -19,6 +19,7 @@ type_map = {
     ],
     'quantized': [
         'QInt8',
+        'QInt32',
     ]
 }
 
