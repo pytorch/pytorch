@@ -326,6 +326,25 @@ static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
    END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "nonzero(Tensor self)|deprecated",
+    "nonzero(Tensor self, *, bool as_tuple=False)",
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0 || (r.idx == 1 && !r.toBool(1))) {
+    return THPVariable_Wrap(self_.nonzero());
+  } else {
+    return THPVariable_Wrap(self_.nonzero_tuple());
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+
 static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
