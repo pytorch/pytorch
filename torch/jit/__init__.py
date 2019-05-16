@@ -915,28 +915,22 @@ def createResolutionCallbackFromClosure(fn):
     Create a resolutionCallback by introspecting the function instead of
     looking up the stack for the enclosing scope
     """
-    # if PY2:
-    #     # TODO: use fn.__closure__
-    #     raise RuntimeError("Cannot make resolutionCallback in Python 2")
-    # else:
-    closure = inspect.getclosurevars(fn)
-    breakpoint()
-    # f_globals = closure.globals
-    # f_unbound = closure.unbound
-    # f_builtins = closure.builtins
     var_names = fn.__code__.co_freevars
+
+    # map of captured name -> value
     free_vars = {}
+
     for index, name in enumerate(var_names):
         free_vars[name] = fn.__closure__[index].cell_contents
+    f_globals = fn.__globals__
 
     def env(key):
-        print("Resolving ", key)
         if key in free_vars:
             return free_vars[key]
         elif hasattr(builtins, key):
             return getattr(builtins, key)
         else:
-            return None
+            return f_globals.get(key)
 
     return env
 
@@ -1002,7 +996,6 @@ def _qualified_name(obj):
 
 
 def _recursive_script(fn):
-    # fn._torch_jit_recurse = True
     return torch.jit.script(fn, _frames_up=1, _recurse=True)
 
 
@@ -1021,7 +1014,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None, _recurse=False):
         return obj
     else:
         ast = get_jit_def(obj)
-        fn = torch._C._jit_script_compile(ast, _rcb, get_default_args(obj), _recurse)
+        fn = torch._C._jit_script_compile(ast, (_rcb, _recurse), get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
         return fn

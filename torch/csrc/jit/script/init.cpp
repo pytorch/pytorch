@@ -49,15 +49,18 @@ namespace script {
 using ::c10::Argument;
 using ::c10::FunctionSchema;
 
-using ResolutionCallback = std::function<py::function(std::string)>;
+// pair of <the rcb function, whether to recurse when a Python function is seen>
+using ResolutionCallback =
+    std::pair<std::function<py::function(std::string)>, bool>;
+
 using FunctionDefaults = std::unordered_map<std::string, py::object>;
 
 namespace {
 
 // A resolver that will inspect the outer Python scope to find `name`.
 struct PythonResolver : public Resolver {
-  explicit PythonResolver(ResolutionCallback rcb, bool recurse)
-      : rcb_(std::move(rcb)), recurse_(recurse) {}
+  explicit PythonResolver(ResolutionCallback rcb)
+      : rcb_(std::move(rcb)) {}
 
   /**
    * While compiling classes, the class type we're compiling will not be
@@ -74,23 +77,21 @@ struct PythonResolver : public Resolver {
   explicit PythonResolver(
       ResolutionCallback rcb,
       std::string classname,
-      ClassTypePtr classType,
-      bool recurse)
+      ClassTypePtr classType)
       : rcb_(std::move(rcb)),
         classname_(std::move(classname)),
-        classType_(std::move(classType)),
-        recurse_(recurse) {}
+        classType_(std::move(classType)) {}
 
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
       const SourceRange& loc) const override {
     AutoGIL ag;
-    py::object obj = rcb_(name);
+    py::object obj = rcb_.first(name);
     if (obj.is(py::none())) {
       return nullptr;
     }
-    return toSugaredValue(obj, m, loc, /*is_constant=*/false, recurse_);
+    return toSugaredValue(obj, m, loc, /*is_constant=*/false, rcb_.second);
   }
 
   TypePtr resolveType(const std::string& name) const override {
@@ -98,7 +99,7 @@ struct PythonResolver : public Resolver {
       return classType_;
     }
     AutoGIL ag;
-    py::object obj = rcb_(name);
+    py::object obj = rcb_.first(name);
     if (obj.is(py::none())) {
       return nullptr;
     }
@@ -118,22 +119,18 @@ struct PythonResolver : public Resolver {
   ResolutionCallback rcb_;
   std::string classname_;
   ClassTypePtr classType_;
-  bool recurse_;
 };
 
-std::shared_ptr<PythonResolver> pythonResolver(
-    ResolutionCallback rcb,
-    bool recurse = false) {
-  return std::make_shared<PythonResolver>(rcb, recurse);
+std::shared_ptr<PythonResolver> pythonResolver(ResolutionCallback rcb) {
+  return std::make_shared<PythonResolver>(rcb);
 }
 
 std::shared_ptr<PythonResolver> pythonResolver(
     ResolutionCallback rcb,
     std::string classname,
-    ClassTypePtr classType,
-    bool recurse) {
+    ClassTypePtr classType) {
   return std::make_shared<PythonResolver>(
-      rcb, std::move(classname), std::move(classType), recurse);
+      rcb, std::move(classname), std::move(classType));
 }
 } // namespace
 
@@ -533,10 +530,9 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_compile",
       [](const Def& def,
          ResolutionCallback rcb,
-         FunctionDefaults defaults,
-         bool recurse) {
+         FunctionDefaults defaults) {
         CompilationUnit cu;
-        cu.define({def}, {pythonResolver(rcb, recurse)}, nullptr);
+        cu.define({def}, {pythonResolver(rcb)}, nullptr);
         std::shared_ptr<Function> defined = cu.get_functions().at(0);
         defined->setSchema(getSchemaWithNameAndDefaults(
             def.range(), defined->getSchema(), def.name().name(), defaults));
@@ -564,8 +560,7 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_class_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
-         ResolutionCallback rcb,
-         bool recurse) {
+         ResolutionCallback rcb) {
         auto cu = std::make_shared<CompilationUnit>();
         auto classType =
             ClassType::create(c10::QualifiedName(qualifiedName), cu);
@@ -575,7 +570,7 @@ void initJitScriptBindings(PyObject* module) {
         for (const auto& def : classDef.defs()) {
           methodDefs.push_back(def);
           rcbs.push_back(
-              pythonResolver(rcb, classDef.name().name(), classType, recurse));
+              pythonResolver(rcb, classDef.name().name(), classType));
         }
         cu->define(methodDefs, rcbs, simpleSelf(classType));
       });
