@@ -14,15 +14,18 @@
 
 namespace at {
 namespace {
+const int NOT_SET = -1;
+const int CONSUMED = -2;
+
 // Number of threads set by the user
-// -1 -> positive value -> -2
+// NOT_SET -> positive value -> CONSUMED
 // or
-// -1 -> -2
+// NOT_SET -> CONSUMED
 // Meaning:
-//  - -1 - pool not initialized, user value is not set
+//  - NOT_SET - pool not initialized, user value is not set
 //  - positive value - pool not initialized, user value set
-//  - -2 - pool is initialized
-std::atomic<int> num_intraop_threads{-1};
+//  - CONSUMED - pool is initialized
+std::atomic<int> num_intraop_threads{NOT_SET};
 
 // used with _set_in_parallel_region to mark master thread
 // as in parallel region while executing parallel primitives
@@ -40,7 +43,7 @@ TaskThreadPoolBase& _get_intraop_pool() {
           "C10",
           /* device_id */ 0,
           // minus one because of the master thread
-          /* pool_size */ num_intraop_threads.exchange(-2) - 1,
+          /* pool_size */ num_intraop_threads.exchange(CONSUMED) - 1,
           /* create_new */ true); // create a separate thread pool for intra-op
   return *pool;
 }
@@ -71,16 +74,11 @@ void init_num_threads() {
 }
 
 void set_num_threads(int nthreads) {
-  if (nthreads <= 0) {
-    throw std::runtime_error(
-      "Expected positive number of threads");
-  }
-  int no_value = -1;
-  if (!num_intraop_threads.compare_exchange_strong(no_value, nthreads)) {
-    throw std::runtime_error(
+  AT_CHECK(nthreads > 0, "Expected positive number of threads");
+  int no_value = NOT_SET;
+  AT_CHECK(num_intraop_threads.compare_exchange_strong(no_value, nthreads),
       "Error: cannot set number of interop threads "
       "after parallel work has started or after set_num_threads call");
-  }
 }
 
 int get_num_threads() {
@@ -89,12 +87,12 @@ int get_num_threads() {
   int nthreads = num_intraop_threads.load();
   if (nthreads > 0) {
     return nthreads;
-  } else if (nthreads == -1) {
+  } else if (nthreads == NOT_SET) {
     // add plus one because master thread is also used in
     // parallel computation
     return TaskThreadPoolBase::defaultNumThreads() + 1;
   } else {
-    AT_ASSERT(nthreads == -2);
+    AT_ASSERT(nthreads == CONSUMED);
     return internal::_get_intraop_pool().size() + 1;
   }
 }
@@ -106,7 +104,7 @@ int get_thread_num() {
 bool in_parallel_region() {
   return in_parallel_region_ || (
     // pool is already created or single thread case
-    num_intraop_threads.load() == -2 &&
+    num_intraop_threads.load() == CONSUMED &&
     internal::_get_intraop_pool().inThreadPool()
   );
 }
