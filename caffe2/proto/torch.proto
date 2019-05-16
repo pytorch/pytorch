@@ -70,6 +70,7 @@ message ModuleDef {
 
   repeated AttributeDef attributes = 9;
 
+  // Used for retrieving module state from the pickled IValues table
   optional int64 id = 10;
 }
 

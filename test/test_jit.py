@@ -12002,45 +12002,44 @@ a")
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_get_set_state(self):
-        with self.disableEmitHook():
-            class M(torch.jit.ScriptModule):
-                __constants__ = ['number']
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['number']
 
-                def __init__(self, number, submodule=None):
-                    super(M, self).__init__()
-                    self.register_buffer('buffer1', torch.ones(2, 2))
-                    self.register_buffer('buffer2', torch.ones(2, 2))
-                    self.number = number
-                    if submodule:
-                        self.submodule = submodule
+            def __init__(self, number, submodule=None):
+                super(M, self).__init__()
+                self.register_buffer('buffer1', torch.ones(2, 2))
+                self.register_buffer('buffer2', torch.ones(2, 2))
+                self.number = number
+                if submodule:
+                    self.submodule = submodule
 
-                @torch.jit.script_method
-                def __getstate__(self):
-                    # type: () -> Tuple[Tensor, Tensor, int]
-                    return (self.buffer1, self.buffer2, 74)
+            @torch.jit.script_method
+            def __getstate__(self):
+                # type: () -> Tuple[Tensor, Tensor, int]
+                return (self.buffer1, self.buffer2, 74)
 
-                @torch.jit.script_method
-                def __setstate__(self, state):
-                    # type: (Tuple[Tensor, Tensor, int]) -> None
-                    self.buffer1 = state[0] + 10
-                    self.buffer2 = state[1] + 10
+            @torch.jit.script_method
+            def __setstate__(self, state):
+                # type: (Tuple[Tensor, Tensor, int]) -> None
+                self.buffer1 = state[0] + 10
+                self.buffer2 = state[1] + 10
 
-            with TemporaryFileName() as fname:
-                m = M(23, submodule=M(99))
-                m.save(fname)
-                loaded = torch.jit.load(fname)
+        with TemporaryFileName() as fname:
+            m = M(23, submodule=M(99))
+            m.save(fname)
+            loaded = torch.jit.load(fname)
 
-            # Check original module
-            self.assertEqual(m.buffer1, torch.ones(2, 2))
-            self.assertEqual(m.buffer2, torch.ones(2, 2))
+        # Check original module
+        self.assertEqual(m.buffer1, torch.ones(2, 2))
+        self.assertEqual(m.buffer2, torch.ones(2, 2))
 
-            # Check top level module
-            self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 10)
-            self.assertEqual(loaded.buffer2, torch.ones(2, 2) + 10)
+        # Check top level module
+        self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 10)
+        self.assertEqual(loaded.buffer2, torch.ones(2, 2) + 10)
 
-            # Check submodule
-            self.assertEqual(loaded.submodule.buffer1, torch.ones(2, 2) + 10)
-            self.assertEqual(loaded.submodule.buffer2, torch.ones(2, 2) + 10)
+        # Check submodule
+        self.assertEqual(loaded.submodule.buffer1, torch.ones(2, 2) + 10)
+        self.assertEqual(loaded.submodule.buffer2, torch.ones(2, 2) + 10)
 
 
     def test_string_slicing(self):

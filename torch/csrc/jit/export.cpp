@@ -504,6 +504,7 @@ class ScriptModuleSerializer final {
   // to dump the content of a tensor
   void writeTensorTable(torch::ModelDef* model_def);
 
+  // Write the list of ivalues to a file as a pickle program
   void writePickleArchive(
       const std::string& name,
       const std::vector<IValue>& ivalues);
@@ -531,6 +532,8 @@ class ScriptModuleSerializer final {
   // all tensors that will be stored
   std::vector<at::Tensor> tensor_table_;
 
+  // A list of attributes (indexed by attr_def->id()) and module state (indexed
+  // by module_def->id())
   std::vector<IValue> pickled_ivalues_;
 
   // all classes used by this module hierarchy
@@ -677,8 +680,6 @@ void ScriptModuleSerializer::convertModel(
 bool ScriptModuleSerializer::moduleHasValidGetSetState(
     const script::Module& module) {
   // Check that the schemas for __getstate__ and __setstate__ are correct
-  //   __getstate__ is expected to be (self) -> T
-  //   __setstate__ is expected to be (self, T) -> None
   auto getstate = module.module_object()->type()->getMethod("__getstate__");
   if (getstate == nullptr) {
     return false;
@@ -687,6 +688,7 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
       module.module_object()->type()->getMethod("__getstate__")->getSchema();
 
   // Check __getstate__
+  //   __getstate__ is expected to be (self) -> T
   AT_CHECK(
       get_schema.arguments().size() == 1,
       "'__getstate__' must have 'self' as its only argument, but found ",
@@ -698,6 +700,8 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
       get_schema.returns().size());
 
   // Check __setstate__ if the method exists
+  //   __setstate__ is expected to be (self, T) -> None
+  // TODO: use getMethod("__getstate__") once methods are not lowered
   auto setstate = module.class_compilation_unit().find_function("__setstate__");
   if (setstate == nullptr) {
     return false;
@@ -736,6 +740,7 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
   return true;
 }
 
+/// Run module.__getstate__() and return the result
 IValue ScriptModuleSerializer::moduleGetState(const script::Module& module) {
   auto getstate = module.find_method("__getstate__");
   AT_CHECK(
@@ -744,7 +749,6 @@ IValue ScriptModuleSerializer::moduleGetState(const script::Module& module) {
       " it does not exist");
 
   Stack stack;
-  // stack.emplace_back(module.module_object());
   getstate->run(stack);
   return stack.at(0);
 }
@@ -846,6 +850,9 @@ void ScriptModuleSerializer::convertModule(
       pickled_ivalues_.push_back(attribute.value());
       attribute_def->set_id(pickled_ivalues_.size() - 1);
     } else {
+      // The module had a __setstate__, so write the attribute name/type so
+      // it can be correctly imported, but it has no entry in the
+      // pickled_ivalues_ table
       attribute_def->set_id(-1);
     }
   }
