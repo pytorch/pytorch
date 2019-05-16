@@ -451,6 +451,49 @@ class TorchIntegration(hu.HypothesisTestCase):
     def test_roi_align_cuda(self):
         self._test_roi_align(device="cuda")
 
+    @given(roi_counts=st.lists(st.integers(0, 5), min_size=1, max_size=10))
+    def test_collect_and_distribute_fpn_rpn_proposals_op(self, roi_counts):
+        batch_size = len(roi_counts)
+        im_dims = np.random.randint(100, 600, batch_size)
+        rpn_rois_and_scores = []
+        for i in range(5):
+            rpn_rois_and_scores.append(torch.Tensor(generate_rois(roi_counts, im_dims)))
+        for i in range(5):
+            rpn_rois_and_scores.append(torch.rand(sum(roi_counts)))
+
+        rois = torch.ops._caffe2.CollectRpnProposals(
+            rpn_rois_and_scores,
+            rpn_max_level=6,
+            rpn_min_level=2,
+            rpn_post_nms_topN=sum(roi_counts),
+        )
+        fpn_outputs = torch.ops._caffe2.DistributeFpnProposals(
+            rois,
+            roi_canonical_scale=224,
+            roi_canonical_level=4,
+            roi_max_level=5,
+            roi_min_level=2,
+        )
+
+        all_outputs = torch.ops._caffe2.CollectAndDistributeFpnRpnProposals(
+            rpn_rois_and_scores,
+            roi_canonical_scale=224,
+            roi_canonical_level=4,
+            roi_max_level=5,
+            roi_min_level=2,
+            rpn_max_level=6,
+            rpn_min_level=2,
+            rpn_post_nms_topN=sum(roi_counts),
+        )
+
+        rois_fpn_list = fpn_outputs[:-1]
+        rois_idx_restore_int32 = fpn_outputs[-1]
+
+        # [rois] + fpn_outputs should be equal to all_outputs
+        torch.testing.assert_allclose(rois, all_outputs[0])
+        for x, y in zip(fpn_outputs, all_outputs[1:]):
+            torch.testing.assert_allclose(x, y)
+
     @given(X=hu.tensor(),
            fast_gelu=st.booleans())
     def _test_gelu_op(self, X, fast_gelu, device):
