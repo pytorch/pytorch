@@ -4209,17 +4209,17 @@ class TestTransformFunctions(TestCase):
 
     def test_power_transform_call(self):
         self._test_call_helper(self.data_1, self.pow_y,
-                               lambda x: functional.power_transform_call(2, x))
+                               lambda x: functional.power_transform_call(2.0, x))
 
-    # def test_power_transform_inverse(self):
-    #     self._test_inverse_helper(self.data_1,
-    #                               lambda x: functional.power_transform_call(2, x),
-    #                               lambda y: functional.power_transform_inverse(2, y))
+    def test_power_transform_inverse(self):
+        self._test_inverse_helper(self.data_1,
+                                  lambda x: functional.power_transform_call(2.0, x),
+                                  lambda y: functional.power_transform_inverse(2.0, y))
 
     def test_power_transform_log_abs_det_jacobian(self):
         self._test_log_abs_det_jacobian(self.data_1, self.pow_log_abs_det_jacobian,
-                                        lambda x: functional.power_transform_call(2, x),
-                                        lambda x, y: functional.power_transform_log_abs_det_jacobian(2, x, y))
+                                        lambda x: functional.power_transform_call(2.0, x),
+                                        lambda x, y: functional.power_transform_log_abs_det_jacobian(2.0, x, y))
 
     def test_sigmoid_transform_call(self):
         self._test_call_helper(self.data_1, self.sigmoid_y,
