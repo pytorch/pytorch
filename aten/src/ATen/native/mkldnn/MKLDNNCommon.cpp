@@ -73,6 +73,19 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
            ideep::tensor::data_type::f32},
           tensor.template data_ptr<float>()};
 }
+
+// Note in case the aten Tensor is a dense tensor, the retured ideep
+// tensor is just a view of the storage of the aten dense tensor, so
+// caller needs to make sure the aten dense tensor's lifetime is
+// longer than the ideep tensor.
+ideep::tensor get_mkldnn_tensor(const at::Tensor& tensor) {
+  if (tensor.is_mkldnn()) {
+    return at::native::itensor_from_mkldnn(tensor);
+  } else {
+    return at::native::itensor_view_from_dense(tensor);
+  }
+}
+
 }}
 
 #endif // AT_MKLDNN_ENABLED()

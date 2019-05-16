@@ -30,6 +30,10 @@ ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 // Construct an `ideep::tensor` "view" from dense tensor, note the
 // ideep::tensor will share the underlying buffer
 ideep::tensor itensor_view_from_dense(const Tensor& tensor);
+
+// Helper function for getting an ideep tensor out of an aten Tensor.
+ideep::tensor get_mkldnn_tensor(const at::Tensor& tensor);
+
 }}
 
 #endif // AT_MKLDNN_ENABLED
