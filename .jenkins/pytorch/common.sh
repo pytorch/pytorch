@@ -127,7 +127,7 @@ fi
 # Use conda cmake in some CI build. Conda cmake will be newer than our supported
 # min version 3.5, so we only do it in two builds that we know should use conda.
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" == *cuda8-cudnn7-py2* ]] || \
+  if [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py2* ]] || \
      [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py3* ]]; then
     if ! which conda; then
       echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"

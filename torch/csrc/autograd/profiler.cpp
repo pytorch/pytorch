@@ -246,7 +246,7 @@ RecordProfile::~RecordProfile() {
 }
 
 void RecordProfile::processEvents(const std::vector<Event*>& events) {
-  AT_CHECK(out_, "could not open file");
+  TORCH_CHECK(out_, "could not open file");
   Event* start = nullptr;
   for (Event* e : events) {
     if(0 == strcmp(e->name(), "__start_profile")) {
@@ -254,7 +254,7 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
       break;
     }
   }
-  AT_CHECK(start, "could not find start?");
+  TORCH_CHECK(start, "could not find start?");
   std::vector<Event*> stack;
   out_ << "[\n";
   bool first = true;

@@ -72,7 +72,7 @@ private:
 namespace detail {
 inline bool defaultValueEquals_(const c10::optional<IValue>& lhs, const c10::optional<IValue>& rhs) {
   if (lhs.has_value()) {
-    return rhs.has_value() && shallowEquals(*lhs, *rhs);
+    return rhs.has_value() && impl::shallowEquals(*lhs, *rhs);
   } else {
     return !rhs.has_value();
   }
