@@ -3,6 +3,8 @@
 #else
 
 #include <ATen/div_rtn.h>
+#include <ATen/native/Col2Im.h>
+#include <ATen/native/Im2Col.h>
 
 static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
         THTensor *input, THTensor *gradOutput,

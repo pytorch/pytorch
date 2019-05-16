@@ -428,48 +428,6 @@ TH_API void THNN_(SpatialDilatedConvolution_accGradParameters)(
           int dilationW, int dilationH,
           accreal scale);
 
-TH_API void THNN_(SpatialFullDilatedConvolution_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,         // [OPTIONAL]
-          THTensor *columns,
-          THTensor *ones,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int dilationW, int dilationH,
-          int adjW, int adjH);
-
-TH_API void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *weight,
-          THTensor *columns,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int dilationW, int dilationH,
-          int adjW, int adjH);
-
-TH_API void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradWeight,
-          THTensor *gradBias,     // [OPTIONAL]
-          THTensor *columns,
-          THTensor *ones,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int dilationW, int dilationH,
-          int adjW, int adjH,
-          accreal scale);
-
 TH_API void THNN_(unfolded_acc)(
           THTensor *finput,
           THTensor *input,
