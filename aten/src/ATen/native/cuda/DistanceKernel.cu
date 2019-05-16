@@ -216,7 +216,7 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
   int64_t r2 = x2.size(-2);
   int64_t m = x1.size(-1);
   const dim3 grid(r1*r2);
-  const dim3 block(forward_threads);
+  const dim3 block(std::min((long)forward_threads, ((m - 1) / 32 + 1) * 32));
 
   AT_DISPATCH_FLOATING_TYPES(x1.scalar_type(), "cdist_cuda", [&] {
     if (p == 0.0) {
