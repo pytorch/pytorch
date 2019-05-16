@@ -100,7 +100,7 @@ struct TORCH_API SugaredValue
 // and not special python syntax sugar types
 struct TORCH_API SimpleValue : public SugaredValue {
   SimpleValue(Value* value) : value_(value) {}
-  std::string kind() const override {
+  virtual std::string kind() const override {
     return "value";
   }
   Value* asValue(const SourceRange& range, Function& m) override {
@@ -114,11 +114,12 @@ struct TORCH_API SimpleValue : public SugaredValue {
     else
       return NEVER;
   }
-  std::vector<std::shared_ptr<SugaredValue>> asTuple(
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
       Function& m,
       const c10::optional<size_t>& size_hint = {}) override;
-  std::shared_ptr<SugaredValue> attr(
+
+  virtual std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
       Function& m,
       const std::string& field) override;
@@ -129,7 +130,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
       const std::string& field,
       Value* newValue) override;
 
-  std::shared_ptr<SugaredValue> call(
+  virtual std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& m,
       // note: names for args will be 'argument 0', 'argument 1', etc..
@@ -139,6 +140,10 @@ struct TORCH_API SimpleValue : public SugaredValue {
 
   Value* getValue() const {
     return value_;
+  }
+
+  virtual std::shared_ptr<SimpleValue> new_with(Value* new_value) {
+    return std::make_shared<SimpleValue>(new_value);
   }
 
  private:

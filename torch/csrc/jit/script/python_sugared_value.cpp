@@ -330,6 +330,10 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
   return result;
 }
 
+std::shared_ptr<SimpleValue> ModuleValue::new_with(Value* new_value) {
+  return std::make_shared<ModuleValue>(new_value, module_, py_module_);
+}
+
 std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     const SourceRange& loc,
     Function& caller,

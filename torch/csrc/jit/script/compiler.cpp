@@ -256,7 +256,10 @@ struct Environment {
     return value_table.at(name)->asValue(loc, method);
   }
 
-  SugaredValuePtr createCapturedInput(Value* orig, const std::string& name) {
+  SugaredValuePtr createCapturedInput(
+      std::shared_ptr<SugaredValue> orig_sv,
+      Value* orig,
+      const std::string& name) {
     // insert the captured input alphabetically in the capture list.
     // this ensures consistency of the order of loop-carried dependencies
     // even when the use in the loop is in a different order
@@ -274,7 +277,11 @@ struct Environment {
             ->setType(orig->type());
 
     // Associate this name with this value
-    auto sv = std::make_shared<SimpleValue>(new_input);
+    auto simple_sugared = dynamic_cast<SimpleValue*>(orig_sv.get());
+    AT_CHECK(
+        simple_sugared != nullptr,
+        "Input can only be captured from a simple value");
+    auto sv = simple_sugared->new_with(new_input);
     value_table[name] = sv;
 
     return sv;
@@ -294,8 +301,9 @@ struct Environment {
 
     // recursively create the captured input if it is the loop block
     if (from_parent && getBlockOwningKind() == prim::Loop) {
-      if (Value* simple_val = asSimple(from_parent))
-        from_parent = createCapturedInput(simple_val, ident);
+      if (Value* simple_val = asSimple(from_parent)) {
+        from_parent = createCapturedInput(from_parent, simple_val, ident);
+      }
     }
     return from_parent;
   }

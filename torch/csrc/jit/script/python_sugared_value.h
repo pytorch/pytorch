@@ -161,6 +161,8 @@ struct VISIBILITY_HIDDEN ModuleValue : public SimpleValue {
       Function& m,
       const c10::optional<size_t>& size_hint = {}) override;
 
+  std::shared_ptr<SimpleValue> new_with(Value* new_value) override;
+
  private:
   Value* self_;
   std::shared_ptr<Module> module_;
