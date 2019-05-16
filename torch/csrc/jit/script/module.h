@@ -168,14 +168,14 @@ struct TORCH_API Module {
   void register_buffer(const std::string& name, autograd::Variable v) {
     if (auto b = find_attribute(name)) {
       AT_ASSERT(b->type()->isSubtypeOf(TensorType::get()));
-      b->setValue(v);
+      b->setValue(at::Tensor(std::move(v)));
       return;
     }
     insert(
         name,
         attributes_,
         EntityType::ATTRIBUTE,
-        appendSlot(name, TensorType::get(), std::move(v)));
+        appendSlot(name, TensorType::get(), at::Tensor(std::move(v))));
   }
 
   void register_parameter(
@@ -187,14 +187,14 @@ struct TORCH_API Module {
       return;
     }
     if (auto p = find_parameter(name)) {
-      p->setValue(v);
+      p->setValue(at::Tensor(std::move(v)));
       return;
     }
     insert(
         name,
         parameters_,
         EntityType::PARAMETER,
-        appendSlot(name, TensorType::get(), std::move(v)));
+        appendSlot(name, TensorType::get(), at::Tensor(std::move(v))));
   }
   void register_attribute(
       const std::string& name,

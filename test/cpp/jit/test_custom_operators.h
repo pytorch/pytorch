@@ -32,7 +32,7 @@ void testCustomOperators() {
     ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
     Stack stack;
-    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
+    push(stack, 2.0f, at::Tensor(autograd::make_variable(at::ones(5))));
     op->getOperation()(stack);
     at::Tensor output;
     pop(stack, output);
@@ -61,7 +61,7 @@ void testCustomOperators() {
     ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
     Stack stack;
-    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
+    push(stack, 2.0f, at::Tensor(autograd::make_variable(at::ones(5))));
     op->getOperation()(stack);
     at::Tensor output;
     pop(stack, output);
@@ -147,7 +147,7 @@ void testCustomOperators() {
     std::tie(state, std::ignore) = tracer::enter({});
 
     Stack stack;
-    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
+    push(stack, 2.0f, at::Tensor(autograd::make_variable(at::ones(5))));
     op.getOperation()(stack);
     at::Tensor output = autograd::make_variable(at::empty({}));
     pop(stack, output);

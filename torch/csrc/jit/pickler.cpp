@@ -694,7 +694,7 @@ OpCode Unpickler::readInstruction() {
       auto module_name = readString();
       // TODO [unpickler refactor] __main__ isn't used by the pickler anymore
       if (module_name == "__main__") {
-        stack_.emplace_back(static_cast<uint8_t>(getClass(readString())));
+        stack_.emplace_back(static_cast<int64_t>(static_cast<uint8_t>(getClass(readString()))));
       } else {
         // Push class name to stack
         stack_.emplace_back(getClass(readString()));

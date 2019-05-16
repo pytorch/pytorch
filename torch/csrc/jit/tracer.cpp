@@ -533,7 +533,7 @@ void addOutput(Node* node, const at::Tensor& output) {
 void setOutput(Value* value, const at::Tensor& output) {
   if (output.defined()) {
     value->inferTypeFrom(output);
-    setValueTrace(autograd::as_variable_ref(output), value);
+    setValueTrace(at::Tensor(autograd::as_variable_ref(output)), value);
   }
 }
 
@@ -568,7 +568,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
 
   auto size_var =
       autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
-  auto* value = getValueTrace(var);
+  auto* value = getValueTrace(at::Tensor(var));
   auto dim_val = graph->insertConstant(dim);
   recordSourceLocation(dim_val->node());
   auto* node = graph->insertNode(graph->create(aten::size, {value, dim_val}));
@@ -577,7 +577,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
 
   auto ten =
       graph->insertNode(graph->createNumToTensor(node->output()))->output();
-  setValueTrace(size_var, ten);
+  setValueTrace(at::Tensor(size_var), ten);
   return size_var;
 }
 
@@ -620,7 +620,7 @@ void ArgumentStash::stashIntArrayRefElem(
   AT_ASSERT(idx < list_trace.size());
   AT_ASSERT(list_trace[idx] == nullptr);
 
-  Value* ten = getValueTrace(var);
+  Value* ten = getValueTrace(at::Tensor(var));
   auto& g = *ten->owningGraph();
   WithInsertPoint guard(ten->node()->next());
   auto prim = g.insert(prim::Int, {ten});
@@ -635,7 +635,7 @@ void ArgumentStash::stashValue(
   if (!isTracing())
     return;
 
-  Value* ten = getValueTrace(var);
+  Value* ten = getValueTrace(at::Tensor(var));
   WithInsertPoint guard(ten->node()->next());
   auto& g = *ten->owningGraph();
 

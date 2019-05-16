@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/variadic.h>
+#include <ATen/core/functional.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -113,7 +114,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// function call.
   variable_list operator()(variable_list&& inputs) {
     RECORD_FUNCTION(
-        this, std::vector<c10::IValue>(inputs.begin(), inputs.end()));
+        this, c10::fmap(inputs, [] (const Variable& v) {return c10::IValue(at::Tensor(v));}));
 
     return apply(std::move(inputs));
   }

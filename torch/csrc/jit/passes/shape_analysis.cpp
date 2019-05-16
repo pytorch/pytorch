@@ -158,7 +158,7 @@ class ShapePropagator {
       auto t =
           at::empty_strided(type->sizes(), type->strides(), attype.options())
               .zero_();
-      return autograd::make_variable(t, /*requires_grad=*/false);
+      return at::Tensor(autograd::make_variable(t, /*requires_grad=*/false));
     } else if (type_->isSubtypeOf(FloatType::get())) {
       return 0.f;
     }

@@ -416,7 +416,7 @@ void testControlFlow() {
   };
 
   auto L = [](int64_t l) {
-    return IValue(autograd::make_variable(scalar_to_tensor(at::Scalar(l))));
+    return IValue(at::Tensor(autograd::make_variable(scalar_to_tensor(at::Scalar(l)))));
   };
   auto V = [](IValue t) { return std::move(t).toTensor().item<int64_t>(); };
   auto run_binary = [&](const std::string& name, int64_t a, int64_t b) {

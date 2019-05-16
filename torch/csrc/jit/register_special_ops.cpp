@@ -280,7 +280,7 @@ RegisterOperators reg(
           if (scalar_type != initial_scalar_type || dev != tensor.device()) { \
             tensor = tensor.to(dev, scalar_type);                             \
           }                                                                   \
-          push(stack, tensor);                                                \
+          push(stack, at::Tensor(tensor));                                    \
           tensor.set_requires_grad(requires_grad);                            \
           return 0;                                                           \
         };                                                                    \
@@ -378,7 +378,7 @@ RegisterOperators reg(
                    "Pass in a dtype argument to ensure consistent behavior");
              }
              tensor.set_requires_grad(requires_grad);
-             push(stack, tensor);
+             push(stack, at::Tensor(tensor));
              return 0;
            };
          }),

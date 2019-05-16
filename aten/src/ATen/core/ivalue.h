@@ -86,7 +86,7 @@ struct CAFFE2_API IValue final {
   }
 
   template<class T> IValue(T x) {
-    static_assert(guts::false_t<T>::value, "Implicit conversions are disabled for IValues to avoid accidental casting to bool");
+    static_assert(guts::false_t<T>::value, "Implicit conversions are disabled for IValues to avoid accidental casting of boolish types (e.g. pointers) to bool");
   }
 
   void dump() const;
@@ -173,6 +173,7 @@ struct CAFFE2_API IValue final {
     AT_ASSERT(isDouble());
     return payload.as_double;
   }
+  IValue(float f): IValue(static_cast<double>(f)) {}
 
   // Future
   IValue(c10::intrusive_ptr<ivalue::Future> v);

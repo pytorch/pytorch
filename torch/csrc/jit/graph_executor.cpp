@@ -125,14 +125,14 @@ struct CaptureList {
     for (Capture capture_type : capture_types_) {
       switch (capture_type) {
         case CAPTURE_TENSOR: {
-          stack.emplace_back(var_capture_it->unpack(saved_for));
+          stack.emplace_back(at::Tensor(var_capture_it->unpack(saved_for)));
           ++var_capture_it;
         } break;
         case CAPTURE_LIST: {
           std::vector<at::Tensor> lst;
           auto size = *size_it++;
           for (size_t i = 0; i < size; i++) {
-            lst.emplace_back(var_capture_it->unpack(saved_for));
+            lst.emplace_back(at::Tensor(var_capture_it->unpack(saved_for)));
             var_capture_it++;
           }
           stack.emplace_back(TensorList::create(std::move(lst)));
@@ -579,7 +579,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
       for (Node* dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
-        // Run post differentiation optimizations, Autodiff will replace some 
+        // Run post differentiation optimizations, Autodiff will replace some
         // parts of graph with new graph, these new graphs usually consists of
         // control flows and miss shape information on nodes, so we run shape
         // prop and differentiable optimizations to ensure the graph is optimized

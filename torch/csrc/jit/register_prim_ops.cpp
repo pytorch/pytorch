@@ -236,7 +236,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            at::Scalar s;
            pop(stack, s);
-           push(stack, autograd::make_variable(at::scalar_to_tensor(s)));
+           push(stack, at::Tensor(autograd::make_variable(at::scalar_to_tensor(s))));
            return 0;
          }),
      // note: this op needs to share a name with the Scalar -> Tensor conversion
@@ -246,7 +246,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            bool b;
            pop(stack, b);
-           push(stack, autograd::make_variable(at::scalar_to_tensor(b)));
+           push(stack, at::Tensor(autograd::make_variable(at::scalar_to_tensor(b))));
            return 0;
          }),
      Operator(
@@ -709,9 +709,9 @@ RegisterOperators reg(
          [](const Node* node) {
            size_t num_inputs = node->inputs().size();
            return [=](Stack& stack) {
-             std::vector<IValue> elems{
+             std::vector<IValue> elems(
                  std::make_move_iterator(stack.end() - num_inputs),
-                 std::make_move_iterator(stack.end())};
+                 std::make_move_iterator(stack.end()));
              drop(stack, num_inputs);
              push(stack, Tuple::create(std::move(elems)));
              return 0;

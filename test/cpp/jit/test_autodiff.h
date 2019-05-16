@@ -60,7 +60,7 @@ variable_list get_grad_outputs(const variable_list& vars) {
 std::shared_ptr<Graph> trace(
     const ADTestSpec& test,
     const variable_list& vars_in) {
-  Stack input_vars = fmap<IValue>(vars_in);
+  Stack input_vars = fmap(vars_in, [] (const Variable& var) {return IValue(at::Tensor(var));});
   std::vector<TypePtr> input_types;
   input_types.reserve(input_vars.size());
   for (auto i = 0; i < input_vars.size(); i++) {
@@ -74,7 +74,7 @@ std::shared_ptr<Graph> trace(
   variable_list trace_vars_in = fmap(
       trace_stack_in, [](const IValue& v) { return Variable(v.toTensor()); });
   auto trace_vars_out = test(trace_vars_in);
-  tracer::exit(fmap<IValue>(trace_vars_out));
+  tracer::exit(fmap(trace_vars_out, [] (const Variable& var) {return IValue(at::Tensor(var));}));
   return state->graph;
 }
 
@@ -212,9 +212,9 @@ void testDifferentiateWithRequiresGrad() {
   graph->registerOutput(d.value());
   graph->registerOutput(e.value());
 
-  auto a_var = autograd::make_variable(
+  at::Tensor a_var = autograd::make_variable(
       at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);
-  auto b_var = autograd::make_variable(
+  at::Tensor b_var = autograd::make_variable(
       at::empty_strided(2, 2, at::CPU(at::kFloat).options()), false);
 
   ArgumentSpecCreator asc(*graph);
