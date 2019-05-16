@@ -82,14 +82,7 @@ void sparse_lengths_sum_op_cpu(
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::SparseLengthsSum",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("data"),
-                                    c10::Argument("indices"),
-                                    c10::Argument("lengths"),
-                                    c10::Argument("output")}),
-        (std::vector<c10::Argument>{})),
+    "_c10_experimental::SparseLengthsSum",
     c10::kernel<
         decltype(sparse_lengths_sum_op_cpu),
         &sparse_lengths_sum_op_cpu>(),
