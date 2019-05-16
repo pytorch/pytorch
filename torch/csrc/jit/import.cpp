@@ -142,7 +142,9 @@ void ScriptModuleDeserializer::deserialize(
   }
 
   loadTensorTable(&model_def);
-  pickled_ivalues_ = loadPickleArchive("attributes.pkl");
+  if (model_def.proto_version() >= 2) {
+    pickled_ivalues_ = loadPickleArchive("attributes.pkl");
+  }
 
   // TODO: this can be simplified when C++/Python interop lands,
   // and the submodules would be created as the same in either C++ or Python
