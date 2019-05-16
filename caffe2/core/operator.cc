@@ -581,11 +581,18 @@ TensorShapes InferBlobShapesAndTypes(
   return tps;
 }
 
-void LoadInt8TensorInfoOfBlob(float* scale, float* offset, const Blob* b) {
-  const int8::Int8TensorCPU* i8tc =
+void LoadInt8TensorInfoOfBlob(
+    std::vector<float>* scale,
+    std::vector<float>* offset,
+    uint32_t* axis,
+    const Blob* b) {
+  const int8::Int8TensorCPU* int8_tensor =
       static_cast<const int8::Int8TensorCPU*>(b->GetRaw());
-  *scale = i8tc->scale;
-  *offset = i8tc->zero_point;
+  scale->clear();
+  offset->clear();
+  scale->push_back(int8_tensor->scale);
+  offset->push_back(int8_tensor->zero_point);
+  *axis = 1;
 }
 
 TensorShape GetTensorShapeOfBlob(const Blob* b) {

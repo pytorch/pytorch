@@ -78,15 +78,15 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
 
 // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
 // 1. the AutogradMeta pointer, because it is unique for each Variable.
-// 2. the version counter, because although it lives in TensorImpl, the version counter is managed
-// by autograd, and the call sites of `shallow_copy_and_detach()` (from autograd) should decide what
-// the version counter should be for each new TensorImpl. See NOTE [ Version Counter Sharing ] for details.
+// 2. the version counter, because it is set to the passed in `version_counter`.
+//    See NOTE [ Version Counter Sharing ] for details.
 //
-// NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
-// to this function that need to change the shallow copy's size or storage afterwards, and setting
-// `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
-// undesirable.
-c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
+// NOTE: `allow_tensor_metadata_change` determines whether the TensorImpl shallow-copy
+// allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
+// See NOTE [ Metadata Change for a Detached Tensor ] for details.
+c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const override {
   //AT_ASSERT(false);
   auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
     type_id(), dtype(), device(), opaque_handle_, sizes_);
@@ -99,6 +99,8 @@ c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
   impl->is_contiguous_ = is_contiguous_;
   impl->is_wrapped_number_ = is_wrapped_number_;
   impl->reserved_ = reserved_;
+  impl->set_version_counter(version_counter);
+  impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
 
   // OpaqueTensorImpl-specific fields (none currently).
   return impl;

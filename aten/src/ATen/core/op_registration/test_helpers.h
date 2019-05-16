@@ -35,6 +35,25 @@ struct InputToIValue<c10::ArrayRef<T>> final {
     return c10::IValue(v.vec());
   }
 };
+template<class Key, class Value>
+struct InputToIValue<c10::Dict<Key, Value>> final {
+  template<class T_>
+  static c10::IValue call(T_&& v) {
+    return c10::IValue(c10::impl::toGenericDict(std::move(v)));
+  }
+};
+template<class Key, class Value>
+struct InputToIValue<std::unordered_map<Key, Value>> final {
+  template<class T_>
+  static c10::IValue call(T_&& v) {
+    c10::Dict<Key, Value> dict;
+    dict.reserve(v.size());
+    for (auto& element : v) {
+      dict.insert(element.first, element.second);
+    }
+    return InputToIValue<c10::Dict<Key, Value>>::call(std::move(dict));
+  }
+};
 }
 
 template<class... Inputs>
