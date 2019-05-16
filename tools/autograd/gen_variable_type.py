@@ -29,8 +29,7 @@ from .gen_autograd_functions import uses_single_grad
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_',
-    '_sparse_coo_tensor_with_dims_and_tensors'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_'
 }
 
 # These functions we don't want to record for tracing, because we always want
