@@ -219,8 +219,9 @@ namespace detail {
   // allows a few deprecated types like std::unordered_map.
   template<class T, class Enable = void>
   struct legacy_return_type_to_ivalue final {
-    static IValue call(T&& v) {
-      return return_type_to_ivalue<T>::call(std::move(v));
+    template<class T_>
+    static IValue call(T_&& v) {
+      return return_type_to_ivalue<T>::call(std::forward<T_>(v));
     }
   };
   template<class T>
