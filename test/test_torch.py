@@ -11415,11 +11415,13 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         # test that we can call c10 ops and they return a reasonable result
         X = torch.rand(5, 5, dtype=torch.float).cuda()
+        weight = torch.rand(*X.size()[1:], dtype=torch.float).cuda()
+        bias = torch.rand(*X.size()[1:], dtype=torch.float).cuda()
         epsilon = 1e-4
 
-        expected_norm = torch.nn.functional.layer_norm(X, X.size()[1:], eps=epsilon)
+        expected_norm = torch.nn.functional.layer_norm(X, X.size()[1:], weight=weight, bias=bias, eps=epsilon)
         actual_norm, actual_mean, actual_stdev = \
-            torch.ops._caffe2.LayerNorm(torch.tensor(X), 1, epsilon)
+            torch.ops._caffe2.LayerNorm(torch.tensor(X), torch.tensor(weight), torch.tensor(bias), 1, epsilon)
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
         print("Is pinned:")
