@@ -63,7 +63,6 @@ if (std::isnan(val)) break;
 
 #ifdef _MSC_VER
 #define PRAGMA(P)         __pragma(P)
-
 # if _MSC_VER < 1920
 // MSVC < 2019 doesn't support loop pragmas.
 #  define PRAGMA_IVDEP    // Noop
