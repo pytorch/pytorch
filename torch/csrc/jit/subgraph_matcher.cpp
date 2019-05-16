@@ -123,7 +123,8 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
 
   if (n1->kind() != n2->kind() ||
       n1->outputs().size() != n2->outputs().size() ||
-      n1->inputs().size() != n2->inputs().size()) {
+      n1->inputs().size() != n2->inputs().size() ||
+      n1->numAttributes() != n2->numAttributes()) {
     return false;
   }
 
@@ -138,6 +139,33 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
   for (size_t i = 0; i < n1->inputs().size(); i++) {
     if (!matchValues(n1->inputs()[i], n2->inputs()[i])) {
       return false;
+    }
+  }
+  std::vector<Symbol> attr_names = n1->attributeNames();
+  for (size_t i = 0; i < attr_names.size(); i++) {
+    auto attrname = attr_names[i];
+    if (n1->kindOf(attrname) != n2->kindOf(attrname)) {
+      return false;
+    }
+    switch (n1->kindOf(attrname)) {
+      case AttributeKind::s:
+        if (n1->s(attrname) != n2->s(attrname)) {
+          return false;
+        }
+        break;
+      case AttributeKind::f:
+        if (n1->f(attrname) != n2->f(attrname)) {
+          return false;
+        }
+        break;
+      case AttributeKind::i:
+        if (n1->i(attrname) != n2->i(attrname)) {
+          return false;
+        }
+        break;
+      default:
+        // Other attributes types not supported yet
+        return false;
     }
   }
 
@@ -167,9 +195,7 @@ bool SubgraphMatcher::matchesSubgraphFromAnchorNode(Node* anchor) {
 } // unnamed namespace
 
 // Main entry point for the subgraph matching.
-std::vector<Match> findPatternMatches(
-    const Graph& pattern,
-    Graph& graph) {
+std::vector<Match> findPatternMatches(const Graph& pattern, Graph& graph) {
   AT_ASSERT(patternGraphIsValid(pattern));
 
   SubgraphMatcher m(pattern);
