@@ -256,6 +256,83 @@ class TestNumbaIntegration(common.TestCase):
                 numba.cuda.as_cuda_array(cudat), numba.cuda.devicearray.DeviceNDArray
             )
 
+    @unittest.skipIf(not TEST_NUMPY, "No numpy")
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
+    def test_from_cuda_array_interface(self):
+        """torch.as_tensor() and torch.tensor() supports the __cuda_array_interface__ protocol.
+
+        If an object exposes the __cuda_array_interface__, .as_tensor() and .tensor()
+        will use the exposed device memory.
+
+        See:
+        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        """
+
+        dtypes = [
+            numpy.float64,
+            numpy.float32,
+            numpy.int64,
+            numpy.int32,
+            numpy.int16,
+            numpy.int8,
+            numpy.uint8,
+        ]
+        for dtype in dtypes:
+            numpy_arys = [
+                numpy.arange(6).reshape(2, 3).astype(dtype),
+                numpy.arange(6).reshape(2, 3).astype(dtype)[1:],  # View offset should be ignored
+                numpy.arange(6).reshape(2, 3).astype(dtype)[:, None],  # change the strides but still contiguous
+            ]
+            # Zero-copy when using `torch.as_tensor()`
+            for numpy_ary in numpy_arys:
+                numba_ary = numba.cuda.to_device(numpy_ary)
+                torch_ary = torch.as_tensor(numba_ary, device="cuda")
+                self.assertEqual(numba_ary.__cuda_array_interface__, torch_ary.__cuda_array_interface__)
+                self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary))
+
+                # Check that `torch_ary` and `numba_ary` points to the same device memory
+                torch_ary += 42
+                self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary))
+
+            # Implicit-copy because `torch_ary` is a CPU array
+            for numpy_ary in numpy_arys:
+                numba_ary = numba.cuda.to_device(numpy_ary)
+                torch_ary = torch.as_tensor(numba_ary, device="cpu")
+                self.assertEqual(torch_ary.data.numpy(), numpy.asarray(numba_ary))
+
+                # Check that `torch_ary` and `numba_ary` points to different memory
+                torch_ary += 42
+                self.assertEqual(torch_ary.data.numpy(), numpy.asarray(numba_ary) + 42)
+
+            # Explict-copy when using `torch.tensor()`
+            for numpy_ary in numpy_arys:
+                numba_ary = numba.cuda.to_device(numpy_ary)
+                torch_ary = torch.tensor(numba_ary, device="cuda")
+                self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary))
+
+                # Check that `torch_ary` and `numba_ary` points to different memory
+                torch_ary += 42
+                self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary) + 42)
+
+    @unittest.skipIf(not TEST_NUMPY, "No numpy")
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
+    @unittest.skipIf(not TEST_MULTIGPU, "No multigpu")
+    def test_active_device(self):
+        """'as_cuda_array' tensor device must match active numba context."""
+
+        # Both torch/numba default to device 0 and can interop freely
+        numba_ary = numba.cuda.to_device(numpy.arange(6))
+        torch_ary = torch.as_tensor(numba_ary, device="cuda")
+        self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary))
+        self.assertEqual(torch_ary.__cuda_array_interface__, numba_ary.__cuda_array_interface__)
+
+        # Torch should raise `RuntimeError` when the Numba and Torch device differ
+        numba_ary = numba.cuda.to_device(numpy.arange(6))
+        with self.assertRaises(RuntimeError):
+            torch.as_tensor(numba_ary, device=torch.device("cuda", 1))
+
 
 if __name__ == "__main__":
     common.run_tests()
