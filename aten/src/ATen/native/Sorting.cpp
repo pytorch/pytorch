@@ -221,37 +221,68 @@ std::tuple<Tensor&, Tensor&> topk_out_cpu(
     indices.zero_();
     return std::forward_as_tuple(values, indices);
   }
-  auto tmp_values = self.clone();
+  auto tmp_values = self;
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "topk_cpu", [&] {
     dim_apply(
-        {tmp_values, values, indices},
+        {self, values, indices},
         dim,
         [&](int64_t i, TensorList tl) {
           auto tmp_values = tl[0].accessor<scalar_t, 1>();
           auto mode_values = tl[1].accessor<scalar_t, 1>();
           auto mode_indices = tl[2].accessor<int64_t, 1>();
 
-          // we want NaN to be sorted as top for numpy compatibility
+          auto n = tmp_values.size(0);
+          auto use_partial_sort = k * 64 <= n;
+
           using elem_t = std::pair<scalar_t, int64_t>;
-          std::function<bool(elem_t&, elem_t&)> cmp =
-            [](elem_t& x, elem_t& y) -> bool {
-              return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
-            };
-          if (largest) {
-            cmp = [](elem_t& x, elem_t& y) -> bool {
-              return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
-            };
+          std::vector<elem_t> queue(n);
+          for (int64_t j = 0; j < n; j++) {
+            queue[j].first = tmp_values[j];
+            queue[j].second = j;
           }
 
-          std::vector<elem_t> queue;
-          for (int64_t j = 0; j < tmp_values.size(0); j++) {
-            queue.emplace_back(tmp_values[j], j);
+          // we want NaN to be sorted as top for numpy compatibility
+          if (use_partial_sort) {
+            if (largest) {
+              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
+                [](const elem_t& x, const elem_t& y) -> bool {
+                  return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
+                });
+            } else {
+              std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
+                [](const elem_t& x, const elem_t& y) -> bool {
+                  return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
+                });
+            }
+          } else {
+            if (largest) {
+              std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
+                [](const elem_t& x, const elem_t& y) -> bool {
+                  return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
+                });
+              if (sorted) {
+                std::sort(queue.begin(), queue.begin() + k - 1,
+                  [](const elem_t& x, const elem_t& y) -> bool {
+                    return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
+                  });
+              }
+            } else {
+              std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
+                [](const elem_t& x, const elem_t& y) -> bool {
+                  return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
+                });
+              if (sorted) {
+                std::sort(queue.begin(), queue.begin() + k -1,
+                  [](const elem_t& x, const elem_t& y) -> bool {
+                    return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
+                  });
+              }
+            }
           }
-          std::partial_sort(queue.begin(), queue.begin() + k, queue.end(), cmp);
 
-          for (int64_t index = 0; index < k; index++) {
-            mode_values[index] = queue[index].first;
-            mode_indices[index] = queue[index].second;
+          for (int64_t j = 0; j < k; j++) {
+            mode_values[j] = queue[j].first;
+            mode_indices[j] = queue[j].second;
           }
         });
   });
