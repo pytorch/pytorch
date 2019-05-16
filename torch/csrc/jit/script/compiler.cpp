@@ -257,7 +257,7 @@ struct Environment {
   }
 
   SugaredValuePtr createCapturedInput(
-      std::shared_ptr<SugaredValue> orig_sv,
+      const std::shared_ptr<SugaredValue>& orig_sv,
       Value* orig,
       const std::string& name) {
     // insert the captured input alphabetically in the capture list.
