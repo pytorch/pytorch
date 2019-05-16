@@ -42,7 +42,7 @@ public:
   RegisterOperators(RegisterOperators&&) noexcept;
   RegisterOperators& operator=(RegisterOperators&&) noexcept;
 
-  class Options final {
+  class C10_API Options final {
   public:
     Options(const Options&) = delete;
     Options(Options&&) noexcept = delete;
