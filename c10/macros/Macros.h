@@ -55,6 +55,7 @@
 //  - MSVC 19.14: https://godbolt.org/z/Dzd7gn (requires /std:c++latest)
 //  - Clang 8.0.0: https://godbolt.org/z/3PYL4Z (always advertises support)
 //  - gcc 8.3: https://godbolt.org/z/4tLMQS (always advertises support)
+#define C10_NODISCARD
 #if defined(__has_cpp_attribute)
 # if __has_cpp_attribute(nodiscard)
 #  undef C10_NODISCARD
