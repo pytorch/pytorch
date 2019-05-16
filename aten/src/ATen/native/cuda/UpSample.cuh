@@ -25,7 +25,7 @@ static inline void upsample_1d_shape_check(
     int nchannels,
     int input_width,
     int output_width) {
-  AT_CHECK(
+  TORCH_CHECK(
       input_width > 0 && output_width > 0,
       "input and output sizes should be greater than 0, but got input (W: ",
       input_width,
@@ -34,7 +34,7 @@ static inline void upsample_1d_shape_check(
       ")");
 
   if (input.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         input.numel() != 0 && input.dim() == 3,
         "non-empty 3D input tensor expected but got a tensor with sizes ",
         input.sizes());
@@ -54,7 +54,7 @@ static inline void upsample_2d_shape_check(
     int input_width,
     int output_height,
     int output_width) {
-  AT_CHECK(
+  TORCH_CHECK(
       input_height > 0 && input_width > 0 && output_height > 0 &&
           output_width > 0,
       "input and output sizes should be greater than 0,"
@@ -69,7 +69,7 @@ static inline void upsample_2d_shape_check(
       ")");
 
   if (input.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         input.numel() != 0 && input.dim() == 4,
         "non-empty 4D input tensor expected but got a tensor with sizes ",
         input.sizes());
@@ -92,7 +92,7 @@ static inline void upsample_3d_shape_check(
     int output_depth,
     int output_height,
     int output_width) {
-  AT_CHECK(
+  TORCH_CHECK(
       input_depth > 0 && input_height > 0 && input_width > 0 &&
           output_depth > 0 && output_height > 0 && output_width > 0,
       "Input and output sizes should be greater than 0, but got input (D: ",
@@ -110,7 +110,7 @@ static inline void upsample_3d_shape_check(
       ")");
 
   if (input.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         input.numel() != 0 && input.dim() == 5,
         "Non-empty 5D data tensor expected but got a tensor with sizes ",
         input.sizes());
