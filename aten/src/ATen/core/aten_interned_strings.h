@@ -656,9 +656,8 @@ _(aten, conv_dilated3d) \
 _(aten, conv_dilated3d_backward) \
 _(aten, conv_transpose2d) \
 _(aten, conv_transpose2d_backward) \
-_(aten, thnn_conv_transpose3d) \
-_(aten, thnn_conv_transpose3d_backward) \
-_(aten, thnn_conv_transpose3d_forward) \
+_(aten, conv_transpose3d) \
+_(aten, conv_transpose3d_backward) \
 _(aten, threshold) \
 _(aten, threshold_backward) \
 _(aten, to) \
