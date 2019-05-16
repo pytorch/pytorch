@@ -114,6 +114,41 @@ static std::unique_ptr<TensorIterator> make_reduction(
   return TensorIterator::reduce_op(viewed_result, self.to(dtype));
 }
 
+static std::unique_ptr<TensorIterator> make_reduction(
+    const char* name, Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
+    bool keepdim, ScalarType dtype)
+{
+  // check that result type and dtype match if provided
+  for (const Tensor *t: {&result1, &result2}) {
+    const Tensor& result = *t;
+    AT_CHECK(
+        !result.defined() || result.type().scalarType() == dtype,
+        name, ": provided dtype must match dtype of result. Got ",
+        toString(result.type().scalarType()),
+        " and ",
+        toString(dtype),
+        ".");
+  }
+
+  int64_t ndim = self.dim();
+  DimMask mask = make_dim_mask(dim, ndim);
+  allocate_reduction_result(result1, self, mask, keepdim, dtype);
+  auto viewed_result1 = review_reduce_result(result1, ndim, mask, keepdim);
+
+  allocate_reduction_result(result2, self, mask, keepdim, dtype);
+  auto viewed_result2 = review_reduce_result(result2, ndim, mask, keepdim);
+
+  // special case for type promotion in mixed precision, improves computational
+  // efficiency.
+  // We don't generalize this to common mismatched input/output types to avoid cross
+  // product of templated kernel launches.
+  if (self.type().scalarType() == dtype ||
+      (self.is_cuda() && self.type().scalarType() == kHalf && dtype == kFloat)) {
+    return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
+  }
+  return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype));
+}
+
 static inline int64_t n_dim_size(const Tensor& self, IntArrayRef dim) {
   int64_t numel = 1;
   for (auto d : dim) {
@@ -609,6 +644,68 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
     std_var_stub(iter->device_type(), *iter, unbiased, take_sqrt);
   }
   return result;
+}
+
+static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
+  AT_ASSERT(result1.defined() && result2.defined());
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+           fname, " only support CPU and CUDA backend, got: ", toString(self.type().backend()));
+  AT_CHECK(at::isFloatingType(self.type().scalarType()), fname, " only support floating-point dtypes");
+  AT_CHECK(result1.type().scalarType() == result2.type().scalarType(),
+           "provided by result1 dtype must match dtype of result2. Got ",
+           toString(result1.type().scalarType()),
+           " and ",
+           toString(result2.type().scalarType()),
+           ".");
+  ScalarType dtype = get_dtype(result1, self, {}, true);
+  auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
+  if (iter->numel() == 0) {
+    result1.fill_(NAN);
+    result2.fill_(NAN);
+  } else {
+    std_var_stub(iter->device_type(), *iter, unbiased, take_sqrt);
+  }
+  return std::tuple<Tensor&, Tensor&>(result1, result2);
+}
+
+std::tuple<Tensor&,Tensor&> var_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  return std_var_mean_out("var_mean", result1, result2, self, dim, unbiased, keepdim, false);
+}
+
+std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  return std_var_mean_out("std_mean", result1, result2, self, dim, unbiased, keepdim, true);
+}
+
+std::tuple<Tensor&,Tensor&> var_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, bool unbiased) {
+  return std_var_mean_out("var_mean", result1, result2, self, {}, unbiased, false, false);
+}
+
+std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, bool unbiased) {
+  return std_var_mean_out("std_mean", result1, result2, self, {}, unbiased, false, true);
+}
+
+std::tuple<Tensor,Tensor> var_mean(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  Tensor result1 = at::empty({0}, self.options());
+  Tensor result2 = at::empty({0}, self.options());
+  return at::native::var_mean_out(result1, result2, self, dim, unbiased, keepdim);
+}
+
+std::tuple<Tensor,Tensor> std_mean(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  Tensor result1 = at::empty({0}, self.options());
+  Tensor result2 = at::empty({0}, self.options());
+  return at::native::std_mean_out(result1, result2, self, dim, unbiased, keepdim);
+}
+
+std::tuple<Tensor,Tensor> std_mean(const Tensor& self, bool unbiased) {
+  Tensor result1 = at::empty({0}, self.options());
+  Tensor result2 = at::empty({0}, self.options());
+  return at::native::std_mean_out(result1, result2, self, unbiased);
+}
+
+std::tuple<Tensor,Tensor> var_mean(const Tensor& self, bool unbiased) {
+  Tensor result1 = at::empty({0}, self.options());
+  Tensor result2 = at::empty({0}, self.options());
+  return at::native::var_mean_out(result1, result2, self, unbiased);
 }
 
 Tensor var(const Tensor& self, bool unbiased) {

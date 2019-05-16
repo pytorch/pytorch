@@ -1447,6 +1447,18 @@ class _TestTorchMixin(object):
 
         self.assertEqual(res1, res2)
 
+    def test_numpy_args(self):
+        x1 = torch.randn(10)
+        x2 = torch.randn(10)
+        res1 = torch.add(input=x1, other=x2)
+        res2 = torch.add(x1=x1, x2=x2)
+        self.assertEqual(res1, res2)
+
+        x1 = torch.randn(10, 10, 10)
+        res1 = x1.sum(dim=(0, 2), keepdim=True)
+        res2 = x1.sum(axis=(0, 2), keepdims=True)
+        self.assertEqual(res1, res2)
+
     def test_add(self):
         # [res] torch.add([res,] tensor1, tensor2)
         m1 = torch.randn(100, 100)
@@ -2422,6 +2434,50 @@ class _TestTorchMixin(object):
         expected = torch.tensor([[0.]], dtype=torch.float16)
         self.assertEqual(halfTensor, expected)
 
+    def test_std_mean(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 50, 20, device=device)
+            for dim in range(x.dim()):
+                for unbiased in [False, True]:
+                    for keepdim in [False, True]:
+                        std1, mean1 = torch.std_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        std2 = x.std(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        mean2 = x.mean(dim=dim, keepdim=keepdim)
+                        self.assertEqual(std1, std2)
+                        self.assertEqual(mean1, mean2)
+
+    def test_std_mean_all_dims(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 50, 20, device=device)
+            for unbiased in [False, True]:
+                std1, mean1 = torch.std_mean(x, unbiased=unbiased)
+                std2 = x.std(unbiased=unbiased)
+                mean2 = x.mean()
+                self.assertEqual(std1, std2)
+                self.assertEqual(mean1, mean2)
+
+    def test_var_mean(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 300, 50, device=device)
+            for dim in range(x.dim()):
+                for unbiased in [False, True]:
+                    for keepdim in [False, True]:
+                        var1, mean1 = torch.var_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        var2 = x.var(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        mean2 = x.mean(dim=dim, keepdim=keepdim)
+                        self.assertEqual(var1, var2)
+                        self.assertEqual(mean1, mean2)
+
+    def test_var_mean_all_dims(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 50, 20, device=device)
+            for unbiased in [False, True]:
+                var1, mean1 = torch.var_mean(x, unbiased=unbiased)
+                var2 = x.var(unbiased=unbiased)
+                mean2 = x.mean()
+                self.assertEqual(var1, var2)
+                self.assertEqual(mean1, mean2)
+
     def test_zeros_like(self):
         expected = torch.zeros(100, 100)
 
@@ -2680,7 +2736,7 @@ class _TestTorchMixin(object):
         r = torch.ones(num_elements, dtype=torch.float)
         scale = 1.0
         zero_point = 2
-        qr = r.quantize_linear(scale, zero_point)
+        qr = r.quantize_linear(scale, zero_point, torch.qint8)
         self.assertEqual(qr.q_scale(), scale)
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
@@ -2698,7 +2754,7 @@ class _TestTorchMixin(object):
         # Scalar Tensor
         # item
         r = torch.ones(1, dtype=torch.float)
-        qr = r.quantize_linear(scale, zero_point)
+        qr = r.quantize_linear(scale, zero_point, torch.qint8)
         self.assertEqual(qr.item(), 1)
         self.assertEqual(qr[0].item(), 1)
         # assignment
@@ -2714,7 +2770,7 @@ class _TestTorchMixin(object):
                          "tensor([15.], size=(1,), dtype=torch.qint8, " +
                          "scale=1.0, zero_point=2)")
         empty_r = torch.ones((0, 1), dtype=torch.float)
-        empty_qr = empty_r.quantize_linear(scale, zero_point)
+        empty_qr = empty_r.quantize_linear(scale, zero_point, torch.qint8)
         self.assertEqual(str(empty_qr),
                          "tensor([], size=(0, 1), dtype=torch.qint8, " +
                          "scale=1.0, zero_point=2)")
@@ -2724,7 +2780,7 @@ class _TestTorchMixin(object):
         r = torch.from_numpy(r).float()
         scale = 2
         zero_point = 2
-        qr = r.quantize_linear(scale, zero_point)
+        qr = r.quantize_linear(scale, zero_point, torch.qint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 

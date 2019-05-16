@@ -6,9 +6,11 @@
 #if defined(__CUDACC__)
 #include <THC/THCDeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
+#include <thrust/tuple.h>
 #elif defined(__HIPCC__)
 #include <THH/THHDeviceUtils.cuh>
 #include <ATen/native/hip/DeviceSqrt.cuh>
+#include <thrust/tuple.h>
 #else
 #include <cmath>
 #define device_sqrt std::sqrt
@@ -42,7 +44,7 @@ struct WelfordData {
 };
 
 
-template <typename scalar_t, typename acc_scalar_t, typename index_t, typename combine_t>
+template <typename scalar_t, typename acc_scalar_t, typename index_t, typename combine_t, typename res_t>
 struct WelfordOps {
   bool unbiased;
   bool take_sqrt;
@@ -80,12 +82,18 @@ struct WelfordOps {
       new_count
     };
   }
-  inline C10_DEVICE scalar_t project(acc_t acc) const {
+  inline C10_DEVICE res_t project(acc_t acc) const {
+    auto mean = acc.mean;
     combine_t divisor = unbiased ? (acc.nf - 1) : acc.nf;
     auto ret = (divisor > 0) ?
       (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
       : NAN;
-    return (scalar_t) ret;
+#if defined(__CUDACC__) || defined(__HIPCC__)
+    thrust::tuple<scalar_t, scalar_t> results((scalar_t) ret, (scalar_t) mean);
+#else
+    std::tuple<scalar_t, scalar_t> results{(scalar_t) ret, (scalar_t) mean};
+#endif
+    return results;
   }
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline __device__ acc_t warp_shfl_down(acc_t acc, int offset) const {
