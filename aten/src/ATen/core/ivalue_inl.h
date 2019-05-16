@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <type_traits>
 
+#include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
@@ -479,6 +480,7 @@ DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
+DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 
 template <typename T>
 struct _fake_type {};

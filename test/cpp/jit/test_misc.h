@@ -691,6 +691,8 @@ void testRecordFunction() {
             std::make_tuple(std::string(getFullName(&fn)), sizes));
       }, [](const autograd::profiler::RecordFunction&) {}, true);
 
+  autograd::profiler::setSamplingProbability(1.0);
+
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
   auto t2 = invokeTestRecordFunction(t);

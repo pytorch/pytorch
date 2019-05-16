@@ -41,7 +41,7 @@ public:
   Tensor values() const { return values_; }
 
   IntArrayRef strides() const override;
-  bool is_contiguous() const override;
+  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const override;
   int64_t stride(int64_t d) const override;
   void resize_dim(int64_t ndim) override;
   void set_size(int64_t dim, int64_t new_size) override;
@@ -185,11 +185,19 @@ public:
 
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
-   * See NOTE [ TensorImpl Shallow-Copying ] for details.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
    */
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<SparseTensorImpl>(type_id(), dtype());
-    copy_tensor_data(/*src_impl=*/this, /*dest_impl=*/impl.get());
+    copy_tensor_data(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/version_counter,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
 
     // Sparse-specific fields
     impl->sparse_dim_ = sparse_dim();
@@ -203,11 +211,14 @@ public:
 
   /**
    * Shallow-copies data from another TensorImpl into this TensorImpl.
-   * See NOTE [ TensorImpl Shallow-Copying ] for details.
    */
   void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
     AT_ASSERT(impl->is_sparse());
-    copy_tensor_data(/*src_impl=*/impl.get(), /*dest_impl=*/this);
+    copy_tensor_data(
+      /*src_impl=*/impl.get(),
+      /*dest_impl=*/this,
+      /*version_counter=*/version_counter(),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
 
     // Sparse-specific fields
     auto sparse_impl = static_cast<SparseTensorImpl*>(impl.get());

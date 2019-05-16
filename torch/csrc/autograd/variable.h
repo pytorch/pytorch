@@ -509,19 +509,20 @@ inline Variable make_variable_view(
   if (data.defined()) {
     if (is_differentiable) {
       /// Differentiable view. Track history with DifferentiableViewMeta.
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
-      data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/0,
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::DifferentiableViewMeta>(
         data_impl_copy.get(), std::move(base), std::move(gradient_edge)));
       return Variable(data_impl_copy);
     } else {
       /// Non-differentiable view. Just share version counter.
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
-      data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl_copy.get(), false, std::move(gradient_edge)));
-      auto var = Variable(data_impl_copy);
-      var.set_version_counter(base.version_counter());
-      return var;
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/base.version_counter(),
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+      data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
+        data_impl_copy.get(), false, std::move(gradient_edge)));
+      return Variable(data_impl_copy);
     }
   }
   return Variable();
@@ -535,9 +536,11 @@ inline Variable make_variable(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
-    data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-    data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl_copy.get(), requires_grad));
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+      /*version_counter=*/0,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
+      data_impl_copy.get(), requires_grad));
     return Variable(data_impl_copy);
   }
   return Variable();
@@ -568,9 +571,11 @@ inline Variable make_variable(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
-    data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-    data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl_copy.get(), false, std::move(gradient_edge)));
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+      /*version_counter=*/0,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
+      data_impl_copy.get(), false, std::move(gradient_edge)));
     return Variable(data_impl_copy);
   }
   return Variable();

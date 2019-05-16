@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/TensorImpl.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/util/Exception.h>
 
 namespace at {
@@ -36,7 +37,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     AT_ERROR("opaque tensors do not have strides");
   }
 
-  bool is_contiguous() const override {
+  bool is_contiguous(c10::MemoryFormat memory_format=c10::MemoryFormat::Any) const override {
     AT_ERROR("opaque tensors do not have is_contiguous");
   }
 
@@ -78,13 +79,21 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
 
 /**
  * Return a TensorImpl that is a shallow-copy of this TensorImpl.
- * See NOTE [ TensorImpl Shallow-Copying ] for details.
+ *
+ * For usage of `version_counter` and `allow_tensor_metadata_change`,
+ * see NOTE [ TensorImpl Shallow-Copying ].
  */
-c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
+c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const override {
   //AT_ASSERT(false);
   auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
     type_id(), dtype(), device(), opaque_handle_, sizes_);
-  copy_tensor_data(/*src_impl=*/this, /*dest_impl=*/impl.get());
+  copy_tensor_data(
+    /*src_impl=*/this,
+    /*dest_impl=*/impl.get(),
+    /*version_counter=*/version_counter,
+    /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
 
   // OpaqueTensorImpl-specific fields (none currently).
   return impl;
@@ -92,10 +101,13 @@ c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
 
   /**
    * Shallow-copies data from another TensorImpl into this TensorImpl.
-   * See NOTE [ TensorImpl Shallow-Copying ] for details.
    */
   void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
-    copy_tensor_data(/*src_impl=*/impl.get(), /*dest_impl=*/this);
+    copy_tensor_data(
+      /*src_impl=*/impl.get(),
+      /*dest_impl=*/this,
+      /*version_counter=*/version_counter(),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
 
     // OpaqueTensorImpl-specific fields
     auto opaque_impl = static_cast<OpaqueTensorImpl<OpaqueHandle>*>(impl.get());

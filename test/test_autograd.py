@@ -2162,6 +2162,24 @@ class TestAutograd(TestCase):
             run_functional_checks(self, "test_cdist", "cdist", f,
                                   True, f_args_variable, f_args_tensor)
 
+    def test_var_mean_differentiable(self):
+        dim = [2, 4]
+        keepdim = False
+        input1 = torch.randn(3, 4, 5, 6, 2, 3, requires_grad=True)
+        input2 = deepcopy(input1)
+        var1, mean1 = torch.var_mean(input1, dim=dim, keepdim=keepdim)
+        var2 = input2.var(dim=dim, keepdim=keepdim)
+        mean2 = input2.mean(dim=dim, keepdim=keepdim)
+        grad = torch.randn(3, 4, 6, 3, requires_grad=True)
+
+        r1 = var1 * var1 * mean1 * mean1
+        r2 = var2 * var2 * mean2 * mean2
+        self.assertTrue(torch.allclose(r1, r2, rtol=0.01, atol=0.0))
+
+        torch.autograd.backward(r1, grad)
+        torch.autograd.backward(r2, grad)
+        self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
+
     @skipIfNoLapack
     def test_cholesky(self):
         def func(root, upper):

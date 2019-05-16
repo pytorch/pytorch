@@ -5,6 +5,7 @@
 #include <numeric>
 
 #include <c10/core/Backend.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeId.h>
@@ -387,12 +388,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * compute_contiguous() for the exact definition of whether or not
    * a tensor is contiguous or not.
    */
-  virtual bool is_contiguous() const {
-#ifdef DEBUG
-    AT_ASSERT(compute_contiguous() == is_contiguous_);
-#endif
-    return is_contiguous_;
-  }
+  virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const;
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
@@ -818,6 +814,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
+   * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
   virtual void set_allow_tensor_metadata_change(bool value) {
     allow_tensor_metadata_change_ = value;
@@ -825,6 +822,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   /**
    * True if a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
+   * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
   virtual bool allow_tensor_metadata_change() const {
     return allow_tensor_metadata_change_;
@@ -861,26 +859,30 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // 2. `var.set_data(tensor)` uses `shallow_copy_from()` to copy storage pointer and tensor metadata from
   // `tensor` into `var`, while keeping `var`'s original AutogradMeta.
   //
-  // Functions that shallow-copy a TensorImpl (such as `shallow_copy_and_detach()` and `shallow_copy_from()`)
-  // copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
-  // by value. However, the following fields are not copied:
+  // Functions that shallow-copy a TensorImpl (such as `shallow_copy_and_detach()` / `shallow_copy_from()` /
+  // `copy_tensor_data()`) copy the storage pointer and the tensor metadata fields (e.g. sizes / strides /
+  // storage_offset) by value. However, the following fields are not copied:
   //
   // 1. the AutogradMeta pointer, because it is unique for each Variable.
-  // 2. the version counter, because although it lives in TensorImpl, the version counter is managed
-  // by autograd, and the call sites of the shallow-copying functions from autograd should decide what
-  // the version counter should be for each new TensorImpl. See NOTE [ Version Counter Sharing ] for details.
+  // 2. the version counter, because the destination TensorImpl's version counter is either set to the
+  // passed-in `version_counter` (in `shallow_copy_and_detach()` and `copy_tensor_data()`), or it is kept
+  // intact (in `shallow_copy_from()`). See NOTE [ Version Counter Sharing ] for details.
   //
-  // Also note that we don't set `allow_tensor_metadata_change_` to false in the TensorImpl shallow-copying functions,
-  // because there are call sites to these function that need to change the shallow copy's size or storage afterwards,
-  // and setting `allow_tensor_metadata_change_` to false would prevent those changes from happening and is undesirable.
+  // In `shallow_copy_and_detach()` and `copy_tensor_data()`, the passed-in `allow_tensor_metadata_change`
+  // determines whether the TensorImpl shallow-copy allows changes to its metadata (e.g. sizes / strides /
+  // storage / storage_offset). See NOTE [ Metadata Change for a Detached Tensor ] for details.
 
   /**
    * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
    * from one TensorImpl to another TensorImpl.
    *
-   * See NOTE [ TensorImpl Shallow-Copying ] for details.
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
    */
-  void copy_tensor_data(const TensorImpl* src_impl, TensorImpl* dest_impl) const {
+  void copy_tensor_data(
+      const TensorImpl* src_impl,
+      TensorImpl* dest_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const {
     dest_impl->storage_ = src_impl->storage_;
     dest_impl->sizes_ = src_impl->sizes_;
     dest_impl->strides_ = src_impl->strides_;
@@ -891,15 +893,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     dest_impl->is_contiguous_ = src_impl->is_contiguous_;
     dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
     dest_impl->reserved_ = src_impl->reserved_;
+    dest_impl->set_version_counter(version_counter);
+    dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
   }
 
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
-   * See NOTE [ TensorImpl Shallow-Copying ] for details.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
    */
-  virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
+  virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id());
-    copy_tensor_data(/*src_impl=*/this, /*dest_impl=*/impl.get());
+    copy_tensor_data(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/version_counter,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;
@@ -907,10 +919,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   /**
    * Shallow-copies data from another TensorImpl into this TensorImpl.
-   * See NOTE [ TensorImpl Shallow-Copying ] for details.
    */
   virtual void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) {
-    copy_tensor_data(/*src_impl=*/impl.get(), /*dest_impl=*/this);
+    copy_tensor_data(
+      /*src_impl=*/impl.get(),
+      /*dest_impl=*/this,
+      /*version_counter=*/version_counter(),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
     refresh_numel();
     refresh_contiguous();
   }
@@ -1477,15 +1492,21 @@ protected:
   bool is_contiguous_ = true;
   bool is_wrapped_number_ = false;
 
-  // Previously, if we change the tensor metadata (e.g. sizes / strides / storage / storage_offset)
-  // of a derived tensor (i.e. tensors created from Python `tensor.data` or Python/C++ `tensor.detach()`),
-  // those metadata in the original tensor will also be updated. However, the new behavior is that
-  // those metadata changes to a derived tensor will not update the original tensor anymore, and we
-  // need this flag to make such changes explicitly illegal, to prevent users from changing metadata of
-  // the derived tensor and expecting the original tensor to also be updated.
+  // NOTE [ Metadata Change for a Detached Tensor ]
   //
-  // NOTE: For a full list of tensor metadata fields, please see `shallow_copy_and_detach()` in TensorImpl
-  // and its subclasses to find which fields are copied by value.
+  // Normally, a user is allowed to change the tensor metadata
+  // (e.g. sizes / strides / storage / storage_offset) of a tensor.
+  // However, if the tensor is created by `t1_detached = t1.data` in Python
+  // or `t1_detached = t1.detach()` in Python/C++, those changes to the
+  // tensor metadata of `t1_detached` will not be propagated back to the
+  // original tensor `t1`. In order to make such changes explicitly illegal,
+  // we created the `allow_tensor_metadata_change_` flag, to prevent users
+  // from changing metadata of the detached tensor and expecting the original
+  // tensor to also be updated.
+  //
+  // NOTE: For a full list of tensor metadata fields, please see
+  // `shallow_copy_and_detach()` in TensorImpl and its subclasses to find
+  // which fields are copied by value.
   bool allow_tensor_metadata_change_ = true;
 
   // we decide to keep reserved_ and it will
