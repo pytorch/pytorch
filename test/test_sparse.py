@@ -1969,8 +1969,8 @@ class TestSparse(TestCase):
         i = self.index_tensor([[0], [1]])
         v = self.value_tensor([[3, 4, 5]])
         t = torch.sparse_coo_tensor(i, v, torch.Size([1, 2, 3]))
-        i.resize_as_(torch.zeros(4, 5).long())
-        v.resize_as_(torch.ones(4, 5))
+        i.resize_as_(self.index_tensor([0], [1]))
+        v.resize_as_(self.value_tensor([3, 4, 5])
         self.assertEqual(list(t.coalesce().indices().size()), [2, 1])
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
@@ -1985,8 +1985,8 @@ class TestSparse(TestCase):
         i = self.index_tensor([[0], [1]])
         v = self.value_tensor([[3, 4, 5]])
         t = torch.sparse_coo_tensor(i, v, torch.Size([1, 2, 3]))
-        i.set_(torch.zeros(4, 5).long())
-        v.set_(torch.ones(4, 5))
+        i.set_(self.index_tensor([0], [1]))
+        v.set_(self.value_tensor([3, 4, 5])
         self.assertEqual(list(t.coalesce().indices().size()), [2, 1])
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
