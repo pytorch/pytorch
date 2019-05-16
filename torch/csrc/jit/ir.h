@@ -607,7 +607,7 @@ struct TORCH_API Node {
 
   template <typename T>
   T* expect() {
-    AT_CHECK(
+    TORCH_CHECK(
         T::Kind == kind(),
         "expected a ",
         T::Kind.toDisplayString(),

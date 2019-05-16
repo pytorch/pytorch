@@ -225,10 +225,12 @@ Reduction Ops
 .. autofunction:: norm
 .. autofunction:: prod
 .. autofunction:: std
+.. autofunction:: std_mean
 .. autofunction:: sum
 .. autofunction:: unique
 .. autofunction:: unique_consecutive
 .. autofunction:: var
+.. autofunction:: var_mean
 
 
 Comparison Ops

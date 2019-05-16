@@ -547,7 +547,7 @@ struct CodeImpl {
     list.size = 0;
   }
   void listInsert(ListHandle<int>& list, int value) {
-    AT_CHECK(
+    TORCH_CHECK(
         list.start + list.size == (int)int_data.size(),
         "another list already started");
     int_data.push_back(value);
@@ -558,7 +558,7 @@ struct CodeImpl {
     list.size = 0;
   }
   void listInsert(ListHandle<bool>& list, int value) {
-    AT_CHECK(
+    TORCH_CHECK(
         list.start + list.size == (int)bool_data.size(),
         "another list already started");
     bool_data.push_back(value);

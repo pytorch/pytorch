@@ -14,8 +14,8 @@ namespace detail {
 template <typename Derived>
 DropoutImplBase<Derived>::DropoutImplBase(DropoutOptions options_)
     : options(options_) {
-  AT_CHECK(options.rate_ >= 0, "Dropout rate must not be less than zero");
-  AT_CHECK(options.rate_ <= 1, "Dropout rate must not be greater than one");
+  TORCH_CHECK(options.rate_ >= 0, "Dropout rate must not be less than zero");
+  TORCH_CHECK(options.rate_ <= 1, "Dropout rate must not be greater than one");
 }
 
 template <typename Derived>
