@@ -65,7 +65,13 @@
 // with [[deprecated]] though (although, if you are on an old version
 // of gcc which doesn't understand attributes, you'll get a -Wattributes
 // error that it is ignored
+#if defined(__GNUC__) && __GNUC__ < 5
+// empty for older gcc versions to avoid warning described above.
+# define C10_DEPRECATED_USING
+#else
 # define C10_DEPRECATED_USING [[deprecated]]
+#endif
+
 #elif defined(__GNUC__)
 # define C10_DEPRECATED_USING __attribute__((deprecated))
 #else
