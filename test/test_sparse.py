@@ -1957,6 +1957,37 @@ class TestSparse(TestCase):
         do_test(self.sparse_empty(3, 0).data)
         do_test(self.sparse_empty(3, 0).detach())
 
+    def test_change_tensor_metadata(self):
+        i = torch.zeros([1, 1])
+        v = torch.ones([1, 2, 3])
+        t = torch.sparse_coo_tensor(i, v, torch.Size([2, 2, 3]))
+        v.resize_(4, 5)
+        self.assertEqual(list(t.coalesce().values().size()), [1, 2, 3])
+
+        i = torch.zeros([1, 1])
+        v = torch.ones([1, 2, 3])
+        t = torch.sparse_coo_tensor(i, v, torch.Size([2, 2, 3]))
+        v.resize_as_(torch.zeros(4, 5))
+        self.assertEqual(list(t.coalesce().values().size()), [1, 2, 3])
+
+        i = torch.zeros([1, 1])
+        v = torch.ones([1, 2, 3])
+        t = torch.sparse_coo_tensor(i, v, torch.Size([2, 2, 3]))
+        v.as_strided_((2, 3), (3, 1))
+        self.assertEqual(list(t.coalesce().values().size()), [1, 2, 3])
+
+        i = torch.zeros([1, 1])
+        v = torch.ones([1, 2, 3])
+        t = torch.sparse_coo_tensor(i, v, torch.Size([2, 2, 3]))
+        v.set_(torch.zeros(4, 5))
+        self.assertEqual(list(t.coalesce().values().size()), [1, 2, 3])
+
+        i = torch.zeros([1, 1])
+        v = torch.ones([1, 2, 3])
+        t = torch.sparse_coo_tensor(i, v, torch.Size([2, 2, 3]))
+        v.transpose_(0, 1)
+        self.assertEqual(list(t.coalesce().values().size()), [1, 2, 3])
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
