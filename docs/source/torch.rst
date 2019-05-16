@@ -223,10 +223,12 @@ Reduction Ops
 .. autofunction:: norm
 .. autofunction:: prod
 .. autofunction:: std
+.. autofunction:: std_mean
 .. autofunction:: sum
 .. autofunction:: unique
 .. autofunction:: unique_consecutive
 .. autofunction:: var
+.. autofunction:: var_mean
 
 
 Comparison Ops
@@ -306,6 +308,7 @@ BLAS and LAPACK Operations
 .. autofunction:: btriunpack
 .. autofunction:: chain_matmul
 .. autofunction:: cholesky
+.. autofunction:: cholesky_inverse
 .. autofunction:: cholesky_solve
 .. autofunction:: dot
 .. autofunction:: eig

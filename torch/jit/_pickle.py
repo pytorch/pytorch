@@ -1,24 +1,23 @@
-import pickle
+# These functions are referenced from the pickle archives produced by
+# ScriptModule.save()
+
+def build_intlist(data):
+    return data
 
 
-class TensorID(object):
-    def __setstate__(self, id):
-        self.id = id
+def build_tensorlist(data):
+    return data
 
 
-class IntList(object):
-    def __setstate__(self, data):
-        self.data = data
+def build_doublelist(data):
+    return data
 
 
-class Unpickler(pickle.Unpickler):
-    def find_class(self, module, name):
-        if not module == '__main__':
-            return None
+def build_boollist(data):
+    return data
 
-        if name == 'TensorID':
-            return TensorID
-        elif name == 'IntList':
-            return IntList
-        elif name == 'LiteralTensor':
-            return LiteralTensor
+
+def build_tensor_from_id(data):
+    if isinstance(data, int):
+        # just the id, can't really do anything
+        return data

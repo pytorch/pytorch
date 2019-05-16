@@ -1387,6 +1387,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   return work;
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce_scatter(
+    std::vector<at::Tensor>& outputs,
+    std::vector<std::vector<at::Tensor>>& inputs,
+    const ReduceScatterOptions& opts) {
+  throw std::runtime_error("ProcessGroupGloo does not support reduce_scatter");
+}
+
 at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
   if (tensors.size() != 1) {
     throw std::runtime_error("ProcessGroupGloo::send takes a single tensor");

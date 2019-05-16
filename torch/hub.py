@@ -142,7 +142,11 @@ def _get_cache_or_reload(github, force_reload):
     # Parse github repo information
     repo_owner, repo_name, branch = _parse_repo_info(github)
 
-    repo_dir = os.path.join(hub_dir, repo_name + '_' + branch)
+    # Github renames folder repo-v1.x.x to repo-1.x.x
+    # We don't know the repo name before downloading the zip file
+    # and inspect name from it.
+    # To check if cached repo exists, we need to normalize folder names.
+    repo_dir = os.path.join(hub_dir, '_'.join([repo_owner, repo_name, branch]))
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
 
@@ -155,9 +159,6 @@ def _get_cache_or_reload(github, force_reload):
         url = _git_archive_link(repo_owner, repo_name, branch)
         _download_archive_zip(url, cached_file)
 
-        # Github uses '{repo_name}-{branch_name}' as folder name which is not importable
-        # We need to manually rename it to '{repo_name}_{branch_name}'
-        # Github also renames folder repo-v1.x.x to repo-1.x.x
         cached_zipfile = zipfile.ZipFile(cached_file)
         extraced_repo_name = cached_zipfile.infolist()[0].filename
         extracted_repo = os.path.join(hub_dir, extraced_repo_name)
@@ -170,17 +171,6 @@ def _get_cache_or_reload(github, force_reload):
         shutil.move(extracted_repo, repo_dir)  # rename the repo
 
     return repo_dir
-
-
-def _load_hubconf_module(github, force_reload):
-    # Setup hub_dir to save downloaded files
-    _setup_hubdir()
-
-    repo_dir = _get_cache_or_reload(github, force_reload)
-
-    m = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
-
-    return m
 
 
 def _check_module_exists(name):
@@ -214,6 +204,10 @@ def _load_entry_from_hubconf(m, model):
     if not isinstance(model, str):
         raise ValueError('Invalid input: model should be a string of function name')
 
+    # Note that if a missing dependency is imported at top level of hubconf, it will
+    # throw before this function. It's a chicken and egg situation where we have to
+    # load hubconf to know what're the dependencies, but to import hubconf it requires
+    # a missing package. This is fine, Python will throw proper error message for users.
     _check_dependencies(m)
 
     func = _load_attr_from_module(m, model)
@@ -245,6 +239,7 @@ def set_dir(d):
 def list(github, force_reload=False):
     r"""
     List all entrypoints available in `github` hubconf.
+
     Args:
         github: Required, a string with format "repo_owner/repo_name[:tag_name]" with an optional
             tag/branch. The default branch is `master` if not specified.
@@ -257,8 +252,16 @@ def list(github, force_reload=False):
     Example:
         >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
     """
+    # Setup hub_dir to save downloaded files
+    _setup_hubdir()
 
-    hub_module = _load_hubconf_module(github, force_reload)
+    repo_dir = _get_cache_or_reload(github, force_reload)
+
+    sys.path.insert(0, repo_dir)
+
+    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+
+    sys.path.remove(repo_dir)
 
     # We take functions starts with '_' as internal helper functions
     entrypoints = [f for f in dir(hub_module) if callable(getattr(hub_module, f)) and not f.startswith('_')]
@@ -269,8 +272,9 @@ def list(github, force_reload=False):
 def help(github, model, force_reload=False):
     r"""
     Show the docstring of entrypoint `model`.
+
     Args:
-        github: Required, a string with format "repo_owner/repo_name[:tag_name]" with an optional
+        github: Required, a string with format <repo_owner/repo_name[:tag_name]> with an optional
             tag/branch. The default branch is `master` if not specified.
             Example: 'pytorch/vision[:hub]'
         model: Required, a string of entrypoint name defined in repo's hubconf.py
@@ -279,14 +283,27 @@ def help(github, model, force_reload=False):
     Example:
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
-    hub_module = _load_hubconf_module(github, force_reload)
+    # Setup hub_dir to save downloaded files
+    _setup_hubdir()
+
+    repo_dir = _get_cache_or_reload(github, force_reload)
+
+    sys.path.insert(0, repo_dir)
+
+    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+
+    sys.path.remove(repo_dir)
 
     entry = _load_entry_from_hubconf(hub_module, model)
 
     return entry.__doc__
 
 
-def load(github, model, force_reload=False, *args, **kwargs):
+# Ideally this should be `def load(github, model, *args, forece_reload=False, **kwargs):`,
+# but Python2 complains syntax error for it. We have to skip force_reload in function
+# signature here but detect it in kwargs instead.
+# TODO: fix it after Python2 EOL
+def load(github, model, *args, **kwargs):
     r"""
     Load a model from a github repo, with pretrained weights.
 
@@ -295,9 +312,9 @@ def load(github, model, force_reload=False, *args, **kwargs):
             tag/branch. The default branch is `master` if not specified.
             Example: 'pytorch/vision[:hub]'
         model: Required, a string of entrypoint name defined in repo's hubconf.py
-        force_reload: Optional, whether to discard the existing cache and force a fresh download.
-            Default is `False`.
         *args: Optional, the corresponding args for callable `model`.
+        force_reload: Optional, whether to force a fresh download of github repo unconditionally.
+            Default is `False`.
         **kwargs: Optional, the corresponding kwargs for callable `model`.
 
     Returns:
@@ -306,11 +323,25 @@ def load(github, model, force_reload=False, *args, **kwargs):
     Example:
         >>> model = torch.hub.load('pytorch/vision', 'resnet50', pretrained=True)
     """
-    hub_module = _load_hubconf_module(github, force_reload)
+    # Setup hub_dir to save downloaded files
+    _setup_hubdir()
+
+    force_reload = kwargs.get('force_reload', False)
+    kwargs.pop('force_reload', None)
+
+    repo_dir = _get_cache_or_reload(github, force_reload)
+
+    sys.path.insert(0, repo_dir)
+
+    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
 
     entry = _load_entry_from_hubconf(hub_module, model)
 
-    return entry(*args, **kwargs)
+    model = entry(*args, **kwargs)
+
+    sys.path.remove(repo_dir)
+
+    return model
 
 
 def _download_url_to_file(url, dst, hash_prefix, progress):

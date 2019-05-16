@@ -7,6 +7,8 @@ smoke_linux_test: &smoke_linux_test
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  - attach_workspace:
+      at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
   - run:
@@ -32,10 +34,12 @@ smoke_mac_test: &smoke_mac_test
   macos:
     xcode: "9.0"
   steps:
+    - attach_workspace:
+        at: ~/workspace
     - run:
         <<: *binary_populate_env
     - run:
-        <<: *macos_brew_update
+        <<: *binary_macos_brew_update
     - run:
         name: Build
         no_output_timeout: "1h"
@@ -44,6 +48,3 @@ smoke_mac_test: &smoke_mac_test
           source "/Users/distiller/project/env"
           git clone https://github.com/pytorch/builder.git
           unbuffer ./builder/smoke_test.sh | ts
-
-
-

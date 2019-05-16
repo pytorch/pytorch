@@ -167,7 +167,9 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)
 
     @given(
-        stride=st.integers(1, 2),
+        stride_0=st.integers(1, 2),
+        stride_1=st.integers(1, 2),
+        stride_2=st.integers(1, 2),
         size=st.integers(5, 12),
         # depthwise 3x3x3 fast path only works for a multiple of 8
         group=st.sampled_from([8, 24, 32]),
@@ -182,7 +184,9 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
     )
     def test_dnnlowp_depthwise_3x3x3_conv(
         self,
-        stride,
+        stride_0,
+        stride_1,
+        stride_2,
         size,
         group,
         batch_size,
@@ -203,7 +207,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         order = "NHWC"
 
         X, W, b = generate_convnd_inputs(
-            (stride,) * 3,
+            (stride_0, stride_1, stride_2),
             (pad,) * 3,
             (kernel,) * 3,
             (dilation,) * 3,
@@ -266,7 +270,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 op_type,
                 ["X_q" if do_quantize else "X", "W", "b"],
                 ["Y_q" if do_dequantize else "Y"],
-                strides=[stride] * 3,
+                strides=[stride_0, stride_1, stride_2],
                 kernels=[kernel] * 3,
                 dilations=[dilation] * 3,
                 pads=[pad] * (3 * 2),

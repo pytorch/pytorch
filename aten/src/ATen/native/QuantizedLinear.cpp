@@ -249,7 +249,7 @@ Tensor fbgemm_pack_quantized_matrix(
       /*ld=*/K,
       /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
       /*groups=*/1);
-  return cpp_custom_type_hack::create(std::move(ptr));
+  return cpp_custom_type_hack::create(std::move(ptr), weight.options());
 }
 
 #else // USE_FBGEMM

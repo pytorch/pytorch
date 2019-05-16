@@ -64,7 +64,7 @@ def _list_supported_ops():
         scripted = torch.jit._try_compile_weak_script(attr)
         if scripted is None:
             continue
-        schema = scripted._get_method('forward').schema()
+        schema = scripted.forward.schema
         functions.append(emit_schema(name, elem, schema))
 
     def is_tensor_method(schema):

@@ -79,6 +79,11 @@ class DataNetFiller : public Filler {
   const NetDef data_net_;
 };
 
+void fill_with_type(
+    const TensorFiller& filler,
+    const std::string& type,
+    TensorCPU* output);
+
 /*
  * @run_net: the predict net with parameter and input names
  * @input_dims: the input dimentions of all operator inputs of run_net
@@ -95,10 +100,7 @@ class DataRandomFiller : public Filler {
 
   void fill_parameter(Workspace* ws) const override;
 
- protected:
-  DataRandomFiller() {}
-
-  TensorFiller get_tensor_filler(
+  static TensorFiller get_tensor_filler(
       const OperatorDef& op_def,
       int input_index,
       const std::vector<std::vector<int64_t>>& input_dims) {
@@ -116,6 +118,9 @@ class DataRandomFiller : public Filler {
     auto filler = schema->InputFillers(input_dims)[input_index];
     return filler;
   }
+
+ protected:
+  DataRandomFiller() {}
 
   using filler_type_pair_t = std::pair<TensorFiller, std::string>;
   std::unordered_map<std::string, filler_type_pair_t> parameters_;

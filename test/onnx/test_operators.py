@@ -258,6 +258,10 @@ class TestOperators(TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2), x)
 
+    def test_maxpool_dilations(self):
+        x = torch.randn(20, 16, 50)
+        self.assertONNX(nn.MaxPool1d(2, stride=1, dilation=2), x, opset_version=10)
+
     def test_avg_pool2d(self):
         x = torch.randn(20, 16, 50, 32)
         self.assertONNX(nn.AvgPool2d(3, stride=2), x)

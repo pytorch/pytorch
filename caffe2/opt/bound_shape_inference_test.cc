@@ -51,7 +51,7 @@ TEST(BoundShapeInference, SparseLengthsSum) {
       "Weights", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {1000, 16}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape, "Weights", ShapeInfo::DimType::CONSTANT, {1000, 16});
@@ -86,7 +86,7 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
           ShapeInfo::DimType::CONSTANT, {1000, 58}, TensorProto_DataType_INT8));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape,
@@ -127,7 +127,7 @@ TEST(BoundShapeInference, LengthsRangeFill) {
   ShapeInfoMap shape_map;
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape,
@@ -175,7 +175,7 @@ TEST(BoundShapeInference, Reshape) {
   shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape, "X0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 1024});
@@ -203,7 +203,7 @@ TEST(BoundShapeInference, ConcatMissingInput) {
       "I0",
       makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60}));
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape, "I0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60});
@@ -233,7 +233,7 @@ TEST(BoundShapeInference, ConcatInferInputBackwards) {
       "W0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {101, 16}));
   shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape, "I0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60});
@@ -274,7 +274,7 @@ TEST(BoundShapeInference, Split) {
       "X1",
       makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 2, 48}));
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape, "X", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48});
@@ -317,7 +317,7 @@ TEST(BoundShapeInference, FC) {
   shape_map.emplace("B1", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {1024}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape, "X0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 1024});
@@ -342,7 +342,7 @@ TEST(BoundShapeInference, FC3D) {
   shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape, "X0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 1024});
@@ -381,7 +381,7 @@ TEST(BoundShapeInference, Combo0) {
       "Indices", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {2}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   LOG(INFO) << eng.PrintShapeInfo();
   verifyShapeInfo(
