@@ -189,6 +189,7 @@ extension_backends = ['MSNPU', 'XLA']
 # scalar_name, c_type, accreal, is_floating_type
 quantized_scalar_types = [
     ('QInt8', 'qint8', 'QInt8AccrealNotDefined', 'Qint8IsFloatingTypeNotDefined'),
+    ('QInt32', 'qint32', 'QInt32AccrealNotDefined', 'Qint32IsFloatingTypeNotDefined'),
 ]
 
 
@@ -389,9 +390,6 @@ def legacy_iterate_types():
         for density in densities:
             for scalar_type in (scalar_types + quantized_scalar_types):
                 if density == 'Mkldnn' and (backend != 'CPU' or scalar_type[0] != 'Float'):
-                    continue
-                if density == 'Sparse' and scalar_type[0] == 'Half':
-                    # THS does not do half type yet.
                     continue
                 else:
                     yield (backend, density, scalar_type)

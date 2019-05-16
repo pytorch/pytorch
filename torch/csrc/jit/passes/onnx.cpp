@@ -171,13 +171,14 @@ void BlockToONNX(
   torch::autograd::SymbolicContext ctx{};
   ctx.block = new_block;
   py::object onnx = py::module::import("torch.onnx");
-  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic");
+  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic_helper");
+  py::object onnx_registry = py::module::import("torch.onnx.symbolic_registry");
 
   // Returns a node that n maps to in the new graph
   auto envFn = [&env](Value* n) -> Value* {
     auto it = env.find(n);
-    AT_CHECK(it != env.end(), "Dangling node reference");
-    AT_CHECK(it->second, "Unused node was subsequently used");
+    TORCH_CHECK(it != env.end(), "Dangling node reference");
+    TORCH_CHECK(it->second, "Unused node was subsequently used");
     return it->second;
   };
 
@@ -211,7 +212,7 @@ void BlockToONNX(
         outputs[i]->setType(old->type());
         // Copy over source location and scope information to all nodes
         // created by the symbolic
-        outputs[i]->node()->setSourceLocation(node->getSourceLocation());
+        outputs[i]->node()->setSourceRange(node->sourceRange());
         outputs[i]->node()->setScope(node->scope());
         env[old] = outputs[i];
       } else {
@@ -295,7 +296,6 @@ void BlockToONNX(
     if (func) {
       pyobj = func->get();
     }
-
     if (!py::hasattr(pyobj, "symbolic")) {
       cloneNode(op);
       return;
@@ -312,13 +312,13 @@ void BlockToONNX(
     for (auto arg_type : op->cconv) {
       py::object obj;
       if (arg_type == 'c') {
-        AT_CHECK(
+        TORCH_CHECK(
             scalar_it != op->scalar_args.end(),
             "expected too many scalar args");
         obj = py::reinterpret_borrow<py::object>(
             py::handle((scalar_it++)->get()));
       } else if (arg_type == 'd') {
-        AT_CHECK(node_it != inputs.end(), "expected too many inputs");
+        TORCH_CHECK(node_it != inputs.end(), "expected too many inputs");
         obj = py::cast(envFn(*node_it++));
       } else {
         throw std::runtime_error("unexpected calling convention");
@@ -331,6 +331,8 @@ void BlockToONNX(
     // Call the symbolic function
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
+    py::object opset_version = onnx_symbolic.attr("_export_onnx_opset_version");
+    onnx_registry.attr("register_op")(op->name(), pyobj.attr("symbolic"), "", opset_version);
     py::object raw_output = onnx.attr("_run_symbolic_method")(
         op->name(), pyobj.attr("symbolic"), py_symbolic_args);
 

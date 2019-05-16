@@ -110,7 +110,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     auto python_op = static_cast<PythonOp*>(new_node);
     python_op->ignore_on_export = true;
   }
-  new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
+  new_node->setSourceRange(loc);
   for (auto& i : matched_schema->inputs)
     new_node->addInput(i);
 
@@ -448,7 +448,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
-    if (auto classType = ClassType::get(c10::QualifiedName(qualifiedName))) {
+    auto& pyCu = CompilationUnit::_get_python_cu();
+    if (auto classType = pyCu.get_class(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
     }
   }
