@@ -604,15 +604,16 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
 }
 
 inline at::Tensor Variable::tensor_data() const noexcept {
-  auto self_impl_copy = get()->shallow_copy_and_detach(); // yf225 TODO: shallow_copy_and_detach() needs to know what to do with version counter: share it, or set to a new one with count 0
-  self_impl_copy->set_version_counter(get()->version_counter());
-  self_impl_copy->set_allow_tensor_metadata_change(get()->allow_tensor_metadata_change());
+  auto self_impl_copy = get()->shallow_copy_and_detach(
+    /*version_counter=*/get()->version_counter(),
+    /*allow_tensor_metadata_change=*/get()->allow_tensor_metadata_change());
   return at::Tensor(self_impl_copy);
 }
 
 inline at::Tensor Variable::variable_data() const noexcept {
-  auto self_impl_copy = get()->shallow_copy_and_detach();
-  self_impl_copy->set_allow_tensor_metadata_change(false);
+  auto self_impl_copy = get()->shallow_copy_and_detach(
+    /*version_counter=*/0,
+    /*allow_tensor_metadata_change=*/false);
   self_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(self_impl_copy.get(), false));
   return at::Tensor(self_impl_copy);
 }
