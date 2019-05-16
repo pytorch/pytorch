@@ -251,6 +251,7 @@ struct TORCH_API Node {
   Block* owning_block_;
   std::shared_ptr<SourceLocation> source_location_;
   ScopePtr scope_;
+  CallStackPtr callstack_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
@@ -317,6 +318,12 @@ struct TORCH_API Node {
       return "";
     }
     return scope_->namesFromRoot();
+  }
+  CallStackPtr callstack() const {
+    return callstack_;
+  }
+  void setCallStack(CallStackPtr callstack) {
+    callstack_ = std::move(callstack);
   }
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
@@ -952,6 +959,7 @@ struct Graph {
   std::unordered_map<std::string, Value*> unique_names_;
 
   ScopePtr current_scope_;
+  CallStackPtr current_callstack_;
 
   Block* const block_;
   // when insertNode() is called, the node is inserted before this node
@@ -962,6 +970,7 @@ struct Graph {
   Graph(ScopePtr scope_root)
       : next_unique_(0),
         current_scope_(std::move(scope_root)),
+        current_callstack_(c10::make_intrusive<CallStack>()),
         block_(new Block(this, nullptr)),
         insert_before_(return_node()) {}
 
@@ -1015,6 +1024,19 @@ struct Graph {
   }
   void set_current_scope(ScopePtr scope) {
     current_scope_ = std::move(scope);
+  }
+
+  void push_callstack(script::Function* fn) {
+    current_callstack_ = current_callstack_->insertSubscope(fn);
+  }
+  void pop_callstack() {
+    current_callstack_ = current_callstack_->parent();
+  }
+  CallStackPtr current_callstack() {
+    return current_callstack_;
+  }
+  void set_current_callstack(CallStackPtr callstack) {
+    current_callstack_ = std::move(callstack);
   }
 
   Value* addInput(std::string name = "") {
