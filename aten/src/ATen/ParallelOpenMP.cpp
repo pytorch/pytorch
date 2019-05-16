@@ -10,7 +10,6 @@
 namespace at {
 
 namespace {
-
 // Number of threads set by the user
 std::atomic<int> num_threads{-1};
 
@@ -32,9 +31,7 @@ void init_num_threads() {
 }
 
 void set_num_threads(int nthreads) {
-  if (nthreads <= 0) {
-    throw std::runtime_error("Expected positive number of threads");
-  }
+  AT_CHECK(nthreads > 0, "Expected positive number of threads");
   num_threads.store(nthreads);
 #ifdef _OPENMP
   omp_set_num_threads(nthreads);
