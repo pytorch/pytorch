@@ -17,7 +17,7 @@ static void _reduction_with_indices_allocate_or_resize_output(
     result_sizes[dim] = 1;
   }
   if (values.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         self.type() == values.type(),
         "output values must be of same type as input");
     if (!keepdim && values.dim() == self.dim() - 1) {
@@ -29,9 +29,9 @@ static void _reduction_with_indices_allocate_or_resize_output(
     values = at::empty(result_sizes, self.options());
   }
   if (indices.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         indices.dtype() == kLong, "output indices must be of scalar type Long");
-    AT_CHECK(
+    TORCH_CHECK(
         indices.device() == self.device(),
         "output indices must be on same device as input");
     if (!keepdim && indices.dim() == self.dim() - 1) {

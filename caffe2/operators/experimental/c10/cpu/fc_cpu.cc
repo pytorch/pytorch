@@ -129,16 +129,7 @@ class fc_op_cpu final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::FullyConnected",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("X"),
-                                    c10::Argument("W"),
-                                    c10::Argument("b"),
-                                    c10::Argument("output"),
-                                    c10::Argument("axis", IntType::get()),
-                                    c10::Argument("axis_w", IntType::get())}),
-        (std::vector<c10::Argument>{})),
+    "_c10_experimental::FullyConnected",
     c10::kernel<fc_op_cpu<float, CPUContext>>(),
     c10::dispatchKey(CPUTensorId()));
 

@@ -7,7 +7,7 @@
 #include <limits>
 #include <sstream>
 #include <type_traits>
-// For quantize_uint8
+// For quantize_val
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/ScalarType.h>
 
@@ -18,7 +18,7 @@ TEST(TestQTensor, QuantDequantAPIs) {
   Tensor r = at::ones({num_elements});
   const float scale = 1.0;
   const int32_t zero_point = 2;
-  Tensor qr = r.quantize_linear(scale, zero_point);
+  Tensor qr = r.quantize_linear(scale, zero_point, kQInt8);
   ASSERT_EQ(qr.q_scale().to<float>(), scale);
   ASSERT_EQ(qr.q_zero_point().to<int32_t>(), zero_point);
   ASSERT_TRUE(qr.is_quantized());
@@ -36,7 +36,7 @@ TEST(TestQTensor, QuantDequantAPIs) {
   auto qr_data = qr.data<qint8>();
   for (auto i = 0; i < num_elements; ++i) {
     ASSERT_EQ(
-        quantize_uint8(scale, zero_point, r_data[i]).val_, qr_data[i].val_);
+        quantize_val<qint8>(scale, zero_point, r_data[i]).val_, qr_data[i].val_);
   }
 
   // Check for correct dequantization
@@ -60,7 +60,7 @@ TEST(TestQTensor, RoundingMode) {
     6, 6, 8, 8, 10, 10};  // scale = 1.0
 
   Tensor x = from_blob(x_values.data(), x_values.size());
-  Tensor qx = x.quantize_linear(/*scale=*/1.0, zero_point);
+  Tensor qx = x.quantize_linear(/*scale=*/1.0, zero_point, kQInt8);
 
   auto qx_data = qx.data<qint8>();
   for (int idx = 0; idx < x_values.size(); ++idx) {
@@ -73,7 +73,7 @@ TEST(TestQTensor, Item) {
   Tensor r = at::ones({1});
   const float scale = 1;
   const int32_t zero_point = 2;
-  Tensor qr = r.quantize_linear(scale, zero_point);
+  Tensor qr = r.quantize_linear(scale, zero_point, kQInt8);
   ASSERT_EQ(r.item().to<float>(), qr.item().to<float>());
 }
 

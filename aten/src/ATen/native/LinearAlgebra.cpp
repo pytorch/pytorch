@@ -23,7 +23,7 @@ static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor
   Tensor p, lu, info;
   std::tie(lu, p, info) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors=*/false);
   int int_info = info.item<int32_t>();
-  AT_CHECK(int_info >= 0, "LU factorization (getrf) failed with info = ", int_info);
+  TORCH_CHECK(int_info >= 0, "LU factorization (getrf) failed with info = ", int_info);
   auto n = self.size(0);
   auto num_exchanges = (at::arange(1, n + 1, p.options()) != p).nonzero().size(0);
   if (num_exchanges % 2 == 1) {
@@ -34,7 +34,7 @@ static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor
 }
 
 Tensor det(const Tensor& self) {
-  AT_CHECK(at::isFloatingType(self.scalar_type()) &&
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) &&
            self.dim() == 2 && self.size(0) == self.size(1),
            "det(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
            "of floating types");
@@ -50,7 +50,7 @@ Tensor det(const Tensor& self) {
 }
 
 Tensor logdet(const Tensor& self) {
-  AT_CHECK(at::isFloatingType(self.scalar_type()) &&
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) &&
            self.dim() == 2 && self.size(0) == self.size(1),
            "logdet(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
            "of floating types");
@@ -73,7 +73,7 @@ Tensor logdet(const Tensor& self) {
 }
 
 std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
-  AT_CHECK(at::isFloatingType(self.scalar_type()) &&
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) &&
            self.dim() == 2 && self.size(0) == self.size(1),
            "slogdet(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
            "of floating types");
@@ -93,7 +93,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor pinverse(const Tensor& self, double rcond) {
-  AT_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
            "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
   if (self.numel() == 0) {
@@ -121,7 +121,7 @@ static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
 }
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
-  AT_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
            "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
 
@@ -130,7 +130,7 @@ Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
 }
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
-  AT_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
            "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
 
@@ -140,7 +140,7 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
- AT_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
+ TORCH_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
 }
 
 Tensor ger(const Tensor& self, const Tensor& vec2) {
@@ -368,7 +368,7 @@ Tensor dot(const Tensor& self, const Tensor& tensor) {
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
   result.resize_({});
-  AT_CHECK(result.scalar_type() == self.scalar_type(),
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
            "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
   return result.fill_(self.dot(tensor));
 }
@@ -489,7 +489,7 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
 }
 
 Tensor matrix_power(const Tensor& a, int64_t n) {
-  AT_CHECK(a.dim() >= 2 && at::isFloatingType(a.scalar_type()),
+  TORCH_CHECK(a.dim() >= 2 && at::isFloatingType(a.scalar_type()),
            "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
            "of floating types with dim at least 2");
   if (n == 0) {
@@ -531,7 +531,7 @@ Tensor frobenius_norm(const Tensor& self) {
 }
 
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  AT_CHECK(
+  TORCH_CHECK(
       dim.size() <= 2,
       "Expected at most 2 dimensions, but got ",
       dim.size(),
@@ -547,7 +547,7 @@ Tensor &frobenius_norm_out(
     const Tensor& self,
     IntArrayRef dim,
     bool keepdim) {
-  AT_CHECK(
+  TORCH_CHECK(
       dim.size() <= 2,
       "Expected at most 2 dimensions, but got ",
       dim.size(),
@@ -559,7 +559,7 @@ Tensor &frobenius_norm_out(
 }
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {
-  AT_CHECK(
+  TORCH_CHECK(
       self.dim() == 2,
       "Expected a tensor with 2 dimensions, but got a ",
       self.dim(),
@@ -568,7 +568,7 @@ Tensor nuclear_norm(const Tensor& self, bool keepdim) {
 }
 
 Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
-  AT_CHECK(
+  TORCH_CHECK(
       self.dim() == 2,
       "Expected a tensor with 2 dimensions, but got a ",
       self.dim(),
