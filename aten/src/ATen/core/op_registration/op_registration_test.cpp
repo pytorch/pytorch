@@ -385,16 +385,6 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenNewer
   }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
 }
 
-TEST(OperatorRegistrationTest, givenKernelWithDispatchKey_whenCalledDirectlyWithoutCache_thenCallsKernel) {
-  bool called_kernel = false;
-  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()));
-
-  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
-  ASSERT_TRUE(op.has_value()); // assert schema is registered
-  callOp(*op, dummyTensor(TensorType1()));
-  EXPECT_TRUE(called_kernel);
-}
-
 
 
 /**
