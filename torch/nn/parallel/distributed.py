@@ -197,7 +197,10 @@ class DistributedDataParallel(Module):
                                        module's ``forward`` function.
                                        Parameters that don't receive gradients as
                                        part of this graph are preemptively marked
-                                       as being ready to be reduced.
+                                       as being ready to be reduced. Note that all
+                                       ``forward`` outputs must participate in
+                                       calculating loss. Otherwise, those unused
+                                       parameters will not be detected.
                                        (default: ``False``)
         check_reduction: when setting to ``True``, it enables DistributedDataParallel
                          to automatically check if the previous iteration's
