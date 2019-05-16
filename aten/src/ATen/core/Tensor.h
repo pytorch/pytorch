@@ -154,7 +154,7 @@ class CAFFE2_API Tensor {
     return impl_.weak_use_count();
   }
 
-  const char * toString() const;
+  std::string toString() const;
 
   IntArrayRef sizes() const {
     return impl_->sizes();
@@ -266,7 +266,7 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
-    AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
+    TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
   template<typename T, size_t N>
@@ -280,7 +280,7 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
-    AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
+    TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
   }
   template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
@@ -580,7 +580,7 @@ class CAFFE2_API Tensor {
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
-  Tensor quantize_linear(double scale, int64_t zero_point) const;
+  Tensor quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const;
   Tensor dequantize() const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;

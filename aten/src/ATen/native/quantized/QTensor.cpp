@@ -7,8 +7,8 @@
 namespace at {
 namespace native {
 
-Tensor quantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point) {
-  auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point);
+Tensor quantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point, ScalarType dtype) {
+  auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point, dtype);
   return quantizer->quantize(self);
 }
 
