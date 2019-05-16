@@ -852,7 +852,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // NOTE [ TensorImpl Shallow-Copying ]
   //
   // TensorImpl shallow-copying is used when we want to have two Variables share the same storage pointer
-  // and tensor metadata, but each with a different autograd history. There are two example call sites:
+  // and tensor metadata, but each with a different autograd history. Example call sites:
   //
   // 1. `var = make_variable(tensor)` uses `shallow_copy_and_detach()` to create `var` that shares the same
   // storage pointer and tensor metadata with `tensor`, but with a completely new autograd history.

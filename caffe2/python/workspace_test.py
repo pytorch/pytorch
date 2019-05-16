@@ -315,8 +315,8 @@ class TestWorkspace(unittest.TestCase):
         # the value of `bar` back into `z`.
         #
         # In the near future, we won't need to perform the shallow-copying of `z` and
-        # can directly pass it into the Caffe2 workspace, as long as `z` doesn't have
-        # AutogradMeta. At that point we won't need to use `z = workspace.FetchTorch("bar")`
+        # can directly pass it into the Caffe2 workspace, as long as `z` doesn't require
+        # grad. At that point we won't need to use `z = workspace.FetchTorch("bar")`
         # to fetch `z` from the Caffe2 workspace, since it will exactly be the same as
         # the original tensor `z`.
         z = workspace.FetchTorch("bar")
@@ -417,8 +417,8 @@ class TestWorkspaceGPU(test_util.TestCase):
         # the value of `bar` back into `z`.
         #
         # In the near future, we won't need to perform the shallow-copying of `z` and
-        # can directly pass it into the Caffe2 workspace, as long as `z` doesn't have
-        # AutogradMeta. At that point we won't need to use `z = workspace.FetchTorch("bar")`
+        # can directly pass it into the Caffe2 workspace, as long as `z` doesn't require
+        # grad. At that point we won't need to use `z = workspace.FetchTorch("bar")`
         # to fetch `z` from the Caffe2 workspace, since it will exactly be the same as
         # the original tensor `z`.
         z = workspace.FetchTorch("bar")

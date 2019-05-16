@@ -423,7 +423,7 @@ void addObjectMethods(py::module& m) {
         auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
             unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
         // TODO: In the near future, a PyTorch tensor without AutogradMeta will be
-        // a valid tensor. At that point, we will only accept no-autograd-meta
+        // a valid tensor. At that point, we will only accept non-requires-grad
         // tensor into Caffe2 workspace, and don't need to perform shallow-copying
         // here anymore.
         p = p->shallow_copy_and_detach(
