@@ -83,28 +83,15 @@ static ${return_type} ${api_name}_${id}(${type_method_formals});
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
 ${return_type} TypeDefault::${api_name}_${id}(${type_method_formals}) {
     ${device_guard_declaration}
-    ${type_definition_body}
+    ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
 """)
 
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}_${id}(${type_method_formals}) {
     ${device_guard_declaration}
-    ${dispatch_scalar_type_declaration}
-    switch (dispatch_scalar_type) {
-        ${cases}
-            ${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${actuals});
-        break;
-        default:
-            AT_ERROR("${api_name} not supported on ${Type} for ", dispatch_scalar_type);
-    }
+    ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
-""")
-NATIVE_DISPATCH_DEFINITION_NATIVE_CASE = CodeTemplate("""\
-case ScalarType::${ScalarName}:
-""")
-NATIVE_DISPATCH_DEFINITION_BODY_NATIVE = CodeTemplate("""\
-${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
@@ -1077,10 +1064,8 @@ def create_generic(top_env, declarations):
             top_env['type_method_definitions'].append(
                 NATIVE_DISPATCH_DECLARATION.substitute(env))
         else:
-            body = NATIVE_DISPATCH_DEFINITION_BODY_NATIVE.substitute(env)
             top_env['type_method_definitions'].append(
-                NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(
-                    env, type_definition_body=body))
+                NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(env))
             top_env['function_registrations'].append(
                 DEFAULT_FUNCTION_REGISTRATION.substitute(env))
 
@@ -1581,10 +1566,8 @@ def create_derived(backend_type_env, declarations):
                     type_object_declarations.append(
                         NATIVE_DISPATCH_DECLARATION.substitute(env))
                     option['native_type_method_dispatch'] = native_dispatch
-                    cases = []
-                    for scalar_type in option['backend_types'][backend]:
-                        cases.append(NATIVE_DISPATCH_DEFINITION_NATIVE_CASE.substitute(env, ScalarName=scalar_type))
-                    type_object_definitions.append(NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env, cases=cases))
+                    type_object_definitions.append(
+                        NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
                     function_registrations.append(
                         BACKEND_FUNCTION_REGISTRATION.substitute(env))
 

@@ -1,4 +1,7 @@
-#include <ATen/TypeDefault.h>
+#include <ATen/core/ATenDispatch.h>
+#include <ATen/Context.h>
+
+#include <unordered_map>
 
 namespace at {
 
@@ -6,7 +9,7 @@ static void* function_table[static_cast<int64_t>(Backend::NumOptions)][${functio
 static void* wrapper_table[${function_count}];
 
 int64_t get_schema_id(std::string schema) {
-  static std::map<std::string, int64_t> schema_to_id = {
+  static std::unordered_map<std::string, int64_t> schema_to_id = {
     ${schema_to_id_pairs}
   };
   return schema_to_id[schema];
@@ -30,6 +33,9 @@ void* get_op(Backend backend, int64_t id) {
       AT_ERROR("asdf");
     }
     function_table[static_cast<int64_t>(backend)][id] = function_table[static_cast<int64_t>(Backend::Undefined)][id];
+  }
+  if (backend == Backend::CUDA) {
+    globalContext().lazyInitCUDA();
   }
   return function_table[static_cast<int64_t>(backend)][id];
 }

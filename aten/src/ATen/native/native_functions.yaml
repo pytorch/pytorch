@@ -221,9 +221,6 @@
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   variants: function, method
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: as_strided_tensorimpl
     CUDA: as_strided_tensorimpl
@@ -457,25 +454,16 @@
   device_guard: False
 
 - func: s_copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: _s_copy__cpu
     CUDA: _s_copy__cuda
     QuantizedCPU: _s_copy__quantized
 
 - func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CUDA: _s_copy_from_cuda
 
 - func: _copy_same_type_(Tensor(a!) self, Tensor src) -> void
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: _copy_same_type__cpu
 
@@ -696,9 +684,6 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
 - func: empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
@@ -711,9 +696,6 @@
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   variants: method
-  cpu_bool: True
-  cuda_bool: True
-  cpu_half: True
   device_guard: False
   dispatch:
     CPU: resize_cpu_
@@ -729,9 +711,6 @@
   device_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
@@ -818,18 +797,12 @@
   variants: function, method
 
 - func: fill_(Tensor(a!) self, Scalar value) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   variants: function, method
   dispatch:
     CPU: fill__cpu
     CUDA: fill__cuda
 
 - func: fill_(Tensor(a!) self, Tensor value) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   variants: function, method
   dispatch:
     CPU: fill__cpu
@@ -2143,9 +2116,6 @@
 
 - func: clone(Tensor self) -> Tensor
   variants: function, method
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: clone_cpu
     CUDA: clone_cuda
@@ -2154,9 +2124,6 @@
     MkldnnCPU: mkldnn_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
-  cpu_half: True
   variants: function, method
   dispatch:
     CPU: resize_as__cpu
@@ -2181,9 +2148,6 @@
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   variants: method, function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: zero__cpu
     CUDA: zero__cuda
@@ -2538,14 +2502,12 @@
   variants: function, method
 
 - func: to_sparse(Tensor self, int sparse_dim) -> Tensor
-  cpu_half: True
   variants: method
   dispatch:
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
 
 - func: to_sparse(Tensor self) -> Tensor
-  cpu_half: True
   variants: method
   dispatch:
     CPU: dense_to_sparse
@@ -2623,9 +2585,6 @@
 # WARNING: Use of cpu_half here is generally not supported; please
 # don't use it.
 - func: _local_scalar_dense(Tensor self) -> Scalar
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
@@ -2700,9 +2659,6 @@
   device_guard: False
 
 - func: set_(Tensor(a!) self, Storage source) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   device_guard: False
   dispatch:
@@ -2710,9 +2666,6 @@
     CUDA: set__cuda
 
 - func: set_(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   device_guard: False
   dispatch:
@@ -2720,9 +2673,6 @@
     CUDA: set__cuda
 
 - func: set_(Tensor(a!) self, Tensor source) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   device_guard: False
   dispatch:
@@ -2730,9 +2680,6 @@
     CUDA: set__cuda
 
 - func: set_(Tensor(a!) self) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: set__cpu
@@ -2740,9 +2687,6 @@
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   device_guard: False
   dispatch:
     CPU: is_set_to_cpu
@@ -2776,9 +2720,6 @@
   variants: function, method
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   device_guard: False
   dispatch:
@@ -2847,96 +2788,72 @@
   variants: function, method
 
 - func: lt_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: lt__cpu
     CUDA: lt__cuda
 
 - func: lt_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: lt__cpu
     CUDA: lt__cuda
 
 - func: gt_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: gt__cpu
     CUDA: gt__cuda
 
 - func: gt_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: gt__cpu
     CUDA: gt__cuda
 
 - func: le_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: le__cpu
     CUDA: le__cuda
 
 - func: le_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: le__cpu
     CUDA: le__cuda
 
 - func: ge_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: ge__cpu
     CUDA: ge__cuda
 
 - func: ge_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: ge__cpu
     CUDA: ge__cuda
 
 - func: eq_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: eq__cpu
     CUDA: eq__cuda
 
 - func: eq_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: eq__cpu
     CUDA: eq__cuda
 
 - func: ne_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: ne__cpu
     CUDA: ne__cuda
 
 - func: ne_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: ne__cpu
@@ -3194,24 +3111,18 @@
     CUDA: addcdiv__cuda
 
 - func: random_(Tensor(a!) self, int from, int to, *, Generator? generator=None) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: random__cpu
     CUDA: random__cuda
 
 - func: random_(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: random__cpu
     CUDA: random__cuda
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: random__cpu
@@ -3304,180 +3215,132 @@
     CUDA: trace_cuda
 
 - func: ne(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: ne_out_cpu
     CUDA: ne_out_cuda
 
 - func: ne(Tensor self, Scalar other) -> Tensor
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: ne_cpu
     CUDA: ne_cuda
 
 - func: ne(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: ne_out_cpu
     CUDA: ne_out_cuda
 
 - func: ne(Tensor self, Tensor other) -> Tensor
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: ne_cpu
     CUDA: ne_cuda
 
 - func: eq(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: eq_out_cpu
     CUDA: eq_out_cuda
 
 - func: eq(Tensor self, Scalar other) -> Tensor
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: eq_cpu
     CUDA: eq_cuda
 
 - func: eq(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: eq_out_cpu
     CUDA: eq_out_cuda
 
 - func: eq(Tensor self, Tensor other) -> Tensor
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: eq_cpu
     CUDA: eq_cuda
 
 - func: ge(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: ge_out_cpu
     CUDA: ge_out_cuda
 
 - func: ge(Tensor self, Scalar other) -> Tensor
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: ge_cpu
     CUDA: ge_cuda
 
 - func: ge(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: ge_out_cpu
     CUDA: ge_out_cuda
 
 - func: ge(Tensor self, Tensor other) -> Tensor
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: ge_cpu
     CUDA: ge_cuda
 
 - func: le(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: le_out_cpu
     CUDA: le_out_cuda
 
 - func: le(Tensor self, Scalar other) -> Tensor
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: le_cpu
     CUDA: le_cuda
 
 - func: le(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: le_out_cpu
     CUDA: le_out_cuda
 
 - func: le(Tensor self, Tensor other) -> Tensor
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: le_cpu
     CUDA: le_cuda
 
 - func: gt(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: gt_out_cpu
     CUDA: gt_out_cuda
 
 - func: gt(Tensor self, Scalar other) -> Tensor
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: gt_cpu
     CUDA: gt_cuda
 
 - func: gt(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: gt_out_cpu
     CUDA: gt_out_cuda
 
 - func: gt(Tensor self, Tensor other) -> Tensor
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: gt_cpu
     CUDA: gt_cuda
 
 - func: lt(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: lt_out_cpu
     CUDA: lt_out_cuda
 
 - func: lt(Tensor self, Scalar other) -> Tensor
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: lt_cpu
     CUDA: lt_cuda
 
 - func: lt(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: lt_out_cpu
     CUDA: lt_out_cuda
 
 - func: lt(Tensor self, Tensor other) -> Tensor
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: lt_cpu
@@ -3517,17 +3380,11 @@
     CUDA: masked_select_cuda
 
 - func: nonzero(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: nonzero_out_cpu
     CUDA: nonzero_out_cuda
 
 - func: nonzero(Tensor self) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: nonzero_cpu
@@ -3991,16 +3848,12 @@
     CUDA: renorm_cuda
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   dispatch:
     CPU: unfold_cpu
     CUDA: unfold_cuda
 
 - func: equal(Tensor self, Tensor other) -> bool
-  cpu_bool: True
   variants: method, function
   dispatch:
     CPU: equal_cpu
@@ -4058,9 +3911,6 @@
     CUDA: normal_cuda
 
 - func: alias(Tensor(a) self) -> Tensor(a)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   variants: method, function
   dispatch:
     CPU: alias_cpu
@@ -4195,17 +4045,11 @@
     CUDA: _addmm__cuda
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: _cat_cpu
     CUDA: _cat_cuda
 
 - func: _cat(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: _cat_out_cpu
     CUDA: _cat_out_cuda
