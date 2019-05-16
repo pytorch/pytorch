@@ -435,16 +435,16 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const Tensor& bias) {
   TORCH_CHECK(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
   for (int64_t i = 0; i < input1.dim() - 1; i++) {
-    AT_CHECK(input1.size(i) == input2.size(i),
+    TORCH_CHECK(input1.size(i) == input2.size(i),
               "bilinear(): input batch dimensions do not match at dim ", i, ": got ", input1.size(i), " and ", input2.size(i));
   }
-  AT_CHECK(input1.size(input1.dim() - 1) == weight.size(1),
+  TORCH_CHECK(input1.size(input1.dim() - 1) == weight.size(1),
             "bilinear(): input1 size does not match weight size: got ",
             input1.size(input1.dim() - 1), " but expected ", weight.size(1));
-  AT_CHECK(input2.size(input2.dim() - 1) == weight.size(2),
+  TORCH_CHECK(input2.size(input2.dim() - 1) == weight.size(2),
             "bilinear(): input2 size does not match weight size: got ",
             input2.size(input2.dim() - 1), " but expected ", weight.size(2));
-  AT_CHECK(!bias.defined() || bias.size(0) == weight.size(0),
+  TORCH_CHECK(!bias.defined() || bias.size(0) == weight.size(0),
             "bilinear(): bias size does not match weight size: got ",
             bias.size(0), " but expected ", weight.size(0));
 
@@ -464,7 +464,7 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
 // implements tensordot, a matrix-multiplication-like contraction, but the dimensions given
 // in the two dimension lists
 Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
-  AT_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
+  TORCH_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
   int64_t csize = 1;  // total size of the contracted dimensions
   Tensor t1 = input1;
   Tensor t2 = input2;
@@ -476,7 +476,7 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
     } else if (s1 == 1) {
       t2 = t2.sum(dims2[i], true);
     } else {
-      AT_CHECK(s1 == s2, "contracted dimensions need to match, but first has size ", s1, " in dim ", dims1[i],
+      TORCH_CHECK(s1 == s2, "contracted dimensions need to match, but first has size ", s1, " in dim ", dims1[i],
                " and second has size ", s2, " in dim ", dims2[i]);
       csize *= s1;
     }

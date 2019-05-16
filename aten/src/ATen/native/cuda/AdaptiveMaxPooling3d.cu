@@ -307,16 +307,16 @@ void adaptive_max_pool3d_out_cuda_template(
   checkAllSameGPU("adaptive_max_pool3d_cuda", {output_arg, indices_arg, input_arg});
 
   for (int64_t i = 0; i < input_.ndimension(); i++) {
-    AT_CHECK(input_.size(i) > 0,
+    TORCH_CHECK(input_.size(i) > 0,
       "adaptive_max_pool3d_cuda(): expected input to have non-empty spatial dimensions, "
       "but input has sizes ", input_.sizes(), " with dimension ", i, " being "
       "empty");
   }
 
-  AT_CHECK((input_.ndimension() == 4 || input_.ndimension() == 5),
+  TORCH_CHECK((input_.ndimension() == 4 || input_.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
 
-  AT_CHECK(output_size.size() == 3,
+  TORCH_CHECK(output_size.size() == 3,
     "adaptive_max_pool3d: internal error: output_size.size() must be 3");
 
   int64_t osizeT = output_size[0];
