@@ -212,7 +212,7 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
                       OperatorClass>,                                        \
-                  &::caffe2::detail::noCache),                               \
+                  &::caffe2::detail::noCache)                                \
               .dispatchKey(::c10::HIPTensorId()));
 
 #else
