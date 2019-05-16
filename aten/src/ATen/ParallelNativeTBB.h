@@ -31,8 +31,8 @@ void parallel_for(
     f(begin, end);
   } else {
     tbb::task_group tg;
-    internal::_get_arena().execute([&](){
-      tg.run([&]() {
+    internal::_get_arena().execute([&tg, begin, end, grain_size, f](){
+      tg.run([begin, end, grain_size, f]() {
         tbb::parallel_for(tbb::blocked_range<int64_t>(begin, end, grain_size),
           [&](const tbb::blocked_range<int64_t>& r) {
             f(r.begin(), r.end());
@@ -63,8 +63,9 @@ scalar_t parallel_reduce(
   } else {
     scalar_t result;
     tbb::task_group tg;
-    internal::_get_arena().execute([&]() {
-      tg.run([&]() {
+    internal::_get_arena().execute(
+        [&tg, &result, begin, end, grain_size, ident, f, sf]() {
+      tg.run([&result, begin, end, grain_size, ident, f, sf]() {
         result = tbb::parallel_reduce(
           tbb::blocked_range<int64_t>(begin, end, grain_size), ident,
           [&](const tbb::blocked_range<int64_t>& r, scalar_t ident) {
