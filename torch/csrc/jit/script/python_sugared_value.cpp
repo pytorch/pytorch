@@ -24,6 +24,11 @@ std::shared_ptr<Function> as_function(const py::object& obj) {
   return nullptr;
 }
 
+thread_local bool recurse_on_python_ops = false;
+bool& getRecursiveScriptMode() {
+  return recurse_on_python_ops;
+}
+
 FunctionSchema PythonValue::getSchema(
     const size_t n_args,
     const size_t n_binders) {
@@ -455,7 +460,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  if (recurse && py::isinstance<py::function>(obj)) {
+  if (recurse_on_python_ops && py::isinstance<py::function>(obj)) {
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_fn")(obj);
     if (auto callee = as_function(compiled_fn)) {

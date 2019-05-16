@@ -49,9 +49,7 @@ namespace script {
 using ::c10::Argument;
 using ::c10::FunctionSchema;
 
-// pair of <the rcb function, whether to recurse when a Python function is seen>
-using ResolutionCallback =
-    std::pair<std::function<py::function(std::string)>, bool>;
+using ResolutionCallback = std::function<py::function(std::string)>;
 
 using FunctionDefaults = std::unordered_map<std::string, py::object>;
 
@@ -87,11 +85,12 @@ struct PythonResolver : public Resolver {
       Function& m,
       const SourceRange& loc) const override {
     AutoGIL ag;
-    py::object obj = rcb_.first(name);
+    py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
     }
-    return toSugaredValue(obj, m, loc, /*is_constant=*/false, rcb_.second);
+    return toSugaredValue(
+        obj, m, loc, /*is_constant=*/false);
   }
 
   TypePtr resolveType(const std::string& name) const override {
@@ -99,7 +98,7 @@ struct PythonResolver : public Resolver {
       return classType_;
     }
     AutoGIL ag;
-    py::object obj = rcb_.first(name);
+    py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
     }
@@ -525,13 +524,16 @@ void initJitScriptBindings(PyObject* module) {
         PythonPrint(ss, self.function(), true, tensors, classes, false);
         return ss.str();
       });
-
+  m.def(
+      "_jit_recursive_script",
+      [](bool recurse) { getRecursiveScriptMode() = recurse; });
   m.def(
       "_jit_script_compile",
       [](const Def& def,
          ResolutionCallback rcb,
          FunctionDefaults defaults) {
         CompilationUnit cu;
+
         cu.define({def}, {pythonResolver(rcb)}, nullptr);
         std::shared_ptr<Function> defined = cu.get_functions().at(0);
         defined->setSchema(getSchemaWithNameAndDefaults(
