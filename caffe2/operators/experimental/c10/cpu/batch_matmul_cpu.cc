@@ -269,17 +269,7 @@ class batch_matmul_cpu final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::BatchMatmul",
-        "",
-        (std::vector<c10::Argument>{
-            c10::Argument("A"),
-            c10::Argument("B"),
-            c10::Argument("output"),
-            c10::Argument("trans_a", IntType::get()),
-            c10::Argument("trans_b", IntType::get()),
-            c10::Argument("broadcast", IntType::get())}),
-        (std::vector<c10::Argument>{})),
+    "_c10_experimental::BatchMatmul",
     c10::kernel<batch_matmul_cpu<float, CPUContext>>(),
     c10::dispatchKey(CPUTensorId()));
 

@@ -17,15 +17,15 @@
 
 #include <exception>
 
-#include "c10/macros/Macros.h"
-#include "c10/util/Backtrace.h"
-#include "c10/util/C++17.h"
-#include "c10/util/Exception.h"
-#include "c10/util/Half.h"
-#include "c10/util/IdWrapper.h"
-#include "c10/util/qint8.h"
-
-#include "c10/util/Type.h"
+#include <c10/macros/Macros.h>
+#include <c10/util/Backtrace.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Half.h>
+#include <c10/util/IdWrapper.h>
+#include <c10/util/qint8.h>
+#include <c10/util/qint32.h>
+#include <c10/util/Type.h>
 
 /*
  * TypeIdentifier is a small type containing an id.
@@ -623,8 +623,9 @@ CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(
     26,
     detail::_guard_long_unique<std::vector<long>>)
 
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(27, c10::qint8);
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(28, _CaffeHighestPreallocatedTypeId)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(29, float*)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(30, at::Half*)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(27, float*)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(28, at::Half*)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(29, c10::qint8)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(30, c10::qint32)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(31, _CaffeHighestPreallocatedTypeId)
 } // namespace caffe2

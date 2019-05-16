@@ -26,7 +26,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         docker pull ${DOCKER_IMAGE} >/dev/null
         export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
-        git submodule sync && git submodule update -q --init
+        git submodule sync && git submodule update -q --init --recursive
 
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
