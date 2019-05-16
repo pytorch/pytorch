@@ -844,7 +844,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
 Gradient differentiate(std::shared_ptr<Graph>& graph) {
   Gradient grad_desc;
   // Take ownership of the graph
-  AT_CHECK(
+  TORCH_CHECK(
       graph.use_count() == 1,
       "differentiate will mutate and destroy the graph, so it requires "
       "graph.use_count() == 1, but found %d",

@@ -797,8 +797,8 @@ inline Tensor Tensor::to_sparse() const {
 inline Tensor Tensor::to_mkldnn() const {
     return dispatch_type().to_mkldnn(*this);
 }
-inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point) const {
-    return dispatch_type().quantize_linear(*this, scale, zero_point);
+inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const {
+    return dispatch_type().quantize_linear(*this, scale, zero_point, dtype);
 }
 inline Tensor Tensor::dequantize() const {
     return dispatch_type().dequantize(*this);
@@ -1372,7 +1372,7 @@ inline bool is_quantized(Tensor self) {
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \
-    AT_CHECK(                                    \
+    TORCH_CHECK(                                    \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \
