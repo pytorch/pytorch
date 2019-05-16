@@ -63,11 +63,13 @@ if (std::isnan(val)) break;
 
 #ifdef _MSC_VER
 #define PRAGMA(P)         __pragma(P)
-#define PRAGMA_IVDEP      PRAGMA(loop(ivdep))
+
 # if _MSC_VER < 1920
-// MSVC < 2019 doesn't support simd loop pragmas.
+// MSVC < 2019 doesn't support loop pragmas.
+#  define PRAGMA_IVDEP    // Noop
 #  define PRAGMA_SIMD     // Noop
 # else
+#  define PRAGMA_IVDEP    PRAGMA(loop(ivdep))
 #  define PRAGMA_SIMD     PRAGMA(omp simd)
 # endif
 #else

@@ -9,6 +9,7 @@ if (INTERN_BUILD_ATEN_OPS)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(AT_LINK_STYLE INTERFACE)
   add_subdirectory(../aten aten)
+  set_source_files_properties(${ATen_CPU_SRCS} PROPERTIES COMPILE_FLAGS "-Qvec-report:2")
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
