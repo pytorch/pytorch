@@ -142,7 +142,7 @@ libtorch_cuda_sources = [
 ]
 
 
-def add_torch_libs():
+def add_torch_libs(extra_libtorch_sources=None, extra_libtorch_deps=None):
     r = {}
     c2_gpu = (read_config("caffe2", "gpu", "1") == "1")
     libtorch_python_sources = [
@@ -292,9 +292,14 @@ def add_torch_libs():
         ],
     }
 
+    if not extra_libtorch_sources:
+        extra_libtorch_sources = []
+    if not extra_libtorch_deps:
+        extra_libtorch_deps = []
+
     cpp_library(
         name="libtorch",
-        srcs=libtorch_sources,
+        srcs=libtorch_sources + extra_libtorch_sources,
         link_whole=True,
         deps=[
             ":generated-autograd-headers",
@@ -304,7 +309,7 @@ def add_torch_libs():
             "//caffe2/caffe2:caffe2_cpu",
             "//caffe2/torch/lib/libshm:libshm",
             "//caffe2/caffe2/quantization/server:dnnlowp_ops",
-        ],
+        ] + extra_libtorch_deps,
         external_deps=[
             ("nanopb", None, "protobuf-nanopb"),
             ("protobuf", None),
