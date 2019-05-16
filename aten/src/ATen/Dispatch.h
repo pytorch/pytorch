@@ -208,6 +208,18 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                        \
   }()
 
+#define AT_DISPATCH_QINT_TYPES(TYPE, NAME, ...)                         \
+  [&] {                                                                 \
+    switch (TYPE) {                                                     \
+      AT_PRIVATE_CASE_TYPE(                                             \
+          at::ScalarType::QInt8, qint8, __VA_ARGS__)                    \
+      AT_PRIVATE_CASE_TYPE(                                             \
+          at::ScalarType::QInt32, qint32, __VA_ARGS__)                  \
+      default:                                                          \
+        AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");  \
+    }                                                                   \
+  }()
+
 #define AT_DISPATCH_ALL_TYPES_AND_COMPLEX(TYPE, NAME, ...)                   \
   [&] {                                                                      \
     const auto& the_type = TYPE;                                             \
