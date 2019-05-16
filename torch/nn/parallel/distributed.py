@@ -198,10 +198,15 @@ class DistributedDataParallel(Module):
                                        Parameters that don't receive gradients as
                                        part of this graph are preemptively marked
                                        as being ready to be reduced. Note that all
-                                       ``forward`` outputs must participate in
-                                       calculating loss. Otherwise, those unused
-                                       parameters will not be detected.
-                                       (default: ``False``)
+                                       ``forward`` outputs that are derived from
+                                       module parameters must participate in
+                                       calculating loss and later the gradient
+                                       computation. If they don't, this wrapper will
+                                       hang waiting for autograd to produce gradients
+                                       for those parameters. Any outputs derived from
+                                       module parameters that are otherwise unused can
+                                       be detached from the autograd graph using
+                                       ``torch.Tensor.detach``. (default: ``False``)
         check_reduction: when setting to ``True``, it enables DistributedDataParallel
                          to automatically check if the previous iteration's
                          backward reductions were successfully issued at the
