@@ -247,8 +247,8 @@ cast_pytorch_to_onnx = {
     'Int': torch.onnx.TensorProtoDataType.INT32,
     'Long': torch.onnx.TensorProtoDataType.INT64,
     'Short': torch.onnx.TensorProtoDataType.INT16,
+    'Bool': torch.onnx.TensorProtoDataType.BOOL,
 }
-
 
 scalar_name_to_pytorch = {
     'uint8_t': 'Byte',
