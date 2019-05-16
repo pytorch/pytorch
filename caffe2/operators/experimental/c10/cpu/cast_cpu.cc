@@ -87,15 +87,7 @@ void cast_op_cpu(
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::Cast",
-        "",
-        (std::vector<c10::Argument>{
-            c10::Argument("input"),
-            c10::Argument("output"),
-            c10::Argument("to_dtype", IntType::get()),
-        }),
-        (std::vector<c10::Argument>{})),
+    "_c10_experimental::Cast",
     c10::kernel<decltype(cast_op_cpu), &cast_op_cpu>(),
     c10::dispatchKey(CPUTensorId()));
 

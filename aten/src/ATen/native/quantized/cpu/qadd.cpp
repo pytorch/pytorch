@@ -15,7 +15,7 @@ class QAddInt8 final : public c10::OperatorKernel {
   Tensor operator()(at::Tensor qa, at::Tensor qb,
                     double scale, int64_t zero_point) {
     AT_ASSERTM(qa.numel() == qb.numel(), "Add operands must be the same size!");
-    AT_CHECK(qa.scalar_type() == qb.scalar_type(), "Add operands should have same data type.");
+    TORCH_CHECK(qa.scalar_type() == qb.scalar_type(), "Add operands should have same data type.");
     auto a = qa.dequantize();
     auto b = qb.dequantize();
     auto c = at::empty_like(a);
