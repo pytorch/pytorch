@@ -1957,6 +1957,47 @@ class TestSparse(TestCase):
         do_test(self.sparse_empty(3, 0).data)
         do_test(self.sparse_empty(3, 0).detach())
 
+    def test_change_tensor_metadata(self):
+        i = self.index_tensor([[0], [1]])
+        v = self.value_tensor([[3, 4, 5]])
+        t = torch.sparse_coo_tensor(i, v, torch.Size([1, 2, 3]))
+        i.resize_(2, 3)
+        v.resize_(4, 5)
+        self.assertEqual(list(t.coalesce().indices().size()), [2, 1])
+        self.assertEqual(list(t.coalesce().values().size()), [1, 3])
+
+        i = self.index_tensor([[0], [1]])
+        v = self.value_tensor([[3, 4, 5]])
+        t = torch.sparse_coo_tensor(i, v, torch.Size([1, 2, 3]))
+        i.resize_as_(torch.zeros(4, 5).long())
+        v.resize_as_(torch.ones(4, 5))
+        self.assertEqual(list(t.coalesce().indices().size()), [2, 1])
+        self.assertEqual(list(t.coalesce().values().size()), [1, 3])
+
+        i = self.index_tensor([[0], [1]])
+        v = self.value_tensor([[3, 4, 5]])
+        t = torch.sparse_coo_tensor(i, v, torch.Size([1, 2, 3]))
+        i.as_strided_((2, 1), (1, 1))
+        v.as_strided_((1, 3), (1, 1))
+        self.assertEqual(list(t.coalesce().indices().size()), [2, 1])
+        self.assertEqual(list(t.coalesce().values().size()), [1, 3])
+
+        i = self.index_tensor([[0], [1]])
+        v = self.value_tensor([[3, 4, 5]])
+        t = torch.sparse_coo_tensor(i, v, torch.Size([1, 2, 3]))
+        i.set_(torch.zeros(4, 5).long())
+        v.set_(torch.ones(4, 5))
+        self.assertEqual(list(t.coalesce().indices().size()), [2, 1])
+        self.assertEqual(list(t.coalesce().values().size()), [1, 3])
+
+        i = self.index_tensor([[0], [1]])
+        v = self.value_tensor([[3, 4, 5]])
+        t = torch.sparse_coo_tensor(i, v, torch.Size([1, 2, 3]))
+        i.transpose_(0, 1)
+        v.transpose_(0, 1)
+        self.assertEqual(list(t.coalesce().indices().size()), [2, 1])
+        self.assertEqual(list(t.coalesce().values().size()), [1, 3])
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
