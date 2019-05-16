@@ -14,9 +14,9 @@ namespace cpp_custom_type_hack {
 
 template <typename T>
 T& cast(const Tensor& packed) {
-  AT_CHECK(
+  TORCH_CHECK(
       packed.scalar_type() == kByte, "Expected temporary cpp type wrapper");
-  AT_CHECK(
+  TORCH_CHECK(
       packed.storage().data_ptr().get_deleter() ==
           caffe2::TypeMeta::Make<T>().deleteFn(),
       "Expected temporary cpp type wrapper of type ",

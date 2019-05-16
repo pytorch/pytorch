@@ -197,7 +197,7 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
         std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
           return node->kind() == prim::FusionGroup;
         });
-    AT_CHECK(
+    TORCH_CHECK(
         maybe_fusion_group != nodes.end(),
         "testRegisterFusionCachesKernel: could not create FusionGroup");
     return *maybe_fusion_group;
