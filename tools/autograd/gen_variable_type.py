@@ -519,6 +519,7 @@ def emit_body(declaration):
             if differentiable:
                 differentiable_outputs.append(output)
     elif uses_single_grad(func):
+        candidate_differentiable_outputs = candidate_differentiable_outputs[:1]
         differentiable_outputs = candidate_differentiable_outputs[:1]
     else:
         differentiable_outputs = candidate_differentiable_outputs
@@ -848,7 +849,7 @@ def emit_body(declaration):
     def emit_increment_version():
         if not modifies_arguments:
             return []
-        return ['increment_version({});'.format(arg['name']) for arg in differentiable_outputs]
+        return ['increment_version({});'.format(arg['name']) for arg in candidate_differentiable_outputs]
 
     def check_record_function_input_type(simple_type):
         return simple_type in ['Tensor', 'Scalar']
@@ -877,10 +878,10 @@ def emit_body(declaration):
 
     body.append(pre_record_trace)
     body.append(emit_call(env))
+    body.extend(emit_increment_version())
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
-        body.extend(emit_increment_version())
         body.append(emit_history())
     # post_record_trace must appear before save_outputs so that saved outputs
     # have their tracing state saved (that is setup by recordTrace)
@@ -922,6 +923,7 @@ def unpack_args(env, declaration):
             # although it's stll getting the non-variable from the variable
             # (in this case via TensorOptions rather than Variable/Tensor).
             body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
+
 
         unpacked_args.append(arg['name'] + '_')
         unpacked_args_simple_type[arg['name'] + '_'] = arg['simple_type']
