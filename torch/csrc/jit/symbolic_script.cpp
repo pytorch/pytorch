@@ -1407,8 +1407,7 @@ c10::optional<GradientPair> gradientInfoForSchema(
 }
 
 bool hasGradientInfoForSchema(const FunctionSchema& schema) {
-  return  gradientInfoForSchema(schema).has_value();
+  return gradientInfoForSchema(schema).has_value();
 }
-
 } // namespace jit
 } // namespace torch

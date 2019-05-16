@@ -600,7 +600,6 @@ class CAFFE2_API Tensor {
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
-  Tensor to(MemoryFormat memory_format) const;
   Scalar item() const;
   void* data_ptr() const;
   Tensor & set_(Storage source);
