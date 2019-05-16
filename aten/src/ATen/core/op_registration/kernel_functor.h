@@ -162,8 +162,9 @@ namespace detail {
   };
   template<class T>
   struct return_type_to_ivalue<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    static IValue call(T&& v) {
-      return IValue(std::move(v));
+    template<class T_>
+    static IValue call(T_&& v) {
+      return IValue(std::forward<T_>(v));
     }
   };
   template<class T>
