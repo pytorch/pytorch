@@ -131,6 +131,24 @@ class TestMkldnn(TestCase):
         x2 = x1.clone().to_mkldnn()
         self.assertEqual(torch.relu_(x1), torch.relu_(x2).to_dense())
 
+    def test_relu_backward(self):
+        x = torch.randn((4, 5), dtype=torch.float32) * 10
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        y1 = torch.relu(x1).sum()
+        y2 = torch.relu(x2).to_dense().sum()
+        y1.backward()
+        y2.backward()
+        self.assertEqual(x1.grad, x2.grad.to_dense())
+        # inplace
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        y1 = torch.relu_(x1.clone()).sum()
+        y2 = torch.relu_(x2.clone()).to_dense().sum()
+        y1.backward()
+        y2.backward()
+        self.assertEqual(x1.grad, x2.grad.to_dense())
+
     def test_max_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
@@ -318,6 +336,26 @@ class TestMkldnn(TestCase):
                     x.to_mkldnn().transpose(dim1, dim2).to_dense(),
                 )
 
+    def test_reshape_backward(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
+        size = (x.size(0), -1)
+
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+
+        in_features = 20
+        out_features = out_features = torch.randint(3, 100, (1,)).item()
+        linear = torch.nn.Linear(in_features, out_features).float()
+
+        y1 = linear(x1.reshape(size)).sum()
+        y2 = linear(x2.reshape(size).to_dense()).sum()
+        y1.backward()
+        y2.backward()
+
+        self.assertEqual(
+            x1.grad,
+            x2.grad.to_dense())
+
     def test_linear(self):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
@@ -333,6 +371,27 @@ class TestMkldnn(TestCase):
             self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
             self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
 
+    '''
+    # we should first expose aten::linear, depend on https://github.com/pytorch/pytorch/pull/20039
+    def test_linear_backward(self):
+        in_features = torch.randint(3, 10, (1,)).item()
+        out_features = torch.randint(3, 100, (1,)).item()
+        x = torch.randn(3, in_features, dtype=torch.float32) * 10
+
+        for bias in [True, False]:
+            x1 = x.clone().requires_grad_()
+            x2 = x.clone().to_mkldnn().requires_grad_()
+            linear = torch.nn.Linear(in_features, out_features).float()
+            mkldnn_linear = copy.deepcopy(linear)
+            y1 = linear(x1).sum()
+            y2 = mkldnn_linear(x2).to_dense().sum()
+            y1.backward()
+            y2.backward()
+            self.assertEqual(x1.grad, x2.grad.to_dense())
+            self.assertEqual(linear.weight.grad, mkldnn_linear.weight.grad)
+            if bias:
+                self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
+    '''
     def test_softmax(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
         for dim in range(x.ndim):

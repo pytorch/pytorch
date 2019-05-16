@@ -80,6 +80,9 @@ Tensor& threshold_out(Tensor& result, const Tensor& self, Scalar threshold, Scal
 }
 
 Tensor threshold_backward(const Tensor& grad, const Tensor& self, Scalar threshold) {
+  if (grad.is_mkldnn()) {
+    return at::mkldnn_relu_backward(grad, self);
+  }
   return threshold_out(nullopt, self, threshold, 0, grad);
 }
 
