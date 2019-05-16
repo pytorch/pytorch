@@ -11411,25 +11411,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(nhwc.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(nhwc, x)
 
-    ## These sections are intentionally commented, as they suppose to pass when we
-    ## switch from the computational check of the tensor memory format to the
-    ## actual layout support
-    #
-    #
-    #     def fake_nhwc(N, C, H, W):
-    #         alloc = torch.randn(N, H, W, C)
-    #         return alloc.permute(0, 3, 1, 2)
-    #
-    #     fake = fake_nhwc(10, 3, 32, 32)
-    #     self.assertFalse(
-    #         fake.is_contiguous(memory_format=torch.channels_last),
-    #         " must be tagged to be identified as channels_last")
-    #
-    # def test_memory_format_permute(self):
-    #     x = torch.randn(10, 3, 32, 32)
-    #     nhwc = x.contiguous(memory_format=torch.channels_last)
-    #     y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
-    #     self.assertFalse(y.is_contiguous(memory_format=torch.channels_last))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_memory_format_permute_cuda(self):
