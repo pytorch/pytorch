@@ -105,10 +105,10 @@ SparseTensor new_with_dims_and_tensor_sparse(
   // contain AutogradMeta, and to achieve that we shallow-copy `indices` and `values` here.
   auto indices_shallow_copy = LongTensor(indices.unsafeGetTensorImpl()->shallow_copy_and_detach(
     /*version_counter=*/indices.unsafeGetTensorImpl()->version_counter(),
-    /*allow_tensor_metadata_change=*/true));
+    /*allow_tensor_metadata_change=*/false));
   auto values_shallow_copy = Tensor(values.unsafeGetTensorImpl()->shallow_copy_and_detach(
     /*version_counter=*/values.unsafeGetTensorImpl()->version_counter(),
-    /*allow_tensor_metadata_change=*/true));
+    /*allow_tensor_metadata_change=*/false));
   alias_into_sparse(self, indices_shallow_copy, values_shallow_copy);
   return self;
 }
