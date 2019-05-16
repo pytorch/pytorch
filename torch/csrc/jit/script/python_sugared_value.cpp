@@ -330,35 +330,6 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
   return result;
 }
 
-void ModuleValue::setAttr(
-    const SourceRange& loc,
-    Function& m,
-    const std::string& field,
-    Value* newValue) {
-  // Check that the field is already registered on the module
-  auto slot = module_->find_parameter(field);
-
-  if (slot == nullptr) {
-    slot = module_->find_attribute(field);
-  }
-
-  if (slot == nullptr) {
-    throw ErrorReport(loc) << "Could not find attribute or parameter named '"
-                           << field << "'";
-  }
-
-  // Check that the new value's type matches the slot's type
-  if (!newValue->type()->isSubtypeOf(slot->type())) {
-    throw ErrorReport(loc) << "Wrong type for attribute assignment. Expected "
-                           << slot->type()->python_str() << " but got "
-                           << newValue->type()->python_str();
-  }
-
-  // Insert the prim::SetAttr
-  auto& g = *m.graph();
-  g.insertNode(g.createSetAttr(self_, field, newValue));
-}
-
 std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     const SourceRange& loc,
     Function& caller,

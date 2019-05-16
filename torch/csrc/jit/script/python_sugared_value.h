@@ -128,9 +128,10 @@ struct VISIBILITY_HIDDEN OverloadedMethodValue : public SugaredValue {
 // anticipating we will eventually need to replace Module with a py::object
 // holding the actual nn.Module class.
 
-struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
+struct VISIBILITY_HIDDEN ModuleValue : public SimpleValue {
   ModuleValue(Value* self, std::shared_ptr<Module> module, py::object py_module)
-      : self_(self),
+      : SimpleValue(self),
+        self_(self),
         module_(std::move(module)),
         py_module_(std::move(py_module)) {}
 
@@ -159,12 +160,6 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       const SourceRange& loc,
       Function& m,
       const c10::optional<size_t>& size_hint = {}) override;
-
-  void setAttr(
-      const SourceRange& loc,
-      Function& m,
-      const std::string& field,
-      Value* newValue) override;
 
  private:
   Value* self_;
