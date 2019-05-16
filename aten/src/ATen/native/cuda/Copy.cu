@@ -202,8 +202,8 @@ void copy_to_cpu(Tensor& dst, const Tensor& src) {
 }
 
 void copy_from_cpu_async_(Tensor& dst, const Tensor& src) {
-  AT_CHECK(dst.is_contiguous(), "Target tensor must be contiguous.");
-  AT_CHECK(src.is_contiguous(), "Source tensor must be contiguous.");
+  TORCH_CHECK(dst.is_contiguous(), "Target tensor must be contiguous.");
+  TORCH_CHECK(src.is_contiguous(), "Source tensor must be contiguous.");
 
   if (dst.numel() == 0) {
     return;
@@ -225,8 +225,8 @@ void copy_from_cpu_async_(Tensor& dst, const Tensor& src) {
 }
 
 void copy_to_cpu_async_(Tensor& dst, const Tensor& src) {
-  AT_CHECK(dst.is_contiguous(), "Target tensor must be contiguous.");
-  AT_CHECK(src.is_contiguous(), "Source tensor must be contiguous.");
+  TORCH_CHECK(dst.is_contiguous(), "Target tensor must be contiguous.");
+  TORCH_CHECK(src.is_contiguous(), "Source tensor must be contiguous.");
 
   if (dst.numel() == 0) {
     return;
@@ -249,7 +249,7 @@ void copy_to_cpu_async_(Tensor& dst, const Tensor& src) {
 
 template <typename dst_T>
 void _copy__cuda(Tensor& dst, const Tensor& src, bool non_blocking) {
-  AT_CHECK(dst.numel() == src.numel(), "sizes do not match");
+  TORCH_CHECK(dst.numel() == src.numel(), "sizes do not match");
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, src.scalar_type(), "_copy__cuda", [&]() {
     if (dst.is_cuda() && src.is_cuda()) {
       copy_device_to_device<dst_T, scalar_t>(dst, src);

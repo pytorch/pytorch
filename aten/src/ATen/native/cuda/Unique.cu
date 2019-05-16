@@ -38,7 +38,7 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
   if (!return_inverse) {
     inverse_indices = at::empty({0}, options);
   } else {
-    AT_CHECK(sorted_indices.defined(),
+    TORCH_CHECK(sorted_indices.defined(),
       "return_inverse is set to true, but sorted_indices is undefined. Send a bug report!");
     const int64_t *sorted_indices_ptr = sorted_indices.data<int64_t>();
     Tensor inv_loc = at::empty({num_inp}, options);

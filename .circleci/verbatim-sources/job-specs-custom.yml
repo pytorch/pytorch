@@ -197,6 +197,6 @@
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
             set -x
 
-            git submodule sync && git submodule update -q --init
+            git submodule sync && git submodule update -q --init --recursive
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
