@@ -25,18 +25,6 @@
 
 namespace torch {
 namespace {
-const std::unordered_map<std::string, at::ScalarType> attype_names = {
-  {"Float", at::kFloat},
-  {"Double", at::kDouble},
-  {"Half", at::kHalf},
-  {"Byte", at::kByte},
-  {"Char", at::kChar},
-  {"Short", at::kShort},
-  {"Int", at::kInt},
-  {"Long", at::kLong},
-  {"Bool", at::kBool},
-};
-
 std::unordered_map<at::DeprecatedTypeProperties*, PyTypeObject*> attype_to_py_storage_type;
 std::unordered_map<PyTypeObject*, at::DeprecatedTypeProperties*> py_storage_type_to_attype;
 
@@ -62,12 +50,11 @@ at::Backend get_backend(bool is_cuda, bool is_sparse) {
   }
 }
 
-at::DeprecatedTypeProperties* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
-  if (is_sparse && name == "Half") {
+at::DeprecatedTypeProperties* get_type(at::Backend backend, at::ScalarType scalarType) {
+  if (isSparse(backend) && scalarType == at::kHalf) {
     return nullptr;
   }
-  at::Backend backend = get_backend(is_cuda, is_sparse);
-  return &at::getNonVariableDeprecatedTypeProperties(backend, attype_names.at(name));
+  return &at::getNonVariableDeprecatedTypeProperties(backend, scalarType);
 }
 
 PyTypeObject* getPyTypeObject(const at::Storage& storage)
@@ -85,9 +72,8 @@ PyTypeObject* getPyTypeObject(const at::Storage& storage)
 }
 } // namespace
 
-void registerStoragePyTypeObject(PyTypeObject *pytype, const std::string& name, bool is_cuda, bool is_sparse)
-{
-  auto attype = get_type(name, is_cuda, is_sparse);
+void registerStoragePyTypeObject(PyTypeObject *pytype, at::Backend backend, at::ScalarType scalarType) {
+  auto attype = get_type(backend, scalarType);
   if (attype) {
     attype_to_py_storage_type[attype] = pytype;
     py_storage_type_to_attype[pytype] = attype;

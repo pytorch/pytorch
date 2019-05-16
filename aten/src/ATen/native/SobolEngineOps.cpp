@@ -16,9 +16,9 @@ namespace native {
 /// `sobolstate`.
 std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, const Tensor& sobolstate,
                                               int64_t dimension, int64_t num_generated, optional<ScalarType> dtype) {
-  AT_CHECK(sobolstate.dtype() == at::kLong,
+  TORCH_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
-  AT_CHECK(quasi.dtype() == at::kLong,
+  TORCH_CHECK(quasi.dtype() == at::kLong,
            "quasi needs to be of type ", at::kLong);
 
   Tensor wquasi = quasi.clone();
@@ -55,9 +55,9 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
 /// specified above.
 Tensor& _sobol_engine_ff_(Tensor& quasi, int64_t n, const Tensor& sobolstate,
                         int64_t dimension, int64_t num_generated) {
-  AT_CHECK(sobolstate.dtype() == at::kLong,
+  TORCH_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
-  AT_CHECK(quasi.dtype() == at::kLong,
+  TORCH_CHECK(quasi.dtype() == at::kLong,
            "quasi needs to be of type ", at::kLong);
 
   // We deal with `data` and `strides` due to performance issues.
@@ -82,7 +82,7 @@ Tensor& _sobol_engine_ff_(Tensor& quasi, int64_t n, const Tensor& sobolstate,
 /// and a list of random lower triangular matrices consisting of 0s and 1s. `dimension` is
 /// passed explicitly again.
 Tensor& _sobol_engine_scramble_(Tensor& sobolstate, const Tensor& ltm, int64_t dimension) {
-  AT_CHECK(sobolstate.dtype() == at::kLong,
+  TORCH_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
 
   /// Require a tensor accessor for `sobolstate`
@@ -121,7 +121,7 @@ Tensor& _sobol_engine_scramble_(Tensor& sobolstate, const Tensor& ltm, int64_t d
 /// This is a core function to initialize the main state variable of a `SobolEngine`.
 /// `dimension` is passed explicitly as well (see why above)
 Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
-  AT_CHECK(sobolstate.dtype() == at::kLong,
+  TORCH_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
 
   /// First row of `sobolstate` is 1

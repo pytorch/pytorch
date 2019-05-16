@@ -278,7 +278,7 @@ C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(const std::str
 
 C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   auto parsed = parseSchemaOrName(schema);
-  AT_CHECK(parsed.is_right(), "Tried to parse a function schema but only the operator name was given");
+  TORCH_CHECK(parsed.is_right(), "Tried to parse a function schema but only the operator name was given");
   return parsed.right();
 }
 

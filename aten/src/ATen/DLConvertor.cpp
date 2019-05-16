@@ -42,6 +42,9 @@ static DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::QInt8:
       throw std::logic_error("QInt8 is not supported by dlpack");
       break;
+    case ScalarType::QInt32:
+      throw std::logic_error("QInt32 is not supported by dlpack");
+      break;
     case ScalarType::ComplexHalf:
       throw std::logic_error("ComplexHalf is not supported by dlpack");
     case ScalarType::ComplexFloat:
