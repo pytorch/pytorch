@@ -855,7 +855,7 @@ void ScriptModuleSerializer::convertModule(
     module_name << prefix << "_";
   module_name << name;
 
-  if (module.get_methods().size() > 0) {
+  if (module.class_compilation_unit().get_functions().size() > 0) {
     std::ostringstream methods;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
