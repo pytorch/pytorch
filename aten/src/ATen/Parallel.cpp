@@ -14,16 +14,19 @@
 namespace at {
 
 namespace {
+const int NOT_SET = -1;
+const int CONSUMED = -2;
+
 // Number of threads set by the user
-std::atomic<int> num_threads{-1};
+std::atomic<int> num_threads{NOT_SET};
 
 // Number of inter-op threads set by the user;
 // Atomic transitions:
-// -1 -> (atomic) -> positive value -> (atomic) -> -2
-// (-2 - thread pool is initialized)
+// NOT_SET -> (atomic) -> positive value -> (atomic) -> CONSUMED
+// (CONSUMED - thread pool is initialized)
 // or
-// -1 -> (atomic) -> -2
-std::atomic<int> num_interop_threads{-1};
+// NOT_SET -> (atomic) -> CONSUMED
+std::atomic<int> num_interop_threads{NOT_SET};
 
 // thread pool global instance is hidden,
 // users should use at::launch ang get/set_num_interop_threads interface
@@ -32,7 +35,7 @@ TaskThreadPoolBase& get_pool() {
       ThreadPoolRegistry()->Create(
           "C10",
           /* device_id */ 0,
-          /* pool_size */ num_interop_threads.exchange(-2),
+          /* pool_size */ num_interop_threads.exchange(CONSUMED),
           /* create_new */ true);
   return *pool;
 }
@@ -44,9 +47,9 @@ std::shared_ptr<TaskThreadPoolBase> create_c10_threadpool(
     bool create_new) {
   // For now, the only accepted device id is 0
   // for the JIT inter-op pool (CPU),
-  AT_ASSERT(device_id == 0);
+  AT_CHECK(device_id == 0);
   // Create new thread pool
-  AT_ASSERT(create_new);
+  AT_CHECK(create_new);
   return std::make_shared<PTThreadPool>(pool_size);
 }
 
@@ -68,9 +71,7 @@ void init_num_threads() {
 }
 
 void set_num_threads(int nthreads) {
-  if (nthreads <= 0) {
-    throw std::runtime_error("Expected positive number of threads");
-  }
+  AT_CHECK(nthreads > 0, "Expected positive number of threads");
 
   num_threads.store(nthreads);
 #ifdef _OPENMP
@@ -148,23 +149,19 @@ void PTThreadPool::init_thread() {
 C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, create_c10_threadpool);
 
 void set_num_interop_threads(int nthreads) {
-  if (nthreads <= 0) {
-    throw std::runtime_error("Expected positive number of threads");
-  }
+  AT_CHECK(nthreads > 0, "Expected positive number of threads");
 
-  int no_value = -1;
-  if (!num_interop_threads.compare_exchange_strong(no_value, nthreads)) {
-    throw std::runtime_error(
+  int no_value = NOT_SET;
+  AT_CHECK(num_interop_threads.compare_exchange_strong(no_value, nthreads),
       "Error: cannot set number of interop threads after parallel work "
       "has started or set_num_interop_threads called");
-  }
 }
 
 int get_num_interop_threads() {
   int nthreads = num_interop_threads.load();
   if (nthreads > 0) {
     return nthreads;
-  } else if (nthreads == -1) {
+  } else if (nthreads == NOT_SET) {
     // return default value
     return TaskThreadPoolBase::defaultNumThreads();
   } else {
