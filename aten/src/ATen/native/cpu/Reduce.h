@@ -25,6 +25,44 @@ static inline bool is_outer_reduction(const int64_t* strides) {
          strides[3] == sizeof(typename traits::arg2_t);
 }
 
+template<typename traits, typename res_t>
+static void set_result(const int index, const res_t result, const TensorIterator &iter, const int num_outputs) {
+  static_assert(std::is_same<res_t, typename traits::arg2_t>::value, "data types must match");
+  if (index < num_outputs) {
+    char *out = (char *) iter.data_ptr(index);
+    *(res_t *) out = result;
+  }
+}
+
+template<typename traits, typename res_t>
+static void set_results(const res_t result, const TensorIterator &iter, const int num_outputs) {
+  AT_ASSERT(num_outputs == 1);
+  set_result<traits>(0, result, iter, num_outputs);
+}
+
+template<typename traits, std::size_t i = 0, typename... tuple_t>
+static inline typename std::enable_if<i == sizeof...(tuple_t), std::size_t>::type
+for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIterator &iter, const int num_outputs) {
+  return i;
+}
+
+template<typename traits, std::size_t i = 0, typename... tuple_t>
+static inline typename std::enable_if<i < sizeof...(tuple_t), std::size_t>::type
+for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIterator &iter, const int num_outputs) {
+  if (i < num_outputs) {
+    set_result<traits>(i, std::get<i>(t), iter, num_outputs);
+    return for_each_in_tuple<traits, i + 1, tuple_t...>(t, iter, num_outputs);
+  }
+  return i;
+}
+
+template<typename traits, typename... res_t>
+static void set_results(const std::tuple<res_t...>& result, const TensorIterator &iter, const int num_outputs) {
+  AT_ASSERT(num_outputs >= 1);
+  std::size_t result_size = for_each_in_tuple<traits>(result, iter, num_outputs);
+  AT_ASSERT(num_outputs == result_size);
+}
+
 template <typename T, typename... Args>
 struct all_same : c10::guts::conjunction<
   std::is_same<T, Args>...
@@ -64,7 +102,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
   using c_traits = binary_function_traits<cf_t>;
   using p_traits = unary_function_traits<pf_t>;
   using acc_t = typename p_traits::arg1_t;
-  using data_t = typename p_traits::result_type;
+  using data_t = typename r_traits::arg2_t;
   static_assert(
     all_same<
       acc_t,
@@ -76,18 +114,16 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
       typename c_traits::result_type>::value,
     "all accumulate types must match");
   static_assert(
-    std::is_same<data_t, typename r_traits::arg2_t>::value,
-    "all data types must match");
-  static_assert(
     std::is_default_constructible<acc_t>::value,
     "the accumulate type must be default-constructible"
   );
-  iter.foreach_reduced_elt([&](TensorIterator &sub_iter) {
-    auto reduction_body = [&](acc_t acc, int64_t begin, int64_t end) -> acc_t {
-      sub_iter.serial_for_each([&acc, &ops](int ntensors, char** data, const int64_t* strides, int64_t size) {
-        AT_ASSERT(ntensors == 2);
-        char *in = data[1];
-        int64_t stride = strides[1];
+  const int num_outputs = iter.noutputs();
+  iter.foreach_reduced_elt([&ops, &init, num_outputs](TensorIterator &sub_iter) {
+    auto reduction_body = [&ops, &sub_iter, num_outputs](acc_t acc, int64_t begin, int64_t end) -> acc_t {
+      sub_iter.serial_for_each([&acc, &ops, num_outputs](int ntensors, char** data, const int64_t* strides, int64_t size) {
+        AT_ASSERT(ntensors - num_outputs == 1);
+        char *in = data[ntensors - 1];
+        int64_t stride = strides[ntensors - 1];
         for (int64_t i = 0; i < size; ++i) {
           acc = ops.reduce(acc, *(data_t*)in);
           in += stride;
@@ -118,8 +154,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
         total_acc = ops.combine(total_acc, buffer[i]);
       }
     }
-    char *out = (char *)sub_iter.data_ptr(0);
-    *(data_t*)out = ops.project(total_acc);
+    set_results<r_traits>(ops.project(total_acc), sub_iter, num_outputs);
   });
 }
 
