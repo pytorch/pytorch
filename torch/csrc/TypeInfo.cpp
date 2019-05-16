@@ -55,7 +55,7 @@ PyObject* THPFInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
 
   torch::ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  AT_CHECK(r.idx < 2, "Not a type");
+  TORCH_CHECK(r.idx < 2, "Not a type");
   at::ScalarType scalar_type;
   if (r.idx == 1) {
     scalar_type = torch::tensors::get_default_scalar_type();
@@ -81,7 +81,7 @@ PyObject* THPIInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   });
   torch::ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  AT_CHECK(r.idx == 0, "Not a type");
+  TORCH_CHECK(r.idx == 0, "Not a type");
 
   at::ScalarType scalar_type = r.scalartype(0);
   if (!at::isIntegralType(scalar_type)) {

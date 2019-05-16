@@ -5,6 +5,7 @@
 #include <numeric>
 
 #include <c10/core/Backend.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeId.h>
@@ -387,12 +388,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * compute_contiguous() for the exact definition of whether or not
    * a tensor is contiguous or not.
    */
-  virtual bool is_contiguous() const {
-#ifdef DEBUG
-    AT_ASSERT(compute_contiguous() == is_contiguous_);
-#endif
-    return is_contiguous_;
-  }
+  virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const;
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
@@ -630,7 +626,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T * data() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
-    AT_CHECK(has_storage(),
+    TORCH_CHECK(has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
     AT_ASSERTM(
         storage_initialized(),
@@ -663,7 +659,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void* data() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
-    AT_CHECK(has_storage(),
+    TORCH_CHECK(has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
     AT_ASSERT(dtype_initialized());
     return static_cast<void*>(
@@ -740,7 +736,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void resize_dim(int64_t ndim) {
-    AT_CHECK(allow_tensor_metadata_change(), "resize_dim is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "resize_dim is not allowed on Tensor created from .data or .detach()");
     sizes_.resize(ndim, 0);
     strides_.resize(ndim, 0);
     refresh_numel();
@@ -756,7 +752,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_size(int64_t dim, int64_t new_size) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_size is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_size is not allowed on Tensor created from .data or .detach()");
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
@@ -769,7 +765,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_stride(int64_t dim, int64_t new_stride) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_stride is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_stride is not allowed on Tensor created from .data or .detach()");
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
@@ -783,7 +779,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * (and resizing if necessary.)
    */
   virtual void set_storage_offset(int64_t storage_offset) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_storage_offset is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_storage_offset is not allowed on Tensor created from .data or .detach()");
     storage_offset_ = storage_offset;
   }
 
@@ -798,7 +794,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_contiguous(IntArrayRef new_size) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
@@ -823,9 +819,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
-    AT_CHECK(
+    TORCH_CHECK(
         new_size.size() == new_stride.size(),
         "dimensionality of sizes (",
         new_size.size(),
@@ -882,6 +878,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
+   * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
   virtual void set_allow_tensor_metadata_change(bool value) {
     allow_tensor_metadata_change_ = value;
@@ -889,6 +886,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   /**
    * True if a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
+   * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
   virtual bool allow_tensor_metadata_change() const {
     return allow_tensor_metadata_change_;
@@ -917,15 +915,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
   // 1. the AutogradMeta pointer, because it is unique for each Variable.
-  // 2. the version counter, because although it lives in TensorImpl, the version counter is managed
-  // by autograd, and the call sites of `shallow_copy_and_detach()` (from autograd) should decide what
-  // the version counter should be for each new TensorImpl. See NOTE [ Version Counter Sharing ] for details.
+  // 2. the version counter, because it is set to the passed in `version_counter`.
+  //    See NOTE [ Version Counter Sharing ] for details.
   //
-  // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
-  // to this function that need to change the shallow copy's size or storage afterwards, and setting
-  // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
-  // undesirable.
-  virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
+  // NOTE: `allow_tensor_metadata_change` determines whether the TensorImpl shallow-copy
+  // allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
+  // See NOTE [ Metadata Change for a Detached Tensor ] for details.
+  virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id());
     impl->set_sizes_and_strides(sizes(), strides());
@@ -934,6 +932,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     impl->reserved_ = reserved_;
     impl->refresh_numel();
     impl->refresh_contiguous();
+    impl->set_version_counter(version_counter);
+    impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
     return impl;
   }
 
@@ -1342,7 +1342,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_storage(at::Storage storage) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_storage is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_storage is not allowed on Tensor created from .data or .detach()");
     storage_ = std::move(storage);
     data_type_ = storage_.dtype();
     device_opt_ = storage_.device();
@@ -1502,15 +1502,21 @@ protected:
   bool is_contiguous_ = true;
   bool is_wrapped_number_ = false;
 
-  // Previously, if we change the tensor metadata (e.g. sizes / strides / storage / storage_offset)
-  // of a derived tensor (i.e. tensors created from Python `tensor.data` or Python/C++ `tensor.detach()`),
-  // those metadata in the original tensor will also be updated. However, the new behavior is that
-  // those metadata changes to a derived tensor will not update the original tensor anymore, and we
-  // need this flag to make such changes explicitly illegal, to prevent users from changing metadata of
-  // the derived tensor and expecting the original tensor to also be updated.
+  // NOTE [ Metadata Change for a Detached Tensor ]
   //
-  // NOTE: For a full list of tensor metadata fields, please see `shallow_copy_and_detach()` in TensorImpl
-  // and its subclasses to find which fields are copied by value.
+  // Normally, a user is allowed to change the tensor metadata
+  // (e.g. sizes / strides / storage / storage_offset) of a tensor.
+  // However, if the tensor is created by `t1_detached = t1.data` in Python
+  // or `t1_detached = t1.detach()` in Python/C++, those changes to the
+  // tensor metadata of `t1_detached` will not be propagated back to the
+  // original tensor `t1`. In order to make such changes explicitly illegal,
+  // we created the `allow_tensor_metadata_change_` flag, to prevent users
+  // from changing metadata of the detached tensor and expecting the original
+  // tensor to also be updated.
+  //
+  // NOTE: For a full list of tensor metadata fields, please see
+  // `shallow_copy_and_detach()` in TensorImpl and its subclasses to find
+  // which fields are copied by value.
   bool allow_tensor_metadata_change_ = true;
 
   // we decide to keep reserved_ and it will

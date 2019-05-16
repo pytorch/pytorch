@@ -182,9 +182,9 @@ std::tuple<Tensor, Tensor> _solve_helper_cpu(const Tensor& self, const Tensor& A
 
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
-  AT_CHECK(self.dim() >= 2,
+  TORCH_CHECK(self.dim() >= 2,
            "B should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  AT_CHECK(A.dim() >= 2,
+  TORCH_CHECK(A.dim() >= 2,
            "A should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
@@ -324,9 +324,9 @@ Tensor _cholesky_solve_helper_cpu(const Tensor& self, const Tensor& A, bool uppe
 
 // Supports arbitrary batch dimensions for self and A
 Tensor cholesky_solve(const Tensor& self, const Tensor& A, bool upper) {
-  AT_CHECK(self.dim() >= 2,
+  TORCH_CHECK(self.dim() >= 2,
            "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  AT_CHECK(A.dim() >= 2,
+  TORCH_CHECK(A.dim() >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
@@ -437,8 +437,8 @@ static void apply_lu(Tensor& self, Tensor& pivots, Tensor& infos) {
 }
 
 std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pivot, bool check_errors) {
-  AT_CHECK(pivot, "lu without pivoting is not implemented on the CPU");
-  AT_CHECK(self.dim() >= 2,
+  TORCH_CHECK(pivot, "lu without pivoting is not implemented on the CPU");
+  TORCH_CHECK(self.dim() >= 2,
            "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
            " instead");
   squareCheckInputs(self);
@@ -653,9 +653,9 @@ std::tuple<Tensor, Tensor> _triangular_solve_helper_cpu(const Tensor& self, cons
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor, Tensor> triangular_solve(const Tensor& self, const Tensor& A,
                                             bool upper, bool transpose, bool unitriangular) {
-  AT_CHECK(self.dim() >= 2,
+  TORCH_CHECK(self.dim() >= 2,
            "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  AT_CHECK(A.dim() >= 2,
+  TORCH_CHECK(A.dim() >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);

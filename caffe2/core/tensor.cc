@@ -58,8 +58,9 @@ TypeMeta GetTensorType(const void* c) {
   return tc->dtype();
 }
 TypeMeta GetInt8TensorType(const void* c) {
-  const int8::Int8TensorCPU* i8tc = static_cast<const int8::Int8TensorCPU*>(c);
-  return (i8tc->t).dtype();
+  const int8::Int8TensorCPU* int8_tensor =
+      static_cast<const int8::Int8TensorCPU*>(c);
+  return (int8_tensor->t).dtype();
 }
 
 // TODO(jerryzh): Remove
@@ -98,8 +99,9 @@ vector<int64_t> GetTensorInfo(
 
 vector<int64_t>
 GetInt8TensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
-  const int8::Int8TensorCPU* i8tc = static_cast<const int8::Int8TensorCPU*>(c);
-  return GetTensorInfo(&(i8tc->t), capacity, device);
+  const int8::Int8TensorCPU* int8_tensor =
+      static_cast<const int8::Int8TensorCPU*>(c);
+  return GetTensorInfo(&(int8_tensor->t), capacity, device);
 }
 // since we only have one tensor, probably need to remove this at some point?
 static CaffeMap<TypeIdentifier, TensorInfoCall> tensor_info_call_registry_{

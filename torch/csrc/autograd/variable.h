@@ -137,14 +137,14 @@ struct TORCH_API Variable : public at::Tensor {
   // "Downcasts" a `Tensor` into a `Variable`. Only call this on tensors you
   // know are Variables.
   /*implicit*/ Variable(at::Tensor const& rhs) : at::Tensor(rhs) {
-    AT_CHECK(
+    TORCH_CHECK(
         is_variable() || !defined(),
         "Tensor that was converted to Variable was not actually a Variable");
   }
 
   /*implicit*/ Variable(at::Tensor&& rhs)
       : at::Tensor(std::move(rhs)) {
-    AT_CHECK(
+    TORCH_CHECK(
         is_variable() || !defined(),
         "Tensor that was converted to Variable was not actually a Variable");
   }
@@ -355,7 +355,7 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   /// leaf variables that want to accumulate gradients, and false for all other
   /// variables.
   void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) override {
-    AT_CHECK(
+    TORCH_CHECK(
       !requires_grad || at::isFloatingType(at::typeMetaToScalarType(self_impl->dtype())),
       "Only Tensors of floating point dtype can require gradients");
     requires_grad_ = requires_grad;
@@ -409,7 +409,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   int64_t numel() const override;
   at::IntArrayRef sizes() const override;
   at::IntArrayRef strides() const override;
-  bool is_contiguous() const override;
+  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const override;
   int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
   void resize_dim(int64_t ndim) override;
@@ -546,21 +546,22 @@ inline Variable make_variable_view(
   if (data.defined()) {
     if (is_differentiable) {
       /// Differentiable view. Track history with DifferentiableViewImpl.
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
-      data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/0,
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       auto data_copy = at::Tensor(data_impl_copy);
       auto diff_view_meta = c10::guts::make_unique<Variable::DifferentiableViewMeta>();
       return Variable(c10::make_intrusive<Variable::DifferentiableViewImpl>(
               std::move(base), std::move(data_copy), std::move(gradient_edge), std::move(diff_view_meta)));
     } else {
       /// Non-differentiable view. Just share version counter.
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
-      data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/base.version_counter(),
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       auto data_copy = at::Tensor(data_impl_copy);
       auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
       auto var = Variable(c10::make_intrusive<Variable::Impl>(
               std::move(data_copy), std::move(autograd_meta), false, std::move(gradient_edge)));
-      var.set_version_counter(base.version_counter());
       return var;
     }
   }
@@ -571,12 +572,13 @@ inline Variable make_variable(
     at::Tensor data,
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
-  AT_CHECK(
+  TORCH_CHECK(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
-    data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+      /*version_counter=*/0,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     auto data_copy = at::Tensor(data_impl_copy);
     auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
     return Variable(c10::make_intrusive<Variable::Impl>(data_copy, std::move(autograd_meta), requires_grad));
@@ -588,7 +590,7 @@ inline Variable make_variable_consuming(
     at::Tensor data,
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
-  AT_CHECK(
+  TORCH_CHECK(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
@@ -604,12 +606,13 @@ inline Variable make_variable(
     at::Tensor data,
     Edge gradient_edge,
     bool allow_tensor_metadata_change = true) {
-  AT_CHECK(
+  TORCH_CHECK(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
-    data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+      /*version_counter=*/0,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     auto data_copy = at::Tensor(data_impl_copy);
     auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
     return Variable(c10::make_intrusive<Variable::Impl>(data_copy, std::move(autograd_meta), false, std::move(gradient_edge)));
@@ -624,7 +627,7 @@ inline Variable make_variable(
 /// in DEBUG mode and the tensor's dynamic type is not in fact `Variable`,
 /// throws a `std::invalid_argument` exception.
 inline Variable& as_variable_ref(at::Tensor& tensor) {
-  AT_CHECK(
+  TORCH_CHECK(
       tensor.is_variable(),
       "Attempted to cast a Tensor to a Variable, but "
       "the dynamic type of the value is not Variable.");
@@ -632,7 +635,7 @@ inline Variable& as_variable_ref(at::Tensor& tensor) {
 }
 
 inline const Variable& as_variable_ref(const at::Tensor& tensor) {
-  AT_CHECK(
+  TORCH_CHECK(
       tensor.is_variable(),
       "Attempted to cast a Tensor to a Variable, but "
       "the dynamic type of the value is not Variable.");
@@ -767,7 +770,7 @@ inline Variable::Variable(c10::intrusive_ptr<Variable::Impl> self)
     : at::Tensor(std::move(self)) {}
 
 inline Variable::Impl* Variable::get() const {
-  AT_CHECK(defined(), "Called Variable::get() on an undefined Variable");
+  TORCH_CHECK(defined(), "Called Variable::get() on an undefined Variable");
   return static_cast<Variable::Impl*>(impl_.get());
 }
 }} // namespace torch::autograd
