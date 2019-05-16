@@ -155,7 +155,7 @@ class CAFFE2_API Tensor {
     return impl_.weak_use_count();
   }
 
-  const char * toString() const;
+  std::string toString() const;
 
   IntArrayRef sizes() const {
     return impl_->sizes();

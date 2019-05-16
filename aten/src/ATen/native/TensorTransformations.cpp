@@ -118,10 +118,10 @@ Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
     " and dim1 = ", dims[1]);
 
   // check range of dims
-  AT_CHECK(dims[0] < total_dims && dims[0] >= -total_dims,
+  TORCH_CHECK(dims[0] < total_dims && dims[0] >= -total_dims,
     "Rotation dim0 out of range, dim0 = ", dims[0]);
 
-  AT_CHECK(dims[1] < total_dims && dims[1] >= -total_dims,
+  TORCH_CHECK(dims[1] < total_dims && dims[1] >= -total_dims,
     "Rotation dim1 out of range, dim1 = ", dims[1]);
 
   // handle modulo with negative k

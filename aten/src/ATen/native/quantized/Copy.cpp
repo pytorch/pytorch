@@ -14,14 +14,16 @@ Tensor& _s_copy__quantized(Tensor& self, const Tensor& src, bool /* unused */) {
   TORCH_CHECK(
       src.scalar_type() == at::kFloat,
       "Quantized copy only works with kFloat as source Tensor");
-  qint8* self_data = self.data<qint8>();
   float* src_data = src.data<float>();
-  for (int i = 0; i < self.numel(); ++i) {
-    self_data[i] = quantize_uint8(
-        self.q_scale().to<float>(),
-        self.q_zero_point().to<uint8_t>(),
-        src_data[i]);
-  }
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "Copy", [&]() {
+    scalar_t* self_data = self.data<scalar_t>();
+    for (int i = 0; i < self.numel(); ++i) {
+      self_data[i] = quantize_val<scalar_t>(
+          self.q_scale().to<float>(),
+          self.q_zero_point().to<int32_t>(),
+          src_data[i]);
+    }
+  });
   return self;
 }
 } // namespace native
