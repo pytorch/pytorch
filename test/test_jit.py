@@ -12512,9 +12512,13 @@ a")
                     continue
                 self.assertEqual(item[1], loaded_item)
 
+    some_unbound_var = 40
+
     def test_script_recurse(self):
+        outer = 20
+
         def a_python_fn(a, b, c):
-            return a + b + c
+            return a + b + c + outer + some_unbound_var
 
         @torch.jit._recursive_script
         def a_script_fn(d, e, f):
@@ -12523,6 +12527,8 @@ a")
         graph = str(a_script_fn.graph)
         FileCheck().check("aten::add").run(graph)
         FileCheck().check_not("a_python_fn").run(graph)
+        t = torch.ones(2, 2)
+        self.assertEqual(a_script_fn(t, t, t), t + t + t + 20 + 40)
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):

@@ -910,27 +910,29 @@ class ScriptWarning(Warning):
     pass
 
 
-def make_rcb(fn):
+def createResolutionCallbackFromClosure(fn):
     """
     Create a resolutionCallback by introspecting the function instead of
     looking up the stack for the enclosing scope
     """
-    if PY2:
-        # TODO: use fn.__closure__
-        raise RuntimeError("Cannot make resolutionCallback in Python 2")
-    else:
-        closure = inspect.getclosurevars(fn)
-    f_globals = closure.globals
-    f_unbound = closure.unbound
-    f_builtins = closure.builtins
+    # if PY2:
+    #     # TODO: use fn.__closure__
+    #     raise RuntimeError("Cannot make resolutionCallback in Python 2")
+    # else:
+    closure = inspect.getclosurevars(fn)
+    breakpoint()
+    # f_globals = closure.globals
+    # f_unbound = closure.unbound
+    # f_builtins = closure.builtins
+    var_names = fn.__code__.co_freevars
+    free_vars = {}
+    for index, name in enumerate(var_names):
+        free_vars[name] = fn.__closure__[index].cell_contents
 
     def env(key):
-        if key in f_globals:
-            return f_globals[key]
-        elif key in f_builtins:
-            return f_builtins[key]
-        elif key in unbound:
-            raise RuntimeError("Cannot resolve unbound variable", key)
+        print("Resolving ", key)
+        if key in free_vars:
+            return free_vars[key]
         elif hasattr(builtins, key):
             return getattr(builtins, key)
         else:
@@ -943,21 +945,8 @@ def _try_compile_fn(fn):
     if inspect.ismethod(fn) or _is_ignored_function(fn):
         # Skip methods
         return None
-    try:
-        rcb = make_rcb(fn)
-        return torch.jit.script(fn, _rcb=rcb)
-    except Exception as e:
-        if hasattr(fn, '__qualname__'):
-            name = fn.__qualname__
-        elif hasattr(fn, '__name__'):
-            name = fn.__name__
-        else:
-            name = '<unknown>'
-        # Compile error, display as a warning so the user knows why it didn't
-        # compile and that it was inserted as a Python op
-        message = "Inserting a call to Python for '{}' since it could not be compiled:\n{}".format(name, e)
-        warnings.warn(message, category=ScriptWarning, stacklevel=3)
-
+    rcb = createResolutionCallbackFromClosure(fn)
+    return torch.jit.script(fn, _rcb=rcb)
 
 # ScriptClasses must be new-style classes because we construct them using their
 # __new__ method.
@@ -1013,6 +1002,7 @@ def _qualified_name(obj):
 
 
 def _recursive_script(fn):
+    # fn._torch_jit_recurse = True
     return torch.jit.script(fn, _frames_up=1, _recurse=True)
 
 
