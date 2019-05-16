@@ -255,6 +255,10 @@ struct TORCH_API Module {
     if (Method* method = find_method(name)) {
       return *method;
     }
+    if (name == "__setstate__") {
+      // TODO: remove this hack when lowering is no longer necessary
+      return *methods_.at(0);
+    }
     // temporary: force the error message
     // once the on-demand creation of Method is removed, this code
     // can be removed as well
@@ -315,8 +319,12 @@ struct TORCH_API Module {
       // This can be removed when class_compilation_unit() is the source of
       // truth for methods.
       std::lock_guard<std::recursive_mutex> guard(create_method_guard_);
+
+      std::unique_ptr<Method> m;
       Module* mutable_this = const_cast<Module*>(this);
-      std::unique_ptr<Method> m(new Method(mutable_this, fn));
+      if (name != "__setstate__") {
+        m = std::unique_ptr<Method>(new Method(mutable_this, fn));
+      }
       return mutable_this
           ->insert(
               fn->name(),
@@ -444,8 +452,7 @@ struct TORCH_API Module {
   void define(const std::string& src, const ResolverPtr& resolver = nullptr);
 
   template <typename... Types>
-  IValue create_class(const c10::QualifiedName& name, Types&&... args)
-      const {
+  IValue create_class(const c10::QualifiedName& name, Types&&... args) const {
     return create_class(name, {IValue(std::forward<Types>(args))...});
   }
 

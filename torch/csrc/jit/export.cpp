@@ -698,7 +698,7 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
       get_schema.returns().size());
 
   // Check __setstate__ if the method exists
-  auto setstate = module.module_object()->type()->getMethod("__setstate__");
+  auto setstate = module.class_compilation_unit().find_function("__setstate__");
   if (setstate == nullptr) {
     return false;
   }

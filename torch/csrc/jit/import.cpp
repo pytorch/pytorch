@@ -260,14 +260,19 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
 void ScriptModuleDeserializer::moduleSetState(
     const std::shared_ptr<script::Module>& module,
     IValue state) {
-  auto setstate = module->find_method("__setstate__");
+  auto setstate = module->class_compilation_unit().find_function("__setstate__");
 
   AT_CHECK(
       setstate != nullptr,
       "Cannot call '__setstate__' method because"
       " it does not exist");
 
-  module->run_method("__setstate__", state);
+  // TODO: once modules are first class in the interpreter and methods are not
+  // lowered, change this to `module->run_method("__setstate__", state);`
+  Stack stack;
+  stack.push_back(module->module_object());
+  stack.push_back(state);
+  setstate->run(stack);
 }
 
 void ScriptModuleDeserializer::convertModule(

@@ -12022,8 +12022,8 @@ a")
                 @torch.jit.script_method
                 def __setstate__(self, state):
                     # type: (Tuple[Tensor, Tensor, int]) -> None
-                    self.buffer1 = state[0]
-                    self.buffer2 = state[1]
+                    self.buffer1 = state[0] + 10
+                    self.buffer2 = state[1] + 10
 
             with TemporaryFileName() as fname:
                 m = M(23, submodule=M(99))
@@ -12035,12 +12035,12 @@ a")
             self.assertEqual(m.buffer2, torch.ones(2, 2))
 
             # Check top level module
-            self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 3)
-            self.assertEqual(loaded.buffer2, torch.ones(2, 2) + 23)
+            self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 10)
+            self.assertEqual(loaded.buffer2, torch.ones(2, 2) + 10)
 
             # Check submodule
-            self.assertEqual(loaded.submodule.buffer1, torch.ones(2, 2) + 3)
-            self.assertEqual(loaded.submodule.buffer2, torch.ones(2, 2) + 99)
+            self.assertEqual(loaded.submodule.buffer1, torch.ones(2, 2) + 10)
+            self.assertEqual(loaded.submodule.buffer2, torch.ones(2, 2) + 10)
 
 
     def test_string_slicing(self):

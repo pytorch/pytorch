@@ -160,6 +160,12 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       Function& m,
       const c10::optional<size_t>& size_hint = {}) override;
 
+  void setAttr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field,
+      Value* newValue) override;
+
  private:
   Value* self_;
   std::shared_ptr<Module> module_;
