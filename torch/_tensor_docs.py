@@ -3191,3 +3191,8 @@ add_docstr_all('device',
                r"""
 Is the :class:`torch.device` where this Tensor is.
 """)
+
+add_docstr_all('ndim',
+                r"""
+Is the number of dimensions in this Tensor.
+""")
