@@ -127,7 +127,13 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_propagate_qinfo",
-          [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
+          [](std::shared_ptr<script::Module>& m, py::dict& pyQConfDict) {
+            auto qconf_dict =
+                py::cast<std::unordered_map<script::Function*, int>>(
+                    pyQConfDict);
+
+            return PropagateQuantInfo(m, qconf_dict);
+          })
       .def(
           "_jit_pass_insert_observers",
           [](std::shared_ptr<script::Module>& moduleObj,

@@ -17,7 +17,9 @@ namespace jit {
  * might be different for input and output tensors, we would like to use input's
  * qparams for output as well.
  */
-TORCH_API void PropagateQuantInfo(std::shared_ptr<Graph>& graph);
+TORCH_API void PropagateQuantInfo(
+    std::shared_ptr<script::Module> module,
+    std::unordered_map<script::Function*, int> qconf);
 
 /** \brief Inserts observer nodes for collecting distribution of values taken by
  * a tensor.

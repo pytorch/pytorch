@@ -185,9 +185,53 @@ bool matchQParamDictKeytoObserver(
 
 } // namespace
 
+static int getQConfForNode(
+    Node* n,
+    std::unordered_map<script::Function*, int> qconf) {
+  // Find first match
+  auto callstack = n->callstack();
+  if (!callstack) {
+    return 0;
+  }
+  if (qconf.count(callstack->fn())) {
+    return qconf.at(callstack->fn());
+  }
+  while (!callstack->isRoot()) {
+    callstack = callstack->parent();
+    if (qconf.count(callstack->fn())) {
+      return qconf.at(callstack->fn());
+    }
+  }
+  return 0;
+}
+
+void runMyPassOnGraph(
+    Graph* g,
+    std::unordered_map<script::Function*, int> qconf) {
+  //   Value* v = g->insertConstant(val);
+  //   Node* n = g->create(at::Symbol::fromQualString("aten::qqqq"), {v});
+  //   g->appendNode(n);
+
+  for (auto n : g->nodes()) {
+    std::cout << *n;
+    std::cout << "// Will be processed with qconf = "
+              << getQConfForNode(n, qconf) << "\n";
+  }
+}
+
 // PyBind APIs
-void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
-  throw std::runtime_error("Pass not implemented yet!");
+TORCH_API void PropagateQuantInfo(
+    std::shared_ptr<script::Module> module,
+    std::unordered_map<script::Function*, int> qconf) {
+  for (auto& kv : qconf) {
+    std::cout << kv.first << " <===> " << kv.second << std::endl;
+  }
+  for (auto& fn : module->class_compilation_unit().get_functions()) {
+    runMyPassOnGraph(&*fn->graph(), qconf);
+  }
+  for (auto& submod : module->get_modules()) {
+    PropagateQuantInfo(submod, qconf);
+  }
 }
 
 static Node* addObserverFor(
