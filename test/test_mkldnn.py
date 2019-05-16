@@ -150,6 +150,26 @@ class TestMkldnn(TestCase):
                         max_pool2d(x),
                         max_pool2d(x.to_mkldnn()).to_dense())
 
+    def test_max_pool2d_backward(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+        x = torch.randn(N, C, 64, 64, dtype=torch.float32) * 10
+        for ceil_mode in [False, True]:
+            max_pool2d = torch.nn.MaxPool2d(
+                kernel_size=3,
+                stride=2,
+                padding=1,
+                ceil_mode=ceil_mode)
+
+            x1 = x.clone().requires_grad_()
+            x2 = x.clone().to_mkldnn().requires_grad_()
+
+            y1 = max_pool2d(x1).sum()
+            y2 = max_pool2d(x2).to_dense().sum()
+            y1.backward()
+            y2.backward()
+            self.assertEqual(x1.grad, x2.grad.to_dense())
+
     def test_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
@@ -166,6 +186,26 @@ class TestMkldnn(TestCase):
                 avg_pool2d(x),
                 avg_pool2d(x.to_mkldnn()).to_dense())
 
+    def test_avg_pool2d_backward(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+        x = torch.randn(N, C, 64, 64, dtype=torch.float32) * 10
+
+        for count_include_pad in [True, False]:
+            x1 = x.clone().requires_grad_()
+            x2 = x.clone().to_mkldnn().requires_grad_()
+            avg_pool2d = torch.nn.AvgPool2d(
+                kernel_size=3,
+                stride=2,
+                padding=1,
+                count_include_pad=count_include_pad)
+
+            y1 = avg_pool2d(x1).sum()
+            y2 = avg_pool2d(x2).to_dense().sum()
+            y1.backward()
+            y2.backward()
+            self.assertEqual(x1.grad, x2.grad.to_dense())
+
     def test_adaptive_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
@@ -176,6 +216,21 @@ class TestMkldnn(TestCase):
         self.assertEqual(
             adaptive_avg_pool2d(x),
             adaptive_avg_pool2d(x.to_mkldnn()).to_dense())
+
+    def test_adaptive_avg_pool2d_backward(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+        x = torch.randn(N, C, 224, 224, dtype=torch.float32) * 100
+
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d(7)
+
+        y1 = adaptive_avg_pool2d(x1).sum()
+        y2 = adaptive_avg_pool2d(x2).to_dense().sum()
+        y1.backward()
+        y2.backward()
+        self.assertEqual(x1.grad, x2.grad.to_dense())
 
     def test_batch_norm2d(self):
         N = torch.randint(3, 10, (1,)).item()

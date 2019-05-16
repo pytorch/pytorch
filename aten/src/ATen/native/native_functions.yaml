@@ -1660,6 +1660,10 @@
   dispatch:
     QuantizedCPU: quantized_max_pool2d
 
+- func: mkldnn_max_pool2d_backward(Tensor grad_output, Tensor output, Tensor input, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+  dispatch:
+    MkldnnCPU: mkldnn_max_pool2d_backward
+
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
 # The CPU and GPU dispatch variants are named weirdly here because otherwise there
@@ -5653,6 +5657,11 @@
     MkldnnCPU: mkldnn_adaptive_avg_pool2d
   requires_tensor: True
 
+- func: mkldnn_adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
+  dispatch:
+    MkldnnCPU: mkldnn_adaptive_avg_pool2d_backward
+  requires_tensor: True
+
 - func: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   dispatch:
     CPU: adaptive_avg_pool2d_cpu
@@ -5765,12 +5774,14 @@
   dispatch:
     CPU: avg_pool2d_backward_out_cpu
     CUDA: avg_pool2d_backward_out_cuda
+    MkldnnCPU: mkldnn_avg_pool2d_backward_out
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
   python_module: nn
   dispatch:
     CPU: avg_pool2d_backward_cpu
     CUDA: avg_pool2d_backward_cuda
+    MkldnnCPU: mkldnn_avg_pool2d_backward
 
 - func: avg_pool3d.out(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
