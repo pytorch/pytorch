@@ -2,6 +2,7 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -43,6 +44,39 @@ struct TORCH_API Scope : public c10::intrusive_ptr_target {
   Symbol name() const;
 
   std::string namesFromRoot(const std::string& separator = "/") const;
+};
+
+namespace script {
+struct Function;
+}
+
+struct CallStack;
+using CallStackPtr = c10::intrusive_ptr<CallStack>;
+struct TORCH_API CallStack : public c10::intrusive_ptr_target {
+ private:
+  CallStackPtr parent_;
+  std::unordered_map<script::Function*, CallStackPtr> children_;
+  script::Function* fn_;
+  CallStackPtr intrusive_from_this();
+
+ public:
+  CallStack();
+
+  CallStack(CallStackPtr parent, script::Function* fn);
+
+  CallStackPtr insertSubscope(script::Function* fn);
+
+  CallStackPtr parent();
+
+  bool isRoot() const;
+
+  CallStackPtr getRoot();
+
+  size_t getDepth();
+
+  script::Function* fn() const;
+
+  std::vector<script::Function*> asVector();
 };
 
 } // namespace jit
