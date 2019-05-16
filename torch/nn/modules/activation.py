@@ -708,6 +708,8 @@ class MultiheadAttention(Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.dropout = dropout
+        self.head_dim = embed_dim // num_heads
+        assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
         self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
         if bias:
@@ -754,7 +756,7 @@ class MultiheadAttention(Module):
 
 
     Shape:
-        Inputs:
+        - Inputs:
         - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
           the embedding dimension.
         - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
@@ -764,7 +766,7 @@ class MultiheadAttention(Module):
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
         - attn_mask: :math:`(L, L)` where L is the target sequence length.
 
-        Outputs:
+        - Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,

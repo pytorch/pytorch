@@ -409,7 +409,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   int64_t numel() const override;
   at::IntArrayRef sizes() const override;
   at::IntArrayRef strides() const override;
-  bool is_contiguous() const override;
+  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const override;
   int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
   void resize_dim(int64_t ndim) override;
@@ -546,21 +546,22 @@ inline Variable make_variable_view(
   if (data.defined()) {
     if (is_differentiable) {
       /// Differentiable view. Track history with DifferentiableViewImpl.
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
-      data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/0,
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       auto data_copy = at::Tensor(data_impl_copy);
       auto diff_view_meta = c10::guts::make_unique<Variable::DifferentiableViewMeta>();
       return Variable(c10::make_intrusive<Variable::DifferentiableViewImpl>(
               std::move(base), std::move(data_copy), std::move(gradient_edge), std::move(diff_view_meta)));
     } else {
       /// Non-differentiable view. Just share version counter.
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
-      data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/base.version_counter(),
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       auto data_copy = at::Tensor(data_impl_copy);
       auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
       auto var = Variable(c10::make_intrusive<Variable::Impl>(
               std::move(data_copy), std::move(autograd_meta), false, std::move(gradient_edge)));
-      var.set_version_counter(base.version_counter());
       return var;
     }
   }
@@ -575,8 +576,9 @@ inline Variable make_variable(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
-    data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+      /*version_counter=*/0,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     auto data_copy = at::Tensor(data_impl_copy);
     auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
     return Variable(c10::make_intrusive<Variable::Impl>(data_copy, std::move(autograd_meta), requires_grad));
@@ -608,8 +610,9 @@ inline Variable make_variable(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
-    data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+      /*version_counter=*/0,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     auto data_copy = at::Tensor(data_impl_copy);
     auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
     return Variable(c10::make_intrusive<Variable::Impl>(data_copy, std::move(autograd_meta), false, std::move(gradient_edge)));

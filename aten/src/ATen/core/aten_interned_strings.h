@@ -257,6 +257,8 @@ _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
 _(aten, cosine_similarity) \
 _(aten, cross) \
+_(aten, std_mean) \
+_(aten, var_mean) \
 _(aten, ctc_loss) \
 _(aten, cudnn_affine_grid_generator) \
 _(aten, cudnn_affine_grid_generator_backward) \
@@ -905,6 +907,8 @@ _(attr, padding_value) \
 _(attr, params) \
 _(attr, pdist) \
 _(attr, cdist) \
+_(attr, std_mean) \
+_(attr, var_mean) \
 _(attr, periodic) \
 _(attr, pivot) \
 _(attr, pivots) \

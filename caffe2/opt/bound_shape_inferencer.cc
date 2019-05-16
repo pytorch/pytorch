@@ -123,8 +123,11 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorShapeAndType(
   TensorShape& shape = shape_info.shape;
   if (is_quantized) {
     shape_info.is_quantized = true;
-    shape_info.q_info.scale = 1;
-    shape_info.q_info.offset = 0;
+    shape_info.q_info.scale.clear();
+    shape_info.q_info.scale.push_back(1);
+    shape_info.q_info.offset.clear();
+    shape_info.q_info.offset.push_back(0);
+    shape_info.q_info.axis = 1;
   }
   if (!rt.second) {
     // Check shape consistency
