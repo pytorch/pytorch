@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <type_traits>
 
+#include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
