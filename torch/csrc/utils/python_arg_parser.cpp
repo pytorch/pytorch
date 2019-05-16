@@ -2,6 +2,7 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
 
@@ -28,6 +29,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"PyObject*", ParameterType::PYOBJECT},
   {"ScalarType", ParameterType::SCALARTYPE},
   {"Layout", ParameterType::LAYOUT},
+  {"MemoryFormat", ParameterType::MEMORY_FORMAT},
   {"Device", ParameterType::DEVICE},
   {"std::string", ParameterType::STRING},
 };
@@ -169,6 +171,7 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::PYOBJECT: return true;
     case ParameterType::SCALARTYPE: return THPDtype_Check(obj);
     case ParameterType::LAYOUT: return THPLayout_Check(obj);
+    case ParameterType::MEMORY_FORMAT: return THPMemoryFormat_Check(obj);
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
@@ -190,6 +193,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::PYOBJECT: return "object";
     case ParameterType::SCALARTYPE: return "torch.dtype";
     case ParameterType::LAYOUT: return "torch.layout";
+    case ParameterType::MEMORY_FORMAT: return "torch.memory_format";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
     default: throw std::runtime_error("unknown parameter type");
