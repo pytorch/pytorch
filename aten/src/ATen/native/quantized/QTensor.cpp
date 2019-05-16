@@ -42,5 +42,10 @@ Tensor int_repr_quant(const Tensor& self) {
   return dst;
 }
 
+int64_t qscheme_quant(const Tensor& self) {
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  return static_cast<int64_t>(quantizer->qscheme());
+}
+
 } // namespace native
 } // namespace at

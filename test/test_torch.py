@@ -20,6 +20,7 @@ from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple
+from torch.nn.quantized.functional import _QScheme
 from itertools import product, combinations, combinations_with_replacement
 from functools import reduce
 from torch import multiprocessing as mp
@@ -2741,6 +2742,7 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
         self.assertFalse(r.is_quantized)
+        self.assertEqual(_QScheme.get_string(qr.qscheme()), 'per_tensor_affine')
         # slicing and int_repr
         int_repr = qr.int_repr()
         for num in int_repr:

@@ -15,13 +15,15 @@ namespace c10 {
  * Keep this file in sync with torch/nn/_qscheme.py
  */
 enum class QScheme : uint8_t {
-  PER_TENSOR_AFFINE = 0,
-  PER_CHANNEL_AFFINE = 1,
-  PER_TENSOR_SYMMETRIC = 2,
-  PER_CHANNEL_SYMMETRIC = 3,
-  COMPILE_TIME_NUM_QSCHEMES = 4,
+  NO_QUANT = 0,
+  PER_TENSOR_AFFINE = 1,
+  PER_CHANNEL_AFFINE = 2,
+  PER_TENSOR_SYMMETRIC = 3,
+  PER_CHANNEL_SYMMETRIC = 4,
+  COMPILE_TIME_NUM_QSCHEMES = 5,
 };
 
+constexpr auto kNoQuant = QScheme::NO_QUANT;
 constexpr auto kPerTensorAffine = QScheme::PER_TENSOR_AFFINE;
 constexpr auto kPerChannelAffine = QScheme::PER_CHANNEL_AFFINE;
 constexpr auto kPerTensorSymmetric = QScheme::PER_TENSOR_SYMMETRIC;
@@ -31,6 +33,8 @@ constexpr int COMPILE_TIME_NUM_QSCHEMES =
 
 inline std::string toString(QScheme qscheme) {
   switch(qscheme) {
+    case kNoQuant:
+      return "NoQuant";
     case kPerTensorAffine:
       return "PerTensorAffine";
     case kPerChannelAffine:
