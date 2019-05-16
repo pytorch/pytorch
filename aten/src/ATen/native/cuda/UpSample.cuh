@@ -173,8 +173,8 @@ __device__ __forceinline__ static scalar_t upsample_get_value_bounded(
     int width,
     int y,
     int x) {
-  int access_x = max<int>(min<int>(x, width - 1), static_cast<int>(0));
-  int access_y = max<int>(min<int>(y, height - 1), static_cast<int>(0));
+  int access_y = max<int>(min<int>(y, height - 1), 0);
+  int access_x = max<int>(min<int>(x, width - 1), 0);
   return data[batch][channel][access_y][access_x];
 }
 
@@ -189,8 +189,8 @@ __device__ __forceinline__ static void upsample_increment_value_bounded(
     int y,
     int x,
     accscalar_t value) {
-  int access_x = max<int>(min<int>(x, width - 1), static_cast<int>(0));
-  int access_y = max<int>(min<int>(y, height - 1), static_cast<int>(0));
+  int access_y = max<int>(min<int>(y, height - 1), 0);
+  int access_x = max<int>(min<int>(x, width - 1), 0);
   /* TODO: result here is trucated to scalar_t,
      check: https://github.com/pytorch/pytorch/pull/19630#discussion_r281426912
    */
