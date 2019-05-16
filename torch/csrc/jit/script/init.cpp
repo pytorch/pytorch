@@ -313,6 +313,11 @@ void initJitScriptBindings(PyObject* module) {
           py::return_value_policy::reference_internal)
       .def("_register_parameter", &Module::register_parameter)
       .def(
+          "_get_functions",
+          [](Module& self) {
+            return self.class_compilation_unit().get_functions();
+          })
+      .def(
           "_register_attribute",
           [](Module& self, std::string name, TypePtr type, py::object value) {
             self.register_attribute(name, type, toIValue(value, type));
