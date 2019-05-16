@@ -315,7 +315,6 @@ struct TORCH_API Module {
       // This can be removed when class_compilation_unit() is the source of
       // truth for methods.
       std::lock_guard<std::recursive_mutex> guard(create_method_guard_);
-
       Module* mutable_this = const_cast<Module*>(this);
       std::unique_ptr<Method> m(new Method(mutable_this, fn));
       return mutable_this
@@ -329,7 +328,6 @@ struct TORCH_API Module {
 
     return nullptr;
   }
-
   void apply(std::function<void(Module&)> fn) {
     for (auto& submod : get_modules()) {
       submod->apply(fn);
@@ -445,7 +443,8 @@ struct TORCH_API Module {
   void define(const std::string& src, const ResolverPtr& resolver = nullptr);
 
   template <typename... Types>
-  IValue create_class(const c10::QualifiedName& name, Types&&... args) const {
+  IValue create_class(const c10::QualifiedName& name, Types&&... args)
+      const {
     return create_class(name, {IValue(std::forward<Types>(args))...});
   }
 

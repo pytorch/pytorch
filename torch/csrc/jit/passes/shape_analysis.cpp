@@ -123,9 +123,7 @@ class ShapePropagator {
   }
 
   void setUnshapedType(Value* o) {
-    if (o->type()->isSubtypeOf(TensorType::get())) {
-      o->setType(unshapedType(o->type()));
-    }
+    o->setType(unshapedType(o->type()));
   }
 
   void setUnshapedType(Node* node) {
