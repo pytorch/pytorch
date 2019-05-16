@@ -1392,8 +1392,11 @@ CAFFE2_API void SetOpEnginePref(
     const std::string& op_type,
     const CaffeMap<DeviceType, EnginePrefType>& op_pref);
 
-CAFFE2_API void
-LoadInt8TensorInfoOfBlob(float* scale, float* offset, const Blob* b);
+CAFFE2_API void LoadInt8TensorInfoOfBlob(
+    std::vector<float>* scale,
+    std::vector<float>* offset,
+    uint32_t* axis,
+    const Blob* b);
 
 CAFFE2_API TensorShape GetTensorShapeOfBlob(const Blob* b);
 
