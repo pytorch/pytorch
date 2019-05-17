@@ -5307,16 +5307,7 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
-
-    def test_number_all(self):
-        def int1():
-            return all(torch.tensor([1,2,3],dtype=torch.uint8))
-        def int2():
-            return all(torch.tensor([1,0,3],dtype=torch.uint8))
-
-        self.checkScript(int1, ())
-        self.checkScript(int2, ())
-
+        
     def test_number_math(self):
         ops_template = dedent('''
         def func():
@@ -6288,9 +6279,9 @@ a")
         m = M()
         self.assertEqual(m(), 10)
 
-    def test_script_module_for2(self):
+    def test_script_module_for2(self):  
         class Sub(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self):            
                 super(Sub, self).__init__(False)
                 self.weight = nn.Parameter(torch.randn(2))
 

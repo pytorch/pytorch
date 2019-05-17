@@ -1842,25 +1842,7 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__and__, a& b),
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
-
-    //all is a function that takes an iterable and returns True if all are True
-      Operator(
-        "aten::all(Tensor x) -> bool",
-        [](Stack& stack) {
-          at::Tensor x;
-          pop(stack, x);
-          for(int i = 0; i < sizeof(x)/sizeof(x[0]); i++){
-            if((x[i].item().toInt()) == 0) {      
-              push(stack, false);
-              break;
-            }
-            else if(i == sizeof(x)/sizeof(x[0])-1 && (x[(sizeof(x)/sizeof(x[0]))-1]).item().toInt() != 0){
-              push(stack, true);
-              break;
-            }
-          }
-          return 0; 
-          }),
+    
     Operator(
         "prim::abs(int x) -> int",
         [](Stack& stack) {
