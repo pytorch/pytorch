@@ -16,7 +16,7 @@ namespace caffe2 {
 namespace utils {
 
 // Compute the area of an array of boxes.
-ERArrXXf BoxesArea(const ERArrXXf& boxes);
+ERArrXXf BoxesArea(const ERArrXXf& boxes, const bool legacy_plus_one = false);
 
 // Determine which FPN level each RoI in a set of RoIs should map to based
 // on the heuristic in the FPN paper.
@@ -25,7 +25,8 @@ ERArrXXf MapRoIsToFpnLevels(
     const float k_min,
     const float k_max,
     const float s0,
-    const float lvl0);
+    const float lvl0,
+    const bool legacy_plus_one = false);
 
 // Sort RoIs from highest to lowest individual RoI score based on
 // values from scores array and limit to n results
@@ -76,7 +77,9 @@ class CollectAndDistributeFpnRpnProposalsOp final : public Operator<Context> {
         rpn_min_level_(
             this->template GetSingleArgument<int>("rpn_min_level", 2)),
         rpn_post_nms_topN_(
-            this->template GetSingleArgument<int>("rpn_post_nms_topN", 2000)) {
+            this->template GetSingleArgument<int>("rpn_post_nms_topN", 2000)),
+        legacy_plus_one_(
+            this->template GetSingleArgument<bool>("legacy_plus_one", true)) {
     CAFFE_ENFORCE_GE(
         roi_max_level_,
         roi_min_level_,
@@ -110,6 +113,8 @@ class CollectAndDistributeFpnRpnProposalsOp final : public Operator<Context> {
   int rpn_min_level_{2};
   // RPN_POST_NMS_TOP_N
   int rpn_post_nms_topN_{2000};
+  // The infamous "+ 1" for box width and height dating back to the DPM days
+  bool legacy_plus_one_{true};
 };
 
 template <class Context>
@@ -160,7 +165,9 @@ class DistributeFpnProposalsOp final : public Operator<Context> {
         roi_max_level_(
             this->template GetSingleArgument<int>("roi_max_level", 5)),
         roi_min_level_(
-            this->template GetSingleArgument<int>("roi_min_level", 2)) {
+            this->template GetSingleArgument<int>("roi_min_level", 2)),
+        legacy_plus_one_(
+            this->template GetSingleArgument<bool>("legacy_plus_one", true)) {
     CAFFE_ENFORCE_GE(
         roi_max_level_,
         roi_min_level_,
@@ -182,6 +189,8 @@ class DistributeFpnProposalsOp final : public Operator<Context> {
   int roi_max_level_{5};
   // ROI_MIN_LEVEL
   int roi_min_level_{2};
+  // The infamous "+ 1" for box width and height dating back to the DPM days
+  bool legacy_plus_one_{true};
 };
 
 } // namespace caffe2
