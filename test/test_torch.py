@@ -1795,8 +1795,7 @@ class _TestTorchMixin(object):
 
         # Info should be positive for rank deficient matrices
         a = cast(torch.ones(5, 3, 3))
-        if not (a.is_cuda and any(x in torch.version.cuda for x in ['8.0', '9.2'])):
-            self.assertGreater(a.lu(get_infos=True)[2][0], 0)
+        self.assertGreater(a.lu(get_infos=True)[2][0], 0)
 
         # Error checking, no pivoting variant on CPU
         with self.assertRaisesRegex(RuntimeError,
@@ -5941,17 +5940,9 @@ class _TestTorchMixin(object):
         eye = torch.eye(5, device=device)
         test_single_det(eye, (torch.ones((), device=device), torch.zeros((), device=device)), 'identity')
 
-        # TODO: Remove when MAGMA 2.5.0 is built for CUDA 8 and CUDA 9.2
-        is_cuda_8_92 = False
-        if torch.cuda.is_available() and torch.version.cuda is not None:
-            is_cuda_8_92 = any(x in torch.version.cuda for x in ['8.0', '9.2'])
-
         def test(M):
             assert M.size(0) >= 5, 'this helper fn assumes M to be at least 5x5'
             M = M.to(device)
-
-            if M.is_cuda and is_cuda_8_92:
-                return
 
             ref_M_sdet, ref_M_logabsdet = reference_slogdet(M)
 
