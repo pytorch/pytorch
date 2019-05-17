@@ -3,10 +3,9 @@
 #ifndef BOX_WITH_NMS_AND_LIMIT_OP_H_
 #define BOX_WITH_NMS_AND_LIMIT_OP_H_
 
+#include "caffe2/core/c10_operator.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/c10_operator.h"
-
 
 C10_DECLARE_CAFFE2_OPERATOR(BoxWithNMSLimit)
 
@@ -44,7 +43,9 @@ class BoxWithNMSLimitOp final : public Operator<Context> {
             true)),
         output_classes_include_bg_cls_(this->template GetSingleArgument<bool>(
             "output_classes_include_bg_cls",
-            true)) {
+            true)),
+        legacy_plus_one_(
+            this->template GetSingleArgument<bool>("legacy_plus_one", true)) {
     CAFFE_ENFORCE(
         soft_nms_method_str_ == "linear" || soft_nms_method_str_ == "gaussian",
         "Unexpected soft_nms_method");
@@ -91,6 +92,8 @@ class BoxWithNMSLimitOp final : public Operator<Context> {
   // The index where foreground starts in scoures. Eg. if 0 represents
   // background class then foreground class starts with 1.
   int input_scores_fg_cls_starting_id_{1};
+  // The infamous "+ 1" for box width and height dating back to the DPM days
+  bool legacy_plus_one_{true};
 
   // Map a class id (starting with background and then foreground) from (0, 1,
   // ..., NUM_FG_CLASSES) to it's matching value in box
