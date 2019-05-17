@@ -1717,6 +1717,19 @@ RegisterOperators reg2({
           push(stack, t.sizes()[0]);
           return 0;
         }),
+    Operator(
+        "aten::list(str t) -> str[]",
+        [](Stack& stack) {
+          auto str = pop(stack).toStringRef();
+          std::vector<IValue> chars;
+          chars.reserve(str.size());
+          for (auto c : str) {
+            chars.push_back(std::string(1, c));
+          }
+          push(stack, chars);
+          return 0;
+        }
+    ),
 // Mutable ops for lists containing mutable types.
 #define CREATE_MUTABLE_LIST_OPS(decl_type, c_type)                          \
   Operator(                                                                 \
