@@ -184,7 +184,7 @@ void initJITBindings(PyObject* module) {
                   method_name,
                   param_name,
                   getQParamFunc,
-                  at::ScalarType::QInt8);
+                  at::ScalarType::QUInt8);
             }
           })
       .def(
@@ -395,8 +395,8 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(qualified_name);
           auto operations = getAllOperatorsFor(symbol);
-          AT_CHECK(!operations.empty(), "No such operator ", qualified_name);
-          AT_CHECK(
+          TORCH_CHECK(!operations.empty(), "No such operator ", qualified_name);
+          TORCH_CHECK(
               operations.size() == 1,
               "Found ",
               operations.size(),
