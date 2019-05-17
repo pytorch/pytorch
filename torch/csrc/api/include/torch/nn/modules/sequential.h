@@ -161,7 +161,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// \endrst
   template <typename ReturnType = Tensor, typename... InputTypes>
   ReturnType forward(InputTypes&&... inputs) {
-    AT_CHECK(!is_empty(), "Cannot call forward() on an empty Sequential");
+    TORCH_CHECK(!is_empty(), "Cannot call forward() on an empty Sequential");
 
     auto iterator = modules_.begin();
     auto input = iterator->any_forward(std::forward<InputTypes>(inputs)...);
@@ -263,7 +263,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     static_assert(
         torch::detail::is_module<T>::value,
         "Can only call Sequential::at with an nn::Module type");
-    AT_CHECK(index < size(), "Index out of range");
+    TORCH_CHECK(index < size(), "Index out of range");
     return modules_[index].get<T>();
   }
 
@@ -275,7 +275,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     static_assert(
         torch::detail::is_module<T>::value,
         "Can only call Sequential::at with an nn::Module type");
-    AT_CHECK(index < size(), "Index out of range");
+    TORCH_CHECK(index < size(), "Index out of range");
     return modules_[index].get<T>();
   }
 
@@ -283,7 +283,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// underlying module at the given index. Throws an exception if the index is
   /// out of bounds.
   std::shared_ptr<Module> ptr(size_t index) const {
-    AT_CHECK(index < size(), "Index out of range");
+    TORCH_CHECK(index < size(), "Index out of range");
     return modules_[index].ptr();
   }
 
@@ -295,7 +295,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     static_assert(
         torch::detail::is_module<T>::value,
         "Can only call Sequential::ptr with an nn::Module type");
-    AT_CHECK(index < size(), "Index out of range");
+    TORCH_CHECK(index < size(), "Index out of range");
     return modules_[index].ptr<T>();
   }
 

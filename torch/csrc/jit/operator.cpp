@@ -68,7 +68,7 @@ struct OperatorRegistry {
         }
       }
 #endif
-      AT_CHECK(
+      TORCH_CHECK(
           op_ptr_it != operators_by_sig.end(),
           "Couldn't find an operator for ",
           name,

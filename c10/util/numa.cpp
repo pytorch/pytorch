@@ -27,7 +27,7 @@ void NUMABind(int numa_node_id) {
     return;
   }
 
-  AT_CHECK(
+  TORCH_CHECK(
       numa_node_id <= numa_max_node(),
       "NUMA node id ",
       numa_node_id,
@@ -46,7 +46,7 @@ int GetNUMANode(const void* ptr) {
   AT_ASSERT(ptr);
 
   int numa_node = -1;
-  AT_CHECK(
+  TORCH_CHECK(
       get_mempolicy(
           &numa_node,
           NULL,
@@ -83,7 +83,7 @@ void NUMAMove(void* ptr, size_t size, int numa_node_id) {
       numa_node_id >= 0 &&
       static_cast<unsigned>(numa_node_id) < sizeof(unsigned long) * 8);
   unsigned long mask = 1UL << numa_node_id;
-  AT_CHECK(
+  TORCH_CHECK(
       mbind(
           reinterpret_cast<void*>(page_start_ptr),
           size + offset,
