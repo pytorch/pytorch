@@ -12555,9 +12555,10 @@ a")
         def a_python_fn(a, b, c):
             return a + b + c
 
-        @torch.jit._recursive_script
-        def a_script_fn(d, e, f):
-            return a_python_fn(d, e, f)
+        with torch.jit._enable_recursive_script():
+            @torch.jit.script
+            def a_script_fn(d, e, f):
+                return a_python_fn(d, e, f)
 
         graph = str(a_script_fn.graph)
         FileCheck().check("aten::add").run(graph)

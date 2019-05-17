@@ -995,11 +995,11 @@ def _qualified_name(obj):
     return module_name + "." + name
 
 
-def _recursive_script(fn):
+@contextlib.contextmanager
+def _enable_recursive_script():
     torch._C._jit_recursive_script(True)
-    result = torch.jit.script(fn, _frames_up=1)
+    yield
     torch._C._jit_recursive_script(False)
-    return result
 
 
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
