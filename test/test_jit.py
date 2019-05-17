@@ -9493,7 +9493,7 @@ a")
         self.assertExpected(str(cu.foo.schema))
 
     def test_parser_type_annotations_unknown_type(self):
-        with self.assertRaisesRegex(RuntimeError, r'Unknown type name Foo'):
+        with self.assertRaisesRegex(RuntimeError, "Unknown type name 'Foo'"):
             cu = torch.jit.CompilationUnit('''
                 def foo(x : Tensor, y : Tuple[Tuple[Foo, Tensor], Tensor]) -> Tuple[Tensor, Tensor]:
                     return x, x
@@ -12838,6 +12838,14 @@ a")
         x = torch.randn(3, 6)
         y = torch.randn(3, 6)
         self.checkScript(split_two, [(x + y)])
+
+    def test_python_op_name(self):
+        import random
+
+        with self.assertRaisesRegex(RuntimeError, "randint"):
+            @torch.jit.script
+            def fn():
+                return random.randint()
 
 
 class MnistNet(nn.Module):
