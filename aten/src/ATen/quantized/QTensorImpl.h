@@ -44,7 +44,8 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
     impl->refresh_numel();
     impl->refresh_contiguous();
 
-    // QTensorImpl-specific fields (none currently).
+    // QTensorImpl-specific fields.
+    impl->quantizer_ = quantizer();
     return impl;
   }
 

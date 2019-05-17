@@ -95,7 +95,8 @@ c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
     /*version_counter=*/version_counter,
     /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
 
-  // OpaqueTensorImpl-specific fields (none currently).
+  // OpaqueTensorImpl-specific fields.
+  impl->opaque_handle_ = opaque_handle_;
   return impl;
 }
 
