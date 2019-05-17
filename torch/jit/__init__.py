@@ -1231,12 +1231,10 @@ if _enabled:
                     ScriptModule.__setattr__(self, name, item)
                 else:
                     # if we can, register it as an attribute
-                    supported_types = [int, str, float]
-                    for supported_type in supported_types:
-                        if isinstance(item, supported_type):
-                            attr = Attribute(item, supported_type)
-                            ScriptModule.__setattr__(self, name, attr)
-                            break
+                    supported_types = (int, str, float)
+                    if isinstance(item, supported_types):
+                        attr = Attribute(item, type(item))
+                        ScriptModule.__setattr__(self, name, attr)
             for name in original._buffers:
                 if original._buffers[name] is None:
                     object.__setattr__(self, name, None)
