@@ -3,6 +3,7 @@
 #include <ATen/core/qualified_name.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/resolver.h>
+#include <torch/csrc/jit/export.h>
 
 namespace torch {
 namespace jit {
@@ -163,7 +164,18 @@ struct SourceImporter {
         std::make_shared<SourceResolver>(lib_cu_, version_, constant_table_);
   }
 
+  void checkVersionNumber() {
+    // note: this cannot be called in the constructor because it may throw
+    if (version_ > CURRENT_OP_VERSION_SET) {
+      throw ErrorReport(p_.lexer().cur().range)
+          << "Attempting to load a script generated from a newer version of PyTorch. Maximum supported TorchScript version is "
+          << CURRENT_OP_VERSION_SET << " but the script being loaded is version "
+          << version_ << ".";
+    }
+  }
+
   void importLibs(CompilationUnit& owner, const std::string& class_qualifier) {
+    checkVersionNumber();
     auto& L = p_.lexer();
 
     while (L.cur().kind != TK_EOF) {
@@ -192,6 +204,7 @@ struct SourceImporter {
   }
 
   void importFunctions(CompilationUnit& cu, const Self& self) {
+    checkVersionNumber();
     parseImportsAndDoCallback();
 
     std::vector<Def> definitions;

@@ -190,6 +190,15 @@ int ExecutorHelper::GetNumWorkers() const {
   CAFFE_THROW("Not implemented");
 }
 
+// benchmark an individual run so that we can FeedBlobs with new inputs
+// no warmup
+// return time taken in microseconds
+float NetBase::TEST_Benchmark_One_Run() {
+  Timer timer;
+  CAFFE_ENFORCE(Run(), "Run has failed.");
+  return timer.MicroSeconds();
+}
+
 std::vector<float> NetBase::TEST_Benchmark(
     const int warmup_runs,
     const int main_runs,

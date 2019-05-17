@@ -53,7 +53,7 @@ static THCTensor* THNN_(view_weight_local)(
                  THCTensor *_weight)
 {
   THCTensor *weight = THCTensor_(newContiguous)(state, _weight);
-  AT_CHECK(!weight->is_empty() && (weight->dim() == 3 || weight->dim() == 6), 4,
+  TORCH_CHECK(!weight->is_empty() && (weight->dim() == 3 || weight->dim() == 6), 4,
            "weight tensor should be (non-empty) 3D or 6D - got size: ", weight->sizes());
   if (weight->dim() == 6) {
     int64_t s1 = weight->size(0) * weight->size(1);

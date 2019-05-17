@@ -249,7 +249,7 @@ struct TORCH_API Node {
   std::vector<Block*> blocks_;
   Graph* graph_;
   Block* owning_block_;
-  std::shared_ptr<SourceLocation> source_location_;
+  c10::optional<SourceRange> source_range_;
   ScopePtr scope_;
   CallStackPtr callstack_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
@@ -288,13 +288,12 @@ struct TORCH_API Node {
   NodeKind kind() const {
     return kind_;
   }
-  Node* setSourceLocation(std::shared_ptr<SourceLocation> sl) {
-    source_location_ = std::move(sl);
+  Node* setSourceRange(SourceRange r) {
+    source_range_ = std::move(r);
     return this;
   }
-  std::shared_ptr<SourceLocation> getSourceLocation() const {
-    return source_location_;
-  }
+  SourceRange sourceRange() const;
+
   Graph* owningGraph() {
     return graph_;
   }
@@ -561,6 +560,14 @@ struct TORCH_API Node {
   // Result: %3 = f()
   void removeAllInputs();
 
+  // Rearrange the ordering of inputs or outputs of a node
+  // Given: %3 = f(%1, %2)
+  // Execute: %3.permuteInputs({1, 0})
+  // Result: %3 = f(%2, %1)
+  // Each index must appear exactly once
+  void permuteInputs(const std::vector<size_t>& new_inputs);
+  void permuteOutputs(const std::vector<size_t>& new_inputs);
+
   // iterators of the node list starting at this node
   // useful for resuming a search starting at this node
   inline graph_node_list_iterator iterator() {
@@ -590,8 +597,6 @@ struct TORCH_API Node {
   // template variable, returning nullptr if the cast is invalid..
   //
   // Example usage: if(auto s = n.cast<Select>()) { ... }
-  //
-  // TODO: Make this const correct
   template <typename T>
   T* cast() {
     if (T::Kind == kind()) {
@@ -600,8 +605,16 @@ struct TORCH_API Node {
     return nullptr;
   }
   template <typename T>
+  const T* cast() const {
+    if (T::Kind == kind()) {
+      return static_cast<const T*>(this);
+    }
+    return nullptr;
+  }
+
+  template <typename T>
   T* expect() {
-    AT_CHECK(
+    TORCH_CHECK(
         T::Kind == kind(),
         "expected a ",
         T::Kind.toDisplayString(),
@@ -902,6 +915,12 @@ struct Block {
   }
   void eraseOutput(size_t i) {
     output_->removeInput(i);
+  }
+  void permuteOutputs(const std::vector<size_t>& new_inputs) {
+    output_->permuteInputs(new_inputs);
+  }
+  void permuteInputs(const std::vector<size_t>& new_inputs) {
+    input_->permuteOutputs(new_inputs);
   }
 
   Node* appendNode(Node* n) {
@@ -1268,6 +1287,10 @@ struct ProfileOp : public Node {
 
   const std::function<void(std::vector<IValue>&)>& getCallback() const {
     return callback_;
+  }
+
+  void setCallback(std::function<void(std::vector<IValue>&)> callback) {
+    callback_ = callback;
   }
 
  private:
