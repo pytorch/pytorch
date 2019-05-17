@@ -319,6 +319,12 @@ struct CAFFE2_API IValue final {
     return static_cast<at::Layout>(toInt());
   }
 
+  // MemoryFormat
+  at::MemoryFormat toMemoryFormat() const {
+    return static_cast<at::MemoryFormat>(toInt());
+  }
+
+
   // for debugging
   std::string tagKind() const {
     switch(tag) {
