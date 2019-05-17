@@ -516,11 +516,6 @@ class ScriptModuleSerializer final {
       const std::string& name,
       torch::ModuleDef* module_def);
 
-  void convertParameter(
-      const script::Slot& param,
-      torch::ParameterDef* param_def,
-      bool is_parameter);
-
   IValue moduleGetState(const script::Module& module);
   bool moduleHasValidGetSetState(const script::Module& module);
 
@@ -825,10 +820,6 @@ void ScriptModuleSerializer::convertModule(
     torch::ModuleDef* module_def) {
   module_def->set_name(name);
   module_def->set_optimize(module.is_optimized());
-  for (const auto& elem : module.get_parameters()) {
-    torch::ParameterDef* param_def = module_def->add_parameters();
-    convertParameter(elem, param_def, /*is_buffer=*/false);
-  }
 
   // If __getstate__ and __setstate__ methods are provided, use those for
   // serializing instead of serializing the attributes directly
@@ -836,8 +827,23 @@ void ScriptModuleSerializer::convertModule(
   if (user_provided_serialization) {
     // Run the '__getstate__' method on the module and store the result
     pickled_ivalues_.emplace_back(moduleGetState(module));
-    module_def->set_id(pickled_ivalues_.size() - 1);
+    module_def->set_get_state_attribute_id(pickled_ivalues_.size() - 1);
   }
+
+  // Add all the parameters
+  for (const auto& param : module.get_parameters()) {
+    torch::ParameterDef* param_def = module_def->add_parameters();
+    param_def->set_name(param.name());
+    param_def->set_is_buffer(false);
+    if (user_provided_serialization) {
+      // If a __getstate__ was used, don't write the actual tensor
+      param_def->set_tensor_id(-1);
+    } else {
+      param_def->set_tensor_id(addTensor(param.value().toTensor()));
+    }
+  }
+
+  // Add all the attributes
   for (const auto& attribute : module.get_attributes()) {
     // Add attribute to ModuleDef
     torch::AttributeDef* attribute_def = module_def->add_attributes();
@@ -886,15 +892,6 @@ void ScriptModuleSerializer::convertModule(
     torch::ModuleDef* sub_def = module_def->add_submodules();
     convertModule(*elem, module_name.str(), elem->name(), sub_def);
   }
-}
-
-void ScriptModuleSerializer::convertParameter(
-    const script::Slot& param,
-    torch::ParameterDef* param_def,
-    bool is_parameter) {
-  param_def->set_name(param.name());
-  param_def->set_is_buffer(is_parameter);
-  param_def->set_tensor_id(addTensor(param.value().toTensor()));
 }
 
 // Pretty printing for ONNX

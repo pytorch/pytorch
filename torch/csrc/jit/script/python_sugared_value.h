@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <torch/csrc/jit/pybind_utils.h>
@@ -128,10 +129,9 @@ struct VISIBILITY_HIDDEN OverloadedMethodValue : public SugaredValue {
 // anticipating we will eventually need to replace Module with a py::object
 // holding the actual nn.Module class.
 
-struct VISIBILITY_HIDDEN ModuleValue : public SimpleValue {
+struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   ModuleValue(Value* self, std::shared_ptr<Module> module, py::object py_module)
-      : SimpleValue(self),
-        self_(self),
+      : self_(self),
         module_(std::move(module)),
         py_module_(std::move(py_module)) {}
 
@@ -161,7 +161,11 @@ struct VISIBILITY_HIDDEN ModuleValue : public SimpleValue {
       Function& m,
       const c10::optional<size_t>& size_hint = {}) override;
 
-  std::shared_ptr<SimpleValue> new_with(Value* new_value) override;
+  void setAttr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field,
+      Value* newValue) override;
 
  private:
   Value* self_;

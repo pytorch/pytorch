@@ -270,11 +270,8 @@ void ScriptModuleDeserializer::moduleSetState(
       " it does not exist");
 
   // TODO: once modules are first class in the interpreter and methods are not
-  // lowered, change this to `module->run_method("__setstate__", state);`
-  Stack stack;
-  stack.push_back(module->module_object());
-  stack.push_back(state);
-  setstate->run(stack);
+  // lowered, change this to `module->run_method("__setstate__", {state});`
+  setstate->run({module->module_object(), state});
 }
 
 void ScriptModuleDeserializer::convertModule(
@@ -332,8 +329,9 @@ void ScriptModuleDeserializer::convertModule(
         import_callback);
   }
 
-  if (module_def.has_id()) {
-    moduleSetState(module, pickled_ivalues_.at(module_def.id()));
+  if (module_def.has_get_state_attribute_id()) {
+    moduleSetState(
+        module, pickled_ivalues_.at(module_def.get_state_attribute_id()));
   }
 
   for (const auto& slot : module->get_attributes()) {

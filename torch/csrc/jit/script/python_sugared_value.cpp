@@ -330,8 +330,14 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
   return result;
 }
 
-std::shared_ptr<SimpleValue> ModuleValue::new_with(Value* new_value) {
-  return std::make_shared<ModuleValue>(new_value, module_, py_module_);
+void ModuleValue::setAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field,
+    Value* newValue) {
+  // Forward to SimpleValue::setAttr
+  SimpleValue simple(self_);
+  simple.setAttr(loc, m, field, newValue);
 }
 
 std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
