@@ -30,7 +30,7 @@ inline Tensor from_blob(
     const TensorOptions& options = {}) {
   auto device = getType(options).getDeviceFromPtr(data);
   if (options.device().has_index()) {
-    AT_CHECK(
+    TORCH_CHECK(
         options.device() == device,
         "Specified device ", options.device(),
         " does not match device of data ", device);
@@ -71,11 +71,11 @@ inline Tensor from_blob(
 namespace detail {
 
 static inline TypeExtendedInterface & infer_type(const Tensor & t) {
-  AT_CHECK(t.defined(), "undefined Tensor");
+  TORCH_CHECK(t.defined(), "undefined Tensor");
   return getType(t);
 }
 static inline TypeExtendedInterface & infer_type(const TensorList & tl) {
-  AT_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
   return getType(tl[0]);
 }
 

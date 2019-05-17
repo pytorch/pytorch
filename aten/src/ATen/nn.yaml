@@ -162,53 +162,6 @@
     output: 'false'
     grad_input: 'false'
 
-# Upsampling
-
-# Note: The upsampling backwards functions also include an IntArrayRef input_size
-# parameter, which is added by nn_parse.py
-
-- name: _thnn_upsample_linear1d(Tensor self, IntArrayRef[1] output_size, bool align_corners)
-  cname: TemporalUpSamplingLinear
-  scalar_check:
-    self: 'false'
-    grad_input: 'false'
-
-- name: _thnn_upsample_bilinear2d(Tensor self, IntArrayRef[2] output_size, bool align_corners)
-  cname: SpatialUpSamplingBilinear
-  scalar_check:
-    self: 'false'
-    grad_input: 'false'
-
-- name: _thnn_upsample_bicubic2d(Tensor self, IntArrayRef[2] output_size, bool align_corners)
-  cname: SpatialUpSamplingBicubic
-  scalar_check:
-    grad_input: 'false'
-
-- name: _thnn_upsample_trilinear3d(Tensor self, IntArrayRef[3] output_size, bool align_corners)
-  cname: VolumetricUpSamplingTrilinear
-  scalar_check:
-    self: 'false'
-    grad_input: 'false'
-
-- name: _thnn_upsample_nearest1d(Tensor self, IntArrayRef[1] output_size)
-  cname: TemporalUpSamplingNearest
-  scalar_check:
-    self: 'false'
-    grad_input: 'false'
-
-- name: _thnn_upsample_nearest2d(Tensor self, IntArrayRef[2] output_size)
-  cname: SpatialUpSamplingNearest
-  scalar_check:
-    self: 'false'
-    grad_input: 'false'
-
-- name: _thnn_upsample_nearest3d(Tensor self, IntArrayRef[3] output_size)
-  cname: VolumetricUpSamplingNearest
-  scalar_check:
-    self: 'false'
-    grad_input: 'false'
-
-
 # Private functions. These also exist in TH, but we want the backwards functions
 # to implement derivatives.
 

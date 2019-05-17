@@ -18,8 +18,10 @@
 #include <torch/csrc/jit/script/logging.h>
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/Dict.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
@@ -512,7 +514,7 @@ RegisterOperators reg(
              std::vector<int64_t> regular_shape = shape;
              std::vector<int64_t> last_shape = shape;
              int64_t dim = at::maybe_wrap_dim(raw_dim, shape.size());
-             AT_CHECK(
+             TORCH_CHECK(
                  dim < (int64_t)regular_shape.size(),
                  "Dimension out of range for chunk");
              int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
@@ -738,7 +740,7 @@ RegisterOperators reg(
              int64_t num_results = result.size();
              if (num_results != chunks) {
                if (num_results > chunks) {
-                 AT_CHECK(
+                 TORCH_CHECK(
                      num_results == chunks,
                      "Expected chunk to return ",
                      chunks,
@@ -746,7 +748,7 @@ RegisterOperators reg(
                      num_results);
                }
                for (int64_t i = num_results; i < chunks; ++i) {
-                 AT_CHECK(
+                 TORCH_CHECK(
                      !outputs_used[i],
                      "Expected chunk to return at least ",
                      chunks,
@@ -769,7 +771,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                auto ilist = pop(stack);
                const auto& list = ilist.toIntList()->elements();
-               AT_CHECK(
+               TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
@@ -782,7 +784,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                auto ilist = pop(stack);
                const auto& list = ilist.toDoubleList()->elements();
-               AT_CHECK(
+               TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
@@ -795,7 +797,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                auto ilist = pop(stack);
                const auto& list = ilist.toTensorList()->elements();
-               AT_CHECK(
+               TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
@@ -808,7 +810,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                auto glist = pop(stack);
                const auto& list = glist.toGenericList()->elements();
-               AT_CHECK(
+               TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
@@ -865,11 +867,11 @@ RegisterOperators reg(
                  "DictConstruct must have an even number of inputs");
            }
            return [=](Stack& stack) {
-             c10::ivalue::UnorderedMap vals;
+             c10::impl::GenericDict vals;
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
-               vals[key] = val;
+               vals.insert_or_assign(std::move(key), std::move(val));
              }
              push(stack, std::move(vals));
              return 0;
@@ -879,7 +881,7 @@ RegisterOperators reg(
          "aten::_unwrap_optional(t(a)? optional) -> t(a)",
          [](Stack& stack) {
            auto val = pop(stack);
-           AT_CHECK(!val.isNone(), "Unwrapping null optional");
+           TORCH_CHECK(!val.isNone(), "Unwrapping null optional");
            push(stack, val);
            return 0;
          }),
@@ -905,7 +907,7 @@ RegisterOperators reg(
 
              push(stack, forked_interprester.getFuture());
 
-             c10::global_work_queue().run(std::move(continuation));
+             at::launch(std::move(continuation));
              return 0;
            };
          }),
@@ -1056,7 +1058,7 @@ RegisterOperators logging_operators(
 
 int stringSlice(Stack& stack) {
   auto step = pop(stack).toInt();
-  AT_CHECK(step == 1, "Slicing a string only supports step=1");
+  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
 
   auto end = pop(stack).toInt();
   auto start = pop(stack).toInt();
@@ -1583,24 +1585,24 @@ int listSetItem<Shared<BoolList>, bool>(Stack& stack) {
 int dictSetItem(Stack& stack) {
   auto value = pop(stack);
   auto idx = pop(stack);
-  auto& dict = pop(stack).toGenericDict()->elements();
-  dict[idx] = value;
-  push(stack, dict);
+  auto dict = pop(stack).toGenericDict();
+  dict->elements().insert_or_assign(std::move(idx), std::move(value));
+  push(stack, std::move(dict));
   return 0;
 }
 
 int dictLen(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
-  push(stack, int64_t(dict.size()));
+  auto dict = pop(stack).toGenericDict();
+  push(stack, int64_t(dict->elements().size()));
   return 0;
 }
 
 int dictKeys(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
+  auto dict = pop(stack).toGenericDict();
   std::vector<IValue> keys;
-  keys.reserve(dict.size());
-  for (auto item : dict) {
-    keys.push_back(item.first);
+  keys.reserve(dict->elements().size());
+  for (auto item : dict->elements()) {
+    keys.push_back(item.key());
   }
   push(stack, IValue(keys));
   return 0;
@@ -1644,7 +1646,7 @@ int dictIndex(Stack& stack) {
   if (value == elems.end()) {
     AT_ERROR("KeyError: '", index, "'");
   }
-  push(stack, value->second);
+  push(stack, value->value());
   return 0;
 }
 
@@ -1656,7 +1658,7 @@ int dictGet(Stack& stack) {
   if (value == elems.end()) {
     push(stack, IValue());
   } else {
-    push(stack, value->second);
+    push(stack, value->value());
   }
   return 0;
 }
@@ -1670,7 +1672,7 @@ int dictGetDefault(Stack& stack) {
   if (value == elems.end()) {
     push(stack, default_value);
   } else {
-    push(stack, value->second);
+    push(stack, value->value());
   }
   return 0;
 }
@@ -1904,7 +1906,7 @@ RegisterOperators reg2({
         "aten::ord(str string) -> int",
         [](Stack& stack) {
           auto string = pop(stack).toStringRef();
-          AT_CHECK(
+          TORCH_CHECK(
               string.size() == 1,
               "String for ord() must be 1 character, found",
               string.size());
