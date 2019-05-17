@@ -89,12 +89,8 @@ class ShapePropagator {
   bool resizesInput(Node* n) {
     static std::unordered_set<Symbol> resize_ops{
         aten::resize_,    aten::resize_as_, aten::copy_,    aten::set_,
-        aten::add_,       aten::addbmm_,    aten::addcdiv_, aten::addcmul_,
-        aten::addmv_,     aten::addr_,      aten::baddbmm_, aten::ge_,
-        aten::gt_,        aten::le_,        aten::lerp_,    aten::lt_,
-        aten::mul_,       aten::ne_,        aten::sub_,     aten::unsqueeze_,
-        aten::t_, // could preserve DimensionedTensorType Here
-        aten::transpose_,
+        aten::unsqueeze_,
+        aten::t_, aten::transpose_, // could preserve DimensionedTensorType Here
     };
 
     if (resize_ops.count(n->kind()))
@@ -456,6 +452,7 @@ class ShapePropagator {
     bool in_resize = false;
     for (auto v : vs) {
       if (aliasDb_.mayAlias(ValueSet{v}, resized_alias_set)) {
+        setUnshapedType(v);
         in_resize = true;
       }
     }
@@ -466,9 +463,6 @@ class ShapePropagator {
     // Certain ops like resize_ change the input tensors size. Because our
     // analysis is flow invariant, we set any Tensor that can alias a resized
     // Tensor to the base Tensor Type without size information.
-    // NB: We don't erase the input shape information for in-place operations
-    // since in-place operations do not allow the in-place tensor to change
-    // shape as a result of the broadcast.
     if (mayAliasResizedSet(node->inputs())) {
       return setUnshapedType(node);
     }
