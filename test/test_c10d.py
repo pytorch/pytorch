@@ -583,7 +583,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
-        xs = [torch.cuda.FloatTensor([])]
+        xs = [torch.FloatTensor([])]
         pg.broadcast(xs).wait()
         self.assertEqual(0, xs[0].numel())
 
