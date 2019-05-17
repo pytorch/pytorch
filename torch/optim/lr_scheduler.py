@@ -697,32 +697,18 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
                 for base_lr in self.base_lrs]
 
     def step(self, epoch=None):
-        """Step could be called after every batch update
-
-        Example:
-            >>> scheduler = CosineAnnealingWarmRestarts(optimizer, T_0, T_mult)
-            >>> iters = len(dataloader)
-            >>> for epoch in range(20):
-            >>>     for i, sample in enumerate(dataloader):
-            >>> 	inputs, labels = sample['inputs'], sample['labels']
-            >>>         scheduler.step(epoch + i / iters)
-            >>>         optimizer.zero_grad()
-            >>>         outputs = net(inputs)
-            >>>         loss = criterion(outputs, labels)
-            >>>         loss.backward()
-            >>>         optimizer.step()
+        """Step could be called after every update, i.e. if one epoch has 10 iterations
+        (number_of_train_examples / batch_size), we should call SGDR.step(0.1), SGDR.step(0.2), etc.
 
         This function can be called in an interleaved way.
 
         Example:
-            >>> scheduler = ConsineAnnealingWarmRestarts(optimizer, T_0, T_mult)
+            >>> scheduler = SGDR(optimizer, T_0, T_mult)
             >>> for epoch in range(20):
             >>>     scheduler.step()
             >>> scheduler.step(26)
             >>> scheduler.step() # scheduler.step(27), instead of scheduler(20)
         """
-        if epoch < 0:
-            raise ValueError("Expected non-negative epoch, but got {}".format(epoch))
         if epoch is None:
             epoch = self.last_epoch + 1
             self.T_cur = self.T_cur + 1
