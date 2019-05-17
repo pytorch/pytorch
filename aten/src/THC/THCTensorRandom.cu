@@ -115,25 +115,6 @@ __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)    \
   }                                                                            \
 }
 
-#define GENERATE_KERNEL2(NAME, T, ARG1, ARG2, CURAND_T, CURAND_FUNC, TRANSFORM)      \
-__global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2)    \
-{                                                                                    \
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                                   \
-  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                      \
-  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {            \
-    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                                    \
-    if (i < size) {                                                                  \
-      T y = TRANSFORM;                                                               \
-      result[i] = y;                                                                 \
-    }                                                                                \
-  }                                                                                  \
-}
-
-GENERATE_KERNEL1(generate_exponential, float, double lambda, float, curand_uniform, (float)(-1. / lambda * log(x)))
-GENERATE_KERNEL1(generate_exponential, double, double lambda, double, curand_uniform_double, (double)(-1. / lambda * log(x)))
-
-GENERATE_KERNEL1(generate_exponential, at::Half, double lambda, float, curand_uniform, (ScalarConvert<float, at::Half>::to((float)(-1. / lambda * log(x)))))
-
 #include <THC/generic/THCTensorRandom.cu>
 #include <THC/THCGenerateAllTypes.h>
 
@@ -141,4 +122,3 @@ GENERATE_KERNEL1(generate_exponential, at::Half, double lambda, float, curand_un
 #include <THC/THCGenerateBoolType.h>
 
 #undef GENERATE_KERNEL1
-#undef GENERATE_KERNEL2

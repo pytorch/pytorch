@@ -265,7 +265,7 @@ Tensor & log_normal_(Tensor& self, double mean, double std, Generator * generato
   return at::legacy::th::_th_log_normal_(self, mean, std, generator);
 }
 
-Tensor & exponential_(Tensor& self, double lambd, Generator * generator) {
+Tensor & exponential_cpu_(Tensor& self, double lambd, Generator * generator) {
   return at::legacy::th::_th_exponential_(self, lambd, generator);
 }
 

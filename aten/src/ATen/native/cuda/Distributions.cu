@@ -523,6 +523,29 @@ void cauchy_kernel_cuda(TensorIterator& iter, double median_, double sigma_, Gen
    });
 }
 
+void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* gen_) {
+  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "exponential_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto lambda = static_cast<accscalar_t>(lambda_);
+    // define lambda for exponential transformation
+    auto cauchy_func = [lambda] __device__ (accscalar_t rand) {
+      return static_cast<scalar_t>(static_cast<scalar_t>(-1.0) / lambda * ::log(rand));
+    };
+    if (std::is_same<scalar_t, double>::value) {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
+        cauchy_func);
+    } else {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
+        cauchy_func);
+    }
+   });
+}
+
 Tensor& uniform_cuda_(Tensor& self, double from, double to, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   uniform_kernel_cuda(*iter, from, to, gen);
@@ -624,6 +647,12 @@ Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
 Tensor& cauchy_cuda_(Tensor& self, double median, double sigma, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   cauchy_kernel_cuda(*iter, median, sigma, gen);
+  return self;
+}
+
+Tensor& exponential_cuda_(Tensor& self, double lambda, Generator* gen) {
+  auto iter = TensorIterator::nullary_op(self);
+  exponential_kernel_cuda(*iter, lambda, gen);
   return self;
 }
 
