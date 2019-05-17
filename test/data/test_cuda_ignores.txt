@@ -2,7 +2,6 @@
 # These are skipped by test_cuda.py
 torch.ByteTensor.dist
 torch.ByteTensor.dot
-torch.ByteTensor.kthvalue
 torch.ByteTensor.lerp
 torch.ByteTensor.lerp_
 torch.ByteTensor.mean
@@ -13,7 +12,6 @@ torch.ByteTensor.std
 torch.ByteTensor.var
 torch.CharTensor.dist
 torch.CharTensor.dot
-torch.CharTensor.kthvalue
 torch.CharTensor.lerp
 torch.CharTensor.lerp_
 torch.CharTensor.mean
@@ -22,8 +20,6 @@ torch.CharTensor.renorm
 torch.CharTensor.renorm_
 torch.CharTensor.std
 torch.CharTensor.var
-torch.DoubleTensor.kthvalue
-torch.FloatTensor.kthvalue
 torch.HalfTensor.chunk_
 torch.HalfTensor.clone_
 torch.HalfTensor.contiguous_
@@ -47,7 +43,6 @@ torch.HalfTensor.inverse_
 torch.HalfTensor.is_contiguous_
 torch.HalfTensor.is_same_size_
 torch.HalfTensor.is_set_to_
-torch.HalfTensor.kthvalue
 torch.HalfTensor.kthvalue_
 torch.HalfTensor.max_
 torch.HalfTensor.mean_
@@ -87,7 +82,6 @@ torch.HalfTensor.zeros
 torch.HalfTensor.zeros_
 torch.IntTensor.dist
 torch.IntTensor.dot
-torch.IntTensor.kthvalue
 torch.IntTensor.lerp
 torch.IntTensor.lerp_
 torch.IntTensor.mean
@@ -98,7 +92,6 @@ torch.IntTensor.std
 torch.IntTensor.var
 torch.LongTensor.dist
 torch.LongTensor.dot
-torch.LongTensor.kthvalue
 torch.LongTensor.lerp
 torch.LongTensor.lerp_
 torch.LongTensor.mean
@@ -109,7 +102,6 @@ torch.LongTensor.std
 torch.LongTensor.var
 torch.ShortTensor.dist
 torch.ShortTensor.dot
-torch.ShortTensor.kthvalue
 torch.ShortTensor.lerp
 torch.ShortTensor.lerp_
 torch.ShortTensor.mean

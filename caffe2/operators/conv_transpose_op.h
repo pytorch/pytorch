@@ -11,8 +11,9 @@ template <typename T, class Context>
 class ConvTransposeOp final : public ConvTransposeUnpoolBase<Context> {
  public:
   USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context);
-  ConvTransposeOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvTransposeUnpoolBase<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit ConvTransposeOp(Args&&... args)
+      : ConvTransposeUnpoolBase<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
@@ -29,8 +30,9 @@ template <typename T, class Context>
 class ConvTransposeGradientOp final : public ConvTransposeUnpoolBase<Context> {
  public:
   USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context);
-  ConvTransposeGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvTransposeUnpoolBase<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ConvTransposeGradientOp(Args&&... args)
+      : ConvTransposeUnpoolBase<Context>(std::forward<Args>(args)...),
         no_bias_(this->template GetSingleArgument<bool>("no_bias", false)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),

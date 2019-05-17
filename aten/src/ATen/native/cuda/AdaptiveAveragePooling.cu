@@ -214,13 +214,13 @@ namespace {
     checkAllSameGPU("cudnn_adaptive_avg_pooling2d", {input_arg, output_arg});
 
     for (int64_t i = 0; i < input.ndimension(); i++) {
-      AT_CHECK(input.size(i) > 0,
+      TORCH_CHECK(input.size(i) > 0,
         "adaptive_avg_pooling2d(): expected input to have non-empty spatial dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i, " being "
         "empty");
     }
 
-    AT_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
+    TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
       "non-empty 3D or 4D (batch mode) tensor expected for input");
     Tensor input_ = input;
     int64_t grid_x = input.size(-3);
@@ -244,7 +244,7 @@ namespace {
        output.resize_({sizeD, osizeH, osizeW});
     }
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-        input_.type(), "adaptive_avg_pool2d", [&] {
+        input_.scalar_type(), "adaptive_avg_pool2d_cuda", [&] {
           scalar_t *input_data = input_.data<scalar_t>();
           scalar_t *output_data = output.data<scalar_t>();
 
@@ -284,13 +284,13 @@ namespace {
 
     int64_t osizeH = gradOutput.size(-2);
     int64_t osizeW = gradOutput.size(-1);
-    
+
     int64_t grid_x = sizeD;
     if (input.ndimension() == 4) grid_x *= input.size(-4);
 
       //bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0);
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-        input.type(), "adaptive_avg_pool2d_backward", [&] {
+        input.scalar_type(), "adaptive_avg_pool2d_backward_cuda", [&] {
           scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
           scalar_t *gradInput_data = gradInput.data<scalar_t>();
 

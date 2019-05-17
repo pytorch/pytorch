@@ -1,7 +1,6 @@
 import math
 import torch
 import warnings
-import itertools
 import numbers
 
 from .module import Module
@@ -27,7 +26,7 @@ def apply_permutation(tensor, permutation, dim=1):
 
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
-                     'batch_first', 'dropout', 'bidirectional', '_flat_parameters']
+                     'batch_first', 'dropout', 'bidirectional']
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
@@ -133,8 +132,11 @@ class RNNBase(Module):
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
 
-    @_parameter_list
-    def get_flat_weights(self):
+    def _get_flat_weights_names(self):
+        return [weight for weights in self._all_weights for weight in weights]
+
+    @_parameter_list(_get_flat_weights_names)
+    def _get_flat_weights(self):
         return self._flat_weights
 
     @weak_script_method
@@ -154,7 +156,8 @@ class RNNBase(Module):
     def get_expected_hidden_size(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> Tuple[int, int, int]
         if batch_sizes is not None:
-            mini_batch = int(batch_sizes[0])
+            mini_batch = batch_sizes[0]
+            mini_batch = int(mini_batch)
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
         num_directions = 2 if self.bidirectional else 1
@@ -183,7 +186,8 @@ class RNNBase(Module):
         is_packed = isinstance(input, PackedSequence)
         if is_packed:
             input, batch_sizes, sorted_indices, unsorted_indices = input
-            max_batch_size = int(batch_sizes[0])
+            max_batch_size = batch_sizes[0]
+            max_batch_size = int(max_batch_size)
         else:
             batch_sizes = None
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
@@ -203,10 +207,10 @@ class RNNBase(Module):
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
-            result = _impl(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
+            result = _impl(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
                            self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _impl(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
+            result = _impl(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
                            self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1]
@@ -514,10 +518,10 @@ class LSTM(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
-            result = _VF.lstm(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
+            result = _VF.lstm(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _VF.lstm(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
+            result = _VF.lstm(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
                               self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:]
@@ -540,7 +544,8 @@ class LSTM(RNNBase):
     def forward_packed(self, input, hx=None):
         # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
         input, batch_sizes, sorted_indices, unsorted_indices = input
-        max_batch_size = int(batch_sizes[0])
+        max_batch_size = batch_sizes[0]
+        max_batch_size = int(max_batch_size)
 
         output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
 

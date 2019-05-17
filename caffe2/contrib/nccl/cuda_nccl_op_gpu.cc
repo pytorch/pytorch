@@ -34,6 +34,7 @@ nccl::NCCLExecution getNCCLElements(
 }
 
 namespace {
+
 // Check if all inputs are float
 template <typename T>
 bool AllInputsAre(OperatorBase* op) {
@@ -46,13 +47,34 @@ bool AllInputsAre(OperatorBase* op) {
   }
   return true;
 }
+
+// Manual count of all instantiated NCCL ops.
+// If this drops to zero after destructing the last NCCL op,
+// it means we can safely destroy all lazily created NCCL contexts.
+std::atomic<int> kNCCLOpCounter(0);
+
 }; // namespace
 
-class NCCLAllreduceOp final : public Operator<CUDAContext> {
+class NCCLBaseOp : public Operator<CUDAContext> {
  public:
   using Operator::Operator;
-  NCCLAllreduceOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws) {}
+
+  NCCLBaseOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {
+    kNCCLOpCounter++;
+  }
+
+  ~NCCLBaseOp() {
+    if (--kNCCLOpCounter == 0) {
+      nccl::destroyContexts();
+    }
+  }
+};
+
+class NCCLAllreduceOp final : public NCCLBaseOp {
+ public:
+  using NCCLBaseOp::NCCLBaseOp;
+
   bool RunOnDevice() override {
     if (InputSize() == 1)
       return true;
@@ -108,14 +130,12 @@ class NCCLAllreduceOp final : public Operator<CUDAContext> {
     c.params_bytes = 0;
     return c;
   }
-
- protected:
 };
 
-class NCCLBroadcastOp final : public Operator<CUDAContext> {
+class NCCLBroadcastOp final : public NCCLBaseOp {
  public:
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
-  using Operator::Operator;
+  using NCCLBaseOp::NCCLBaseOp;
+
   bool RunOnDevice() override {
     if (InputSize() == 1)
       return true;
@@ -129,14 +149,12 @@ class NCCLBroadcastOp final : public Operator<CUDAContext> {
       return false;
     }
   }
-
- protected:
 };
 
-class NCCLReduceOp final : public Operator<CUDAContext> {
+class NCCLReduceOp final : public NCCLBaseOp {
  public:
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
-  using Operator::Operator;
+  using NCCLBaseOp::NCCLBaseOp;
+
   bool RunOnDevice() override {
     if (InputSize() == 1)
       return true;
@@ -152,14 +170,12 @@ class NCCLReduceOp final : public Operator<CUDAContext> {
       return false;
     }
   }
-
- protected:
 };
 
-class NCCLAllGatherOp final : public Operator<CUDAContext> {
+class NCCLAllGatherOp final : public NCCLBaseOp {
  public:
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
-  using Operator::Operator;
+  using NCCLBaseOp::NCCLBaseOp;
+
   bool RunOnDevice() override {
     if (InputSize() == 1)
       return true;
@@ -173,14 +189,12 @@ class NCCLAllGatherOp final : public Operator<CUDAContext> {
       return false;
     }
   }
-
- protected:
 };
 
-class NCCLReduceScatterOp final : public Operator<CUDAContext> {
+class NCCLReduceScatterOp final : public NCCLBaseOp {
  public:
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
-  using Operator::Operator;
+  using NCCLBaseOp::NCCLBaseOp;
+
   bool RunOnDevice() override {
     if (AllInputsAre<float>(this)) {
       nccl::NCCL<float>::ReduceScatter(getNCCLElements(this, context_));
@@ -192,8 +206,6 @@ class NCCLReduceScatterOp final : public Operator<CUDAContext> {
       return false;
     }
   }
-
- protected:
 };
 
 namespace {
@@ -258,6 +270,6 @@ OPERATOR_SCHEMA(NCCLReduceScatter)
     .InputsCanCrossDevices()
     .DeviceInferenceFunction(ncclOpDevInfer);
 SHOULD_NOT_DO_GRADIENT(NCCLReduceScatter);
-} // namespace
 
+} // namespace
 } // namespace caffe2

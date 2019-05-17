@@ -42,6 +42,9 @@
 #   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
+#   MKLDNN_THREADING
+#     MKL-DNN threading mode (https://github.com/intel/mkl-dnn/)
+#
 #   USE_NNPACK=0
 #     disables NNPACK build
 #
@@ -63,6 +66,9 @@
 #
 #   USE_OPENCV
 #     enables use of OpenCV for additional operators
+#
+#   USE_OPENMP=0
+#     disables use of OpenMP for parallelization
 #
 #   USE_FFMPEG
 #     enables use of ffmpeg for additional operators
@@ -95,6 +101,9 @@
 #     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, or OpenBLAS. If set
 #     then the build will fail if the requested BLAS is not found, otherwise
 #     the BLAS will be chosen based on what is found on your system.
+#
+#   MKL_SEQ=1
+#     chooses a sequential version of MKL library (in case of BLAS=MKL)
 #
 #   USE_FBGEMM
 #     Enables use of FBGEMM
@@ -142,7 +151,7 @@
 #     we will search for libraries in these paths
 
 from __future__ import print_function
-from setuptools import setup, Extension, distutils, Command, find_packages
+from setuptools import setup, Extension, distutils, find_packages
 from distutils import core, dir_util
 from distutils.core import Distribution
 from distutils.errors import DistutilsArgError
@@ -151,7 +160,6 @@ import setuptools.command.install
 import distutils.command.clean
 import distutils.sysconfig
 import filecmp
-import platform
 import subprocess
 import shutil
 import sys
@@ -231,18 +239,21 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
 version = '1.1.0a0'
+sha = 'Unknown'
+
+try:
+    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
+except Exception:
+    pass
+
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
     version = os.getenv('PYTORCH_BUILD_VERSION')
     if build_number > 1:
         version += '.post' + str(build_number)
-else:
-    try:
-        sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
-        version += '+' + sha[:7]
-    except Exception:
-        pass
+elif sha != 'Unknown':
+    version += '+' + sha[:7]
 report("Building wheel {}-{}".format(package_name, version))
 
 
@@ -257,6 +268,7 @@ def build_deps():
         # this would claim to be a release build when it's not.)
         f.write("debug = {}\n".format(repr(DEBUG)))
         f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
+        f.write("git_version = {}\n".format(repr(sha)))
 
     def check_file(f):
         if not os.path.exists(f):
@@ -370,6 +382,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
             target_lib = os.path.join(
                 build_lib, 'torch', 'lib', '_C.lib').replace('\\', '/')
+
+            # Create "torch/lib" directory if not exists.
+            # (It is not created yet in "develop" mode.)
+            target_dir = os.path.dirname(target_lib)
+            if not os.path.exists(target_dir):
+                os.makedirs(target_dir)
 
             self.copy_file(export_lib, target_lib)
 
@@ -719,9 +737,14 @@ if __name__ == '__main__':
         entry_points=entry_points,
         package_data={
             'torch': [
+                'py.typed',
                 'bin/*',
                 'test/*',
                 '__init__.pyi',
+                'cuda/*.pyi',
+                'optim/*.pyi',
+                'autograd/*.pyi',
+                'utils/data/*.pyi',
                 'lib/*.so*',
                 'lib/*.dylib*',
                 'lib/*.dll',
@@ -744,8 +767,8 @@ if __name__ == '__main__':
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',
                 'include/ATen/core/dispatch/*.h',
+                'include/ATen/core/op_registration/*.h',
                 'include/c10/core/impl/*.h',
-                'include/ATen/core/opschema/*.h',
                 'include/c10/util/*.h',
                 'include/c10/cuda/*.h',
                 'include/c10/cuda/impl/*.h',
@@ -776,6 +799,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/*.h',
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
+                'include/torch/csrc/jit/passes/utils/*.h',
                 'include/torch/csrc/jit/script/*.h',
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/onnx/*.h',

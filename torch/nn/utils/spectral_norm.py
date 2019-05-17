@@ -3,7 +3,6 @@ Spectral Normalization from https://arxiv.org/abs/1802.05957
 """
 import torch
 from torch.nn.functional import normalize
-from torch.nn.parameter import Parameter
 
 
 class SpectralNorm(object):
@@ -48,9 +47,9 @@ class SpectralNorm(object):
         #     broadcast and used!
         #
         #     Therefore, to make the change propagate back, we rely on two
-        #     important bahaviors (also enforced via tests):
+        #     important behaviors (also enforced via tests):
         #       1. `DataParallel` doesn't clone storage if the broadcast tensor
-        #          is alreay on correct device; and it makes sure that the
+        #          is already on correct device; and it makes sure that the
         #          parallelized module is already on `device[0]`.
         #       2. If the out tensor in `out=` kwarg has correct shape, it will
         #          just fill in the values.
@@ -215,8 +214,8 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12, dim=No
         eps (float, optional): epsilon for numerical stability in
             calculating norms
         dim (int, optional): dimension corresponding to number of outputs,
-            the default is 0, except for modules that are instances of
-            ConvTranspose1/2/3d, when it is 1
+            the default is ``0``, except for modules that are instances of
+            ConvTranspose{1,2,3}d, when it is ``1``
 
     Returns:
         The original module with the spectral norm hook
@@ -224,9 +223,10 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12, dim=No
     Example::
 
         >>> m = spectral_norm(nn.Linear(20, 40))
-        Linear (20 -> 40)
+        >>> m
+        Linear(in_features=20, out_features=40, bias=True)
         >>> m.weight_u.size()
-        torch.Size([20])
+        torch.Size([40])
 
     """
     if dim is None:
@@ -244,7 +244,7 @@ def remove_spectral_norm(module, name='weight'):
     r"""Removes the spectral normalization reparameterization from a module.
 
     Args:
-        module (nn.Module): containing module
+        module (Module): containing module
         name (str, optional): name of weight parameter
 
     Example:

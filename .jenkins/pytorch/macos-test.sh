@@ -1,6 +1,8 @@
 #!/bin/bash
 
+# shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
+
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 export PATH="/usr/local/bin:$PATH"
@@ -17,6 +19,12 @@ export PATH="${PYTORCH_ENV_DIR}/miniconda3/bin:$PATH"
 source ${PYTORCH_ENV_DIR}/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja six
 pip install -q hypothesis "librosa>=0.6.2" psutil
+
+# faulthandler become built-in since 3.3
+if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
+  pip install -q faulthandler
+fi
+
 if [ -z "${IN_CIRCLECI}" ]; then
   rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 fi

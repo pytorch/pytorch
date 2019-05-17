@@ -82,20 +82,29 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
 
   bool RunOnDevice() override {
     for (int i = 0; i < InputSize(); ++i) {
-      if (InputIsType<itensor>(i) &&
-          Input(i).get_data_type() == itensor::data_type::f32) {
+      if (InputIsType<itensor>(i)
+          && (Input(i).has_scale()
+            || Input(i).get_data_type() == idtype::f32)) {
         auto& input = Input(i);
         if (input_share_[i]) {
           local_input_blobs_[i]->Reset();
+          input_share_[i] = false;
         }
-        input_share_[i] = false;
         auto dtensor = BlobGetMutableTensor(local_input_blobs_[i], CPU);
         dtensor->Resize(input.get_dims());
-        if (input.is_public_format()) {
+        // If fallback from INT8, the public format of original input is nhwc.
+        // While the required format is nchw, need to reorder to nchw.
+        if (input.get_public_format() == iformat::nhwc) {
+          itensor temp_ten ({input.get_dims(), idtype::f32, iformat::nchw},
+              dtensor->template mutable_data<float>());
+          temp_ten.feed_from(input);
+        } else if (!input.need_reorder()) {
+          CAFFE_ENFORCE(!input.has_scale(),
+              "Incorrect invocation of get_data_handle");
           dtensor->ShareExternalPointer(
               static_cast<float*>(input.get_data_handle()));
         } else {
-          input.reorder_to(dtensor->template mutable_data<float>());
+          input.to_public(dtensor->template mutable_data<float>());
         }
       } else {
         VLOG(1) << "Input " << i << " is not ideep::tensor. Skipping copy.";
@@ -143,12 +152,14 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
         itensor::dims dst_dims (src_dims.begin(), src_dims.end());
         auto dtensor = dst->template GetMutable<itensor>();
         if (dtensor->get_dims() != dst_dims) {
-          dtensor->resize(dst_dims, itensor::data_type::f32);
+          dtensor->resize(dst_dims, idtype::f32);
         }
         if (output_inplace_[i]) {
-          dtensor->reorder_from(dst_dims, itensor::data_type::f32,
-                                const_cast<void*>(src.raw_data()));
+          dtensor->feed_from(dst_dims, idtype::f32,
+              const_cast<void*>(src.raw_data()));
         } else {
+          CAFFE_ENFORCE(!dtensor->has_scale(),
+              "Incorrect invocation of set_data_handle");
           dtensor->set_data_handle(const_cast<void *>(src.raw_data()));
         }
       } else {

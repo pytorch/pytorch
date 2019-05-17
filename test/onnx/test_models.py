@@ -5,7 +5,6 @@ from torchvision.models.resnet import resnet50
 from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
 
 from model_defs.mnist import MNIST
-from model_defs.word_language_model import RNNModel
 from model_defs.squeezenet import SqueezeNet
 from model_defs.super_resolution import SuperResolutionNet
 from model_defs.srresnet import SRResNet
@@ -17,17 +16,9 @@ from test_pytorch_common import TestCase, run_tests, skipIfNoLapack
 import torch
 import torch.onnx
 import torch.onnx.utils
-from torch.autograd import Variable, Function
-from torch.nn import Module
+from torch.autograd import Variable
 from torch.onnx import OperatorExportTypes
 
-import onnx
-import onnx.checker
-import onnx.helper
-
-import google.protobuf.text_format
-
-import io
 import unittest
 
 import caffe2.python.onnx.backend as backend
@@ -138,6 +129,7 @@ class TestModels(TestCase):
         sqnet_v1_1 = SqueezeNet(version=1.1)
         self.exportTest(toC(sqnet_v1_1), toC(x))
 
+    @unittest.skip("Temporary - waiting for https://github.com/onnx/onnx/pull/1773.")
     def test_densenet(self):
         # Densenet-121 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))

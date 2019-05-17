@@ -14,8 +14,9 @@ template <typename T, typename Context>
 class HSoftmaxOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  HSoftmaxOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit HSoftmaxOpBase(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     HierarchyProto hierarchy;
     CAFFE_ENFORCE(hierarchy.ParseFromString(
         this->template GetSingleArgument<string>("hierarchy", "")));
@@ -114,8 +115,9 @@ template <typename T, class Context>
 class HSoftmaxSearchOp final : public HSoftmaxOp<T, Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  HSoftmaxSearchOp(const OperatorDef& operator_def, Workspace* ws)
-      : HSoftmaxOp<T, Context>(operator_def, ws),
+  template <class... Args>
+  explicit HSoftmaxSearchOp(Args&&... args)
+      : HSoftmaxOp<T, Context>(std::forward<Args>(args)...),
         top_n_(this->template GetSingleArgument<int>("topN", 5)),
         beam_(this->template GetSingleArgument<float>("beam", 0.01f)) {
     CAFFE_ENFORCE(tree_.ParseFromString(
@@ -146,9 +148,11 @@ template <typename T, class Context>
 class HuffmanTreeHierarchyOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  HuffmanTreeHierarchyOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        num_classes_(this->template GetSingleArgument<int>("num_classes", -1)) {}
+  template <class... Args>
+  explicit HuffmanTreeHierarchyOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        num_classes_(this->template GetSingleArgument<int>("num_classes", -1)) {
+  }
   bool RunOnDevice() override;
 
  private:

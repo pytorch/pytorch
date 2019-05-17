@@ -57,11 +57,8 @@ bool _nnpack_available() {
 
 #include <stdlib.h>
 
-#ifdef _OPENMP
-#include <omp.h>
-#else
+#include <ATen/Parallel.h>
 #include <thread>
-#endif
 
 namespace at {
 namespace native {
@@ -76,16 +73,16 @@ pthreadpool_t nnpack_threadpool() {
     enum nnp_status nnpack_status = nnp_initialize();
     if (nnpack_status != nnp_status_success) {
       if (nnpack_status == nnp_status_out_of_memory) {
-	throw std::runtime_error("could not initialize NNPack (out of memory)");
+        throw std::runtime_error("could not initialize NNPack (out of memory)");
       } else if (nnpack_status == nnp_status_unsupported_hardware) {
-	throw std::runtime_error("could not initialize NNPack (unsupported hardware)");
+        throw std::runtime_error("could not initialize NNPack (unsupported hardware)");
       } else {
-	throw std::runtime_error("could not initialize NNPack (unknown error)");
+        throw std::runtime_error("could not initialize NNPack (unknown error)");
       }
     }
     unsigned int threads;
-#ifdef _OPENMP
-    threads = omp_get_num_threads();
+#ifdef INTRA_OP_PARALLEL
+    threads = at::get_num_threads();
 #else
     threads = std::thread::hardware_concurrency();
 #endif
@@ -213,10 +210,10 @@ Tensor _nnpack_spatial_convolution(
   auto algorithm = nnp_convolution_algorithm_auto;
 
   // All Tensors must be float Tensors
-  if (input.type().ID() != at::TypeID::CPUFloat ||
-      weight.type().ID() != at::TypeID::CPUFloat ||
-      output.type().ID() != at::TypeID::CPUFloat ||
-      (bias.defined() && bias.type().ID() != at::TypeID::CPUFloat)) {
+  if (input.device().type() != kCPU || input.scalar_type() != kFloat ||
+      weight.device().type() != kCPU || weight.scalar_type() != kFloat ||
+      output.device().type() != kCPU || output.scalar_type() != kFloat ||
+      (bias.defined() && (bias.device().type() != kCPU || bias.scalar_type() != kFloat))) {
     throw std::runtime_error(
         "Mismatched Tensor types in NNPack convolutionOutput");
   }

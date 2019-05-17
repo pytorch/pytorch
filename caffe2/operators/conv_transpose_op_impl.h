@@ -3,11 +3,15 @@
 #ifndef CAFFE2_OPERATORS_CONV_TRANSPOSE_OP_IMPL_H_
 #define CAFFE2_OPERATORS_CONV_TRANSPOSE_OP_IMPL_H_
 
+#include "caffe2/operators/conv_transpose_op.h"
+
+#include <array>
+#include <vector>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/conv_op_shared.h"
-#include "caffe2/operators/conv_transpose_op.h"
 #include "caffe2/operators/conv_transpose_unpool_op_base.h"
 #include "caffe2/utils/math.h"
 
@@ -17,551 +21,618 @@ namespace caffe2 {
 
 template <typename T, class Context>
 bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
-  const Tensor& X = Input(INPUT);
-  auto& filter = Input(FILTER);
-  const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
-  CAFFE_ENFORCE(filter.dim() == 4, "filter must be 4D tensor");
-  CAFFE_ENFORCE(
-      filter.dim32(0) == M,
-      "filter number must be equal to input channel number");
-  const int C = filter.dim32(1);
-  CAFFE_ENFORCE(
-      filter.dim32(2) == this->kernel_h(),
+  const auto& X = Input(INPUT);
+  const auto& filter = Input(FILTER);
+  CAFFE_ENFORCE_EQ(X.dim(), 4, "Input must be 4D tensor");
+  CAFFE_ENFORCE_EQ(filter.dim(), 4, "filter must be 4D tensor");
+  const int N = X.dim32(0);
+  const int M = X.dim32(1);
+  const int H = X.dim32(2);
+  const int W = X.dim32(3);
+  const int G = group_;
+  CAFFE_ENFORCE_EQ(M, filter.dim32(0));
+  CAFFE_ENFORCE_EQ(
+      M % G, 0, "The number of input channels is not divisible by group.");
+  const int C = filter.dim32(1) * G;
+  CAFFE_ENFORCE_EQ(
+      filter.dim32(2),
+      kernel_h(),
       "filter height must be equal to kernel height");
-  CAFFE_ENFORCE(
-      filter.dim32(3) == this->kernel_w(),
+  CAFFE_ENFORCE_EQ(
+      filter.dim32(3),
+      this->kernel_w(),
       "filter width must be equal to kernel width");
-  auto sizes = ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
-  Tensor* Y = Output(0, sizes, at::dtype<T>());
+  const std::vector<std::int64_t> Y_dims =
+      ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
+  auto* Y = Output(0, Y_dims, at::dtype<T>());
 
-  const int kernel_dim = C * this->kernel_h() * this->kernel_w();
-  const int input_image_size = H * W;
-  const int output_image_size = Y->dim32(2) * Y->dim32(3);
-
-  if (InputSize() == 3) {
-    auto& bias = Input(BIAS);
-    CAFFE_ENFORCE(bias.dim() == 1, "bias must be 1D tensor");
-    CAFFE_ENFORCE(
-        bias.dim32(0) == C,
-        "bias dimension must be equal to output channel number");
-    ReinitializeTensor(
-        &bias_multiplier_,
-        {1, output_image_size},
-        at::dtype<T>().device(Context::GetDeviceType()));
-      T* bm_data = bias_multiplier_.template mutable_data<T>();
-      math::Set<T, Context>(
-          output_image_size,
-          static_cast<T>(1),
-          bm_data,
-          &context_);
+  if (N == 0) {
+    return true;
   }
 
-  const T* Xdata = X.template data<T>();
-  const T* filter_data = filter.template data<T>();
-  T* Ydata = Y->template mutable_data<T>();
+  const int K_HxW = kernel_h() * kernel_w();
+  const int kernel_dim = C / G * K_HxW;
+  const int X_HxW = H * W;
+  const int Y_HxW = Y->dim32(2) * Y->dim32(3);
 
-  auto f = [&](Tensor* col_buffer) {
-    ReinitializeTensor(col_buffer, vector<int64_t>{C, this->kernel_h(), this->kernel_w(), H, W}, at::dtype<T>().device(Context::GetDeviceType()));
+  const T* X_data = X.template data<T>();
+  const T* filter_data = filter.template data<T>();
+  const T* bias_data = nullptr;
+  if (InputSize() == 3) {
+    auto& bias = Input(BIAS);
+    CAFFE_ENFORCE_EQ(bias.dim(), 1, "bias must be 1D tensor");
+    CAFFE_ENFORCE_EQ(
+        bias.dim32(0),
+        C,
+        "bias dimension must be equal to output channel number");
+    bias_data = bias.template data<T>();
+  }
+  T* Y_data = Y->template mutable_data<T>();
+
+  const std::vector<std::int64_t> buffer_shape = {
+      C, kernel_h(), kernel_w(), H, W};
+
+  const auto func = [&](Tensor* col_buffer) {
+    ReinitializeTensor(
+        col_buffer,
+        buffer_shape,
+        at::dtype<T>().device(Context::GetDeviceType()));
     T* col_buffer_data = col_buffer->template mutable_data<T>();
-    for (auto image_id = 0; image_id < N; ++image_id) {
+    for (int image_id = 0; image_id < N; ++image_id) {
       // Weight term
-      math::Gemm<T, Context>(
-          CblasTrans,
-          CblasNoTrans,
-          kernel_dim,
-          input_image_size,
-          M,
-          1,
-          filter_data,
-          Xdata,
-          0,
-          col_buffer_data,
-          &context_);
+      if (G == 1) {
+        math::Gemm<T, Context>(
+            CblasTrans,
+            CblasNoTrans,
+            kernel_dim,
+            X_HxW,
+            M,
+            1.0f,
+            filter_data,
+            X_data + image_id * M * X_HxW,
+            0.0f,
+            col_buffer_data,
+            &context_);
+      } else {
+        math::GemmStridedBatched<T, Context>(
+            CblasTrans,
+            CblasNoTrans,
+            G,
+            kernel_dim,
+            X_HxW,
+            M / G,
+            1.0f,
+            filter_data,
+            M / G * kernel_dim,
+            X_data + image_id * M * X_HxW,
+            M / G * X_HxW,
+            0.0f,
+            col_buffer_data,
+            col_buffer->numel() / G,
+            &context_);
+      }
 
       // Col2Im
       math::Col2Im<T, Context, StorageOrder::NCHW>(
           C,
           Y->dim32(2),
           Y->dim32(3),
-          this->kernel_h(),
-          this->kernel_w(),
+          kernel_h(),
+          kernel_w(),
           1,
           1,
-          this->pad_t(),
-          this->pad_l(),
-          this->pad_b(),
-          this->pad_r(),
-          this->stride_h(),
-          this->stride_w(),
+          pad_t(),
+          pad_l(),
+          pad_b(),
+          pad_r(),
+          stride_h(),
+          stride_w(),
           col_buffer_data,
-          Ydata,
+          Y_data + image_id * C * Y_HxW,
           &context_);
 
-      // Bias term
-      if (InputSize() == 3) {
-        const T* bias_data = Input(BIAS).template data<T>();
-        const T* bm_data = bias_multiplier_.template data<T>();
-#if !defined(__ARM_NEON__) && !defined(__ARM_NEON)
-        math::Gemm<T, Context>(
-            CblasNoTrans,
-            CblasNoTrans,
-            C,
-            output_image_size,
-            1,
-            1,
-            bias_data,
-            bm_data,
-            1,
-            Ydata,
-            &context_);
-#else
+      if (bias_data != nullptr) {
+        // Bias term
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
         math::BiasCHW<T, Context>(
             bias_data,
-            bm_data,
+            nullptr,
             C,
-            output_image_size,
-            Ydata,
+            Y_HxW,
+            Y_data + image_id * C * Y_HxW,
             &context_);
 #endif // !defined(__ARM_NEON__) && !defined(__ARM_NEON)
       }
-
-      Xdata += M * H * W;
-      Ydata += Y->numel() / Y->dim32(0);
+    }
+    if (bias_data != nullptr) {
+#if !defined(__ARM_NEON__) && !defined(__ARM_NEON)
+      // Bias term
+      const std::array<int, 3> Y_dims = {N, C, Y_HxW};
+      const std::array<int, 3> b_dims = {1, C, 1};
+      math::Add<T, Context>(
+          3,
+          Y_dims.data(),
+          3,
+          b_dims.data(),
+          Y_data,
+          bias_data,
+          Y_data,
+          &context_);
+#endif
     }
   };
+
   if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
-    runWithSharedBuffer<Context>(ws_, f);
+    runWithSharedBuffer<Context>(ws_, func);
   } else {
-    f(&col_buffer_);
+    func(&col_buffer_);
   }
   return true;
 }
 
 template <typename T, class Context>
 bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
-  const Tensor& X = Input(INPUT);
+  const auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  const auto N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), M = X.dim32(3);
-  CAFFE_ENFORCE(filter.dim() == 4, "filter must be 4D tensor");
-  CAFFE_ENFORCE(
-      filter.dim32(0) == M,
+  CAFFE_ENFORCE_EQ(filter.dim(), 4, "filter must be 4D tensor");
+  const int N = X.dim32(0);
+  const int H = X.dim32(1);
+  const int W = X.dim32(2);
+  const int M = X.dim32(3);
+  const int G = group_;
+  CAFFE_ENFORCE_EQ(
+      filter.dim32(0),
+      M,
       "filter number must be equal to input channel number");
-  CAFFE_ENFORCE(
-      filter.dim32(1) == this->kernel_h(),
+  CAFFE_ENFORCE_EQ(
+      M % G, 0, "The number of input channels is not divisible by group.");
+  const int C = filter.dim32(3) * G;
+  CAFFE_ENFORCE_EQ(
+      filter.dim32(1),
+      kernel_h(),
       "filter height must be equal to kernel height");
-  CAFFE_ENFORCE(
-      filter.dim32(2) == this->kernel_w(),
+  CAFFE_ENFORCE_EQ(
+      filter.dim32(2),
+      kernel_w(),
       "filter width must be equal to kernel width");
-  const int C = filter.dim32(3);
-  auto sizes = ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
-  Tensor* Y = Output(0, sizes, at::dtype<T>());
 
-  const auto kernel_dim = C * this->kernel_h() * this->kernel_w();
-  const auto input_image_size = H * W;
-  const auto output_image_size = Y->dim32(1) * Y->dim32(2);
+  const std::vector<std::int64_t> Y_dims =
+      ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
+  auto* Y = Output(0, Y_dims, at::dtype<T>());
+  if (N == 0) {
+    return true;
+  }
 
+  const int K_HxW = kernel_h() * kernel_w();
+  const int kernel_dim = C / G * K_HxW;
+  const int X_HxW = H * W;
+  const int Y_HxW = Y->dim32(1) * Y->dim32(2);
+
+  const T* X_data = X.template data<T>();
+  const T* filter_data = filter.template data<T>();
+  const T* bias_data = nullptr;
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
-    CAFFE_ENFORCE(bias.dim() == 1, "bias must be 1D tensor");
-    CAFFE_ENFORCE(
-        bias.dim32(0) == C,
+    CAFFE_ENFORCE_EQ(bias.dim(), 1, "bias must be 1D tensor");
+    CAFFE_ENFORCE_EQ(
+        bias.dim32(0),
+        C,
         "bias dimension must be equal to output channel number");
-    // TODO(jerryzh): is it OK to remove the check of whether numel is output_image_size
-    ReinitializeTensor(
-        &bias_multiplier_,
-        {1, output_image_size},
-        at::dtype<T>().device(Context::GetDeviceType()));
-      T* bm_data = bias_multiplier_.template mutable_data<T>();
-      math::Set<T, Context>(
-          output_image_size,
-          static_cast<T>(1),
-          bm_data,
-          &context_);
+    bias_data = bias.template data<T>();
   }
-  const T* Xdata = X.template data<T>();
-  const T* filter_data = filter.template data<T>();
-  T* Ydata = Y->template mutable_data<T>();
+  T* Y_data = Y->template mutable_data<T>();
 
-  auto f = [&](Tensor* /*col_buffer*/) {
+  const std::vector<std::int64_t> buffer_shape = {
+      G, H, W, kernel_h(), kernel_w(), C / G};
+  const auto func = [&](Tensor* /*col_buffer*/) {
     ReinitializeTensor(
         &col_buffer_,
-        vector<int64_t>{H, W, this->kernel_h(), this->kernel_w(), C},
+        buffer_shape,
         at::dtype<T>().device(Context::GetDeviceType()));
     T* col_buffer_data = col_buffer_.template mutable_data<T>();
-    for (auto image_id = 0; image_id < N; ++image_id) {
+    for (int image_id = 0; image_id < N; ++image_id) {
       // Weight term
-      math::Gemm<T, Context>(
-          CblasNoTrans,
-          CblasNoTrans,
-          input_image_size,
-          kernel_dim,
-          M,
-          1,
-          Xdata,
-          filter_data,
-          0,
-          col_buffer_data,
-          &context_);
+      if (G == 1) {
+        math::Gemm<T, Context>(
+            CblasNoTrans,
+            CblasNoTrans,
+            X_HxW,
+            kernel_dim,
+            M,
+            1.0f,
+            X_data + image_id * M * X_HxW,
+            filter_data,
+            0.0f,
+            col_buffer_data,
+            &context_);
+      } else {
+        for (int group_id = 0; group_id < G; ++group_id) {
+          math::GemmEx<T, Context>(
+              CblasNoTrans,
+              CblasNoTrans,
+              X_HxW,
+              kernel_dim,
+              M / G,
+              1.0f,
+              X_data + image_id * M * X_HxW + group_id * M / G,
+              M,
+              filter_data + group_id * M / G * kernel_dim,
+              kernel_dim,
+              0.0f,
+              col_buffer_data + group_id * kernel_dim,
+              G * kernel_dim,
+              &context_);
+        }
+      }
       // Col2Im
       math::Col2Im<T, Context, StorageOrder::NHWC>(
           C,
           Y->dim32(1),
           Y->dim32(2),
-          this->kernel_h(),
-          this->kernel_w(),
+          kernel_h(),
+          kernel_w(),
           1,
           1,
-          this->pad_t(),
-          this->pad_l(),
-          this->pad_b(),
-          this->pad_r(),
-          this->stride_h(),
-          this->stride_w(),
+          pad_t(),
+          pad_l(),
+          pad_b(),
+          pad_r(),
+          stride_h(),
+          stride_w(),
           col_buffer_data,
-          Ydata,
-          &context_);
+          Y_data + image_id * C * Y_HxW,
+          &context_,
+          G);
+    }
+    if (bias_data != nullptr) {
       // Bias term
-      if (InputSize() == 3) {
-        const T* bm_data = bias_multiplier_.template data<T>();
-        const T* bias_data = Input(BIAS).template data<T>();
-        math::Gemm<T, Context>(
-            CblasNoTrans,
-            CblasNoTrans,
-            output_image_size,
-            C,
-            1,
-            1,
-            bm_data,
-            bias_data,
-            1,
-            Ydata,
-            &context_);
-      }
-      Xdata += M * H * W;
-      Ydata += Y->numel() / Y->dim32(0);
+      const std::array<int, 2> Y_dims = {N * Y_HxW, C};
+      const std::array<int, 2> b_dims = {1, C};
+      math::Add<T, Context>(
+          2,
+          Y_dims.data(),
+          2,
+          b_dims.data(),
+          Y_data,
+          bias_data,
+          Y_data,
+          &context_);
     }
   };
+
   if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
-    runWithSharedBuffer<Context>(ws_, f);
+    runWithSharedBuffer<Context>(ws_, func);
   } else {
-    f(&col_buffer_);
+    func(&col_buffer_);
   }
   return true;
 }
 
 template <typename T, class Context>
 bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
-  auto& X = Input(INPUT);
-  auto& filter = Input(FILTER);
-  auto& dY = Input(OUTPUT_GRAD);
-
-  const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
-  // We only handle LegacyPadding::NOTSET case and ignore cases of
-  // LegacyPadding::VALID and LegacyPadding::SAME
-  // Thus, we don't need to manually compute padding values
-  // We simply use the values from the user
-  CAFFE_ENFORCE(filter.dim() == 4);
-  const int C = filter.dim32(1);
-  CAFFE_ENFORCE(
-      filter.dim32(2) == this->kernel_h(),
+  const auto& X = Input(INPUT);
+  const auto& filter = Input(FILTER);
+  const auto& dY = Input(OUTPUT_GRAD);
+  CAFFE_ENFORCE_EQ(filter.dim(), 4);
+  const int N = X.dim32(0);
+  const int M = X.dim32(1);
+  const int H = X.dim32(2);
+  const int W = X.dim32(3);
+  const int G = group_;
+  CAFFE_ENFORCE_EQ(M, filter.dim32(0));
+  CAFFE_ENFORCE_EQ(
+      M % G, 0, "The number of input channels is not divisible by group.");
+  const int C = filter.dim32(1) * G;
+  CAFFE_ENFORCE_EQ(C, dY.dim32(1));
+  CAFFE_ENFORCE_EQ(
+      filter.dim32(2),
+      kernel_h(),
       "filter height must be equal to kernel height");
-  CAFFE_ENFORCE(
-      filter.dim32(3) == this->kernel_w(),
+  CAFFE_ENFORCE_EQ(
+      filter.dim32(3),
+      this->kernel_w(),
       "filter width must be equal to kernel width");
+
+  const int K_HxW = kernel_h() * kernel_w();
+  const int kernel_dim = C / G * K_HxW;
+  const int X_HxW = H * W;
+  const int Y_HxW = dY.dim32(2) * dY.dim32(3);
   auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
 
-  const int kernel_dim = C * this->kernel_h() * this->kernel_w();
-  const int output_image_size = dY.dim32(2) * dY.dim32(3);
-  // The col buffer is stored in CHW order as well
+  const T* X_data = X.template data<T>();
+  const T* filter_data = filter.template data<T>();
+  const T* dY_data = dY.template data<T>();
+  T* dfilter_data = dfilter->template mutable_data<T>();
+  T* dbias_data = nullptr;
+  T* dX_data = nullptr;
+  if (!no_bias_) {
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, {C}, at::dtype<T>());
+    dbias_data = dbias->template mutable_data<T>();
+  }
+  const bool compute_dX =
+      (OutputSize() == 3) || (no_bias_ && (OutputSize() == 2));
+  if (compute_dX) {
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
+    dX_data = dX->template mutable_data<T>();
+  }
+  math::Set<T, Context>(filter.numel(), T(0), dfilter_data, &context_);
+
+  if (N == 0) {
+    math::Set<T, Context>(C, T(0), dbias_data, &context_);
+    return true;
+  }
+
   ReinitializeTensor(
       &col_buffer_,
-      vector<int64_t>{C, this->kernel_h(), this->kernel_w(), H, W},
+      std::vector<std::int64_t>{C, kernel_h(), kernel_w(), H, W},
       at::dtype<T>().device(Context::GetDeviceType()));
-  if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    dbias->Resize(C);
-    // TODO(jerryzh): is it OK to remove the check of whether numel is output_image_size
-    ReinitializeTensor(
-        &bias_multiplier_,
-        {1, output_image_size},
-        at::dtype<T>().device(Context::GetDeviceType()));
-    T* bm_data = bias_multiplier_.template mutable_data<T>();
-    math::Set<T, Context>(
-        output_image_size,
-        static_cast<T>(1),
-        bm_data,
-        &context_);
-  }
   T* col_buffer_data = col_buffer_.template mutable_data<T>();
-  const T* Xdata = X.template data<T>();
-  const T* filter_data = filter.template data<T>();
-  const T* dYdata = dY.template data<T>();
-  T* dfilter_data = dfilter->template mutable_data<T>();
-  // Pre-setting the gradients to zero
-  math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
-  if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    T* dbias_data = dbias->template mutable_data<T>();
-    math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
-  }
-  for (auto image_id = 0; image_id < N; ++image_id) {
+
+  for (int image_id = 0; image_id < N; ++image_id) {
     // gradient w.r.t. filters. Im2Col followed by Gemm
     // Im2Col.
     math::Im2Col<T, Context, StorageOrder::NCHW>(
         C,
         dY.dim32(2),
         dY.dim32(3),
-        this->kernel_h(),
-        this->kernel_w(),
+        kernel_h(),
+        kernel_w(),
         1,
         1,
-        this->pad_t(),
-        this->pad_l(),
-        this->pad_b(),
-        this->pad_r(),
-        this->stride_h(),
-        this->stride_w(),
-        dYdata,
+        pad_t(),
+        pad_l(),
+        pad_b(),
+        pad_r(),
+        stride_h(),
+        stride_w(),
+        dY_data + image_id * C * Y_HxW,
         col_buffer_data,
         &context_);
     // Gemm
-    math::Gemm<T, Context>(
-        CblasNoTrans,
-        CblasTrans,
-        M,
-        kernel_dim,
-        H * W,
-        1,
-        Xdata,
-        col_buffer_data,
-        1,
-        dfilter_data,
-        &context_);
-    // gradient w.r.t. bias
-    if (!no_bias_) {
-      const T* bm_data = bias_multiplier_.template data<T>();
-      T* input_grad_data = Output(BIAS_OR_INPUT_GRAD)->template mutable_data<T>();
+    if (G == 1) {
       math::Gemm<T, Context>(
           CblasNoTrans,
-          CblasNoTrans,
-          C,
-          1,
-          output_image_size,
-          1,
-          dYdata,
-          bm_data,
-          1,
-          input_grad_data,
-          &context_);
-    }
-    dYdata += dY.numel() / dY.dim32(0);
-    Xdata += X.numel() / X.dim32(0);
-  }
-  if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
-    // Compute gradients w.r.t. the input
-    // Since we have changed dYdata in the above loop, we will need to reset.
-    dYdata = dY.template data<T>();
-
-    auto* dX = Output(
-        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
-    T* dXdata = dX->template mutable_data<T>();
-    for (auto image_id = 0; image_id < N; ++image_id) {
-      // Im2Col.
-      // TODO(zyan3): Probably duplicate work as in gradient computation
-      // w.r.t filters
-      math::Im2Col<T, Context, StorageOrder::NCHW>(
-          C,
-          dY.dim32(2),
-          dY.dim32(3),
-          this->kernel_h(),
-          this->kernel_w(),
-          1,
-          1,
-          this->pad_t(),
-          this->pad_l(),
-          this->pad_b(),
-          this->pad_r(),
-          this->stride_h(),
-          this->stride_w(),
-          dYdata,
-          col_buffer_data,
-          &context_);
-      // Gemm
-      math::Gemm<T, Context>(
-          CblasNoTrans,
-          CblasNoTrans,
+          CblasTrans,
           M,
-          H * W,
           kernel_dim,
-          1,
-          filter_data,
+          X_HxW,
+          1.0f,
+          X_data + image_id * M * X_HxW,
           col_buffer_data,
-          0,
-          dXdata,
+          1.0f,
+          dfilter_data,
           &context_);
-      dYdata += dY.numel() / dY.dim32(0);
-      dXdata += X.numel() / X.dim32(0);
+    } else {
+      math::GemmStridedBatched<T, Context>(
+          CblasNoTrans,
+          CblasTrans,
+          G,
+          M / G,
+          kernel_dim,
+          X_HxW,
+          1.0f,
+          X_data + image_id * M * X_HxW,
+          M / G * X_HxW,
+          col_buffer_data,
+          col_buffer_.numel() / G,
+          1.0f,
+          dfilter_data,
+          M / G * kernel_dim,
+          &context_);
+    }
+
+    if (dX_data != nullptr) {
+      // Compute gradients w.r.t. the input
+      if (G == 1) {
+        math::Gemm<T, Context>(
+            CblasNoTrans,
+            CblasNoTrans,
+            M,
+            X_HxW,
+            kernel_dim,
+            1.0f,
+            filter_data,
+            col_buffer_data,
+            0.0f,
+            dX_data + image_id * M * X_HxW,
+            &context_);
+      } else {
+        math::GemmStridedBatched<T, Context>(
+            CblasNoTrans,
+            CblasNoTrans,
+            G,
+            M / G,
+            X_HxW,
+            kernel_dim,
+            1.0f,
+            filter_data,
+            M / G * kernel_dim,
+            col_buffer_data,
+            col_buffer_.numel() / G,
+            0.0f,
+            dX_data + image_id * M * X_HxW,
+            M / G * X_HxW,
+            &context_);
+      }
     }
   }
+
+  if (dbias_data != nullptr) {
+    // gradient w.r.t. bias
+    const std::array<int, 3> Y_dims = {N, C, Y_HxW};
+    const std::array<int, 3> b_dims = {1, C, 1};
+    math::ReduceSum<T, Context>(
+        3, Y_dims.data(), b_dims.data(), T(1), dY_data, dbias_data, &context_);
+  }
+
   return true;
 }
 
 template <typename T, class Context>
 bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
-  auto& X = Input(INPUT);
-  auto& filter = Input(FILTER);
-  auto& dY = Input(OUTPUT_GRAD);
-
-  const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), M = X.dim32(3);
-  // We only handle LegacyPadding::NOTSET case and ignore cases of
-  // LegacyPadding::VALID and LegacyPadding::SAME
-  // Thus, we don't need to manually compute padding values
-  // We simply use the values from the user
-  CAFFE_ENFORCE(filter.dim() == 4, "filter must be 4D tensor");
-  CAFFE_ENFORCE(
-      filter.dim32(1) == this->kernel_h(),
+  const auto& X = Input(INPUT);
+  const auto& filter = Input(FILTER);
+  const auto& dY = Input(OUTPUT_GRAD);
+  CAFFE_ENFORCE_EQ(filter.dim(), 4);
+  const int N = X.dim32(0);
+  const int H = X.dim32(1);
+  const int W = X.dim32(2);
+  const int M = X.dim32(3);
+  const int G = group_;
+  CAFFE_ENFORCE_EQ(M, filter.dim32(0));
+  CAFFE_ENFORCE_EQ(
+      M % G, 0, "The number of input channels is not divisible by group.");
+  const int C = filter.dim32(3) * G;
+  CAFFE_ENFORCE_EQ(C, dY.dim32(3));
+  CAFFE_ENFORCE_EQ(
+      filter.dim32(1),
+      kernel_h(),
       "filter height must be equal to kernel height");
-  CAFFE_ENFORCE(
-      filter.dim32(2) == this->kernel_w(),
+  CAFFE_ENFORCE_EQ(
+      filter.dim32(2),
+      this->kernel_w(),
       "filter width must be equal to kernel width");
-  const int C = filter.dim32(3);
+  CAFFE_ENFORCE_EQ(dY.dim32(3), C);
+
+  const int K_HxW = kernel_h() * kernel_w();
+  const int kernel_dim = C / G * K_HxW;
+  const int X_HxW = H * W;
+  const int Y_HxW = dY.dim32(1) * dY.dim32(2);
   auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
 
-  const int kernel_dim = C * this->kernel_h() * this->kernel_w();
-  const int output_image_size = dY.dim32(1) * dY.dim32(2);
-  // The col buffer is stored in HWC order as well
+  const T* X_data = X.template data<T>();
+  const T* filter_data = filter.template data<T>();
+  const T* dY_data = dY.template data<T>();
+  T* dfilter_data = dfilter->template mutable_data<T>();
+  T* dbias_data = nullptr;
+  T* dX_data = nullptr;
+  if (!no_bias_) {
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, {C}, at::dtype<T>());
+    dbias_data = dbias->template mutable_data<T>();
+  }
+  const bool compute_dX =
+      (OutputSize() == 3) || (no_bias_ && (OutputSize() == 2));
+  if (compute_dX) {
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
+    dX_data = dX->template mutable_data<T>();
+  }
+  math::Set<T, Context>(filter.numel(), T(0), dfilter_data, &context_);
+
+  if (N == 0) {
+    math::Set<T, Context>(C, T(0), dbias_data, &context_);
+    return true;
+  }
+
   ReinitializeTensor(
       &col_buffer_,
-      vector<int64_t>{H, W, this->kernel_h(), this->kernel_w(), C},
+      std::vector<std::int64_t>{C, kernel_h(), kernel_w(), H, W},
       at::dtype<T>().device(Context::GetDeviceType()));
-  if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    dbias->Resize(C);
-    // TODO(jerryzh): is it OK to remove the check of whether numel is output_image_size
-    ReinitializeTensor(
-        &bias_multiplier_,
-        {1, output_image_size},
-        at::dtype<T>().device(Context::GetDeviceType()));
-    T* bm_data = bias_multiplier_.template mutable_data<T>();
-    math::Set<T, Context>(
-        output_image_size,
-        static_cast<T>(1),
-        bm_data,
-        &context_);
-  }
   T* col_buffer_data = col_buffer_.template mutable_data<T>();
-  const T* Xdata = X.template data<T>();
-  const T* filter_data = filter.template data<T>();
-  const T* dYdata = dY.template data<T>();
-  T* dfilter_data = dfilter->template mutable_data<T>();
-  // Pre-setting the gradients to zero
-  math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
-  if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    T* dbias_data = dbias->template mutable_data<T>();
-    math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
-  }
-  for (auto image_id = 0; image_id < N; ++image_id) {
+
+  for (int image_id = 0; image_id < N; ++image_id) {
     // gradient w.r.t. filters. Im2Col followed by Gemm
     // Im2Col.
     math::Im2Col<T, Context, StorageOrder::NHWC>(
         C,
         dY.dim32(1),
         dY.dim32(2),
-        this->kernel_h(),
-        this->kernel_w(),
+        kernel_h(),
+        kernel_w(),
         1,
         1,
-        this->pad_t(),
-        this->pad_l(),
-        this->pad_b(),
-        this->pad_r(),
-        this->stride_h(),
-        this->stride_w(),
-        dYdata,
+        pad_t(),
+        pad_l(),
+        pad_b(),
+        pad_r(),
+        stride_h(),
+        stride_w(),
+        dY_data + image_id * C * Y_HxW,
         col_buffer_data,
-        &context_);
+        &context_,
+        G);
     // Gemm
-    math::Gemm<T, Context>(
-        CblasTrans,
-        CblasNoTrans,
-        M,
-        kernel_dim,
-        H * W,
-        1,
-        Xdata,
-        col_buffer_data,
-        1,
-        dfilter_data,
-        &context_);
-    // gradients w.r.t. bias
-    if (!no_bias_) {
-      const T* bm_data = bias_multiplier_.template data<T>();
-      T* input_grad_data = Output(BIAS_OR_INPUT_GRAD)->template mutable_data<T>();
+    if (G == 1) {
       math::Gemm<T, Context>(
           CblasTrans,
           CblasNoTrans,
-          C,
-          1,
-          output_image_size,
-          1,
-          dYdata,
-          bm_data,
-          1,
-          input_grad_data,
-          &context_);
-    }
-    dYdata += dY.numel() / dY.dim32(0);
-    Xdata += X.numel() / X.dim32(0);
-  }
-  if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
-    // Compute gradients w.r.t. the input
-    // Since we have changed dYdata in the above loop, we will need to reset.
-    dYdata = dY.template data<T>();
-
-    auto* dX = Output(
-        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
-    T* dXdata = dX->template mutable_data<T>();
-    for (auto image_id = 0; image_id < N; ++image_id) {
-      // Im2Col.
-      // TODO(zyan3): Probably duplicate work as in gradient computation
-      // w.r.t filters
-      math::Im2Col<T, Context, StorageOrder::NHWC>(
-          C,
-          dY.dim32(1),
-          dY.dim32(2),
-          this->kernel_h(),
-          this->kernel_w(),
-          1,
-          1,
-          this->pad_t(),
-          this->pad_l(),
-          this->pad_b(),
-          this->pad_r(),
-          this->stride_h(),
-          this->stride_w(),
-          dYdata,
-          col_buffer_data,
-          &context_);
-      // Gemm
-      math::Gemm<T, Context>(
-          CblasNoTrans,
-          CblasTrans,
-          H * W,
           M,
           kernel_dim,
-          1,
+          X_HxW,
+          1.0f,
+          X_data + image_id * M * X_HxW,
           col_buffer_data,
-          filter_data,
-          0,
-          dXdata,
+          1.0f,
+          dfilter_data,
           &context_);
-      dYdata += dY.numel() / dY.dim32(0);
-      dXdata += X.numel() / X.dim32(0);
+    } else {
+      for (int group_id = 0; group_id < G; ++group_id) {
+        math::GemmEx<T, Context>(
+            CblasTrans,
+            CblasNoTrans,
+            M / G,
+            kernel_dim,
+            X_HxW,
+            1.0f,
+            X_data + image_id * M * X_HxW + group_id * M / G,
+            M,
+            col_buffer_data + group_id * kernel_dim,
+            G * kernel_dim,
+            1.0f,
+            dfilter_data + group_id * M / G * kernel_dim,
+            kernel_dim,
+            &context_);
+      }
+    }
+
+    if (dX_data != nullptr) {
+      // Compute gradients w.r.t. the input
+      if (G == 1) {
+        math::Gemm<T, Context>(
+            CblasNoTrans,
+            CblasTrans,
+            X_HxW,
+            M,
+            kernel_dim,
+            1.0f,
+            col_buffer_data,
+            filter_data,
+            0.0f,
+            dX_data + image_id * M * X_HxW,
+            &context_);
+      } else {
+        for (int group_id = 0; group_id < G; ++group_id) {
+          math::GemmEx<T, Context>(
+              CblasNoTrans,
+              CblasTrans,
+              X_HxW,
+              M / G,
+              kernel_dim,
+              1.0f,
+              col_buffer_data + group_id * kernel_dim,
+              G * kernel_dim,
+              filter_data + group_id * M / G * kernel_dim,
+              kernel_dim,
+              0.0f,
+              dX_data + image_id * M * X_HxW + group_id * M / G,
+              M,
+              &context_);
+        }
+      }
     }
   }
+
+  if (dbias_data != nullptr) {
+    const std::array<int, 2> Y_dims = {N * Y_HxW, C};
+    const std::array<int, 2> b_dims = {1, C};
+    math::ReduceSum<T, Context>(
+        2, Y_dims.data(), b_dims.data(), T(1), dY_data, dbias_data, &context_);
+  }
+
   return true;
 }
 
 } // namespace caffe2
+
 #endif // CAFFE2_OPERATORS_CONV_TRANSPOSE_OP_IMPL_H_

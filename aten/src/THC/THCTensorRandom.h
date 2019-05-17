@@ -6,6 +6,9 @@
 #include <THC/generic/THCTensorRandom.h>
 #include <THC/THCGenerateAllTypes.h>
 
+#include <THC/generic/THCTensorRandom.h>
+#include <THC/THCGenerateBoolType.h>
+
 #include <curand.h>
 #include <curand_kernel.h>
 

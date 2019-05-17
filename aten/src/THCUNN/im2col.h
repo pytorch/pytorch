@@ -8,7 +8,7 @@
 // Kernel for fast unfold+copy
 // (borrowed from Caffe: https://github.com/BVLC/caffe/blob/master/src/caffe/layers/conv_layer.cu)
 template <typename Dtype>
-C10_LAUNCH_BOUNDS(CUDA_NUM_THREADS)
+C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void im2col_kernel(const int64_t n, const Dtype* data_im,
                               const int64_t height, const int64_t width,
                               const int64_t ksize_h, const int64_t ksize_w,
@@ -60,7 +60,7 @@ void im2col(cudaStream_t stream, const Dtype* data_im, const int64_t channels,
 }
 
 template <typename Dtype, typename Acctype>
-C10_LAUNCH_BOUNDS(CUDA_NUM_THREADS)
+C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void col2im_kernel(const int64_t n, const Dtype* data_col,
                                   const int64_t height, const int64_t width, const int64_t channels,
                                   const int64_t kernel_h, const int64_t kernel_w,

@@ -111,8 +111,9 @@ template <typename Context>
 class SpaceBatchOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SpaceBatchOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SpaceBatchOpBase(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         pad_(this->template GetSingleArgument<int>("pad", 0)),
         pad_t_(this->template GetSingleArgument<int>("pad_t", pad_)),
         pad_l_(this->template GetSingleArgument<int>("pad", pad_)),

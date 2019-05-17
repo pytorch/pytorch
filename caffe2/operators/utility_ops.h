@@ -20,8 +20,9 @@ template <class Context>
 class NanCheckOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  NanCheckOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit NanCheckOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override;
 
@@ -42,12 +43,37 @@ struct GetNanCheckGradient : public GradientMakerBase {
 };
 
 template <class Context>
+class IsNanOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  IsNanOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<float, double>>::call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
+    auto& X = Input(0);
+    auto* Y = Output(0, X.sizes(), at::dtype<uint8_t>());
+    const auto* X_data = X.template data<T>();
+    uint8_t* Y_data = Y->template mutable_data<uint8_t>();
+    for (size_t i = 0; i < X.numel(); i++) {
+      Y_data[i] = (uint8_t)(std::isnan(X_data[i]));
+    }
+    return true;
+  }
+};
+
+template <class Context>
 class WallClockTimeOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  WallClockTimeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit WallClockTimeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     int64_t nanoseconds = static_cast<long int>(
@@ -70,7 +96,7 @@ class PrintOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
-  PrintOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit PrintOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         tensor_printer_(
             operator_def.input(0),
@@ -315,6 +341,15 @@ class SumOp : public Operator<Context> {
   }
 };
 
+inline OpSchema::Cost CostInferenceForSum(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in) {
+  struct OpSchema::Cost cost = PointwiseCostInference<1>(def, in);
+  cost.flops *= (in.size() - 1);
+  cost.params_bytes = 0;
+  return cost;
+}
+
 // WeightedSumOp computes the weighted sum of several tensors. The input should
 // be in the form X_0, weight_0, X_1, weight_1, ... where X_i all have the same
 // shape, and weight_i are size 1 tensors that specifies the weight of each
@@ -379,7 +414,7 @@ class WeightedSumOp : public Operator<Context> {
       const auto& weighti = Input(i + 1);
       CAFFE_ENFORCE_EQ(Xi.numel(), size);
       CAFFE_ENFORCE_EQ(weighti.numel(), 1);
-      math::Axpy<T, Context>(
+      math::Axpy<float, T, Context>(
           size,
           weighti.template data<float>(),
           Xi.template data<T>(),
@@ -395,8 +430,9 @@ class WeightedSumGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  WeightedSumGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit WeightedSumGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         grad_on_w_(this->template GetSingleArgument<bool>("grad_on_w", false)) {
   }
 
@@ -597,8 +633,9 @@ class ScatterAssignOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   virtual ~ScatterAssignOp() {}
 
-  ScatterAssignOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ScatterAssignOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         runners_({{{TensorProto_DataType_INT32, TensorProto_DataType_FLOAT},
                    &ScatterAssignOp::DoRun<int32_t, float>},
                   {{TensorProto_DataType_INT32, TensorProto_DataType_FLOAT16},
@@ -871,8 +908,9 @@ template <class Context>
 class LengthsToWeightsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LengthsToWeightsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit LengthsToWeightsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         power_(this->template GetSingleArgument<float>("power", 0.5)) {}
 
   bool RunOnDevice() override {
@@ -1069,7 +1107,7 @@ class GatherRangesOp : public Operator<Context> {
   template <typename Index>
   size_t accumulate(Index* ranges, size_t start, size_t end) {
     size_t result = 0;
-    for (int i = start + 1; i < end; i += 2) {
+    for (size_t i = start + 1; i < end; i += 2) {
       result += ranges[i];
     }
     return result;
@@ -1149,8 +1187,9 @@ class LengthsGatherOp : public Operator<Context> {
 template <typename T, class Context>
 class AccumulateHistogramOp : public Operator<Context> {
  public:
-  AccumulateHistogramOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit AccumulateHistogramOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         lower_bound_(
             this->template GetSingleArgument<float>("lower_bound", 0.0)),
         upper_bound_(
@@ -1288,8 +1327,9 @@ class RangeOp : public Operator<Context> {
 
 class ThrowExceptionOp : public Operator<CPUContext> {
  public:
-  ThrowExceptionOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit ThrowExceptionOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         message_(GetSingleArgument<std::string>(
             "message",
             "Exception from ThrowExceptionOp")) {}
@@ -1304,8 +1344,9 @@ class ThrowExceptionOp : public Operator<CPUContext> {
 
 class ThrowChildThreadExceptionOp : public Operator<CPUContext> {
  public:
-  ThrowChildThreadExceptionOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit ThrowChildThreadExceptionOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         message_(GetSingleArgument<std::string>(
             "message",
             "Exception from ThrowChildThreadExceptionOp")) {}
@@ -1323,8 +1364,9 @@ class ThrowChildThreadExceptionOp : public Operator<CPUContext> {
 
 class LogFatalOp : public Operator<CPUContext> {
  public:
-  LogFatalOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit LogFatalOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         message_(GetSingleArgument<std::string>(
             "message",
             "Logging from LogFatalOp")) {}
@@ -1340,8 +1382,9 @@ class LogFatalOp : public Operator<CPUContext> {
 
 class FailOp : public Operator<CPUContext> {
  public:
-  FailOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {}
+  template <class... Args>
+  explicit FailOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     return false;

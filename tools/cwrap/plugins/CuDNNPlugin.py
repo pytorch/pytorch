@@ -1,8 +1,6 @@
 from string import Template
 import copy
-from copy import deepcopy
 from . import CWrapPlugin
-from itertools import product
 
 
 class CuDNNPlugin(CWrapPlugin):

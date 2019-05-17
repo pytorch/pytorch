@@ -1,5 +1,6 @@
 import os
 import platform
+import struct
 import sys
 from itertools import chain
 
@@ -12,6 +13,8 @@ IS_ARM = (platform.machine() == 'aarch64')
 
 IS_CONDA = 'conda' in sys.version or 'Continuum' in sys.version or any([x.startswith('CONDA') for x in os.environ])
 CONDA_DIR = os.path.join(os.path.dirname(sys.executable), '..')
+
+IS_64BIT = (struct.calcsize("P") == 8)
 
 
 def check_env_flag(name, default=''):
@@ -58,3 +61,4 @@ hotpatch_build_env_vars()
 DEBUG = check_env_flag('DEBUG')
 REL_WITH_DEB_INFO = check_env_flag('REL_WITH_DEB_INFO')
 USE_MKLDNN = check_env_flag('USE_MKLDNN', 'OFF' if IS_PPC or IS_ARM else 'ON')
+NAMEDTENSOR_ENABLED = check_env_flag('USE_NAMEDTENSOR') or check_negative_env_flag('NO_NAMEDTENSOR')

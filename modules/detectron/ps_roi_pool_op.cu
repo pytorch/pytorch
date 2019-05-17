@@ -73,7 +73,7 @@
 #include <cfloat>
 
 #include "caffe2/core/context_gpu.h"
-#include "ps_roi_pool_op.h"
+#include "modules/detectron/ps_roi_pool_op.h"
 
 namespace caffe2 {
 
@@ -123,8 +123,8 @@ __global__ void PSRoIPoolForward(
       roundf(offset_bottom_rois[4]) + 1.) * spatial_scale;
 
     // Force too small ROIs to be 1x1
-    T roi_width = max(roi_end_w - roi_start_w, 0.1);  // avoid 0
-    T roi_height = max(roi_end_h - roi_start_h, 0.1);
+    T roi_width = c10::cuda::compat::max(roi_end_w - roi_start_w, static_cast<T>(0.1));  // avoid 0
+    T roi_height = c10::cuda::compat::max(roi_end_h - roi_start_h, static_cast<T>(0.1));
 
     // Compute w and h at bottom
     T bin_size_h = roi_height / static_cast<T>(pooled_height);
@@ -200,8 +200,8 @@ __global__ void PSRoIPoolBackward(
       roundf(offset_bottom_rois[4]) + 1.) * spatial_scale;
 
     // Force too small ROIs to be 1x1
-    T roi_width = max(roi_end_w - roi_start_w, 0.1); //avoid 0
-    T roi_height = max(roi_end_h - roi_start_h, 0.1);
+    T roi_width = c10::cuda::compat::max(roi_end_w - roi_start_w, static_cast<T>(0.1)); //avoid 0
+    T roi_height = c10::cuda::compat::max(roi_end_h - roi_start_h, static_cast<T>(0.1));
 
     // Compute w and h at bottom
     T bin_size_h = roi_height / static_cast<T>(pooled_height);

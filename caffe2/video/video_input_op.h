@@ -6,11 +6,11 @@
 #include <random>
 #include <string>
 
+#include <c10/core/thread_pool.h>
 #include <caffe2/core/db.h>
 #include <caffe2/core/logging.h>
 #include <caffe2/operators/prefetch_op.h>
 #include <caffe2/utils/math.h>
-#include <caffe2/utils/thread_pool.h>
 #include <caffe2/video/video_io.h>
 
 namespace caffe2 {
@@ -484,8 +484,10 @@ VideoInputOp<Context>::VideoInputOp(
     label_shape[1] = num_of_class_;
     ReinitializeTensor(&prefetched_label_, label_shape, at::dtype<int>().device(CPU));
   } else {
-    prefetched_label_.Resize(
-        vector<int64_t>(1, batch_size_ * clip_per_video_ * multi_crop_count_));
+    ReinitializeTensor(
+        &prefetched_label_,
+        vector<int64_t>(1, batch_size_ * clip_per_video_ * multi_crop_count_),
+        at::dtype<int>().device(CPU));
   }
 
   ReinitializeTensor(&prefetched_video_id_,  vector<int64_t>(1, batch_size_ * clip_per_video_ * multi_crop_count_), at::dtype<int>().device(CPU));

@@ -40,7 +40,7 @@ public:
   Stream exchangeStream(Stream s) const noexcept override {
     return impl_->exchangeStream(s);
   }
-  DeviceIndex deviceCount() const override {
+  DeviceIndex deviceCount() const noexcept override {
     return impl_->deviceCount();
   }
 private:

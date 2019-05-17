@@ -73,14 +73,14 @@ class C10_API intrusive_ptr_target {
 // some other compilers don't know about -Wterminate or -Wexceptions and
 // will show a warning about unknown warning options otherwise.
 #ifdef _MSC_VER
-#  pragma warning(push)  
-#  pragma warning(disable: 4297) // function assumed not to throw an exception but does  
-#else  
-#  pragma GCC diagnostic push  
-#  pragma GCC diagnostic ignored "-Wpragmas"  
-#  pragma GCC diagnostic ignored "-Wunknown-warning-option"  
-#  pragma GCC diagnostic ignored "-Wterminate"  
-#  pragma GCC diagnostic ignored "-Wexceptions"  
+#  pragma warning(push)
+#  pragma warning(disable: 4297) // function assumed not to throw an exception but does
+#else
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wpragmas"
+#  pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#  pragma GCC diagnostic ignored "-Wterminate"
+#  pragma GCC diagnostic ignored "-Wexceptions"
 #endif
     AT_ASSERTM(
         refcount_.load() == 0,
@@ -89,9 +89,9 @@ class C10_API intrusive_ptr_target {
         weakcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
 #ifdef _MSC_VER
-#  pragma warning(pop)  
-#else  
-#  pragma GCC diagnostic pop  
+#  pragma warning(pop)
+#else
+#  pragma GCC diagnostic pop
 #endif
   }
 
@@ -361,6 +361,21 @@ class intrusive_ptr final {
     ++result.target_->weakcount_;
 
     return result;
+  }
+
+  /**
+   * Turn a **non-owning raw pointer** to an intrusive_ptr.
+   *
+   * This method is potentially dangerous (as it can mess up refcount).
+   */
+  static intrusive_ptr unsafe_reclaim_from_nonowning(TTarget* raw_ptr) {
+    // See Note [Stack allocated intrusive_ptr_target safety]
+    AT_ASSERTM(
+        raw_ptr == NullType::singleton() || raw_ptr->refcount_.load() > 0,
+        "intrusive_ptr: Can only reclaim pointers that are owned by someone");
+    auto ptr = reclaim(raw_ptr); // doesn't increase refcount
+    ptr.retain_();
+    return ptr;
   }
 };
 

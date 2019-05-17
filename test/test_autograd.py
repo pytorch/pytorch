@@ -2,29 +2,28 @@ import contextlib
 import gc
 import sys
 import math
+import tempfile
+import time
 import torch
 import unittest
 import warnings
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
-from operator import mul, itemgetter
-from functools import reduce, wraps
+from operator import mul
+from functools import reduce
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
-from torch.autograd.profiler import profile
+from torch.autograd.profiler import profile, format_time, EventList, FunctionEvent
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
-                          prod_single_zero, random_square_matrix_of_rank,
-                          random_symmetric_matrix, random_symmetric_psd_matrix,
-                          random_symmetric_pd_matrix, make_nonzero_det,
-                          random_fullrank_matrix_distinct_singular_value, load_tests)
+                          load_tests, random_symmetric_pd_matrix)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
-from torch.testing import make_non_contiguous, randn_like
+from torch.testing import randn_like
 from common_methods_invocations import (method_tests,
                                         create_input, unpack_variables,
                                         EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
@@ -32,7 +31,7 @@ from common_methods_invocations import (method_tests,
                                         EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
                                         exclude_tensor_method,
                                         mask_not_all_zeros,
-                                        L, S)
+                                        S)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -284,7 +283,7 @@ class TestAutograd(TestCase):
         def fn(x):
             return x ** 2 + y * x + y ** 2
 
-        for i in range(5):
+        for _ in range(5):
             grad_x, = torch.autograd.grad(
                 fn(x), x, grad_outputs=grad_output, create_graph=True)
 
@@ -629,6 +628,7 @@ class TestAutograd(TestCase):
                                     "calculating the gradient of a sparse Tensor argument to mm is not supported."):
             z.sum().backward()
 
+    # NOTE: flaky on ROCm CI
     @skipIfRocm
     def test_sparse_ctor_getter_backward(self):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
@@ -753,7 +753,7 @@ class TestAutograd(TestCase):
             y = x.clone()
 
             # build a "chain" computation graph
-            for i in range(depth):
+            for _ in range(depth):
                 y = y + y * 0.000001
 
             # graph deletion occurs when the above locals go out of scope.
@@ -774,7 +774,7 @@ class TestAutograd(TestCase):
             prev_values = [None, None]
 
             # Build a "chain with skip connections" graph
-            for i in range(depth):
+            for _ in range(depth):
                 prev_tensors = [tensor for tensor in prev_values[:-1]
                                 if tensor is not None]
                 prev_values.append(y)
@@ -809,7 +809,7 @@ class TestAutograd(TestCase):
             y = x.clone()
 
             # build deeply nested computation graph
-            for i in range(depth):
+            for _ in range(depth):
                 y = MyOp.apply(y, y)
 
             # graph deletion occurs when the above locals go out of scope.
@@ -1565,6 +1565,39 @@ class TestAutograd(TestCase):
 
             gradcheck(ctc_after_softmax, [x])
 
+    def _test_sparse_gather(self, size_x, size_ind, dim):
+        x = torch.randn(size_x, requires_grad=True)
+        if len(size_ind) > 0 and len(size_x) > 0:
+            ind = torch.randint(x.size(dim), size_ind)
+        else:
+            ind = torch.zeros(size_ind, dtype=torch.int64)
+        out = torch.gather(x, dim, ind, sparse_grad=False)
+        grad = torch.rand_like(out)
+        out.backward(grad)
+        grad_dense = x.grad.clone()
+        x.grad = None
+        out = torch.gather(x, dim, ind, sparse_grad=True)
+        out.backward(grad)
+        self.assertEqual(grad_dense, x.grad.to_dense())
+
+    def test_sparse_gather_dim0(self):
+        self._test_sparse_gather((10, 10), (5, 10), 0)
+
+    def test_sparse_gather_dim1(self):
+        self._test_sparse_gather((10, 10, 5), (10, 5, 5), 1)
+
+    def test_sparse_gather_dim_neg(self):
+        self._test_sparse_gather((10, 10, 5), (10, 10, 2), -1)
+
+    def test_sparse_gather_ind_scalar(self):
+        self._test_sparse_gather((10,), (), 0)
+
+    def test_sparse_gather_x_scalar(self):
+        self._test_sparse_gather((), (2,), 0)
+
+    def test_sparse_gather_both_scalar(self):
+        self._test_sparse_gather((), (), 0)
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,
@@ -1576,7 +1609,7 @@ class TestAutograd(TestCase):
             def __del__(self):
                 gc.collect()
 
-        for i in range(10):
+        for _ in range(10):
             Variable(torch.randn(10, 10), _grad_fn=CollectOnDelete())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
@@ -1932,7 +1965,7 @@ class TestAutograd(TestCase):
         add1 = a + b
         add2 = add1 + c
         # Simulate a long branch, so grad_output will get buffered.
-        for i in range(4):
+        for _ in range(4):
             a = a * 2
             b = b * 2
             c = c * 2
@@ -2117,41 +2150,73 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor)
 
+    def test_cdist(self):
+        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+            f_args_variable = (torch.randn(S, S, requires_grad=True),
+                               torch.randn(S, S, requires_grad=True))
+
+            def f(a, b):
+                return torch.cdist(a, b, p)
+
+            f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+            run_functional_checks(self, "test_cdist", "cdist", f,
+                                  True, f_args_variable, f_args_tensor)
+
+    def test_var_mean_differentiable(self):
+        dim = [2, 4]
+        keepdim = False
+        input1 = torch.randn(3, 4, 5, 6, 2, 3, requires_grad=True)
+        input2 = deepcopy(input1)
+        var1, mean1 = torch.var_mean(input1, dim=dim, keepdim=keepdim)
+        var2 = input2.var(dim=dim, keepdim=keepdim)
+        mean2 = input2.mean(dim=dim, keepdim=keepdim)
+        grad = torch.randn(3, 4, 6, 3, requires_grad=True)
+
+        r1 = var1 * var1 * mean1 * mean1
+        r2 = var2 * var2 * mean2 * mean2
+        self.assertTrue(torch.allclose(r1, r2, rtol=0.01, atol=0.0))
+
+        torch.autograd.backward(r1, grad)
+        torch.autograd.backward(r2, grad)
+        self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
+
     @skipIfNoLapack
     def test_cholesky(self):
-        def func(root):
+        def func(root, upper):
             x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
             return torch.cholesky(x, upper)
 
         def run_test(upper, dims):
-            root = torch.rand(*dims)
-            indices = torch.ones(dims[-1], dims[-1], dtype=torch.uint8).tril()
-            indices = indices.expand_as(root)
-            root[indices] = 0
-            root.requires_grad_()
+            root = torch.rand(*dims, requires_grad=True)
 
-            gradcheck(func, [root])
-            gradgradcheck(func, [root])
+            gradcheck(func, [root, upper])
+            gradgradcheck(func, [root, upper])
+
+            root = random_symmetric_pd_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            chol = root.cholesky().sum().backward()
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2))  # Check the gradient is symmetric
 
         for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
             run_test(upper, dims)
 
     @skipIfNoLapack
-    def test_trtrs(self):
-        def _test_with_size(N, C):
-            A = torch.rand(N, N, requires_grad=True)
-            b = torch.rand(N, C, requires_grad=True)
+    def test_triangular_solve(self):
+        def _test_with_size(A_dims, B_dims):
+            A = torch.rand(*A_dims).requires_grad_()
+            b = torch.rand(*B_dims).requires_grad_()
 
             for upper, transpose, unitriangular in product((True, False), repeat=3):
                 def func(A, b):
-                    return torch.trtrs(b, A, upper, transpose, unitriangular)
+                    return torch.triangular_solve(b, A, upper, transpose, unitriangular)
 
                 gradcheck(func, [A, b])
                 gradgradcheck(func, [A, b])
 
-        _test_with_size(S, S + 1)
-        _test_with_size(S, S - 1)
+        _test_with_size((3, 3), (3, 4))
+        _test_with_size((3, 3), (3, 2))
+        _test_with_size((2, 3, 3), (2, 3, 4))
+        _test_with_size((2, 3, 3), (2, 3, 2))
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_ifft_rfft_irfft(self):
@@ -2240,6 +2305,16 @@ class TestAutograd(TestCase):
         _test_complex((2, 2, 10, 2), 1)
         _test_complex((1, 2, 3, 4, 2), 2)
         _test_complex((2, 1, 3, 4, 3, 2), 3)
+
+    def test_gradcheck_fail_when_no_differentiable_outputs_and_num_grad_not_zero(self):
+        def autograd_fn(input):
+            output = torch.detach(input)
+            self.assertFalse(output.requires_grad)
+            return output
+
+        f_args_variable = torch.ones(S, S, requires_grad=True)
+        self.assertRaisesRegex(RuntimeError, 'Numerical gradient for function expected to be zero',
+                               lambda: gradcheck(autograd_fn, f_args_variable, eps=1e-6, atol=PRECISION))
 
     def test_variable_traverse(self):
         def get_out_and_unrefed_cycle():
@@ -2354,6 +2429,102 @@ class TestAutograd(TestCase):
             self.assertEqual(info.name, expected_name)
             last_end = info.cpu_interval.end
 
+    def test_profiler_aggregation_fake(self):
+        events = EventList()
+        id = [0]
+
+        def get_id():
+            id[0] = id[0] + 1
+            return id[0]
+
+        # [[thread_id, [(start, end, id), ....]], ...]
+        # Using list instead of a dict so order is guaranteed for any Python
+        # version
+        threads = [
+            [1, [(0, 1, get_id()), (1, 2, get_id())]],
+            [0, [(0, 2, get_id()), (1, 2, get_id()), (1, 3, get_id())]],
+        ]
+        for thread, ranges in threads:
+            for range in ranges:
+                assert(len(range) == 3)
+                events.append(
+                    FunctionEvent(
+                        id=range[2],
+                        name="",
+                        thread=thread,
+                        cpu_start=range[0],
+                        cpu_end=range[1],
+                    )
+                )
+
+        events.populate_cpu_children()
+
+        # Note that [1, 3] pushes out [0, 2] first. Then we record [1, 2]
+        # as a child of [1, 3]
+        res = [[], [], [], [], [4]]
+
+        def get_children_ids(event):
+            return [child.id for child in event.cpu_children]
+
+        assert([get_children_ids(event) for event in events] == res)
+
+    def test_profiler_shapes(self):
+        print("")
+        layer1 = torch.nn.Linear(20, 30)
+        layer2 = torch.nn.Linear(30, 40)
+        input = torch.randn(128, 20)
+        with profile(record_shapes=True) as prof:
+            layer2(layer1(input))
+
+        # type conversion
+        assert(prof.function_events[0].input_shapes == [[30, 20]])
+        # fc (addmm)
+        assert(
+            prof.function_events[1].input_shapes ==
+            [[30], [128, 20], [20, 30], [], []]
+        )
+        assert(prof.function_events[2].input_shapes == [[40, 30]])
+        assert(
+            prof.function_events[3].input_shapes ==
+            [[40], [128, 30], [30, 40], [], []]
+        )
+        print(prof.table())
+        print(prof.key_averages(group_by_input_shape=True).table())
+
+    def test_profiler_aggregation_lstm(self):
+        print("")
+        rnn = torch.nn.LSTM(10, 20, 2)
+        total_time_s = 0
+        with profile(record_shapes=True) as prof:
+            for i in range(20):
+                input = torch.randn(5, 3, 10)
+                h = torch.randn(2, 3, 20)
+                c = torch.randn(2, 3, 20)
+                start = time.time()
+                rnn(input, (h, c))
+                end = time.time()
+                total_time_s += end - start
+
+        print(prof.table(
+            sort_by="self_cpu_time_total", row_limit=10, header="TEST"))
+        print(prof.key_averages(group_by_input_shape=True).table(
+            sort_by="self_cpu_time_total", row_limit=10))
+
+        total_time_us = total_time_s * 1000.0 * 1000.0  # make it us which is profiler default
+        print(
+            "Total time based on python measurements: ",
+            format_time(total_time_us)
+        )
+        print(
+            "CPU time measurement python side overhead: {:.2f}%".format(
+                (total_time_us / prof.self_cpu_time_total - 1.0) * 100.0
+            )
+        )
+
+        if sys.platform != "win32":
+            with tempfile.NamedTemporaryFile() as trace_file:
+                prof.export_chrome_trace(trace_file.name)
+
     def test_dir(self):
         x = torch.randn(10, 10)
         keys = dir(x)
@@ -2431,6 +2602,30 @@ class TestAutograd(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_where_functional_cuda(self):
         self._test_where_functional(lambda t: t.cuda())
+
+    def _test_lerp_tensor_weights(self, cast):
+        def construct_inputs(*shapes):
+            start = cast(torch.randn(shapes[0])).requires_grad_()
+            end = cast(torch.randn(shapes[1])).requires_grad_()
+            weight = cast(torch.randn(shapes[2]))
+            return [start, end, weight]
+
+        all_test_shapes = [((3, 3, 3), (3, 3, 3), (3, 3, 3)),  # no broadcasting
+                           ((3,), (3, 3, 3), (3, 3, 3)),  # start broadcasting - 1
+                           ((3, 3, 3), (3,), (3, 3, 3)),  # end broadcasting - 1
+                           ((3, 3, 3), (3, 3, 3), (3,)),  # weight broadcasting - 1
+                           ((), (3, 3, 3), (3, 3, 3)),  # start broadcasting - 2
+                           ((3, 3, 3), (), (3, 3, 3)),  # end broadcasting - 2
+                           ((3, 3, 3), (3, 3, 3), ()),  # weight broadcasting - 2
+                           ((3, 3), (3, 3, 3), (3,))]  # all broadcasting
+
+        for shapes in all_test_shapes:
+            cur_inputs = construct_inputs(*shapes)
+            gradcheck(torch.lerp, cur_inputs)
+            gradgradcheck(torch.lerp, cur_inputs)
+
+    def test_lerp_tensor_weights(self):
+        self._test_lerp_tensor_weights(lambda t: t)
 
     def test_reduce_dtype(self):
         def test_reduction(op, has_no_dim):
@@ -2829,6 +3024,34 @@ class TestAutograd(TestCase):
         # gpu thread ReadyQueue
         out.sum().backward()
 
+    def test_version_counter(self):
+        x = torch.randn(1, 2)
+
+        # In-place op bumps version
+        x_saved_version = x._version
+        x.add_(1).add_(1)
+        self.assertTrue(x._version > x_saved_version)
+
+        # Differentiable view shares version counter
+        xz = x[:]
+        self.assertTrue(x._version == xz._version)
+        xz.add_(1)
+        self.assertTrue(x._version == xz._version)
+
+        # `x.data = y` preserves version counter of `x`
+        x_saved_version = x._version
+        x.data = torch.randn(2, 3)
+        self.assertTrue(x._version == x_saved_version)
+        x.add_(1)
+        self.assertTrue(x._version > x_saved_version)
+        # Make sure `x` is still using the same version counter it shares with `xz`
+        self.assertTrue(x._version == xz._version)
+
+        # In-place op on `xz` also updates version of `x`,
+        # because they share the version counter
+        xz.add_(1)
+        self.assertTrue(x._version == xz._version)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -2918,6 +3141,7 @@ def add_test(
         self_size,
         args,
         variant_name='',
+        check_ad=(),  # only used in test_jit
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,

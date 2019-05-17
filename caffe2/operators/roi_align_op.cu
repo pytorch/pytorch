@@ -184,3 +184,7 @@ bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
 
 REGISTER_CUDA_OPERATOR(RoIAlign, RoIAlignOp<float, CUDAContext>);
 } // namespace caffe2
+
+using RoIAlignOpFloatCUDA = caffe2::RoIAlignOp<float, caffe2::CUDAContext>;
+
+C10_REGISTER_CAFFE2_OPERATOR_CUDA(RoIAlign, RoIAlignOpFloatCUDA);

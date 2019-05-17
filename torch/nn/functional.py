@@ -3,22 +3,20 @@ from __future__ import division
 
 import warnings
 import math
-import types
 
 import torch
 from torch._C import _infer_size, _add_docstr
 from . import _reduction as _Reduction
-from . import _functions
 from .modules import utils
 from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
-from . import grad
+from . import grad  # noqa: F401
 from . import _VF
 from .._jit_internal import weak_script, List
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
-conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
 
 Applies a 1D convolution over an input signal composed of several input
 planes.
@@ -33,12 +31,13 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or
       a one-element tuple `(sW,)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a
       single number or a one-element tuple `(padW,)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
       a one-element tuple `(dW,)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
       the number of groups. Default: 1
+    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -48,7 +47,7 @@ Examples::
 """)
 
 conv2d = _add_docstr(torch.conv2d, r"""
-conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
 
 Applies a 2D convolution over an input image composed of several input
 planes.
@@ -63,12 +62,13 @@ Args:
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sH, sW)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a
       single number or a tuple `(padH, padW)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
       number of groups. Default: 1
+    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -79,7 +79,7 @@ Examples::
 """)  # noqa: E501
 
 conv3d = _add_docstr(torch.conv3d, r"""
-conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
 
 Applies a 3D convolution over an input image composed of several input
 planes.
@@ -94,12 +94,13 @@ Args:
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a
       single number or a tuple `(padT, padH, padW)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dT, dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
       the number of groups. Default: 1
+    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -454,8 +455,10 @@ def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
 def _max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tensor  # noqa
-    return max_pool1d_with_indices(
-        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+    if stride is None:
+        stride = torch.jit.annotate(List[int], [])
+    return torch.max_pool1d(
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 max_pool1d = torch._jit_internal.boolean_dispatch(
     arg_name='return_indices',
@@ -485,8 +488,10 @@ def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation
 def _max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tensor  # noqa
-    return max_pool2d_with_indices(
-        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+    if stride is None:
+        stride = torch.jit.annotate(List[int], [])
+    return torch.max_pool2d(
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 max_pool2d = torch._jit_internal.boolean_dispatch(
     arg_name='return_indices',
@@ -517,8 +522,10 @@ def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
 def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tensor  # noqa
-    return max_pool3d_with_indices(
-        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+    if stride is None:
+        stride = torch.jit.annotate(List[int], [])
+    return torch.max_pool3d(
+        input, kernel_size, stride, padding, dilation, ceil_mode)
 
 max_pool3d = torch._jit_internal.boolean_dispatch(
     arg_name='return_indices',
@@ -690,7 +697,7 @@ adaptive_max_pool1d = torch._jit_internal.boolean_dispatch(
 
 @weak_script
 def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, BroadcastingList2[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -707,7 +714,7 @@ def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
 
 @weak_script
 def _adaptive_max_pool2d(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
+    # type: (Tensor, BroadcastingList2[int], bool) -> Tensor
     return adaptive_max_pool2d_with_indices(input, output_size)[0]
 
 adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
@@ -722,7 +729,7 @@ adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
 
 @weak_script
 def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, BroadcastingList3[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -739,7 +746,7 @@ def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
 
 @weak_script
 def _adaptive_max_pool3d(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
+    # type: (Tensor, BroadcastingList3[int], bool) -> Tensor
     return adaptive_max_pool3d_with_indices(input, output_size)[0]
 
 adaptive_max_pool3d = torch._jit_internal.boolean_dispatch(
@@ -1414,7 +1421,7 @@ def bilinear(input1, input2, weight, bias=None):
 def _no_grad_embedding_renorm_(weight, input, max_norm, norm_type):
     # type: (Tensor, Tensor, float, float) -> Tensor
     with torch.no_grad():
-        return torch.embedding_renorm_(weight, input, max_norm, norm_type)
+        torch.embedding_renorm_(weight, input, max_norm, norm_type)
 
 
 @weak_script
@@ -1501,8 +1508,9 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
 
 @weak_script
 def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
-                  scale_grad_by_freq=False, mode='mean', sparse=False):
-    # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool) -> Tensor
+                  scale_grad_by_freq=False, mode='mean', sparse=False,
+                  per_sample_weights=None):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool, Optional[Tensor]) -> Tensor
     r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
 
@@ -1529,6 +1537,11 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
                                  :class:`torch.nn.Embedding` for more details regarding sparse gradients.
                                  Note: this option is not supported when ``mode="max"``.
+        per_sample_weights (Tensor, optional): a tensor of float / double weights, or None
+            to indicate all weights should be taken to be 1. If specified, :attr:`per_sample_weights`
+            must have exactly the same shape as input and is treated as having the same
+            :attr:`offsets`, if those are not None.
+
 
     Shape:
 
@@ -1552,6 +1565,9 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         - :attr:`weight` (Tensor): the learnable weights of the module of
           shape `(num_embeddings, embedding_dim)`
 
+        - :attr:`per_sample_weights` (Tensor, optional). Has the same shape as
+          :attr:`input`.
+
         - :attr:`output`: aggregated embedding values of shape `(B, embedding_dim)`
 
     Examples::
@@ -1574,17 +1590,23 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                       "and should now be `embedding_bag(input, weight, ...)`.")
         weight, input = input, weight
 
+    if per_sample_weights is not None and input.size() != per_sample_weights.size():
+        raise ValueError("embedding_bag: If per_sample_weights ({}) is not None, "
+                         "then it must have the same shape as the input ({})"
+                         .format(per_sample_weights.shape, input.shape))
+
     if input.dim() == 2:
         if offsets is not None:
             raise ValueError("if input is 2D, then offsets has to be None"
                              ", as input is treated is a mini-batch of"
                              " fixed length sequences. However, found "
                              "offsets of type {}".format(type(offsets)))
-        else:
-            offsets = torch.arange(0, input.numel(), input.size(1),
-                                   dtype=torch.long, device=input.device)
+        offsets = torch.arange(0, input.numel(), input.size(1),
+                               dtype=torch.long, device=input.device)
 
-            input = input.reshape(-1)
+        input = input.reshape(-1)
+        if per_sample_weights is not None:
+            per_sample_weights = per_sample_weights.reshape(-1)
     elif input.dim() == 1:
         if offsets is None:
             raise ValueError("offsets has to be a 1D Tensor but got None")
@@ -1627,13 +1649,20 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         # remove once script supports set_grad_enabled
         _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
 
+    if per_sample_weights is not None and mode != 'sum':
+        raise NotImplementedError("embedding_bag: per_sample_weights was not None. "
+                                  "per_sample_weights is only supported for mode='sum' "
+                                  "(got mode='{}'). Please open a feature request on GitHub."
+                                  .format(mode))
+
     ret, _, _, _ = torch.embedding_bag(
         weight,
         input,
         offsets,
         scale_grad_by_freq,
         mode_enum,
-        sparse)
+        sparse,
+        per_sample_weights)
     return ret
 
 
@@ -1753,7 +1782,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
         targets: :math:`(N, S)` or `(sum(target_lengths))`.
-            Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
+            Targets cannot be blank. In the second form, the targets are assumed to be concatenated.
         input_lengths: :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`)
         target_lengths: :math:`(N)`.
@@ -1761,9 +1790,10 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
         blank (int, optional):
             Blank label. Default :math:`0`.
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the output losses will be divided by the target lengths and
-            then the mean over the batch is taken. Default: 'mean'
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the output losses will be divided by the target lengths and
+            then the mean over the batch is taken, ``'sum'``: the output will be
+            summed. Default: ``'mean'``
         zero_infinity (bool, optional):
             Whether to zero infinite losses and the associated gradients.
             Default: ``False``
@@ -1793,7 +1823,7 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
 
     Args:
         input: :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
-            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
+            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
             in the case of K-dimensional loss.
         target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
             or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
@@ -1813,11 +1843,11 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Example::
 
@@ -1891,31 +1921,20 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     """
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    if log_input:
-        loss = torch.exp(input) - target * input
-    else:
-        loss = input - target * torch.log(input + eps)
-    if full:
-        mask = target > 1
-        loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
-    if reduction == 'none':
-        ret = loss
-    elif reduction == 'mean':
-        ret = torch.mean(loss)
-    elif reduction == 'sum':
-        ret = torch.sum(loss)
-    else:
+    if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
         ret = input
         raise ValueError(reduction + " is not valid")
+
+    ret = torch.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
     return ret
 
 
@@ -1939,19 +1958,21 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'batchmean' | 'sum' | 'mean'.
-            'none': no reduction will be applied
-            'batchmean': the sum of the output will be divided by the batchsize
-            'sum': the output will be summed
-            'mean': the output will be divided by the number of elements in the output
-            Default: 'mean'
+            ``'none'`` | ``'batchmean'`` | ``'sum'`` | ``'mean'``.
+            ``'none'``: no reduction will be applied
+            ``'batchmean'``: the sum of the output will be divided by the batchsize
+            ``'sum'``: the output will be summed
+            ``'mean'``: the output will be divided by the number of elements in the output
+            Default: ``'mean'``
 
-        .. note:: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
-            and in the meantime, specifying either of those two args will override :attr:`reduction`.
+    .. note::
+        :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
+        and in the meantime, specifying either of those two args will override :attr:`reduction`.
 
-        .. note:: `reduction='mean'` doesn't return the true kl divergence value, please use
-            `reduction='batchmean'` which aligns with KL math definition.
-            In the next major release, 'mean' will be changed to be the same as 'batchmean'.
+    .. note::
+        :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
+        :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
+        In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -1986,7 +2007,7 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
 
     Args:
         input (Tensor) : :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
-            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
+            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
             in the case of K-dimensional loss.
         target (Tensor) : :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
             or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
@@ -2006,11 +2027,11 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Examples::
 
@@ -2048,11 +2069,11 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Examples::
 
@@ -2065,9 +2086,10 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
-                      "Please ensure they have the same size.".format(target.size(), input.size()))
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if input.numel() != target.numel():
         raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
                          "!= input nelement ({})".format(target.numel(), input.numel()))
@@ -2104,11 +2126,11 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
         pos_weight (Tensor, optional): a weight of positive examples.
                 Must be a vector with length equal to the number of classes.
 
@@ -2156,6 +2178,11 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
 
     See :class:`~torch.nn.SmoothL1Loss` for details.
     """
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
@@ -2177,6 +2204,11 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
 
     See :class:`~torch.nn.L1Loss` for details.
     """
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
@@ -2198,6 +2230,11 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
 
     See :class:`~torch.nn.MSELoss` for details.
     """
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
@@ -2340,7 +2377,7 @@ def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=N
 
 pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
 Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
-tensor of shape :math:`(C, H \times r, W \times r)`.
+tensor of shape :math:`(*, C, H \times r, W \times r)`.
 
 See :class:`~torch.nn.PixelShuffle` for details.
 
@@ -2384,15 +2421,17 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear'. Default: 'nearest'
+            ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
+            ``'trilinear'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
-            If set to True, the input and output tensors are aligned by the
-            center points of their corner pixels. If set to False, the input and
+            If set to ``True``, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to ``False``, the input and
             output tensors are aligned by the corner points of their corner
             pixels, and the interpolation uses edge value padding for out-of-boundary values.
-            This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, `bicubic` or `trilinear`. Default: False
+            This only has effect when :attr:`mode` is ``'linear'``,
+            ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
+            Default: ``False``
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2428,16 +2467,18 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
-        mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear' | 'area'. Default: 'nearest'
+        mode (str): algorithm used for upsampling:
+            ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
+            ``'trilinear'`` | ``'area'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
-            If set to True, the input and output tensors are aligned by the
-            center points of their corner pixels. If set to False, the input and
+            If set to ``True``, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to ``False``, the input and
             output tensors are aligned by the corner points of their corner
             pixels, and the interpolation uses edge value padding for out-of-boundary values.
-            This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, `bicubic`, or `trilinear`. Default: False
+            This only has effect when :attr:`mode` is ``'linear'``,
+            ``'bilinear'``, ``'bicubic'``, or ``'trilinear'``.
+            Default: ``False``
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2450,7 +2491,6 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     .. include:: cuda_deterministic_backward.rst
     """
-    from numbers import Integral
     from .modules.utils import _ntuple
 
     def _check_size_scale_factor(dim):
@@ -2469,7 +2509,12 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             return size
         scale_factors = _ntuple(dim)(scale_factor)
         # math.floor might return float in py2.7
-        return [int(math.floor(input.size(i + 2) * scale_factors[i])) for i in range(dim)]
+
+        # make scale_factor a tensor in tracing so constant doesn't get baked in
+        if torch._C._get_tracing_state():
+            return [(torch.floor(input.size(i + 2) * torch.tensor(float(scale_factors[i])))) for i in range(dim)]
+        else:
+            return [int(math.floor(int(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
     if mode in ('nearest', 'area'):
         if align_corners is not None:
@@ -2601,25 +2646,25 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest`` or
     ``bilinear`` interpolation method to sample the input pixels.
 
-    :attr:`grid` should have most values in the range of ``[-1, 1]``. This is
-    because the pixel locations are normalized by the :attr:`input` spatial
-    dimensions. For example, values ``x = -1, y = -1`` is the left-top pixel of
-    :attr:`input`, and values  ``x = 1, y = 1`` is the right-bottom pixel of
-    :attr:`input`.
+    :attr:`grid` specifies the sampling pixel locations normalized by the
+    :attr:`input` spatial dimensions. Therefore, it should have most values in
+    the range of ``[-1, 1]``. For example, values ``x = -1, y = -1`` is the
+    left-top pixel of :attr:`input`, and values  ``x = 1, y = 1`` is the
+    right-bottom pixel of :attr:`input`.
 
-    If :attr:`grid` has values outside the range of ``[-1, 1]``, those locations
-    are handled as defined by :attr:`padding_mode`. Options are
+    If :attr:`grid` has values outside the range of ``[-1, 1]``, the corresponding
+    outputs are handled as defined by :attr:`padding_mode`. Options are
 
-        * ``padding_mode="zeros"``: use ``0`` for out-of-bound values,
-        * ``padding_mode="border"``: use border values for out-of-bound values,
+        * ``padding_mode="zeros"``: use ``0`` for out-of-bound grid locations,
+        * ``padding_mode="border"``: use border values for out-of-bound grid locations,
         * ``padding_mode="reflection"``: use values at locations reflected by
-          the border for out-of-bound values. For location far away from the
-          border, it will keep being reflected until becoming in bound, e.g.,
-          (normalized) pixel location ``x = -3.5`` reflects by ``-1`` and
-          becomes ``x' = 2.5``, then reflects by border ``1`` and becomes
+          the border for out-of-bound grid locations. For location far away
+          from the border, it will keep being reflected until becoming in bound,
+          e.g., (normalized) pixel location ``x = -3.5`` reflects by border ``-1``
+          and becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
           ``x'' = -0.5``.
 
-    .. Note:: This function is often used in building Spatial Transformer Networks.
+    .. Note:: This function is often used in building `Spatial Transformer Networks`_ .
     .. include:: cuda_deterministic_backward.rst
 
     Args:
@@ -2628,13 +2673,15 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
         grid (Tensor): flow-field of shape :math:`(N, H_\text{out}, W_\text{out}, 2)` (4-D case)
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
-            'bilinear' | 'nearest'. Default: 'bilinear'
+            ``'bilinear'`` | ``'nearest'``. Default: ``'bilinear'``
         padding_mode (str): padding mode for outside grid values
-            'zeros' | 'border' | 'reflection'. Default: 'zeros'
+            ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
 
     Returns:
         output (Tensor): output Tensor
 
+    .. _`Spatial Transformer Networks`:
+        https://arxiv.org/abs/1506.02025
     """
     if mode != 'bilinear' and mode != 'nearest':
         raise ValueError("nn.functional.grid_sample(): expected mode to be "
@@ -2662,14 +2709,14 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
 @weak_script
 def affine_grid(theta, size):
     # type: (Tensor, List[int]) -> Tensor
-    r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`
+    r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`.
     Generally used in conjunction with :func:`grid_sample` to
     implement Spatial Transformer Networks.
 
     Args:
         theta (Tensor): input batch of affine matrices (:math:`N \times 2 \times 3`)
-        size (torch.Size): the target output image size (:math:`N \times C \times H \times W`)
-                           Example: torch.Size((32, 3, 24, 24))
+        size (torch.Size): the target output image size (:math:`N \times C \times H \times W`).
+            Example: torch.Size((32, 3, 24, 24))
 
     Returns:
         output (Tensor): output Tensor of size (:math:`N \times H \times W \times 2`)
@@ -2710,10 +2757,12 @@ def pad(input, pad, mode='constant', value=0):
     .. include:: cuda_deterministic_backward.rst
 
     Args:
-        input (Tensor): `Nd` tensor
-        pad (tuple): m-elem tuple, where :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
-        mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
-        value: fill value for 'constant' padding. Default: 0
+        input (Tensor): N-dimensional tensor
+        pad (tuple): m-elements tuple, where
+            :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
+        mode: ``'constant'``, ``'reflect'``, ``'replicate'`` or ``'circular'``.
+            Default: ``'constant'``
+        value: fill value for ``'constant'`` padding. Default: ``0``
 
     Examples::
 
@@ -2745,6 +2794,8 @@ def pad(input, pad, mode='constant', value=0):
                 ret = torch._C._nn.reflection_pad1d(input, pad)
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad1d(input, pad)
+            elif mode == 'circular':
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
@@ -2755,6 +2806,8 @@ def pad(input, pad, mode='constant', value=0):
                 ret = torch._C._nn.reflection_pad2d(input, pad)
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad2d(input, pad)
+            elif mode == 'circular':
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
@@ -2766,12 +2819,15 @@ def pad(input, pad, mode='constant', value=0):
                 raise NotImplementedError
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad3d(input, pad)
+            elif mode == 'circular':
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
         else:
             ret = input  # TODO: remove this when jit raise supports control flow
             raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
+
     return ret
 
 # distance
@@ -2943,6 +2999,14 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         Currently, only 4-D input tensors (batched image-like tensors) are
         supported.
 
+    .. warning::
+
+        More than one element of the unfolded tensor may refer to a single
+        memory location. As a result, in-place operations (especially ones that
+        are vectorized) may result in incorrect behavior. If you need to write
+        to the tensor, please clone it first.
+
+
     See :class:`torch.nn.Unfold` for details
     """
 
@@ -2987,3 +3051,214 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
         ret = input  # TODO: remove when jit supports exception control flow
     return ret
+
+
+@weak_script
+def _pad_circular(input, padding):
+    # type: (Tensor, List[int]) -> Tensor
+    """
+    Arguments
+        :param input: tensor of shape :math:`(N, C_{\text{in}}, H, [W, D]))`
+        :param padding: (tuple): m-elem tuple where m is the degree of convolution
+    Returns
+        :return: tensor of shape :math:`(N, C_{\text{in}}, [D + 2 * padding[0],
+                 H + 2 * padding[1]], W + 2 * padding[2]))`
+    """
+
+    input = torch.cat([input, input[:, :, 0:padding[-1]]], dim=2)
+    input = torch.cat([input[:, :, -(padding[-1] + padding[-2]):-padding[-1]], input], dim=2)
+
+    if len(padding) > 2:
+        input = torch.cat([input, input[:, :, :, 0:padding[-3]]], dim=3)
+        input = torch.cat([input[:, :, :, -(padding[-3] + padding[-4]):-padding[-3]], input], dim=3)
+
+    if len(padding) > 4:
+        input = torch.cat([input, input[:, :, :, :, 0:padding[-5]]], dim=4)
+        input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):-padding[-5]], input], dim=4)
+
+    return input
+
+
+@weak_script
+def multi_head_attention_forward(query,                  # type: Tensor
+                                 key,                    # type: Tensor
+                                 value,                  # type: Tensor
+                                 embed_dim_to_check,     # type: int
+                                 num_heads,              # type: int
+                                 in_proj_weight,         # type: Tensor
+                                 in_proj_bias,           # type: Tensor
+                                 bias_k,                 # type: Tensor
+                                 bias_v,                 # type: Tensor
+                                 add_zero_attn,          # type: bool
+                                 dropout_p,              # type: float
+                                 out_proj,               # type: Tensor
+                                 training=True,          # type: bool
+                                 key_padding_mask=None,  # type: Optional[Tensor]
+                                 need_weights=True,      # type: bool
+                                 attn_mask=None          # type: Optional[Tensor]
+                                 ):
+    # type: (...) -> Tuple[Tensor, Tensor]
+    r"""
+    Args:
+        query, key, value: map a query and a set of key-value pairs to an output.
+            See "Attention Is All You Need" for more details.
+        embed_dim_to_check: total dimension of the model.
+        num_heads: parallel attention heads.
+        in_proj_weight, in_proj_bias: input projection weight and bias.
+        bias_k, bias_v: bias of the key and value sequences to be added at dim=0.
+        add_zero_attn: add a new batch of zeros to the key and
+                       value sequences at dim=1.
+        dropout_p: probability of an element to be zeroed.
+        out_proj: the output projection.
+        training: apply dropout if is ``True``.
+        key_padding_mask: if provided, specified padding elements in the key will
+            be ignored by the attention.
+        need_weights: output attn_output_weights.
+        attn_mask: mask that prevents attention to certain positions.
+
+
+    Shape:
+        Inputs:
+        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
+        - attn_mask: :math:`(L, L)` where L is the target sequence length.
+
+        Outputs:
+        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
+          E is the embedding dimension.
+        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
+          L is the target sequence length, S is the source sequence length.
+    """
+
+    def _in_proj(input, weight, bias, start=0, end=None):
+        # type: (Tensor, Tensor, Optional[Tensor], int, Optional[int]) -> Tensor
+        weight = weight[start:end, :]
+        if bias is not None:
+            bias = bias[start:end]
+        return linear(input, weight, bias)
+
+
+    def _in_proj_qkv(weight, bias, query):
+        # type: (Tensor, Tensor, Tensor) -> Tensor
+        return _in_proj(query, weight, bias).chunk(3, dim=-1)
+
+
+    def _in_proj_kv(weight, bias, embed_dim, key):
+        # type: (Tensor, Tensor, int, Tensor) -> Tensor
+        return _in_proj(key, weight, bias, start=embed_dim).chunk(2, dim=-1)
+
+
+    def _in_proj_q(weight, bias, embed_dim, query):
+        # type: (Tensor, Tensor, int, Tensor) -> Tensor
+        return _in_proj(query, weight, bias, end=embed_dim)
+
+
+    def _in_proj_k(weight, bias, embed_dim, key):
+        # type: (Tensor, Tensor, int, Tensor) -> Tensor
+        return _in_proj(key, weight, bias, start=embed_dim, end=2 * embed_dim)
+
+
+    def _in_proj_v(weight, bias, embed_dim, value):
+        # type: (Tensor, Tensor, int, Tensor) -> Tensor
+        return _in_proj(value, weight, bias, start=2 * embed_dim)
+
+
+    qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
+    kv_same = key.data_ptr() == value.data_ptr()
+
+    tgt_len, bsz, embed_dim = query.size()
+    assert embed_dim == embed_dim_to_check
+    assert list(query.size()) == [tgt_len, bsz, embed_dim]
+    assert key.size() == value.size()
+
+    head_dim = embed_dim // num_heads
+    assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
+    scaling = head_dim ** -0.5
+
+    if qkv_same:
+        # self-attention
+        q, k, v = _in_proj_qkv(in_proj_weight, in_proj_bias, query)
+    elif kv_same:
+        # encoder-decoder attention
+        q = _in_proj_q(in_proj_weight, in_proj_bias, embed_dim, query)
+        if key is None:
+            assert value is None
+            k = v = None
+        else:
+            k, v = _in_proj_kv(in_proj_weight, in_proj_bias, embed_dim, key)
+    else:
+        q = _in_proj_q(in_proj_weight, in_proj_bias, embed_dim, query)
+        k = _in_proj_k(in_proj_weight, in_proj_bias, embed_dim, key)
+        v = _in_proj_v(in_proj_weight, in_proj_bias, embed_dim, value)
+    q *= scaling
+
+    if bias_k is not None:
+        assert bias_v is not None
+        k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+        v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
+        if attn_mask is not None:
+            attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
+        if key_padding_mask is not None:
+            key_padding_mask = torch.cat(
+                [key_padding_mask, key_padding_mask.new_zeros(key_padding_mask.size(0), 1)], dim=1)
+
+    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    if k is not None:
+        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+    if v is not None:
+        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+
+    src_len = k.size(1)
+
+    if key_padding_mask is not None:
+        assert key_padding_mask.size(0) == bsz
+        assert key_padding_mask.size(1) == src_len
+
+    if add_zero_attn:
+        src_len += 1
+        k = torch.cat([k, k.new_zeros((k.size(0), 1) + k.size()[2:])], dim=1)
+        v = torch.cat([v, v.new_zeros((v.size(0), 1) + v.size()[2:])], dim=1)
+        if attn_mask is not None:
+            attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
+        if key_padding_mask is not None:
+            key_padding_mask = torch.cat(
+                [key_padding_mask, torch.zeros(key_padding_mask.size(0), 1).type_as(key_padding_mask)], dim=1)
+
+    attn_output_weights = torch.bmm(q, k.transpose(1, 2))
+    assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
+
+    if attn_mask is not None:
+        attn_mask = attn_mask.unsqueeze(0)
+        attn_output_weights += attn_mask
+
+    if key_padding_mask is not None:
+        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+        attn_output_weights = attn_output_weights.masked_fill(
+            key_padding_mask.unsqueeze(1).unsqueeze(2),
+            float('-inf'),
+        )
+        attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+
+    attn_output_weights = softmax(
+        attn_output_weights.float(), dim=-1,
+        dtype=torch.float32 if attn_output_weights.dtype == torch.float16 else attn_output_weights.dtype)
+    attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
+
+    attn_output = torch.bmm(attn_output_weights, v)
+    assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
+    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+    attn_output = out_proj(attn_output)
+
+    if need_weights:
+        # average attention weights over heads
+        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+        attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
+    else:
+        attn_output_weights = None
+
+    return attn_output, attn_output_weights

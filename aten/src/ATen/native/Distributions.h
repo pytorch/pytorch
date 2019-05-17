@@ -21,7 +21,7 @@ static inline THGenerator* get_generator(at::Generator* gen) {
 }}  // namespace at::native
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
-#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
 #include <c10/cuda/CUDAMathCompat.h>
 #define compat_exp c10::cuda::compat::exp
 #define compat_floor c10::cuda::compat::floor
@@ -40,7 +40,7 @@ static inline THGenerator* get_generator(at::Generator* gen) {
 
 namespace {
 
-#if !defined(__CUDA_ARCH__) && !defined(__HIP_PLATFORM_HCC__)
+#if !defined(__CUDA_ARCH__) && !defined(__HIPCC__)
 // we cannot use std::isnan directly due to some incompatibility of
 // gcc constexpr'ing and nvcc
 #define isnan std::isnan

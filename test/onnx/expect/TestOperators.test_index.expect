@@ -57,5 +57,5 @@ graph {
   }
 }
 opset_import {
-  version: 10
+  version: 9
 }

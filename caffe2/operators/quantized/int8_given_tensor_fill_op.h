@@ -14,8 +14,9 @@ namespace int8 {
 
 class Int8GivenTensorFillOp final : public Operator<CPUContext> {
  public:
-  Int8GivenTensorFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit Int8GivenTensorFillOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         scale_(this->template GetSingleArgument<float>("Y_scale", 1.0)),
         zero_point_(
             this->template GetSingleArgument<int32_t>("Y_zero_point", 0)),
@@ -63,8 +64,9 @@ class Int8GivenTensorFillOp final : public Operator<CPUContext> {
 
 class Int8GivenIntTensorFillOp final : public Operator<CPUContext> {
  public:
-  Int8GivenIntTensorFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit Int8GivenIntTensorFillOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         scale_(this->template GetSingleArgument<float>("Y_scale", 1.0)),
         zero_point_(
             this->template GetSingleArgument<int32_t>("Y_zero_point", 0)),

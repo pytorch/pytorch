@@ -87,7 +87,7 @@ struct CuDNNWorkspace {
 class CuDNNState {
  public:
   explicit CuDNNState(size_t gpu_id) : gpu_id_(gpu_id) {
-    DeviceGuard g(gpu_id_);
+    CUDAGuard g(gpu_id_);
     CUDNN_ENFORCE(cudnnCreate(&cudnn_handle_));
     CUDA_ENFORCE(cudaEventCreate(&before_));
     CUDA_ENFORCE(cudaEventCreate(&after_));
@@ -96,7 +96,7 @@ class CuDNNState {
   }
 
   ~CuDNNState() noexcept {
-    DeviceGuard g(gpu_id_);
+    CUDAGuard g(gpu_id_);
     CUDNN_CHECK(cudnnDestroy(cudnn_handle_));
     CUDA_CHECK(cudaStreamDestroy(stream_));
     CUDA_CHECK(cudaEventDestroy(after_));
@@ -162,7 +162,7 @@ class CuDNNWrapper {
         state_idx < CAFFE2_COMPILE_TIME_MAX_CUDNN_STATES, "Invalid state_idx");
     auto& sync_state = cudnn_states()[context_->device_id()][state_idx];
 
-    DeviceGuard dg(context_->device_id());
+    CUDAGuard dg(context_->device_id());
 
     // We need to serialize execution on the CuDNNState as we can't
     // allow multiple threads to race through the cudaEventRecord

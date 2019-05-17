@@ -19,7 +19,7 @@ test_gpu_speed_mlstm () {
   SAMPLE_ARRAY=()
   NUM_RUNS=$1
 
-  for (( i=1; i<=$NUM_RUNS; i++ )) do
+  for (( i=1; i<=NUM_RUNS; i++ )) do
     runtime=$(get_runtime_of_command python mlstm.py --skip-cpu-governor-check)
     echo $runtime
     SAMPLE_ARRAY+=(${runtime})
@@ -27,7 +27,7 @@ test_gpu_speed_mlstm () {
 
   cd ../..
 
-  stats=$(python ../get_stats.py ${SAMPLE_ARRAY[@]})
+  stats=$(python ../get_stats.py "${SAMPLE_ARRAY[@]}")
   echo "Runtime stats in seconds:"
   echo $stats
 

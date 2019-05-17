@@ -254,31 +254,31 @@ class numeric_limits<c10::Half> {
   static constexpr auto tinyness_before =
       numeric_limits<float>::tinyness_before;
   static constexpr c10::Half min() {
-    return c10::Half(0x0400, c10::Half::from_bits);
+    return c10::Half(0x0400, c10::Half::from_bits());
   }
   static constexpr c10::Half lowest() {
-    return c10::Half(0xFBFF, c10::Half::from_bits);
+    return c10::Half(0xFBFF, c10::Half::from_bits());
   }
   static constexpr c10::Half max() {
-    return c10::Half(0x7BFF, c10::Half::from_bits);
+    return c10::Half(0x7BFF, c10::Half::from_bits());
   }
   static constexpr c10::Half epsilon() {
-    return c10::Half(0x1400, c10::Half::from_bits);
+    return c10::Half(0x1400, c10::Half::from_bits());
   }
   static constexpr c10::Half round_error() {
-    return c10::Half(0x3800, c10::Half::from_bits);
+    return c10::Half(0x3800, c10::Half::from_bits());
   }
   static constexpr c10::Half infinity() {
-    return c10::Half(0x7C00, c10::Half::from_bits);
+    return c10::Half(0x7C00, c10::Half::from_bits());
   }
   static constexpr c10::Half quiet_NaN() {
-    return c10::Half(0x7E00, c10::Half::from_bits);
+    return c10::Half(0x7E00, c10::Half::from_bits());
   }
   static constexpr c10::Half signaling_NaN() {
-    return c10::Half(0x7D00, c10::Half::from_bits);
+    return c10::Half(0x7D00, c10::Half::from_bits());
   }
   static constexpr c10::Half denorm_min() {
-    return c10::Half(0x0001, c10::Half::from_bits);
+    return c10::Half(0x0001, c10::Half::from_bits());
   }
 };
 

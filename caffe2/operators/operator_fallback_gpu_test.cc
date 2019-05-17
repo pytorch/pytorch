@@ -9,8 +9,9 @@ namespace caffe2 {
 
 class IncrementByOneOp final : public Operator<CPUContext> {
  public:
-  IncrementByOneOp(const OperatorDef& def, Workspace* ws)
-      : Operator<CPUContext>(def, ws) {}
+  template <class... Args>
+  explicit IncrementByOneOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {}
   bool RunOnDevice() override {
     const auto& in = Input(0);
 

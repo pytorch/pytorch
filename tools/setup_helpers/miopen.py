@@ -1,7 +1,4 @@
-import os
-import glob
-
-from .env import IS_WINDOWS, IS_CONDA, CONDA_DIR, check_env_flag, gather_paths
+from .env import check_env_flag
 from .rocm import USE_ROCM, ROCM_HOME
 
 

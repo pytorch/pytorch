@@ -4,6 +4,7 @@ list(APPEND Caffe2_CPU_SRCS
   utils/math/broadcast.cc
   utils/math/elementwise.cc
   utils/math/reduce.cc
+  utils/math/transpose.cc
   utils/math/utils.cc
   utils/math_cpu.cc
   utils/murmur_hash3.cc
@@ -13,13 +14,12 @@ list(APPEND Caffe2_CPU_SRCS
   utils/signal_handler.cc
   utils/smart_tensor_printer.cc
   utils/string_utils.cc
-  utils/thread_name.cc
   utils/threadpool/ThreadPool.cc)
 
 # ---[ threadpool/pthreadpool* is a local modification of the NNPACK
 # pthreadpool with a very similar interface. Neither NNPACK, nor this
 # thread pool supports Windows.
-if (NOT MSVC)
+if (NOT MSVC AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
           utils/threadpool/pthreadpool.cc
           utils/threadpool/pthreadpool_impl.cc
@@ -30,6 +30,7 @@ set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}
         utils/math/broadcast.cu
         utils/math/elementwise.cu
         utils/math/reduce.cu
+        utils/math/transpose.cu
         utils/math_gpu.cu
         )
 
@@ -37,6 +38,7 @@ set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS}
         utils/math/hip/broadcast.hip
         utils/math/hip/elementwise.hip
         utils/math/hip/reduce.hip
+        utils/math/hip/transpose.hip
         utils/hip/math_gpu.hip
         )
 

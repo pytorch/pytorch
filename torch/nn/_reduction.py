@@ -1,6 +1,5 @@
 import warnings
 from .._jit_internal import weak_script
-import torch
 
 # NB: Keep this file in sync with enums in aten/src/ATen/core/Reduction.h
 

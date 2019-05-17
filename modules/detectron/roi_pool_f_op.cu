@@ -17,7 +17,7 @@
 #include <cfloat>
 
 #include "caffe2/core/context_gpu.h"
-#include "roi_pool_f_op.h"
+#include "modules/detectron/roi_pool_f_op.h"
 
 namespace caffe2 {
 

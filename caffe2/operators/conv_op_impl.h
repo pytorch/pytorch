@@ -738,7 +738,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(C, filter.dim32(filter.dim() - 1) * group_);
 
   int kernel_dims_size = 1;
-  for (int i = 0; i < kernel_.size(); ++i) {
+  for (size_t i = 0; i < kernel_.size(); ++i) {
     CAFFE_ENFORCE_EQ(filter.dim32(i + 1), kernel_[i]);
     kernel_dims_size *= kernel_[i];
   }

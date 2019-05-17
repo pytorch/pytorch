@@ -12,8 +12,14 @@ struct ReturnInfo {
 };
 
 void checkNoReturn(const TreeRef& ref) {
-  if (ref->kind() == TK_RETURN)
+  if (ref->kind() == TK_RETURN) {
     throw ErrorReport(ref) << "return is not allowed from a loop.";
+  }
+  // do not search into first-class functions
+  if (ref->kind() == TK_DEF) {
+    return;
+  }
+
   for (const TreeRef& child : ref->trees()) {
     checkNoReturn(child);
   }

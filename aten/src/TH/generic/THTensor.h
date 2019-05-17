@@ -62,7 +62,6 @@ TH_API THTensor *THTensor_(newContiguous)(THTensor *tensor);
 TH_API THTensor *THTensor_(newSelect)(THTensor *tensor, int dimension_, int64_t sliceIndex_);
 TH_API THTensor *THTensor_(newNarrow)(THTensor *tensor, int dimension_, int64_t firstIndex_, int64_t size_);
 TH_API THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimension2_);
-TH_API THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, int64_t size_, int64_t step_);
 
 // resize* methods simply resize the storage. So they may not retain the current data at current indices.
 // This is especially likely to happen when the tensor is not contiguous. In general, if you still need the

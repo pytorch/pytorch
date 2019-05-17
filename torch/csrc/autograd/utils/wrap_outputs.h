@@ -55,7 +55,7 @@ inline PyObject* wrap(at::Tensor tensor) {
 }
 
 inline PyObject* wrap(at::Scalar scalar) {
-  return wrap(scalar_to_tensor(scalar));
+  return wrap(make_variable(scalar_to_tensor(scalar)));
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor> tensors) {

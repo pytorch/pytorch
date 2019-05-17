@@ -22,7 +22,7 @@ void DataNetFiller::fill_input_internal(TensorList_t* input_data) const {
   }
 }
 
-static void fill_with_type(
+void fill_with_type(
     const TensorFiller& filler,
     const std::string& type,
     TensorCPU* output) {
@@ -243,6 +243,15 @@ void TestDataRandomFiller::fillInputToWorkspace(Workspace* workspace) const {
         BlobGetMutableTensor(workspace->CreateBlob(name), caffe2::CPU);
     fill_with_type(it->second.first, it->second.second, tensor);
   }
+}
+
+void fillRandomNetworkInputs(
+    const NetDef& net,
+    const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
+    const std::vector<std::vector<std::string>>& inputTypes,
+    Workspace* workspace) {
+  TestDataRandomFiller(net, inputDims, inputTypes)
+      .fillInputToWorkspace(workspace);
 }
 
 } // namespace emulator

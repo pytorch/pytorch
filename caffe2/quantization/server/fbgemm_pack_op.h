@@ -56,6 +56,9 @@ class ConvDNNLowPPackWeightOp final
   bool TakeDepthWise3x3x3FastPath_();
   bool TakeGConvFastPath_();
 
+  // Save quantized weights right after quantization before layout packing for
+  // performance purpose
+  bool save_unpacked_weights_;
   bool quantize_groupwise_;
   int nbits_in_non_outlier_; // only for DNNLOWP_ACC16
 
@@ -81,6 +84,13 @@ void ComputeColumnOffsets(
     const T* W,
     const vector<dnnlowp::TensorQuantizationParams>& qparams,
     vector<int32_t>& col_offsets);
+
+int CountOutliers(
+    int groups,
+    int kernel_dim,
+    int M,
+    int nbits_in_non_outlier,
+    vector<std::int8_t>& W_quantized);
 
 /**
  * @param W_quantized input quantized weight that is not packed yet

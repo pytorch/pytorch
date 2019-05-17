@@ -9,24 +9,24 @@ import inspect
 from torch._six import builtins
 
 # Tracks standalone weak script functions
-compiled_weak_fns = weakref.WeakKeyDictionary()
+compiled_weak_fns = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Tracks which methods should be converted to strong methods
-weak_script_methods = weakref.WeakKeyDictionary()
+weak_script_methods = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Converted modules and their corresponding WeakScriptModuleProxy objects
-weak_modules = weakref.WeakKeyDictionary()
+weak_modules = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Types that have been declared as weak modules
-weak_types = weakref.WeakKeyDictionary()
+weak_types = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
-boolean_dispatched = weakref.WeakKeyDictionary()
+boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Python Op functions that should be ignored by the compiler. These will be replaced
 # with an operator that always throws an error
-ignored_fns = weakref.WeakSet()
+ignored_fns = weakref.WeakSet()  # noqa: T484
 
 COMPILATION_PENDING = object()
 COMPILED = object()
@@ -165,18 +165,21 @@ def ignore(fn):
     return fn
 
 
-def _parameter_list(fn):
+def _parameter_list(parameter_names_fn):
     """
     Decorator to denote that a function returns a list of all the parameters
     in a module
     """
-    fn._is_parameter_list = True
-    return fn
+    def decorator(fn):
+        fn._parameter_names_fn = parameter_names_fn
+        return fn
+
+    return decorator
 
 
 try:
     import typing
-    from typing import Tuple, List, Dict
+    from typing import Tuple, List, Dict, Optional
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -193,6 +196,22 @@ try:
         return ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.Dict or
              getattr(ann, '__origin__', None) is dict)
+
+    def is_optional(ann):
+        # Optional[T] is just shorthand for Union[T, None], so check for both
+        union_optional = False
+        if ann.__module__ == 'typing' and \
+           (getattr(ann, '__origin__', None) is typing.Union):
+            args = getattr(ann, '__args__', ())
+            if len(args) == 2:
+                union_optional = (issubclass(args[1], type(None)) and not issubclass(args[0], type(None))) \
+                    or (issubclass(args[0], type(None)) and not issubclass(args[1], type(None)))
+
+        optional = ann.__module__ == 'typing' and \
+            (getattr(ann, '__origin__', None) is typing.Optional)
+
+        return optional or union_optional
+
 except ImportError:
     # A minimal polyfill for versions of Python that don't have typing.
     # Note that this means that they also don't support the fancy annotation syntax, so
@@ -204,28 +223,45 @@ except ImportError:
             return TupleInstance(types)
 
     class TupleInstance(object):
+        __slots__ = ['__args__']
+
         def __init__(self, types):
-            setattr(self, '__args__', types)
+            self.__args__ = types
 
     class ListInstance(object):
+        __slots__ = ['__args__']
+
         def __init__(self, types):
-            setattr(self, '__args__', types)
+            self.__args__ = types
 
     class ListCls(object):
         def __getitem__(self, types):
             return TupleInstance(types)
 
     class DictInstance(object):
+        __slots__ = ['__args__']
+
         def __init__(self, types):
-            setattr(self, '__args__', types)
+            self.__args__ = types
 
     class DictCls(object):
         def __getitem__(self, types):
             return DictInstance(types)
 
-    Tuple = TupleCls()
-    List = ListCls()
-    Dict = DictCls()
+    class OptionalInstance(object):
+        __slots__ = ['__args__']
+
+        def __init__(self, types):
+            self.__args__ = types
+
+    class OptionalCls(object):
+        def __getitem__(self, types):
+            return OptionalInstance(types)
+
+    Tuple = TupleCls()  # noqa: T484
+    List = ListCls()  # noqa: T484
+    Dict = DictCls()  # noqa: T484
+    Optional = DictCls()  # noqa: T484
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)
@@ -235,6 +271,9 @@ except ImportError:
 
     def is_dict(ann):
         return isinstance(ann, DictInstance)
+
+    def is_optional(ann):
+        return isinstance(ann, OptionalInstance)
 
 
 # allows BroadcastingList instance to be subscriptable

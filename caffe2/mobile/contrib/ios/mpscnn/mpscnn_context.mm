@@ -1,7 +1,7 @@
 
 #include "caffe2/core/common.h"
 
-#if C10_MOBILE
+#ifdef C10_MOBILE
 
 #include "mpscnn_context.h"
 #include "mpscnn_kernels.h"

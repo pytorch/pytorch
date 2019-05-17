@@ -31,7 +31,7 @@ static inline const Storage& checked_storage(
     const char* name,
     int pos,
     DeviceType device_type,
-    DataType data_type) {
+    caffe2::TypeMeta dtype) {
   if (expr.device_type() != device_type) {
     AT_ERROR(
         "Expected object of device type ",
@@ -44,10 +44,10 @@ static inline const Storage& checked_storage(
         name,
         "'");
   }
-  if (expr.dtype().id() != data_type) {
+  if (expr.dtype() != dtype) {
     AT_ERROR(
         "Expected object of data type ",
-        data_type,
+        dtype,
         " but got data type ",
         expr.dtype().id(),
         " for argument #",

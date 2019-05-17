@@ -12,6 +12,7 @@
 
 #if __APPLE_NEED_FIX || __CLANG_NEED_FIX
 
+#include <c10/util/Half.h>
 #include <emmintrin.h>
 
 // This version of clang has a bug that _cvtsh_ss is not defined, see
@@ -25,6 +26,14 @@ _cvtsh_ss(unsigned short a)
   return r[0];
 }
 
+static __inline unsigned short
+    __attribute__((__always_inline__, __nodebug__, __target__("f16c")))
+_cvtss_sh(float a, int imm8) {
+  unsigned short ret;
+  *reinterpret_cast<at::Half*>(&ret) = a;
+  return ret;
+}
+
 #endif // __APPLE_NEED_FIX || __CLANG_NEED_FIX
 
 #undef __APPLE_NEED_FIX
@@ -32,6 +41,7 @@ _cvtsh_ss(unsigned short a)
 
 #ifdef _MSC_VER
 
+#include <c10/util/Half.h>
 #include <cstdint>
 
 // It seems that microsoft msvc does not have a _cvtsh_ss implementation so
@@ -52,6 +62,12 @@ static inline float _cvtsh_ss(unsigned short x) {
   t1.intval = (t3 == 0 ? 0 : t1.intval); // Denormals-as-zero
   t1.intval |= t2; // Re-insert sign bit
   return t1.floatval;
+}
+
+static inline unsigned short _cvtss_sh(float x, int imm8) {
+  unsigned short ret;
+  *reinterpret_cast<at::Half*>(&ret) = x;
+  return ret;
 }
 
 #endif // _MSC_VER

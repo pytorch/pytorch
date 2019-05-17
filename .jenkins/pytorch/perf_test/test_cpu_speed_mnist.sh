@@ -20,7 +20,7 @@ test_cpu_speed_mnist () {
   SAMPLE_ARRAY=()
   NUM_RUNS=$1
 
-  for (( i=1; i<=$NUM_RUNS; i++ )) do
+  for (( i=1; i<=NUM_RUNS; i++ )) do
     runtime=$(get_runtime_of_command python main.py --epochs 1 --no-log)
     echo $runtime
     SAMPLE_ARRAY+=(${runtime})
@@ -28,7 +28,7 @@ test_cpu_speed_mnist () {
 
   cd ../..
 
-  stats=$(python ../get_stats.py ${SAMPLE_ARRAY[@]})
+  stats=$(python ../get_stats.py "${SAMPLE_ARRAY[@]}")
   echo "Runtime stats in seconds:"
   echo $stats
 

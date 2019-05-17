@@ -9,13 +9,20 @@ from caffe2.python import core, dyndep, utils, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     check_quantized_results_close,
-    generate_conv_inputs,
+    run_conv_or_fc,
 )
 from hypothesis import assume, given
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
-workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
+workspace.GlobalInit(
+    [
+        "caffe2",
+        "--caffe2_omp_num_threads=11",
+        # Increase this threshold to test acc16 with randomly generated data
+        "--caffe2_dnnlowp_acc16_density_threshold=0.5",
+    ]
+)
 
 
 class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
@@ -185,12 +192,9 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
+            run_conv_or_fc(
+                self, None, net, X, W, b, op_type, engine, order, gc, outputs
+            )
 
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)
 
@@ -254,9 +258,7 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
             W_min = -100
             W_max = W_min + 255
         W = (
-            np.random.rand(
-                output_channels, kernel, kernel, input_channels_per_group
-            )
+            np.random.rand(output_channels, kernel, kernel, input_channels_per_group)
             * 4
             - 2
             + W_min
@@ -372,12 +374,8 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(init_net)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, order, gc, outputs
+            )
 
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)

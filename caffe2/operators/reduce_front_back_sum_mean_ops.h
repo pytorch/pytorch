@@ -11,8 +11,9 @@ namespace caffe2 {
 template <class Context, bool FIRSTDIMS, bool NORMALIZE>
 class SumReduceDimsOp final : public Operator<Context> {
  public:
-  SumReduceDimsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SumReduceDimsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         num_reduce_dims_(
             this->template GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
 
@@ -86,8 +87,9 @@ class SumReduceDimsOp final : public Operator<Context> {
 template <class Context, bool FIRSTDIMS, bool NORMALIZE>
 class SumReduceDimsGradientOp final : public Operator<Context> {
  public:
-  SumReduceDimsGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SumReduceDimsGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         num_reduce_dims_(
             this->template GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
 

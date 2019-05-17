@@ -28,57 +28,65 @@ Python 2 can only create subprocesses using ``fork``, and it's not supported
 by the CUDA runtime.
 
 Unlike CPU tensors, the sending process is required to keep the original tensor
-as long as the receiving process retains a copy of the tensor.
-This shouldn't be a problem for sharing model parameters (which stay live
-for the entire execution of the model), but passing other
-kinds of data should be done with care.
+as long as the receiving process retains a copy of the tensor. It is implemented
+under the hood but requires users to follow the next best practices.
 
-Here is an example program which handles these requirements correctly:
+1. Release memory ASAP in the consumer.
 
 ::
 
-    import torch
-    import torch.multiprocessing as mp
+    ## Good
+    x = queue.get()
+    # do somethings with x
+    del x
 
-    torch.set_default_tensor_type(torch.cuda.FloatTensor)
+::
 
-    def sender(q, e):
-        for i in range(10):
-            s_sample = [torch.zeros(1), torch.ones(1)]
-            q.put(s_sample)
-            e.wait()
-            del s_sample
-            e.clear()
+    ## Bad
+    x = queue.get()
+    # do somethings with x
+    # do everything else (producer have to keep x in memory)
 
-    if __name__ == "__main__":
-        ctx = mp.get_context("spawn")
-        q = ctx.Queue()
-        e = ctx.Event()
-        p = ctx.Process(target=sender, args=(q, e))
-        p.start()
+2. Keep producer process running until all consumers exits. This will prevent
+the situation when the producer process releasing memory which is still in use
+by the consumer.
 
-        for i in range(10):
-            print('=== ITER {} ===".format(i))
-            r_sample = q.get()
-            del r_sample
-            e.set()
+::
 
-        p.join()
+    ## producer
+    # send tensors, do something
+    event.wait()
 
-In the example above, calling `e.wait()`
-on sender side ensures tensor `s_sample` doesn't get deleted while
-receiver is working on it.  The receiver signals when it is done
-with the tensor using `e.set()`, being careful to `del` its reference
-to the received tensor first.  It is INSUFFICIENT to promise never to call
-`r_sample` again; while `r_sample` is live, it may be confused with
-any subsequent tensors allocated by the source process at the same address.
 
-If a receiver wants to save the data of `r_sample` for future use while
-letting the source process deallocate the original, it must
-`clone()` it.
+::
 
-This behavior is very confusing, and we are tracking a fix for it
-at https://github.com/pytorch/pytorch/issues/16141
+    ## consumer
+    # receive tensors and use them
+    event.set()
+
+3. Don't pass received tensors.
+
+::
+
+    # not going to work
+    x = queue.get()
+    queue_2.put(x)
+
+
+::
+
+    # you need to create a process-local copy
+    x = queue.get()
+    x_clone = x.clone()
+    queue_2.put(x_clone)
+
+
+::
+
+    # putting and getting from the same queue in the same process will likely end up with segfault
+    queue.put(tensor)
+    x = queue.get()
+
 
 Sharing strategies
 ------------------

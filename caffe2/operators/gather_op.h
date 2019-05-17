@@ -149,8 +149,9 @@ class GatherOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  GatherOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit GatherOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, 0) {
     // TBD: We may want to fix the old index wrap behaviour once we have
     // operator versioning, to only apply it when needed as otherwise its likely

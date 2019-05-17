@@ -17,8 +17,9 @@ class ReduceOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  ReduceOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ReduceOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         axes_(this->template GetRepeatedArgument<int>("axes")),
         OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true) {}
 
@@ -84,8 +85,9 @@ class ReduceGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  ReduceGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ReduceGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         axes_(this->template GetRepeatedArgument<int>("axes")) {}
 
   bool RunOnDevice() override {

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <torch/csrc/jit/irparser.h>
 #include "test/cpp/jit/test_base.h"
+#include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/utils/memory.h"
@@ -50,7 +52,7 @@ struct TopoMoveTestFixture {
     for (const auto name : inputNames) {
       inputs.push_back(nodes.at(name)->output());
     }
-    auto node = graph->appendNode(graph->create(prim::Undefined, inputs));
+    auto node = graph->appendNode(graph->create(prim::AutogradZero, inputs));
     node->output()->setUniqueName(name);
     nodes[name] = node;
 
@@ -62,7 +64,7 @@ struct TopoMoveTestFixture {
       }
 
       auto block = node->blocks().at(0);
-      block->appendNode(graph->create(prim::Undefined, blockDeps));
+      block->appendNode(graph->create(prim::AutogradZero, blockDeps));
     }
   }
 
@@ -450,43 +452,321 @@ void testAliasAnalysis() {
     AliasDb aliasDb(graph);
     ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
   }
+
+  // test none value does not have writers
+  {
+    {
+      auto graph = std::make_shared<Graph>();
+      std::unordered_map<std::string, Value*> vmap;
+      script::parseIR(
+          R"IR(
+    graph():
+      %opt : Tensor? = prim::Constant()
+      %out : Tensor = prim::unchecked_unwrap_optional(%opt)
+      %ret.2 : Tensor = aten::div(%out, %out, %out)
+      return (%opt, %out, %ret.2)
+      )IR",
+          &*graph,
+          vmap);
+
+      AliasDb aliasDb(graph);
+      AT_ASSERT(!aliasDb.hasWriters(vmap["opt"]->node()));
+    }
+  }
 }
 
-void testAliasTracker() {
-  auto graph = std::make_shared<Graph>();
-  const Value* a = graph->addInput();
-  const Value* b = graph->addInput();
-  const Value* c = graph->addInput();
-  const Value* d = graph->addInput();
-  const Value* e = graph->addInput();
-  const Value* f = graph->addInput();
-  const Value* g = graph->addInput();
-  const Value* wc = graph->addInput();
+void testWriteTracking() {
+  RegisterOperators reg(
+      {Operator("prim::creates_alias(Tensor(a) x) -> Tensor(a)", [](Stack& s) {
+        return 0;
+      })});
+  const auto creates_alias = Symbol::fromQualString("prim::creates_alias");
+  {
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->addInput();
+
+    // aten::add(%b, %b)
+    // aten::add_(%a, %b)
+    // foo::creates_alias(%a)
+    auto pureNode = graph->insert(aten::add, {b, b})->node();
+    auto writingNode = graph->insert(aten::add_, {a, b})->node();
+    auto node3 = graph->insert(creates_alias, {a})->node();
+    auto aAlias = node3->output();
+
+    graph->lint();
+
+    AliasDb aliasDb(graph);
+    ASSERT_TRUE(aliasDb.mayAlias(aAlias, a));
+    ASSERT_TRUE(aliasDb.mayAlias(a, b));
+    ASSERT_FALSE(
+        aliasDb.writesToAlias(pureNode, std::unordered_set<const Value*>{a}));
+    ASSERT_FALSE(
+        aliasDb.writesToAlias(pureNode, std::unordered_set<const Value*>{b}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        writingNode, std::unordered_set<const Value*>{a}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        writingNode, std::unordered_set<const Value*>{a, b}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        writingNode, std::unordered_set<const Value*>{aAlias}));
+  }
+}
+
+void testContainerAliasing() {
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph():
+    %x : str = prim::Constant[value="a"]()
+    %y : Tensor = prim::Constant()
+    %a : (Tensor) = prim::TupleConstruct(%y)
+    %b : Dict(str, Tensor) = prim::DictConstruct(%x, %y)
+    %c : Tensor[] = prim::ListConstruct(%y)
+    return (%a, %b, %c)
+    )IR",
+        &*graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    auto str_node = node_iter++; // string
+    Node* ten_node = *node_iter++;
+    AliasDb aliasDb(graph);
+
+    AT_ASSERT(graph->outputs().size() == 3);
+    for (auto out : graph->outputs()) {
+      AT_ASSERT(aliasDb.mayContainAlias(ten_node->output(), out));
+    }
+    AT_ASSERT(aliasDb.mayContainAlias({ten_node->output()}, graph->outputs()));
+    AT_ASSERT(!aliasDb.mayContainAlias(str_node->output(), graph->outputs()));
+  }
 
   {
-    // test contains()
-    AliasTracker t;
-    t.makeFreshValue(a);
-    ASSERT_TRUE(t.contains(a));
-    ASSERT_FALSE(t.contains(b));
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph():
+    %x : str = prim::Constant[value="a"]()
+    %y : int = prim::Constant[value=1]()
+    %a : (int) = prim::TupleConstruct(%y)
+    %b : Dict(str, int) = prim::DictConstruct(%x, %y)
+    %c : int[] = prim::ListConstruct(%y)
+    return (%a, %b, %c)
+    )IR",
+        &*graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    node_iter++; // string
+    Node* int_node = *node_iter++;
+    AliasDb aliasDb(graph);
+
+    AT_ASSERT(graph->outputs().size() == 3);
+    // primitive values don't need to alias container
+    for (auto out : graph->outputs()) {
+      AT_ASSERT(!aliasDb.mayContainAlias(int_node->output(), out));
+    }
   }
+
+  // Test input aliasing
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph(%x: Tensor, %y: Tensor):
+    %a : (Tensor) = prim::TupleConstruct(%x)
+    return (%a)
+    )IR",
+        &*graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    auto tuple_node = *node_iter;
+    AliasDb aliasDb(graph);
+
+    for (auto input : graph->inputs()) {
+      AT_ASSERT(aliasDb.mayContainAlias(input, tuple_node->output()));
+    }
+    AT_ASSERT(aliasDb.mayContainAlias(graph->inputs(), graph->outputs()));
+  }
+
+  // Test tuple that doesn't come from construct
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+graph(%x : int,
+      %y : Tensor,
+      %z : Tensor):
+  %3 : int = prim::Constant[value=1]()
+  %4 : bool = aten::eq(%x, %3)
+  %a : (Tensor) = prim::If(%4)
+    block0():
+      %a.1 : (Tensor) = prim::TupleConstruct(%y)
+      -> (%a.1)
+    block1():
+      %a.2 : (Tensor) = prim::TupleConstruct(%z)
+      -> (%a.2)
+  return (%a)
+ )IR",
+        &*graph);
+
+    AliasDb aliasDb(graph);
+
+    for (auto input : graph->inputs()) {
+      if (input->type() == IntType::get()) {
+        continue;
+      }
+
+      AT_ASSERT(aliasDb.mayContainAlias(input, graph->outputs().at(0)));
+    }
+  }
+
+  // test nested types
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+graph():
+  %4 : Device? = prim::Constant()
+  %2 : int? = prim::Constant()
+  %0 : float = prim::Constant[value=1]()
+  %20 : bool = prim::Constant[value=0]()
+  %a : Tensor = aten::tensor(%0, %2, %4, %20)
+  %a_list : Tensor[] = prim::ListConstruct(%a)
+  %b : Tensor = aten::tensor(%0, %2, %4, %20)
+  %b_list : Tensor[] = prim::ListConstruct(%b)
+  %13 : (Tensor[], Tensor[]) = prim::TupleConstruct(%a_list, %b_list)
+  return (%13)
+)IR",
+        &*graph);
+    AliasDb aliasDb(graph);
+    auto g_output = graph->outputs().at(0);
+    auto list_2 = g_output->node()->inputs().at(0);
+    auto list_1 = g_output->node()->inputs().at(1);
+
+    // TODO FIX assume conservatively for now
+    AT_ASSERT(aliasDb.mayContainAlias(list_1, list_2));
+    AT_ASSERT(aliasDb.mayContainAlias(list_2, list_1));
+
+    AT_ASSERT(aliasDb.mayContainAlias(list_1, g_output));
+    AT_ASSERT(aliasDb.mayContainAlias(list_2, g_output));
+  }
+
+  // simple example
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+graph():
+  %0 : Tensor = prim::Constant()
+  %1 : Tensor = prim::Constant()
+  %13 : (Tensor) = prim::TupleConstruct(%0)
+  return (%13)
+)IR",
+        &*graph);
+    AliasDb aliasDb(graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    auto first_ten = *node_iter++;
+    auto second_ten = *node_iter++;
+    auto tup_node = *node_iter;
+
+    AT_ASSERT(aliasDb.mayContainAlias(first_ten->output(), tup_node->output()));
+    AT_ASSERT(
+        !aliasDb.mayContainAlias(second_ten->output(), tup_node->output()));
+
+    std::vector<Value*> first_st = {first_ten->output()};
+    std::vector<Value*> second_st = {second_ten->output()};
+    std::vector<Value*> tup_st = {tup_node->output()};
+    AT_ASSERT(aliasDb.mayContainAlias(first_st, tup_st));
+    AT_ASSERT(!aliasDb.mayContainAlias(first_st, second_st));
+    AT_ASSERT(!aliasDb.mayContainAlias(second_st, tup_st));
+  }
+}
+
+void testWildcards() {
+  RegisterOperators reg(
+      {Operator(
+           "prim::returns_wildcard(Tensor a) -> Tensor(*)",
+           [](Stack& stack) { return 0; }),
+       Operator("prim::writes(Tensor(z!) a) -> Tensor(a)", [](Stack& stack) {
+         return 0;
+       })});
+  const auto returns_wildcard =
+      Symbol::fromQualString("prim::returns_wildcard");
+  const auto writes = Symbol::fromQualString("prim::writes");
+
+  auto graph = std::make_shared<Graph>();
+  const auto a = graph->addInput();
+
+  const auto constant = graph->insertConstant(1);
+  const auto fresh = graph->insert(aten::rand, {constant});
+  const auto fresh2 = graph->insert(aten::rand, {constant});
+  const auto wildcard = graph->insert(returns_wildcard, {fresh});
+
+  {
+    graph->lint();
+    AliasDb aliasDb(graph);
+
+    ASSERT_FALSE(aliasDb.mayAlias(a, fresh));
+    ASSERT_TRUE(aliasDb.mayAlias(wildcard, fresh));
+    ASSERT_TRUE(aliasDb.mayAlias(wildcard, a));
+    ASSERT_FALSE(aliasDb.mayAlias(
+        std::unordered_set<const Value*>({wildcard}),
+        std::unordered_set<const Value*>()));
+    ASSERT_FALSE(aliasDb.hasWriters(wildcard->node()));
+  }
+
+  graph->insert(writes, {fresh2})->node();
+  {
+    graph->lint();
+    AliasDb aliasDb(graph);
+    // Any write should be considered a write to the wildcard
+    ASSERT_TRUE(aliasDb.hasWriters(wildcard->node()));
+  }
+
+  const auto wildcardWrite = graph->insert(writes, {wildcard})->node();
+  {
+    graph->lint();
+    AliasDb aliasDb(graph);
+    // Test writes to wildcards
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        wildcardWrite, std::unordered_set<const Value*>{fresh}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        wildcardWrite, std::unordered_set<const Value*>{fresh2}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        wildcardWrite, std::unordered_set<const Value*>{a}));
+    ASSERT_TRUE(aliasDb.hasWriters(wildcard->node()));
+  }
+}
+
+void testMemoryDAG() {
+  auto graph = std::make_shared<Graph>();
+  const Value* aValue = graph->addInput();
+  const Value* bValue = graph->addInput();
+  const Value* cValue = graph->addInput();
+  const Value* dValue = graph->addInput();
+  const Value* eValue = graph->addInput();
+  const Value* fValue = graph->addInput();
+  const Value* gValue = graph->addInput();
+
   {
     // a <- b <- c
     //      b <- d
     // a <- e
     // f <- e
     // g is by itself
-    // wc is a wildcard value
-    AliasTracker t;
-    t.makeFreshValue(a);
-    t.makeFreshValue(f);
-    t.makeFreshValue(g);
+    MemoryDAG t;
+    auto a = t.makeFreshValue(aValue);
+    auto b = t.makeFreshValue(bValue);
+    auto c = t.makeFreshValue(cValue);
+    auto d = t.makeFreshValue(dValue);
+    auto e = t.makeFreshValue(eValue);
+    auto f = t.makeFreshValue(fValue);
+    auto g = t.makeFreshValue(gValue);
     t.makePointerTo(b, a);
     t.makePointerTo(c, b);
     t.makePointerTo(d, b);
     t.makePointerTo(e, a);
     t.makePointerTo(e, f);
-    t.setWildcard(wc);
 
     /**
      * Test mayAlias()
@@ -506,60 +786,101 @@ void testAliasTracker() {
     // But a and f don't alias
     ASSERT_FALSE(t.mayAlias(a, f));
 
-    // Wildcards should alias everything
-    ASSERT_TRUE(t.mayAlias(wc, a));
-    ASSERT_TRUE(t.mayAlias(wc, b));
-    ASSERT_TRUE(t.mayAlias(wc, f));
-    ASSERT_TRUE(t.mayAlias(wc, g));
-
     /**
      * Test mayAlias() set interface
      */
-    std::multiset<const Value*> foo{c, c, d};
-    std::multiset<const Value*> bar{e, f};
-    std::unordered_set<const Value*> baz{f, g};
-    std::set<const Value*> containsWildcard{wc};
+    std::multiset<const Element*> foo{c, c, d};
+    std::multiset<const Element*> bar{e, f};
+    std::unordered_set<const Element*> baz{f, g};
     ASSERT_TRUE(t.mayAlias(foo, bar));
     ASSERT_TRUE(t.mayAlias(bar, baz));
     ASSERT_FALSE(t.mayAlias(foo, baz));
-    // wildcard stuff aliases everything
-    ASSERT_TRUE(t.mayAlias(containsWildcard, foo));
-    ASSERT_TRUE(t.mayAlias(containsWildcard, bar));
-    ASSERT_TRUE(t.mayAlias(containsWildcard, baz));
+  }
 
-    /**
-     * Test writer tracking
-     */
-    auto n1 = graph->appendNode(graph->create(prim::Undefined));
-    auto n2 = graph->appendNode(graph->create(prim::Undefined));
-    auto n3 = graph->appendNode(graph->create(prim::Undefined));
-    t.registerWrite(a, n1);
-    t.registerWrite(f, n2);
-    // We should report those writes accurately
-    ASSERT_TRUE(t.writesTo(n1, a));
-    ASSERT_TRUE(t.writesTo(n2, f));
-    ASSERT_FALSE(t.writesTo(n1, f));
-    ASSERT_FALSE(t.writesTo(n2, a));
-    // We should correctly report writes to aliases as well
-    ASSERT_TRUE(t.writesTo(n1, c));
+  {
+    // x(y) -> x contains y
 
-    // Check hasWriters()
-    ASSERT_TRUE(t.hasWriters(a));
-    // Aliases of written-to values should have writers
-    ASSERT_TRUE(t.hasWriters(b));
-    ASSERT_TRUE(t.hasWriters(d));
-    ASSERT_TRUE(t.hasWriters(e));
-    // Unique values not registered should be unaffected
-    ASSERT_FALSE(t.hasWriters(g));
+    // b(a)
+    // c(a)
+    MemoryDAG t;
+    auto a = t.makeFreshValue(aValue);
+    auto b = t.makeFreshValue(bValue);
+    t.addToContainedElements(a, b);
 
-    // create a write to the wildcard set
-    t.registerWrite(wc, n3);
-    // Now everything may be written to
-    ASSERT_TRUE(t.hasWriters(g));
-    const auto& wildcardWriters = t.getWildcardWriters();
-    ASSERT_EQ(wildcardWriters.size(), 1);
-    ASSERT_EQ(*wildcardWriters.begin(), n3);
+    auto c = t.makeFreshValue(cValue);
+    t.addToContainedElements(a, c);
+
+    AT_ASSERT(t.mayContainAlias(a, b));
+    AT_ASSERT(t.mayContainAlias(b, a));
+
+    AT_ASSERT(t.mayContainAlias(a, c))
+    AT_ASSERT(t.mayContainAlias(c, a));
+
+    AT_ASSERT(t.mayContainAlias(b, c));
+    AT_ASSERT(t.mayContainAlias(c, b));
+
+    // containers contain an element in themselves
+    AT_ASSERT(t.mayContainAlias(b, b));
+    AT_ASSERT(t.mayContainAlias(c, c));
+    AT_ASSERT(t.mayContainAlias(a, a));
+
+    auto d = t.makeFreshValue(dValue);
+
+    // b(a)
+    // c(a)
+    // d(b(a))
+    t.addToContainedElements(b, d);
+    AT_ASSERT(t.mayContainAlias(b, d));
+    AT_ASSERT(t.mayContainAlias(d, b));
+
+    AT_ASSERT(t.mayContainAlias(c, d));
+    AT_ASSERT(t.mayContainAlias(d, c));
+
+    AT_ASSERT(t.mayContainAlias(a, d));
+
+    // f(e)
+    auto f = t.makeFreshValue(aValue);
+    auto e = t.makeFreshValue(bValue);
+
+    t.addToContainedElements(f, e);
+
+    for (auto elem : {a, b, c, d}) {
+      AT_ASSERT(!t.mayContainAlias(f, elem));
+      AT_ASSERT(!t.mayContainAlias(e, elem));
+    }
   }
 }
+
+void testAliasRegistration() {
+  {
+    auto opts = OperatorOptions().aliasAnalysis(AliasAnalysisKind::DEFAULT);
+    RegisterOperators reg({createOperator(
+        "foo::rand",
+        [](at::Tensor) -> at::Tensor {
+          return at::rand({2, 2});
+        },
+        opts)});
+    const auto rand_op = Symbol::fromQualString("foo::rand");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->insert(rand_op, {a});
+    AliasDb aliasDb(graph);
+    // Conservatively we assume there is a reference
+    ASSERT_TRUE(aliasDb.mayAlias(a, b));
+  }
+  {
+    auto opts = OperatorOptions().aliasAnalysis(AliasAnalysisKind::PURE);
+    RegisterOperators reg({createOperator(
+        "foo::pure", [](at::Tensor t) -> at::Tensor { return t * 2; }, opts)});
+    const auto rand_op = Symbol::fromQualString("foo::pure");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->insert(rand_op, {a});
+    AliasDb aliasDb(graph);
+    // PURE means there is no reference
+    ASSERT_FALSE(aliasDb.mayAlias(a, b));
+  }
+}
+
 } // namespace jit
 } // namespace torch

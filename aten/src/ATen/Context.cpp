@@ -84,6 +84,14 @@ bool Context::hasMKL() const {
 #endif
 }
 
+bool Context::hasMKLDNN() const {
+#if AT_MKLDNN_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool Context::hasOpenMP() const {
 #ifdef _OPENMP
   return true;
@@ -115,7 +123,7 @@ TypeExtendedInterface& getType(TensorOptions options) {
 TypeExtendedInterface& getType(const TensorImpl* impl) {
   Backend backend = tensorTypeIdToBackend(impl->type_id());
   return globalContext().getType(
-            backend, typeMetaToScalarType(impl->dtype()), impl->is_variable() && !at::NonVariableTypeMode::is_enabled());
+            backend, typeMetaToScalarType(impl->dtype()), impl->is_variable());
 }
 
 TypeExtendedInterface& getType(const Tensor& t) {

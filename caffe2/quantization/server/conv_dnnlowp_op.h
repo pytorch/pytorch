@@ -127,7 +127,8 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   // pre-computed biases and offsets
   std::shared_ptr<std::vector<std::int32_t>> b_quantized_;
 
-  float in_qparams_scale_old_ = 0;
+  float in_qparams_scale_old_{0};
+  std::int32_t in_qparams_zero_point_old_{0};
 }; // class ConvDNNLowPOp
 
 } // namespace caffe2

@@ -22,16 +22,15 @@ SKIP_PYTHON_BINDINGS = [
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
-    'index',
-    '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
+    'index', 'unique_dim_consecutive',
+    '_indexCopy_', 'max_values', 'min_values',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
-    'arange.*', 'range.*', '_gesv.*', '_getri.*', '_inverse.*',
-    '_potrs.*', '_cholesky.*',
+    'arange.*', 'range.*', '_solve.*', '_getri.*', '_inverse.*',
+    '_cholesky.*', '_triangular_solve.*',
     'slice', 'randint(_out)?',
-    'item', '_local_scalar_dense',
-    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
-    'copy_sparse_to_sparse_',
+    'item', '_local_scalar_dense', 'to',
+    'copy_sparse_to_sparse_', 'copy_',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -127,6 +126,7 @@ static PyTypeObject type${namedtuple_type_index};
 static bool namedtuple_type_initialized${namedtuple_type_index} = false;
 if (!namedtuple_type_initialized${namedtuple_type_index}) {
   PyStructSequence_InitType(&type${namedtuple_type_index}, &desc${namedtuple_type_index});
+  type${namedtuple_type_index}.tp_repr = (reprfunc)torch::utils::returned_structseq_repr;
   namedtuple_type_initialized${namedtuple_type_index} = true;
 }
 """)
@@ -148,7 +148,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,Tensor,int64_t>',
     'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::vector<Tensor>',
-    'Scalar', 'bool', 'int64_t', 'void*', 'void'
+    'Scalar', 'bool', 'int64_t', 'void*', 'void',
 }
 
 TENSOR_OPTIONS = CodeTemplate("""\
@@ -156,7 +156,8 @@ const auto options = TensorOptions()
     .dtype(${dtype})
     .device(${device})
     .layout(${layout}.layout)
-    .requires_grad(${requires_grad});
+    .requires_grad(${requires_grad})
+    .pinned_memory(${pin_memory});
 """)
 
 
@@ -299,6 +300,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'c10::optional<ScalarType>': 'scalartypeOptional',
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
+        'c10::optional<bool>': 'toBoolOptional',
         'IntArrayRef': 'intlist',
         'int64_t': 'toInt64',
         'bool': 'toBool',
@@ -428,9 +430,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 arg_idx += 1
 
         if 'layout' in (a['name'] for a in python_binding_arguments):
-            layout_idx, device_idx, requires_grad_idx = (arg_idx, arg_idx + 1, arg_idx + 2)
+            layout_idx, device_idx, pin_memory_idx, requires_grad_idx = (arg_idx, arg_idx + 1, arg_idx + 2, arg_idx + 3)
         else:
-            device_idx, requires_grad_idx = (arg_idx, arg_idx + 1)
+            device_idx, pin_memory_idx, requires_grad_idx = (arg_idx, arg_idx + 1, arg_idx + 2)
 
         device = None
         for arg in python_binding_arguments:
@@ -458,9 +460,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     has_device_bind = True
             elif arg['name'] == 'requires_grad' and arg['simple_type'] == 'bool':
                 requires_grad = parse_arg(arg, requires_grad_idx)[0]
+            elif arg['name'] == 'pin_memory' and arg['simple_type'] == 'bool':
+                pin_memory = parse_arg(arg, pin_memory_idx)[0]
             else:
                 raise RuntimeError(("found {} in python_binding_arguments but only "
-                                    "\"bool requires_grad\", \"ScalarType dtype\", \"Layout layout\", "
+                                    "\"bool pin_memory\", \"bool requires_grad\", \"ScalarType dtype\", \"Layout layout\", "
                                     "\"Device device\" are supported".format(arg)))
 
         dtype = parsed_type_args[0] if parsed_type_args else None
@@ -469,7 +473,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'dtype': dtype,
                 'layout': layout,
                 'device': device,
-                'requires_grad': requires_grad
+                'requires_grad': requires_grad,
+                'pin_memory': pin_memory,
             }))
             formal_args.append('const TensorOptions & options')
             actuals.append('options')
@@ -619,6 +624,15 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'python_default_init': py_default_device
             }
             python_binding_arguments.append(device_arg)
+            pin_memory_arg = {
+                'default': False,
+                'dynamic_type': 'bool',
+                'kwarg_only': True,
+                'name': 'pin_memory',
+                'type': 'bool',
+                'simple_type': 'bool',
+            }
+            python_binding_arguments.append(pin_memory_arg)
         if is_factory_or_like_function:
             requires_grad_arg = {
                 'default': False,
@@ -891,7 +905,14 @@ def get_python_signature(declaration, include_out):
             typename = 'TensorList[{}]'.format(len(typenames))
         else:
             typename = typenames[0]
-        py_formal_args.append(typename + ' out=None')
+        if len(output_args) == 1:
+            # The nn module bindings are often not exposed to the user directly
+            # but via torch.nn modules and functionals.
+            py_formal_args.append(typename + ' ' + output_args[0]['name'] + '=None')
+        else:
+            # NB: For more than 1 output args the type name is a TensorList
+            # and as such we don't (yet) need to consider the naming.
+            py_formal_args.append(typename + ' out=None')
 
     # we could put this in the loop above but we want to ensure both type dispatched args
     # and python binding arguments are after the out argument; this matches the case

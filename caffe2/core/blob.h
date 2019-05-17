@@ -12,8 +12,13 @@
 #include <c10/util/typeid.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/tensor_int8.h"
 
 namespace caffe2 {
+
+inline bool BlobIsInt8TensorCPUType(const Blob& blob) {
+  return blob.meta().Match<int8::Int8TensorCPU>();
+}
 
 inline bool BlobIsTensorType(const Blob& blob, DeviceType device_type) {
   bool is_match = blob.meta().Match<Tensor>();

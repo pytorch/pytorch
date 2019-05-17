@@ -87,7 +87,7 @@ that determines the type. For instance, `ones` creates a new constant tensor of 
 ```
 class Type {
 	...
-	virtual Tensor ones(IntList size) const;
+	virtual Tensor ones(IntArrayRef size) const;
 	...
 };
 ```

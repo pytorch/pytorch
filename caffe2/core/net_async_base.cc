@@ -151,7 +151,7 @@ TaskThreadPoolBase* AsyncNetBase::poolGetter(
   std::unique_lock<std::mutex> pools_lock(pools_mutex_);
   auto pool = pools[device_id][pool_size];
   if (!pool) {
-    pool = ThreadPoolRegistry()->Create(
+    pool = c10::ThreadPoolRegistry()->Create(
         DeviceTypeName(device_type),
         device_id,
         pool_size,
@@ -478,26 +478,6 @@ AsyncNetBase::~AsyncNetBase() {
   }
 }
 
-C10_DEFINE_SHARED_REGISTRY(
-    ThreadPoolRegistry,
-    TaskThreadPoolBase,
-    int,
-    int,
-    bool);
-
-C10_REGISTER_CREATOR(
-    ThreadPoolRegistry,
-    CPU,
-    GetAsyncNetThreadPool<TaskThreadPool, PROTO_CPU>);
-C10_REGISTER_CREATOR(
-    ThreadPoolRegistry,
-    CUDA,
-    GetAsyncNetThreadPool<TaskThreadPool, PROTO_CUDA>);
-C10_REGISTER_CREATOR(
-    ThreadPoolRegistry,
-    HIP,
-    GetAsyncNetThreadPool<TaskThreadPool, PROTO_HIP>);
-
 ExecutionOptions::ExecutionOptions(
     const std::shared_ptr<const NetDef>& net_def) {
   static const std::string kDag = "dag";
@@ -558,3 +538,20 @@ ExecutionOptions::ExecutionOptions(
 }
 
 } // namespace caffe2
+
+namespace c10 {
+
+C10_REGISTER_CREATOR(
+    ThreadPoolRegistry,
+    CPU,
+    caffe2::GetAsyncNetThreadPool<TaskThreadPool, caffe2::PROTO_CPU>);
+C10_REGISTER_CREATOR(
+    ThreadPoolRegistry,
+    CUDA,
+    caffe2::GetAsyncNetThreadPool<TaskThreadPool, caffe2::PROTO_CUDA>);
+C10_REGISTER_CREATOR(
+    ThreadPoolRegistry,
+    HIP,
+    caffe2::GetAsyncNetThreadPool<TaskThreadPool, caffe2::PROTO_HIP>);
+
+} // namespace c10

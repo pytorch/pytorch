@@ -6,8 +6,8 @@ namespace {
 
 class GetGPUMemoryUsageOp final : public Operator<CUDAContext> {
  public:
-  GetGPUMemoryUsageOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws) {}
+  template<class... Args> explicit GetGPUMemoryUsageOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...) {}
   ~GetGPUMemoryUsageOp() override {}
 
   bool RunOnDevice() override {

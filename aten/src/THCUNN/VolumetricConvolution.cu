@@ -9,7 +9,7 @@
 // Borrowed from Theano
 // Authors: Arjun Jain, Frédéric Bastien, Jan Schlüter, Nicolas Ballas
 template <typename Dtype>
-__global__ void C10_LAUNCH_BOUNDS(CUDA_NUM_THREADS) // ensure that at least 1 block can be resident
+__global__ void C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS) // ensure that at least 1 block can be resident
 im3d2col_kernel(const int64_t n, const Dtype* data_im,
                 const int64_t height, const int64_t width, const int64_t depth,
                 const int64_t kernel_h, const int64_t kernel_w, const int64_t kernel_d,
@@ -88,7 +88,7 @@ void im3d2col(cudaStream_t stream, const Dtype* data_im, const int64_t channels,
 }
 
 template <typename Dtype, typename Acctype>
-__global__ void C10_LAUNCH_BOUNDS(CUDA_NUM_THREADS) // ensure that at least 1 block can be resident
+__global__ void C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS) // ensure that at least 1 block can be resident
 col2im3d_kernel(const int64_t n, const Dtype* data_col,
                 const int64_t height, const int64_t width, const int64_t depth,
                 const int64_t channels,

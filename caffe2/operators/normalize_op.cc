@@ -1,32 +1,8 @@
 #include "caffe2/operators/normalize_op.h"
 
 #include "caffe2/core/tensor.h"
-#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
-
-template <typename T, class Context>
-void NormalizeOp<T, Context>::DoNormalize(
-    const T* xData,
-    T* yData,
-    const int m,
-    const int n,
-    const int sf) {
-  using InnerStride = Eigen::InnerStride<Eigen::Dynamic>;
-  using StridedVec =
-      Eigen::Map<Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
-  using ConstStridedVec =
-      Eigen::Map<const Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
-
-  for (int i = 0; i < n; ++i) {
-    auto base = (i / sf) * sf * m + (i % sf);
-    ConstStridedVec xVec(xData + base, 1, m, InnerStride(sf));
-    auto norm = xVec.template lpNorm<2>();
-    norm = std::max(norm, kEps_);
-    StridedVec yVec(yData + base, 1, m, InnerStride(sf));
-    yVec = xVec / norm;
-  }
-};
 
 template <typename T, class Context>
 void NormalizeGradientOp<T, Context>::DoNormalize(

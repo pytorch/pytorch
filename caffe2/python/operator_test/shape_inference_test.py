@@ -415,8 +415,8 @@ class TestShapeInference(test_util.TestCase):
         net = core.Net("concat")
 
         net.Concat(["A", "B"], ["C", "splits"], axis=1)
-        net.Concat(["C", "D"], ["E"], order="NCHW")
-        net.Concat(["E", "F"], ["G"], add_axis=1, order="NHWC")
+        net.Concat(["C", "D"], ["E", "splitsE"], order="NCHW")
+        net.Concat(["E", "F"], ["G", "splitsG"], add_axis=1, order="NHWC")
         (shapes, types) = workspace.InferShapesAndTypes(
             [net],
             {
@@ -435,8 +435,8 @@ class TestShapeInference(test_util.TestCase):
         net = core.Net("concat")
 
         net.Concat(["A", "B"], ["C", "splits"], axis=1)
-        net.Concat(["C", "D"], ["E"], order="NCHW")
-        net.Concat(["E", "F"], ["G"], add_axis=1, order="NHWC")
+        net.Concat(["C", "D"], ["E", "splitsE"], order="NCHW")
+        net.Concat(["E", "F"], ["G", "splitsG"], add_axis=1, order="NHWC")
         (shapes, types) = workspace.InferShapesAndTypes(
             [net],
             blob_dimensions={
@@ -538,6 +538,28 @@ class TestShapeInference(test_util.TestCase):
         x_recovered = workspace.FetchBlob('x_recovered')
         # TODO: find a tighter bound
         assert(np.allclose(x, x_recovered, atol=1e-2))
+
+    def testLearningRateOp(self):
+        net = core.Net("lr_test")
+        iteration = net.ConstantFill(
+            [],
+            "iteration",
+            shape=[1],
+            value=0,
+            dtype=core.DataType.INT64,
+        )
+        lr = net.LearningRate(
+            [iteration],
+            net.NextScopedBlob("weight_decay"),
+            base_lr=0.5,
+            policy="constantWarmup",
+            multiplier=0.0,
+            num_iter=0,
+        )
+        (shapes, types) = workspace.InferShapesAndTypes(
+            [net],
+        )
+        self.assertEqual(shapes['weight_decay'], [1])
 
     def testShapeOp(self):
         model = model_helper.ModelHelper(name="shape_op_test")

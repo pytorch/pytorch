@@ -65,8 +65,8 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 
 
   // Fill sortedOrigIndices with sequential indices
-  thrust::counting_iterator<int64_t> countIterI(TH_INDEX_BASE);
-  thrust::counting_iterator<int64_t> countIterO(TH_INDEX_BASE);
+  thrust::counting_iterator<int64_t> countIterI(0);
+  thrust::counting_iterator<int64_t> countIterO(0);
 
   thrust::copy(policy, countIterI, countIterI + nnz, origIndicesIter);
   thrust::copy(policy, countIterO, countIterO + nnz, uniqueOffsetsIter);
@@ -94,8 +94,8 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
     int64_t stride = at::prod_intlist(values.sizes().slice(1));
     dim3 grid(THCCeilDiv(newNnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
     dim3 block(32, 4);
-    AT_DISPATCH_ALL_TYPES_AND_HALF(
-        values.type(), "coalesce_sparse_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(
+      at::ScalarType::Half,values.scalar_type(), "coalesce_sparse_cuda", [&] {
           using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
           apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
             uniqueOffsets.data<int64_t>(),
@@ -131,9 +131,6 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
     newIndices = indices1D;
   } else {
     newIndices = at::empty({sparse_dim, newNnz}, origIndices.options());
-    if (TH_INDEX_BASE != 0) {
-      indices1D.add_(-1);
-    }
     for (int64_t d = sparse_dim - 1; d >= 0; d--) {
       // NB: Not a select, so I can preserve the outer dimension
       LongTensor indicesSlice = newIndices.narrow(0, d, 1);
@@ -143,9 +140,6 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
       indicesSlice.copy_(indices1D);
       indices1D.div_(self.size(d));
       indicesSlice.add_(indices1D, -self.size(d));
-    }
-    if (TH_INDEX_BASE != 0) {
-      indices1D.add_(1); // "lol"
     }
   }
   ////////////////////////////////////////////////////////////
