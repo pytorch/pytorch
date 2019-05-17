@@ -14,13 +14,13 @@ class QReluInt8 final : public c10::OperatorKernel {
  public:
   Tensor operator()(Tensor qx) {
     Tensor qy = at::_empty_affine_quantized(qx.sizes(),
-                                            at::device(kCPU).dtype(kQInt8),
+                                            at::device(kCPU).dtype(kQUInt8),
                                             qx.q_scale().toDouble(),
                                             qx.q_zero_point().toLong());
     auto iter = TensorIterator::unary_op(qy, qx);
     const auto zero_point = qx.q_zero_point().toByte();
-    unary_kernel(*iter, [&](c10::qint8 value) -> c10::qint8 {
-      return c10::qint8(std::max(value.val_, zero_point));
+    unary_kernel(*iter, [&](c10::quint8 value) -> c10::quint8 {
+      return c10::quint8(std::max(value.val_, zero_point));
     });
     return qy;
   }
