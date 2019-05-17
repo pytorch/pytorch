@@ -158,7 +158,24 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
 {
   THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
           "but got %s", THPUtils_typename(arg));
-  at::set_num_threads((int)THPUtils_unpackLong(arg));
+  int nthreads = (int)THPUtils_unpackLong(arg);
+  THPUtils_assert(nthreads > 0, "set_num_threads expects a positive integer");
+  at::set_num_threads(nthreads);
+  Py_RETURN_NONE;
+}
+
+static PyObject * THPModule_getNumInteropThreads(PyObject *module)
+{
+  return PyLong_FromLong(at::get_num_interop_threads());
+}
+
+static PyObject * THPModule_setNumInteropThreads(PyObject *module, PyObject *arg)
+{
+  THPUtils_assert(THPUtils_checkLong(arg), "set_num_interop_threads expects an int, "
+          "but got %s", THPUtils_typename(arg));
+  int nthreads = (int)THPUtils_unpackLong(arg);
+  THPUtils_assert(nthreads > 0, "set_num_interop_threads expects a positive integer");
+  at::set_num_interop_threads(nthreads);
   Py_RETURN_NONE;
 }
 
@@ -458,6 +475,8 @@ static PyMethodDef TorchMethods[] = {
   {"_get_backcompat_keepdim_warn", (PyCFunction)THPModule_getBackcompatKeepdimWarn, METH_NOARGS, nullptr},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  nullptr},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       nullptr},
+  {"get_num_interop_threads", (PyCFunction)THPModule_getNumInteropThreads,     METH_NOARGS,  nullptr},
+  {"set_num_interop_threads", (PyCFunction)THPModule_setNumInteropThreads,     METH_O,       nullptr},
   {"_get_cudnn_enabled", (PyCFunction)THPModule_userEnabledCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_enabled", (PyCFunction)THPModule_setUserEnabledCuDNN, METH_O,  nullptr},
   {"_get_cudnn_benchmark", (PyCFunction)THPModule_benchmarkCuDNN, METH_NOARGS,     nullptr},

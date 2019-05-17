@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/script/logging.h>
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/Dict.h>
@@ -906,7 +907,7 @@ RegisterOperators reg(
 
              push(stack, forked_interprester.getFuture());
 
-             c10::global_work_queue().run(std::move(continuation));
+             at::launch(std::move(continuation));
              return 0;
            };
          }),
