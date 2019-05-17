@@ -482,8 +482,11 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             Module module;
+            // Make a graph with a fake self argument
+            auto graph = self->graph()->copy();
+            graph->insertInput(0, "self");
             module.module_object()->type()->compilation_unit().create_function(
-                "forward", self->graph());
+                "forward", graph);
             module.save(filename, _extra_files);
           },
           py::arg("filename"),
@@ -494,8 +497,10 @@ void initJitScriptBindings(PyObject* module) {
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
             Module module;
+            auto graph = self->graph()->copy();
+            graph->insertInput(0, "self");
             module.module_object()->type()->compilation_unit().create_function(
-                "forward", self->graph());
+                "forward", graph);
             module.save(buf, _extra_files);
             return py::bytes(buf.str());
           },
