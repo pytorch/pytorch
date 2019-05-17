@@ -120,6 +120,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       rets.push_back(Argument("0", ret_type, {}, {}, false));
     }
     std::string name("");
+    // Use the qualified name if possible
     if (py::hasattr(self, "__qualname__")) {
       name = py::str(py::getattr(self, "__qualname__"));
     } else if (py::hasattr(self, "__name__")) {
