@@ -76,6 +76,7 @@ TEST(UtilsNMSTest, TestNMSGPU) {
         d_sorted_boxes,
         nboxes,
         thresh,
+        true, /* legacy_plus_one */
         d_list,
         &list_nitems,
         dev_delete_mask,
@@ -250,6 +251,7 @@ TEST(UtilsNMSTest, TestPerfNMS) {
         d_sorted_boxes,
         nboxes,
         thresh,
+        true, /* legacy_plus_one */
         d_list,
         &list_nitems,
         dev_delete_mask,
@@ -360,6 +362,7 @@ TEST(UtilsNMSTest, GPUEqualsCPUCorrectnessTest) {
           d_sorted_boxes,
           nboxes,
           thresh,
+          true, /* legacy_plus_one */
           d_list,
           &list_nitems,
           dev_delete_mask,
@@ -450,6 +453,7 @@ TEST(UtilsNMSTest, TestNMSGPURotatedAngle0) {
         d_sorted_boxes,
         nboxes,
         thresh,
+        true, /* legacy_plus_one */
         d_list,
         &list_nitems,
         dev_delete_mask,
@@ -561,6 +565,7 @@ TEST(UtilsNMSTest, TestPerfRotatedNMS) {
         d_sorted_boxes,
         nboxes,
         thresh,
+        true, /* legacy_plus_one */
         d_list,
         &list_nitems,
         dev_delete_mask,
@@ -671,6 +676,7 @@ TEST(UtilsNMSTest, GPUEqualsCPURotatedCorrectnessTest) {
           d_sorted_boxes,
           nboxes,
           thresh,
+          true, /* legacy_plus_one */
           d_list,
           &list_nitems,
           dev_delete_mask,
