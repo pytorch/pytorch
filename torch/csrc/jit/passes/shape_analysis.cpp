@@ -456,7 +456,6 @@ class ShapePropagator {
     bool in_resize = false;
     for (auto v : vs) {
       if (aliasDb_.mayAlias(ValueSet{v}, resized_alias_set)) {
-        setUnshapedType(v);
         in_resize = true;
       }
     }
@@ -467,6 +466,9 @@ class ShapePropagator {
     // Certain ops like resize_ change the input tensors size. Because our
     // analysis is flow invariant, we set any Tensor that can alias a resized
     // Tensor to the base Tensor Type without size information.
+    // NB: We don't erase the input shape information for in-place operations
+    // since in-place operations do not allow the in-place tensor to change
+    // shape as a result of the broadcast.
     if (mayAliasResizedSet(node->inputs())) {
       return setUnshapedType(node);
     }
