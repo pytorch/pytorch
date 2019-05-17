@@ -3135,39 +3135,6 @@ def multi_head_attention_forward(query,                  # type: Tensor
           L is the target sequence length, S is the source sequence length.
     """
 
-    def _in_proj(input, weight, bias, start=0, end=None):
-        # type: (Tensor, Tensor, Optional[Tensor], int, Optional[int]) -> Tensor
-        weight = weight[start:end, :]
-        if bias is not None:
-            bias = bias[start:end]
-        return linear(input, weight, bias)
-
-
-    def _in_proj_qkv(weight, bias, query):
-        # type: (Tensor, Tensor, Tensor) -> Tensor
-        return _in_proj(query, weight, bias).chunk(3, dim=-1)
-
-
-    def _in_proj_kv(weight, bias, embed_dim, key):
-        # type: (Tensor, Tensor, int, Tensor) -> Tensor
-        return _in_proj(key, weight, bias, start=embed_dim).chunk(2, dim=-1)
-
-
-    def _in_proj_q(weight, bias, embed_dim, query):
-        # type: (Tensor, Tensor, int, Tensor) -> Tensor
-        return _in_proj(query, weight, bias, end=embed_dim)
-
-
-    def _in_proj_k(weight, bias, embed_dim, key):
-        # type: (Tensor, Tensor, int, Tensor) -> Tensor
-        return _in_proj(key, weight, bias, start=embed_dim, end=2 * embed_dim)
-
-
-    def _in_proj_v(weight, bias, embed_dim, value):
-        # type: (Tensor, Tensor, int, Tensor) -> Tensor
-        return _in_proj(value, weight, bias, start=2 * embed_dim)
-
-
     qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
     kv_same = key.data_ptr() == value.data_ptr()
 
@@ -3182,19 +3149,55 @@ def multi_head_attention_forward(query,                  # type: Tensor
 
     if qkv_same:
         # self-attention
-        q, k, v = _in_proj_qkv(in_proj_weight, in_proj_bias, query)
+        q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
+
     elif kv_same:
         # encoder-decoder attention
-        q = _in_proj_q(in_proj_weight, in_proj_bias, embed_dim, query)
+        _b = in_proj_bias
+        _start = 0
+        _end = embed_dim
+        _w = in_proj_weight[_start:_end, :]
+        if _b is not None:
+            _b = _b[_start:_end]
+        q = linear(query, _w, _b)
+
         if key is None:
             assert value is None
             k = v = None
         else:
-            k, v = _in_proj_kv(in_proj_weight, in_proj_bias, embed_dim, key)
+
+            _b = in_proj_bias
+            _start = embed_dim
+            _end = None
+            _w = in_proj_weight[_start:_end, :]
+            if _b is not None:
+                _b = _b[_start:_end]
+            k, v = linear(key, _w, _b).chunk(2, dim=-1)
+
     else:
-        q = _in_proj_q(in_proj_weight, in_proj_bias, embed_dim, query)
-        k = _in_proj_k(in_proj_weight, in_proj_bias, embed_dim, key)
-        v = _in_proj_v(in_proj_weight, in_proj_bias, embed_dim, value)
+        _b = in_proj_bias
+        _start = 0
+        _end = embed_dim
+        _w = in_proj_weight[_start:_end, :]
+        if _b is not None:
+            _b = _b[_start:_end]
+        q = linear(query, _w, _b)
+
+        _b = in_proj_bias
+        _start = embed_dim
+        _end = embed_dim * 2
+        _w = in_proj_weight[_start:_end, :]
+        if _b is not None:
+            _b = _b[_start:_end]
+        k = linear(key, _w, _b)
+
+        _b = in_proj_bias
+        _start = embed_dim * 2
+        _end = None
+        _w = in_proj_weight[_start:_end, :]
+        if _b is not None:
+            _b = _b[_start:_end]
+        v = linear(value, _w, _b)
     q *= scaling
 
     if bias_k is not None:
