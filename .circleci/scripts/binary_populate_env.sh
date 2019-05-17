@@ -1,6 +1,5 @@
 #!/bin/bash
-
-set -ex
+set -eux -o pipefail
 export TZ=UTC
 
 # We need to write an envfile to persist these variables to following
@@ -24,7 +23,7 @@ configs=($BUILD_ENVIRONMENT)
 export PACKAGE_TYPE="${configs[0]}"
 export DESIRED_PYTHON="${configs[1]}"
 export DESIRED_CUDA="${configs[2]}"
-export DESIRED_DEVTOOLSET="${configs[3]}"
+export DESIRED_DEVTOOLSET="${configs[3]:-}"
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
   export BUILD_PYTHONLESS=1
 fi
@@ -63,8 +62,8 @@ echo "Running on $(uname -a) at $(date)"
 export PACKAGE_TYPE="$PACKAGE_TYPE"
 export DESIRED_PYTHON="$DESIRED_PYTHON"
 export DESIRED_CUDA="$DESIRED_CUDA"
-export LIBTORCH_VARIANT="$LIBTORCH_VARIANT"
-export BUILD_PYTHONLESS="$BUILD_PYTHONLESS"
+export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
+export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
 
 export DATE="$DATE"
@@ -87,9 +86,9 @@ export BUILDER_ROOT="$workdir/builder"
 export MINICONDA_ROOT="$workdir/miniconda"
 export PYTORCH_FINAL_PACKAGE_DIR="$workdir/final_pkgs"
 
-export CIRCLE_TAG="$CIRCLE_TAG"
+export CIRCLE_TAG="${CIRCLE_TAG:-}"
 export CIRCLE_SHA1="$CIRCLE_SHA1"
-export CIRCLE_PR_NUMBER="$CIRCLE_PR_NUMBER"
+export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
 export CIRCLE_BRANCH="$CIRCLE_BRANCH"
 # =================== The above code will be executed inside Docker container ===================
 EOL
