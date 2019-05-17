@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+set -eux -o pipefail
 # This step runs on multiple executors with different envfile locations
 if [[ "$(uname)" == Darwin ]]; then
   source "/Users/distiller/project/env"
@@ -21,10 +21,6 @@ fi
 chmod +x "$conda_sh"
 "$conda_sh" -b -p "$MINICONDA_ROOT"
 rm -f "$conda_sh"
-
-# TODO we can probably remove the next two lines
-export PATH="$MINICONDA_ROOT/bin:$PATH"
-source "$MINICONDA_ROOT/bin/activate"
 
 # We can't actually add miniconda to the PATH in the envfile, because that
 # breaks 'unbuffer' in Mac jobs. This is probably because conda comes with

@@ -7,11 +7,62 @@ namespace torch {
 namespace jit {
 namespace {
 
-at::Tensor unwrap(at::Tensor&& tensor) {
+at::Tensor unwrap_tensor(at::Tensor&& tensor) {
   if (tensor.requires_grad()) {
     throw std::runtime_error("Autograd not yet supported for c10 ops.");
   }
   return torch::autograd::Variable(std::move(tensor)).data();
+}
+
+IValue unwrap(IValue&& ivalue) {
+  // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
+  if (ivalue.isTensor() && ivalue.toTensor().defined()) {
+    return unwrap_tensor(std::move(ivalue).toTensor());
+  } else if (ivalue.isTensorList()) {
+    for (auto& item : ivalue.toTensorList()->elements()) {
+      item = unwrap_tensor(std::move(item));
+    }
+    return std::move(ivalue);
+  } else if (ivalue.isGenericList()) {
+    for (auto& item : ivalue.toGenericList()->elements()) {
+      item = unwrap(std::move(item));
+    }
+    return std::move(ivalue);
+  } else if (ivalue.isGenericDict()) {
+    for (auto& item : ivalue.toGenericDict()->elements()) {
+      item.setValue(unwrap(item.value()));
+    }
+    return std::move(ivalue);
+  } else {
+    return std::move(ivalue);
+  }
+}
+
+at::Tensor wrap_tensor(at::Tensor&& tensor) {
+  return torch::autograd::make_variable(tensor);
+}
+
+IValue wrap(IValue&& ivalue) {
+  if (ivalue.isTensor()) {
+    return wrap_tensor(std::move(ivalue).toTensor());
+  } else if (ivalue.isTensorList()) {
+    for (auto& item : ivalue.toTensorList()->elements()) {
+      item = wrap_tensor(std::move(item));
+    }
+    return std::move(ivalue);
+  } else if (ivalue.isGenericList()) {
+    for (auto& item : ivalue.toGenericList()->elements()) {
+      item = wrap(std::move(item));
+    }
+    return std::move(ivalue);
+  } else if (ivalue.isGenericDict()) {
+    for (auto& item : ivalue.toGenericDict()->elements()) {
+      item.setValue(wrap(item.value()));
+    }
+    return std::move(ivalue);
+  } else {
+    return std::move(ivalue);
+  }
 }
 
 // TODO This currently only handles tensors with requires_grad==False correctly.
@@ -112,23 +163,14 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
 
       // unwrap tensor inputs from variable
       for (auto iter = stack.end() - input_size; iter != stack.end(); ++iter) {
-        // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
-        if (iter->isTensor() && iter->toTensor().defined()) {
-          *iter = unwrap(std::move(*iter).toTensor());
-        } else if (iter->isTensorList()) {
-          for (auto& item : iter->toTensorList()->elements()) {
-            item = unwrap(std::move(item));
-          }
-        }
+        *iter = unwrap(std::move(*iter));
       }
 
       c10::Dispatcher::singleton().lookup(op, &stack).call(&stack);
 
       // wrap tensor outputs as variable
       for (auto iter = stack.end() - output_size; iter != stack.end(); ++iter) {
-        if (iter->isTensor()) {
-          *iter = torch::autograd::make_variable(std::move(*iter).toTensor());
-        }
+        *iter = wrap(std::move(*iter));
       }
 
       if (jit::tracer::isTracing()) {

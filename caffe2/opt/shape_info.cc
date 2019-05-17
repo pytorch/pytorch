@@ -14,7 +14,10 @@ ShapeInfo getShapeInfoFromBlob(const Blob* blob) {
   if (blob->meta().id() == TypeMeta::Id<int8::Int8TensorCPU>()) {
     shape_info.is_quantized = true;
     LoadInt8TensorInfoOfBlob(
-        &shape_info.q_info.scale, &shape_info.q_info.offset, blob);
+        &shape_info.q_info.scale,
+        &shape_info.q_info.offset,
+        &shape_info.q_info.axis,
+        blob);
   }
   return shape_info;
 }

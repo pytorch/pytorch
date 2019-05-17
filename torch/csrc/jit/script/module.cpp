@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/script/module.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/export.h>
@@ -6,6 +5,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
@@ -194,7 +194,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       continue;
     }
     if (e.n->kind() != prim::GetAttr) {
-      throw ErrorReport(e.n->getSourceLocation())
+      throw ErrorReport(e.n->sourceRange())
           << "temporary: the only valid use of a module is looking up an attribute";
     }
     Slot slot(e.mod, e.mod->type()->getAttributeSlot(e.n->s(attr::name)));
@@ -351,6 +351,38 @@ void Module::train(bool on) {
     submod->train(on);
   }
   register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
+}
+
+IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
+  // Classes live in the top-level compilation unit.
+  if (parent_) {
+    return parent_->create_class(name, std::move(stack));
+  }
+
+  // Look up the class
+  const auto classType =
+      class_compilation_unit().get_class(c10::QualifiedName(name));
+  if (!classType) {
+    AT_ERROR(
+        "Could not find class with name: '",
+        name.qualifiedName(),
+        "' in module.");
+  }
+
+  // Create a bare object with correct number of slots
+  const size_t numAttrs = classType->numAttributes();
+  auto obj = c10::ivalue::Object::create(classType, numAttrs);
+
+  // Invoke the `__init__()` of the class with the arguments provided.
+  Stack stackWithSelf = {obj};
+  for (auto& arg : stack) {
+    stackWithSelf.push_back(std::move(arg));
+  }
+  // Note: following Python, `__init__()` modifies its first parameter in-place
+  // and returns nothing.
+  classType->getMethod("__init__")->operator()(std::move(stackWithSelf));
+
+  return obj;
 }
 
 } // namespace script
