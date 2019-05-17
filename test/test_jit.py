@@ -2171,7 +2171,7 @@ graph(%Ra, %Rb):
             def forward(self, scores, bbox_deltas, im_info, anchors):
                 a, b = torch.ops._caffe2.GenerateProposals(
                     (scores), (bbox_deltas), (im_info), (anchors),
-                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
                 )
                 return a, b
         model = MyModel()
@@ -3298,6 +3298,45 @@ def foo(x):
                     cu.define(full)
             else:
                 cu.define(full)
+
+    def test_inherit_method(self):
+        class A(torch.jit.ScriptModule):
+            def __init__(self):
+                super(A, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.bar(x)
+
+        class B(A):
+            def __init__(self):
+                super(B, self).__init__()
+
+            @torch.jit.script_method
+            def bar(self, x):
+                return x * x
+
+        with self.assertRaisesRegex(RuntimeError, 'attribute'):
+            A()  # cannot use because bar is not defined
+
+        v = torch.rand(3, 4)
+        b = B()
+        self.assertEqual(b(v), v + v * v)
+
+        class C(torch.jit.ScriptModule):
+            def __init__(self):
+                super(C, self).__init__()
+
+            @torch.jit.script_method
+            def bar(self, x):
+                return x
+
+        class D(C, B):
+            def __init__(self):
+                super(D, self).__init__()
+
+        self.assertEqual(D()(v), v + v)
+
 
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
@@ -14033,14 +14072,14 @@ nn_functional_tests = [
         '', (True, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
-     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
     ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),), 'with_only_weight',
-     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
     ('layer_norm', (S, S, S, S), ([5], None, non_differentiable(torch.rand(S)),), 'with_only_bias',
-     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
+     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
     ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),
                                   non_differentiable(torch.rand(S))), 'with_weight_and_bias',
-     (True, ['aten::contiguous', 'aten::_batch_norm_impl_index', 'aten::addcmul'])),
+     (False, ['aten::contiguous', 'aten::_batch_norm_impl_index', 'aten::addcmul'])),
     ('group_norm', (S, S, S), (1, torch.rand(5),),),
     ('local_response_norm', (S, S, S), (2, ),),
     ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '', (True, 'aten::nll_loss_forward')),

@@ -2147,7 +2147,15 @@ add_docstr(torch.get_num_threads,
            r"""
 get_num_threads() -> int
 
-Gets the number of threads used for parallelizing CPU operations
+Returns the number of threads used for parallelizing CPU operations
+""")
+
+add_docstr(torch.get_num_interop_threads,
+           r"""
+get_num_interop_threads() -> int
+
+Returns the number of threads used for inter-op parallelism on CPU
+(e.g. in JIT interpreter)
 """)
 
 add_docstr(torch.gt,
@@ -4304,6 +4312,16 @@ To ensure that the correct number of threads is used, set_num_threads
 must be called before running eager, JIT or autograd code.
 """)
 
+add_docstr(torch.set_num_interop_threads,
+           r"""
+set_num_interop_threads(int)
+
+Sets the number of threads used for interop parallelism
+(e.g. in JIT interpreter) on CPU.
+WARNING: Can only be called once and before any inter-op parallel work
+is started (e.g. JIT execution).
+""")
+
 add_docstr(torch.sigmoid,
            r"""
 sigmoid(input, out=None) -> Tensor
@@ -4658,6 +4676,56 @@ Example::
             [ 0.1264, -0.5080,  1.6420,  0.1992]])
     >>> torch.std(a, dim=1)
     tensor([ 1.0311,  0.7477,  1.2204,  0.9087])
+""".format(**multi_dim_common))
+
+add_docstr(torch.std_mean,
+           r"""
+.. function:: std_mean(input, unbiased=True) -> (Tensor, Tensor)
+
+Returns the standard-deviation and mean of all elements in the :attr:`input` tensor.
+
+If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
+via the biased estimator. Otherwise, Bessel's correction will be used.
+
+Args:
+    input (Tensor): the input tensor
+    unbiased (bool): whether to use the unbiased estimation or not
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[0.3364, 0.3591, 0.9462]])
+    >>> torch.std_mean(a)
+    (tensor(0.3457), tensor(0.5472))
+
+.. function:: std(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
+
+Returns the standard-deviation and mean of each row of the :attr:`input` tensor in the
+dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
+reduce over all of them.
+
+{keepdim_details}
+
+If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
+via the biased estimator. Otherwise, Bessel's correction will be used.
+
+Args:
+    input (Tensor): the input tensor
+    {dim}
+    {keepdim}
+    unbiased (bool): whether to use the unbiased estimation or not
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.5648, -0.5984, -1.2676, -1.4471],
+            [ 0.9267,  1.0612,  1.1050, -0.6014],
+            [ 0.0154,  1.9301,  0.0125, -1.0904],
+            [-1.9711, -0.7748, -1.3840,  0.5067]])
+    >>> torch.std_mean(a, 1)
+    (tensor([0.9110, 0.8197, 1.2552, 1.0608]), tensor([-0.6871,  0.6229,  0.2169, -0.9058]))
 """.format(**multi_dim_common))
 
 add_docstr(torch.sum,
@@ -5511,6 +5579,55 @@ Example::
             [-0.7700,  0.6074, -0.1469,  0.7777]])
     >>> torch.var(a, 1)
     tensor([ 1.7444,  1.1363,  0.7356,  0.5112])
+""".format(**multi_dim_common))
+
+add_docstr(torch.var_mean,
+           r"""
+.. function:: var_mean(input, unbiased=True) -> (Tensor, Tensor)
+
+Returns the variance and mean of all elements in the :attr:`input` tensor.
+
+If :attr:`unbiased` is ``False``, then the variance will be calculated via the
+biased estimator. Otherwise, Bessel's correction will be used.
+
+Args:
+    input (Tensor): the input tensor
+    unbiased (bool): whether to use the unbiased estimation or not
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[0.0146, 0.4258, 0.2211]])
+    >>> torch.var_mean(a)
+    (tensor(0.0423), tensor(0.2205))
+
+.. function:: var_mean(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
+
+Returns the variance and mean of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim`.
+
+{keepdim_details}
+
+If :attr:`unbiased` is ``False``, then the variance will be calculated via the
+biased estimator. Otherwise, Bessel's correction will be used.
+
+Args:
+    input (Tensor): the input tensor
+    {dim}
+    {keepdim}
+    unbiased (bool): whether to use the unbiased estimation or not
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[-1.5650,  2.0415, -0.1024, -0.5790],
+            [ 0.2325, -2.6145, -1.6428, -0.3537],
+            [-0.2159, -1.1069,  1.2882, -1.3265],
+            [-0.6706, -1.5893,  0.6827,  1.6727]])
+    >>> torch.var_mean(a, 1)
+    (tensor([2.3174, 1.6403, 1.4092, 2.0791]), tensor([-0.0512, -1.0946, -0.3403,  0.0239]))
 """.format(**multi_dim_common))
 
 add_docstr(torch.zeros,

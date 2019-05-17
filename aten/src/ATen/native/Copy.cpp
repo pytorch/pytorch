@@ -43,7 +43,7 @@ Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
   if (self.scalar_type() == src.scalar_type()) {
     copy_kernel_same_type(kCPU, self, src);
   } else {
-    AT_CHECK(self.numel() == src.numel(), "sizes do not match");
+    TORCH_CHECK(self.numel() == src.numel(), "sizes do not match");
     copy_kernel_cast(kCPU, self, src);
   }
   return self;

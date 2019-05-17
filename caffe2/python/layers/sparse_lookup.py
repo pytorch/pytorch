@@ -59,7 +59,7 @@ class SparseLookup(ModelLayer):
     ]
 
     _fp16_compatible_reducers = [
-        'Sum', 'Mean', 'Sqrt', 'PositionWeighted'
+        'Sum', 'Mean', 'Sqrt', 'PositionWeighted', 'RecencyWeighted',
     ]
 
     def __init__(self, model, input_record, inner_shape, reducer,

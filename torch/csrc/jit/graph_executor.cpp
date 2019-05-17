@@ -481,7 +481,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   // entry point where execution begins
   void run(Stack& stack) override {
-    AT_CHECK(
+    TORCH_CHECK(
         stack.size() >= num_inputs,
         "expected ",
         num_inputs,

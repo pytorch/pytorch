@@ -205,9 +205,9 @@ void replication_pad1d_out_cuda_template(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
+  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
       "input tensor must fit into 32-bit index math");
-  AT_CHECK(paddingSize.size() == 2, "padding Size is expected to be 2");
+  TORCH_CHECK(paddingSize.size() == 2, "padding Size is expected to be 2");
 
   int padL = paddingSize[0];
   int padR = paddingSize[1];
@@ -216,7 +216,7 @@ void replication_pad1d_out_cuda_template(
   int numBatch = 1;
 
   int numInputDims = input.ndimension();
-  AT_CHECK(input.numel() > 0 && (numInputDims == 2 || numInputDims == 3),
+  TORCH_CHECK(input.numel() > 0 && (numInputDims == 2 || numInputDims == 3),
       "2D or 3D (batch mode) tensor expected for input")
 
     if (numInputDims == 3) {
@@ -229,7 +229,7 @@ void replication_pad1d_out_cuda_template(
   int inputW = input.size(dimw);
   int outputW  = inputW + padL + padR;
 
-  AT_CHECK(outputW >= 1,
+  TORCH_CHECK(outputW >= 1,
       "input (W: ", inputW, ")is too small."
       " Calculated output W: ", outputW);
 
@@ -279,11 +279,11 @@ void replication_pad1d_backward_out_cuda_template(
     IntArrayRef paddingSize)
 {
 
-  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
+  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
       "input tensor must fit into 32-bit index math");
-  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(gradOutput),
+  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(gradOutput),
       "output gradient tensor must fit into 32-bit index math");
-  AT_CHECK(paddingSize.size() == 2, "padding Size is expected to be 2");
+  TORCH_CHECK(paddingSize.size() == 2, "padding Size is expected to be 2");
 
   int padL = paddingSize[0];
   int padR = paddingSize[1];
@@ -298,7 +298,7 @@ void replication_pad1d_backward_out_cuda_template(
   int iwidth = input.size(dimw);
   int owidth  = iwidth + padL + padR;
 
-  AT_CHECK(owidth == gradOutput.size(dimw),
+  TORCH_CHECK(owidth == gradOutput.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
       gradOutput.size(dimw));
 
@@ -336,9 +336,9 @@ void replication_pad2d_out_cuda_template(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
+  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
       "input tensor must fit into 32-bit index math");
-  AT_CHECK(paddingSize.size() == 4, "padding Size is expected to be 4");
+  TORCH_CHECK(paddingSize.size() == 4, "padding Size is expected to be 4");
 
   int padL = paddingSize[0];
   int padR = paddingSize[1];
@@ -350,7 +350,7 @@ void replication_pad2d_out_cuda_template(
   int numBatch = 1;
 
   int numInputDims = input.dim();
-  AT_CHECK(input.numel() && (numInputDims == 3 || numInputDims == 4),
+  TORCH_CHECK(input.numel() && (numInputDims == 3 || numInputDims == 4),
       "non-empty 3D or 4D (batch mode) tensor expected for input, but got: ",
       input)
 
@@ -367,7 +367,7 @@ void replication_pad2d_out_cuda_template(
   int outputH = inputH + padT + padB;
   int outputW  = inputW + padL + padR;
 
-  AT_CHECK(outputW >= 1 || outputH >= 1,
+  TORCH_CHECK(outputW >= 1 || outputH >= 1,
       "input (H: ", inputH, ", W: ", inputW, ") is too small."
       " Calculated output H: ", outputH, " W: ", outputW);
 
@@ -418,11 +418,11 @@ void replication_pad2d_backward_out_cuda_template(
     IntArrayRef paddingSize)
 {
 
-  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
+  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
       "input tensor must fit into 32-bit index math");
-  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(gradOutput),
+  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(gradOutput),
       "output gradient tensor must fit into 32-bit index math");
-  AT_CHECK(paddingSize.size() == 4, "padding Size is expected to be 4");
+  TORCH_CHECK(paddingSize.size() == 4, "padding Size is expected to be 4");
 
   int padL = paddingSize[0];
   int padR = paddingSize[1];
@@ -443,10 +443,10 @@ void replication_pad2d_backward_out_cuda_template(
   int oheight = iheight + padT + padB;
   int owidth  = iwidth + padL + padR;
 
-  AT_CHECK(owidth == gradOutput.size(dimw),
+  TORCH_CHECK(owidth == gradOutput.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
       gradOutput.size(dimw));
-  AT_CHECK(oheight == gradOutput.size(dimh),
+  TORCH_CHECK(oheight == gradOutput.size(dimh),
       "gradOutput height unexpected. Expected: ", oheight, ", Got: ",
       gradOutput.size(dimh));
 
@@ -483,11 +483,11 @@ static inline void shapeCheck3d(
     int pleft, int pright,
     int ptop, int pbottom,
     int pfront, int pback) {
-  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
+  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
       "input tensor must fit into 32-bit index math");
   int numInputDims = input.dim();
 
-  AT_CHECK(input.numel() && (numInputDims == 4 || numInputDims == 5),
+  TORCH_CHECK(input.numel() && (numInputDims == 4 || numInputDims == 5),
       "non-empty 4D or 5D (batch mode) tensor expected for input, but got: ", input);
 
   int planeDim = 0;
@@ -508,7 +508,7 @@ static inline void shapeCheck3d(
   int odepth = idepth + pfront + pback;
   int oheight = iheight + ptop + pbottom;
   int owidth  = iwidth + pleft + pright;
-  AT_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
+  TORCH_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
       "input (D: ", idepth, " H: ", iheight, ", W: ", iwidth,
       ") is too small."
       " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
@@ -521,11 +521,11 @@ static inline void shapeAndGradOutputCheck3d(
     int pleft, int pright,
     int ptop, int pbottom,
     int pfront, int pback) {
-  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
+  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
       "input tensor must fit into 32-bit index math");
   int numInputDims = input.dim();
 
-  AT_CHECK(input.numel() && (numInputDims == 4 || numInputDims == 5),
+  TORCH_CHECK(input.numel() && (numInputDims == 4 || numInputDims == 5),
       "non-empty 4D or 5D (batch mode) tensor expected for input, but got: ", input);
 
   int planeDim = 0;
@@ -546,24 +546,24 @@ static inline void shapeAndGradOutputCheck3d(
   int odepth = idepth + pfront + pback;
   int oheight = iheight + ptop + pbottom;
   int owidth  = iwidth + pleft + pright;
-  AT_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
+  TORCH_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
       "input (D: ", idepth, " H: ", iheight, ", W: ", iwidth,
       ") is too small."
       " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
 
-  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(gradOutput),
+  TORCH_CHECK(at::cuda::detail::canUse32BitIndexMath(gradOutput),
       "output gradient tensor must fit into 32-bit index math");
 
-  AT_CHECK(numPlanes == gradOutput.size(planeDim),
+  TORCH_CHECK(numPlanes == gradOutput.size(planeDim),
       "gradOutput width unexpected. Expected: ", numPlanes, ", Got: ",
       gradOutput.size(planeDim));
-  AT_CHECK(owidth == gradOutput.size(dimw),
+  TORCH_CHECK(owidth == gradOutput.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
       gradOutput.size(dimw));
-  AT_CHECK(oheight == gradOutput.size(dimh),
+  TORCH_CHECK(oheight == gradOutput.size(dimh),
       "gradOutput height unexpected. Expected: ", oheight, ", Got: ",
       gradOutput.size(dimh));
-  AT_CHECK(odepth == gradOutput.size(dimd),
+  TORCH_CHECK(odepth == gradOutput.size(dimd),
       "gradOutput depth unexpected. Expected: ", odepth, ", Got: ",
       gradOutput.size(dimd));
 }
@@ -573,7 +573,7 @@ void replication_pad3d_out_cuda_template(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  AT_CHECK(paddingSize.size() == 6, "padding Size is expected to be 6");
+  TORCH_CHECK(paddingSize.size() == 6, "padding Size is expected to be 6");
   int pleft = paddingSize[0];
   int pright = paddingSize[1];
   int ptop = paddingSize[2];
@@ -654,7 +654,7 @@ void replication_pad3d_backward_out_cuda_template(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  AT_CHECK(paddingSize.size() == 6, "padding Size is expected to be 6");
+  TORCH_CHECK(paddingSize.size() == 6, "padding Size is expected to be 6");
   int pleft = paddingSize[0];
   int pright = paddingSize[1];
   int ptop = paddingSize[2];
