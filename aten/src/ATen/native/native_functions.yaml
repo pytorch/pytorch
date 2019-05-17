@@ -3422,11 +3422,14 @@
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
 
-#- func: nonzero(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-#
-#- func: nonzero(Tensor self) -> Tensor
-#  variants: method, function
-#
+- func: nonzero(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: nonzero(Tensor self) -> Tensor
+  variants: method, function
+
+- func: nonzero_tuple(Tensor self) -> Tensor[]
+  variants: method, function
+
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: gather_out_cpu

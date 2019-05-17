@@ -9056,7 +9056,7 @@ class _TestTorchMixin(object):
                         lex = is_lexicographically_sorted(dst1)
                         self.assertEqual(torch.ones_like(lex), lex)
                     if TEST_NUMPY:
-                        tup1 = torch.nonzero_tuple(tensor)
+                        tup1 = torch.nonzero(tensor, as_tuple=True)
                         tup2 = tensor.nonzero(as_tuple=True)
                         np1 = tensor.numpy().nonzero()
                         for t in (tup1, tup2):

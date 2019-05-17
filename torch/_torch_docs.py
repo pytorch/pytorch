@@ -3466,14 +3466,6 @@ Example::
     tensor([-0.0090,  0.2262,  0.0682,  0.2866, -0.3940])
 """)
 
-add_docstr(torch.nonzero_tuple,
-           r"""
-.. function:: nonzero_tuple(self) -> tuple of Tensors
-
-Equivalent to ``torch.nonzero(self, as_tuple=True)``
-
-""")
-
 add_docstr(torch.normal,
            r"""
 .. function:: normal(mean, std, out=None) -> Tensor
