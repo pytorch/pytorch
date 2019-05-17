@@ -319,8 +319,8 @@ class TestNumbaIntegration(common.TestCase):
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
     @unittest.skipIf(not TEST_MULTIGPU, "No multigpu")
-    def test_active_device(self):
-        """'as_cuda_array' tensor device must match active numba context."""
+    def test_active_device_using_cuda_array_interface(self):
+        """'as_tensor()' tensor device must match active numba context."""
 
         # Both torch/numba default to device 0 and can interop freely
         numba_ary = numba.cuda.to_device(numpy.arange(6))
