@@ -681,10 +681,22 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
                 mode_s="linear")
 
 
-def wrap_logical_op_with_cast_to_uint8(func):
-    def wrap_with_cast(g, input, other):
-        return g.op("Cast", func(g, input, other), to_i=sym_help.cast_pytorch_to_onnx['Byte'])
-    return wrap_with_cast
+def wrap_logical_op_with_cast_to(to_type):
+    def decorator(fn):
+        def wrap_with_cast(g, input, other):
+            return g.op("Cast", fn(g, input, other), to_i=sym_help.cast_pytorch_to_onnx[to_type])
+        return wrap_with_cast
+    return decorator
+
+
+def wrap_logical_op_with_cast_to_and_from(to_type):
+    def decorator(fn):
+        def wrap_with_cast(g, input, other):
+            to_cast_func = globals()['_cast_{}'.format(to_type)]
+            from_cast_func = wrap_logical_op_with_cast_to(input.type().scalarType())(fn)
+            return from_cast_func(g, to_cast_func(g, input, False), to_cast_func(g, other, False))
+        return wrap_with_cast
+    return decorator
 
 
 def wrap_logical_op_with_negation(func):
@@ -693,18 +705,18 @@ def wrap_logical_op_with_negation(func):
     return wrap_with_not
 
 
-@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_cast_to('Byte')
 def eq(g, self, other):
     return g.op("Equal", self, other)
 
 
-@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_cast_to('Byte')
 @wrap_logical_op_with_negation
 def ne(g, self, other):
     return g.op("Equal", self, other)
 
 
-@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_cast_to('Byte')
 def gt(g, input, other):
     return gt_impl(g, input, other)
 
@@ -714,7 +726,7 @@ def gt_impl(g, input, other):
     return g.op("Greater", input, sym_help._if_scalar_type_as(g, other, input))
 
 
-@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_cast_to('Byte')
 def lt(g, input, other):
     return lt_impl(g, input, other)
 
@@ -724,18 +736,28 @@ def lt_impl(g, input, other):
     return g.op("Less", input, sym_help._if_scalar_type_as(g, other, input))
 
 
-@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_cast_to('Byte')
 @wrap_logical_op_with_negation
 def ge(g, input, other):
     other = sym_help._maybe_get_scalar(other)
     return lt_impl(g, input, sym_help._if_scalar_type_as(g, other, input))
 
 
-@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_cast_to('Byte')
 @wrap_logical_op_with_negation
 def le(g, input, other):
     other = sym_help._maybe_get_scalar(other)
     return gt_impl(g, input, sym_help._if_scalar_type_as(g, other, input))
+
+
+@wrap_logical_op_with_cast_to_and_from('Bool')
+def __and_(g, input, other):
+    return g.op('And', input, other)
+
+
+@wrap_logical_op_with_cast_to_and_from('Bool')
+def __or_(g, input, other):
+    return g.op('Or', input, other)
 
 
 def where(g, condition, self, other):
