@@ -5027,6 +5027,17 @@ class TestNN(NNTestCase):
         self.assertRaises(ValueError, lambda: F.dropout(v, -0.1))
         self.assertRaises(ValueError, lambda: F.dropout(v, 1.1))
 
+    def test_empty_dropout(self):
+        x = torch.Tensor([])
+        out = torch.nn.functional.dropout(x)
+        self.assertEqual(out.size(), x.size())
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_empty_dropout_cuda(self):
+        x = torch.Tensor([]).to('cuda')
+        out = torch.nn.functional.dropout(x)
+        self.assertEqual(out.size(), x.size())
+
     def test_pad_sequence(self):
         def pad(tensor, length):
             return torch.cat(

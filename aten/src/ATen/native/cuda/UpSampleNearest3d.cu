@@ -12,9 +12,7 @@ namespace native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void upsample_nearest3d_out_frame(
     const int n,
     const PackedTensorAccessor<scalar_t, 5> idata,
@@ -71,9 +69,7 @@ __global__ void upsample_nearest3d_out_frame(
 
 // Backward operation
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void upsample_nearest3d_backward_out_frame(
     const int n,
     PackedTensorAccessor<scalar_t, 5> idata,
@@ -174,8 +170,8 @@ static void upsample_nearest3d_out_cuda_template(
   output.zero_();
 
   const int num_kernels = output_depth * output_height * output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  const int num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -192,7 +188,7 @@ static void upsample_nearest3d_out_cuda_template(
                stream>>>(num_kernels, idata, odata);
       });
 
-      AT_CUDA_CHECK(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 static void upsample_nearest3d_backward_out_cuda_template(
@@ -244,8 +240,8 @@ static void upsample_nearest3d_backward_out_cuda_template(
   grad_input.zero_();
 
   const int num_kernels = output_depth * output_height * output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  const int num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -262,7 +258,7 @@ static void upsample_nearest3d_backward_out_cuda_template(
                stream>>>(num_kernels, idata, odata);
       });
 
-      AT_CUDA_CHECK(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace

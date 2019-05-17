@@ -64,6 +64,18 @@ void magmaLuNoPivBatched(
 }
 
 template<class scalar_t>
+inline magma_int_t magmaGetriOptimalBlocksize(magma_int_t n) {
+  AT_ERROR("getri only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void magmaGetri(
+    magma_int_t n, scalar_t* dA, magma_int_t ldda, magma_int_t* ipiv, scalar_t* dwork,
+    magma_int_t lwork, magma_int_t* info) {
+  AT_ERROR("getri only takes float or double Tensors");
+}
+
+template<class scalar_t>
 void magmaGetriBatched(
     magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** ipiv_array, scalar_t** dinvA_array, magma_int_t lddia,
@@ -200,6 +212,30 @@ void magmaLuNoPivBatched<float>(
     magma_int_t m, magma_int_t n, float** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_sgetrf_nopiv_batched(m, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
+}
+
+template<>
+inline magma_int_t magmaGetriOptimalBlocksize<double>(magma_int_t n) {
+  return magma_get_dgetri_nb(n);
+}
+
+template<>
+inline magma_int_t magmaGetriOptimalBlocksize<float>(magma_int_t n) {
+  return magma_get_sgetri_nb(n);
+}
+
+template<>
+void magmaGetri<double>(
+    magma_int_t n, double* dA, magma_int_t ldda, magma_int_t* ipiv, double* dwork,
+    magma_int_t lwork, magma_int_t* info) {
+  magma_dgetri_gpu(n, dA, ldda, ipiv, dwork, lwork, info);
+}
+
+template<>
+void magmaGetri<float>(
+    magma_int_t n, float* dA, magma_int_t ldda, magma_int_t* ipiv, float* dwork,
+    magma_int_t lwork, magma_int_t* info) {
+  magma_sgetri_gpu(n, dA, ldda, ipiv, dwork, lwork, info);
 }
 
 template<>
@@ -382,7 +418,7 @@ std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_inverse(Tensor& self, Tensor& self_inv, std::vector<int64_t>& infos) {
+static void apply_batched_inverse(Tensor& self, Tensor& self_inv, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("inverse: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -429,17 +465,47 @@ AT_ERROR("inverse: MAGMA library not found in "
 #endif
 }
 
-// Because this is out-of-place inverse, the predefined macros will
-// not work
+template <typename scalar_t>
+static void apply_single_inverse(Tensor& self, int64_t& info) {
+#ifndef USE_MAGMA
+AT_ERROR("inverse: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
+  auto self_data = self.data<scalar_t>();
+  magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
+  magma_int_t lwork = n * magmaGetriOptimalBlocksize<scalar_t>(n);
+  magma_int_t info_tmp = 0;
+
+  Tensor ipiv = at::empty({n}, at::kInt);
+  Tensor dwork = at::empty({lwork}, self.options());
+  magmaLu<scalar_t>(n, n, self_data, n, ipiv.data<magma_int_t>(), &info_tmp);
+  if (info_tmp != 0) {
+    info = info_tmp;
+    return;
+  }
+  magmaGetri<scalar_t>(
+    n, self_data, n, ipiv.data<magma_int_t>(), dwork.data<scalar_t>(), lwork, &info_tmp);
+  info = info_tmp;
+#endif
+}
+
 Tensor _inverse_helper_cuda(const Tensor& self) {
-  std::vector<int64_t> infos(batchCount(self), 0);
-  auto self_working_copy = cloneBatchedColumnMajor(self);
   auto self_inv_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-    apply_inverse<scalar_t>(
-      self_working_copy, self_inv_working_copy, infos);
-  });
-  batchCheckErrors(infos, "inverse_cuda");
+  if (self.dim() > 2) {
+    std::vector<int64_t> infos(batchCount(self), 0);
+    auto self_working_copy = cloneBatchedColumnMajor(self);
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
+      apply_batched_inverse<scalar_t>(
+        self_working_copy, self_inv_working_copy, infos);
+    });
+    batchCheckErrors(infos, "inverse_cuda");
+  } else {
+    int64_t info = 0;
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
+      apply_single_inverse<scalar_t>(self_inv_working_copy, info);
+    });
+    singleCheckErrors(info, "inverse_cuda");
+  }
   return self_inv_working_copy;
 }
 

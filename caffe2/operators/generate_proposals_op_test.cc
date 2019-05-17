@@ -147,7 +147,8 @@ TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
 
   // Convert to RRPN format and add angles
   ERMatXf anchors(3, 5);
-  anchors.block(0, 0, 3, 4) = utils::bbox_xyxy_to_ctrwh(anchors_xyxy.array());
+  anchors.block(0, 0, 3, 4) = utils::bbox_xyxy_to_ctrwh(
+      anchors_xyxy.array(), true /* legacy_plus_one */);
   std::vector<float> angles{0.0, 45.0, -120.0};
   for (int i = 0; i < anchors.rows(); ++i) {
     anchors(i, 4) = angles[i % angles.size()];
@@ -170,8 +171,8 @@ TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
 
   // Convert gt to RRPN format and add angles
   ERMatXf all_anchors_gt(36, 5);
-  all_anchors_gt.block(0, 0, 36, 4) =
-      utils::bbox_xyxy_to_ctrwh(all_anchors_gt_xyxy.array());
+  all_anchors_gt.block(0, 0, 36, 4) = utils::bbox_xyxy_to_ctrwh(
+      all_anchors_gt_xyxy.array(), true /* legacy_plus_one */);
   for (int i = 0; i < all_anchors_gt.rows(); ++i) {
     all_anchors_gt(i, 4) = angles[i % angles.size()];
   }
@@ -196,7 +197,8 @@ TEST(GenerateProposalsTest, TestComputeSortedAnchorsRotated) {
 
   // Convert to RRPN format and add angles
   ERMatXf anchors(3, 5);
-  anchors.block(0, 0, 3, 4) = utils::bbox_xyxy_to_ctrwh(anchors_xyxy.array());
+  anchors.block(0, 0, 3, 4) = utils::bbox_xyxy_to_ctrwh(
+      anchors_xyxy.array(), true /* legacy_plus_one */);
   std::vector<float> angles{0.0, 45.0, -120.0};
   for (int i = 0; i < anchors.rows(); ++i) {
     anchors(i, 4) = angles[i % angles.size()];
@@ -524,7 +526,8 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
       rois_gt_xyxy.block(0, 0, rois_gt.rows(), 1);
   // rois_gt in [x_ctr, y_ctr, w, h] format
   rois_gt.block(0, 1, rois_gt.rows(), 4) = utils::bbox_xyxy_to_ctrwh(
-      rois_gt_xyxy.block(0, 1, rois_gt.rows(), 4).array());
+      rois_gt_xyxy.block(0, 1, rois_gt.rows(), 4).array(),
+      true /* legacy_plus_one */);
   // Angle
   rois_gt.block(0, 5, rois_gt.rows(), 1) =
       ERMatXf::Constant(rois_gt.rows(), 1, angle);
