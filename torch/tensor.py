@@ -414,17 +414,19 @@ class Tensor(torch._C._TensorBase):
     __ge__ = _C._TensorBase.ge
     __abs__ = _C._TensorBase.abs
 
-    def _std_mean(self, dim=None, unbiased=True, keepdim=False):
+    def std_mean(self, dim=None, unbiased=True, keepdim=False):
         if dim is None:
             return _C._VariableFunctions.std_mean(self, unbiased)
         else:
             return _C._VariableFunctions.std_mean(self, dim, unbiased, keepdim)
+    std_mean.__doc__ = "see torch.std_mean"
 
-    def _var_mean(self, dim=None, unbiased=True, keepdim=False):
+    def var_mean(self, dim=None, unbiased=True, keepdim=False):
         if dim is None:
             return _C._VariableFunctions.var_mean(self, unbiased)
         else:
             return _C._VariableFunctions.var_mean(self, dim, unbiased, keepdim)
+    var_mean.__doc__ = "see torch.var_mean"
 
     def __len__(self):
         if self.dim() == 0:
