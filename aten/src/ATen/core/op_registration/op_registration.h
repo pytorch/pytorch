@@ -32,7 +32,7 @@ namespace c10 {
  * >         .kernel<my_kernel_cpu>()
  * >         .dispatchKey(CPUTensorId()));
  */
-class C10_API RegisterOperators final {
+class CAFFE2_API RegisterOperators final {
 public:
   RegisterOperators();
   ~RegisterOperators();
@@ -42,7 +42,7 @@ public:
   RegisterOperators(RegisterOperators&&) noexcept;
   RegisterOperators& operator=(RegisterOperators&&) noexcept;
 
-  class C10_API Options final {
+  class CAFFE2_API Options final {
   public:
     Options(const Options&) = delete;
     Options(Options&&) noexcept = delete;

@@ -32,7 +32,7 @@ class QFCInt8 final : public c10::OperatorKernel {
     // TODO: contiguous is called for further jit optimizations.
     auto input_contig = input.contiguous();
     const auto* input_ptr =
-        reinterpret_cast<uint8_t*>(input_contig.data<c10::qint8>());
+        reinterpret_cast<uint8_t*>(input_contig.data<c10::quint8>());
 
     AT_ASSERT(input.dim() >= 2);
     // C(output) = A(input) x B(weight), where C, A, B are M x N, M x K, K x N
@@ -114,7 +114,7 @@ class QFCInt8 final : public c10::OperatorKernel {
     // Allocate output Tensor and a buffer for fbgemmPacked to use
     auto output = _empty_affine_quantized(
         {M, N},
-        at::device(kCPU).dtype(kQInt8),
+        at::device(kCPU).dtype(kQUInt8),
         output_scale,
         output_zero_point);
 
@@ -124,7 +124,7 @@ class QFCInt8 final : public c10::OperatorKernel {
     fbgemm::fbgemmPacked(
         /*packA=*/packA,
         /*packB=*/*packB,
-        /*C=*/reinterpret_cast<uint8_t*>(output.data<c10::qint8>()),
+        /*C=*/reinterpret_cast<uint8_t*>(output.data<c10::quint8>()),
         /*C_buffer=*/buffer.data<int32_t>(),
         /*ldc=*/N,
         /*outProcess=*/outputProcObj,
