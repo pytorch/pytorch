@@ -257,12 +257,17 @@ struct TORCH_API RegisterOperators {
   RegisterOperators& op(
       const std::string& name,
       Implementation&& implementation) {
-    registrars_.emplace_back(c10::guts::make_unique<c10::RegisterOperators>(name, std::forward<Implementation>(implementation)));
+    registrars_.emplace_back(std::make_shared<c10::RegisterOperators>(name, std::forward<Implementation>(implementation)));
 
     return *this;
   }
 
 private:
+  // A c10::RegisterOperators instance is not copyable, so to make
+  // torch::jit::RegisterOperators copyable, we use shared_ptrs.
+  // We need to keep the c10::RegisterOperators instances around
+  // because this is an RAII pattern. In the destructor, the registered
+  // ops get de-registered.
   std::vector<std::shared_ptr<c10::RegisterOperators>> registrars_;
 };
 

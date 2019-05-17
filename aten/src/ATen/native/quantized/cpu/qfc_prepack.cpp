@@ -53,7 +53,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     std::vector<int8_t> weight_int8(K * N);
     int8_t* weight_ptr_int8 = weight_int8.data();
     uint8_t* weight_ptr_uint8 =
-        reinterpret_cast<uint8_t*>(weight_contig.data<c10::qint8>());
+        reinterpret_cast<uint8_t*>(weight_contig.data<c10::quint8>());
     convert_uint8_int8(K, N, weight_ptr_uint8, weight_ptr_int8);
 
     std::vector<int32_t> col_offsets(N);

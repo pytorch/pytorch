@@ -362,7 +362,8 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
       rois_gt_xyxy.block(0, 0, rois_gt.rows(), 0);
   // rois_gt in [x_ctr, y_ctr, w, h] format
   rois_gt.block(0, 1, rois_gt.rows(), 4) = utils::bbox_xyxy_to_ctrwh(
-      rois_gt_xyxy.block(0, 1, rois_gt.rows(), 4).array());
+      rois_gt_xyxy.block(0, 1, rois_gt.rows(), 4).array(),
+      true /* legacy_plus_one */);
   // Angle
   rois_gt.block(0, 5, rois_gt.rows(), 1) =
       ERMatXf::Constant(rois_gt.rows(), 1, angle);
