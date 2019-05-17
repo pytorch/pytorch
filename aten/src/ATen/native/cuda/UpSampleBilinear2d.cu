@@ -14,7 +14,9 @@ namespace native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
+#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void upsample_bilinear2d_out_frame(
     const int n,
     const accscalar_t rheight,
@@ -77,7 +79,9 @@ __global__ void upsample_bilinear2d_out_frame(
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename scalar_t, typename accscalar_t>
+#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void upsample_bilinear2d_backward_out_frame(
     const int n,
     const accscalar_t rheight,
@@ -183,8 +187,8 @@ static void upsample_bilinear2d_out_cuda_template(
       output_width > 0);
 
   const int num_kernels = output_height * output_width;
-  const int num_threads = std::min(
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  const int num_threads =
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -207,7 +211,7 @@ static void upsample_bilinear2d_out_cuda_template(
                 num_kernels, rheight, rwidth, align_corners, idata, odata);
       });
 
-  AT_CUDA_CHECK(cudaGetLastError());
+      AT_CUDA_CHECK(cudaGetLastError());
 }
 
 static void upsample_bilinear2d_backward_out_cuda_template(
@@ -256,8 +260,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   grad_input.zero_();
 
   const int num_kernels = output_height * output_width;
-  const int num_threads = std::min(
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  const int num_threads =
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -280,7 +284,7 @@ static void upsample_bilinear2d_backward_out_cuda_template(
                 num_kernels, rheight, rwidth, align_corners, idata, odata);
       });
 
-  AT_CUDA_CHECK(cudaGetLastError());
+      AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace
