@@ -3058,14 +3058,7 @@ class TestAutograd(TestCase):
         x = torch.randn(1, 2)
         x_s = torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1]))
         with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
-            x.data = x_q
-
-        # Dense tensor has impl of type `TensorImpl`, while quantized tensor has impl
-        # of type `QTensorImpl`.
-        x = torch.randn(1, 2)
-        x_q = torch.tensor([4, 6], dtype=torch.uint8)
-        with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
-            x.data = x_q
+            x.data = x_s
 
 
 def index_variable(shape, max_indices):
