@@ -424,7 +424,7 @@
 - func: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
   variants: function
 
-- func: contiguous(Tensor self) -> Tensor
+- func: contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor
   variants: method
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
@@ -1832,6 +1832,12 @@
 - func: std(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   variants: function, method
 
+- func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+  variants: function
+
+- func: std_mean(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+  variants: function
+
 - func: std(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
@@ -2007,6 +2013,12 @@
   variants: function, method
 
 - func: var(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+  variants: function
+
+- func: var_mean(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+  variants: function
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
   variants: method
@@ -2552,7 +2564,7 @@
 
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
 
-- func: quantize_linear(Tensor self, float scale, int zero_point) -> Tensor
+- func: quantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
   variants: function, method
   dispatch:
     CPU: quantize_linear_cpu

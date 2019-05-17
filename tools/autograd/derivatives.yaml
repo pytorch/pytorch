@@ -498,13 +498,13 @@
   other: grad.clone().masked_fill_(self > other, 0)
 
 - name: mean(Tensor self)
-  self: grad.expand(self.sizes()) / self.numel()
+  self: mean_backward(grad, self.sizes(), self.numel())
 
 - name: mean(Tensor self, ScalarType dtype)
   self: grad.expand(self.sizes()).to(self.scalar_type()) / self.numel()
 
 - name: mean(Tensor self, IntArrayRef dim, bool keepdim)
-  self: sum_backward(grad, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim)
+  self: mean_backward(grad, self.sizes(), dim, keepdim)
 
 - name: mean(Tensor self, IntArrayRef dim, ScalarType dtype)
   self: sum_backward(grad, self.sizes(), dim, false).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
@@ -774,10 +774,10 @@
   self: unsqueeze_to(grad, dim, self.sizes())
 
 - name: std(Tensor self, bool unbiased)
-  self: var_backward(grad / (result * 2), self, unbiased)
+  self: std_backward(result, grad, self, unbiased)
 
 - name: std(Tensor self, IntArrayRef dim, bool unbiased, bool keepdim)
-  self: var_backward(grad / (result * 2), self, dim, unbiased, keepdim)
+  self: std_backward(result, grad, self, dim, unbiased, keepdim)
 
 - name: sub(Tensor self, Tensor other, *, Scalar alpha)
   self: grad
@@ -1486,3 +1486,15 @@
 # PackedSequence helpers
 - name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first)
   input: _pack_padded_sequence_backward(grad, input.sizes(), result1, batch_first)
+
+- name: std_mean(Tensor self, IntArrayRef dim, bool unbiased, bool keepdim)
+  self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, true)
+
+- name: var_mean(Tensor self, IntArrayRef dim, bool unbiased, bool keepdim)
+  self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, false)
+
+- name: std_mean(Tensor self, bool unbiased)
+  self: var_std_mean_backward(grads, self, result0, result1, unbiased, true)
+
+- name: var_mean(Tensor self, bool unbiased)
+  self: var_std_mean_backward(grads, self, result0, result1, unbiased, false)
