@@ -318,9 +318,20 @@ class TestNumbaIntegration(common.TestCase):
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
+    def test_from_cuda_array_interface_lifetime(self):
+        """torch.as_tensor(obj) tensor grabs a reference to obj so that the lifetime of obj exceeds the tensor"""
+        numba_ary = numba.cuda.to_device(numpy.arange(6))
+        torch_ary = torch.as_tensor(numba_ary, device="cuda")
+        self.assertEqual(torch_ary.__cuda_array_interface__, numba_ary.__cuda_array_interface__)  # No copy
+        del numba_ary
+        self.assertEqual(torch_ary.cpu().data.numpy(), numpy.arange(6))  # `torch_ary` is still alive
+
+    @unittest.skipIf(not TEST_NUMPY, "No numpy")
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
     @unittest.skipIf(not TEST_MULTIGPU, "No multigpu")
-    def test_active_device_using_cuda_array_interface(self):
-        """'as_tensor()' tensor device must match active numba context."""
+    def test_from_cuda_array_interface_active_device(self):
+        """torch.as_tensor() tensor device must match active numba context."""
 
         # Both torch/numba default to device 0 and can interop freely
         numba_ary = numba.cuda.to_device(numpy.arange(6))
