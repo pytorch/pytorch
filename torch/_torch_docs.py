@@ -2147,14 +2147,14 @@ add_docstr(torch.get_num_threads,
            r"""
 get_num_threads() -> int
 
-Gets the number of threads used for parallelizing CPU operations
+Returns the number of threads used for parallelizing CPU operations
 """)
 
 add_docstr(torch.get_num_interop_threads,
            r"""
 get_num_interop_threads() -> int
 
-Gets the number of threads used for inter-op parallelism on CPU
+Returns the number of threads used for inter-op parallelism on CPU
 (e.g. in JIT interpreter)
 """)
 

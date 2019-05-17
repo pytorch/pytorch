@@ -267,7 +267,7 @@ public:
    * Returns the mapped value of the element with key equivalent to key.
    * If no such element exists, an exception of type std::out_of_range is thrown.
    */
-  Value at(const Key& key);
+  Value at(const Key& key) const;
 
   /**
    * Finds an element with key equivalent to key.
