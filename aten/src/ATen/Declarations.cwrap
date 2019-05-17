@@ -2530,7 +2530,6 @@
   name: _th_random_
   backends:
     - CPU
-    - CUDA
   return: self
   variants: function
   cpu_bool: True
