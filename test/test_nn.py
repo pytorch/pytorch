@@ -29,7 +29,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, download_file, PY3, PY34, to_gpu, \
-    get_function_arglist, load_tests
+    get_function_arglist, load_tests, slowTest
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, loss_reference_fns, get_reduction, \
@@ -2295,6 +2295,32 @@ class TestNN(NNTestCase):
         # 2eps = 1x addition + 1x subtraction.
         tol = 2 * torch.finfo(dtype).eps
         self.assertAlmostEqual(logits_soft.grad, logits_hard.grad, delta=tol)
+    
+    @slowTest
+    def _test_gumbel_softmax_isnan(self, cuda=True, shape=(10000000,)):
+        # 0 can be sampled from the exponential distribution, which will result in 'inf' from 'log(0)'
+        # and further cause 'nan' error from 'softmax' function.
+        num_draws = 100
+        logits = torch.rand(shape)
+        if cuda:
+            logits = logits.cuda()
+        for i in range(num_draws):
+            gumbel_def = F.gumbel_softmax(logits) 
+            isnan = torch.isnan(gumbel_def).any()
+            self.assertFalse(isnan)
+
+    @slowTest
+    def _test_gumbel_isinf(self, cuda=True, shape=(10000000,)):
+        # This verifies that 0 can be sampled from the exponential distribution, 
+        # which will result in 'inf' from 'log(0)' in 'gumbel_softmax' function.
+        num_draws = 100
+        samples = torch.empty(shape)
+        if cuda:
+            samples = samples.cuda()
+        for i in range(num_draws):
+            gumbels = -samples.exponential_().log() 
+            isinf = torch.isinf(gumbels).any()
+            self.assertFalse(isinf)
 
     @repeat_test_for_types(NO_HALF_TENSORTYPES)
     def test_gumbel_softmax(self, dtype=torch.float):
@@ -2308,6 +2334,7 @@ class TestNN(NNTestCase):
         self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5, 4, 3], dim=-1, count_expected=5 * 4)
         self._test_gumbel_softmax_straight_through(cuda=False, dtype=dtype)
         self._test_gumbel_softmax_grad(cuda=False, dtype=dtype)
+        self._test_gumbel_softmax_isnan(cuda=False, shape=(100000, 0))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -2319,6 +2346,7 @@ class TestNN(NNTestCase):
         self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5, 4, 3], dim=-1, count_expected=5 * 4)
         self._test_gumbel_softmax_straight_through(cuda=True, dtype=dtype)
         self._test_gumbel_softmax_grad(cuda=True, dtype=dtype)
+        self._test_gumbel_softmax_isnan(cuda=True, shape=(100000, 0))
 
     def _test_EmbeddingBag_vs_Embedding(self, N, D, B, L, max_norm=None,
                                         mode='mean',
