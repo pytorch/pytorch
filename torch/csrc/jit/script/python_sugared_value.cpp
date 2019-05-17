@@ -293,8 +293,27 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       auto list = g.insertNode(g.createTuple(params))->output();
       return std::make_shared<ConstantParameterList>(list);
     }
-    if (py::isinstance<py::function>(attr) ||
-        py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
+
+    if (py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
+      if (getRecursiveScriptMode()) {
+        // If the module is a submodule of the py_module, convert it to a
+        // ScriptModule and add it as a submodule to the script::Module. This
+        // enables lazy strong-ification of modules.
+        auto result =
+            py::module::import("torch.jit")
+                .attr("_make_strong_submodule")(field, attr, py_module_);
+        if (auto submodule = as_module(result)) {
+          // The module was a submodule of the nn.Module, so register it here
+          // and return the submodule.
+          module_->register_module(field, submodule);
+          auto v = module_->find_module(field);
+          return std::make_shared<ModuleValue>(
+              m.graph()->insertGetAttr(self_, field), v, attr);
+        }
+      }
+      return toSugaredValue(attr, m, loc, true);
+    } else if (
+        py::isinstance<py::function>(attr) ||
         py_module_.attr("_constants_set").contains(field.c_str())) {
       return toSugaredValue(attr, m, loc, true);
     } else {

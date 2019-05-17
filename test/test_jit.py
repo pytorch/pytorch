@@ -12574,10 +12574,9 @@ a")
                 super(Other, self).__init__()
                 self.x = x
                 self.param = torch.nn.Parameter(torch.ones(2, 2))
-                self.attribute = torch.jit.Attribute(99, int)
 
             def forward(self, t):
-                return t + self.x + self.param + self.attribute
+                return t + self.x + self.param
 
 
         class M(torch.nn.Module):
@@ -12592,7 +12591,7 @@ a")
 
         m = M()
         with torch.jit._enable_recursive_script():
-            sm = torch.jit._make_strong(m, from_weak_type=False)
+            sm = torch.jit._make_strong(m, _methods=['forward'])
 
         self.assertExportImportModule(sm, (torch.ones(2, 2),))
 

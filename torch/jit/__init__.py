@@ -935,6 +935,14 @@ def createResolutionCallbackFromClosure(fn):
     return env
 
 
+def _make_strong_submodule(field, module, parent):
+    if field not in parent._modules:
+        # It's not a submodule, don't do anything
+        return None
+
+    return _make_strong(module, _methods=['forward'])
+
+
 def _try_compile_fn(fn):
     if inspect.ismethod(fn) or _is_ignored_function(fn):
         # Skip methods
@@ -1543,14 +1551,7 @@ if _enabled:
                     object.__setattr__(self, name, item)
                 elif item is self:
                     continue
-                elif isinstance(item, Parameter):
-                    ScriptModule.__setattr__(self, name, item)
-                elif isinstance(item, Module):
-                    if torch._C._jit_recursive_script():
-                        # make it a ScriptModule
-                        item = _make_strong(item, from_weak_type=False)
-                    ScriptModule.__setattr__(self, name, item)
-                elif isinstance(item, Attribute):
+                elif isinstance(item, (Parameter, Module, Attribute)):
                     ScriptModule.__setattr__(self, name, item)
 
             # Copy buffers
@@ -1639,15 +1640,28 @@ def _get_module_stubs(cls):
     return stubs
 
 
-def _make_strong(mod, from_weak_type=True):
+def _convert_to_script_module(mod, methods=None):
     """
-    Converts a weak module into a subclass of ScriptModule
+    Makes a ScriptModule from an nn.Module. If `_methods` is provided,
+    these methods are treated as @script_methods. If not, it defaults to
+    `('forward',)`. Methods accessed in forward are scripted on demand if
+    `_enable_recursive_script()` is used.
+    """
+    if methods is None:
+        methods = ('forward',)
+    return _make_strong(mod, _methods=methods)
+
+
+def _make_strong(mod, _methods=None):
+    """
+    Converts a weak module into a subclass of ScriptModule. If `_methods` is
+    provided, only these methods are treated as @script_methods.
     """
     if mod in _jit_internal.weak_modules:
         return _jit_internal.weak_modules[mod]
 
     cls = type(mod)
-    if from_weak_type:
+    if _methods is None:
         stubs = _jit_internal.weak_types.get(cls)["method_stubs"]
         if stubs is None:
             # Generate stubs and and store on weak_types in case this type is
@@ -1655,7 +1669,11 @@ def _make_strong(mod, from_weak_type=True):
             stubs = _get_weak_stubs(cls)
             _jit_internal.weak_types[cls]["method_stubs"] = stubs
     else:
-        stubs = _get_module_stubs(cls)
+        stubs = []
+        for method in _methods:
+            func = get_function_from_type(cls, method)
+            stub = script_method(func, createResolutionCallbackFromClosure(func))
+            stubs.append(stub)
 
     # Construct a new type that inherits from both WeakScriptModuleProxy and
     # original_type so that isinstance checks work correctly
