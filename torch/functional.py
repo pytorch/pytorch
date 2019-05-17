@@ -743,8 +743,41 @@ def chain_matmul(*matrices):
     return torch._C._VariableFunctions.chain_matmul(matrices)
 
 
-def interp1d(x_in, y_in, x_out):
-    return torch._C._VariableFunctions.interp1d(x_in, y_in, x_out)
+def interp1d(x_out, x_in, y_in):
+    r"""1-D linear interpolation.
+    Returns the 1-D piecewise linear interpolant to a function
+    with given discrete data points (`x_in`, `y_in`), evaluated at `x_out`.
+
+    Args:
+        x_out: 1-D tensor. The x-coordinates at which to evaluate the interpolated values.
+        x_in: 1-D tensor. The x-coordinates of the data points, must be increasing.
+        y_in: 1-D tensor. The y-coordinates of the data points, same length as `x_in`.
+
+    Output:
+        y_out: 1-D tensor in torch.float64. The interpolated values, same shape as `x_out`.
+
+    Warning:
+        RuntimeError
+        If `x_in` and `y_in` have different length
+        If `x_in` or `y_in` are not 1-D tensor
+        If x_out is not in the range of x_in (A.K.A. "extrapolation")
+        If x_in is not monotonically increasing.
+
+    Note:
+        current interp1d doesn't support extrapolation.
+
+    Example:
+        >>> x_in = torch.Tensor([1, 2, 3])
+        >>> y_in = torch.Tensor([10, 20, 30])
+        >>> torch.interp1d(torch.Tensor([1.5, 2.0]), x_in, y_in)
+        tensor([15., 20.], dtype=torch.float64)
+
+    """
+    x_out = x_out.double()
+    x_in = x_in.double()
+    y_in = y_in.double()
+
+    return torch._C._VariableFunctions.interp1d(x_out, x_in, y_in)
 
 
 def pstrf(a, upper=True, out=None):

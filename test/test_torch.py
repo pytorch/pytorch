@@ -5872,6 +5872,92 @@ class _TestTorchMixin(object):
     def test_chain_matmul(self):
         self._test_chain_matmul(self, cast=lambda x: x)
 
+    def test_interp1d(self):
+
+        x_in = np.array([1.0, 2.0, 3.0, 4.0])
+        y_in = np.array([10.0, 20.0, 30.0, 40.0])
+        ref_y_out = np.interp(np.array([1.0, 2.0, 3.0, 4.0]), x_in, y_in)
+        result_y_out = torch.interp1d(torch.Tensor([1.0, 2.0, 3.0, 4.0]),
+                                      torch.from_numpy(x_in),
+                                      torch.from_numpy(y_in))
+        result_y_out = result_y_out.detach().numpy()
+        np.testing.assert_allclose(result_y_out, ref_y_out, atol=1e-5)
+
+        lower_bound = np.random.randint(1000)
+        upper_bound = np.random.randint(10000) + lower_bound
+        for _ in range(100):
+            x_in = np.random.rand(100) * (upper_bound - lower_bound) + lower_bound
+            y_in = np.sin(x_in) * 1000
+            y_in_tensor = torch.from_numpy(y_in).double()
+
+            # Monotonically increase
+            x_in = np.sort(x_in)
+            x_out = x_in[0] + (x_in[-1] - x_in[0]) * np.random.rand(100)
+            ref_y_out = np.interp(x_out, x_in, y_in)
+            y_out_tensor = torch.interp1d(torch.from_numpy(x_out).double(),
+                                          torch.from_numpy(x_in).double(),
+                                          torch.from_numpy(y_in).double())
+            result_y_out = y_out_tensor.detach().numpy()
+            np.testing.assert_allclose(result_y_out, ref_y_out, atol=1e-5)
+
+    def test_interp1d_args_check(self):
+
+        # x_in is not monotonic
+        x_in = torch.Tensor([1.0, 2.0, 0.0, 3.0])
+        y_in = torch.Tensor([100, 200, -100, -200])
+        x_out = torch.Tensor([1.5, 2.5])
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input x is required to be monotonically increasing"):
+            y_out = torch.interp1d(x_out, x_in, y_in)
+
+        # x_in is not monotonic
+        x_in = torch.Tensor([4.0, 3.0, 2.0, 1.0])
+        y_in = torch.Tensor([100, 200, -100, -200])
+        x_out = torch.Tensor([1.5, 2.5])
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input x is required to be monotonically increasing"):
+            y_out = torch.interp1d(x_out, x_in, y_in)
+
+        # x_in and y_in have different length
+        x_in = torch.Tensor([1.0, 2.0, 3.0])
+        y_in = torch.Tensor([100, 200, -100, -200])
+        x_out = torch.Tensor([1.5, 2.5])
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input x and y should have same length"):
+            y_out = torch.interp1d(x_out, x_in, y_in)
+
+        # x_in dimension is equal to 1.
+        x_in = torch.rand((2, 3))
+        y_in = torch.Tensor([100, 200, -100, -200])
+        x_out = torch.Tensor([1.5, 2.5])
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input x is required to have dim = 1"):
+            y_out = torch.interp1d(x_out, x_in, y_in)
+
+        # y_in dimension is equal to 1.
+        x_in = torch.Tensor([1.0, 2.0, 3.0])
+        y_in = torch.rand((4, 3))
+        x_out = torch.Tensor([1.5, 2.5])
+        with self.assertRaisesRegex(RuntimeError,
+                                    "input y is required to have dim = 1"):
+            y_out = torch.interp1d(x_out, x_in, y_in)
+
+        # x_out is in the range of x_in
+        x_in = torch.Tensor([1.0, 2.0, 3.0])
+        y_in = torch.Tensor([100, -100, -200])
+        x_out = torch.Tensor([0.0])
+        with self.assertRaisesRegex(RuntimeError,
+                                    "current interp1d doesn't support extrapolation !"):
+            y_out = torch.interp1d(x_out, x_in, y_in)
+
+        # x_out is in the range of x_in
+        x_in = torch.Tensor([1.0, 2.0, 3.0])
+        y_in = torch.Tensor([100, -100, -200])
+        x_out = torch.Tensor([4.0])
+        with self.assertRaisesRegex(RuntimeError,
+                                    "current interp1d doesn't support extrapolation !"):
+            y_out = torch.interp1d(x_out, x_in, y_in)
+
     @staticmethod
     def _test_det_logdet_slogdet(self, device):
         def reference_slogdet(M):

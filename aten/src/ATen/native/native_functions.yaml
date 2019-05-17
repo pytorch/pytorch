@@ -372,7 +372,7 @@
 - func: chain_matmul(Tensor[] matrices) -> Tensor
   variants: function
 
-- func: interp1d(Tensor tensor_x_in, Tensor tensor_y_in, Tensor tensor_x_out) -> Tensor
+- func: interp1d(Tensor tensor_x_out, Tensor tensor_x_in, Tensor tensor_y_in) -> Tensor
   variants: function
 
 - func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
