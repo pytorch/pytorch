@@ -12574,6 +12574,11 @@ a")
                 super(Other, self).__init__()
                 self.x = x
                 self.param = torch.nn.Parameter(torch.ones(2, 2))
+                self.some_unscriptable_method
+
+            def some_unscriptable_method():
+                import pdb
+                return 100
 
             def forward(self, t):
                 return t + self.x + self.param
