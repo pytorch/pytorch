@@ -952,8 +952,7 @@ struct to_ir {
   }
 
   Node* create(Symbol kind, const SourceRange& loc, size_t n_outputs) {
-    return graph->create(kind, n_outputs)
-        ->setSourceRange(loc);
+    return graph->create(kind, n_outputs)->setSourceRange(loc);
   }
 
   Value* emitTernaryIf(const TernaryIf& expr) {
@@ -2376,10 +2375,9 @@ struct to_ir {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes) {
     // Build the fork node without inputs
-    auto fork_node =
-        method.graph()
-            ->insertNode(method.graph()->create(prim::fork, 1))
-            ->setSourceRange(loc);
+    auto fork_node = method.graph()
+                         ->insertNode(method.graph()->create(prim::fork, 1))
+                         ->setSourceRange(loc);
     auto body_block = fork_node->addBlock();
 
     // Build a template of the graph to be executed
@@ -2980,8 +2978,7 @@ struct FunctionResolver : public Resolver {
       functionTable_;
 };
 
-CompilationUnit::CompilationUnit(const std::string& source)
-{
+CompilationUnit::CompilationUnit(const std::string& source) {
   // calles the define with native resolver to generate the graph for functions
   define(source, nativeResolver(), nullptr);
 }
