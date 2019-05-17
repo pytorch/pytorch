@@ -125,6 +125,8 @@ Parallelism
 ----------------------------------
 .. autofunction:: get_num_threads
 .. autofunction:: set_num_threads
+.. autofunction:: get_num_interop_threads
+.. autofunction:: set_num_interop_threads
 
 Locally disabling gradient computation
 --------------------------------------
