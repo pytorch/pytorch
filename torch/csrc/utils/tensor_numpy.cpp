@@ -261,8 +261,8 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 
     // Extract the `strides` attribute
     PyObject *py_strides = PyDict_GetItemString(cuda_dict, "strides");
-    if (py_strides != nullptr and py_strides != Py_None) {
-      if (PySequence_Length(py_shape) == -1 or PySequence_Length(py_shape) != ndim) {
+    if (py_strides != nullptr && py_strides != Py_None) {
+      if (PySequence_Length(py_shape) == -1 || PySequence_Length(py_shape) != ndim) {
         throw TypeError("strides must be a sequence of the same length as shape");
       }
       std::vector<npy_intp> npy_strides(ndim);
