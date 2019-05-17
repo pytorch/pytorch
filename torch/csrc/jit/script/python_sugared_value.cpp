@@ -330,6 +330,16 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
   return result;
 }
 
+void ModuleValue::setAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field,
+    Value* newValue) {
+  // Forward to SimpleValue::setAttr
+  SimpleValue simple(self_);
+  simple.setAttr(loc, m, field, newValue);
+}
+
 std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     const SourceRange& loc,
     Function& caller,
