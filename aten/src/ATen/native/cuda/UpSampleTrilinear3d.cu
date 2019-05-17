@@ -237,8 +237,8 @@ static void upsample_trilinear3d_out_cuda_template(
       output_depth > 0 && output_height > 0 && output_width > 0);
 
   const int num_kernels = output_depth * output_height * output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  const int num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -269,7 +269,7 @@ static void upsample_trilinear3d_out_cuda_template(
                 odata);
       });
 
-      AT_CUDA_CHECK(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 static void upsample_trilinear3d_backward_out_cuda_template(
@@ -322,8 +322,8 @@ static void upsample_trilinear3d_backward_out_cuda_template(
   grad_input.zero_();
 
   const int num_kernels = output_depth * output_height * output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  const int num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -356,7 +356,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
                 odata);
       });
 
-      AT_CUDA_CHECK(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace
