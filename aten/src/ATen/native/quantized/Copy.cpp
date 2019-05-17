@@ -9,8 +9,8 @@ namespace at {
 namespace native {
 Tensor& _s_copy__quantized(Tensor& self, const Tensor& src, bool /* unused */) {
   TORCH_CHECK(
-      self.scalar_type() == at::kQInt8,
-      "Quantized copy only works with kQInt8 as target Tensor");
+      self.scalar_type() == at::kQUInt8,
+      "Quantized copy only works with kQUInt8 as target Tensor");
   TORCH_CHECK(
       src.scalar_type() == at::kFloat,
       "Quantized copy only works with kFloat as source Tensor");
