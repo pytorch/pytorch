@@ -84,8 +84,9 @@ with compiling PyTorch from source.
 
                               !! WARNING !!
 '''
-CUDA_HOME = _find_cuda_home()
-CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
+HIP_COMP = os.path.exists('/opt/rocm')
+CUDA_HOME = ('/opt/rocm' if HIP_COMP else find_cuda_home())
+CUDNN_HOME = ('/opt/rocm/miopen' if HIP_COMP else (os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')))
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
 # it the below pattern.
@@ -97,6 +98,13 @@ COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF2_OPERATORS__',
 ]
 
+COMMON_HIPCC_FLAGS = [
+    '-fPIC',
+    '-D__HIP_PLATFORM_HCC__=1',
+    '-DCUDA_HAS_FP16=1',
+    '-D__HIP_NO_HALF_OPERATORS__=1',
+    '-D__HIP_NO_HALF_CONVERSIONS__=1',
+]
 
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
@@ -236,7 +244,7 @@ class BuildExtension(build_ext, object):
             self._add_gnu_cpp_abi_flag(extension)
 
         # Register .cu and .cuh as valid source extensions.
-        self.compiler.src_extensions += ['.cu', '.cuh']
+        self.compiler.src_extensions += ['.cu', '.cuh', '.hip']
         # Save the original _compile method for later.
         if self.compiler.compiler_type == 'msvc':
             self.compiler._cpp_extensions += ['.cu', '.cuh']
@@ -251,19 +259,23 @@ class BuildExtension(build_ext, object):
             try:
                 original_compiler = self.compiler.compiler_so
                 if _is_cuda_file(src):
-                    nvcc = _join_cuda_home('bin', 'nvcc')
+                    nvcc = (_join_cuda_home('bin', 'hipcc') if HIP_COMP else _join_cuda_home('bin', 'nvcc'))
                     if not isinstance(nvcc, list):
                         nvcc = [nvcc]
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
-                    cflags = COMMON_NVCC_FLAGS + ['--compiler-options', "'-fPIC'"] + cflags
+                    if HIP_COMP:
+                       cflags = COMMON_HIPCC_FLAGS + cflags
+                    else
+                       cflags = COMMON_NVCC_FLAGS + ['--compiler-options', "'-fPIC'"] + cflags
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
-                # NVCC does not allow multiple -std to be passed, so we avoid
-                # overriding the option if the user explicitly passed it.
-                if not any(flag.startswith('-std=') for flag in cflags):
-                    cflags.append('-std=c++11')
+                if not HIP_COMP:
+                    # NVCC does not allow multiple -std to be passed, so we avoid
+                    # overriding the option if the user explicitly passed it.
+                    if not any(flag.startswith('-std=') for flag in cflags):
+                        cflags.append('-std=c++11')
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
             finally:
@@ -542,7 +554,10 @@ def library_paths(cuda=False):
         paths.append(lib_path)
 
     if cuda:
-        lib_dir = 'lib/x64' if IS_WINDOWS else 'lib64'
+        if HIP_COMP:
+            lib_dir = 'lib'
+        else
+            lib_dir = 'lib/x64' if IS_WINDOWS else 'lib64'
         paths.append(_join_cuda_home(lib_dir))
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, lib_dir))
@@ -1129,4 +1144,4 @@ def _join_cuda_home(*paths):
 
 
 def _is_cuda_file(path):
-    return os.path.splitext(path)[1] in ['.cu', '.cuh']
+    return os.path.splitext(path)[1] in ['.cu', '.cuh', '.hip']
