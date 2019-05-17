@@ -257,7 +257,7 @@ Tensor & normal_cpu_(Tensor& self, double mean, double std, Generator * generato
   return at::legacy::th::_th_normal_(self, mean, std, generator);
 }
 
-Tensor & cauchy_(Tensor& self, double median, double sigma, Generator * generator) {
+Tensor & cauchy_cpu_(Tensor& self, double median, double sigma, Generator * generator) {
   return at::legacy::th::_th_cauchy_(self, median, sigma, generator);
 }
 
