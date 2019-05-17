@@ -108,7 +108,7 @@ struct TORCH_API Function {
   }
 
   void check_single_output() {
-    AT_CHECK(
+    TORCH_CHECK(
         graph()->outputs().size() == 1,
         "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
   }
@@ -184,6 +184,10 @@ struct TORCH_API Function {
 // are used to implement their Methods
 
 struct TORCH_API CompilationUnit {
+  // constructor that takes a set of functions to compile using the native resolver
+  explicit CompilationUnit(const std::string& source);
+  CompilationUnit() = default;
+
   std::shared_ptr<Function> find_function(const std::string& name) const {
     auto it = dict_.find(name);
     if (it == dict_.end())
@@ -293,7 +297,7 @@ struct TORCH_API CompilationUnit {
 
  private:
   Function& register_function(std::shared_ptr<Function> fn) {
-    AT_CHECK(
+    TORCH_CHECK(
         0 == dict_.count(fn->name()),
         "method '",
         fn->name(),

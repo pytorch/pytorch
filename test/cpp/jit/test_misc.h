@@ -642,22 +642,22 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
     const auto& sizes = std::get<1>(input);
     if (fn == "test") {
       found_test = true;
-      AT_CHECK(sizes.size() == 1);
-      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes.size() == 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
     } else if (fn == "test::pow") {
       found_pow = true;
-      AT_CHECK(sizes.size() == 2);
-      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
-      AT_CHECK(sizes[1].empty());
+      TORCH_CHECK(sizes.size() == 2);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes[1].empty());
     } else if (fn.find("::mul") != std::string::npos) {
       found_mul = true;
-      AT_CHECK(sizes.size() > 1);
-      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes.size() > 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
     }
   }
-  AT_CHECK(found_test);
-  AT_CHECK(found_pow);
-  AT_CHECK(found_mul);
+  TORCH_CHECK(found_test);
+  TORCH_CHECK(found_pow);
+  TORCH_CHECK(found_mul);
 }
 
 std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
@@ -690,6 +690,8 @@ void testRecordFunction() {
         traced_inputs.push_back(
             std::make_tuple(std::string(getFullName(&fn)), sizes));
       }, [](const autograd::profiler::RecordFunction&) {}, true);
+
+  autograd::profiler::setSamplingProbability(1.0);
 
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
@@ -736,7 +738,7 @@ void testAutogradProfiler() {
   for (size_t pos = 0; (pos = result.find("tanh", pos)) != std::string::npos;
        count++, pos++) {
   }
-  AT_CHECK(count == 200);
+  TORCH_CHECK(count == 200);
 }
 
 void testNoneSchemaMatch() {
@@ -797,7 +799,7 @@ void testModuleConversion() {
     // test cuda to cpu for params and buffers
     m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
     m->register_buffer("bar", torch::ones({}, at::kCUDA));
-    
+
     m->to(at::kCUDA);
     m->to(at::kCPU);
     AT_ASSERT(m->get_parameter("foo").data().device().is_cpu());
@@ -807,7 +809,7 @@ void testModuleConversion() {
     // test cpu to cuda for params and buffers
     m->register_parameter("foo", torch::ones({}), false);
     m->register_buffer("bar", torch::ones({}));
-    
+
     m->to(at::kCUDA);
     AT_ASSERT(m->get_parameter("foo").data().device().is_cuda());
     AT_ASSERT(m->get_buffer("bar").data().device().is_cuda());
@@ -842,7 +844,9 @@ graph(%a):
 }
 
 static void checkShape(Node* n, std::vector<int64_t> expected) {
-  auto tp = n->output()->type();
+  auto profile = n->inputs().at(0)->node();
+  AT_ASSERT(profile->kind() == prim::profile);
+  auto tp = profile->output()->type();
   auto ptp = tp->expect<ProfiledTensorType>();
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
@@ -879,7 +883,7 @@ void testProfiler() {
   auto mm =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mm; });
   ASSERT_NE(mm, end);
-  std::vector<int64_t> mm_expected{4, 2048};
+  std::vector<int64_t> mm_expected{4, 256};
   std::vector<int64_t> eltwise{4, 512};
   checkShape(*mm, mm_expected);
   auto sigmoid_n = std::find_if(

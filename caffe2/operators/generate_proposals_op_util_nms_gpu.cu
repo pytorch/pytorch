@@ -29,6 +29,7 @@ __launch_bounds__(
         const Box* d_desc_sorted_boxes,
         const int nboxes,
         const float thresh,
+        const bool legacy_plus_one,
         const int mask_ld,
         int* d_delete_mask) {
   // Storing boxes used by this CUDA block in the shared memory
@@ -45,7 +46,8 @@ __launch_bounds__(
       if (threadIdx.y == 0) {
         const Box box = d_desc_sorted_boxes[i_to_load];
         shared_i_areas[threadIdx.x] =
-            (box.x2 - box.x1 + 1.0f) * (box.y2 - box.y1 + 1.0f);
+            (box.x2 - box.x1 + float(int(legacy_plus_one))) *
+            (box.y2 - box.y1 + float(int(legacy_plus_one)));
         shared_i_boxes[threadIdx.x] = box;
       }
     }
@@ -68,7 +70,8 @@ __launch_bounds__(
           const Box j_box = d_desc_sorted_boxes[j];
           const Box i_box = shared_i_boxes[threadIdx.x];
           const float j_area =
-              (j_box.x2 - j_box.x1 + 1.0f) * (j_box.y2 - j_box.y1 + 1.0f);
+              (j_box.x2 - j_box.x1 + float(int(legacy_plus_one))) *
+              (j_box.y2 - j_box.y1 + float(int(legacy_plus_one)));
           const float i_area = shared_i_areas[threadIdx.x];
           // The following code will not be valid with empty boxes
           if (i_area == 0.0f || j_area == 0.0f)
@@ -79,8 +82,8 @@ __launch_bounds__(
           const float yy2 = fminf(i_box.y2, j_box.y2);
 
           // fdimf computes the positive difference between xx2+1 and xx1
-          const float w = fdimf(xx2 + 1.0f, xx1);
-          const float h = fdimf(yy2 + 1.0f, yy1);
+          const float w = fdimf(xx2 + float(int(legacy_plus_one)), xx1);
+          const float h = fdimf(yy2 + float(int(legacy_plus_one)), yy1);
           const float intersection = w * h;
 
           // Testing for a/b > t
@@ -109,6 +112,7 @@ void nms_gpu_upright(
     const float* d_desc_sorted_boxes_float_ptr,
     const int N,
     const float thresh,
+    const bool legacy_plus_one,
     int* d_keep_sorted_list,
     int* h_nkeep,
     TensorCUDA& dev_delete_mask,
@@ -132,7 +136,7 @@ void nms_gpu_upright(
       CAFFE_CUDA_NUM_THREADS_2D,
       0,
       context->cuda_stream()>>>(
-      d_desc_sorted_boxes, N, thresh, mask_ld, d_delete_mask);
+      d_desc_sorted_boxes, N, thresh, legacy_plus_one, mask_ld, d_delete_mask);
 
   host_delete_mask.Resize(N * mask_ld);
   int* h_delete_mask = host_delete_mask.template mutable_data<int>();
@@ -554,6 +558,7 @@ void nms_gpu(
     const float* d_desc_sorted_boxes,
     const int N,
     const float thresh,
+    const bool legacy_plus_one,
     int* d_keep_sorted_list,
     int* h_nkeep,
     TensorCUDA& dev_delete_mask,
@@ -566,6 +571,7 @@ void nms_gpu(
         d_desc_sorted_boxes,
         N,
         thresh,
+        legacy_plus_one,
         d_keep_sorted_list,
         h_nkeep,
         dev_delete_mask,
