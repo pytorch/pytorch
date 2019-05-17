@@ -338,7 +338,7 @@ struct THCCachingAllocator
     std::lock_guard<std::recursive_mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     if (!block) {
-      AT_ERROR("invalid device pointer: %p", ptr);
+      AT_ERROR("invalid device pointer: ", ptr);
     }
     while (block->prev) {
       block = block->prev;
@@ -381,7 +381,7 @@ struct THCCachingAllocator
     std::lock_guard<std::recursive_mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     if (!block) {
-      AT_ERROR("invalid device pointer: %p", ptr);
+      AT_ERROR("invalid device pointer: ", ptr);
     }
     if (stream.stream() == block->stream) {
       // ignore uses on the allocation stream, since those don't require any
