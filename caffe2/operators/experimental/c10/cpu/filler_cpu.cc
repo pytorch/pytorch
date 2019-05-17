@@ -145,82 +145,27 @@ void uniform_fill_op_cpu_impl(
 
 static auto registry =
     c10::RegisterOperators()
-        .op(FunctionSchema(
-                "_c10_experimental::ConstantFill",
-                "",
-                (std::vector<c10::Argument>{
-                    c10::Argument("inputs", ListType::ofTensors()),
-                    c10::Argument("output"),
-                    c10::Argument("shape", ListType::ofInts()),
-                    c10::Argument("extra_shape", ListType::ofInts()),
-                    c10::Argument("input_as_shape", BoolType::get()),
-                    c10::Argument("dtype", IntType::get()),
-                    c10::Argument("value", NumberType::get())}),
-                (std::vector<c10::Argument>{})),
+        .op("_c10_experimental::ConstantFill",
             c10::kernel<
                 decltype(constant_fill_op_cpu_impl),
                 &constant_fill_op_cpu_impl>(),
             c10::dispatchKey(CPUTensorId()))
-        .op(FunctionSchema(
-                "_c10_experimental::UniformFill",
-                "",
-                (std::vector<c10::Argument>{
-                    c10::Argument("inputs", ListType::ofTensors()),
-                    c10::Argument("output"),
-                    c10::Argument("shape", ListType::ofInts()),
-                    c10::Argument("extra_shape", ListType::ofInts()),
-                    c10::Argument("input_as_shape", BoolType::get()),
-                    c10::Argument("min", FloatType::get()),
-                    c10::Argument("max", FloatType::get())}),
-                (std::vector<c10::Argument>{})),
+        .op("_c10_experimental::UniformFill",
             c10::kernel<
                 decltype(uniform_fill_op_cpu_impl),
                 &uniform_fill_op_cpu_impl>(),
             c10::dispatchKey(CPUTensorId()))
-        .op(FunctionSchema(
-                "_c10_experimental::GivenTensorFill",
-                "",
-                (std::vector<c10::Argument>{
-                    c10::Argument("inputs", ListType::ofTensors()),
-                    c10::Argument("output"),
-                    c10::Argument("shape", ListType::ofInts()),
-                    c10::Argument("extra_shape", ListType::ofInts()),
-                    c10::Argument("input_as_shape", BoolType::get()),
-                    c10::Argument("values"),
-                }),
-                (std::vector<c10::Argument>{})),
+        .op("_c10_experimental::GivenTensorFill",
             c10::kernel<
                 decltype(given_tensor_fill_op_cpu_impl<float, CPUContext>),
                 &given_tensor_fill_op_cpu_impl<float, CPUContext>>(),
             c10::dispatchKey(CPUTensorId()))
-        .op(FunctionSchema(
-                "_c10_experimental::GivenTensorIntFill",
-                "",
-                (std::vector<c10::Argument>{
-                    c10::Argument("inputs", ListType::ofTensors()),
-                    c10::Argument("output"),
-                    c10::Argument("shape", ListType::ofInts()),
-                    c10::Argument("extra_shape", ListType::ofInts()),
-                    c10::Argument("input_as_shape", BoolType::get()),
-                    c10::Argument("values"),
-                }),
-                (std::vector<c10::Argument>{})),
+        .op("_c10_experimental::GivenTensorIntFill",
             c10::kernel<
                 decltype(given_tensor_fill_op_cpu_impl<int, CPUContext>),
                 &given_tensor_fill_op_cpu_impl<int, CPUContext>>(),
             c10::dispatchKey(CPUTensorId()))
-        .op(FunctionSchema(
-                "_c10_experimental::GivenTensorInt64Fill",
-                "",
-                (std::vector<c10::Argument>{
-                    c10::Argument("inputs", ListType::ofTensors()),
-                    c10::Argument("output"),
-                    c10::Argument("shape", ListType::ofInts()),
-                    c10::Argument("extra_shape", ListType::ofInts()),
-                    c10::Argument("input_as_shape", BoolType::get()),
-                    c10::Argument("values"),
-                }),
-                (std::vector<c10::Argument>{})),
+        .op("_c10_experimental::GivenTensorInt64Fill",
             c10::kernel<
                 decltype(given_tensor_fill_op_cpu_impl<int, CPUContext>),
                 &given_tensor_fill_op_cpu_impl<int, CPUContext>>(),
