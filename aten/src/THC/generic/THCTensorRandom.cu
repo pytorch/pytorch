@@ -8,42 +8,6 @@
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
-void THCTensor_(normal)(THCState* state, THCTensor *self_, double mean, double stdv)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  ptrdiff_t size = THCTensor_(nElement)(state, self_);
-  if (size == 0) return;
-  THCGenerator* gen = THCRandom_getGenerator(state);
-  THCTensor *self = THCTensor_(newContiguous)(state, self_);
-  scalar_t *data = THCTensor_(data)(state, self);
-
-  generate_normal<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, mean, stdv);
-
-  THCTensor_(freeCopyTo)(state, self, self_);
-};
-
-void THCTensor_(normal_means)(THCState *state, THCTensor *self, THCTensor *means, double stddev) {
-  THCTensor_(resizeAs)(state, self, means);
-  THCTensor_(normal)(state, self, 0, stddev);
-  THCTensor_(cadd)(state, self, self, ScalarConvert<int, scalar_t>::to(1), means);
-}
-
-void THCTensor_(normal_stddevs)(THCState *state, THCTensor *self, double mean, THCTensor *stddevs)
-{
-  THCTensor_(resizeAs)(state, self, stddevs);
-  THCTensor_(normal)(state, self, 0, 1);
-  THCTensor_(cmul)(state, self, self, stddevs);
-  THCTensor_(add)(state, self, self, ScalarConvert<double, scalar_t>::to(mean));
-}
-
-void THCTensor_(normal_means_stddevs)(THCState *state, THCTensor *self, THCTensor *means, THCTensor *stddevs)
-{
-  THCTensor_(resizeAs)(state, self, means);
-  THCTensor_(normal)(state, self, 0, 1);
-  THCTensor_(cmul)(state, self, self, stddevs);
-  THCTensor_(cadd)(state, self, self, ScalarConvert<int, scalar_t>::to(1), means);
-}
 
 void THCTensor_(logNormal)(THCState* state, THCTensor *self_, double mean, double stdv)
 {

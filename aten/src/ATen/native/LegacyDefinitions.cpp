@@ -253,7 +253,7 @@ Tensor & uniform_cpu_(Tensor& self, double from, double to, Generator * generato
   return at::legacy::th::_th_uniform_(self, from, to, generator);
 }
 
-Tensor & normal_(Tensor& self, double mean, double std, Generator * generator) {
+Tensor & normal_cpu_(Tensor& self, double mean, double std, Generator * generator) {
   return at::legacy::th::_th_normal_(self, mean, std, generator);
 }
 
@@ -712,27 +712,27 @@ Tensor pow(Scalar self, const Tensor & exponent) {
   return at::legacy::th::_th_pow(self, exponent);
 }
 
-Tensor & normal_out(Tensor & output, const Tensor & mean, double std, Generator * generator) {
+Tensor & normal_out_cpu(Tensor & output, const Tensor & mean, double std, Generator * generator) {
   return at::legacy::th::_th_normal_out(output, mean, std, generator);
 }
 
-Tensor normal(const Tensor & mean, double std, Generator * generator) {
+Tensor normal_cpu(const Tensor & mean, double std, Generator * generator) {
   return at::legacy::th::_th_normal(mean, std, generator);
 }
 
-Tensor & normal_out(Tensor & output, double mean, const Tensor & std, Generator * generator) {
+Tensor & normal_out_cpu(Tensor & output, double mean, const Tensor & std, Generator * generator) {
   return at::legacy::th::_th_normal_out(output, mean, std, generator);
 }
 
-Tensor normal(double mean, const Tensor & std, Generator * generator) {
+Tensor normal_cpu(double mean, const Tensor & std, Generator * generator) {
   return at::legacy::th::_th_normal(mean, std, generator);
 }
 
-Tensor & normal_out(Tensor & output, const Tensor & mean, const Tensor & std, Generator * generator) {
+Tensor & normal_out_cpu(Tensor & output, const Tensor & mean, const Tensor & std, Generator * generator) {
   return at::legacy::th::_th_normal_out(output, mean, std, generator);
 }
 
-Tensor normal(const Tensor & mean, const Tensor & std, Generator * generator) {
+Tensor normal_cpu(const Tensor & mean, const Tensor & std, Generator * generator) {
   return at::legacy::th::_th_normal(mean, std, generator);
 }
 
