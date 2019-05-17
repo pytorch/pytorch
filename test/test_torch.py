@@ -8200,6 +8200,98 @@ class _TestTorchMixin(object):
                 A_LU, pivots = fn(torch.lu, (2, 0, 0))
                 self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
+    def check_single_matmul(self, x, y, shape):
+        a = np.array(x, copy=False)
+        b = np.array(y, copy=False)
+        expected = np.matmul(a, b)
+        self.assertTrue(expected.flags['C_CONTIGUOUS'])
+
+        ans = torch.matmul(x, y)
+        self.assertTrue(ans.is_contiguous())
+        self.assertTrue(np.array_equal(ans, expected))
+
+        out = torch.zeros(*shape, dtype=torch.int64)
+        ans = torch.matmul(x, y, out=out)
+        self.assertIs(ans, out)
+        self.assertTrue(ans.is_contiguous())
+        self.assertTrue(np.array_equal(ans, expected))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_matmul_small_brute_force_1d_Nd(self):
+        # Issue #20452: range(0, 10) does not work.
+        n = 1
+        for m in range(1, 8):
+            for p in range(1, 8):
+                for o in range(1, 5):
+                    # 1d, 3d, inner dimensions C
+                    x = torch.arange(m)
+                    y = torch.arange(o * m * p).reshape(o, m, p)
+                    self.check_single_matmul(x, y, (o, n, p))
+
+                    # 1d, 3d, inner dimensions Fortran
+                    x = torch.arange(m)
+                    y = torch.arange(o * p * m).reshape(o, p, m).transpose(-1, -2)
+                    self.check_single_matmul(x, y, (o, n, p))
+
+                    # 1d, 3d, inner dimensions non-contiguous
+                    x = torch.arange(2 * m)[::2]
+                    y = torch.arange(o * m * 2 * p).reshape(o, m, 2 * p)[:, :, ::2]
+                    self.check_single_matmul(x, y, (o, n, p))
+
+                    for r in range(1, 5):
+                        # 1d, 4d, inner dimensions C
+                        x = torch.arange(m)
+                        y = torch.arange(r * o * m * p).reshape(r, o, m, p)
+                        self.check_single_matmul(x, y, (r, o, n, p))
+
+                        # 1d, 4d, inner dimensions Fortran
+                        x = torch.arange(m)
+                        y = torch.arange(r * o * p * m).reshape(r, o, p, m).transpose(-1, -2)
+                        self.check_single_matmul(x, y, (r, o, n, p))
+
+                        # 1d, 4d, inner dimensions non-contiguous
+                        x = torch.arange(2 * m)[::2]
+                        y = torch.arange(r * o * m * 2 * p).reshape(r, o, m, 2 * p)[:, :, :, ::2]
+                        self.check_single_matmul(x, y, (r, o, n, p))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_matmul_small_brute_force_2d_Nd(self):
+        # Issue #20452: range(0, 10) does not work.
+        for n in range(1, 5):
+            for m in range(1, 5):
+                for p in range(1, 5):
+                    for o in range(1, 3):
+                        # 2d, 3d, inner dimensions C
+                        x = torch.arange(n * m).reshape(n, m)
+                        y = torch.arange(o * m * p).reshape(o, m, p)
+                        self.check_single_matmul(x, y, (o, n, p))
+
+                        # 2d, 3d, inner dimensions Fortran
+                        x = torch.arange(m * n).reshape(m, n).transpose(-1, -2)
+                        y = torch.arange(o * p * m).reshape(o, p, m).transpose(-1, -2)
+                        self.check_single_matmul(x, y, (o, n, p))
+
+                        # 2d, 3d, inner dimensions non-contiguous
+                        x = torch.arange(n * 2 * m).reshape(n, 2 * m)[:, ::2]
+                        y = torch.arange(o * m * 2 * p).reshape(o, m, 2 * p)[:, :, ::2]
+                        self.check_single_matmul(x, y, (o, n, p))
+
+                        for r in range(1, 2):
+                            # 2d, 4d, inner dimensions C
+                            x = torch.arange(n * m).reshape(n, m)
+                            y = torch.arange(r * o * m * p).reshape(r, o, m, p)
+                            self.check_single_matmul(x, y, (r, o, n, p))
+
+                            # 2d, 4d, inner dimensions Fortran
+                            x = torch.arange(m * n).reshape(m, n).transpose(-1, -2)
+                            y = torch.arange(r * o * p * m).reshape(r, o, p, m).transpose(-1, -2)
+                            self.check_single_matmul(x, y, (r, o, n, p))
+
+                            # 2d, 4d, inner dimensions non-contiguous
+                            x = torch.arange(n * 2 * m).reshape(n, 2 * m)[:, ::2]
+                            y = torch.arange(r * o * m * 2 * p).reshape(r, o, m, 2 * p)[:, :, :, ::2]
+                            self.check_single_matmul(x, y, (r, o, n, p))
+
     @skipIfRocm
     def test_blas_alpha_beta_empty(self):
         for device in torch.testing.get_all_device_types():
