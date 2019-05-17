@@ -217,7 +217,7 @@ private:
         }
         return tensor_list[0].type_id();
       } else {
-        return first_tensor_arg.unsafeToTensorImplRef()->type_id();
+        return first_tensor_arg.unsafeToTensorImpl()->type_id();
       }
     }
   };
