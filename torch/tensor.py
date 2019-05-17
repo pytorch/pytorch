@@ -18,6 +18,11 @@ from numbers import Number
 # torch/__init__.py.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C._TensorBase):
+    # for matplotlib (using numpy interfaces) compatibility
+    @property
+    def ndim(self):
+        return self.dim()
+
     def __deepcopy__(self, memo):
         if not self.is_leaf:
             raise RuntimeError("Only Tensors created explicitly by the user "
