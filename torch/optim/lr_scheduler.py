@@ -700,7 +700,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         """Step could be called after every batch update
 
         Example:
-            >>> scheduler = ConsineAnnealingWarmRestarts(optimizer, T_0, T_mult)
+            >>> scheduler = CosineAnnealingWarmRestarts(optimizer, T_0, T_mult)
             >>> iters = len(dataloader)
             >>> for epoch in range(20):
             >>>     for i, sample in enumerate(dataloader):
