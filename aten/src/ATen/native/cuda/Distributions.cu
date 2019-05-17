@@ -291,45 +291,6 @@ void bernoulli_tensor_cuda_kernel(
 }
 
 template<typename scalar_t>
-void bernoulli_scalar_cuda_kernel(
-    at::Tensor& ret, double p_,
-    std::pair<uint64_t, uint64_t> seeds) {
-  float p = static_cast<float>(p_);
-  // The template argument `4` below indicates that we want to operate on four
-  // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
-  at::cuda::CUDA_tensor_apply1<scalar_t, 4>(
-      ret, [seeds, p] __device__(
-        int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4) {
-        curandStatePhilox4_32_10_t state;
-        curand_init(
-            seeds.first,
-            blockIdx.x * blockDim.x + threadIdx.x,
-            seeds.second,
-            &state);
-        // See Note [Register spilling in curand call for CUDA < 10]
-        float4 rand = curand_uniform4(&state);
-        switch (n) {
-          case 4: {
-            v4 = static_cast<scalar_t>(rand.w <= p);
-            // fallthrough
-          }
-          case 3: {
-            v3 = static_cast<scalar_t>(rand.z <= p);
-            // fallthrough
-          }
-          case 2: {
-            v2 = static_cast<scalar_t>(rand.y <= p);
-            // fallthrough
-          }
-          case 1: {
-            v1 = static_cast<scalar_t>(rand.x <= p);
-          }
-        }
-      }
-    );
-}
-
-template<typename scalar_t>
 void dirichlet_scalar_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& gamma) {
@@ -391,15 +352,6 @@ Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen) {
         using p_t = scalar_t;
         return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, seeds);
       });
-   });
-  return self;
-}
-
-Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
-  TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "bernoulli_scalar_cuda_", [&] {
-    auto seeds = next_philox_seed(gen, 10);
-    bernoulli_scalar_cuda_kernel<scalar_t>(self, p, seeds);
    });
   return self;
 }
@@ -597,6 +549,29 @@ void geometric_kernel_cuda(TensorIterator& iter, double p_, Generator* gen_) {
    });
 }
 
+void bernoulli_scalar_cuda_kernel(TensorIterator& iter, double p_, Generator* gen_) {
+  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "bernoulli_scalar_cuda_", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto p = static_cast<accscalar_t>(p_);
+    // define lambda for bernoulli transformation
+    auto bernoulli_func = [p] __device__ (accscalar_t rand) {
+      return static_cast<scalar_t>(rand <= p);
+    };
+    if (std::is_same<scalar_t, double>::value) {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
+        bernoulli_func);
+    } else {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
+        bernoulli_func);
+    }
+   });
+}
+
 Tensor& uniform_cuda_(Tensor& self, double from, double to, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   uniform_kernel_cuda(*iter, from, to, gen);
@@ -718,6 +693,13 @@ Tensor& geometric_cuda_(Tensor& self, double p, Generator* gen) {
   AT_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
   auto iter = TensorIterator::nullary_op(self);
   geometric_kernel_cuda(*iter, p, gen);
+  return self;
+}
+
+Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
+  AT_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
+  auto iter = TensorIterator::nullary_op(self);
+  bernoulli_scalar_cuda_kernel(*iter, p, gen);
   return self;
 }
 
