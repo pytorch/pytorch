@@ -158,51 +158,42 @@ __device__ __forceinline__ static int nearest_neighbor_compute_source_index(
     const float scale,
     int dst_index,
     int input_size) {
-  const int src_index = min<int>(
-      static_cast<int>(floorf(dst_index * scale)), input_size - 1);
+  const int src_index =
+      min<int>(static_cast<int>(floorf(dst_index * scale)), input_size - 1);
   return src_index;
 }
 
-/* just affect UpSampleBicubic2d.cu */
-/* TODO: change width and height order in the arguments */
-/* TODO: maybe change x and y order in the arguments */
-/* TODO: maybe change channel and batch order in the arguments */
+/* Used by UpSampleBicubic2d.cu */
 template <typename scalar_t>
 __device__ __forceinline__ static scalar_t upsample_get_value_bounded(
     const PackedTensorAccessor<scalar_t, 4>& data,
-    int channel,
     int batch,
-    int width,
+    int channel,
     int height,
-    int x,
-    int y) {
-  int access_x =
-      max<int>(min<int>(x, width - 1), static_cast<int>(0));
-  int access_y =
-      max<int>(min<int>(y, height - 1), static_cast<int>(0));
+    int width,
+    int y,
+    int x) {
+  int access_y = max<int>(min<int>(y, height - 1), 0);
+  int access_x = max<int>(min<int>(x, width - 1), 0);
   return data[batch][channel][access_y][access_x];
 }
 
-/* just affect UpSampleBicubic2d.cu */
-/* TODO: change width and height order in the arguments */
-/* TODO: maybe change x and y order in the arguments */
-/* TODO: maybe change channel and batch order in the arguments */
+/* Used by UpSampleBicubic2d.cu */
 template <typename scalar_t, typename accscalar_t>
 __device__ __forceinline__ static void upsample_increment_value_bounded(
     PackedTensorAccessor<scalar_t, 4>& data,
-    int channel,
     int batch,
-    int width,
+    int channel,
     int height,
-    int x,
+    int width,
     int y,
+    int x,
     accscalar_t value) {
-  int access_x =
-      max<int>(min<int>(x, width - 1), static_cast<int>(0));
-  int access_y =
-      max<int>(min<int>(y, height - 1), static_cast<int>(0));
-  /* TODO: result here is trucated to scalar_t, 
-     check: https://github.com/pytorch/pytorch/pull/19630#discussion_r281426912 */
+  int access_y = max<int>(min<int>(y, height - 1), 0);
+  int access_x = max<int>(min<int>(x, width - 1), 0);
+  /* TODO: result here is trucated to scalar_t,
+     check: https://github.com/pytorch/pytorch/pull/19630#discussion_r281426912
+   */
   atomicAdd(
       &data[batch][channel][access_y][access_x], static_cast<scalar_t>(value));
 }

@@ -143,17 +143,24 @@ static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
    END_HANDLE_TH_ERRORS
 }
 
-static Tensor dispatch_contiguous(const Tensor & self) {
+static Tensor dispatch_contiguous(const Tensor & self, at::MemoryFormat memory_format) {
   AutoNoGIL no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  return self.contiguous();
+  return self.contiguous(memory_format);
 }
- static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
+
+static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "contiguous(*, MemoryFormat memory_format=contiguous_format)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  auto memory_format = r.toMemoryFormat(0);
   // avoids touching the GIL or current device if self is already contiguous
-  if (self_.is_contiguous()) {
+  if (self_.is_contiguous(memory_format)) {
     // NOTE: this logic is duplicated from VariableType.cpp. Since we need to
     // record this call to contiguous() in the trace regardless of whether
     // we actually call contiguous here, we need to record this information
@@ -163,13 +170,14 @@ static Tensor dispatch_contiguous(const Tensor & self) {
       auto node = tracer_state->graph->create(jit::aten::contiguous, /*num_outputs=*/0);
       jit::tracer::recordSourceLocation(node);
       jit::tracer::addInputs(node, "self", self_);
+      jit::tracer::addInputs(node, "memory_format", memory_format);
       tracer_state->graph->insertNode(node);
       jit::tracer::addOutput(node, self_);
     }
     Py_INCREF(self);
     return self;
   }
-  return THPVariable_Wrap(dispatch_contiguous(self_));
+  return THPVariable_Wrap(dispatch_contiguous(self_, memory_format));
   END_HANDLE_TH_ERRORS
 }
 
@@ -432,15 +440,21 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
   END_HANDLE_TH_ERRORS
 }
 
-inline bool dispatch_is_contiguous(Tensor & self) {
-  return self.is_contiguous();
+inline bool dispatch_is_contiguous(Tensor & self, MemoryFormat memory_format) {
+  return self.is_contiguous(memory_format);
 }
 
-static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args)
+static PyObject * THPVariable_is_contiguous(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "is_contiguous(*, MemoryFormat memory_format=contiguous_format)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto memory_format = r.toMemoryFormat(0);
   auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
-  return wrap(dispatch_is_contiguous(self));
+  return wrap(dispatch_is_contiguous(self, memory_format));
   END_HANDLE_TH_ERRORS
 }
 
@@ -686,7 +700,7 @@ PyMethodDef variable_methods[] = {
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
-  {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
+  {"contiguous", (PyCFunction)THPVariable_contiguous, METH_VARARGS | METH_KEYWORDS, NULL},
   {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
   {"cuda", (PyCFunction)THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -698,7 +712,7 @@ PyMethodDef variable_methods[] = {
   {"bool", (PyCFunction)THPVariable_bool, METH_NOARGS, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
-  {"is_contiguous", (PyCFunction)THPVariable_is_contiguous, METH_NOARGS, NULL},
+  {"is_contiguous", (PyCFunction)THPVariable_is_contiguous, METH_VARARGS | METH_KEYWORDS, NULL},
   {"item", (PyCFunction)THPVariable_item, METH_NOARGS, NULL},
   {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
   {"map_", (PyCFunction)THPVariable_map_, METH_VARARGS | METH_KEYWORDS, NULL},

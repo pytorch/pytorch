@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/TensorImpl.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/util/Exception.h>
 
 namespace at {
@@ -36,7 +37,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     AT_ERROR("opaque tensors do not have strides");
   }
 
-  bool is_contiguous() const override {
+  bool is_contiguous(c10::MemoryFormat memory_format=c10::MemoryFormat::Any) const override {
     AT_ERROR("opaque tensors do not have is_contiguous");
   }
 

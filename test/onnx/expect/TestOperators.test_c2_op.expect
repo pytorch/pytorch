@@ -55,6 +55,11 @@ graph {
       f: 1
       type: FLOAT
     }
+    attribute {
+      name: "legacy_plus_one"
+      i: 1
+      type: INT
+    }
     domain: "org.pytorch._caffe2"
   }
   name: "torch-jit-export"

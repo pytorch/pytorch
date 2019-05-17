@@ -122,7 +122,7 @@ class TestQuantizedOps(unittest.TestCase):
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
         zero_point = 1
-        qX = X.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.qint8)
+        qX = X.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.quint8)
 
         Y = X.numpy().copy()
         Y[Y < 0] = 0
@@ -139,8 +139,8 @@ class TestQuantizedOps(unittest.TestCase):
         B = torch.arange(-25, 25, dtype=torch.float)
         scale = 2.0
         zero_point = 127
-        qA = A.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.qint8)
-        qB = A.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.qint8)
+        qA = A.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        qB = A.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.quint8)
 
         # Add ReLU ground truth
         C = (qA.dequantize() + qB.dequantize()).numpy()
@@ -172,8 +172,8 @@ class TestQuantizedOps(unittest.TestCase):
         scale_C = 0.5
         zero_point_C = 5
 
-        qA = A.quantize_linear(scale=scale_A, zero_point=zero_point_A, dtype=torch.qint8)
-        qB = A.quantize_linear(scale=scale_B, zero_point=zero_point_B, dtype=torch.qint8)
+        qA = A.quantize_linear(scale=scale_A, zero_point=zero_point_A, dtype=torch.quint8)
+        qB = A.quantize_linear(scale=scale_B, zero_point=zero_point_B, dtype=torch.quint8)
 
         # Add ground truth
         C = (qA.dequantize() + qB.dequantize()).numpy()
@@ -243,9 +243,9 @@ class TestQuantizedFC(unittest.TestCase):
         X = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
         W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
 
-        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zp, dtype=torch.qint8)
+        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
         # W_zp + 128 is the zero point for uint8 quantization.
-        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp + 128, dtype=torch.qint8)
+        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp + 128, dtype=torch.quint8)
         b_q = torch.round(torch.rand(output_channels) * 10 - 10).to(dtype=torch.int32)
 
         # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
@@ -272,7 +272,7 @@ class TestQuantizedFC(unittest.TestCase):
         X_fp32 = X_q.dequantize().to(dtype=torch.float)
         b_fp32 = torch.from_numpy(_dequantize(b_q.numpy(), W_scale * X_scale, 0).astype(np.float)).to(dtype=torch.float)
         Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
-        Y_q_ref2 = Y_fp32_ref.quantize_linear(Y_scale, Y_zp, torch.qint8)
+        Y_q_ref2 = Y_fp32_ref.quantize_linear(Y_scale, Y_zp, torch.quint8)
 
         # Assert equal
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
@@ -321,8 +321,8 @@ class TestQuantizedFC(unittest.TestCase):
         X = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
         W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
 
-        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zp, dtype=torch.qint8)
-        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp + 128, dtype=torch.qint8)
+        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
+        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp + 128, dtype=torch.quint8)
         b_q = torch.round(torch.rand(output_channels) * 10 - 10).to(dtype=torch.int32)
 
         # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
@@ -351,7 +351,7 @@ class TestQuantizedFC(unittest.TestCase):
         b_fp32 = torch.from_numpy(_dequantize(b_q.numpy(), W_scale * X_scale, 0).astype(np.float)).to(dtype=torch.float)
         Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
         Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
-        Y_q_ref2 = Y_fp32_ref.quantize_linear(Y_scale, Y_zp, torch.qint8)
+        Y_q_ref2 = Y_fp32_ref.quantize_linear(Y_scale, Y_zp, torch.quint8)
 
         # Assert equal
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
