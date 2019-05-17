@@ -574,6 +574,29 @@ void log_normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Gen
    });
 }
 
+void geometric_kernel_cuda(TensorIterator& iter, double p_, Generator* gen_) {
+  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "geometric_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto p = static_cast<accscalar_t>(p_);
+    // define lambda for geometric transformation
+    auto geometric_func = [p] __device__ (accscalar_t rand) {
+      return static_cast<scalar_t>(::ceil(::log(rand) / ::log(static_cast<accscalar_t>(1.0)-p)));
+    };
+    if (std::is_same<scalar_t, double>::value) {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
+        geometric_func);
+    } else {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
+        geometric_func);
+    }
+   });
+}
+
 Tensor& uniform_cuda_(Tensor& self, double from, double to, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   uniform_kernel_cuda(*iter, from, to, gen);
@@ -688,6 +711,13 @@ Tensor& log_normal_cuda_(Tensor& self, double mean, double std, Generator* gen) 
   AT_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
   auto iter = TensorIterator::nullary_op(self);
   log_normal_kernel_cuda(*iter, mean, std, gen);
+  return self;
+}
+
+Tensor& geometric_cuda_(Tensor& self, double p, Generator* gen) {
+  AT_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
+  auto iter = TensorIterator::nullary_op(self);
+  geometric_kernel_cuda(*iter, p, gen);
   return self;
 }
 

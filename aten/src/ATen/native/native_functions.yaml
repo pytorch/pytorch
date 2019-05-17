@@ -3007,6 +3007,9 @@
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: geometric_cpu_
+    CUDA: geometric_cuda_
 
 # wrappers for TH functions
 

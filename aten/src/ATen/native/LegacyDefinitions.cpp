@@ -269,7 +269,7 @@ Tensor & exponential_cpu_(Tensor& self, double lambd, Generator * generator) {
   return at::legacy::th::_th_exponential_(self, lambd, generator);
 }
 
-Tensor & geometric_(Tensor& self, double p, Generator * generator) {
+Tensor & geometric_cpu_(Tensor& self, double p, Generator * generator) {
   return at::legacy::th::_th_geometric_(self, p, generator);
 }
 
