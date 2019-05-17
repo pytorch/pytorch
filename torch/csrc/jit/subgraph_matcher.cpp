@@ -141,25 +141,23 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
       return false;
     }
   }
-  std::vector<Symbol> attr_names = n1->attributeNames();
-  for (size_t i = 0; i < attr_names.size(); i++) {
-    auto attrname = attr_names[i];
-    if (n1->kindOf(attrname) != n2->kindOf(attrname)) {
+  for (const Symbol& attr_name : n1->attributeNames()) {
+    if (n1->kindOf(attr_name) != n2->kindOf(attr_name)) {
       return false;
     }
-    switch (n1->kindOf(attrname)) {
+    switch (n1->kindOf(attr_name)) {
       case AttributeKind::s:
-        if (n1->s(attrname) != n2->s(attrname)) {
+        if (n1->s(attr_name) != n2->s(attr_name)) {
           return false;
         }
         break;
       case AttributeKind::f:
-        if (n1->f(attrname) != n2->f(attrname)) {
+        if (n1->f(attr_name) != n2->f(attr_name)) {
           return false;
         }
         break;
       case AttributeKind::i:
-        if (n1->i(attrname) != n2->i(attrname)) {
+        if (n1->i(attr_name) != n2->i(attr_name)) {
           return false;
         }
         break;
