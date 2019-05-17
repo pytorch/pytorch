@@ -123,9 +123,7 @@ class Upsample(Module):
         self.name = type(self).__name__
         self.size = size
         if isinstance(scale_factor, tuple):
-            self.scale_factor = ()
-            for factor in scale_factor:
-                self.scale_factor += (float(factor),)
+            self.scale_factor = tuple(float(factor) for factor in scale_factor)
         else:
             self.scale_factor = float(scale_factor) if scale_factor else None
         self.mode = mode
