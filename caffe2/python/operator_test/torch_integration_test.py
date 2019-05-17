@@ -122,6 +122,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             -90,
             90,
             clip_angle_thresh,
+            legacy_plus_one=True,
         )
 
         torch.testing.assert_allclose(box_out, a)
@@ -161,6 +162,7 @@ class TorchIntegration(hu.HypothesisTestCase):
                 -90,
                 90,
                 clip_angle_thresh,
+                legacy_plus_one=True,
             )
         ]
         class_prob = np.random.randn(sum(roi_counts), num_classes).astype(np.float32)
@@ -206,6 +208,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             cls_agnostic_bbox_reg=False,
             input_boxes_include_bg_cls=True,
             output_classes_include_bg_cls=True,
+            legacy_plus_one=True,
         )
 
         for o, o_ref in zip(outputs, output_refs):
@@ -258,6 +261,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             -90,
             90,
             1.0,
+            legacy_plus_one=True,
         )
         torch.testing.assert_allclose(rois, a)
         torch.testing.assert_allclose(rois_probs, b)
@@ -392,6 +396,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             -90,
             90,
             1.0,
+            legacy_plus_one=True,
         )
         torch.testing.assert_allclose(rois, a.cpu())
         torch.testing.assert_allclose(rois_probs, b.cpu())
@@ -473,6 +478,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             roi_canonical_level=4,
             roi_max_level=5,
             roi_min_level=2,
+            legacy_plus_one=True,
         )
 
         all_outputs = torch.ops._caffe2.CollectAndDistributeFpnRpnProposals(
@@ -484,6 +490,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             rpn_max_level=6,
             rpn_min_level=2,
             rpn_post_nms_topN=sum(roi_counts),
+            legacy_plus_one=True,
         )
 
         rois_fpn_list = fpn_outputs[:-1]

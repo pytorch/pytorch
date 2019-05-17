@@ -5,14 +5,14 @@ namespace caffe2 {
 namespace utils {
 
 // Compute the area of an array of boxes.
-ERArrXXf BoxesArea(const ERArrXXf& boxes) {
+ERArrXXf BoxesArea(const ERArrXXf& boxes, const bool legacy_plus_one) {
   // equivalent to python code
   //   w = (boxes[:, 2] - boxes[:, 0] + 1)
   //   h = (boxes[:, 3] - boxes[:, 1] + 1)
   //   areas = w * h
   //   assert np.all(areas >= 0), 'Negative areas founds'
-  const auto w = boxes.col(2) - boxes.col(0) + 1;
-  const auto h = boxes.col(3) - boxes.col(1) + 1;
+  const auto w = boxes.col(2) - boxes.col(0) + int(legacy_plus_one);
+  const auto h = boxes.col(3) - boxes.col(1) + int(legacy_plus_one);
   const ERArrXXf areas = w * h;
   CAFFE_ENFORCE((areas >= 0).all(), "Negative areas founds: ", boxes);
   return areas;
@@ -25,9 +25,10 @@ ERArrXXf MapRoIsToFpnLevels(
     const float k_min,
     const float k_max,
     const float s0,
-    const float lvl0) {
+    const float lvl0,
+    const bool legacy_plus_one) {
   // Compute level ids
-  ERArrXXf s = BoxesArea(rois).sqrt();
+  ERArrXXf s = BoxesArea(rois, legacy_plus_one).sqrt();
   // s0 = cfg.FPN.ROI_CANONICAL_SCALE  # default: 224
   // lvl0 = cfg.FPN.ROI_CANONICAL_LEVEL  # default: 4
 
@@ -181,7 +182,7 @@ bool CollectAndDistributeFpnRpnProposalsOp<CPUContext>::RunOnDevice() {
   const int canon_level = roi_canonical_level_;
   auto rois_block = rois.block(0, 1, rois.rows(), 4);
   auto lvls = utils::MapRoIsToFpnLevels(
-      rois_block, lvl_min, lvl_max, canon_scale, canon_level);
+      rois_block, lvl_min, lvl_max, canon_scale, canon_level, legacy_plus_one_);
 
   // equivalent to python code
   //   outputs[0].reshape(rois.shape)
@@ -326,7 +327,7 @@ bool DistributeFpnProposalsOp<CPUContext>::RunOnDevice() {
   const int canon_level = roi_canonical_level_;
   auto rois_block = rois.block(0, 1, rois.rows(), 4);
   auto lvls = utils::MapRoIsToFpnLevels(
-      rois_block, lvl_min, lvl_max, canon_scale, canon_level);
+      rois_block, lvl_min, lvl_max, canon_scale, canon_level, legacy_plus_one_);
 
   // Create new roi blobs for each FPN level
   // (See: modeling.FPN.add_multilevel_roi_blobs which is similar but annoying
@@ -630,7 +631,8 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       "int roi_min_level, "
       "int rpn_max_level, "
       "int rpn_min_level, "
-      "int rpn_post_nms_topN"
+      "int rpn_post_nms_topN, "
+      "bool legacy_plus_one"
     ") -> ("
       "Tensor rois, "
       "Tensor rois_fpn2, "
@@ -660,7 +662,8 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       "int roi_canonical_scale, "
       "int roi_canonical_level, "
       "int roi_max_level, "
-      "int roi_min_level"
+      "int roi_min_level, "
+      "bool legacy_plus_one"
     ") -> ("
       "Tensor rois_fpn2, "
       "Tensor rois_fpn3, "
