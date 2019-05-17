@@ -285,6 +285,22 @@ class TestFuser(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    def test_dropout(self):
+        def func(x):
+            x = torch.nn.functional.dropout(x)
+            return torch.nn.functional.relu(x)
+
+        a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
+        s = torch.jit.script(func, (a,))
+        self.assertAllFused(s.graph_for(a,), except_for={'aten::div', 'prim::Constant'})
+        c = s(a)
+        c.sum().backward()
+        graph = backward_graph(s)
+        self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_comparison_eq_ne(self):
         def f(x, y):
             mask = (x == 0).type_as(x)

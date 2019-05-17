@@ -468,7 +468,7 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   auto builder = TensorIterator::Builder();
   if (a.device().is_cuda() && b.device().is_cuda()) {
-    AT_CHECK(a.device() == b.device(),
+    TORCH_CHECK(a.device() == b.device(),
       "binary_op(): expected both inputs to be on same device, but input a "
       "is on ", a.device(), " and input b is on ", b.device());
   }
@@ -486,10 +486,40 @@ std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tens
   return builder.build();
 }
 
+std::unique_ptr<TensorIterator> TensorIterator::nullary_op(Tensor& out) {
+  auto builder = TensorIterator::Builder();
+  builder.add_output(out);
+  // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
+  builder.iter_->resize_outputs_ = false;
+  return builder.build();
+}
+
 std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   AT_ASSERT(out.defined());
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
+  builder.add_input(a);
+  builder.iter_->promote_gpu_output_dtypes_ = true;
+  builder.iter_->resize_outputs_ = false;
+  builder.iter_->is_reduction_ = true;
+  return builder.build();
+}
+
+std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
+  AT_ASSERT(out1.defined());
+  AT_ASSERT(out2.defined());
+  AT_CHECK((!a.is_cuda() && !out1.is_cuda() && !out2.is_cuda()) || (a.device() == out1.device() && out1.device() == out2.device()),
+      "reduce_op(): expected input and both outputs to be on same device, but input is on ", a.device(),
+      ", output1 is on ", out1.device(), " and output2 is on", out2.device());
+  AT_CHECK(out1.dim() == out2.dim(), "reduce_op(): expected both outputs to have same number of dims, but output1 has ", out1.dim(),
+      " and output2 has ", out2.dim());
+  AT_CHECK(out1.sizes() == out2.sizes(), "reduce_op(): expected both outputs to have same sizes, but output1 has ", out1.sizes(),
+      " and output2 has ", out2.sizes());
+  AT_CHECK(out1.strides() == out2.strides(), "reduce_op(): expected both outputs to have same strides, but output1 has ", out1.strides(),
+           " and output2 has ", out2.strides());
+  auto builder = TensorIterator::Builder();
+  builder.add_output(out1);
+  builder.add_output(out2);
   builder.add_input(a);
   builder.iter_->promote_gpu_output_dtypes_ = true;
   builder.iter_->resize_outputs_ = false;
