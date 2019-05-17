@@ -3,7 +3,6 @@
 #include <ATen/PTThreadPool.h>
 
 #include <atomic>
-#include <thread>
 
 namespace at {
 
@@ -12,15 +11,14 @@ const int NOT_SET = -1;
 const int CONSUMED = -2;
 
 // Number of inter-op threads set by the user;
-// Atomic transitions:
-// NOT_SET -> (atomic) -> positive value -> (atomic) -> CONSUMED
+// NOT_SET -> positive value -> CONSUMED
 // (CONSUMED - thread pool is initialized)
 // or
-// NOT_SET -> (atomic) -> CONSUMED
+// NOT_SET -> CONSUMED
 std::atomic<int> num_interop_threads{NOT_SET};
 
 // thread pool global instance is hidden,
-// users should use at::launch ang get/set_num_interop_threads interface
+// users should use at::launch and get/set_num_interop_threads interface
 TaskThreadPoolBase& get_pool() {
   static std::shared_ptr<TaskThreadPoolBase> pool =
       ThreadPoolRegistry()->Create(
@@ -37,7 +35,6 @@ std::shared_ptr<TaskThreadPoolBase> create_c10_threadpool(
     int pool_size,
     bool create_new) {
   // For now, the only accepted device id is 0
-  // for the JIT inter-op pool (CPU),
   AT_CHECK(device_id == 0);
   // Create new thread pool
   AT_CHECK(create_new);
