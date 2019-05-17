@@ -6,6 +6,7 @@ import shutil
 import random
 import tempfile
 import unittest
+import contextlib
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -492,11 +493,26 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
+# Errors will still be raised and reported
+@contextlib.contextmanager
+def suppress_stderr():
+    original = sys.stderr
+    sys.stderr = open(os.devnull, 'w')
+    yield
+    sys.stderr = original
+
+
 class TestHub(TestCase):
     @classmethod
     @skipIfNoTorchVision
     def setUpClass(cls):
-        cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
+        # The current torchvision code does not provide a way to disable tqdm
+        # progress bar, leading this download printing a huge number of lines
+        # in CI.
+        # TODO: remove this context manager when torchvision provides a way.
+        #       See pytorch/torchvision#862
+        with suppress_stderr():
+            cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
 
     @skipIfNoTorchVision
     def test_load_from_github(self):

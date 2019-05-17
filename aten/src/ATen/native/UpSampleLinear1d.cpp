@@ -35,12 +35,12 @@ static void upsample_linear1d_out_frame(
     }
     return;
   }
-  const scalar_t rwidth = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
       input_width, output_width, align_corners);
 
   for (int64_t w2 = 0; w2 < output_width; ++w2) {
-    const scalar_t w1r = linear_upsample_compute_source_index<scalar_t>(
-        rwidth, w2, align_corners);
+    const scalar_t w1r = area_pixel_compute_source_index<scalar_t>(
+        rwidth, w2, align_corners, /*cubic=*/false);
 
     const int64_t w1 = w1r;
     const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
@@ -84,12 +84,12 @@ static void upsample_linear1d_backward_out_frame(
     }
     return;
   }
-  const scalar_t rwidth = linear_upsample_compute_scale<scalar_t>(
+  const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
       input_width, output_width, align_corners);
 
   for (int64_t w2 = 0; w2 < output_width; ++w2) {
-    const scalar_t w1r = linear_upsample_compute_source_index<scalar_t>(
-        rwidth, w2, align_corners);
+    const scalar_t w1r = area_pixel_compute_source_index<scalar_t>(
+        rwidth, w2, align_corners, /*cubic=*/false);
 
     const int64_t w1 = w1r;
     const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
@@ -112,7 +112,7 @@ static void upsample_linear1d_out_cpu_template(
     const Tensor& input_,
     IntArrayRef output_size,
     bool align_corners) {
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
       output_size.size());
@@ -159,12 +159,12 @@ static void upsample_linear1d_backward_out_cpu_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners) {
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
       output_size.size());
 
-  AT_CHECK(
+  TORCH_CHECK(
       input_size.size() == 3,
       "It is expected input_size equals to 3, but got size ",
       input_size.size());

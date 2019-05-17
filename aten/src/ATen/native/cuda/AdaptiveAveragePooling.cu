@@ -214,13 +214,13 @@ namespace {
     checkAllSameGPU("cudnn_adaptive_avg_pooling2d", {input_arg, output_arg});
 
     for (int64_t i = 0; i < input.ndimension(); i++) {
-      AT_CHECK(input.size(i) > 0,
+      TORCH_CHECK(input.size(i) > 0,
         "adaptive_avg_pooling2d(): expected input to have non-empty spatial dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i, " being "
         "empty");
     }
 
-    AT_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
+    TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
       "non-empty 3D or 4D (batch mode) tensor expected for input");
     Tensor input_ = input;
     int64_t grid_x = input.size(-3);

@@ -12,7 +12,6 @@ THC_API void THCTensor_(gesdd)(THCState *state, THCTensor *ru_, THCTensor *rs_, 
                                const char *some, const char* compute_uv);
 THC_API void THCTensor_(gesdd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *ra_, THCTensor *a,
                                 const char *some, const char* compute_uv);
-THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a);
 THC_API void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo);
 THC_API void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_, THCTensor *a_);
 THC_API void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THCTensor *a);

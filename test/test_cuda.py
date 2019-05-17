@@ -974,15 +974,22 @@ class TestCuda(TestCase):
         self._test_copy_sync_current_stream(x0, x2)
 
     def test_copy_non_blocking(self):
-        x = torch.randn(5, 5).cuda()
-        y = torch.zeros(5, 5)
-        y.copy_(x, non_blocking=True)
-        self.assertEqual(x, y)
+        def _test_copy_non_blocking(a, b):
+            event = torch.cuda.Event()
+            a.copy_(b, non_blocking=True)
+            event.record()
+            self.assertFalse(event.query())
+            event.synchronize()
+            self.assertEqual(a, b)
 
-        x = torch.randn(5, 5)
-        y = torch.zeros(5, 5).cuda()
-        y.copy_(x, non_blocking=True)
-        self.assertEqual(x, y)
+        # 10MB copies
+        x = torch.ones(10000000, dtype=torch.uint8).cuda()
+        y = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
+        _test_copy_non_blocking(x, y)
+
+        x = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
+        y = torch.ones(10000000, dtype=torch.uint8).cuda()
+        _test_copy_non_blocking(x, y)
 
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
@@ -1497,6 +1504,21 @@ class TestCuda(TestCase):
 
     def test_cuda_synchronize(self):
         torch.cuda.synchronize()
+        torch.cuda.synchronize('cuda')
+        torch.cuda.synchronize('cuda:0')
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(torch.device('cuda:0'))
+
+        if TEST_MULTIGPU:
+            torch.cuda.synchronize('cuda:1')
+            torch.cuda.synchronize(1)
+            torch.cuda.synchronize(torch.device('cuda:1'))
+
+        with self.assertRaisesRegex(ValueError, "Expected a cuda device, but"):
+            torch.cuda.synchronize(torch.device("cpu"))
+
+        with self.assertRaisesRegex(ValueError, "Expected a cuda device, but"):
+            torch.cuda.synchronize("cpu")
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_current_stream(self):
@@ -2168,6 +2190,10 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_cholesky_solve_batched_dims(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_cholesky_inverse(self):
+        _TestTorchMixin._test_cholesky_inverse(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky(self):
         _TestTorchMixin._test_cholesky(self, lambda t: t.cuda())
 
@@ -2584,6 +2610,11 @@ class TestCuda(TestCase):
     def test_logspace(self):
         a = torch.logspace(1, 10, 10, device='cuda')
         b = torch.logspace(1, 10, 10)
+        self.assertEqual(a, b.cuda())
+
+        # Check non-default base=2
+        a = torch.logspace(1, 10, 10, 2, device='cuda')
+        b = torch.logspace(1, 10, 10, 2)
         self.assertEqual(a, b.cuda())
 
     def test_lerp(self):

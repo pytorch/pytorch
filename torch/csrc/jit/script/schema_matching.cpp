@@ -100,16 +100,12 @@ Value* tryConvertToType(
         value->type()->isSubtypeOf(TensorType::get())) {
       auto n = graph.createImplicitTensorToNum(concrete_type, value);
       value = graph.insertNode(n)
-                  ->setSourceLocation(std::make_shared<SourceRange>(loc))
+                  ->setSourceRange(loc)
                   ->output();
     }
     if (value->type()->isSubtypeOf(StringType::get()) &&
         DeviceObjType::get()->isSubtypeOf(concrete_type)) {
       return graph.insert(aten::device, {value}, {}, loc);
-    }
-    if (concrete_type == FloatType::get() &&
-        value->type() == NumberType::get()) {
-      return graph.insert(prim::Float, {value}, {}, loc);
     }
   }
 
@@ -359,7 +355,7 @@ static Value* emitBuiltinNode(
     Graph& graph,
     Symbol name) {
   auto n = graph.insertNode(graph.create(name, matched_schema.inputs, 0))
-               ->setSourceLocation(std::make_shared<SourceRange>(loc));
+               ->setSourceRange(loc);
 
   for (auto& ret : matched_schema.return_types) {
     n->addOutput()->setType(ret);

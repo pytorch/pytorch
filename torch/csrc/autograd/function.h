@@ -130,7 +130,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// Adds the type and shape metadata for a new input. Returns the index of
   /// of the new input.
   uint32_t add_input_metadata(
-    const at::Type& type
+    const at::DeprecatedTypeProperties& type
   , at::IntArrayRef shape
   , at::Device device) noexcept {
     uint32_t input_nr = input_metadata_.size();
@@ -214,7 +214,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
   bool should_compute_output(size_t output_edge_index) const {
-    AT_CHECK(output_edge_index < num_outputs(), "Index out of range");
+    TORCH_CHECK(output_edge_index < num_outputs(), "Index out of range");
     return next_edges_[output_edge_index].is_valid();
   }
 

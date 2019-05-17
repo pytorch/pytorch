@@ -42,7 +42,7 @@ public:
   RegisterOperators(const RegisterOperators&) = delete;
   RegisterOperators& operator=(const RegisterOperators&) = delete;
   RegisterOperators(RegisterOperators&&) noexcept;
-  RegisterOperators& operator=(RegisterOperators&&);
+  RegisterOperators& operator=(RegisterOperators&&) noexcept;
 
   /**
    * Register an operator based on a function schema and a set of configuration
@@ -189,8 +189,6 @@ public:
       return std::move(*this);
     }
 
-   // TODO allow input schema to be just the operator name + overload name, in that case use schema generated from kernel function
-
 private:
   template<class... ConfigParameters>
   void op_(FunctionSchema&& schema, ConfigParameters&&... configParameters) {
@@ -203,7 +201,8 @@ private:
 
   template<class FuncType>
   void legacyAPIOp_(const std::string& schemaOrName, FuncType&& func) {
-    op_(schemaOrName, kernel<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(std::forward<FuncType>(func)));
+    constexpr bool AllowLegacyTypes = true;
+    op_(schemaOrName, detail::kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(std::forward<FuncType>(func)));
   }
 
   void checkSchemaAndRegisterOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config);
@@ -214,6 +213,9 @@ private:
   class OperatorRegistrar;
 
   std::vector<OperatorRegistrar> registrars_;
+
+  static_assert(std::is_nothrow_move_constructible<std::vector<OperatorRegistrar>>::value, "");
+  static_assert(std::is_nothrow_move_assignable<std::vector<OperatorRegistrar>>::value, "");
 };
 
 }

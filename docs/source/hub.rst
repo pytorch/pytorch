@@ -98,11 +98,10 @@ Where are my downloaded models saved?
 
 The locations are used in the order of
 
-- hub_dir: user specified path. It can be set in the following ways:
-  - Calling ``hub.set_dir(<PATH_TO_HUB_DIR>)``
-  - ``$TORCH_HOME/hub``, if environment variable ``TORCH_HOME`` is set.
-  - ``$XDG_CACHE_HOME/torch/hub``, if environment variable ``XDG_CACHE_HOME` is set.
-  - ``~/.cache/torch/hub``
+- Calling ``hub.set_dir(<PATH_TO_HUB_DIR>)``
+- ``$TORCH_HOME/hub``, if environment variable ``TORCH_HOME`` is set.
+- ``$XDG_CACHE_HOME/torch/hub``, if environment variable ``XDG_CACHE_HOME`` is set.
+- ``~/.cache/torch/hub``
 
 .. autofunction:: set_dir
 
