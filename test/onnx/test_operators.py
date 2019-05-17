@@ -258,6 +258,10 @@ class TestOperators(TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2), x)
 
+    def test_maxpool_dilations(self):
+        x = torch.randn(20, 16, 50)
+        self.assertONNX(nn.MaxPool1d(2, stride=1, dilation=2), x, opset_version=10)
+
     def test_avg_pool2d(self):
         x = torch.randn(20, 16, 50, 32)
         self.assertONNX(nn.AvgPool2d(3, stride=2), x)
@@ -577,7 +581,7 @@ class TestOperators(TestCase):
             def forward(self, scores, bbox_deltas, im_info, anchors):
                 a, b = torch.ops._caffe2.GenerateProposals(
                     (scores), (bbox_deltas), (im_info), (anchors),
-                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
                 )
                 return a, b
 

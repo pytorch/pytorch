@@ -13,6 +13,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/Dispatch.h>
 #include <c10/util/Half.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
@@ -29,12 +30,6 @@ namespace at {
 
 ${Type}::${Type}()
   : ${DeviceType}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
-ScalarType ${Type}::scalarType() const {
-  return ScalarType::${ScalarName};
-}
-caffe2::TypeMeta ${Type}::typeMeta() const {
-  return caffe2::TypeMeta::Make<${ScalarType}>();
-}
 Backend ${Type}::backend() const {
   return Backend::${Backend};
 }

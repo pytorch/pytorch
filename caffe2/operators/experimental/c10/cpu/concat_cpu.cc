@@ -18,8 +18,8 @@ void concat_op_cpu_impl(
     const at::Tensor& split_,
     int64_t axis,
     int64_t add_axis) {
-  Tensor output{C10Tensor(output_)};
-  Tensor split{C10Tensor(split_)};
+  Tensor output(output_);
+  Tensor split(split_);
   CPUContext context;
 
   split.Resize(vector<int64_t>(1, inputs.size()));
@@ -105,16 +105,7 @@ void concat_op_cpu_impl(
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::Concat",
-        "",
-        (std::vector<c10::Argument>{
-            c10::Argument("inputs", ListType::ofTensors()),
-            c10::Argument("output"),
-            c10::Argument("split_info"),
-            c10::Argument("add", IntType::get()),
-            c10::Argument("add_axis", IntType::get())}),
-        (std::vector<c10::Argument>{})),
+    "_c10_experimental::Concat",
     c10::kernel<
         decltype(concat_op_cpu_impl<float, CPUContext>),
         &concat_op_cpu_impl<float, CPUContext>>(),

@@ -112,9 +112,11 @@ template <>
 template <typename T>
 bool ReluFunctor<CUDAContext>::
 operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
-  const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
-  ReluCUDAKernel<T>
-      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(N, X, Y);
+  if (N > 0) {
+    const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
+    ReluCUDAKernel<T>
+        <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(N, X, Y);
+  }
   return true;
 }
 
@@ -125,6 +127,9 @@ bool ReluFunctor<CUDAContext>::operator()<at::Half>(
     const at::Half* X,
     at::Half* Y,
     CUDAContext* context) const {
+  if (N == 0) {
+    return true;
+  }
   if (N % 2 == 0) {
     const int M = math::DivUp(N / 2, CAFFE_CUDA_NUM_THREADS);
     ReluCUDAKernel<half2>
@@ -152,9 +157,12 @@ bool ReluGradientFunctor<CUDAContext>::Forward(
     CUDAContext* context) const {
   const int N = std::accumulate(
       Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
-  const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
-  ReluGradientCUDAKernel<T>
-      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(N, dY, Y, dX);
+  if (N > 0) {
+    const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
+    ReluGradientCUDAKernel<T>
+        <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+            N, dY, Y, dX);
+  }
   return true;
 }
 
@@ -169,6 +177,9 @@ bool ReluGradientFunctor<CUDAContext>::Forward<at::Half>(
     CUDAContext* context) const {
   const int N = std::accumulate(
       Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
+  if (N == 0) {
+    return true;
+  }
   if (N % 2 == 0) {
     const int M = math::DivUp(N / 2, CAFFE_CUDA_NUM_THREADS);
     ReluGradientCUDAKernel<half2>

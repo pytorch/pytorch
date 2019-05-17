@@ -974,15 +974,22 @@ class TestCuda(TestCase):
         self._test_copy_sync_current_stream(x0, x2)
 
     def test_copy_non_blocking(self):
-        x = torch.randn(5, 5).cuda()
-        y = torch.zeros(5, 5)
-        y.copy_(x, non_blocking=True)
-        self.assertEqual(x, y)
+        def _test_copy_non_blocking(a, b):
+            event = torch.cuda.Event()
+            a.copy_(b, non_blocking=True)
+            event.record()
+            self.assertFalse(event.query())
+            event.synchronize()
+            self.assertEqual(a, b)
 
-        x = torch.randn(5, 5)
-        y = torch.zeros(5, 5).cuda()
-        y.copy_(x, non_blocking=True)
-        self.assertEqual(x, y)
+        # 10MB copies
+        x = torch.ones(10000000, dtype=torch.uint8).cuda()
+        y = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
+        _test_copy_non_blocking(x, y)
+
+        x = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
+        y = torch.ones(10000000, dtype=torch.uint8).cuda()
+        _test_copy_non_blocking(x, y)
 
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
@@ -1048,6 +1055,9 @@ class TestCuda(TestCase):
 
     def test_inplace_unary_mem_overlap(self):
         _TestTorchMixin._test_inplace_unary_mem_overlap(self, device='cuda')
+
+    def test_inplace_binary_mem_overlap(self):
+        _TestTorchMixin._test_inplace_binary_mem_overlap(self, device='cuda')
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_arithmetic_large_tensor(self):
@@ -1494,6 +1504,21 @@ class TestCuda(TestCase):
 
     def test_cuda_synchronize(self):
         torch.cuda.synchronize()
+        torch.cuda.synchronize('cuda')
+        torch.cuda.synchronize('cuda:0')
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(torch.device('cuda:0'))
+
+        if TEST_MULTIGPU:
+            torch.cuda.synchronize('cuda:1')
+            torch.cuda.synchronize(1)
+            torch.cuda.synchronize(torch.device('cuda:1'))
+
+        with self.assertRaisesRegex(ValueError, "Expected a cuda device, but"):
+            torch.cuda.synchronize(torch.device("cpu"))
+
+        with self.assertRaisesRegex(ValueError, "Expected a cuda device, but"):
+            torch.cuda.synchronize("cpu")
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_current_stream(self):
@@ -2165,6 +2190,10 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_cholesky_solve_batched_dims(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_cholesky_inverse(self):
+        _TestTorchMixin._test_cholesky_inverse(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky(self):
         _TestTorchMixin._test_cholesky(self, lambda t: t.cuda())
 
@@ -2189,11 +2218,15 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         @contextmanager
-        def plan_cache_max_size(n):
-            original = torch.backends.cuda.cufft_plan_cache.max_size
-            torch.backends.cuda.cufft_plan_cache.max_size = n
+        def plan_cache_max_size(n, device=None):
+            if device is None:
+                plan_cache = torch.backends.cuda.cufft_plan_cache
+            else:
+                plan_cache = torch.backends.cuda.cufft_plan_cache[device]
+            original = plan_cache.max_size
+            plan_cache.max_size = n
             yield
-            torch.backends.cuda.cufft_plan_cache.max_size = original
+            plan_cache.max_size = original
 
         with plan_cache_max_size(max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
             _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
@@ -2212,6 +2245,44 @@ class TestCuda(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"read-only property"):
             torch.backends.cuda.cufft_plan_cache.size = -1
+
+        with self.assertRaisesRegex(RuntimeError, r"but got device with index"):
+            torch.backends.cuda.cufft_plan_cache[torch.cuda.device_count() + 10]
+
+        if TEST_MULTIGPU:
+            # Test that different GPU has different cache
+            x0 = torch.randn(2, 3, 3, device='cuda:0')
+            x1 = x0.cuda(1)
+            self.assertEqual(x0.rfft(2), x1.rfft(2))
+            # If a plan is used across different devices, the following line (or
+            # the assert above) would trigger illegal memory access. Other ways
+            # to trigger the error include
+            #   (1) setting CUDA_LAUNCH_BLOCKING=1 (pytorch/pytorch#19224) and
+            #   (2) printing a device 1 tensor.
+            x0.copy_(x1)
+
+            # Test that un-indexed `torch.backends.cuda.cufft_plan_cache` uses current device
+            with plan_cache_max_size(10, device='cuda:0'):
+                with plan_cache_max_size(11, device='cuda:1'):
+                    self.assertEqual(torch.backends.cuda.cufft_plan_cache[0].max_size, 10)
+                    self.assertEqual(torch.backends.cuda.cufft_plan_cache[1].max_size, 11)
+
+                    self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
+                    with torch.cuda.device(1):
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
+                        with torch.cuda.device(0):
+                            self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
+
+                self.assertEqual(torch.backends.cuda.cufft_plan_cache[0].max_size, 10)
+                with torch.cuda.device(1):
+                    with plan_cache_max_size(11):  # default is cuda:1
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache[0].max_size, 10)
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache[1].max_size, 11)
+
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
+                        with torch.cuda.device(0):
+                            self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
+                        self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
     def test_stft(self):
         _TestTorchMixin._test_stft(self, device=torch.device('cuda'))
@@ -2539,6 +2610,11 @@ class TestCuda(TestCase):
     def test_logspace(self):
         a = torch.logspace(1, 10, 10, device='cuda')
         b = torch.logspace(1, 10, 10)
+        self.assertEqual(a, b.cuda())
+
+        # Check non-default base=2
+        a = torch.logspace(1, 10, 10, 2, device='cuda')
+        b = torch.logspace(1, 10, 10, 2)
         self.assertEqual(a, b.cuda())
 
     def test_lerp(self):

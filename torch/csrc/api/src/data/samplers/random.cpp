@@ -12,6 +12,8 @@ namespace samplers {
 RandomSampler::RandomSampler(int64_t size, Dtype index_dtype)
     : indices_(torch::randperm(size, index_dtype)) {}
 
+RandomSampler::~RandomSampler() = default;
+
 void RandomSampler::reset(optional<size_t> new_size) {
   // This allocates a new chunk of memory every time (just FYI). It should be
   // amortized over the entire epoch hopefully.

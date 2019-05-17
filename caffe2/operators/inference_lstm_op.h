@@ -1,13 +1,13 @@
 #ifndef LSTM_OP_H_
 #define LSTM_OP_H_
 
-#include <c10/core/Tensor.h>
 #include <algorithm>
 #include <sstream>
 #include <unordered_map>
 #include <vector>
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/c10_operator.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"

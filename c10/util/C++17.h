@@ -7,6 +7,8 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <cstdlib>
+#include <c10/macros/Macros.h>
 
 /*
  * This header adds some polyfills with C++14 and C++17 functionality

@@ -269,7 +269,7 @@ class TestFuser(JitTestCase):
 
         a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
         b = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        nan = torch.tensor(float('nan'))
+        nan = torch.tensor(float('nan'), dtype=torch.float, device='cuda')
 
         funcs = (func2, funcInf, funcOptMin, funcOptMax)
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
@@ -281,6 +281,22 @@ class TestFuser(JitTestCase):
             c.sum().backward()
             graph = backward_graph(s)
             self.assertAllFused(graph)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_dropout(self):
+        def func(x):
+            x = torch.nn.functional.dropout(x)
+            return torch.nn.functional.relu(x)
+
+        a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
+        s = torch.jit.script(func, (a,))
+        self.assertAllFused(s.graph_for(a,), except_for={'aten::div', 'prim::Constant'})
+        c = s(a)
+        c.sum().backward()
+        graph = backward_graph(s)
+        self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -743,6 +759,7 @@ class TestFuser(JitTestCase):
             __constants__ = ['d']
 
             def __init__(self):
+                super(M, self).__init__()
                 self.d = torch.device('cuda')
 
             @torch.jit.script_method

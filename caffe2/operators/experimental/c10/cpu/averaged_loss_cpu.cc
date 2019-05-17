@@ -14,8 +14,8 @@ template <class T, class Context>
 class averaged_loss_cpu final : public c10::OperatorKernel {
  public:
   void operator()(const at::Tensor& X_, const at::Tensor& sum_) {
-    Tensor X{C10Tensor(X_)};
-    Tensor sum{C10Tensor(sum_)};
+    Tensor X(X_);
+    Tensor sum(sum_);
     CPUContext context;
 
     sum.Resize(vector<int64_t>());
@@ -40,16 +40,11 @@ class averaged_loss_cpu final : public c10::OperatorKernel {
   }
 
  private:
-  at::Tensor scratch_ = at::Tensor(C10Tensor(empty({}, CPU)));
+  at::Tensor scratch_ = at::Tensor(empty({}, CPU));
 };
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::AveragedLoss",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("input"),
-                                    c10::Argument("output")}),
-        (std::vector<c10::Argument>{})),
+    "_c10_experimental::AveragedLoss",
     c10::kernel<averaged_loss_cpu<float, CPUContext>>(),
     c10::dispatchKey(CPUTensorId()));
 

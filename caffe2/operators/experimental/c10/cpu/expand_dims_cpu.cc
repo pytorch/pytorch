@@ -15,8 +15,8 @@ class expand_dims_cpu final : public c10::OperatorKernel {
       const at::Tensor& input_,
       const at::Tensor& output_,
       ArrayRef<int64_t> dims) {
-    Tensor input{C10Tensor(input_)};
-    Tensor output{C10Tensor(output_)};
+    Tensor input(input_);
+    Tensor output(output_);
 
     if (!initialized_) {
       dims_ = dims.vec();
@@ -55,13 +55,7 @@ class expand_dims_cpu final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::ExpandDims",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("input"),
-                                    c10::Argument("output"),
-                                    c10::Argument("dims", ListType::ofInts())}),
-        (std::vector<c10::Argument>{})),
+    "_c10_experimental::ExpandDims",
     c10::kernel<expand_dims_cpu<float>>(),
     c10::dispatchKey(CPUTensorId()));
 

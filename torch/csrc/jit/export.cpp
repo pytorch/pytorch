@@ -7,6 +7,7 @@
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/import_export_helpers.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pickler.h>
@@ -24,7 +25,6 @@
 #include <memory>
 #include <set>
 #include <sstream>
-#include <stack>
 #include <string>
 #include <vector>
 
@@ -38,13 +38,7 @@ namespace onnx = ::ONNX_NAMESPACE;
 class ScriptModuleSerializer;
 
 std::string getNodeStackTraceString(const Node* n) {
-  std::stringstream ss;
-  if (n->getSourceLocation()) {
-    n->getSourceLocation()->highlight(ss);
-  } else {
-    ss << "<unknown location>";
-  }
-  return ss.str();
+  return n->sourceRange().str();
 }
 
 void validateBlock(
@@ -120,21 +114,21 @@ class EncoderBase {
  protected:
   // Using std::map instead of std::unordered_map for initializers
   // in EncodeGraph cosntructor so that the order in which initializers
-  // get written to the ONNX graph is always the deterministic and 
-  // predictable. While this is not a ONNX requirement, it is needed 
+  // get written to the ONNX graph is always the deterministic and
+  // predictable. While this is not a ONNX requirement, it is needed
   // for testing purposes in tests that use _export_to_pretty_string()
   // for validating ONNX graphs.
   void EncodeGraph(
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
-      const std::map<std::string, at::Tensor>& initializers = 
-        std::map<std::string, at::Tensor>());
+      const std::map<std::string, at::Tensor>& initializers =
+          std::map<std::string, at::Tensor>());
 
   void EncodeBlock(
       onnx::GraphProto* graph_proto,
       const Block* block,
-      const std::map<std::string, at::Tensor>& initializers = 
-        std::map<std::string, at::Tensor>());
+      const std::map<std::string, at::Tensor>& initializers =
+          std::map<std::string, at::Tensor>());
 
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
@@ -258,10 +252,8 @@ void EncoderBase::EncodeBlock(
       continue;
     }
     auto p_n = graph_proto->add_node();
-    if (node->getSourceLocation() && !strip_doc_) {
-      std::stringstream ss;
-      node->getSourceLocation()->highlight(ss);
-      p_n->set_doc_string(ss.str());
+    if (!strip_doc_) {
+      p_n->set_doc_string(node->sourceRange().str());
     }
     for (auto input : node->inputs()) {
       if (input->node()->mustBeNone() && !is_raw_export) {
@@ -281,8 +273,8 @@ void EncoderBase::EncodeBlock(
     if (is_raw_export) {
       AT_ASSERT(!node->kind().is_onnx());
     } else if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-      AT_ASSERT(!node->kind().is_aten() &&
-          !node->kind().is_prim() &&
+      AT_ASSERT(
+          !node->kind().is_aten() && !node->kind().is_prim() &&
           !node->kind().is_attr());
     }
     p_n->set_op_type(node->kind().toUnqualString());
@@ -522,7 +514,7 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   void convertParameter(
-      const script::Slot & param,
+      const script::Slot& param,
       torch::ParameterDef* param_def,
       bool is_parameter);
 
@@ -539,8 +531,8 @@ class ScriptModuleSerializer final {
   // all classes used by this module hierarchy
   std::vector<ClassTypePtr> class_table_;
   OrderedDict<ClassTypePtr, std::string> converted_classes_;
+  std::unordered_map<ClassTypePtr, std::vector<ClassTypePtr>> class_to_deps_;
 
-  static const size_t op_version_set = 0;
 };
 
 // ScriptModuleSerializer's methods
@@ -580,23 +572,42 @@ void ScriptModuleSerializer::serialize(
 }
 
 void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
-  auto lib_def = model_def->mutable_libs();
-  std::ostringstream lib_stream;
-  lib_stream << "op_version_set = " << op_version_set << "\n";
-  // Convert all the classes that
+  // Convert all the classes that this model depends on
   for (const auto& class_type : class_table_) {
     convertClass(class_type, model_def);
   }
 
-  for (const auto& c : converted_classes_) {
-    lib_stream << *c << "\n";
+  // Mapping of filename => src. We need this because multiple clases may go in
+  // the same file (e.g. foo.bar.Baz and foo.bar.Qux)
+
+  // Aggregate classes into files by their qualified names
+  std::unordered_map<std::string, std::ostringstream> fileToSrc;
+  for (const auto& item : converted_classes_) {
+    const auto& class_type = item.key();
+    const auto& class_src = item.value();
+
+    // For the type, foo.bar.Baz
+    const std::string filename =
+        ImportExportHelpers::qualifierToPath(class_type->qualifier());
+    // End state: filename is "foo/bar.py", in which we will define a class
+    // named Baz
+    fileToSrc[filename] << class_src;
   }
 
-  torch::RecordRef* lib_record = lib_def->mutable_torchscript_arena();
-  const auto filename = "libs.py";
-  const auto& lib_str = lib_stream.str();
-  writer_.writeRecord(filename, lib_str.c_str(), lib_str.size());
-  lib_record->set_key(filename);
+  // Write out the files. We still have to do this in converted_classes_ order,
+  // to maintain dependency order.
+  for (const auto& item : converted_classes_) {
+    const ClassTypePtr& class_type = item.key();
+    const std::string filename =
+        ImportExportHelpers::qualifierToPath(class_type->qualifier());
+    const std::string& src = fileToSrc.at(filename).str();
+
+    std::ostringstream lib_stream;
+    lib_stream << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
+    lib_stream << src;
+    std::string lib_str = lib_stream.str();
+    writer_.writeRecord(filename, lib_str.c_str(), lib_str.size());
+  }
 }
 
 // python print the class and add to the converted_classes_. Recursively
@@ -616,6 +627,8 @@ void ScriptModuleSerializer::convertClass(
       tensor_table_,
       class_deps,
       /*enforce_importable=*/true);
+
+  class_to_deps_[class_type] = class_deps;
 
   for (const auto& c : class_deps) {
     if (c == class_type) {
@@ -678,29 +691,12 @@ void ScriptModuleSerializer::convertAndWriteTensor(
 
   tensor_proto->set_requires_grad(tensor.requires_grad());
 
-  uint64_t record_size = tensor.element_size() * tensor.storage().size();
   auto* key = tensor.storage().unsafeGetStorageImpl();
-
   auto storage_it = storageMap.find(key);
   if (storage_it == storageMap.end()) {
-    at::Tensor storage_tensor = tensor;
-    // TODO HIP support
-    if (tensor.storage().device_type() == at::DeviceType::CUDA) {
-      // NB: This new tensor is created to support cuda tensors.
-      // Storages can be mutated when converting tensors from cuda to cpu,
-      // and we need a cpu tensor to copy data from.
-      storage_tensor = at::empty({0}, tensor.options())
-                           .set_(
-                               tensor.storage(),
-                               /* storageOffset = */ 0,
-                               /* size = */
-                               {static_cast<int64_t>(tensor.storage().size())},
-                               /* stride = */ {1})
-                           .cpu();
-      AT_ASSERT(
-          storage_tensor.element_size() * storage_tensor.storage().size() ==
-          record_size);
-    }
+    uint64_t record_size;
+    at::Tensor storage_tensor;
+    std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
     std::string name = "tensors/" + std::to_string(tensor_id);
     writer_.writeRecord(name, storage_tensor.storage().data(), record_size);
     storage_it = storageMap.insert({key, name}).first;
@@ -727,9 +723,11 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
 void ScriptModuleSerializer::writeAttributeTable() {
   Pickler pickler(&tensor_table_);
   pickler.start();
+  pickler.startTuple();
   for (const IValue& ivalue : attribute_table_) {
     pickler.addIValue(ivalue);
   }
+  pickler.endTuple();
   pickler.finish();
   writer_.writeRecord(
       "attributes.pkl", pickler.stack().data(), pickler.stack().size());
@@ -764,10 +762,11 @@ void ScriptModuleSerializer::convertModule(
 
   if (module.get_methods().size() > 0) {
     std::ostringstream methods;
-    methods << "op_version_set = " << op_version_set << "\n";
+    methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
-        module,
+        module.class_compilation_unit(),
+        /*is_method=*/true,
         tensor_table_,
         class_table_,
         /*enforce_importable=*/true);
@@ -1003,14 +1002,15 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
     const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export,
-    ::torch::onnx::OperatorExportTypes operator_export_type) {
+    ::torch::onnx::OperatorExportTypes operator_export_type,
+    bool strip_doc_string) {
   auto graph_encoder = GraphEncoder(
       graph,
       onnx_opset_version,
       operator_export_type,
       initializers,
       defer_weight_export,
-      false);
+      strip_doc_string);
   return std::make_tuple(
       graph_encoder.get_model_proto().SerializeAsString(),
       graph_encoder.get_raw_data_export_map());

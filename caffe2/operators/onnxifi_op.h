@@ -4,6 +4,7 @@
 
 #include "onnx/onnx_pb.h"
 
+#include "c10/util/SmallVector.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -13,7 +14,7 @@
 
 namespace caffe2 {
 
-template <typename T, typename Context>
+template <typename Context>
 class OnnxifiOp final : public Operator<Context> {
   struct TensorInfo {
     TensorInfo() {}
@@ -30,6 +31,7 @@ class OnnxifiOp final : public Operator<Context> {
     lib_ = onnx::initOnnxifiLibrary();
     backend_graph_map_ptr_ = onnx::getOnnxBackendGraphMap();
     CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
+    use_onnx_ = this->template GetSingleArgument<int>("use_onnx", 0);
     auto onnx_model_str =
         this->template GetSingleArgument<std::string>("onnx_model", "");
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
@@ -63,6 +65,25 @@ class OnnxifiOp final : public Operator<Context> {
       }
       ++output_idx;
     }
+    input_shapes_.resize(input_names_.size());
+    output_shapes_.resize(output_names_.size());
+
+    // Get output resizing hints
+    adjust_output_batch_ =
+        this->template GetSingleArgument<int>("adjust_output_batch", 0);
+    permit_unknown_output_batch_size_ = this->template GetSingleArgument<int>(
+        "permit_unknown_output_batch_size", 0);
+    auto output_resize_hints =
+        this->template GetRepeatedArgument<int>("output_resize_hints");
+    CAFFE_ENFORCE_EQ(
+        output_resize_hints.size() % 2,
+        0,
+        "output_resize_hints must have even size: ",
+        output_resize_hints.size());
+    for (int i = 0; i < output_resize_hints.size(); ++i) {
+      auto k = output_resize_hints[i++];
+      batch_pos_map_.emplace(k, output_resize_hints[i]);
+    }
 
     // Encode arguments starting with "custom_" to backend
     std::vector<uint64_t> property_pointers;
@@ -82,10 +103,22 @@ class OnnxifiOp final : public Operator<Context> {
   ~OnnxifiOp() {
     backend_graph_shared_ptr_.reset();
     backend_graph_map_ptr_->remove(op_id_string_);
+#ifdef ONNXIFI_ENABLE_EXT
+    traces_.reset();
+#endif
   }
 
   bool RunOnDevice() override;
 
+  void setEnableTracing(bool b) {
+    enable_tracing_ = b;
+  }
+
+#ifdef ONNXIFI_ENABLE_EXT
+  std::shared_ptr<onnxTraceEventList> traces() const {
+    return traces_;
+  }
+#endif
  private:
   uint64_t SetOutputShapeAndType(int output_idx, std::vector<size_t>* dims) {
     uint64_t type = ONNXIFI_DATATYPE_FLOAT32;
@@ -188,19 +221,36 @@ class OnnxifiOp final : public Operator<Context> {
     backend_ = backend_graph_shared_ptr_->backend;
     graph_ = backend_graph_shared_ptr_->graph;
 
-// Set up function pointer if onnxifi_ext is enabled
+    getExtFunctionPointers();
+  }
+
+  /// Set up function pointer if onnxifi_ext is enabled
+  void getExtFunctionPointers() {
 #ifdef ONNXIFI_ENABLE_EXT
     onnxExtensionFunctionPointer p;
     if (lib_->onnxGetExtensionFunctionAddress(
             backend_id_, "onnxSetIOAndRunGraphFunction", &p) !=
         ONNXIFI_STATUS_SUCCESS) {
       onnxSetIOAndRunGraphPointer_ = nullptr;
-      return;
+    } else {
+      onnxSetIOAndRunGraphPointer_ =
+          reinterpret_cast<decltype(onnxSetIOAndRunGraphPointer_)>(p);
     }
-    onnxSetIOAndRunGraphPointer_ =
-        reinterpret_cast<decltype(onnxSetIOAndRunGraphPointer_)>(p);
+    if (lib_->onnxGetExtensionFunctionAddress(
+            backend_id_, "onnxReleaseTraceEventsFunction", &p) !=
+        ONNXIFI_STATUS_SUCCESS) {
+      onnxReleaseTraceEventsPointer_ = nullptr;
+    } else {
+      onnxReleaseTraceEventsPointer_ =
+          reinterpret_cast<decltype(onnxReleaseTraceEventsPointer_)>(p);
+    }
 #endif
   }
+
+  std::vector<int> extractOutputBatchSizes() const;
+
+  void maybeAdjustOutputBatchSizes(
+      const std::vector<int>& real_output_batch_sizes);
 
   std::vector<onnxTensorDescriptorV1> buildInitializationList(
       Workspace* ws,
@@ -232,7 +282,12 @@ class OnnxifiOp final : public Operator<Context> {
       const onnxTensorDescriptorV1*,
       onnxMemoryFenceV1*,
       onnxTraceEventList*);
+
+  onnxStatus (*onnxReleaseTraceEventsPointer_)(onnxTraceEventList*);
+
+  std::shared_ptr<onnxTraceEventList> traces_{nullptr};
 #endif
+  bool use_onnx_{false};
 
   // We bind the op input/output by position while ONNXIFI binds input/output by
   // names. In addition, op input/output names can be writtten by, for example,
@@ -241,11 +296,31 @@ class OnnxifiOp final : public Operator<Context> {
   std::vector<std::string> input_names_;
   std::vector<std::string> output_names_;
 
-  std::vector<std::vector<uint64_t>> input_shapes_;
-  std::vector<std::vector<uint64_t>> output_shapes_;
+  std::vector<c10::SmallVector<uint64_t, 4>> input_shapes_;
+  std::vector<c10::SmallVector<uint64_t, 4>> output_shapes_;
+
+  // A cache vector to avoid repeated reallocation. The existence of this is not
+  // ideal, which is purely due to the factor that we use int64_t for c2::tensor
+  // dim but uint64_t for onnxDesciptor dim. Maybe we should just use int64_t
+  c10::SmallVector<int64_t, 4> tensor_dims_int64_;
 
   // output shape hints
   std::unordered_map<int, TensorInfo> output_shape_hints_;
+
+  // Whether we need to resize outputs or not
+  bool adjust_output_batch_{false};
+
+  // Whether we allow unknown output batch size. This is often needed when
+  // we explicitly blacklist operators out of the onnxifi op.
+  bool permit_unknown_output_batch_size_{false};
+
+  // Output resizing hint map
+  // key: max batch size
+  // value: position of the input where the real batch size can be extracted
+  // from its first dimension
+  std::unordered_map<int, int> batch_pos_map_;
+  // Whether we enable tracing in one run of inference
+  bool enable_tracing_{false};
 };
 
 } // namespace caffe2

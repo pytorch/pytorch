@@ -1,10 +1,9 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
 #include <c10/core/Scalar.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/macros/Macros.h>
 #include <ATen/core/SparseTensorRef.h>
-#include <ATen/core/Type.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 
@@ -16,7 +15,7 @@ inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocki
   return to(
       at::device(t.device_type()).layout(t.layout()).dtype(t.scalarType()),
       non_blocking,
-      /*copy*/ true);
+      /*copy=*/ true);
 }
 
 inline Tensor Tensor::cpu() const {
@@ -29,10 +28,6 @@ inline Tensor Tensor::cuda() const {
 
 inline Tensor Tensor::hip() const {
   return toType(type().hip());
-}
-
-inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
-  return dispatch_type().copy_(*this, src, non_blocking);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
@@ -182,8 +177,11 @@ inline Tensor Tensor::clamp_min(Scalar min) const {
 inline Tensor & Tensor::clamp_min_(Scalar min) {
     return dispatch_type().clamp_min_(*this, min);
 }
-inline Tensor Tensor::contiguous() const {
-    return dispatch_type().contiguous(*this);
+inline Tensor Tensor::contiguous(MemoryFormat memory_format) const {
+    return dispatch_type().contiguous(*this, memory_format);
+}
+inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
+    return dispatch_type().copy_(*this, src, non_blocking);
 }
 inline Tensor Tensor::cos() const {
     return dispatch_type().cos(*this);
@@ -800,8 +798,8 @@ inline Tensor Tensor::to_sparse() const {
 inline Tensor Tensor::to_mkldnn() const {
     return dispatch_type().to_mkldnn(*this);
 }
-inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point) const {
-    return dispatch_type().quantize_linear(*this, scale, zero_point);
+inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const {
+    return dispatch_type().quantize_linear(*this, scale, zero_point, dtype);
 }
 inline Tensor Tensor::dequantize() const {
     return dispatch_type().dequantize(*this);
@@ -811,6 +809,9 @@ inline Scalar Tensor::q_scale() const {
 }
 inline Scalar Tensor::q_zero_point() const {
     return dispatch_type().q_zero_point(*this);
+}
+inline Tensor Tensor::int_repr() const {
+    return dispatch_type().int_repr(*this);
 }
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
     return dispatch_type().to(*this, options, non_blocking, copy);
@@ -1187,8 +1188,8 @@ inline Tensor Tensor::cholesky_solve(const Tensor & input2, bool upper) const {
 inline std::tuple<Tensor,Tensor> Tensor::solve(const Tensor & A) const {
     return dispatch_type().solve(*this, A);
 }
-inline Tensor Tensor::potri(bool upper) const {
-    return dispatch_type().potri(*this, upper);
+inline Tensor Tensor::cholesky_inverse(bool upper) const {
+    return dispatch_type().cholesky_inverse(*this, upper);
 }
 inline std::tuple<Tensor,Tensor> Tensor::pstrf(bool upper, Scalar tol) const {
     return dispatch_type().pstrf(*this, upper, tol);
@@ -1351,6 +1352,15 @@ inline bool is_sparse(Tensor self) {
   return self.is_sparse();
 }
 
+inline bool Tensor::is_mkldnn() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_mkldnn();
+}
+
+inline bool is_mkldnn(Tensor self) {
+  return self.is_mkldnn();
+}
+
 inline bool Tensor::is_quantized() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_quantized();
@@ -1363,7 +1373,7 @@ inline bool is_quantized(Tensor self) {
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \
-    AT_CHECK(                                    \
+    TORCH_CHECK(                                    \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \

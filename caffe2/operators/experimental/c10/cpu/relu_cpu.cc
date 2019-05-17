@@ -12,8 +12,8 @@ template <class DataType>
 void relu_op_cpu_impl(
     const at::Tensor& input_,
     const at::Tensor& output_) {
-  Tensor input{C10Tensor(input_)};
-  Tensor output{C10Tensor(output_)};
+  Tensor input(input_);
+  Tensor output(output_);
 
   output.ResizeLike(input);
 
@@ -41,12 +41,7 @@ void relu_op_cpu_impl(
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::Relu",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("input"),
-                                    c10::Argument("output")}),
-        (std::vector<c10::Argument>{})),
+    "_c10_experimental::Relu",
     c10::kernel<decltype(relu_op_cpu_impl<float>), &relu_op_cpu_impl<float>>(),
     c10::dispatchKey(CPUTensorId()));
 

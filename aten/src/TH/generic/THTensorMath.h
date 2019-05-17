@@ -4,6 +4,8 @@
 
 TH_API void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor);
 
+#ifndef TH_REAL_IS_HALF
+
 TH_API void THTensor_(ltValue)(THByteTensor *r_, THTensor* t, scalar_t value);
 TH_API void THTensor_(leValue)(THByteTensor *r_, THTensor* t, scalar_t value);
 TH_API void THTensor_(gtValue)(THByteTensor *r_, THTensor* t, scalar_t value);
@@ -32,11 +34,17 @@ TH_API void THTensor_(geTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(neTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(eqTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 
+TH_API accreal THTensor_(sumall)(THTensor *t);
+TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
+
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 TH_API void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value);
 TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src);
 TH_API void THTensor_(maskedSelect)(THTensor *tensor, THTensor* src, THByteTensor *mask);
+TH_API void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value);
+TH_API void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* src);
+TH_API void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor* src, THBoolTensor *mask);
 
 TH_API void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index);
 TH_API void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
@@ -54,7 +62,6 @@ TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
 
 TH_API scalar_t THTensor_(minall)(THTensor *t);
 TH_API scalar_t THTensor_(maxall)(THTensor *t);
-TH_API accreal THTensor_(sumall)(THTensor *t);
 
 TH_API void THTensor_(neg)(THTensor *self, THTensor *src);
 TH_API void THTensor_(cinv)(THTensor *self, THTensor *src);
@@ -122,8 +129,6 @@ TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int d
 TH_API void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted);
 TH_API void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k);
 
-TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
-
 TH_API void THTensor_(pow)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(tpow)(THTensor *r_, scalar_t value, THTensor *t);
 TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
@@ -178,5 +183,6 @@ TH_API accreal THTensor_(normall)(THTensor *t, scalar_t value);
 TH_API void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THTensor *total);
 #endif
 
+#endif
 #endif
 #endif

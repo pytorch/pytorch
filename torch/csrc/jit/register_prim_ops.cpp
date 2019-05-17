@@ -8,13 +8,20 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/script/compilation_unit.h>
+#include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/Dict.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
@@ -26,6 +33,7 @@
 #include <memory>
 #include <mutex>
 #include <ostream>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <typeinfo>
@@ -90,6 +98,16 @@ static int64_t floordiv(int64_t a, int64_t b) {
   }
 }
 
+static int gcd(int a, int b) {
+    while (b != 0) {
+        int r = a % b;
+        a = b;
+        b = r;
+    }
+    // in python gcd returns non-negative values
+    return std::abs(a);
+}
+
 // reference function THPVariable_to in python_variable_methods.cpp
 static at::Tensor to_dispatch(
     at::Tensor self,
@@ -111,8 +129,27 @@ static at::Tensor to_dispatch(
   }
 }
 
+// Convert an python index (which may be negative) into an index usable for a
+// C++ container
+int64_t normalizeIndex(int64_t idx, int64_t list_size) {
+  if (idx < 0) {
+    // Handle negative indexing
+    idx = list_size + idx;
+  }
+  return idx;
+}
+
 RegisterOperators reg(
     {Operator(
+         prim::profile,
+         [](const Node* node) {
+           auto callback = node->cast<ProfileOp>()->getCallback();
+           return [callback](Stack& stack) {
+             callback(stack);
+             return 0;
+           };
+         }),
+     Operator(
          prim::FusionGroup,
          [](const Node* node) {
            const auto key = registerFusion(node);
@@ -258,7 +295,7 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "prim::Int(Scalar a) -> float",
+         "prim::Int(Scalar a) -> int",
          [](Stack& stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -391,6 +428,14 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         // TODO return generator object when torchscript supports RNG
+         // first-class
+         "aten::manual_seed(int seed) -> ()",
+         [](Stack& stack) {
+           at::manual_seed(pop(stack).toInt());
+           return 0;
+         }),
+     Operator(
          "aten::cuda(Tensor(a) self) -> Tensor(a|b)",
          [](Stack& stack) {
            at::Tensor a;
@@ -405,6 +450,24 @@ RegisterOperators reg(
              stack.emplace_back(at::Tensor());
              return 0;
            };
+         }),
+     Operator(
+         "aten::save(t item, str filename) -> ()",
+         [](Stack& stack) {
+           auto filename = pop(stack).toStringRef();
+           auto value = pop(stack);
+
+           // Pickle the tensor
+           Pickler p;
+           p.pushMetadata();
+           p.start();
+           p.addIValue(value);
+           p.finish();
+
+           // Write file
+           std::fstream output(filename, std::ios::out | std::ios::binary);
+           output.write(p.stack().data(), p.stack().size());
+           return 0;
          }),
      Operator(
          prim::Print,
@@ -451,7 +514,7 @@ RegisterOperators reg(
              std::vector<int64_t> regular_shape = shape;
              std::vector<int64_t> last_shape = shape;
              int64_t dim = at::maybe_wrap_dim(raw_dim, shape.size());
-             AT_CHECK(
+             TORCH_CHECK(
                  dim < (int64_t)regular_shape.size(),
                  "Dimension out of range for chunk");
              int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
@@ -629,12 +692,16 @@ RegisterOperators reg(
      Operator(
          prim::TupleIndex,
          [](const Node* node) {
-           auto index = node->i(attr::index);
-           return [=](Stack& stack) {
+           return [](Stack& stack) {
+             int64_t index = pop(stack).toInt();
              auto tup = pop(stack).toTuple();
              const auto& elems = tup->elements();
-             // index is normalized to be positive at compile time
-             stack.emplace_back(elems.at(index));
+             auto norm_index = normalizeIndex(index, elems.size());
+             if (norm_index < 0 ||
+                 norm_index > static_cast<int64_t>(elems.size())) {
+               throw std::out_of_range("Tuple list index out of range");
+             }
+             stack.emplace_back(elems.at(norm_index));
              return 0;
            };
          }),
@@ -673,7 +740,7 @@ RegisterOperators reg(
              int64_t num_results = result.size();
              if (num_results != chunks) {
                if (num_results > chunks) {
-                 AT_CHECK(
+                 TORCH_CHECK(
                      num_results == chunks,
                      "Expected chunk to return ",
                      chunks,
@@ -681,7 +748,7 @@ RegisterOperators reg(
                      num_results);
                }
                for (int64_t i = num_results; i < chunks; ++i) {
-                 AT_CHECK(
+                 TORCH_CHECK(
                      !outputs_used[i],
                      "Expected chunk to return at least ",
                      chunks,
@@ -704,7 +771,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                auto ilist = pop(stack);
                const auto& list = ilist.toIntList()->elements();
-               AT_CHECK(
+               TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
@@ -717,7 +784,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                auto ilist = pop(stack);
                const auto& list = ilist.toDoubleList()->elements();
-               AT_CHECK(
+               TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
@@ -730,7 +797,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                auto ilist = pop(stack);
                const auto& list = ilist.toTensorList()->elements();
-               AT_CHECK(
+               TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
@@ -743,7 +810,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                auto glist = pop(stack);
                const auto& list = glist.toGenericList()->elements();
-               AT_CHECK(
+               TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
@@ -800,11 +867,11 @@ RegisterOperators reg(
                  "DictConstruct must have an even number of inputs");
            }
            return [=](Stack& stack) {
-             c10::ivalue::UnorderedMap vals;
+             c10::impl::GenericDict vals;
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
-               vals[key] = val;
+               vals.insert_or_assign(std::move(key), std::move(val));
              }
              push(stack, std::move(vals));
              return 0;
@@ -814,7 +881,7 @@ RegisterOperators reg(
          "aten::_unwrap_optional(t(a)? optional) -> t(a)",
          [](Stack& stack) {
            auto val = pop(stack);
-           AT_CHECK(!val.isNone(), "Unwrapping null optional");
+           TORCH_CHECK(!val.isNone(), "Unwrapping null optional");
            push(stack, val);
            return 0;
          }),
@@ -840,7 +907,7 @@ RegisterOperators reg(
 
              push(stack, forked_interprester.getFuture());
 
-             c10::global_work_queue().run(std::move(continuation));
+             at::launch(std::move(continuation));
              return 0;
            };
          }),
@@ -989,19 +1056,9 @@ RegisterOperators logging_operators(
     return 0;                                                      \
   })
 
-// Convert an python index (which may be negative) into an index usable for a
-// C++ container
-int64_t normalizeIndex(int64_t idx, int64_t list_size) {
-  if (idx < 0) {
-    // Handle negative indexing
-    idx = list_size + idx;
-  }
-  return idx;
-}
-
 int stringSlice(Stack& stack) {
   auto step = pop(stack).toInt();
-  AT_CHECK(step == 1, "Slicing a string only supports step=1");
+  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
 
   auto end = pop(stack).toInt();
   auto start = pop(stack).toInt();
@@ -1470,6 +1527,29 @@ int listSlice(Stack& stack) {
   return 0;
 }
 
+template <typename TList>
+int listSort(Stack& stack) {
+  TList list;
+
+  pop(stack, list);
+  std::sort(list->elements().begin(), list->elements().end());
+  return 0;
+}
+
+// Specialization for at::Tensor
+template <>
+int listSort<Shared<TensorList>>(Stack& stack) {
+  Shared<TensorList> list;
+  pop(stack, list);
+  std::sort(
+      list->elements().begin(),
+      list->elements().end(),
+      [](const at::Tensor& a, const at::Tensor& b) {
+        return a.lt(b).is_nonzero();
+      });
+  return 0;
+}
+
 template <typename TList, typename TElement>
 int listSetItem(Stack& stack) {
   TList list;
@@ -1505,38 +1585,57 @@ int listSetItem<Shared<BoolList>, bool>(Stack& stack) {
 int dictSetItem(Stack& stack) {
   auto value = pop(stack);
   auto idx = pop(stack);
-  auto& dict = pop(stack).toGenericDict()->elements();
-  dict[idx] = value;
-  push(stack, dict);
+  auto dict = pop(stack).toGenericDict();
+  dict->elements().insert_or_assign(std::move(idx), std::move(value));
+  push(stack, std::move(dict));
   return 0;
 }
 
 int dictLen(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
-  push(stack, int64_t(dict.size()));
+  auto dict = pop(stack).toGenericDict();
+  push(stack, int64_t(dict->elements().size()));
   return 0;
 }
 
 int dictKeys(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
+  auto dict = pop(stack).toGenericDict();
   std::vector<IValue> keys;
-  keys.reserve(dict.size());
-  for (auto item : dict) {
-    keys.push_back(item.first);
+  keys.reserve(dict->elements().size());
+  for (auto item : dict->elements()) {
+    keys.push_back(item.key());
   }
   push(stack, IValue(keys));
   return 0;
 }
 
-int dictValues(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
-  std::vector<IValue> values;
-  values.reserve(dict.size());
-  for (auto item : dict) {
-    values.push_back(item.second);
+template <typename Elem>
+std::vector<Elem> makeListForDictValues(
+    const c10::ivalue::GenericDict::IterationOrder& order) {
+  std::vector<Elem> values;
+  values.reserve(order.size());
+  for (auto item : order) {
+    values.push_back(item.second.to<Elem>());
   }
-  push(stack, IValue(values));
-  return 0;
+  return values;
+}
+
+Operation dictValues(const Node* n) {
+  auto outputType = n->output()->type()->expect<ListType>();
+  return [=](Stack& stack) -> int {
+    const auto& order = pop(stack).toGenericDict()->iterationOrder();
+    if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
+      push(stack, makeListForDictValues<at::Tensor>(order));
+    } else if (outputType->getElementType() == IntType::get()) {
+      push(stack, makeListForDictValues<int64_t>(order));
+    } else if (outputType->getElementType() == FloatType::get()) {
+      push(stack, makeListForDictValues<double>(order));
+    } else if (outputType->getElementType() == BoolType::get()) {
+      push(stack, makeListForDictValues<bool>(order));
+    } else {
+      push(stack, makeListForDictValues<IValue>(order));
+    }
+    return 0;
+  };
 }
 
 int dictIndex(Stack& stack) {
@@ -1547,7 +1646,7 @@ int dictIndex(Stack& stack) {
   if (value == elems.end()) {
     AT_ERROR("KeyError: '", index, "'");
   }
-  push(stack, value->second);
+  push(stack, value->value());
   return 0;
 }
 
@@ -1559,7 +1658,7 @@ int dictGet(Stack& stack) {
   if (value == elems.end()) {
     push(stack, IValue());
   } else {
-    push(stack, value->second);
+    push(stack, value->value());
   }
   return 0;
 }
@@ -1573,7 +1672,7 @@ int dictGetDefault(Stack& stack) {
   if (value == elems.end()) {
     push(stack, default_value);
   } else {
-    push(stack, value->second);
+    push(stack, value->value());
   }
   return 0;
 }
@@ -1600,11 +1699,13 @@ RegisterOperators reg2({
     DEFINE_STRING_OP(aten::ne, a != b, bool),
     DEFINE_STRING_OP(aten::add, a + b, str),
 #undef DEFINE_STRING_OP
-    Operator("aten::len(str s) -> int", [](Stack& stack) {
-        auto string = pop(stack).toStringRef();
-        push(stack, static_cast<int64_t>(string.size()));
-        return 0;
-    }),
+    Operator(
+        "aten::len(str s) -> int",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          push(stack, static_cast<int64_t>(string.size()));
+          return 0;
+        }),
     // tensor length op (size of 1st dimension)
     Operator(
         "aten::len(Tensor t) -> int",
@@ -1756,6 +1857,14 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("Tensor", TensorList),
     CREATE_LIST_OPS("t", GenericList),
 #undef CREATE_LIST_OPS
+    Operator("aten::sort(int[](a!) self) -> ()", listSort<Shared<IntList>>),
+    Operator(
+        "aten::sort(float[](a!) self) -> ()",
+        listSort<Shared<DoubleList>>),
+    Operator(
+        "aten::sort(Tensor[](a!) self) -> ()",
+        listSort<Shared<TensorList>>),
+    Operator("aten::sort(bool[](a!) self) -> ()", listSort<Shared<BoolList>>),
 
     Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
     Operator(
@@ -1786,14 +1895,23 @@ RegisterOperators reg2({
           return 0;
         }),
     Operator(
+      "prim::str(t elem) -> str",
+      [](Stack& stack) {
+        std::stringstream ss;
+        ss << pop(stack);
+        push(stack, ss.str());
+        return 0;
+      }),
+    Operator(
         "aten::ord(str string) -> int",
         [](Stack& stack) {
           auto string = pop(stack).toStringRef();
-          AT_CHECK(
+          TORCH_CHECK(
               string.size() == 1,
               "String for ord() must be 1 character, found",
               string.size());
-          push(stack, int64_t(string.at(0)));
+          uint8_t ord = string.at(0);
+          push(stack, int64_t(ord));
           return 0;
         }),
 #define CREATE_COPY_OP(other_type, c_type)                                 \
@@ -2012,6 +2130,35 @@ RegisterOperators reg2({
           return 0;
         }),
 
+    DEFINE_INT_OP(aten::gcd, gcd(a, b)),
+
+    DEFINE_GENERIC_OP(aten::copysign, std::copysign(a, b), std::copysign(a, b), float, float),
+    DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a,b), float),
+
+#define DEFINE_MATH_OP(aten_op, op, int_result, float_result)              \
+  Operator(                                                                \
+      #aten_op "(int a) -> " #int_result,                                  \
+      [](Stack& stack) {                                                   \
+        int64_t a;                                                         \
+        pop(stack, a);                                                     \
+        push(stack, op);                                                   \
+        return 0;                                                          \
+      }),                                                                  \
+      Operator(#aten_op "(float a) -> " #float_result,                     \
+      [](Stack& stack) {                                                   \
+        double a;                                                          \
+        pop(stack, a);                                                     \
+        push(stack, op);                                                   \
+        return 0;                                                          \
+      })
+
+    DEFINE_MATH_OP(aten::gamma, std::tgamma(a), float, float),
+    DEFINE_MATH_OP(aten::erf, std::erf(a), float, float),
+    DEFINE_MATH_OP(aten::erfc, std::erfc(a), float, float),
+    DEFINE_MATH_OP(aten::expm1, std::expm1(a), float, float),
+    DEFINE_MATH_OP(aten::fabs, std::fabs(a), float, float),
+    DEFINE_MATH_OP(aten::lgamma, std::lgamma(a), float, float),
+
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),
     DEFINE_COMPARISON_OP(aten::lt, a < b),
@@ -2019,7 +2166,7 @@ RegisterOperators reg2({
     DEFINE_COMPARISON_OP(aten::le, a <= b),
     DEFINE_COMPARISON_OP(aten::ge, a >= b),
 
-    DEFINE_BOOL_OP(aten::__and__, a && b),
+    DEFINE_BOOL_OP(aten::__and__, a&& b),
     DEFINE_BOOL_OP(aten::__or__, a || b),
     DEFINE_BOOL_OP(aten::__xor__, a != b),
 
@@ -2114,6 +2261,78 @@ RegisterOperators reg2({
     Operator("aten::hash(str t) -> int", hashValue<std::string>),
     Operator("aten::hash(int t) -> int", hashValue<int>),
     Operator("aten::hash(float t) -> int", hashValue<double>),
+});
+
+bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
+  return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
+}
+
+void checkSortSchema(const Node* node, const c10::TypePtr& list_element_type) {
+  std::stringstream error_str;
+  if (auto class_type = list_element_type->cast<ClassType>()) {
+    if (auto method = class_type->getMethod("__lt__")) {
+      const auto& lt_schema = method->getSchema();
+      const auto& schema_args = lt_schema.arguments();
+      bool error =
+          (schema_args.size() != 2 ||
+           !simpleClassTypeArg(schema_args[0], class_type) ||
+           !simpleClassTypeArg(schema_args[1], class_type) ||
+           lt_schema.returns().size() != 1 ||
+           lt_schema.returns()[0].type() != BoolType::get());
+      if (!error) {
+        return;
+      }
+    }
+    error_str << "To sort a list of " << class_type->python_str()
+              << " it must define a "
+              << "__lt__ method with two inputs of type "
+              << class_type->python_str() << " that "
+              << "returns a bool";
+  } else {
+    error_str
+        << "Input to list sort must be of Tensors, ints, floats, bools or "
+        << "a User Defined Class that defines the __lt__ compare method"
+        << ", got list of " << list_element_type->python_str() << "\n";
+  }
+
+  auto error_msg = script::ErrorReport(node->sourceRange());
+  error_msg << error_str.str();
+  throw error_msg;
+}
+
+// NB: this must be registered after the other aten::sort operators
+RegisterOperators regSort({
+    Operator(
+        "aten::sort(t[](a!) self, bool reverse=False) -> ()",
+        [](const Node* node) {
+          const auto list_type =
+              node->inputs().at(0)->type()->expect<ListType>();
+          checkSortSchema(node, list_type->getElementType());
+          const auto elem = list_type->getElementType()->expect<ClassType>();
+          auto func = elem->getMethod("__lt__");
+          return [func](Stack& stack) {
+            bool reverse = pop(stack).toBool();
+            auto g_list = pop(stack).toGenericList();
+            Stack sort_stack;
+            std::sort(
+                g_list->elements().begin(),
+                g_list->elements().end(),
+                [func, reverse, &sort_stack](
+                    const IValue& a, const IValue& b) -> bool {
+                  // FBCode errors without this check - "strict weak ordering"
+                  // TODO: remove when possible, since it just slows down
+                  // sorting and doesn't do anything useful
+                  if (a.isSameIdentity(b)) {
+                    return false;
+                  }
+                  sort_stack.push_back(a);
+                  sort_stack.push_back(b);
+                  func->run(sort_stack);
+                  return pop(sort_stack).toBool() ^ reverse;
+                });
+            return 0;
+          };
+        }),
 });
 
 // reference: _output_size in torch/nn/functional.py
