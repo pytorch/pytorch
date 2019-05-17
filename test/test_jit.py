@@ -12824,6 +12824,13 @@ a")
         self._test_pickle_checkpoint('cpu')
         self._test_pickle_checkpoint_views('cpu')
 
+    def test_string_list(self):
+        def fn(string):
+            # type: (str) -> List[str]
+            return list(string)
+
+        self.checkScript(fn, ("abcdefgh",))
+
     def test_split(self):
         def split_two(tensor):
             a, b, c = torch.split(tensor, 2, dim=1)
