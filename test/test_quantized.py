@@ -1,12 +1,18 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import torch
-import torch.jit
 import numpy as np
 import unittest
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, skipIfNotRegistered
+
+import torch
+import torch.jit
 import torch.nn.functional as F
 
+from hypothesis import given
+from hypothesis import strategies as st
+from hypothesis.extra import numpy as stnp
+
+from common_utils import TEST_WITH_UBSAN, TestCase, run_tests
+from common_utils import skipIfNotRegistered
 
 def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
@@ -113,21 +119,25 @@ graph(%x : (Tensor, float, int)):
         )
 
 
-class TestQuantizedOps(unittest.TestCase):
+class TestQuantizedOps(TestCase):
+
     """Tests the correctness of the quantized::relu op."""
-
-    def test_qrelu(self):
+    @given(X=stnp.arrays(dtype=np.float32,
+                         elements=st.floats(-256, 256, allow_nan=False),
+                         shape=(1, 2, 3, 4)),
+           scale=st.floats(min_value=1.0/128, max_value=128.0),
+           zero_point=st.integers(min_value=0, max_value=255))
+    def test_qrelu(self, X, scale, zero_point):
         relu = torch.ops.quantized.relu
+        Y = X.copy()
+        X = torch.from_numpy(X)
 
-        X = torch.arange(-5, 5, dtype=torch.float)
-        scale = 2.0
-        zero_point = 1
         qX = X.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.quint8)
 
-        Y = X.numpy().copy()
         Y[Y < 0] = 0
         qY = _quantize(Y, scale, zero_point)
         qY_hat = relu(qX)
+
         np.testing.assert_equal(qY, qY_hat.int_repr())
 
     """Tests the correctness of the add and add_relu op."""

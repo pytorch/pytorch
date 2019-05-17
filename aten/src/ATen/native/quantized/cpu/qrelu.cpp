@@ -10,7 +10,7 @@
 namespace at { namespace native {
 namespace {
 
-class QReluInt8 final : public c10::OperatorKernel {
+class QReluUInt8 final : public c10::OperatorKernel {
  public:
   Tensor operator()(Tensor qx) {
     Tensor qy = at::_empty_affine_quantized(qx.sizes(),
@@ -28,7 +28,7 @@ class QReluInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::relu(Tensor qx) -> Tensor",
-    c10::kernel<QReluInt8>(),
+    c10::kernel<QReluUInt8>(),
     c10::dispatchKey(QuantizedCPUTensorId()));
 
 }  // namespace
