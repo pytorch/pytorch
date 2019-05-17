@@ -15,6 +15,8 @@
   case enum_type: {                                                     \
     using scalar_t = type;                                              \
     using underlying_t = underlying_type;                               \
+    __attribute__ ((scalar_t))                                          \
+    __attribute__ ((underlying_t))                                      \
     return __VA_ARGS__();                                               \
   }
 
