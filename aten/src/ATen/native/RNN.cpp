@@ -114,10 +114,10 @@ struct QuantizedCellParams {
   const Scalar zero_point_hh;
 
   Tensor matmul_ih(Tensor input) const {
-    AT_CHECK(false, "matmul is not supported with quantized cell params");
+    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
   Tensor matmul_hh(Tensor h) const {
-    AT_CHECK(false, "matmul is not supported with quantized cell params");
+    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
   }
   Tensor linear_ih(Tensor input) const {
     return at::fbgemm_linear_int8_weight(
@@ -132,7 +132,7 @@ struct QuantizedCellParams {
 // Gathers every two elements of a vector in a vector of pairs
 template<typename T>
 static std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
-  AT_CHECK(vals.size() % 2 == 0, "Odd number of params or hiddens given to a bidirectional RNN");
+  TORCH_CHECK(vals.size() % 2 == 0, "Odd number of params or hiddens given to a bidirectional RNN");
   std::vector<pair_of<T>> result;
   result.reserve(vals.size() / 2);
   for (int64_t i = 0; i < vals.size(); i += 2) {
@@ -158,12 +158,12 @@ static std::vector<CellParams> gather_params(TensorList params, bool has_biases)
   static at::Tensor undefined;
   std::vector<CellParams> result;
   if (has_biases) {
-    AT_CHECK(params.size() % 4 == 0, "got an incorrect number of RNN parameters");
+    TORCH_CHECK(params.size() % 4 == 0, "got an incorrect number of RNN parameters");
     for (size_t i = 0; i < params.size(); i += 4) {
       result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3]);
     }
   } else {
-    AT_CHECK(params.size() % 2 == 0, "got an incorrect number of RNN parameters");
+    TORCH_CHECK(params.size() % 2 == 0, "got an incorrect number of RNN parameters");
     for (size_t i = 0; i < params.size(); i += 2) {
       result.emplace_back(params[i], params[i + 1], undefined, undefined);
     }
@@ -174,7 +174,7 @@ static std::vector<CellParams> gather_params(TensorList params, bool has_biases)
 static std::vector<QuantizedCellParams> gather_quantized_params(TensorList params) {
   static at::Tensor undefined;
   std::vector<QuantizedCellParams> result;
-  AT_CHECK(params.size() % 12 == 0, "got an incorrect number of quantized RNN parameters");
+  TORCH_CHECK(params.size() % 12 == 0, "got an incorrect number of quantized RNN parameters");
   for (size_t i = 0; i < params.size(); i += 12) {
     result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3],
                         params[i + 4], params[i + 5], params[i + 6], params[i + 7],
@@ -512,8 +512,8 @@ LayerOutput<io_type, std::vector<hidden_type>>
 apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const io_type& input,
                   const std::vector<hidden_type>& hiddens, const std::vector<weight_type>& weights,
                   int64_t num_layers, double dropout_p, bool train) {
-  AT_CHECK(num_layers == hiddens.size(), "Expected more hidden states in stacked_rnn");
-  AT_CHECK(num_layers == weights.size(), "Expected more weights in stacked_rnn");
+  TORCH_CHECK(num_layers == hiddens.size(), "Expected more hidden states in stacked_rnn");
+  TORCH_CHECK(num_layers == weights.size(), "Expected more weights in stacked_rnn");
 
   auto layer_input = input;
   auto hidden_it = hiddens.begin();
@@ -658,7 +658,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-  AT_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
@@ -680,7 +680,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& data, const Tensor& batch_sizes, TensorList hx,
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
-  AT_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(data)) {
     Tensor output, hy, cy;
     lstm_packed_cudnn_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
@@ -698,7 +698,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 std::tuple<Tensor, Tensor> lstm_cell(
     const Tensor& input, TensorList hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
-  AT_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
+  TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
   return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh});
 }
 
@@ -730,7 +730,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-  AT_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
@@ -739,7 +739,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
   }
   check_device(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;
-  AT_CHECK(has_biases, "quantized LSTM requires biases");
+  TORCH_CHECK(has_biases, "quantized LSTM requires biases");
   auto params = gather_quantized_params(_params);
   auto results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
       input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional);

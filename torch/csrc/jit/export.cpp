@@ -38,13 +38,7 @@ namespace onnx = ::ONNX_NAMESPACE;
 class ScriptModuleSerializer;
 
 std::string getNodeStackTraceString(const Node* n) {
-  std::stringstream ss;
-  if (n->getSourceLocation()) {
-    n->getSourceLocation()->highlight(ss);
-  } else {
-    ss << "<unknown location>";
-  }
-  return ss.str();
+  return n->sourceRange().str();
 }
 
 void validateBlock(
@@ -258,10 +252,8 @@ void EncoderBase::EncodeBlock(
       continue;
     }
     auto p_n = graph_proto->add_node();
-    if (node->getSourceLocation() && !strip_doc_) {
-      std::stringstream ss;
-      node->getSourceLocation()->highlight(ss);
-      p_n->set_doc_string(ss.str());
+    if (!strip_doc_) {
+      p_n->set_doc_string(node->sourceRange().str());
     }
     for (auto input : node->inputs()) {
       if (input->node()->mustBeNone() && !is_raw_export) {
@@ -541,7 +533,6 @@ class ScriptModuleSerializer final {
   OrderedDict<ClassTypePtr, std::string> converted_classes_;
   std::unordered_map<ClassTypePtr, std::vector<ClassTypePtr>> class_to_deps_;
 
-  static const size_t op_version_set = 0;
 };
 
 // ScriptModuleSerializer's methods
@@ -612,7 +603,7 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
     const std::string& src = fileToSrc.at(filename).str();
 
     std::ostringstream lib_stream;
-    lib_stream << "op_version_set = " << op_version_set << "\n";
+    lib_stream << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     lib_stream << src;
     std::string lib_str = lib_stream.str();
     writer_.writeRecord(filename, lib_str.c_str(), lib_str.size());
@@ -700,29 +691,12 @@ void ScriptModuleSerializer::convertAndWriteTensor(
 
   tensor_proto->set_requires_grad(tensor.requires_grad());
 
-  uint64_t record_size = tensor.element_size() * tensor.storage().size();
   auto* key = tensor.storage().unsafeGetStorageImpl();
-
   auto storage_it = storageMap.find(key);
   if (storage_it == storageMap.end()) {
-    at::Tensor storage_tensor = tensor;
-    // TODO HIP support
-    if (tensor.storage().device_type() == at::DeviceType::CUDA) {
-      // NB: This new tensor is created to support cuda tensors.
-      // Storages can be mutated when converting tensors from cuda to cpu,
-      // and we need a cpu tensor to copy data from.
-      storage_tensor = at::empty({0}, tensor.options())
-                           .set_(
-                               tensor.storage(),
-                               /* storageOffset = */ 0,
-                               /* size = */
-                               {static_cast<int64_t>(tensor.storage().size())},
-                               /* stride = */ {1})
-                           .cpu();
-      AT_ASSERT(
-          storage_tensor.element_size() * storage_tensor.storage().size() ==
-          record_size);
-    }
+    uint64_t record_size;
+    at::Tensor storage_tensor;
+    std::tie(storage_tensor, record_size) = getWriteableTensor(tensor);
     std::string name = "tensors/" + std::to_string(tensor_id);
     writer_.writeRecord(name, storage_tensor.storage().data(), record_size);
     storage_it = storageMap.insert({key, name}).first;
@@ -749,9 +723,11 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
 void ScriptModuleSerializer::writeAttributeTable() {
   Pickler pickler(&tensor_table_);
   pickler.start();
+  pickler.startTuple();
   for (const IValue& ivalue : attribute_table_) {
     pickler.addIValue(ivalue);
   }
+  pickler.endTuple();
   pickler.finish();
   writer_.writeRecord(
       "attributes.pkl", pickler.stack().data(), pickler.stack().size());
@@ -786,7 +762,7 @@ void ScriptModuleSerializer::convertModule(
 
   if (module.get_methods().size() > 0) {
     std::ostringstream methods;
-    methods << "op_version_set = " << op_version_set << "\n";
+    methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
         module.class_compilation_unit(),

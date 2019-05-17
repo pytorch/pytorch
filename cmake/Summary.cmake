@@ -125,6 +125,7 @@ function (caffe2_print_configuration_summary)
     message(STATUS "    USE_GLOO            : ${USE_GLOO}")
     message(STATUS "    USE_GLOO_IBVERBS    : ${USE_GLOO_IBVERBS}")
   endif()
+  message(STATUS "  NAMEDTENSOR_ENABLED   : ${NAMEDTENSOR_ENABLED}")
 
   message(STATUS "  Public Dependencies  : ${Caffe2_PUBLIC_DEPENDENCY_LIBS}")
   message(STATUS "  Private Dependencies : ${Caffe2_DEPENDENCY_LIBS}")

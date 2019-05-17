@@ -73,11 +73,7 @@ class ShapePropagator {
       } catch (propagation_error& e) {
         setUnshapedType(node);
       } catch (std::exception& e) {
-        if (auto sl = node->getSourceLocation()) {
-          sl->wrapAndRethrowException(e, "operation failed shape propagation");
-        } else {
-          throw;
-        }
+         node->sourceRange().wrapAndRethrowException(e, "operation failed shape propagation");
       }
     }
   }
@@ -705,7 +701,7 @@ class ShapePropagator {
             "aten::atan(Tensor self) -> Tensor",
             "aten::ceil(Tensor self) -> Tensor",
             "aten::clone(Tensor self) -> Tensor",
-            "aten::contiguous(Tensor self) -> Tensor",
+            "aten::contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor",
             "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
             "aten::celu(Tensor self, Scalar alpha) -> Tensor",
             "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",

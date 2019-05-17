@@ -30,7 +30,7 @@ struct ProfilingRecord {
   size_t profiling_count_;
 
  private:
-  Node* createProfileNode(
+  ProfileOp* createProfileNode(
       const std::function<void(Stack&)>& fp,
       at::ArrayRef<Value*> inputs);
   void instrumentBlock(Block* block);

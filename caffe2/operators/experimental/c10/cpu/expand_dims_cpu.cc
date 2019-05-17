@@ -55,13 +55,7 @@ class expand_dims_cpu final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::ExpandDims",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("input"),
-                                    c10::Argument("output"),
-                                    c10::Argument("dims", ListType::ofInts())}),
-        (std::vector<c10::Argument>{})),
+    "_c10_experimental::ExpandDims",
     c10::kernel<expand_dims_cpu<float>>(),
     c10::dispatchKey(CPUTensorId()));
 
