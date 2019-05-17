@@ -5648,6 +5648,7 @@ class TestNN(NNTestCase):
                         self.assertEqual(hx.grad.data, hx_cuda.grad.data)
 
     def test_transformer_args_check(self):
+        model_name = 'Transformer'
         d_model = 128
         nhead = 4
         num_encoder_layers = 2
@@ -5666,8 +5667,8 @@ class TestNN(NNTestCase):
                  src_mask_len=None, tgt_mask_len=None, memory_mask_size=None):
             encoder_input = torch.randn(encoder_input_shape)
             decoder_input = torch.randn(decoder_input_shape)
-            model = getattr(nn, 'Transformer')(d_model, nhead, num_encoder_layers, 
-                                               num_decoder_layers, dim_feedforward, dropout)
+            model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers, 
+                                            num_decoder_layers, dim_feedforward, dropout)
 
             if src_mask_len is not None:
                 src_mask = model.generate_square_subsequent_mask(src_mask_len)
@@ -5720,8 +5721,8 @@ class TestNN(NNTestCase):
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         with self.assertRaises(AssertionError):
-            model = getattr(nn, 'Transformer')(d_model, wrong_nhead, num_encoder_layers, 
-                                               num_decoder_layers, dim_feedforward, dropout)
+            model = getattr(nn, model_name)(d_model, wrong_nhead, num_encoder_layers, 
+                                            num_decoder_layers, dim_feedforward, dropout)
 
         # Incorrect src_mask
         encoder_input_shape = correct_encoder_input_shape

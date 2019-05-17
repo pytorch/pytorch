@@ -10,7 +10,8 @@ from .linear import Linear
 from .normalization import LayerNorm
 
 class Transformer(Module):
-    r"""A transformer model. User is able to modified the attributes as needed.
+    r"""A transformer model. User is able to modified the attributes as needed. The architechture
+        is based on the paper "Attention Is All You Need".
 
     Args:
         d_model: the number of expected features in the encoder/decoder inputs (default=512).
@@ -224,12 +225,20 @@ class TransformerEncoderLayer(Module):
         Shape:
             see the docs in Transformer class.
         """
-        src2 = self.norm1(src)
-        src = src + self.dropout1(self.self_attn(src2, src2, src2, attn_mask=src_mask)[0])
-        src2 = self.norm2(src)
-        src2 = self.linear2(self.dropout(F.relu(self.linear1(src2))))
-        src = src + self.dropout2(src2)
-        return src
+        return F.transformer_encoder_layer_forward(src, src_mask,
+                                                   self.self_attn.embed_dim, self.self_attn.num_heads,
+                                                   self.self_attn.in_proj_weight, self.self_attn.in_proj_bias, 
+                                                   self.self_attn.bias_k,
+                                                   self.self_attn.bias_v, self.self_attn.add_zero_attn,
+                                                   self.self_attn.dropout, 
+                                                   self.self_attn.out_proj.weight, self.self_attn.out_proj.bias,
+                                                   self.norm1.normalized_shape, self.norm1.weight, self.norm1.bias, self.norm1.eps,
+                                                   self.norm2.normalized_shape, self.norm2.weight, self.norm2.bias, self.norm2.eps,
+                                                   self.dropout.p, self.dropout.training, self.dropout.inplace,
+                                                   self.dropout1.p, self.dropout1.training, self.dropout1.inplace,
+                                                   self.dropout2.p, self.dropout2.training, self.dropout2.inplace,
+                                                   self.linear1.weight, self.linear1.bias,
+                                                   self.linear2.weight, self.linear2.bias)
 
 
 class TransformerDecoderLayer(Module):
@@ -273,14 +282,28 @@ class TransformerDecoderLayer(Module):
         Shape:
             see the docs in Transformer class.
         """
-        tgt2 = self.norm1(tgt)
-        tgt = tgt + self.dropout1(self.self_attn(tgt2, tgt2, tgt2, attn_mask=tgt_mask)[0])
-        tgt2 = self.norm2(tgt)
-        tgt = tgt + self.dropout2(self.multihead_attn(tgt2, memory, memory, attn_mask=memory_mask)[0])
-        tgt2 = self.norm3(tgt)
-        tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt2))))
-        tgt = tgt + self.dropout3(tgt2)        
-        return tgt
+        return F.transformer_decoder_layer_forward(tgt, memory, tgt_mask, memory_mask,
+                                                   self.self_attn.embed_dim, self.self_attn.num_heads,
+                                                   self.self_attn.in_proj_weight, self.self_attn.in_proj_bias, 
+                                                   self.self_attn.bias_k,
+                                                   self.self_attn.bias_v, self.self_attn.add_zero_attn,
+                                                   self.self_attn.dropout, 
+                                                   self.self_attn.out_proj.weight, self.self_attn.out_proj.bias,
+                                                   self.multihead_attn.embed_dim, self.multihead_attn.num_heads,
+                                                   self.multihead_attn.in_proj_weight, self.multihead_attn.in_proj_bias, 
+                                                   self.multihead_attn.bias_k, self.multihead_attn.bias_v, 
+                                                   self.multihead_attn.add_zero_attn,
+                                                   self.multihead_attn.dropout, 
+                                                   self.multihead_attn.out_proj.weight, self.multihead_attn.out_proj.bias,
+                                                   self.norm1.normalized_shape, self.norm1.weight, self.norm1.bias, self.norm1.eps,
+                                                   self.norm2.normalized_shape, self.norm2.weight, self.norm2.bias, self.norm2.eps,
+                                                   self.norm3.normalized_shape, self.norm3.weight, self.norm3.bias, self.norm3.eps,
+                                                   self.dropout.p, self.dropout.training, self.dropout.inplace,
+                                                   self.dropout1.p, self.dropout1.training, self.dropout1.inplace,
+                                                   self.dropout2.p, self.dropout2.training, self.dropout2.inplace,
+                                                   self.dropout3.p, self.dropout3.training, self.dropout3.inplace,
+                                                   self.linear1.weight, self.linear1.bias,
+                                                   self.linear2.weight, self.linear2.bias)
 
 
 def _get_clones(module, N):
