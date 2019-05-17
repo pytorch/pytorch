@@ -12588,7 +12588,6 @@ a")
                 self.other = Other(200)
 
             def forward(self, t):
-                # return t + self.x
                 return self.other(t) * 2
 
         m = M()

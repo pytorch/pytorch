@@ -1526,7 +1526,7 @@ if _enabled:
 
             # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
-#
+
             constants_set = set(getattr(original, "__constants__", []))
             self.__dict__["_constants_set"] = {}
 
@@ -1547,7 +1547,7 @@ if _enabled:
                     ScriptModule.__setattr__(self, name, item)
                 elif isinstance(item, Module):
                     if torch._C._jit_recursive_script():
-                        # make it a strong module
+                        # make it a ScriptModule
                         item = _make_strong(item, from_weak_type=False)
                     ScriptModule.__setattr__(self, name, item)
                 elif isinstance(item, Attribute):
@@ -1610,8 +1610,8 @@ else:
 
 def _get_weak_stubs(cls):
     """
-    Calls script_method for each method on the type of the object passed in and
-    returns the generated ScriptMethodStubs
+    Calls script_method for each method that has been annotated with @weak_script
+    on the type of the object passed in and returns the generated ScriptMethodStubs.
     """
     stubs = []
     for name in dir(cls):
@@ -1625,7 +1625,7 @@ def _get_weak_stubs(cls):
 
 def _get_module_stubs(cls):
     """
-    Gets ScriptMethodStubs for all functions on a module
+    Gets ScriptMethodStubs for all functions on a nn.Module
     """
     stubs = []
     for name in cls.__dict__:
