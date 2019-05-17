@@ -12566,6 +12566,37 @@ a")
         t = torch.ones(2, 2)
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
 
+    def test_module_recursive(self):
+        class Other(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self, x):
+                super(Other, self).__init__()
+                self.x = x
+                self.param = torch.nn.Parameter(torch.ones(2, 2))
+                self.attribute = torch.jit.Attribute(99, int)
+
+            def forward(self, t):
+                return t + self.x + self.param + self.attribute
+
+
+        class M(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.other = Other(200)
+
+            def forward(self, t):
+                # return t + self.x
+                return self.other(t) * 2
+
+        m = M()
+        with torch.jit._enable_recursive_script():
+            sm = torch.jit._make_strong(m, from_weak_type=False)
+
+        self.assertExportImportModule(sm, (torch.ones(2, 2),))
+
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):
         model = {

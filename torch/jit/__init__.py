@@ -939,6 +939,9 @@ def _try_compile_fn(fn):
     if inspect.ismethod(fn) or _is_ignored_function(fn):
         # Skip methods
         return None
+    if not hasattr(fn, '__code__'):
+        return None
+
     rcb = createResolutionCallbackFromClosure(fn)
     return torch.jit.script(fn, _rcb=rcb)
 
@@ -1523,9 +1526,13 @@ if _enabled:
 
             # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
-
+#
             constants_set = set(getattr(original, "__constants__", []))
             self.__dict__["_constants_set"] = {}
+
+            if not hasattr(original, '_parameters'):
+                raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
+                                   .format(type(original).__name__))
 
             # Copy Parameters and Modules
             for name in dir(original):
@@ -1534,7 +1541,16 @@ if _enabled:
                     # XXX: treat None value simply as module attributes instead of adding them to the parameter list
                     # TODO: need to handle this more generally when non-tensor attributes added to module
                     object.__setattr__(self, name, item)
-                elif isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
+                elif item is self:
+                    continue
+                elif isinstance(item, Parameter):
+                    ScriptModule.__setattr__(self, name, item)
+                elif isinstance(item, Module):
+                    if torch._C._jit_recursive_script():
+                        # make it a strong module
+                        item = _make_strong(item, from_weak_type=False)
+                    ScriptModule.__setattr__(self, name, item)
+                elif isinstance(item, Attribute):
                     ScriptModule.__setattr__(self, name, item)
 
             # Copy buffers
@@ -1607,27 +1623,43 @@ def _get_weak_stubs(cls):
     return stubs
 
 
-def _make_strong(mod):
+def _get_module_stubs(cls):
+    """
+    Gets ScriptMethodStubs for all functions on a module
+    """
+    stubs = []
+    for name in cls.__dict__:
+        func = get_function_from_type(cls, name)
+        if func is None or not callable(func):
+            continue
+        if func.__name__ == '__init__':
+            continue
+        stub = script_method(func, createResolutionCallbackFromClosure(func))
+        stubs.append(stub)
+    return stubs
+
+
+def _make_strong(mod, from_weak_type=True):
     """
     Converts a weak module into a subclass of ScriptModule
     """
     if mod in _jit_internal.weak_modules:
         return _jit_internal.weak_modules[mod]
 
-    stubs = _jit_internal.weak_types.get(type(mod))["method_stubs"]
-
-    if stubs is None:
-        # Generate stubs and and store on weak_types in case this type is
-        # used again
-        stubs = _get_weak_stubs(type(mod))
-        _jit_internal.weak_types[type(mod)]["method_stubs"] = stubs
-
-    # Create proxy with stubs
-    original_type = type(mod)
+    cls = type(mod)
+    if from_weak_type:
+        stubs = _jit_internal.weak_types.get(cls)["method_stubs"]
+        if stubs is None:
+            # Generate stubs and and store on weak_types in case this type is
+            # used again
+            stubs = _get_weak_stubs(cls)
+            _jit_internal.weak_types[cls]["method_stubs"] = stubs
+    else:
+        stubs = _get_module_stubs(cls)
 
     # Construct a new type that inherits from both WeakScriptModuleProxy and
     # original_type so that isinstance checks work correctly
-    weak_type = type(original_type.__name__, (WeakScriptModuleProxy, original_type), {})
+    weak_type = type(cls.__name__, (WeakScriptModuleProxy, cls), {})
     proxy = weak_type(mod, stubs)
 
     _jit_internal.weak_modules[mod] = proxy
