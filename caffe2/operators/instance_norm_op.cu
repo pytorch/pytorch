@@ -188,8 +188,6 @@ bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
 
-  auto mean = OutputSize() >= 2 ? Output(MEAN) : &mean_;
-  auto inv_stdev = OutputSize() >= 3 ? Output(INV_STDEV) : &inv_stdev_;
   CAFFE_ENFORCE_EQ(4, input.dim());
   const int N = input.dim32(0);
   const int H = input.dim32(1);
@@ -200,8 +198,22 @@ bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(1, bias.dim());
   CAFFE_ENFORCE_EQ(C, bias.dim32(0));
   auto output = Output(OUTPUT, input.sizes(), at::dtype<float>());
-  mean->Resize(N, C);
-  inv_stdev->Resize(N, C);
+
+  Tensor* mean;
+  if (OutputSize() >= 2) {
+    mean = Output(MEAN, {N, C}, at::dtype<float>().device(CUDA));
+  } else {
+    ReinitializeTensor(&mean_, {N, C}, at::dtype<float>().device(CUDA));
+    mean = &mean_;
+  }
+
+  Tensor* inv_stdev;
+  if (OutputSize() >= 3) {
+    inv_stdev = Output(INV_STDEV, {N, C}, at::dtype<float>().device(CUDA));
+  } else {
+    ReinitializeTensor(&inv_stdev_, {N, C}, at::dtype<float>().device(CUDA));
+    inv_stdev = &inv_stdev_;
+  }
 
   const auto input_data = input.data<float>();
   const auto scale_data = scale.data<float>();
@@ -265,8 +277,6 @@ bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
 
-  auto mean = OutputSize() >= 2 ? Output(MEAN) : &mean_;
-  auto inv_stdev = OutputSize() >= 3 ? Output(INV_STDEV) : &inv_stdev_;
   CAFFE_ENFORCE_EQ(4, input.dim());
   const int N = input.dim32(0);
   const int C = input.dim32(1);
@@ -277,8 +287,22 @@ bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE_EQ(1, bias.dim());
   CAFFE_ENFORCE_EQ(C, bias.dim32(0));
   auto output = Output(OUTPUT, input.sizes(), at::dtype<float>());
-  mean->Resize(N, C);
-  inv_stdev->Resize(N, C);
+
+  Tensor* mean;
+  if (OutputSize() >= 2) {
+    mean = Output(MEAN, {N, C}, at::dtype<float>().device(CUDA));
+  } else {
+    ReinitializeTensor(&mean_, {N, C}, at::dtype<float>().device(CUDA));
+    mean = &mean_;
+  }
+
+  Tensor* inv_stdev;
+  if (OutputSize() >= 3) {
+    inv_stdev = Output(INV_STDEV, {N, C}, at::dtype<float>().device(CUDA));
+  } else {
+    ReinitializeTensor(&inv_stdev_, {N, C}, at::dtype<float>().device(CUDA));
+    inv_stdev = &inv_stdev_;
+  }
 
   const auto input_data = input.data<float>();
   const auto scale_data = scale.data<float>();
@@ -471,9 +495,9 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
   const auto& output_grad = Input(OUTPUT_GRAD);
+
   const auto& mean = InputSize() >= 5 ? Input(MEAN) : mean_;
   const auto& inv_stdev = InputSize() >= 6 ? Input(INV_STDEV) : inv_stdev_;
-
   CAFFE_ENFORCE_EQ(4, input.dim());
   const int N = input.dim32(0);
   const int C = input.dim32(1);
@@ -507,7 +531,7 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto dim_stride = 1;
 
   if (InputSize() < 5) {
-    mean_.Resize(N, C);
+    ReinitializeTensor(&mean_, {N, C}, at::dtype<float>().device(CUDA));
     auto mean_mutable_data = mean_.mutable_data<float>();
     InstanceNormMeanKernel<<<
         CAFFE_GET_BLOCKS(N * C),
@@ -530,7 +554,7 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto mean_data = mean.data<float>();
 
   if (InputSize() < 6) {
-    inv_stdev_.Resize(N, C);
+    ReinitializeTensor(&inv_stdev_, {N, C}, at::dtype<float>().device(CUDA));
     auto inv_stdev_mutable_data = inv_stdev_.mutable_data<float>();
     InstanceNormInvStdevKernel<<<
         CAFFE_GET_BLOCKS(N * C),

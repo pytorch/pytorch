@@ -566,8 +566,8 @@ template <typename ModuleType>
 std::shared_ptr<ModuleType> Module::register_module(
     std::string name,
     std::shared_ptr<ModuleType> module) {
-  AT_CHECK(!name.empty(), "Submodule name must not be empty");
-  AT_CHECK(
+  TORCH_CHECK(!name.empty(), "Submodule name must not be empty");
+  TORCH_CHECK(
       name.find('.') == std::string::npos,
       "Submodule name must not contain a dot (got '",
       name,

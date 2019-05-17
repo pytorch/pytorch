@@ -1236,51 +1236,52 @@ class CTCLoss(_Loss):
     with respect to each input node. The alignment of input to target is assumed to be "many-to-one", which
     limits the length of the target sequence such that it must be :math:`\leq` the input length.
 
-    **Args:**
-        **blank** (int, optional): blank label. Default :math:`0`.
+    Args:
+        blank (int, optional): blank label. Default :math:`0`.
         reduction (string, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output losses will be divided by the target lengths and
             then the mean over the batch is taken. Default: ``'mean'``
-
-        **zero_infinity** (bool, optional):
+        zero_infinity (bool, optional):
             Whether to zero infinite losses and the associated gradients.
             Default: ``False``
             Infinite losses mainly occur when the inputs are too short
             to be aligned to the targets.
 
-    **Inputs:**
-        **log_probs**: Tensor of size :math:`(T, N, C)`
-            | :math:`T = \text{input length}`
-            | :math:`N = \text{batch size}`
-            | :math:`C = \text{number of classes (including blank)}`
-
-            The logarithmized probabilities of the outputs
-            (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
-        **targets**: Tensor of size :math:`(N, S)` or :math:`(\operatorname{sum}(\text{target\_lengths}))`
-            | :math:`N = \text{batch size}`
-            | :math:`S = \text{max target length, if shape is } (N, S)`.
-
-            | Target sequences. Each element in the target sequence is a class index. Target index
-              cannot be blank (default=0).
-
-            | In the :math:`(N, S)` form, targets are padded to the length of the longest sequence, and stacked.
-            | In the :math:`(\operatorname{sum}(\text{target\_lengths}))` form, the targets are assumed to
-              be un-padded and concatenated within 1 dimension.
-        **input_lengths**: Tuple or tensor of size :math:`(N)`.
-            Lengths of the inputs (must each be :math:`\leq T`).
-            Lengths are specified for each sequence to achieve masking under the
-            assumption that sequences are padded to equal lengths.
-        **target_lengths**: Tuple or tensor of size  :math:`(N)`.
-            | Lengths of the targets. Lengths are specified for each sequence to achieve masking under the
-              assumption that sequences are padded to equal lengths.
-
-            | If target shape is :math:`(N,S)`, target_lengths are effectively the stop index
-              :math:`s_n` for each target sequence, such that ``target_n = targets[n,0:s_n]`` for
-              each target in a batch. Lengths must each be :math:`\leq S`
-
-            | If the targets are given as a 1d tensor that is the concatenation of individual targets,
-              the target_lengths must add up to the total length of the tensor.
+    Shape:
+        - Log_probs: Tensor of size :math:`(T, N, C)`,
+          where :math:`T = \text{input length}`,
+          :math:`N = \text{batch size}`, and
+          :math:`C = \text{number of classes (including blank)}`.
+          The logarithmized probabilities of the outputs (e.g. obtained with
+          :func:`torch.nn.functional.log_softmax`).
+        - Targets: Tensor of size :math:`(N, S)` or
+          :math:`(\operatorname{sum}(\text{target\_lengths}))`,
+          where :math:`N = \text{batch size}` and
+          :math:`S = \text{max target length, if shape is } (N, S)`.
+          It represent the target sequences. Each element in the target
+          sequence is a class index. And the target index cannot be blank (default=0).
+          In the :math:`(N, S)` form, targets are padded to the
+          length of the longest sequence, and stacked.
+          In the :math:`(\operatorname{sum}(\text{target\_lengths}))` form,
+          the targets are assumed to be un-padded and
+          concatenated within 1 dimension.
+        - Input_lengths: Tuple or tensor of size :math:`(N)`,
+          where :math:`N = \text{batch size}`. It represent the lengths of the
+          inputs (must each be :math:`\leq T`). And the lengths are specified
+          for each sequence to achieve masking under the assumption that sequences
+          are padded to equal lengths.
+        - Target_lengths: Tuple or tensor of size :math:`(N)`,
+          where :math:`N = \text{batch size}`. It represent lengths of the targets.
+          Lengths are specified for each sequence to achieve masking under the
+          assumption that sequences are padded to equal lengths. If target shape is
+          :math:`(N,S)`, target_lengths are effectively the stop index
+          :math:`s_n` for each target sequence, such that ``target_n = targets[n,0:s_n]`` for
+          each target in a batch. Lengths must each be :math:`\leq S`
+          If the targets are given as a 1d tensor that is the concatenation of individual
+          targets, the target_lengths must add up to the total length of the tensor.
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then
+          :math:`(N)`, where :math:`N = \text{batch size}`.
 
     Example::
 

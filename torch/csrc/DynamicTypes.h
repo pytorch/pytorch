@@ -25,8 +25,7 @@ struct Type;
 namespace torch {
 // Register a PyTypeObject* with the given attributes
 void registerStoragePyTypeObject(
-    PyTypeObject *pytype, const std::string& name,
-    bool is_cuda, bool is_sparse);
+    PyTypeObject *pytype, at::Backend backend, at::ScalarType scalarType);
 
 void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType);
 void registerLayoutObject(THPLayout *layout, at::Backend backend);

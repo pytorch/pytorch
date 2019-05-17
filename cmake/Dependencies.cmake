@@ -1101,15 +1101,6 @@ if (NOT INTERN_BUILD_MOBILE)
     ENDIF ()
   ENDIF()
 
-  if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
-      if (CUDA_VERSION VERSION_LESS "8.0")
-        MESSAGE(STATUS "Found gcc >=5 and CUDA <= 7.5, adding workaround C++ flags")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORCE_INLINES -D_MWAITXINTRIN_H_INCLUDED -D__STRICT_ANSI__")
-      endif()
-    endif()
-  endif()
-
   LIST(APPEND CUDA_NVCC_FLAGS -Wno-deprecated-gpu-targets)
   LIST(APPEND CUDA_NVCC_FLAGS --expt-extended-lambda)
 
