@@ -503,11 +503,11 @@ def _get_tensor_summary(name, display_name, description, tensor, content_type, j
                              TensorShapeProto.Dim(size=tensor.shape[2]),
                          ]))
 
-    tensor_summary = Summary(value=[Summary.Value(
+    tensor_summary = Summary.Value(
         tag=metadata.get_instance_name(name, content_type),
         tensor=tensor,
         metadata=tensor_metadata,
-    )])
+    )
 
     return tensor_summary
 
@@ -548,7 +548,4 @@ def mesh(tag, vertices, colors, faces, config_dict, display_name=None, descripti
         summaries.append(
             _get_tensor_summary(tag, display_name, description, tensor, content_type, json_config))
 
-    # todo: merge summaries without using tensorflow
-    # all_summaries = tf.summary.merge(summaries, name=tag)
-
-    return summaries[0]  # return only vertices for testing
+    return Summary(value=summaries)  # return only vertices for testing
