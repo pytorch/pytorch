@@ -240,7 +240,7 @@ class TestMkldnn(TestCase):
     def test_set_data_tensorimpl_type(self):
         # Dense tensor has impl of type `TensorImpl`, while MKL-DNN tensor has impl
         # of type `OpaqueTensorImpl<IDeepTensorWrapperPtr>`.
-        x = torch.randn(1, 2)
+        x = torch.randn((1, 2), dtype=torch.float, device=torch.device('cpu'))
         x_mkldnn = x.to_mkldnn()
         with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
             x.data = x_mkldnn
