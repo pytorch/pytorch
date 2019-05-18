@@ -122,12 +122,14 @@ namespace detail {
   };
   template<class T>
   struct legacy_ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> final {
+    C10_DEPRECATED_MESSAGE("Taking std::vector<T> as a kernel argument is deprecated. Please take ArrayRef<T> instead.")
     static std::vector<T> call(IValue&& v) {
       return std::move(*std::move(v).to<intrusive_ptr<ivalue::List<T>>>()).elements();
     }
   };
   template<class T>
   struct legacy_ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> final {
+    C10_DEPRECATED_MESSAGE("Taking std::vector<T> as a kernel argument is deprecated. Please take ArrayRef<T> instead.")
     static std::vector<T> call(IValue&& v) {
       auto list = std::move(v).toGenericList();
       std::vector<T> result;
@@ -140,6 +142,7 @@ namespace detail {
   };
   template<class Key, class Value>
   struct legacy_ivalue_to_arg_type<std::unordered_map<Key, Value>> final {
+    C10_DEPRECATED_MESSAGE("Taking std::unordered_map<Key, Value> as a kernel argument is deprecated. Please take Dict<Key, Value> instead.")
     static std::unordered_map<Key, Value> call(const IValue& v) {
       auto dict = std::move(v).toGenericDict();
       std::unordered_map<Key, Value> result;
@@ -242,6 +245,7 @@ namespace detail {
   };
   template<class Key, class Value>
   struct legacy_return_type_to_ivalue<std::unordered_map<Key, Value>> final {
+    C10_DEPRECATED_MESSAGE("Returning std::unordered_map<Key, Value> from a kernel is deprecated. Please return Dict<Key, Value> instead.")
     static IValue call(std::unordered_map<Key, Value>&& v) {
       c10::impl::GenericDict dict;
       dict.reserve(v.size());
