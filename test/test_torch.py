@@ -2796,6 +2796,9 @@ class _TestTorchMixin(object):
         r = torch.from_numpy(r).float()
         scale = 2
         zero_point = 2
+        qr = r.quantize_linear(scale, zero_point, torch.qint8)
+        rqr = qr.dequantize()
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
         qr = r.quantize_linear(scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
