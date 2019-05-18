@@ -12,9 +12,7 @@ namespace native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void upsample_bicubic2d_out_frame(
     const int num_elements,
     const accscalar_t height_scale,
@@ -65,18 +63,15 @@ __global__ void upsample_bicubic2d_out_frame(
       accscalar_t coefficients[4];
 
       for (int k = 0; k < 4; k++) {
-        /* TODO: change width and height order in the arguments */
-        /* TODO: maybe change x and y order in the arguments */
-        /* TODO: maybe change c and n order in the arguments */
         coefficients[k] = cubic_interp1d(
             upsample_get_value_bounded<scalar_t>(
-                idata, c, n, input_width, input_height, in_x - 1, in_y - 1 + k),
+                idata, n, c, input_height, input_width, in_y - 1 + k, in_x - 1),
             upsample_get_value_bounded<scalar_t>(
-                idata, c, n, input_width, input_height, in_x + 0, in_y - 1 + k),
+                idata, n, c, input_height, input_width, in_y - 1 + k, in_x + 0),
             upsample_get_value_bounded<scalar_t>(
-                idata, c, n, input_width, input_height, in_x + 1, in_y - 1 + k),
+                idata, n, c, input_height, input_width, in_y - 1 + k, in_x + 1),
             upsample_get_value_bounded<scalar_t>(
-                idata, c, n, input_width, input_height, in_x + 2, in_y - 1 + k),
+                idata, n, c, input_height, input_width, in_y - 1 + k, in_x + 2),
             t_x);
       }
 
@@ -92,9 +87,7 @@ __global__ void upsample_bicubic2d_out_frame(
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void upsample_bicubic2d_backward_out_frame(
     const int num_elements,
     const accscalar_t height_scale,
@@ -102,7 +95,6 @@ __global__ void upsample_bicubic2d_backward_out_frame(
     const bool align_corners,
     PackedTensorAccessor<scalar_t, 4> idata,
     const PackedTensorAccessor<scalar_t, 4> odata) {
-
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
@@ -150,16 +142,14 @@ __global__ void upsample_bicubic2d_backward_out_frame(
       scalar_t out_value = odata[n][c][output_y][output_x];
       for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
-          /* TODO: change width and height order in the arguments */
-          /* TODO: maybe change x and y order in the arguments */
           upsample_increment_value_bounded<scalar_t, accscalar_t>(
               idata,
-              c,
               n,
-              input_width,
+              c,
               input_height,
-              input_x - 1 + j,
+              input_width,
               input_y - 1 + i,
+              input_x - 1 + j,
               out_value * y_coeffs[i] * x_coeffs[j]);
         }
       }
@@ -206,8 +196,8 @@ static void upsample_bicubic2d_out_cuda_template(
       output_width > 0);
 
   const int num_output_elements = output_height * output_width;
-  const int max_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock / 2;
+  const int max_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
 
   // Launch kernel
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -287,8 +277,8 @@ static void upsample_bicubic2d_backward_out_cuda_template(
   grad_input.zero_();
 
   const int num_kernels = output_height * output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock / 2;
+  const int num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
