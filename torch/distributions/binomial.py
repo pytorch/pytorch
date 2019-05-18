@@ -5,6 +5,11 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
 
 
+def _clamp_by_zero(x):
+    # works like clamp(x, min=0) but has grad at 0 is 0.5
+    return (x.clamp(min=0) + x - x.clamp(max=0)) / 2
+
+
 class Binomial(Distribution):
     r"""
     Creates a Binomial distribution parameterized by :attr:`total_count` and
@@ -118,7 +123,7 @@ class Binomial(Distribution):
         #     (case logit > 0)              = k * logit - n * (log(p) - log(1 - p)) + n * log(p)
         #                                   = k * logit - n * logit - n * log1p(e^-logit)
         #     (merge two cases)             = k * logit - n * max(logit, 0) - n * log1p(e^-|logit|)
-        normalize_term = (self.total_count * self.logits.clamp(min=0)
+        normalize_term = (self.total_count * _clamp_by_zero(self.logits)
                           + self.total_count * torch.log1p(torch.exp(-torch.abs(self.logits)))
                           - log_factorial_n)
         return value * self.logits - log_factorial_k - log_factorial_nmk  - normalize_term

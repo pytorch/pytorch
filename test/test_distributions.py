@@ -960,6 +960,11 @@ class TestDistributions(TestCase):
         log_prob = Binomial(total_count, logits=logits).log_prob(x)
         self.assertTrue(torch.isfinite(log_prob).all())
 
+        # make sure that the grad at logits=0, value=0 is 0.5
+        x = torch.tensor(0., requires_grad=True)
+        y = Binomial(total_count, logits=x).log_prob(torch.tensor(-0.))[0]
+        self.assertEqual(grad(y, x)[0], torch.tensor(-0.5))
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_log_prob_vectorized_count(self):
         probs = torch.tensor([0.2, 0.7, 0.9])
