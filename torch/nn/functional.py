@@ -2246,9 +2246,43 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
         ret = torch._C._nn.mse_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
     return ret
 
+
+def _fspecial_gaussian(size, channel, sigma=1.5):
+    coords = torch.tensor([(x - (size - 1.) / 2.) for x in range(size)])
+    coords = -coords ** 2 / (2. * sigma ** 2)
+    grid = coords.view(1, -1) + coords.view(-1, 1)
+    grid = grid.view(1, -1)
+    grid = grid.softmax(-1)
+    kernel = grid.view(1, 1, size, size)
+    kernel = kernel.expand(channel, 1, size, size).contiguous()
+    return kernel
+
+
+def _ssim(input, target, max_val, size, channel, kernel):
+    c1 = (0.01 * max_val) ** 2
+    c2 = (0.03 * max_val) ** 2
+
+    mu1 = conv2d(input, kernel, padding=size // 2, groups=channel)
+    mu2 = conv2d(target, kernel, padding=size // 2, groups=channel)
+
+    mu1_sq = mu1 ** 2
+    mu2_sq = mu2 ** 2
+    mu1_mu2 = mu1 * mu2
+
+    sigma1_sq = conv2d(input * input, kernel, padding=size // 2, groups=channel) - mu1_sq
+    sigma2_sq = conv2d(target * target, kernel, padding=size // 2, groups=channel) - mu2_sq
+    sigma12 = conv2d(input * target, kernel, padding=size // 2, groups=channel) - mu1_mu2
+
+    v1 = 2 * sigma12 + c2
+    v2 = sigma1_sq + sigma2_sq + c2
+
+    ssim = ((2 * mu1_mu2 + c1) * v1) / ((mu1_sq + mu2_sq + c1) * v2)
+    return ssim, torch_mean(v1 / v2)
+
+
 @weak_script
-def ssim_loss(input, target, size_average=None, reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
+def ssim_loss(input, target, max_val, filter_size=11, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, float, int, Optional[bool], Optional[bool], str) -> Tensor
     r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Measures the element-wise mean squared error.
@@ -2256,51 +2290,51 @@ def ssim_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     See :class:`~torch.nn.MSELoss` for details.
     """
 
-    def _fspecial_gaussian(size, sigma, channel):
-        coords = torch.tensor([(x - (size - 1.) / 2.) for x in range(size)])
-        coords = -coords ** 2 / (2. * sigma ** 2)
-        grid = coords.view(1, -1) + coords.view(-1, 1)
-        grid = softmax(grid)
-        kernel = grid.unsqueeze(0).unsqueeze(0)
-        kernel = kernel.expand(channel, 1, size, size).continguous()
-        return kernel
+    dim = input.dim()
+    if dim != 4:
+        raise ValueError('Expected 4 dimensions (got {})'.format(dim))
 
-    def _ssim(img1, img2, kernel, size, channel, size_average=True):
-        mu1 = conv2d(img1, kernel, padding=size // 2, groups=channel)
-        mu2 = conv2d(img2, kernel, padding=size // 2, groups=channel)
+    if input.size() != target.size():
+        raise ValueError('Expected input size ({}) to match target size ({}).'
+                         .format(input.size(0), target.size(0)))
 
-        mu1_sq = mu1.pow(2)
-        mu2_sq = mu2.pow(2)
-        mu1_mu2 = mu1 * mu2
-
-        sigma1_sq = conv2d(img1 * img1, kernel, padding=window_size // 2, groups=channel) - mu1_sq
-        sigma2_sq = conv2d(img2 * img2, kernel, padding=window_size // 2, groups=channel) - mu2_sq
-        sigma12 = conv2d(img1 * img2, kernel, padding=window_size // 2, groups=channel) - mu1_mu2
-
-        C1 = 0.01 ** 2
-        C2 = 0.03 ** 2
-
-        ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
-
-        if size_average:
-            return ssim_map.mean()
-        else:
-            return ssim_map.mean(1).mean(1).mean(1)
-
-    if not (target.size() == input.size()):
-        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
-                      "This will likely lead to incorrect results due to broadcasting. "
-                      "Please ensure they have the same size.".format(target.size(), input.size()),
-                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    if target.requires_grad:
-        ret = (input - target) ** 2
-        if reduction != 'none':
-            ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
-    else:
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-        ret = torch._C._nn.mse_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+
+    _, channel, _, _ = input.size()
+    kernel = _fspecial_gaussian(filter_size, channel)
+    ret, _ = _ssim(input, target, max_val, filter_size, channel, kernel)
+
+    if reduction != 'none':
+        ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
+    return ret
+
+def ms_ssim_loss(input, target, max_val, filter_size=11, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, float, int, Optional[bool], Optional[bool], str) -> Tensor
+    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+
+    Measures the element-wise mean squared error.
+
+    See :class:`~torch.nn.MSELoss` for details.
+    """
+
+    dim = input.dim()
+    if dim != 4:
+        raise ValueError('Expected 4 dimensions (got {})'.format(dim))
+
+    if input.size() != target.size():
+        raise ValueError('Expected input size ({}) to match target size ({}).'
+                         .format(input.size(0), target.size(0)))
+
+    if size_average is not None or reduce is not None:
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
+
+    _, channel, _, _ = input.size()
+    kernel = _fspecial_gaussian(filter_size, channel)
+    ret = _ssim(input, target, max_val, filter_size, channel, kernel)
+
+    if reduction != 'none':
+        ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
     return ret
 
 
