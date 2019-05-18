@@ -531,7 +531,7 @@ struct PythonPrintPass {
       // this must be a while loop, but check that there isn't _also_ a trip
       // count
       if (trip_count_is_specified) {
-        throw script::ErrorReport(stmt.node()->getSourceLocation())
+        throw script::ErrorReport(stmt.node()->sourceRange())
             << "loop cannot be printed as python "
             << "because it has gone through an optimization "
             << "that combined while and for loops. File a bug.";
@@ -665,20 +665,11 @@ struct PythonPrintPass {
 
     if (!print_const && node->kind() == prim::Constant)
       return;
-    if (node->kind() == prim::PythonOp) {
-      auto value = static_cast<const PythonOp*>(node);
-      if (enforce_importable_ && value->ignore_on_export) {
-        // Op has been marked as ignored, so insert an error in its place
-        indent();
-        body_ << "ops.prim.IgnoredPythonOp()\n";
-        return;
-      }
-    }
     splitLongInlines(node->inputs());
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
               << "Normal use of ScriptMethods should enforce this.";
         }
@@ -733,7 +724,7 @@ struct PythonPrintPass {
       } break;
       case prim::Function: {
         if (enforce_importable_) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(node->sourceRange())
               << "closures are not exportable";
         }
         assignValuesToTheirUniqueNames(node->outputs());
@@ -849,16 +840,20 @@ struct PythonPrintPass {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
-        if (enforce_importable_) {
-          throw script::ErrorReport(node->getSourceLocation())
+        if (enforce_importable_ && !value->ignore_on_export) {
+          throw script::ErrorReport(node->sourceRange())
               << "could not export python function call " << value->name()
               << ". Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "
               << "If this is a nn.ModuleList, add it to __constants__.";
         }
 
-        stmt << "^" << value->name();
-        value->writeScalars(stmt);
+        if (value->ignore_on_export) {
+          stmt << "ops.prim.IgnoredPythonOp";
+        } else {
+          stmt << "^" << value->name();
+          value->writeScalars(stmt);
+        }
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
       case prim::Constant: {
@@ -1204,6 +1199,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
       prim::Store, // used in interpreter only
+      prim::profile, // used in interpreter only
 
   };
 

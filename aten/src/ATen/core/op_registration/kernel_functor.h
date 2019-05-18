@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/op_registration/kernel_stackbased.h>
 #include <ATen/core/op_registration/infer_schema.h>
 
 namespace c10 {
@@ -94,9 +93,9 @@ namespace detail {
   };
   template<class Key, class Value>
   struct ivalue_to_arg_type<std::unordered_map<Key, Value>> {
-    // We don't support std::vector because that would prevent us from doing
-    // internal optimization to how we represent lists (e.g. SmallVector).
-    // Users should use ArrayRef instead.
+    // We don't support std::unordered_map because that would prevent us from doing
+    // internal optimization to how we represent dicts.
+    // Users should use Dict<Key, Value> instead.
     static_assert(guts::false_t<std::unordered_map<Key, Value>>::value, "You tried to register a kernel with an unsupported argument type: std::unordered_map<Key, Value>. Please use c10::Dict<Key, Value> instead.");
   };
   template<class T>
@@ -115,37 +114,47 @@ namespace detail {
 
   // legacy_ivalue_to_arg_type is like ivalue_to_arg_type but additionally
   // allows a few deprecated types like std::vector.
-  template<class T>
+  template<class T, class Enable = void>
   struct legacy_ivalue_to_arg_type final {
     static auto call(IValue&& v) -> decltype(ivalue_to_arg_type<T>::call(std::move(v))) {
       return ivalue_to_arg_type<T>::call(std::move(v));
     }
   };
   template<class T>
-  struct legacy_ivalue_to_arg_type<std::vector<T>> final {
+  struct legacy_ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> final {
+    C10_DEPRECATED_MESSAGE("Taking std::vector<T> as a kernel argument is deprecated. Please take ArrayRef<T> instead.")
     static std::vector<T> call(IValue&& v) {
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported argument type: std::vector<T> and T is not one of the supported primitive types.");
       return std::move(*std::move(v).to<intrusive_ptr<ivalue::List<T>>>()).elements();
+    }
+  };
+  template<class T>
+  struct legacy_ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> final {
+    C10_DEPRECATED_MESSAGE("Taking std::vector<T> as a kernel argument is deprecated. Please take ArrayRef<T> instead.")
+    static std::vector<T> call(IValue&& v) {
+      auto list = std::move(v).toGenericList();
+      std::vector<T> result;
+      result.reserve(list->elements().size());
+      for (auto&& elem : std::move(list)->elements()) {
+        result.push_back(legacy_ivalue_to_arg_type<T>::call(std::move(elem)));
+      }
+      return result;
     }
   };
   template<class Key, class Value>
   struct legacy_ivalue_to_arg_type<std::unordered_map<Key, Value>> final {
+    C10_DEPRECATED_MESSAGE("Taking std::unordered_map<Key, Value> as a kernel argument is deprecated. Please take Dict<Key, Value> instead.")
     static std::unordered_map<Key, Value> call(const IValue& v) {
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported argument type: std::unordered_map<Key, Value> and Key is not one of the supported primitive types.");
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported argument type: std::unordered_map<Key, Value> and Value is not one of the supported primitive types.");
-
-      auto dict_ptr = std::move(v).toGenericDict();
-      auto dict = impl::toTypedDict<Key, Value>(std::move(dict_ptr->elements()));
+      auto dict = std::move(v).toGenericDict();
       std::unordered_map<Key, Value> result;
-      result.reserve(dict.size());
-      for (auto& element : dict) {
-        result.emplace(element.key(), element.value());
+      result.reserve(dict->elements().size());
+      for (auto& element : dict->elements()) {
+        result.emplace(legacy_ivalue_to_arg_type<Key>::call(element.key()), legacy_ivalue_to_arg_type<Value>::call(element.value()));
       }
       return result;
     }
   };
 
-  // TODO Make nesting types work, e.g. Dicts of lists, lists of lists, and so on
+  // TODO Make nesting types work with new style API, e.g. Dicts of lists, lists of lists, and so on
 
   template<class T, class Enable = void>
   struct return_type_to_ivalue {
@@ -153,8 +162,9 @@ namespace detail {
   };
   template<class T>
   struct return_type_to_ivalue<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    static IValue call(T&& v) {
-      return IValue(std::move(v));
+    template<class T_>
+    static IValue call(T_&& v) {
+      return IValue(std::forward<T_>(v));
     }
   };
   template<class T>
@@ -207,22 +217,42 @@ namespace detail {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral return argument type. Please use int64_t instead.");
   };
   // legacy_return_type_to_ivalue is like return_type_to_ivalue but additionally
-  // allows a few deprecated types like std::vector.
-  template<class T>
+  // allows a few deprecated types like std::unordered_map.
+  template<class T, class Enable = void>
   struct legacy_return_type_to_ivalue final {
-    static IValue call(T&& v) {
-      return return_type_to_ivalue<T>::call(std::move(v));
+    template<class T_>
+    static IValue call(T_&& v) {
+      return return_type_to_ivalue<T>::call(std::forward<T_>(v));
+    }
+  };
+  template<class T>
+  struct legacy_return_type_to_ivalue<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> {
+    static IValue call(std::vector<T>&& v) {
+      return return_type_to_ivalue<std::vector<T>>::call(std::move(v));
+    }
+  };
+  template<class T>
+  struct legacy_return_type_to_ivalue<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> {
+    static IValue call(std::vector<T>&& v) {
+      static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
+      std::vector<IValue> result;
+      result.reserve(v.size());
+      for (auto& elem : v) {
+        result.push_back(legacy_return_type_to_ivalue<T>::call(std::move(elem)));
+      }
+      return result;
     }
   };
   template<class Key, class Value>
   struct legacy_return_type_to_ivalue<std::unordered_map<Key, Value>> final {
+    C10_DEPRECATED_MESSAGE("Returning std::unordered_map<Key, Value> from a kernel is deprecated. Please return Dict<Key, Value> instead.")
     static IValue call(std::unordered_map<Key, Value>&& v) {
-      c10::Dict<Key, Value> dict;
+      c10::impl::GenericDict dict;
       dict.reserve(v.size());
       for (auto& element : v) {
-        dict.insert(element.first, element.second);
+        dict.insert(legacy_return_type_to_ivalue<Key>::call(Key{element.first}), legacy_return_type_to_ivalue<Value>::call(std::move(element.second)));
       }
-      return return_type_to_ivalue<c10::Dict<Key, Value>>::call(std::move(dict));
+      return dict;
     }
   };
 
@@ -320,63 +350,6 @@ namespace detail {
       return guts::make_unique<FunctionSchema>(inferFunctionSchema<KernelFunctor>("", ""));
     }
   };
-
-  template<class KernelFunctor, bool AllowDeprecatedTypes = false, class... ConstructorParameters>
-  detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>
-  kernelFunctor(ConstructorParameters&&... constructorParameters) {
-    return {
-      &detail::wrap_kernel_functor<KernelFunctor, AllowDeprecatedTypes>::call,
-      detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
-      detail::FunctionSchemaInferer<KernelFunctor>()
-    };
-  }
-}
-
-/**
- * Use this to register an operator whose kernel is implemented as a functor
- *
- * Example:
- *
- * > namespace {
- * >   class my_kernel_cpu final : public c10::OperatorKernel {
- * >   public:
- * >     Tensor operator()(Tensor a, Tensor b) {...}
- * >   };
- * > }
- * >
- * > static auto registry = c10::RegisterOperators()
- * >     .op("my_op",
- * >         c10::kernel<my_kernel_cpu>(),
- * >         c10::dispatchKey(CPUTensorId()));
- *
- * The functor constructor can take arguments to configure the kernel.
- * The arguments are defined in the kernel registration.
- * Example:
- *
- * > namespace {
- * >   class my_kernel_cpu final : public c10::OperatorKernel {
- * >   public:
- * >     explicit my_kernel_cpu(std::string some_configuration, int a, bool b)
- * >         : ... {...}
- * >
- * >     Tensor operator()(Tensor a, Tensor b) {...}
- * >   };
- * > }
- * >
- * > static auto registry = c10::RegisterOperators()
- * >     .op("my_op",
- * >         c10::kernel<my_kernel_cpu>("some_configuration", 3, true),
- * >         c10::dispatchKey(CPUTensorId()));
- */
-template<class KernelFunctor, class... ConstructorParameters>
-// enable_if: only enable it if KernelFunctor is actually a functor
-inline constexpr guts::enable_if_t<guts::is_functor<KernelFunctor>::value,
-detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>>
-kernel(ConstructorParameters&&... constructorParameters) {
-  static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
-  static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
-
-  return detail::kernelFunctor<KernelFunctor, false>(std::forward<ConstructorParameters>(constructorParameters)...);
 }
 
 }

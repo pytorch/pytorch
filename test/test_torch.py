@@ -1447,6 +1447,18 @@ class _TestTorchMixin(object):
 
         self.assertEqual(res1, res2)
 
+    def test_numpy_args(self):
+        x1 = torch.randn(10)
+        x2 = torch.randn(10)
+        res1 = torch.add(input=x1, other=x2)
+        res2 = torch.add(x1=x1, x2=x2)
+        self.assertEqual(res1, res2)
+
+        x1 = torch.randn(10, 10, 10)
+        res1 = x1.sum(dim=(0, 2), keepdim=True)
+        res2 = x1.sum(axis=(0, 2), keepdims=True)
+        self.assertEqual(res1, res2)
+
     def test_add(self):
         # [res] torch.add([res,] tensor1, tensor2)
         m1 = torch.randn(100, 100)
@@ -1783,8 +1795,7 @@ class _TestTorchMixin(object):
 
         # Info should be positive for rank deficient matrices
         a = cast(torch.ones(5, 3, 3))
-        if not (a.is_cuda and any(x in torch.version.cuda for x in ['8.0', '9.2'])):
-            self.assertGreater(a.lu(get_infos=True)[2][0], 0)
+        self.assertGreater(a.lu(get_infos=True)[2][0], 0)
 
         # Error checking, no pivoting variant on CPU
         with self.assertRaisesRegex(RuntimeError,
@@ -2422,6 +2433,50 @@ class _TestTorchMixin(object):
         expected = torch.tensor([[0.]], dtype=torch.float16)
         self.assertEqual(halfTensor, expected)
 
+    def test_std_mean(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 50, 20, device=device)
+            for dim in range(x.dim()):
+                for unbiased in [False, True]:
+                    for keepdim in [False, True]:
+                        std1, mean1 = torch.std_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        std2 = x.std(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        mean2 = x.mean(dim=dim, keepdim=keepdim)
+                        self.assertEqual(std1, std2)
+                        self.assertEqual(mean1, mean2)
+
+    def test_std_mean_all_dims(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 50, 20, device=device)
+            for unbiased in [False, True]:
+                std1, mean1 = torch.std_mean(x, unbiased=unbiased)
+                std2 = x.std(unbiased=unbiased)
+                mean2 = x.mean()
+                self.assertEqual(std1, std2)
+                self.assertEqual(mean1, mean2)
+
+    def test_var_mean(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 300, 50, device=device)
+            for dim in range(x.dim()):
+                for unbiased in [False, True]:
+                    for keepdim in [False, True]:
+                        var1, mean1 = torch.var_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        var2 = x.var(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        mean2 = x.mean(dim=dim, keepdim=keepdim)
+                        self.assertEqual(var1, var2)
+                        self.assertEqual(mean1, mean2)
+
+    def test_var_mean_all_dims(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(100, 50, 20, device=device)
+            for unbiased in [False, True]:
+                var1, mean1 = torch.var_mean(x, unbiased=unbiased)
+                var2 = x.var(unbiased=unbiased)
+                mean2 = x.mean()
+                self.assertEqual(var1, var2)
+                self.assertEqual(mean1, mean2)
+
     def test_zeros_like(self):
         expected = torch.zeros(100, 100)
 
@@ -2680,7 +2735,7 @@ class _TestTorchMixin(object):
         r = torch.ones(num_elements, dtype=torch.float)
         scale = 1.0
         zero_point = 2
-        qr = r.quantize_linear(scale, zero_point)
+        qr = r.quantize_linear(scale, zero_point, torch.quint8)
         self.assertEqual(qr.q_scale(), scale)
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
@@ -2698,7 +2753,7 @@ class _TestTorchMixin(object):
         # Scalar Tensor
         # item
         r = torch.ones(1, dtype=torch.float)
-        qr = r.quantize_linear(scale, zero_point)
+        qr = r.quantize_linear(scale, zero_point, torch.quint8)
         self.assertEqual(qr.item(), 1)
         self.assertEqual(qr[0].item(), 1)
         # assignment
@@ -2711,12 +2766,12 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.item(), 15)
         # we can also print a qtensor
         self.assertEqual(str(qr),
-                         "tensor([15.], size=(1,), dtype=torch.qint8, " +
+                         "tensor([15.], size=(1,), dtype=torch.quint8, " +
                          "scale=1.0, zero_point=2)")
         empty_r = torch.ones((0, 1), dtype=torch.float)
-        empty_qr = empty_r.quantize_linear(scale, zero_point)
+        empty_qr = empty_r.quantize_linear(scale, zero_point, torch.quint8)
         self.assertEqual(str(empty_qr),
-                         "tensor([], size=(0, 1), dtype=torch.qint8, " +
+                         "tensor([], size=(0, 1), dtype=torch.quint8, " +
                          "scale=1.0, zero_point=2)")
 
     def test_qtensor_quant_dequant(self):
@@ -2724,7 +2779,7 @@ class _TestTorchMixin(object):
         r = torch.from_numpy(r).float()
         scale = 2
         zero_point = 2
-        qr = r.quantize_linear(scale, zero_point)
+        qr = r.quantize_linear(scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
@@ -2733,8 +2788,24 @@ class _TestTorchMixin(object):
         zero_point = 10
         val = 100
         numel = 10
-        q = torch._empty_affine_quantized(numel, dtype=torch.qint8, scale=scale, zero_point=zero_point)
+        q = torch._empty_affine_quantized(numel, dtype=torch.quint8, scale=scale, zero_point=zero_point)
         # TODO: check dequantized values?
+
+    def test_qtensor_dtypes(self):
+        r = np.random.rand(3, 2) * 2 - 4
+        r = torch.from_numpy(r).float()
+        scale = 2
+        zero_point = 2
+        qr = r.quantize_linear(scale, zero_point, torch.qint8)
+        rqr = qr.dequantize()
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+        qr = r.quantize_linear(scale, zero_point, torch.quint8)
+        rqr = qr.dequantize()
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+        qr = r.quantize_linear(scale, zero_point, torch.qint32)
+        rqr = qr.dequantize()
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
@@ -5872,17 +5943,9 @@ class _TestTorchMixin(object):
         eye = torch.eye(5, device=device)
         test_single_det(eye, (torch.ones((), device=device), torch.zeros((), device=device)), 'identity')
 
-        # TODO: Remove when MAGMA 2.5.0 is built for CUDA 8 and CUDA 9.2
-        is_cuda_8_92 = False
-        if torch.cuda.is_available() and torch.version.cuda is not None:
-            is_cuda_8_92 = any(x in torch.version.cuda for x in ['8.0', '9.2'])
-
         def test(M):
             assert M.size(0) >= 5, 'this helper fn assumes M to be at least 5x5'
             M = M.to(device)
-
-            if M.is_cuda and is_cuda_8_92:
-                return
 
             ref_M_sdet, ref_M_logabsdet = reference_slogdet(M)
 
@@ -8140,6 +8203,98 @@ class _TestTorchMixin(object):
                 A_LU, pivots = fn(torch.lu, (2, 0, 0))
                 self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
+    def check_single_matmul(self, x, y, shape):
+        a = np.array(x, copy=False)
+        b = np.array(y, copy=False)
+        expected = np.matmul(a, b)
+        self.assertTrue(expected.flags['C_CONTIGUOUS'])
+
+        ans = torch.matmul(x, y)
+        self.assertTrue(ans.is_contiguous())
+        self.assertTrue(np.array_equal(ans, expected))
+
+        out = torch.zeros(*shape, dtype=torch.int64)
+        ans = torch.matmul(x, y, out=out)
+        self.assertIs(ans, out)
+        self.assertTrue(ans.is_contiguous())
+        self.assertTrue(np.array_equal(ans, expected))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_matmul_small_brute_force_1d_Nd(self):
+        # Issue #20452: range(0, 10) does not work.
+        n = 1
+        for m in range(1, 8):
+            for p in range(1, 8):
+                for o in range(1, 5):
+                    # 1d, 3d, inner dimensions C
+                    x = torch.arange(m)
+                    y = torch.arange(o * m * p).reshape(o, m, p)
+                    self.check_single_matmul(x, y, (o, n, p))
+
+                    # 1d, 3d, inner dimensions Fortran
+                    x = torch.arange(m)
+                    y = torch.arange(o * p * m).reshape(o, p, m).transpose(-1, -2)
+                    self.check_single_matmul(x, y, (o, n, p))
+
+                    # 1d, 3d, inner dimensions non-contiguous
+                    x = torch.arange(2 * m)[::2]
+                    y = torch.arange(o * m * 2 * p).reshape(o, m, 2 * p)[:, :, ::2]
+                    self.check_single_matmul(x, y, (o, n, p))
+
+                    for r in range(1, 5):
+                        # 1d, 4d, inner dimensions C
+                        x = torch.arange(m)
+                        y = torch.arange(r * o * m * p).reshape(r, o, m, p)
+                        self.check_single_matmul(x, y, (r, o, n, p))
+
+                        # 1d, 4d, inner dimensions Fortran
+                        x = torch.arange(m)
+                        y = torch.arange(r * o * p * m).reshape(r, o, p, m).transpose(-1, -2)
+                        self.check_single_matmul(x, y, (r, o, n, p))
+
+                        # 1d, 4d, inner dimensions non-contiguous
+                        x = torch.arange(2 * m)[::2]
+                        y = torch.arange(r * o * m * 2 * p).reshape(r, o, m, 2 * p)[:, :, :, ::2]
+                        self.check_single_matmul(x, y, (r, o, n, p))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_matmul_small_brute_force_2d_Nd(self):
+        # Issue #20452: range(0, 10) does not work.
+        for n in range(1, 5):
+            for m in range(1, 5):
+                for p in range(1, 5):
+                    for o in range(1, 3):
+                        # 2d, 3d, inner dimensions C
+                        x = torch.arange(n * m).reshape(n, m)
+                        y = torch.arange(o * m * p).reshape(o, m, p)
+                        self.check_single_matmul(x, y, (o, n, p))
+
+                        # 2d, 3d, inner dimensions Fortran
+                        x = torch.arange(m * n).reshape(m, n).transpose(-1, -2)
+                        y = torch.arange(o * p * m).reshape(o, p, m).transpose(-1, -2)
+                        self.check_single_matmul(x, y, (o, n, p))
+
+                        # 2d, 3d, inner dimensions non-contiguous
+                        x = torch.arange(n * 2 * m).reshape(n, 2 * m)[:, ::2]
+                        y = torch.arange(o * m * 2 * p).reshape(o, m, 2 * p)[:, :, ::2]
+                        self.check_single_matmul(x, y, (o, n, p))
+
+                        for r in range(1, 2):
+                            # 2d, 4d, inner dimensions C
+                            x = torch.arange(n * m).reshape(n, m)
+                            y = torch.arange(r * o * m * p).reshape(r, o, m, p)
+                            self.check_single_matmul(x, y, (r, o, n, p))
+
+                            # 2d, 4d, inner dimensions Fortran
+                            x = torch.arange(m * n).reshape(m, n).transpose(-1, -2)
+                            y = torch.arange(r * o * p * m).reshape(r, o, p, m).transpose(-1, -2)
+                            self.check_single_matmul(x, y, (r, o, n, p))
+
+                            # 2d, 4d, inner dimensions non-contiguous
+                            x = torch.arange(n * 2 * m).reshape(n, 2 * m)[:, ::2]
+                            y = torch.arange(r * o * m * 2 * p).reshape(r, o, m, 2 * p)[:, :, :, ::2]
+                            self.check_single_matmul(x, y, (r, o, n, p))
+
     @skipIfRocm
     def test_blas_alpha_beta_empty(self):
         for device in torch.testing.get_all_device_types():
@@ -9314,7 +9469,7 @@ class _TestTorchMixin(object):
         i, j = 41, 43
         with BytesIOContext() as f:
             pickle.dump(i, f)
-            torch.save(a, f)            
+            torch.save(a, f)
             pickle.dump(j, f)
             torch.save(b, f)
             f.seek(0)
@@ -11348,6 +11503,21 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 weight), torch.tensor(bias), 1, epsilon, True)
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
+    def test_memory_format(self):
+        x = torch.randn(10, 3, 32, 32)
+        nhwc = x.contiguous(memory_format=torch.channels_last)
+        self.assertFalse(nhwc.is_contiguous())
+        self.assertTrue(nhwc.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(nhwc, x)
+
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_memory_format_permute_cuda(self):
+        x = torch.randn(10, 3, 32, 32)
+        nhwc = x.contiguous(memory_format=torch.channels_last).cuda()
+        y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
+        self.assertFalse(y.is_contiguous(memory_format=torch.channels_last))
+
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
         with self.assertRaisesRegex(TypeError, "type 'torch.FloatTensor' is not an acceptable base type"):
@@ -11366,7 +11536,6 @@ METHOD = 1
 INPLACE_METHOD = 2
 FUNCTIONAL = 4
 DIM_ARG = None
-
 
 def make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim=0):
     def neg_dim_test(self):

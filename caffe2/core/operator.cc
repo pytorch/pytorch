@@ -63,8 +63,11 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   type_ = operator_def.type();
 }
 
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 namespace {
-int compute_input_size_(const std::vector<c10::IValue>& inputs) {
+int
+C10_UNUSED  // Suppress unused function warning on mobile.
+compute_input_size_(const std::vector<c10::IValue>& inputs) {
   if (inputs.empty()) {
     return 0;
   }
@@ -103,6 +106,7 @@ OperatorBase::OperatorBase(
   input_tensors_.resize(input_size_);
   output_tensors_.resize(newstyle_outputs_.size());
 }
+#endif
 
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
   vector<TensorShape> tps;
@@ -577,11 +581,18 @@ TensorShapes InferBlobShapesAndTypes(
   return tps;
 }
 
-void LoadInt8TensorInfoOfBlob(float* scale, float* offset, const Blob* b) {
-  const int8::Int8TensorCPU* i8tc =
+void LoadInt8TensorInfoOfBlob(
+    std::vector<float>* scale,
+    std::vector<float>* offset,
+    uint32_t* axis,
+    const Blob* b) {
+  const int8::Int8TensorCPU* int8_tensor =
       static_cast<const int8::Int8TensorCPU*>(b->GetRaw());
-  *scale = i8tc->scale;
-  *offset = i8tc->zero_point;
+  scale->clear();
+  offset->clear();
+  scale->push_back(int8_tensor->scale);
+  offset->push_back(int8_tensor->zero_point);
+  *axis = 1;
 }
 
 TensorShape GetTensorShapeOfBlob(const Blob* b) {
@@ -737,7 +748,11 @@ std::function<void(const OperatorDef&)> GetOperatorLogger() {
 
 c10::optional<int> OperatorBase::argumentIndexWithName(
     const std::string& name) const {
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
   return getFunctionSchema().argumentIndexWithName(name);
+#else
+  CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
+#endif
 }
 
 OperatorBase::~OperatorBase() noexcept = default;

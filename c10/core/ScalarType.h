@@ -29,7 +29,9 @@ namespace c10 {
   _(std::complex<float>, ComplexFloat, z) /* 9 */    \
   _(std::complex<double>, ComplexDouble, z) /* 10 */ \
   _(bool, Bool, i) /* 11 */                          \
-  _(c10::qint8, QInt8, i) /* 12 */
+  _(c10::qint8, QInt8, i) /* 12 */                   \
+  _(c10::quint8, QUInt8, i) /* 13 */                 \
+  _(c10::qint32, QInt32, i) /* 14 */
 
 // If you want to support ComplexHalf for real, replace occurrences
 // of this macro with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  But
@@ -46,7 +48,9 @@ namespace c10 {
   _(std::complex<float>, ComplexFloat, z)                          \
   _(std::complex<double>, ComplexDouble, z)                        \
   _(bool, Bool, i)                                                 \
-  _(c10::qint8, QInt8, i)
+  _(c10::qint8, QInt8, i)                                          \
+  _(c10::quint8, QUInt8, i)                                        \
+  _(c10::qint32, QInt32, i)
 
 #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(_) \
   _(uint8_t, Byte, i)                                                       \
@@ -70,7 +74,9 @@ namespace c10 {
   _(at::Half, Half, d)            \
   _(float, Float, d)              \
   _(double, Double, d)            \
-  _(c10::qint8, QInt8, i)
+  _(c10::qint8, QInt8, i)         \
+  _(c10::quint8, QUInt8, i)       \
+  _(c10::qint32, QInt32, i)
 
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_QINT(_) \
   _(uint8_t, Byte, i)                         \
@@ -101,7 +107,9 @@ namespace c10 {
   _(int64_t, Long, i)                         \
   _(float, Float, d)                          \
   _(double, Double, d)                        \
-  _(c10::qint8, QInt8, i)
+  _(c10::qint8, QInt8, i)                     \
+  _(c10::quint8, QUInt8, i)                   \
+  _(c10::qint32, QInt32, i)
 
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(_) \
   _(uint8_t, Byte, i)                                  \
@@ -223,7 +231,7 @@ static inline bool isComplexType(ScalarType t) {
 
 static inline bool isQIntType(ScalarType t) {
   // Don't forget to extend this when adding new QInt types
-  return t == ScalarType::QInt8;
+  return t == ScalarType:: QInt8 || t == ScalarType::QUInt8 || t == ScalarType::QInt32;
 }
 
 static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {

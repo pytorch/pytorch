@@ -135,6 +135,13 @@ CAFFE2_API void* maybe_data_ptr(const TensorArg& tensor);
 // on whether a subgeometry is contiguous.
 CAFFE2_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
 
+// Correspond to THCUNN_check_dim_size/THNN_check_dim_size
+CAFFE2_API void check_dim_size(
+    const Tensor& tensor,
+    int64_t dim,
+    int64_t dim_size,
+    int64_t size);
+
 namespace detail {
 CAFFE2_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
 CAFFE2_API int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides);

@@ -27,17 +27,12 @@ void flatten_op_cpu_impl(
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::Flatten",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("input"),
-                                    c10::Argument("output"),
-                                    c10::Argument("axis", IntType::get())}),
-        (std::vector<c10::Argument>{})),
-    c10::kernel<
+    "_c10_experimental::Flatten",
+    c10::RegisterOperators::options()
+      .kernel<
         decltype(flatten_op_cpu_impl<float, CPUContext>),
-        &flatten_op_cpu_impl<float, CPUContext>>(),
-    c10::dispatchKey(CPUTensorId()));
+        &flatten_op_cpu_impl<float, CPUContext>>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 

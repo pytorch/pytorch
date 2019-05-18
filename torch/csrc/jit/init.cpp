@@ -170,6 +170,24 @@ void initJITBindings(PyObject* module) {
             return InsertQuantDequantNodes(g, qparam_dict);
           })
       .def(
+          "_jit_pass_insert_quantdequant_for_param",
+          [](std::shared_ptr<script::Module>& moduleObj,
+             const std::string& method_name,
+             const std::string& param_name,
+             py::function pyGetQParamFunc) {
+            if (param_name == std::string("weight")) {
+              auto getQParamFunc =
+                  py::cast<std::function<std::tuple<std::string, float, int>(
+                      at::Tensor)>>(pyGetQParamFunc);
+              InsertQuantDequantNodesForParam(
+                  moduleObj,
+                  method_name,
+                  param_name,
+                  getQParamFunc,
+                  at::ScalarType::QUInt8);
+            }
+          })
+      .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
       .def(
@@ -296,6 +314,9 @@ void initJITBindings(PyObject* module) {
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
       .def(
+          "_jit_set_profiling_mode",
+          [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
+      .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
@@ -374,8 +395,8 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(qualified_name);
           auto operations = getAllOperatorsFor(symbol);
-          AT_CHECK(!operations.empty(), "No such operator ", qualified_name);
-          AT_CHECK(
+          TORCH_CHECK(!operations.empty(), "No such operator ", qualified_name);
+          TORCH_CHECK(
               operations.size() == 1,
               "Found ",
               operations.size(),

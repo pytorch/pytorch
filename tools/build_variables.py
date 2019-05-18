@@ -3,7 +3,7 @@
 # not currently relevant so they are combined into one list.
 from __future__ import absolute_import, division, print_function, unicode_literals
 load("@bazel_skylib//lib:new_sets.bzl", "sets")
-
+load("//caffe2/caffe2/fb:defs_gpu.bzl", "gpu_library_targets")
 
 GENERATED_CPP = [
     "Functions.cpp",
@@ -68,6 +68,7 @@ libtorch_sources = [
     "torch/csrc/jit/register_c10_ops.cpp",
     "torch/csrc/jit/subgraph_matcher.cpp",
     "torch/csrc/jit/symbolic_script.cpp",
+    "torch/csrc/jit/profiling_graph_executor_impl.cpp",
     "torch/csrc/jit/profiling_record.cpp",
     "torch/csrc/jit/operator.cpp",
     "torch/csrc/jit/passes/alias_analysis.cpp",
@@ -143,7 +144,6 @@ libtorch_cuda_sources = [
 
 def add_torch_libs():
     r = {}
-    c2_gpu = (read_config("caffe2", "gpu", "1") == "1")
     libtorch_python_sources = [
         ":generate-code=THNN.cpp",
         ":generate-code=python_functions.cpp",
@@ -157,6 +157,7 @@ def add_torch_libs():
         "torch/csrc/DynamicTypes.cpp",
         "torch/csrc/Generator.cpp",
         "torch/csrc/Layout.cpp",
+        "torch/csrc/MemoryFormat.cpp",
         "torch/csrc/Module.cpp",
         "torch/csrc/PtrWrapper.cpp",
         "torch/csrc/Size.cpp",
@@ -200,6 +201,7 @@ def add_torch_libs():
         "torch/csrc/autograd/python_variable_indexing.cpp",
         "torch/csrc/byte_order.cpp",
         "torch/csrc/distributed/Module.cpp",
+        "torch/csrc/distributed/c10d/comm.cpp",
         "torch/csrc/distributed/c10d/init.cpp",
         "torch/csrc/distributed/c10d/reducer.cpp",
         "torch/csrc/jit/init.cpp",
@@ -231,6 +233,7 @@ def add_torch_libs():
         "torch/csrc/utils/tensor_apply.cpp",
         "torch/csrc/utils/tensor_dtypes.cpp",
         "torch/csrc/utils/tensor_layouts.cpp",
+        "torch/csrc/utils/tensor_memoryformats.cpp",
         "torch/csrc/utils/tensor_list.cpp",
         "torch/csrc/utils/tensor_new.cpp",
         "torch/csrc/utils/tensor_numpy.cpp",
@@ -252,25 +255,26 @@ def add_torch_libs():
         "torch/csrc/distributed/c10d/ddp.cpp",
     ]
 
+    compiler_flags_cpu = [
+        "-D_THP_CORE",
+        "-DUSE_C10D",
+        "-DUSE_DISTRIBUTED",
+        "-DUSE_NUMPY",
+        "-DUSE_SCALARS",
+        "-DNO_CUDNN_DESTROY_HANDLE",
+        "-DPYTORCH_ONNX_CAFFE2_BUNDLE",
+        "-Wno-write-strings",
+        "-Wno-format",
+        "-Wno-strict-aliasing",
+        "-Wno-non-virtual-dtor",
+        "-Wno-shadow-compatible-local",
+        "-Wno-empty-body",
+    ]
+    compiler_flags_cuda = [
+        "-DUSE_CUDNN",
+        "-DUSE_NCCL",
+    ]
     common_flags = {
-        "compiler_flags": [
-            "-D_THP_CORE",
-            "-DUSE_C10D",
-            "-DUSE_DISTRIBUTED",
-            "-DUSE_NUMPY",
-            "-DUSE_SCALARS",
-            "-DNO_CUDNN_DESTROY_HANDLE",
-            "-DPYTORCH_ONNX_CAFFE2_BUNDLE",
-            "-Wno-write-strings",
-            "-Wno-format",
-            "-Wno-strict-aliasing",
-            "-Wno-non-virtual-dtor",
-            "-Wno-shadow-compatible-local",
-            "-Wno-empty-body",
-        ] + ([
-            "-DUSE_CUDNN",
-            "-DUSE_NCCL",
-        ] if c2_gpu else []),
         "compiler_specific_flags": {
             "clang": [
                 "-Wno-absolute-value",
@@ -307,6 +311,7 @@ def add_torch_libs():
             ("nanopb", None, "protobuf-nanopb"),
             ("protobuf", None),
         ],
+        compiler_flags=compiler_flags_cpu,
         **common_flags
     )
 
@@ -336,29 +341,55 @@ def add_torch_libs():
             ("cuda", None, "nvrtc-lazy"),
             ("cuda", None, "nvrtc-builtins-lazy"),
         ],
+        compiler_flags=compiler_flags_cpu + compiler_flags_cuda,
         **common_flags
     )
 
     # TODO: split it into cpp and cuda parts similarly to libtorch
-    cpp_library(
+    gpu_library_targets(
         name="_C_impl",
-        srcs=libtorch_python_sources + (
-            libtorch_python_cuda_sources if c2_gpu else []
-        ),
+        deps=[":_C_impl_cuda"],
+        deps_cpu=[":_C_impl_cpu"],
+        merge_only=True,
+    )
+
+    cpp_library(
+        name="_C_impl_cpu",
+        srcs=libtorch_python_sources,
         link_whole=True,
         deps=[
+            ":libtorch",
             ":thnn",
-            "//caffe2/torch/lib/THD:THD",
-            "//caffe2/torch/lib/c10d:c10d",
+            "//caffe2/torch/lib/THD:THD_cpu",
+            "//caffe2/torch/lib/c10d:c10d_cpu",
             "//caffe2/torch/lib/libshm:libshm",
-        ] + [
-            ":libtorch_cuda" if c2_gpu else ":libtorch",
         ],
         external_deps=[
             ("numpy", None, "cpp"),
             ("pybind11", None),
             ("python", None),
         ],
+        compiler_flags=compiler_flags_cpu,
+        **common_flags
+    )
+
+    cpp_library(
+        name="_C_impl_cuda",
+        srcs=libtorch_python_sources + libtorch_python_cuda_sources,
+        link_whole=True,
+        deps=[
+            ":libtorch_cuda",
+            ":thnn",
+            "//caffe2/torch/lib/THD:THD",
+            "//caffe2/torch/lib/c10d:c10d",
+            "//caffe2/torch/lib/libshm:libshm",
+        ],
+        external_deps=[
+            ("numpy", None, "cpp"),
+            ("pybind11", None),
+            ("python", None),
+        ],
+        compiler_flags=compiler_flags_cpu + compiler_flags_cuda,
         **common_flags
     )
 

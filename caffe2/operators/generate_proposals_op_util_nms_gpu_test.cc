@@ -76,6 +76,7 @@ TEST(UtilsNMSTest, TestNMSGPU) {
         d_sorted_boxes,
         nboxes,
         thresh,
+        true, /* legacy_plus_one */
         d_list,
         &list_nitems,
         dev_delete_mask,
@@ -207,7 +208,13 @@ TEST(UtilsNMSTest, TestPerfNMS) {
   // Running ntests runs of CPU NMS
   auto cpu_start = std::chrono::steady_clock::now();
   for (int itest = 0; itest < ntests; ++itest) {
-    utils::nms_cpu(proposals, scores, indices, thresh);
+    utils::nms_cpu(
+        proposals,
+        scores,
+        indices,
+        thresh,
+        -1, /* topN */
+        true /* legacy_plus_one */);
   }
   auto cpu_stop = std::chrono::steady_clock::now();
 
@@ -244,6 +251,7 @@ TEST(UtilsNMSTest, TestPerfNMS) {
         d_sorted_boxes,
         nboxes,
         thresh,
+        true, /* legacy_plus_one */
         d_list,
         &list_nitems,
         dev_delete_mask,
@@ -342,13 +350,19 @@ TEST(UtilsNMSTest, GPUEqualsCPUCorrectnessTest) {
 
     // Running ntests runs of CPU NMS
     for (int itest = 0; itest < ntests; ++itest) {
-      std::vector<int> keep =
-          utils::nms_cpu(eig_proposals, eig_scores, sorted_indices, thresh);
+      std::vector<int> keep = utils::nms_cpu(
+          eig_proposals,
+          eig_scores,
+          sorted_indices,
+          thresh,
+          -1, /* topN */
+          true /* legacy_plus_one */);
       int list_nitems;
       utils::nms_gpu(
           d_sorted_boxes,
           nboxes,
           thresh,
+          true, /* legacy_plus_one */
           d_list,
           &list_nitems,
           dev_delete_mask,
@@ -439,6 +453,7 @@ TEST(UtilsNMSTest, TestNMSGPURotatedAngle0) {
         d_sorted_boxes,
         nboxes,
         thresh,
+        true, /* legacy_plus_one */
         d_list,
         &list_nitems,
         dev_delete_mask,
@@ -507,7 +522,13 @@ TEST(UtilsNMSTest, TestPerfRotatedNMS) {
   // Running ntests runs of CPU NMS
   auto cpu_start = std::chrono::steady_clock::now();
   for (int itest = 0; itest < ntests; ++itest) {
-    utils::nms_cpu(proposals, scores, indices, thresh);
+    utils::nms_cpu(
+        proposals,
+        scores,
+        indices,
+        thresh,
+        -1, /* topN */
+        true /* legacy_plus_one */);
   }
   auto cpu_stop = std::chrono::steady_clock::now();
 
@@ -544,6 +565,7 @@ TEST(UtilsNMSTest, TestPerfRotatedNMS) {
         d_sorted_boxes,
         nboxes,
         thresh,
+        true, /* legacy_plus_one */
         d_list,
         &list_nitems,
         dev_delete_mask,
@@ -642,13 +664,19 @@ TEST(UtilsNMSTest, GPUEqualsCPURotatedCorrectnessTest) {
 
     // Running ntests runs of CPU NMS
     for (int itest = 0; itest < ntests; ++itest) {
-      std::vector<int> keep =
-          utils::nms_cpu(eig_proposals, eig_scores, sorted_indices, thresh);
+      std::vector<int> keep = utils::nms_cpu(
+          eig_proposals,
+          eig_scores,
+          sorted_indices,
+          thresh,
+          -1, /* topN */
+          true /* legacy_plus_one */);
       int list_nitems;
       utils::nms_gpu(
           d_sorted_boxes,
           nboxes,
           thresh,
+          true, /* legacy_plus_one */
           d_list,
           &list_nitems,
           dev_delete_mask,

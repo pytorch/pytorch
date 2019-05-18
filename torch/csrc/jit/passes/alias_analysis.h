@@ -47,11 +47,11 @@ class AliasDb {
 
   // Does `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
-  bool mayContainAlias(Value* a, Value* b) const;
+  TORCH_API bool mayContainAlias(Value* a, Value* b) const;
 
   // Do any values in group `a` share a memory location or hold in memory
   // any element that exists in group `b`
-  bool mayContainAlias(
+  TORCH_API bool mayContainAlias(
       const at::ArrayRef<Value*>& a,
       const at::ArrayRef<Value*>& b) const;
 
@@ -206,7 +206,7 @@ class AliasDb {
    */
   void makeAllAlias(const std::vector<Value*>& values);
   void makePointerTo(const Value* value, const Value* to);
-  void addToContainedElements(const Value* element, const Value* container);
+  TORCH_API void addToContainedElements(const Value* element, const Value* container);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
   void giveFreshAlias(const Value* value);
   Element* getOrCreateElement(const Value* value);
