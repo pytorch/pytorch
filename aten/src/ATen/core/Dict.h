@@ -3,6 +3,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/intrusive_ptr.h>
 
 namespace c10 {
 struct IValue;
@@ -23,7 +24,11 @@ struct DictEqualTo {
   }
 };
 
-using dict_map_type = ska::flat_hash_map<IValue, IValue, DictHash, DictEqualTo>;
+struct DictImpl final : public c10::intrusive_ptr_target {
+  using dict_map_type = ska::flat_hash_map<IValue, IValue, DictHash, DictEqualTo>;
+  dict_map_type dict;
+};
+
 }
 
 namespace impl {
@@ -100,7 +105,7 @@ public:
 
   // the template automatically disables the operator when we are already a
   // const_iterator, because that would cause a lot of compiler warnings otherwise.
-  template<class const_iterator_ = typename detail::dict_map_type::const_iterator, class = guts::enable_if_t<!std::is_same<const_iterator_, Iterator>::value>>
+  template<class const_iterator_ = typename detail::DictImpl::dict_map_type::const_iterator, class = guts::enable_if_t<!std::is_same<const_iterator_, Iterator>::value>>
   /* implicit */ operator DictIterator<Key, Value, const_iterator_>() const
   {
       return DictIterator<Key, Value, const_iterator_> { const_iterator_ { entryRef_.iterator_ } };
@@ -111,7 +116,7 @@ private:
 
   DictEntryRef<Key, Value, Iterator> entryRef_;
 
-  friend class DictIterator<Key, Value, typename detail::dict_map_type::iterator>;
+  friend class DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::iterator>;
   friend class Dict<Key, Value>;
   friend bool operator==<Key, Value, Iterator>(const DictIterator& lhs, const DictIterator& rhs);
 };
@@ -126,56 +131,61 @@ inline bool operator!=(const DictIterator<Key, Value, Iterator>& lhs, const Dict
   return !(lhs == rhs);
 }
 
-template<class Key, class Value> Dict<Key, Value> toTypedDict(Dict<IValue, IValue>&& dict);
-template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Value>&& dict);
+template<class Key, class Value> Dict<Key, Value> toTypedDict(Dict<IValue, IValue> dict);
+template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Value> dict);
 }
 
 /**
  * An object of this class stores a map from Key to Value.
  *
- * We use this class in the PyTorch kernel API instead of
- * std::unordered_map<Key, Value>, because that allows us
- * to do optimizations and switch out the underlying map
- * implementation without breaking backwards compatibility
- * for the kernel API.
+ * This is a reference type. After a copy, both Dicts
+ * will share the same storage:
  *
- * The API of this class is borrowed from std::unordered_map,
- * but with slight differences and it intentionally does not
- * support the full std::unordered_map API, because a more
- * narrow abstraction gives us more freedom to change the internals.
+ * > Dict<int, string> a;
+ * > Dict<int, string> b = a;
+ * > b.insert(3, "three");
+ * > ASSERT("three" == a.at(3));
+ *
+ * We use this class in the PyTorch kernel API because that
+ * allows us to do optimizations and switch out the underlying
+ * map implementation without breaking backwards compatibility
+ * for the kernel API.
  */
 template<class Key, class Value>
 class Dict final {
 private:
-  // map_ stores the underlying map as a ska::flat_hash_map.
+  // impl_ stores the underlying map as a ska::flat_hash_map.
   // We intentionally don't offer conversion from/to
   // ska::flat_hash_map, return references to it or something like that,
   // because such operations would get expensive if we switch out
   // the actual map implementation.
-  detail::dict_map_type map_;
+  // This is an intrusive_ptr because Dict is a reference type.
+  // Invariant: This will never be a nullptr, there will always be a valid
+  // DictImpl.
+  c10::intrusive_ptr<detail::DictImpl> impl_;
 
-  explicit Dict(detail::dict_map_type&& map): map_(std::move(map)) {}
-  template<class K, class V> friend Dict<K, V> impl::toTypedDict(Dict<IValue, IValue>&&);
-  template<class K, class V> friend Dict<IValue, IValue> impl::toGenericDict(Dict<K, V>&&);
+  explicit Dict(c10::intrusive_ptr<detail::DictImpl>&& impl): impl_(std::move(impl)) {}
+  template<class K, class V> friend Dict<K, V> impl::toTypedDict(Dict<IValue, IValue>);
+  template<class K, class V> friend Dict<IValue, IValue> impl::toGenericDict(Dict<K, V>);
 
 public:
   using key_type = Key;
   using mapped_type = Value;
-  using size_type = typename detail::dict_map_type::size_type;
-  using iterator = impl::DictIterator<Key, Value, typename detail::dict_map_type::iterator>;
-  using const_iterator = impl::DictIterator<Key, Value, typename detail::dict_map_type::const_iterator>;
+  using size_type = typename detail::DictImpl::dict_map_type::size_type;
+  using iterator = impl::DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::iterator>;
+  using const_iterator = impl::DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::const_iterator>;
 
   /**
    * Creates an empty dict.
    */
-  explicit Dict() = default;
+  explicit Dict();
 
   ~Dict() = default;
 
   Dict(const Dict&) = default;
-  Dict(Dict&&) noexcept = default;
   Dict& operator=(const Dict&) = default;
-  Dict& operator=(Dict&&) noexcept = default;
+  Dict(Dict&&) noexcept;
+  Dict& operator=(Dict&&) noexcept;
 
   /**
    * Returns an iterator to the first element of the container.
@@ -306,13 +316,13 @@ namespace impl {
 using GenericDict = Dict<IValue, IValue>;
 
 template<class Key, class Value>
-Dict<Key, Value> toTypedDict(GenericDict&& dict) {
-  return Dict<Key, Value>(std::move(dict.map_));
+Dict<Key, Value> toTypedDict(GenericDict dict) {
+  return Dict<Key, Value>(std::move(dict.impl_));
 }
 
 template<class Key, class Value>
-GenericDict toGenericDict(Dict<Key, Value>&& dict) {
-  return GenericDict(std::move(dict.map_));
+GenericDict toGenericDict(Dict<Key, Value> dict) {
+  return GenericDict(std::move(dict.impl_));
 }
 }
 

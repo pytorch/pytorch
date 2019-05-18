@@ -502,3 +502,15 @@ TEST(DictTest, givenMutableIterator_whenWritingToValue_thenWorks) {
   iter->setValue("new_value_2");
   EXPECT_EQ("new_value_2", dict.begin()->value());
 }
+
+TEST(DictTest, isReferenceType) {
+  Dict<int, string> dict1;
+  Dict<int, string> dict2(dict1);
+  Dict<int, string> dict3;
+  dict3 = dict2;
+
+  dict1.insert(3, "three");
+  EXPECT_EQ(1, dict1.size());
+  EXPECT_EQ(1, dict2.size());
+  EXPECT_EQ(1, dict3.size());
+}
