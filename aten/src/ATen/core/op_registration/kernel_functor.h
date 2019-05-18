@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/op_registration/kernel_stackbased.h>
 #include <ATen/core/op_registration/infer_schema.h>
 
 namespace c10 {
@@ -347,63 +346,6 @@ namespace detail {
       return guts::make_unique<FunctionSchema>(inferFunctionSchema<KernelFunctor>("", ""));
     }
   };
-
-  template<class KernelFunctor, bool AllowDeprecatedTypes = false, class... ConstructorParameters>
-  detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>
-  kernelFunctor(ConstructorParameters&&... constructorParameters) {
-    return {
-      &detail::wrap_kernel_functor<KernelFunctor, AllowDeprecatedTypes>::call,
-      detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
-      detail::FunctionSchemaInferer<KernelFunctor>()
-    };
-  }
-}
-
-/**
- * Use this to register an operator whose kernel is implemented as a functor
- *
- * Example:
- *
- * > namespace {
- * >   class my_kernel_cpu final : public c10::OperatorKernel {
- * >   public:
- * >     Tensor operator()(Tensor a, Tensor b) {...}
- * >   };
- * > }
- * >
- * > static auto registry = c10::RegisterOperators()
- * >     .op("my_op",
- * >         c10::kernel<my_kernel_cpu>(),
- * >         c10::dispatchKey(CPUTensorId()));
- *
- * The functor constructor can take arguments to configure the kernel.
- * The arguments are defined in the kernel registration.
- * Example:
- *
- * > namespace {
- * >   class my_kernel_cpu final : public c10::OperatorKernel {
- * >   public:
- * >     explicit my_kernel_cpu(std::string some_configuration, int a, bool b)
- * >         : ... {...}
- * >
- * >     Tensor operator()(Tensor a, Tensor b) {...}
- * >   };
- * > }
- * >
- * > static auto registry = c10::RegisterOperators()
- * >     .op("my_op",
- * >         c10::kernel<my_kernel_cpu>("some_configuration", 3, true),
- * >         c10::dispatchKey(CPUTensorId()));
- */
-template<class KernelFunctor, class... ConstructorParameters>
-// enable_if: only enable it if KernelFunctor is actually a functor
-inline constexpr guts::enable_if_t<guts::is_functor<KernelFunctor>::value,
-detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>>
-kernel(ConstructorParameters&&... constructorParameters) {
-  static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
-  static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
-
-  return detail::kernelFunctor<KernelFunctor, false>(std::forward<ConstructorParameters>(constructorParameters)...);
 }
 
 }

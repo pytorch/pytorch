@@ -73,8 +73,9 @@ void mul_op_cpu_impl(
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::Mul",
-    c10::kernel<decltype(mul_op_cpu_impl<float>), &mul_op_cpu_impl<float>>(),
-    c10::dispatchKey(CPUTensorId()));
+    c10::RegisterOperators::options()
+      .kernel<decltype(mul_op_cpu_impl<float>), &mul_op_cpu_impl<float>>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 

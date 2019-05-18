@@ -88,8 +88,9 @@ void cast_op_cpu(
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::Cast",
-    c10::kernel<decltype(cast_op_cpu), &cast_op_cpu>(),
-    c10::dispatchKey(CPUTensorId()));
+    c10::RegisterOperators::options()
+      .kernel<decltype(cast_op_cpu), &cast_op_cpu>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 
