@@ -962,7 +962,7 @@ class TestDistributions(TestCase):
 
         # make sure that the grad at logits=0, value=0 is 0.5
         x = torch.tensor(0., requires_grad=True)
-        y = Binomial(total_count, logits=x).log_prob(torch.tensor(0.))[0]
+        y = Binomial(total_count, logits=x).log_prob(torch.tensor(0.))
         self.assertEqual(grad(y, x)[0], torch.tensor(-0.5))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
