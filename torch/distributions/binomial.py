@@ -126,7 +126,7 @@ class Binomial(Distribution):
         normalize_term = (self.total_count * _clamp_by_zero(self.logits)
                           + self.total_count * torch.log1p(torch.exp(-torch.abs(self.logits)))
                           - log_factorial_n)
-        return value * self.logits - log_factorial_k - log_factorial_nmk  - normalize_term
+        return value * self.logits - log_factorial_k - log_factorial_nmk - normalize_term
 
     def enumerate_support(self, expand=True):
         total_count = int(self.total_count.max())
