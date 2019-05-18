@@ -117,16 +117,16 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
       Graph* graph = it->owningGraph();
       Value* input = it->namedInput(attr::input);
       Value* input_dim = graph->insert(aten::dim, {input});
-			std::vector<Value*> inputs {
-				input,
-				it->namedInput(attr::running_mean),
-				it->namedInput(attr::running_var),
-				it->namedInput(attr::training),
-				it->namedInput(attr::momentum),
-				it->namedInput(attr::eps)
+      std::vector<Value*> inputs {
+        input,
+        it->namedInput(attr::running_mean),
+        it->namedInput(attr::running_var),
+        it->namedInput(attr::training),
+        it->namedInput(attr::momentum),
+        it->namedInput(attr::eps)
       };
 
-			// inline the compiled decomposed layernorm
+      // inline the compiled decomposed layernorm
       std::shared_ptr<Graph> d_graph = decompose_funcs.get_function("batch_norm").graph();
       Value* new_output = inlineCallTo(*graph, *d_graph, inputs).at(0);
 
