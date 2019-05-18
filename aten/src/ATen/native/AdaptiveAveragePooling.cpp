@@ -1,5 +1,5 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <tuple>
 
@@ -89,11 +89,9 @@ namespace {
     at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
       for (auto b = start; b < end; b++)
       {
-        auto input_data = input_p + b *istrideB;
-        auto output_data = output_p + b * sizeD * osizeH * osizeW;
         adaptive_avg_pool2d_single_out_frame<scalar_t>(
-          input_data,
-          output_data,
+          input_p + b * istrideB,
+          output_p + b * sizeD * osizeH * osizeW,
           sizeD,
           isizeH, isizeW,
           osizeH, osizeW,
@@ -138,30 +136,36 @@ namespace {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "adaptive_avg_pool2d_cpu", [&] {
           auto input_data = input.data<scalar_t>();
           auto output_data = output.data<scalar_t>();
-          adaptive_avg_pool2d_single_out_frame<scalar_t>(input_data, output_data,
-                                                  sizeD,
-                                                  isizeH, isizeW,
-                                                  osizeH, osizeW,
-                                                  istrideD,
-                                                  istrideH, istrideW);
+          adaptive_avg_pool2d_single_out_frame<scalar_t>(
+            input_data,
+            output_data,
+            sizeD,
+            isizeH, isizeW,
+            osizeH, osizeW,
+            istrideD,
+            istrideH, istrideW);
         }
       );
     }
     else
     {
       int64_t sizeB = input.size(-4);
-      int64_t istrideB = input.stride(-4);
       output.resize_({sizeB, sizeD, osizeH, osizeW});
+      int64_t istrideB = input.stride(-4);
 
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "adaptive_avg_pool2d_cpu", [&] {
         auto input_data = input.data<scalar_t>();
         auto output_data = output.data<scalar_t>();
-        adaptive_avg_pool2d_out_frame<scalar_t>(input_data, output_data,
-                                                sizeB, sizeD,
-                                                isizeH, isizeW,
-                                                osizeH, osizeW,
-                                                istrideB, istrideD,
-                                                istrideH, istrideW);
+        adaptive_avg_pool2d_out_frame<scalar_t>(
+          input_data,
+          output_data,
+          sizeB,
+          sizeD,
+          isizeH, isizeW,
+          osizeH, osizeW,
+          istrideB,
+          istrideD,
+          istrideH, istrideW);
       });
     }
   }
@@ -226,10 +230,13 @@ namespace {
     int64_t osizeW)
   {
     at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
-      for (auto b = 0; b < end; b++)
+      for (auto b = start; b < end; b++)
       {
-        adaptive_avg_pool2d_backward_single_out_frame(
-          gradInput_p+b*sizeD*isizeH*isizeW, gradOutput_p+b*sizeD*osizeH*osizeW,
+        scalar_t *gradInput_p_d = gradInput_p + b * sizeD * isizeW * isizeH;
+        scalar_t *gradOutput_p_d = gradOutput_p + b * sizeD * osizeW * osizeH;
+        adaptive_avg_pool2d_backward_single_out_frame<scalar_t>(
+          gradInput_p_d,
+          gradOutput_p_d,
           sizeD,
           isizeH, isizeW,
           osizeH, osizeW);
@@ -276,7 +283,7 @@ namespace {
           /* get raw pointers */
           scalar_t *gradInput_data = gradInput.data<scalar_t>();
           scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-          int64_t sizeB = input.size(0);
+          int64_t sizeB = input.size(-4);
 
           adaptive_avg_pool2d_backward_out_frame<scalar_t>(
             gradInput_data, gradOutput_data,
