@@ -113,9 +113,15 @@ class Binomial(Distribution):
         log_factorial_n = torch.lgamma(self.total_count + 1)
         log_factorial_k = torch.lgamma(value + 1)
         log_factorial_nmk = torch.lgamma(self.total_count - value + 1)
-        # Note that: torch.log1p(-self.probs)) = - torch.log1p(self.logits.exp()))
-        return (log_factorial_n - log_factorial_k - log_factorial_nmk +
-                value * self.logits - self.total_count * torch.log1p(self.logits.exp()))
+        # k * log(p) + (n - k) * log(1 - p) = k * (log(p) - log(1 - p)) + n * log(1 - p)
+        #     (case logit < 0)              = k * logit - n * log1p(e^logit)
+        #     (case logit > 0)              = k * logit - n * (log(p) - log(1 - p)) + n * log(p)
+        #                                   = k * logit - n * logit - n * log1p(e^-logit)
+        #     (merge two cases)             = k * logit - n * max(logit, 0) - n * log1p(e^-|logit|)
+        normalize_term = (self.total_count * self.logits.clamp(min=0)
+                          + self.total_count * torch.log1p(torch.exp(-torch.abs(self.logits)))
+                          - log_factorial_n)
+        return value * self.logits - log_factorial_k - log_factorial_nmk  - normalize_term
 
     def enumerate_support(self, expand=True):
         total_count = int(self.total_count.max())
