@@ -1357,7 +1357,7 @@ graph(%x : Tensor,
         # quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
-                   .check("conv2d").check("quantize_linear") \
+                   .check("_convolution").check("quantize_linear") \
                    .check_next("int_repr").check_next("dequantize_linear") \
                    .check("relu").check("quantize_linear") \
                    .check_next("int_repr").check_next("dequantize_linear") \
