@@ -24,7 +24,7 @@ void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
       elem_type != BoolType::get()) {
     auto error = script::ErrorReport(node->sourceRange());
     error << "Input list to torch.tensor must be of ints, floats, or bools, "
-          << "got " << elem_type->str();
+          << "got " << elem_type->python_str();
     // special case empty list torch.tensor([])
     if (elem_type->isSubtypeOf(TensorType::get())) {
       auto input = node->inputs().at(0);
@@ -151,112 +151,112 @@ void recursiveStore(
   }
 }
 
-RegisterOperators reg(
-    {Operator(
-         "aten::split(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]",
-         [](Stack& stack) {
-           RECORD_FUNCTION("split_with_sizes", last(stack, 3));
+RegisterOperators reg({
+    Operator(
+        "aten::split(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]",
+        [](Stack& stack) {
+          RECORD_FUNCTION("split_with_sizes", last(stack, 3));
 
-           auto result = at::split_with_sizes(
-               (std::move(peek(stack, 0, 3))).toTensor(),
-               (std::move(peek(stack, 1, 3))).toIntList()->elements(),
-               (std::move(peek(stack, 2, 3))).toInt());
-           drop(stack, 3);
-           pack(stack, std::move(result));
-           return 0;
-         }),
-     Operator(
-         "aten::Size(int[] sizes) -> int[]",
-         [](Stack& stack) { return 0; }),
-     Operator(
-         "aten::size(Tensor self) -> int[]",
-         [](Stack& stack) {
-           RECORD_FUNCTION("size", last(stack, 1));
+          auto result = at::split_with_sizes(
+              (std::move(peek(stack, 0, 3))).toTensor(),
+              (std::move(peek(stack, 1, 3))).toIntList()->elements(),
+              (std::move(peek(stack, 2, 3))).toInt());
+          drop(stack, 3);
+          pack(stack, std::move(result));
+          return 0;
+        }),
+    Operator(
+        "aten::Size(int[] sizes) -> int[]",
+        [](Stack& stack) { return 0; }),
+    Operator(
+        "aten::size(Tensor self) -> int[]",
+        [](Stack& stack) {
+          RECORD_FUNCTION("size", last(stack, 1));
 
-           auto t = std::move(pop(stack)).toTensor();
-           pack(stack, t.sizes().vec());
-           return 0;
-         }),
-     Operator(
-         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
-         [](Stack& stack) {
-           RECORD_FUNCTION("sizes", last(stack, 2));
+          auto t = std::move(pop(stack)).toTensor();
+          pack(stack, t.sizes().vec());
+          return 0;
+        }),
+    Operator(
+        "aten::list_with_default(int[] list, int[] defaults) -> int[]",
+        [](Stack& stack) {
+          RECORD_FUNCTION("sizes", last(stack, 2));
 
-           auto list = peek(stack, 0, 2).toIntListRef();
-           auto defaults = peek(stack, 1, 2).toIntListRef();
-           drop(stack, 2);
+          auto list = peek(stack, 0, 2).toIntListRef();
+          auto defaults = peek(stack, 1, 2).toIntListRef();
+          drop(stack, 2);
 
-           AT_ASSERT(defaults.size() > list.size());
+          AT_ASSERT(defaults.size() > list.size());
 
-           // TODO: allow list of optionals to be filled in with defaults
-           // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]
+          // TODO: allow list of optionals to be filled in with defaults
+          // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]
 
-           push(stack, list);
-           return 0;
-         }),
-     Operator(
-         "aten::_infer_size(int[] a, int[] b) -> int[]",
-         [](const Node* node) {
-           return [](Stack& stack) {
-             auto a = pop(stack).toIntList()->elements();
-             auto b = pop(stack).toIntList()->elements();
-             push(stack, at::infer_size(a, b));
-             return 0;
-           };
-         }),
-     Operator(
-         "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
-         [](const Node* node) {
-           return [](Stack& stack) {
-             at::Tensor weight;
-             at::Tensor input;
-             double max_norm;
-             double norm_type;
-             pop(stack, weight, input, max_norm, norm_type);
+          push(stack, list);
+          return 0;
+        }),
+    Operator(
+        "aten::_infer_size(int[] a, int[] b) -> int[]",
+        [](const Node* node) {
+          return [](Stack& stack) {
+            auto a = pop(stack).toIntList()->elements();
+            auto b = pop(stack).toIntList()->elements();
+            push(stack, at::infer_size(a, b));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
+        [](const Node* node) {
+          return [](Stack& stack) {
+            at::Tensor weight;
+            at::Tensor input;
+            double max_norm;
+            double norm_type;
+            pop(stack, weight, input, max_norm, norm_type);
 
-             // TODO: remove when script supports setting grad mode
-             torch::NoGradGuard no_grad;
+            // TODO: remove when script supports setting grad mode
+            torch::NoGradGuard no_grad;
 
-             at::Tensor result =
-                 at::embedding_renorm_(weight, input, max_norm, norm_type);
-             push(stack, result);
+            at::Tensor result =
+                at::embedding_renorm_(weight, input, max_norm, norm_type);
+            push(stack, result);
 
-             return 0;
-           };
-         }),
-     Operator(
-         "aten::format(str self, ...) -> str",
-         [](const Node* node) {
-           size_t num_inputs = node->inputs().size();
-           std::regex unsupported_options("\\{(.*)\\}");
-           return [num_inputs, unsupported_options](Stack& stack) {
-             auto format = peek(stack, 0, num_inputs).toStringRef();
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::format(str self, ...) -> str",
+        [](const Node* node) {
+          size_t num_inputs = node->inputs().size();
+          std::regex unsupported_options("\\{(.*)\\}");
+          return [num_inputs, unsupported_options](Stack& stack) {
+            auto format = peek(stack, 0, num_inputs).toStringRef();
 
-             if (std::regex_search(format, unsupported_options)) {
-               AT_WARN("Format options are not supported.");
-             }
+            if (std::regex_search(format, unsupported_options)) {
+              AT_WARN("Format options are not supported.");
+            }
 
-             auto args = last(stack, num_inputs - 1);
-             std::stringstream ss;
-             for (size_t begin = 0, used_args = 0; true; ++used_args) {
-               size_t loc = format.find("{}", begin);
-               if (loc == std::string::npos) {
-                 ss << format.substr(begin);
-                 break;
-               }
-               ss << format.substr(begin, loc - begin);
-               if (used_args >= args.size()) {
-                 AT_ERROR("Too few arguments for format string: ", format);
-               }
-               ss << args[used_args];
-               begin = loc + 2;
-             }
+            auto args = last(stack, num_inputs - 1);
+            std::stringstream ss;
+            for (size_t begin = 0, used_args = 0; true; ++used_args) {
+              size_t loc = format.find("{}", begin);
+              if (loc == std::string::npos) {
+                ss << format.substr(begin);
+                break;
+              }
+              ss << format.substr(begin, loc - begin);
+              if (used_args >= args.size()) {
+                AT_ERROR("Too few arguments for format string: ", format);
+              }
+              ss << args[used_args];
+              begin = loc + 2;
+            }
 
-             drop(stack, num_inputs);
-             push(stack, ss.str());
-             return 0;
-           };
-         }),
+            drop(stack, num_inputs);
+            push(stack, ss.str());
+            return 0;
+          };
+        }),
 
 #define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)     \
   Operator(                                                                   \
@@ -286,159 +286,166 @@ RegisterOperators reg(
         };                                                                    \
       }),
 
-     DEFINE_TORCH_TENSOR_OP(float, double, at::scalar_to_tensor(scalar_val))
-         DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
-             DEFINE_TORCH_TENSOR_OP(
-                 bool,
-                 bool,
-                 at::empty({}, at::CPU(at::kByte).options()).fill_(scalar_val))
+    DEFINE_TORCH_TENSOR_OP(float, double, at::scalar_to_tensor(scalar_val))
+        DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
+            DEFINE_TORCH_TENSOR_OP(
+                bool,
+                bool,
+                at::empty({}, at::CPU(at::kByte).options()).fill_(scalar_val))
 
-     // reference python implementation: internal_new_from_data in
-     // tensor_new.cpp
-     Operator(
-         "aten::_infer_size(int[] a, int[] b) -> int[]",
-         [](const Node* node) {
-           return [](Stack& stack) {
-             auto a = pop(stack).toIntList()->elements();
-             auto b = pop(stack).toIntList()->elements();
-             push(stack, at::infer_size(a, b));
-             return 0;
-           };
-         }),
-     Operator(
-         "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
-         [](const Node* node) {
-           return [](Stack& stack) {
-             at::Tensor weight;
-             at::Tensor input;
-             double max_norm;
-             double norm_type;
-             pop(stack, weight, input, max_norm, norm_type);
+    // reference python implementation: internal_new_from_data in
+    // tensor_new.cpp
+    Operator(
+        "aten::_infer_size(int[] a, int[] b) -> int[]",
+        [](const Node* node) {
+          return [](Stack& stack) {
+            auto a = pop(stack).toIntList()->elements();
+            auto b = pop(stack).toIntList()->elements();
+            push(stack, at::infer_size(a, b));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
+        [](const Node* node) {
+          return [](Stack& stack) {
+            at::Tensor weight;
+            at::Tensor input;
+            double max_norm;
+            double norm_type;
+            pop(stack, weight, input, max_norm, norm_type);
 
-             // TODO: remove when script supports setting grad mode
-             torch::NoGradGuard no_grad;
+            // TODO: remove when script supports setting grad mode
+            torch::NoGradGuard no_grad;
 
-             at::Tensor result =
-                 at::embedding_renorm_(weight, input, max_norm, norm_type);
-             push(stack, result);
+            at::Tensor result =
+                at::embedding_renorm_(weight, input, max_norm, norm_type);
+            push(stack, result);
 
-             return 0;
-           };
-         }),
-     Operator(
-         "aten::tensor(t[] data, *, ScalarType? dtype=None, Device? device=None, bool requires_grad=False) -> Tensor",
-         [](const Node* node) {
-           auto input = node->inputs().at(0);
-           auto elem_type = input->type();
-           while (auto list_type = elem_type->cast<ListType>()) {
-             elem_type = list_type->getElementType();
-           }
-           checkListInputType(elem_type, node);
-           at::ScalarType initial_scalar_type =
-               scalarTypeFromJitType(elem_type);
-           return [initial_scalar_type, elem_type](Stack& stack) {
-             bool requires_grad;
-             IValue data;
-             IValue dtype;
-             IValue device;
-             pop(stack, data, dtype, device, requires_grad);
-             auto sizes = compute_sizes(data);
-             auto tensor = autograd::make_variable(at::empty(
-                 sizes, at::initialTensorOptions().dtype(initial_scalar_type)));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::tensor(t[] data, *, ScalarType? dtype=None, Device? device=None, bool requires_grad=False) -> Tensor",
+        [](const Node* node) {
+          auto input = node->inputs().at(0);
+          auto elem_type = input->type();
+          while (auto list_type = elem_type->cast<ListType>()) {
+            elem_type = list_type->getElementType();
+          }
+          checkListInputType(elem_type, node);
+          at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
+          return [initial_scalar_type, elem_type](Stack& stack) {
+            bool requires_grad;
+            IValue data;
+            IValue dtype;
+            IValue device;
+            pop(stack, data, dtype, device, requires_grad);
+            auto sizes = compute_sizes(data);
+            auto tensor = autograd::make_variable(at::empty(
+                sizes, at::initialTensorOptions().dtype(initial_scalar_type)));
 
-             recursiveStore(
-                 (char*)tensor.data_ptr(),
-                 sizes,
-                 tensor.strides(),
-                 0,
-                 tensor.element_size(),
-                 data);
+            recursiveStore(
+                (char*)tensor.data_ptr(),
+                sizes,
+                tensor.strides(),
+                0,
+                tensor.element_size(),
+                data);
 
-             at::ScalarType scalar_type =
-                 dtype.isNone() ? tensor.scalar_type() : dtype.toScalarType();
-             c10::Device dev =
-                 device.isNone() ? tensor.device() : device.toDevice();
-             if (scalar_type != initial_scalar_type || dev != tensor.device()) {
-               tensor = tensor.to(dev, scalar_type);
-             }
+            at::ScalarType scalar_type =
+                dtype.isNone() ? tensor.scalar_type() : dtype.toScalarType();
+            c10::Device dev =
+                device.isNone() ? tensor.device() : device.toDevice();
+            if (scalar_type != initial_scalar_type || dev != tensor.device()) {
+              tensor = tensor.to(dev, scalar_type);
+            }
 
-             auto default_type =
-                 at::typeMetaToScalarType(at::get_default_dtype());
+            auto default_type =
+                at::typeMetaToScalarType(at::get_default_dtype());
 
-             if (dtype.isNone() && tensor.scalar_type() != default_type &&
-                 tensor.numel() == 0) {
-               AT_WARN(
-                   "Creating a tensor from an empty ",
-                   elem_type->str(),
-                   "list will create a tensor of default floating point type  (currently ",
-                   default_type,
-                   ") in python but a tensor of type ",
-                   elem_type->str(),
-                   " in torchscript.\n",
-                   "Pass in a dtype argument to ensure consistent behavior");
-             }
-             tensor.set_requires_grad(requires_grad);
-             push(stack, tensor);
-             return 0;
-           };
-         }),
-     Operator(
-         "aten::_assert_int_or_pair(int[] vals, str name, str message) -> Tensor",
-         [](const Node* node) {
-           return [](Stack& stack) {
-             // Everything is a list at the point this is used, so don't do
-             // anything
-             drop(stack, 3);
-             return 0;
-           };
-         }),
-     Operator(
-         "aten::_pack_sequence(Tensor output, Tensor batch_sizes, Tensor? sorted_indices, "
-         "Tensor? unsorted_indices) -> (Tensor, Tensor, Tensor?, Tensor?)",
-         [](Stack& stack) { return 0; }),
-     Operator("aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)", [](Stack& stack) {
-       // TODO: remove when script supports setting grad mode
-       torch::NoGradGuard no_grad;
+            if (dtype.isNone() && tensor.scalar_type() != default_type &&
+                tensor.numel() == 0) {
+              AT_WARN(
+                  "Creating a tensor from an empty ",
+                  elem_type->python_str(),
+                  "list will create a tensor of default floating point type  (currently ",
+                  default_type,
+                  ") in python but a tensor of type ",
+                  elem_type->python_str(),
+                  " in torchscript.\n",
+                  "Pass in a dtype argument to ensure consistent behavior");
+            }
+            tensor.set_requires_grad(requires_grad);
+            push(stack, tensor);
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::_assert_int_or_pair(int[] vals, str name, str message) -> Tensor",
+        [](const Node* node) {
+          return [](Stack& stack) {
+            // Everything is a list at the point this is used, so don't do
+            // anything
+            drop(stack, 3);
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::_pack_sequence(Tensor output, Tensor batch_sizes, Tensor? sorted_indices, "
+        "Tensor? unsorted_indices) -> (Tensor, Tensor, Tensor?, Tensor?)",
+        [](Stack& stack) { return 0; }),
+    Operator(
+        "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)",
+        [](Stack& stack) {
+          // TODO: remove when script supports setting grad mode
+          torch::NoGradGuard no_grad;
 
-       at::Tensor tensor;
-       double a;
-       double b;
-       pop(stack, tensor, a, b);
-       push(stack, at::_th_uniform_(tensor, a, b));
-       return 0;
-     }),
-     Operator("aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std) -> Tensor(a!)", [](Stack& stack) {
-       // TODO: remove when script supports setting grad mode
-       torch::NoGradGuard no_grad;
+          at::Tensor tensor;
+          double a;
+          double b;
+          pop(stack, tensor, a, b);
+          push(stack, at::_th_uniform_(tensor, a, b));
+          return 0;
+        }),
+    Operator(
+        "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std) -> Tensor(a!)",
+        [](Stack& stack) {
+          // TODO: remove when script supports setting grad mode
+          torch::NoGradGuard no_grad;
 
-       at::Tensor tensor;
-       double mean;
-       double std;
-       pop(stack, tensor, mean, std);
-       push(stack, at::_th_normal_(tensor, mean, std));
-       return 0;
-     }),
-     Operator("aten::_no_grad_fill_(Tensor(a!) tensor, float val) -> Tensor(a!)", [](Stack& stack) {
-       // TODO: remove when script supports setting grad mode
-       torch::NoGradGuard no_grad;
+          at::Tensor tensor;
+          double mean;
+          double std;
+          pop(stack, tensor, mean, std);
+          push(stack, at::_th_normal_(tensor, mean, std));
+          return 0;
+        }),
+    Operator(
+        "aten::_no_grad_fill_(Tensor(a!) tensor, float val) -> Tensor(a!)",
+        [](Stack& stack) {
+          // TODO: remove when script supports setting grad mode
+          torch::NoGradGuard no_grad;
 
-       at::Tensor tensor;
-       double val;
-       pop(stack, tensor, val);
-       push(stack, at::fill_(tensor, val));
-       return 0;
-     }),
-     Operator("aten::_no_grad_zero_(Tensor(a!) tensor) -> Tensor(a!)", [](Stack& stack) {
-       // TODO: remove when script supports setting grad mode
-       torch::NoGradGuard no_grad;
+          at::Tensor tensor;
+          double val;
+          pop(stack, tensor, val);
+          push(stack, at::fill_(tensor, val));
+          return 0;
+        }),
+    Operator(
+        "aten::_no_grad_zero_(Tensor(a!) tensor) -> Tensor(a!)",
+        [](Stack& stack) {
+          // TODO: remove when script supports setting grad mode
+          torch::NoGradGuard no_grad;
 
-       at::Tensor tensor;
-       pop(stack, tensor);
-       push(stack, at::zero_(tensor));
-       return 0;
-     }),
+          at::Tensor tensor;
+          pop(stack, tensor);
+          push(stack, at::zero_(tensor));
+          return 0;
+        }),
 
-    });
+});
 } // namespace
 } // namespace jit
 } // namespace torch

@@ -190,6 +190,10 @@ def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
 
+def sign(g, self):
+    return g.op("Sign", self)
+
+
 def _slice_op(g, input, axes, starts, ends):
     assert len(starts) == len(ends)
     if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807:
