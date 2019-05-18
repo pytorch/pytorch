@@ -122,6 +122,10 @@ Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_im
   attr_version = self_impl->version_counter().current_version();
 }
 
+Variable::DifferentiableViewMeta::~DifferentiableViewMeta() {
+  base_.reset();
+}
+
 const std::shared_ptr<Function>& Variable::grad_fn() const {
   if (is_view()) {
     auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
