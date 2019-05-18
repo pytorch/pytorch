@@ -30,6 +30,17 @@ int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"};
   return quantnodeLookup.find(n);
 }
 
+void travAndReplaceQuantnodeinput(Node* dq, Value* v_to_quant) {
+  TORCH_INTERNAL_ASSERT(v_to_quant != nullptr);
+  TORCH_INTERNAL_ASSERT(dq != nullptr);
+  TORCH_INTERNAL_ASSERT(dq->inputs().size() != 0);
+  Node* intrepr = dq->inputs()[0]->node();
+  TORCH_INTERNAL_ASSERT(intrepr != nullptr);
+  TORCH_INTERNAL_ASSERT(intrepr->inputs().size() != 0);
+  Node* q = intrepr->inputs()[0]->node();
+  q->replaceInputWith(dq->output(), v_to_quant);
+}
+
 // Look for index of particular param in op schema
 size_t getParamIndexinOpArgs(Node* n, const std::string& param_name) {
   TORCH_INTERNAL_ASSERT(n != nullptr);
@@ -119,7 +130,6 @@ Node* createQuantNode(Value* v, Node* n) {
       at::Symbol::fromQualString("aten::quantize_linear"));
   TORCH_INTERNAL_ASSERT(quant != nullptr, "Failed to create quant node");
   quant->output()->setUniqueName(v->uniqueName() + ".quant");
-  quant->setScope(n->scope());
   return quant;
 }
 
@@ -129,7 +139,6 @@ Node* createDeQuantNode(Value* v, Node* n) {
       at::Symbol::fromQualString("aten::dequantize_linear"));
   TORCH_INTERNAL_ASSERT(dequant != nullptr, "Failed to create dequant node");
   dequant->output()->setUniqueName(v->uniqueName() + ".dequant");
-  dequant->setScope(n->scope());
   return dequant;
 }
 
@@ -139,7 +148,6 @@ Node* createIntReprNode(Value* v, Node* n) {
       n->owningGraph()->create(at::Symbol::fromQualString("aten::int_repr"));
   TORCH_INTERNAL_ASSERT(intrepr != nullptr, "Failed to create inttensor node");
   intrepr->output()->setUniqueName(v->uniqueName() + ".intrepr");
-  intrepr->setScope(n->scope());
   return intrepr;
 }
 
@@ -151,6 +159,8 @@ Node* addQuantDeQuantNodesFor(
     at::ScalarType t = at::ScalarType::Undefined) {
   TORCH_INTERNAL_ASSERT(v != nullptr);
   WithInsertPoint ins(insert_point);
+  WithCurrentScope scope_guard(
+      *insert_point->owningGraph(), insert_point->scope());
   Node* quant = createQuantNode(v, insert_point);
   Node* intrepr = createIntReprNode(v, insert_point);
   Node* dequant = createDeQuantNode(v, insert_point);
@@ -434,8 +444,7 @@ void InsertQuantDequantNodes(
       v_to_quant->replaceAllUsesWith(dq->output());
       // Above step replaces v->quant with vdq->quant. We need to restore link.
       // Below chain traverse up from dq to q node.
-      dq->inputs()[0]->node()->inputs()[0]->node()->replaceInputWith(
-          dq->output(), v_to_quant);
+      travAndReplaceQuantnodeinput(dq, v_to_quant);
     }
   }
 
