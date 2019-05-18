@@ -36,6 +36,7 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"Generator", GeneratorType::get()},
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
+      {"MemoryFormat", IntType::get()},
       {"Device", DeviceObjType::get()},
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},

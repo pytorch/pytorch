@@ -44,12 +44,7 @@ class averaged_loss_cpu final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::AveragedLoss",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("input"),
-                                    c10::Argument("output")}),
-        (std::vector<c10::Argument>{})),
+    "_c10_experimental::AveragedLoss",
     c10::kernel<averaged_loss_cpu<float, CPUContext>>(),
     c10::dispatchKey(CPUTensorId()));
 

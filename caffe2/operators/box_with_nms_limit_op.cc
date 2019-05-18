@@ -98,7 +98,8 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
             soft_nms_sigma_,
             nms_thres_,
             soft_nms_min_score_thres_,
-            soft_nms_method_);
+            soft_nms_method_,
+            legacy_plus_one_);
       } else {
         std::sort(
             inds.data(),
@@ -107,8 +108,13 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
               return cur_scores(lhs) > cur_scores(rhs);
             });
         int keep_max = detections_per_im_ > 0 ? detections_per_im_ : -1;
-        keeps[j] =
-            utils::nms_cpu(cur_boxes, cur_scores, inds, nms_thres_, keep_max);
+        keeps[j] = utils::nms_cpu(
+            cur_boxes,
+            cur_scores,
+            inds,
+            nms_thres_,
+            keep_max,
+            legacy_plus_one_);
       }
       total_keep_count += keeps[j].size();
     }
@@ -300,6 +306,7 @@ SHOULD_NOT_DO_GRADIENT(BoxWithNMSLimit);
 } // namespace
 } // namespace caffe2
 
+// clang-format off
 C10_REGISTER_CAFFE2_OPERATOR_CPU(
     BoxWithNMSLimit,
     "_caffe2::BoxWithNMSLimit("
@@ -316,7 +323,8 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       "bool rotated, "
       "bool cls_agnostic_bbox_reg, "
       "bool input_boxes_include_bg_cls, "
-      "bool output_classes_include_bg_cls "
+      "bool output_classes_include_bg_cls, "
+      "bool legacy_plus_one "
     ") -> ("
       "Tensor scores, "
       "Tensor boxes, "
@@ -326,3 +334,4 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       //"Tensor keeps_size, "
     ")",
     caffe2::BoxWithNMSLimitOp<caffe2::CPUContext>);
+// clang-format on

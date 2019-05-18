@@ -3135,7 +3135,6 @@ def multi_head_attention_forward(query,                  # type: Tensor
           L is the target sequence length, S is the source sequence length.
     """
 
-    @weak_script
     def _in_proj(input, weight, bias, start=0, end=None):
         # type: (Tensor, Tensor, Optional[Tensor], int, Optional[int]) -> Tensor
         weight = weight[start:end, :]
@@ -3144,31 +3143,26 @@ def multi_head_attention_forward(query,                  # type: Tensor
         return linear(input, weight, bias)
 
 
-    @weak_script
     def _in_proj_qkv(weight, bias, query):
         # type: (Tensor, Tensor, Tensor) -> Tensor
         return _in_proj(query, weight, bias).chunk(3, dim=-1)
 
 
-    @weak_script
     def _in_proj_kv(weight, bias, embed_dim, key):
         # type: (Tensor, Tensor, int, Tensor) -> Tensor
         return _in_proj(key, weight, bias, start=embed_dim).chunk(2, dim=-1)
 
 
-    @weak_script
     def _in_proj_q(weight, bias, embed_dim, query):
         # type: (Tensor, Tensor, int, Tensor) -> Tensor
         return _in_proj(query, weight, bias, end=embed_dim)
 
 
-    @weak_script
     def _in_proj_k(weight, bias, embed_dim, key):
         # type: (Tensor, Tensor, int, Tensor) -> Tensor
         return _in_proj(key, weight, bias, start=embed_dim, end=2 * embed_dim)
 
 
-    @weak_script
     def _in_proj_v(weight, bias, embed_dim, value):
         # type: (Tensor, Tensor, int, Tensor) -> Tensor
         return _in_proj(value, weight, bias, start=2 * embed_dim)

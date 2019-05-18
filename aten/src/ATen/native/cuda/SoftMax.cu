@@ -330,6 +330,7 @@ blockReduce(AccumT* smem, AccumT val,
   AccumT warpVal = defaultVal;
 
   // First warp will perform per-warp reductions for the remaining warps
+  uint32_t mask = (((uint64_t)1) << (blockDim.x / 32)) - 1;
   if (threadIdx.x < 32) {
     int lane = threadIdx.x % 32;
     if (lane < blockDim.x / 32) {
@@ -337,6 +338,9 @@ blockReduce(AccumT* smem, AccumT val,
       for (int i = 0; i < 32; ++i) {
         warpVal = r(warpVal, smem[lane * 32 + i]);
       }
+#if CUDA_VERSION >= 9000
+      __syncwarp(mask);
+#endif
       smem[lane] = warpVal;
     }
   }
