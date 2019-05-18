@@ -413,7 +413,7 @@ void InsertQuantDequantNodes(
           //           N1 is not quantizable node but N4 and N7 are
           //           quantizable nodes. So we add the (V1, N4) and
           //           (V2, N7) as insertion points for quant-dequant nodes
-          quantInputs.emplace_back(param_info_t{v, n});
+          quantInputs.emplace_back(param_info_t{v, n, 0});
         }
       }
     } // End Loop for nodes within block
