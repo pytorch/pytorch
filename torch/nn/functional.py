@@ -2277,17 +2277,17 @@ def _ssim(input, target, max_val, size, channel, kernel):
     v2 = sigma1_sq + sigma2_sq + c2
 
     ssim = ((2 * mu1_mu2 + c1) * v1) / ((mu1_sq + mu2_sq + c1) * v2)
-    return ssim, torch_mean(v1 / v2)
+    return ssim, v1 / v2
 
 
 @weak_script
 def ssim_loss(input, target, max_val, filter_size=11, size_average=None, reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, float, int, Optional[bool], Optional[bool], str) -> Tensor
-    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""ssim_loss(input, target, max_val, filter_size, size_average=None, reduce=None, reduction='mean') -> Tensor
 
-    Measures the element-wise mean squared error.
+    Measures the structural similarity index (SSIM) error.
 
-    See :class:`~torch.nn.MSELoss` for details.
+    See :class:`~torch.nn.SSIMLoss` for details.
     """
 
     dim = input.dim()
@@ -2311,11 +2311,11 @@ def ssim_loss(input, target, max_val, filter_size=11, size_average=None, reduce=
 
 def ms_ssim_loss(input, target, max_val, filter_size=11, size_average=None, reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, float, int, Optional[bool], Optional[bool], str) -> Tensor
-    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""ms_ssim_loss(input, target, max_val, filter_size, size_average=None, reduce=None, reduction='mean') -> Tensor
 
-    Measures the element-wise mean squared error.
+    Measures the multi-scale structural similarity index (MS-SSIM) error.
 
-    See :class:`~torch.nn.MSELoss` for details.
+    See :class:`~torch.nn.MSSSIMLoss` for details.
     """
 
     dim = input.dim()
@@ -2331,7 +2331,29 @@ def ms_ssim_loss(input, target, max_val, filter_size=11, size_average=None, redu
 
     _, channel, _, _ = input.size()
     kernel = _fspecial_gaussian(filter_size, channel)
-    ret = _ssim(input, target, max_val, filter_size, channel, kernel)
+
+    weights = torch.tensor([0.0448, 0.2856, 0.3001, 0.2363, 0.1333])
+    levels = weights.size(0)
+
+    mssim = []
+    mcs = []
+    for _ in range(levels):
+        ssim, cs = _ssim(input, target, max_val, filter_size, channel, kernel)
+        ssim = ssim.mean((2, 3))
+        cs = cs.mean((2, 3))
+        mssim.append(ssim)
+        mcs.append(cs)
+
+        input = avg_pool2d(input, (2, 2))
+        target = avg_pool2d(target, (2, 2))
+
+    mssim = torch.stack(mssim)
+    mcs = torch.stack(mcs)
+
+    p1 = mcs ** weights
+    p2 = mssim ** weights
+
+    ret = torch.prod(p1[:-1], 0) * p2[-1]
 
     if reduction != 'none':
         ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
