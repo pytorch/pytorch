@@ -491,14 +491,6 @@ std::tuple<Tensor,Tensor> pstrf(const Tensor & self, bool upper, Scalar tol) {
   return at::legacy::th::_th_pstrf(self, upper, tol);
 }
 
-std::tuple<Tensor &,Tensor &> qr_out(Tensor & Q, Tensor & R, const Tensor & self) {
-  return at::legacy::th::_th_qr_out(Q, R, self);
-}
-
-std::tuple<Tensor,Tensor> qr(const Tensor & self) {
-  return at::legacy::th::_th_qr(self);
-}
-
 std::tuple<Tensor &,Tensor &> geqrf_out(Tensor & result0, Tensor & result1, const Tensor & self) {
   return at::legacy::th::_th_geqrf_out(result0, result1, self);
 }

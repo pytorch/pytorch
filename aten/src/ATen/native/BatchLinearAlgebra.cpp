@@ -9,6 +9,7 @@
 
 #include <TH/TH.h>  // for USE_LAPACK
 
+#include <iostream>
 #include <vector>
 
 // First the required LAPACK implementations are registered here.
@@ -683,20 +684,17 @@ std::tuple<Tensor&, Tensor&> triangular_solve_out(Tensor& result, Tensor& clone_
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_qr(Tensor& self, Tensor& Q, int64_t n_columns, std::vector<int64_t>& infos) {
+static void apply_geqrf(Tensor& self, Tensor& tau, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("qr: LAPACK library not found in compilation");
 #else
   auto self_data = self.data<scalar_t>();
-  auto q_data = Q.data<scalar_t>();
+  auto tau_data = tau.data<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
-  auto q_matrix_stride = matrixStride(Q);
+  auto tau_stride = tau.size(-1);
   auto batch_size = batchCount(self);
   auto m = self.size(-2);
   auto n = self.size(-1);
-
-  auto k = std::min(m, n);
-  auto tau = at::zeros({k}, self.options());
 
   int lwork;
   scalar_t wkopt;
@@ -705,33 +703,57 @@ static void apply_qr(Tensor& self, Tensor& Q, int64_t n_columns, std::vector<int
   int info;
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    scalar_t* q_working_ptr = &q_data[i * q_matrix_stride];
+    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 
-    // Phase 1: geqrf for R and TAU
     // Run twice, first to get the optimum work size
-    lwork = -1
-    lapackGeqrf<scalar_t>(m, n, self_working_ptr, m, tau.data<scalar_t>(), &wkopt, lwork, &info);
+    lwork = -1;
+    lapackGeqrf<scalar_t>(m, n, self_working_ptr, m, tau_working_ptr, &wkopt, lwork, &info);
 
     lwork = static_cast<int>(wkopt);
     work = at::empty({lwork}, self.options());
 
     // now to compute the actual R and TAU
-    lapackGeqrf<scalar_t>(m, n, self_working_ptr, m, tau.data<scalar_t>(), work.data<scalar_t>(), lwork, &info);
+    lapackGeqrf<scalar_t>(m, n, self_working_ptr, m, tau_working_ptr, work.data<scalar_t>(), lwork, &info);
     infos[i] = info;
     if (info != 0) {
       return;
     }
+  }
+#endif
+}
 
-    // Phase 2: orgqr for generating Q
+template<typename scalar_t>
+static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns, std::vector<int64_t>& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("qr: LAPACK library not found in compilation");
+#else
+  auto self_data = self.data<scalar_t>();
+  auto tau_data = tau.data<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+  auto tau_stride = tau.size(-1);
+  auto batch_size = batchCount(self);
+  auto m = self.size(-2);
+  auto n = self.size(-1);
+  auto k = std::min(m, n);
+
+  int lwork;
+  scalar_t wkopt;
+  Tensor work;
+
+  int info;
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+
     // Run twice, first to get the optimum work size
     lwork = -1;
-    lapackOrgqr<scalar_t>(m, n_columns, k, q_working_ptr, m, tau.data<scalar_t>(), &wkopt, lwork, &info);
+    lapackOrgqr<scalar_t>(m, n_columns, k, self_working_ptr, m, tau_working_ptr, &wkopt, lwork, &info);
 
     lwork = static_cast<int>(wkopt);
     work = at::empty({lwork}, self.options());
 
     // now to compute the actual Q
-    lapackOrgqr<scalar_t>(m, n_columns, k, q_working_ptr, m, tau.data<scalar_t>(), work.data<scalar_t>(), lwork, &info);
+    lapackOrgqr<scalar_t>(m, n_columns, k, self_working_ptr, m, tau_working_ptr, work.data<scalar_t>(), lwork, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -742,39 +764,60 @@ static void apply_qr(Tensor& self, Tensor& Q, int64_t n_columns, std::vector<int
 
 std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   std::vector<int64_t> infos(batchCount(self), 0);
+  int64_t m = self.size(-2), n = self.size(-1);
+
+  // First perform GEQRF for R and TAU (the elementary reflectors)
+  // We will need to generate R from the upper triangular matrix from the
+  // matrix input to GEQRF.
   auto self_working_copy = cloneBatchedColumnMajor(self);
-  int64_t m = self.size(-2), n = self.size(-1), n_columns_q;
-  auto q_sizes = self.sizes().vec();
-  Tensor Q;
-  if (!some && m > n) {
-    n_columns_q = m;
-    q_sizes[q.dim() - 1] = m;
-    Q = at::empty(q_sizes, self.options());
-  } else {
-    n_columns_q = std::min(m, n);
-    q_sizes[q.dim() - 1] = n;
-    Q = at::empty(q_sizes, self.options());
-  }
-  auto q_working_copy = cloneBatchedColumnMajor(Q).narrow(-1, 0, n).copy_(self);
+  auto self_sizes = self.sizes().vec();
+  self_sizes[self.dim() - 2] = std::min(m, n);
+  self_sizes.pop_back();
+  auto tau_working_copy = at::zeros(self_sizes, self.options());
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "qr_cpu", [&]{
-    apply_qr<scalar_t>(self_working_copy, q_working_copy, n_columns_q, infos);
+    apply_geqrf<scalar_t>(self_working_copy, tau_working_copy, infos);
   });
   if (self.dim() > 2) {
     batchCheckErrors(infos, "qr_cpu");
   } else {
     singleCheckErrors(infos[0], "qr_cpu");
   }
-  return std::make_tuple(q_working_copy.narrow_copy(-1, 0, n_columns_q),
-                         self_working_copy.narrow_copy(-2, 0, n_columns_q).triu_());
+
+  // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
+  // We first need to compute the required size of Q based on the `some` option
+  int64_t n_columns_q;
+  auto q_sizes = self.sizes().vec();
+  if (!some && m > n) {
+    q_sizes[self.dim() - 1] = m;
+    n_columns_q = m;
+  } else {
+    q_sizes[self.dim() - 1] = n;
+    n_columns_q = std::min(m, n);
+  }
+  auto R = self_working_copy.narrow_copy(-2, 0, n_columns_q).triu_();
+
+  auto q_working_copy = at::empty(q_sizes, self.options());
+  q_working_copy.narrow(-1, 0, n).copy_(self_working_copy);
+  q_working_copy = cloneBatchedColumnMajor(q_working_copy);
+
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "qr_cpu", [&]{
+    apply_orgqr<scalar_t>(q_working_copy, tau_working_copy, n_columns_q, infos);
+  });
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "qr_cpu");
+  } else {
+    singleCheckErrors(infos[0], "qr_cpu");
+  }
+  return std::make_tuple(q_working_copy.narrow_copy(-1, 0, n_columns_q), R);
 }
 
-std::tuple<Tensor, Tensor> qr(const Tensor& self, bool some) {
+std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
   TORCH_CHECK(self.dim() >= 2,
               "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   return at::_qr_helper(self, some);
 }
 
-std::tuple<Tensor&, Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, bool some) {
+std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, bool some) {
   Tensor Q_tmp, R_tmp;
   std::tie(Q_tmp, R_tmp) = at::_qr_helper(self, some);
   Q.resize_as_(Q_tmp).copy_(Q_tmp);

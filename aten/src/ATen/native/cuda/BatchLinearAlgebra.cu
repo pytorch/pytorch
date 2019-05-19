@@ -2,6 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/LegacyTHFunctions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
@@ -868,6 +869,12 @@ std::tuple<Tensor, Tensor> _triangular_solve_helper_cuda(const Tensor& self, con
     apply_triangular_solve<scalar_t>(self_working_copy, A_working_copy, upper, transpose, unitriangular);
   });
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, bool some) {
+  return at::legacy::th::_th_qr(self);
 }
 
 }}  // namespace at::native
