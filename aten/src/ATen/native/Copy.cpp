@@ -18,7 +18,7 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
 }
 
 // special case copy where tensor is contiguous and src is a transposed matrix
-// This can be generalized to most copies, but it's tricker
+// This can be generalized to most copies, but it's trickier
 void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   int64_t BLOCK_SZ;
   if (self.scalar_type() == kByte) {
