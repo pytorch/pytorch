@@ -526,28 +526,6 @@ TH_API void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
           int adjW, int adjH,
           accreal scale);
 
-TH_API void THNN_(SpatialDilatedMaxPooling_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THIndexTensor *indices,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int dilationW, int dilationH,
-          bool ceil_mode);
-TH_API void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THIndexTensor *indices,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int dilationW, int dilationH,
-          bool ceil_mode);
-
 TH_API void THNN_(SpatialMaxUnpooling_updateOutput)(
           THNNState *state,
           THTensor *input,
