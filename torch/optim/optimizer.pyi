@@ -1,7 +1,7 @@
 from typing import Iterable, Union, Callable, Optional
 from .. import Tensor
 
-_params_t = Union[Iterable[Tensor], Iterable[Dict]]
+_params_t = Union[Iterable[Tensor], Iterable[dict]]
 
 class Optimizer:
     def __init__(self, params: _params_t) -> None: ...
