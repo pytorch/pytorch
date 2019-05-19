@@ -385,13 +385,16 @@ class SummaryWriter(object):
             num (int): Number of values
             sum (float or int): Sum of all values
             sum_squares (float or int): Sum of squares for all values
-            bucket_limits (torch.Tensor, numpy.array): Upper value per bucket
+            bucket_limits (torch.Tensor, numpy.array): Upper value per bucket.
+              The number of elements of it should be the same as `bucket_counts`.
             bucket_counts (torch.Tensor, numpy.array): Number of values per bucket
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
             see: https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/histogram/README.md
         """
+        if len(bucket_limits) != len(bucket_counts):
+            raise ValueError('len(bucket_limits) != len(bucket_counts), see the document.')
         self._get_file_writer().add_summary(
             histogram_raw(tag,
                           min,
