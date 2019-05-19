@@ -42,7 +42,7 @@ if (NOT __NCCL_INCLUDED)
         "NVCC_GENCODE=${NVCC_GENCODE}"
         "BUILDDIR=${CMAKE_CURRENT_BINARY_DIR}/nccl"
         "VERBOSE=0"
-        "-j"
+        "-j$$(getconf _NPROCESSORS_CONF)"
       BUILD_BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/nccl/lib/libnccl_static.a"
       INSTALL_COMMAND ""
       )
