@@ -64,6 +64,7 @@ struct DimCounter {
   DimVector values;
   int64_t offset;
 };
+
 struct CAFFE2_API OperandInfo {
   OperandInfo() {}
   explicit OperandInfo(const Tensor& t, const Backend backend=Backend::Undefined, const ScalarType dtype=ScalarType::Undefined)
@@ -166,6 +167,8 @@ struct CAFFE2_API TensorIterator {
 
   /// 1-dimensional iteration and no buffering or type conversion
   bool is_trivial_1d() const;
+  /// Reducible to 1-dimensional and all operands are contiguous
+  bool is_contiguous() const;
   bool is_dim_reduced(int dim) const;
 
   /// Accessors for each operand
@@ -173,6 +176,7 @@ struct CAFFE2_API TensorIterator {
   void* data_ptr(int arg) const;
   ScalarType dtype(int arg=0) const { return operands_[arg].dtype; }
   DeviceType device_type(int arg=0) const { return backendToDeviceType(operands_[arg].backend); }
+  Device device(int arg=0) const { return operands_[arg].tensor.device(); }
   int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
   bool is_scalar(int arg) const;
   bool is_cpu_scalar(int arg) const;
