@@ -13,14 +13,12 @@
 namespace at {
 
 template <class F>
-void parallel_for(
+inline void parallel_for(
     const int64_t begin,
     const int64_t end,
     const int64_t grain_size,
     const F& f) {
 #ifdef _OPENMP
-  std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
-  std::exception_ptr eptr;
 #pragma omp parallel if (!omp_in_parallel() && ((end - begin) >= grain_size))
   {
     int64_t num_threads = omp_get_num_threads();
@@ -28,17 +26,8 @@ void parallel_for(
     int64_t chunk_size = divup((end - begin), num_threads);
     int64_t begin_tid = begin + tid * chunk_size;
     if (begin_tid < end) {
-      try {
-        f(begin_tid, std::min(end, chunk_size + begin_tid));
-      } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
-        }
-      }
+      f(begin_tid, std::min(end, chunk_size + begin_tid));
     }
-  }
-  if (eptr) {
-    std::rethrow_exception(eptr);
   }
 #else
   if (begin < end) {
@@ -48,13 +37,13 @@ void parallel_for(
 }
 
 template <class scalar_t, class F, class SF>
-scalar_t parallel_reduce(
+inline scalar_t parallel_reduce(
     const int64_t begin,
     const int64_t end,
     const int64_t grain_size,
     const scalar_t ident,
-    const F f,
-    const SF sf) {
+    const F& f,
+    const SF& sf) {
   if (in_parallel_region() || get_num_threads() == 1) {
     return f(begin, end, ident);
   } else {
