@@ -6,8 +6,6 @@
 #include <torch/csrc/jit/script/function_schema_parser.h>
 
 using c10::RegisterOperators;
-using c10::kernel;
-using c10::dispatchKey;
 using c10::TensorTypeId;
 using c10::KernelCache;
 using c10::Stack;
@@ -60,32 +58,32 @@ void expectCallsDecrement(TensorTypeId type_id) {
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", kernel(&incrementKernel, &noCache), dispatchKey(TensorType1()));
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(&incrementKernel, &noCache).dispatchKey(TensorType1()));
   expectCallsIncrement(TensorType1());
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
-      .op("_test::my_op(Tensor dummy, int input) -> int", kernel(&incrementKernel, &noCache), dispatchKey(TensorType1()))
-      .op("_test::my_op(Tensor dummy, int input) -> int", kernel(&errorKernel, &noCache), dispatchKey(TensorType2()))
-      .op("_test::error(Tensor dummy, int input) -> int", kernel(&errorKernel, &noCache), dispatchKey(TensorType1()))
-      .op("_test::error(Tensor dummy, int input) -> int", kernel(&errorKernel, &noCache), dispatchKey(TensorType2()));
+      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(&incrementKernel, &noCache).dispatchKey(TensorType1()))
+      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(&errorKernel, &noCache).dispatchKey(TensorType2()))
+      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(&errorKernel, &noCache).dispatchKey(TensorType1()))
+      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(&errorKernel, &noCache).dispatchKey(TensorType2()));
   expectCallsIncrement(TensorType1());
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
-  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", kernel(&incrementKernel, &noCache), dispatchKey(TensorType1()));
-  auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", kernel(&errorKernel, &noCache), dispatchKey(TensorType2()));
-  auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", kernel(&errorKernel, &noCache), dispatchKey(TensorType1()));
-  auto registrar4 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", kernel(&errorKernel, &noCache), dispatchKey(TensorType2()));
+  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(&incrementKernel, &noCache).dispatchKey(TensorType1()));
+  auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(&errorKernel, &noCache).dispatchKey(TensorType2()));
+  auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(&errorKernel, &noCache).dispatchKey(TensorType1()));
+  auto registrar4 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(&errorKernel, &noCache).dispatchKey(TensorType2()));
   expectCallsIncrement(TensorType1());
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
-    auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", kernel(&incrementKernel, &noCache), dispatchKey(TensorType1()));
+    auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(&incrementKernel, &noCache).dispatchKey(TensorType1()));
     {
-      auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", kernel(&decrementKernel, &noCache), dispatchKey(TensorType2()));
+      auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(&decrementKernel, &noCache).dispatchKey(TensorType2()));
 
       // assert that schema and cpu kernel are present
       expectCallsIncrement(TensorType1());
@@ -112,7 +110,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutAnyArg
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
   auto registrar = RegisterOperators()
-      .op("_test::no_tensor_args() -> ()", kernel(&kernelWithoutInputs, &noCache));
+      .op("_test::no_tensor_args() -> ()", RegisterOperators::options().kernel(&kernelWithoutInputs, &noCache));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
   ASSERT_TRUE(op.has_value());
@@ -131,7 +129,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensor
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
   auto registrar = RegisterOperators()
-      .op("_test::no_tensor_args(int arg) -> int", kernel(&kernelWithoutTensorInputs, &noCache));
+      .op("_test::no_tensor_args(int arg) -> int", RegisterOperators::options().kernel(&kernelWithoutTensorInputs, &noCache));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
   ASSERT_TRUE(op.has_value());
@@ -146,7 +144,7 @@ void kernelForSchemaInference(Stack* stack, KernelCache* cache) {
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenFailsBecauseItCannotInferFromStackBasedKernel) {
   expectThrows<c10::Error>([] {
-      RegisterOperators().op("_test::no_schema_specified", kernel(&kernelForSchemaInference, &noCache));
+      RegisterOperators().op("_test::no_schema_specified", RegisterOperators::options().kernel(&kernelForSchemaInference, &noCache));
   }, "Cannot infer schema from this kernel function. Please explicitly specify the operator schema.");
 }
 
@@ -165,7 +163,7 @@ void increment_sequence_kernel(Stack* stack, KernelCache* cache) {
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernelWithCache_whenCalled_thenCacheIsHandledCorrectly) {
-  auto registrar = RegisterOperators().op("_test::increment_sequence(Tensor dummy) -> int", kernel(&increment_sequence_kernel, &make_cache), dispatchKey(TensorType1()));
+  auto registrar = RegisterOperators().op("_test::increment_sequence(Tensor dummy) -> int", RegisterOperators::options().kernel(&increment_sequence_kernel, &make_cache).dispatchKey(TensorType1()));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::increment_sequence", "");
   ASSERT_TRUE(op.has_value());

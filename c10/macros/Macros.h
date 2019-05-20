@@ -35,19 +35,41 @@
 #define MACRO_EXPAND(args) args
 
 /// C10_NODISCARD - Warn if a type or return value is discarded.
+
+// Technically, we should check if __cplusplus > 201402L here, because
+// [[nodiscard]] is only defined in C++17.  However, some compilers
+// we care about don't advertise being C++17 (e.g., clang), but
+// support the attribute anyway.  In fact, this is not just a good idea,
+// it's the law: clang::warn_unused_result doesn't work on nvcc + clang
+// and the best workaround for this case is to use [[nodiscard]]
+// instead; see https://github.com/pytorch/pytorch/issues/13118
+//
+// Note to future editors: if you have noticed that a compiler is
+// misbehaving (e.g., it advertises support, but the support doesn't
+// actually work, or it is emitting warnings).  Some compilers which
+// are strict about the matter include MSVC, which will complain:
+//
+//  error C2429: attribute 'nodiscard' requires compiler flag '/std:c++latest'
+//
+// Exhibits:
+//  - MSVC 19.14: https://godbolt.org/z/Dzd7gn (requires /std:c++latest)
+//  - Clang 8.0.0: https://godbolt.org/z/3PYL4Z (always advertises support)
+//  - gcc 8.3: https://godbolt.org/z/4tLMQS (always advertises support)
 #define C10_NODISCARD
-#if __cplusplus > 201402L && defined(__has_cpp_attribute)
-#if __has_cpp_attribute(nodiscard)
-#undef C10_NODISCARD
-#define C10_NODISCARD [[nodiscard]]
-#endif
+#if defined(__has_cpp_attribute)
+# if __has_cpp_attribute(nodiscard)
+#  undef C10_NODISCARD
+#  define C10_NODISCARD [[nodiscard]]
+# endif
 // Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
 // error when __has_cpp_attribute is given a scoped attribute in C mode.
 #elif __cplusplus && defined(__has_cpp_attribute)
-#if __has_cpp_attribute(clang::warn_unused_result)
-#undef C10_NODISCARD
-#define C10_NODISCARD [[clang::warn_unused_result]]
-#endif
+# if __has_cpp_attribute(clang::warn_unused_result)
+// TODO: It's possible this is still triggering https://github.com/pytorch/pytorch/issues/13118
+// on Windows; if it is, better fix it.
+#  undef C10_NODISCARD
+#  define C10_NODISCARD [[clang::warn_unused_result]]
+# endif
 #endif
 
 // suppress an unused variable.

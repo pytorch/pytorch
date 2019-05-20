@@ -35,4 +35,4 @@ bool ImageInputOp<CUDAContext>::ApplyTransformOnGPU(
 
 REGISTER_CUDA_OPERATOR(ImageInput, ImageInputOp<CUDAContext>);
 
-}  // namespace caffe2
+} // namespace caffe2
