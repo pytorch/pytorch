@@ -555,7 +555,7 @@ inline Variable make_variable_consuming(
       "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
     AT_ASSERT(data.getIntrusivePtr().use_count() == 1);
-    auto data_impl = data.unsafeGetTensorImpl();
+    auto data_impl = data.getIntrusivePtr();
     data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
     data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl.get(), requires_grad));
     return Variable(std::move(data_impl));
