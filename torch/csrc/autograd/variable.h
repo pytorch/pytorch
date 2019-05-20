@@ -557,7 +557,7 @@ inline Variable make_variable_consuming(
     AT_ASSERT(data.getIntrusivePtr().use_count() == 1);
     auto data_impl = data.unsafeGetTensorImpl();
     data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-    data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl.get(), requires_grad));
+    data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl, requires_grad));
     return Variable(std::move(data_impl));
   }
   return Variable();
