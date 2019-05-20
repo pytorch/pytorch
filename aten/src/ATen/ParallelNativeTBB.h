@@ -15,7 +15,7 @@ tbb::task_arena& _get_arena();
 }
 
 template <class F>
-void parallel_for(
+inline void parallel_for(
     const int64_t begin,
     const int64_t end,
     const int64_t grain_size,
@@ -44,13 +44,13 @@ void parallel_for(
 }
 
 template <class scalar_t, class F, class SF>
-scalar_t parallel_reduce(
+inline scalar_t parallel_reduce(
     const int64_t begin,
     const int64_t end,
     const int64_t grain_size,
     const scalar_t ident,
-    const F f,
-    const SF sf) {
+    const F& f,
+    const SF& sf) {
   if (begin >= end) {
     return ident;
   }
