@@ -219,57 +219,70 @@ bool is_numpy_scalar(PyObject* obj) {
 }
 
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
-  PyObject *cuda_dict = PyObject_GetAttrString(obj, "__cuda_array_interface__");
-  TORCH_INTERNAL_ASSERT(cuda_dict != nullptr);
+  auto cuda_dict = THPObjectPtr(PyObject_GetAttrString(obj, "__cuda_array_interface__"));
+  TORCH_INTERNAL_ASSERT(cuda_dict);
 
-  // In the following code block, we extract the values of `__cuda_array_interface__`
+  if (!PyDict_Check(cuda_dict)) {
+    throw TypeError("`__cuda_array_interface__` must be a dict");
+  }
+
+  // Extract the `obj.__cuda_array_interface__['shape']` attribute
   std::vector<int64_t> sizes;
-  ScalarType dtype;
-  void *data_ptr;
-  std::vector<int64_t> strides;
-  try {
-    if (!PyDict_Check(cuda_dict)) {
-      throw TypeError("`__cuda_array_interface__` must be a dict");
-    }
+  {
     PyObject *py_shape = PyDict_GetItemString(cuda_dict, "shape");
-    PyObject *py_typestr = PyDict_GetItemString(cuda_dict, "typestr");
-    PyObject *py_data = PyDict_GetItemString(cuda_dict, "data");
-    if (py_shape == nullptr || py_typestr == nullptr || py_data == nullptr) {
-      throw TypeError("attributes `shape`, `typestr`, and `data` must exist");
+    if (py_shape == nullptr) {
+      throw TypeError("attribute `shape` must exist");
     }
-
-    // Extract the `shape` attribute
     sizes = seq_to_aten_shape(py_shape);
+  }
 
-    // Extract the `typestr` attribute
-    int dtype_size_in_bytes;
-    {
-      PyArray_Descr *descr;
-      if(!PyArray_DescrConverter(py_typestr, &descr)) {
-        throw ValueError("cannot parse `typestr`");
-      }
-      dtype = numpy_dtype_to_aten(descr->type_num);
-      dtype_size_in_bytes = descr->elsize;
-      TORCH_INTERNAL_ASSERT(dtype_size_in_bytes > 0);
+  // Extract the `obj.__cuda_array_interface__['typestr']` attribute
+  ScalarType dtype;
+  int dtype_size_in_bytes;
+  {
+    PyObject *py_typestr = PyDict_GetItemString(cuda_dict, "typestr");
+    if (py_typestr == nullptr) {
+      throw TypeError("attribute `typestr` must exist");
     }
+    PyArray_Descr *descr;
+    if(!PyArray_DescrConverter(py_typestr, &descr)) {
+      throw ValueError("cannot parse `typestr`");
+    }
+    dtype = numpy_dtype_to_aten(descr->type_num);
+    dtype_size_in_bytes = descr->elsize;
+    TORCH_INTERNAL_ASSERT(dtype_size_in_bytes > 0);
+  }
 
-    // Extract the `data` attribute
+  // Extract the `obj.__cuda_array_interface__['data']` attribute
+  void *data_ptr;
+  {
+    PyObject *py_data = PyDict_GetItemString(cuda_dict, "data");
+    if (py_data == nullptr) {
+      throw TypeError("attribute `shape` data exist");
+    }
     if(!PyTuple_Check(py_data) || PyTuple_GET_SIZE(py_data) != 2) {
       throw TypeError("`data` must be a 2-tuple of (int, bool)");
     }
+    PyTuple_GET_ITEM(py_data, 0);
     data_ptr = PyLong_AsVoidPtr(PyTuple_GET_ITEM(py_data, 0));
+    if (data_ptr == nullptr && PyErr_Occurred()) {
+      throw python_error();
+    }
     int read_only = PyObject_IsTrue(PyTuple_GET_ITEM(py_data, 1));
     if (PyErr_Occurred() || read_only == -1) {
-      throw TypeError("`data` must be a 2-tuple (int, bool)");
+      throw python_error();
     }
     if (read_only) {
       throw TypeError("the read only flag is not supported, should always be False");
     }
+  }
 
-    // Extract the `strides` attribute
+  // Extract the `obj.__cuda_array_interface__['strides']` attribute
+  std::vector<int64_t> strides;
+  {
     PyObject *py_strides = PyDict_GetItemString(cuda_dict, "strides");
     if (py_strides != nullptr && py_strides != Py_None) {
-      if (PySequence_Length(py_strides) == -1 || PySequence_Length(py_strides) != PySequence_Length(py_shape)) {
+      if (PySequence_Length(py_strides) == -1 || PySequence_Length(py_strides) != sizes.size()) {
         throw TypeError("strides must be a sequence of the same length as shape");
       }
       strides = seq_to_aten_shape(py_strides);
@@ -286,9 +299,6 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
         }
       stride /= dtype_size_in_bytes;
     }
-  } catch (const ValueError &e) {
-    Py_DECREF(cuda_dict);
-    throw;
   }
 
   Py_INCREF(obj);
