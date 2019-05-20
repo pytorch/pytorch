@@ -204,9 +204,7 @@ bool is_numpy_scalar(PyObject* obj) {
 
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   PyObject *cuda_dict = PyObject_GetAttrString(obj, "__cuda_array_interface__");
-  if (cuda_dict == nullptr) {
-    throw TypeError("attribute `__cuda_array_interface__` must exist");
-  }
+  TORCH_INTERNAL_ASSERT(cuda_dict != nullptr);
 
   // In the following code block, we extract the values of `__cuda_array_interface__`
   std::vector<int64_t> sizes;
@@ -242,7 +240,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
       }
       dtype = numpy_dtype_to_aten(descr->type_num);
       dtype_size_in_bytes = descr->elsize;
-      assert(dtype_size_in_bytes > 0);
+      TORCH_INTERNAL_ASSERT(dtype_size_in_bytes > 0);
     }
 
     // Extract the `data` attribute
