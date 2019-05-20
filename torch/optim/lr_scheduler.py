@@ -64,9 +64,11 @@ class _LRScheduler(object):
         # Raise a warning if old pattern is detected
         # https://github.com/pytorch/pytorch/issues/20124
         if self.optimizer.step.called < 1:
-            warnings.warn("Old pattern using lr_scheduler.step() is detected. "
-                          "New behaviour is to call `optimizer.step()` before `lr_scheduler.step()`. "
-                          "See more details: "
+            warnings.warn("Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
+                          "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
+                          "`optimizer.step()` before `lr_scheduler.step()`.  Failure to do this "
+                          "will result in PyTorch skipping the first value of the learning rate schedule."
+                          "See more details at "
                           "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
         if epoch is None:
             epoch = self.last_epoch + 1
