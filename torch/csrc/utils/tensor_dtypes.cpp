@@ -41,8 +41,8 @@ static std::pair<std::string, std::string> getDtypeNames(
       return std::make_pair("complex128", "");
     case at::ScalarType::Bool:
       return std::make_pair("bool", "");
-    case at::ScalarType::QInt8:
-      return std::make_pair("qint8", "");
+    case at::ScalarType::QUInt8:
+      return std::make_pair("quint8", "");
     case at::ScalarType::QInt32:
       return std::make_pair("qint32", "");
     default:

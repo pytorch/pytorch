@@ -1368,7 +1368,7 @@ class TestCaffe2Backend(unittest.TestCase):
                 bbox_deltas = self.conv(feature)
                 a, b = torch.ops._caffe2.GenerateProposals(
                     feature, bbox_deltas, im_info, anchors,
-                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
                 )
                 output = torch.ops._caffe2.RoIAlign(
                     feature, a,
@@ -1424,7 +1424,7 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, scores, bbox_deltas, im_info, anchors):
                 a, b = torch.ops._caffe2.GenerateProposals(
                     scores, bbox_deltas, im_info, anchors,
-                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
                 )
                 return a, b
 
@@ -1458,6 +1458,7 @@ class TestCaffe2Backend(unittest.TestCase):
                     angle_bound_lo=-90,
                     angle_bound_hi=90,
                     clip_angle_thresh=0.5,
+                    legacy_plus_one=True,
                 )
                 return a, b
 
@@ -1502,6 +1503,7 @@ class TestCaffe2Backend(unittest.TestCase):
                 -90,
                 90,
                 clip_angle_thresh,
+                legacy_plus_one=True,
             )
         ]
         class_prob = np.random.randn(sum(roi_counts), num_classes).astype(np.float32)
@@ -1529,6 +1531,7 @@ class TestCaffe2Backend(unittest.TestCase):
                     cls_agnostic_bbox_reg=False,
                     input_boxes_include_bg_cls=True,
                     output_classes_include_bg_cls=True,
+                    legacy_plus_one=True,
                 )
                 return a, b, c, d
 
@@ -1650,6 +1653,24 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, input):
                 return view_by_prim_shape(input)
         self.run_model_test(PrimShapeModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_and(self):
+        class AndModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x & y
+
+        x = torch.randint(0, 1, (3, 5))
+        y = torch.randint(0, 1, (3, 5))
+        self.run_model_test(AndModel(), train=False, input=(x, y), batch_size=BATCH_SIZE)
+
+    def test_or(self):
+        class OrModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x | y
+
+        x = torch.randint(0, 1, (3, 5))
+        y = torch.randint(0, 1, (3, 5))
+        self.run_model_test(OrModel(), train=False, input=(x, y), batch_size=BATCH_SIZE)
 
 # a bit of metaprogramming to set up all the rnn tests
 
