@@ -31,6 +31,7 @@
 #endif
 
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
+C10_DECLARE_bool(caffe2_operator_throw_if_fp_overflow_exceptions);
 
 namespace c10 {
 struct FunctionSchema;
@@ -894,6 +895,8 @@ class Operator : public OperatorBase {
         CAFFE_ENFORCE(
             !std::fetestexcept(FE_INVALID),
             "Invalid floating point exception (FE_INVALID) reported.");
+      }
+      if (FLAGS_caffe2_operator_throw_if_fp_overflow_exceptions) {
         CAFFE_ENFORCE(
             !std::fetestexcept(FE_OVERFLOW),
             "Overflow floating point exception (FE_OVERFLOW) reported.");
@@ -1264,7 +1267,7 @@ C10_DECLARE_REGISTRY(
 #define REGISTER_CPU_GRADIENT_OPERATOR(...) /* No gradients. */
 #else
 #define REGISTER_CPU_GRADIENT_OPERATOR(...) \
-  MACRO_EXPAND(REGISTER_CPU_OPERATOR(__VA_ARGS__))
+  C10_MACRO_EXPAND(REGISTER_CPU_OPERATOR(__VA_ARGS__))
 #endif
 
 C10_DECLARE_REGISTRY(

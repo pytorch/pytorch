@@ -72,8 +72,9 @@ void add_op_cpu_impl(
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::Add",
-    c10::kernel<decltype(add_op_cpu_impl<float>), &add_op_cpu_impl<float>>(),
-    c10::dispatchKey(CPUTensorId()));
+    c10::RegisterOperators::options()
+      .kernel<decltype(add_op_cpu_impl<float>), &add_op_cpu_impl<float>>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 

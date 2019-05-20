@@ -78,6 +78,13 @@ FunctionSchema PythonValue::getSchema(
     }
     rets.push_back(Argument("0", ret_type, {}, {}, false));
   }
+  std::string name("");
+  // Use the qualified name if possible
+  if (py::hasattr(self, "__qualname__")) {
+    name = py::str(py::getattr(self, "__qualname__"));
+  } else if (py::hasattr(self, "__name__")) {
+    name = py::str(py::getattr(self, "__name__"));
+  }
   return FunctionSchema("", "", std::move(args), std::move(rets));
 }
 
@@ -352,6 +359,16 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
     }
   }
   return result;
+}
+
+void ModuleValue::setAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field,
+    Value* newValue) {
+  // Forward to SimpleValue::setAttr
+  SimpleValue simple(self_);
+  simple.setAttr(loc, m, field, newValue);
 }
 
 std::shared_ptr<SugaredValue> BooleanDispatchValue::call(

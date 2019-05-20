@@ -138,28 +138,22 @@ static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #else
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
+  auto A_mat_stride = matrixStride(A);
+  auto b_mat_stride = matrixStride(b);
+  auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
 
   auto ipiv = at::empty({n}, b.options().dtype(kInt));
 
   int info;
-  if (b.dim() == 2) {
-    lapackSolve<scalar_t>(n, nrhs, A_data, n, ipiv.data<int>(), b_data, n, &info);
-    infos[0] = info;
-  } else {
-    auto A_mat_stride = matrixStride(A);
-    auto b_mat_stride = matrixStride(b);
-    auto batch_size = batchCount(A);
-
-    for (int64_t i = 0; i < batch_size; i++) {
-      scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
-      scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-      lapackSolve<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(), b_working_ptr, n, &info);
-      infos[i] = info;
-      if (info != 0) {
-        return;
-      }
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+    scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
+    lapackSolve<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(), b_working_ptr, n, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
     }
   }
 #endif
@@ -208,7 +202,6 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
 #else
   auto self_data = self.data<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
-
   auto batch_size = batchCount(self);
   auto n = self.size(-2);
 
@@ -217,8 +210,8 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
   scalar_t wkopt;
   Tensor work;
 
+  int info;
   for (int64_t i = 0; i < batch_size; i++) {
-    int info;
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     lapackLu<scalar_t>(n, n, self_working_ptr, n, ipiv.data<int>(), &info);
     infos[i] = info;
@@ -249,16 +242,17 @@ Tensor _inverse_helper_cpu(const Tensor& self) {
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cpu", [&]{
     apply_inverse<scalar_t>(self_working_copy, infos);
   });
-  batchCheckErrors(infos, "inverse_cpu");
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "inverse_cpu");
+  } else {
+    singleCheckErrors(infos[0], "inverse_cpu");
+  }
   return self_working_copy;
 }
 
 Tensor inverse(const Tensor &self) {
   if (self.size(-1) == 0) {
     return at::empty_like(self);
-  }
-  if (self.dim() == 2) {
-    return at::legacy::th::_th_getri_single(self);
   }
   squareCheckInputs(self);
   return at::_inverse_helper(self);
@@ -283,25 +277,20 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<i
 
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
+  auto A_mat_stride = matrixStride(A);
+  auto b_mat_stride = matrixStride(b);
+  auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
 
   int info;
-  if (b.dim() == 2) {
-    lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_data, n, b_data, n, &info);
-    infos[0] = info;
-  } else {
-    auto A_mat_stride = matrixStride(A);
-    auto b_mat_stride = matrixStride(b);
-    auto batch_size = batchCount(A);
-    for (int64_t i = 0; i < batch_size; i++) {
-      scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
-      scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-      lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
-      infos[i] = info;
-      if (info != 0) {
-        return;
-      }
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+    scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
+    lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
     }
   }
 #endif
@@ -350,22 +339,17 @@ static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos
   char uplo = upper ? 'U' : 'L';
 
   auto self_data = self.data<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+  auto batch_size = batchCount(self);
   auto n = self.size(-2);
 
   int info;
-  if (self.dim() == 2) {
-    lapackCholesky<scalar_t>(uplo, n, self_data, n, &info);
-    infos[0] = info;
-  } else {
-    auto self_matrix_stride = matrixStride(self);
-    auto batch_size = batchCount(self);
-    for (int64_t i = 0; i < batch_size; i++) {
-      scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-      lapackCholesky<scalar_t>(uplo, n, self_working_ptr, n, &info);
-      infos[i] = info;
-      if (info != 0) {
-        return;
-      }
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    lapackCholesky<scalar_t>(uplo, n, self_working_ptr, n, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
     }
   }
 #endif
@@ -417,21 +401,16 @@ static void apply_lu(Tensor& self, Tensor& pivots, Tensor& infos) {
   auto self_data = self.data<scalar_t>();
   auto pivots_data = pivots.data<int>();
   auto infos_data = infos.data<int>();
-
+  auto self_matrix_stride = matrixStride(self);
+  auto pivots_matrix_stride = pivots.size(-1);
+  auto batch_size = batchCount(self);
   auto n = self.size(-1);
 
-  if (self.dim() == 2) {
-    lapackLu<scalar_t>(n, n, self_data, n, pivots_data, infos_data);
-  } else {
-    auto self_matrix_stride = matrixStride(self);
-    auto batch_size = batchCount(self);
-    auto pivots_matrix_stride = pivots.size(-1);
-    for (int64_t i = 0; i < batch_size; i++) {
-      scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-      int* pivots_working_ptr = &pivots_data[i * pivots_matrix_stride];
-      int* infos_working_ptr = &infos_data[i];
-      lapackLu<scalar_t>(n, n, self_working_ptr, n, pivots_working_ptr, infos_working_ptr);
-    }
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    int* pivots_working_ptr = &pivots_data[i * pivots_matrix_stride];
+    int* infos_working_ptr = &infos_data[i];
+    lapackLu<scalar_t>(n, n, self_working_ptr, n, pivots_working_ptr, infos_working_ptr);
   }
 #endif
 }
@@ -458,10 +437,10 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
     });
   }
   if (check_errors) {
-    if (self.dim() == 2) {
-      singleCheckErrors(infos_tensor.item<int64_t>(), "lu");
-    } else {
+    if (self.dim() > 2) {
       batchCheckErrors(infos_tensor, "lu");
+    } else {
+      singleCheckErrors(infos_tensor.item<int64_t>(), "lu");
     }
   }
   return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
@@ -621,21 +600,17 @@ static void apply_triangular_solve(Tensor& b, Tensor& A, bool upper, bool transp
 
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
+  auto A_mat_stride = matrixStride(A);
+  auto b_mat_stride = matrixStride(b);
+  auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
 
   int info;
-  if (b.dim() == 2) {
-    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_data, n, b_data, n, &info);
-  } else {
-    auto A_mat_stride = matrixStride(A);
-    auto b_mat_stride = matrixStride(b);
-    auto batch_size = batchCount(A);
-    for (int64_t i = 0; i < batch_size; i++) {
-      scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
-      scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-      lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
-    }
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+    scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
+    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
   }
 #endif
 }

@@ -61,7 +61,7 @@ class KernelTable_ final {
     if (!emplaced.second) {
       // Element already existed. Overwrite it.
       emplaced.first->second = value;
-      AT_WARN("Registered a kernel that overwrote a previoulsy registered kernel with same dispatch key '",
+      AT_WARN("Registered a kernel that overwrote a previously registered kernel with same dispatch key '",
           detail::dispatch_key_to_string(key), "' for operator '", operator_name ,"'.");
     }
   }
@@ -205,7 +205,7 @@ private:
     bool is_valid_;
 
     TensorTypeId get_dispatch_key(const Stack* stack) const {
-      auto first_tensor_arg = torch::jit::peek(
+      const IValue& first_tensor_arg = torch::jit::peek(
         *stack,
         0,
         reverse_index_of_first_tensor_arg_
@@ -217,8 +217,7 @@ private:
         }
         return tensor_list[0].type_id();
       } else {
-        // TODO Avoid bumping the refcounter
-        return first_tensor_arg.toTensor().type_id();
+        return first_tensor_arg.unsafeToTensorImpl()->type_id();
       }
     }
   };

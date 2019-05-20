@@ -947,11 +947,10 @@ def _try_compile_fn(fn):
     if inspect.ismethod(fn) or _is_ignored_function(fn):
         # Skip methods
         return None
-    if not hasattr(fn, '__code__'):
-        return None
 
     rcb = createResolutionCallbackFromClosure(fn)
     return torch.jit.script(fn, _rcb=rcb)
+
 
 # ScriptClasses must be new-style classes because we construct them using their
 # __new__ method.

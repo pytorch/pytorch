@@ -152,7 +152,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
             arg.name(), arg.type(), arg.N(), value, arg.kwarg_only());
       } catch (py::cast_error& e) {
         throw ErrorReport(range)
-            << "Expected a default value of type " << arg.type()->str()
+            << "Expected a default value of type " << arg.type()->python_str()
             << " on parameter \"" << arg.name() << "\"";
       }
     } else {
@@ -312,6 +312,11 @@ void initJitScriptBindings(PyObject* module) {
           },
           py::return_value_policy::reference_internal)
       .def("_register_parameter", &Module::register_parameter)
+      .def(
+          "_get_functions",
+          [](Module& self) {
+            return self.class_compilation_unit().get_functions();
+          })
       .def(
           "_register_attribute",
           [](Module& self, std::string name, TypePtr type, py::object value) {
@@ -529,6 +534,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_jit_script_compile",
       [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
+        C10_LOG_API_USAGE_ONCE("torch.script.compile");
         CompilationUnit cu;
         cu.define({def}, {pythonResolver(rcb)}, nullptr);
         std::shared_ptr<Function> defined = cu.get_functions().at(0);
@@ -559,6 +565,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
          ResolutionCallback rcb) {
+        C10_LOG_API_USAGE_ONCE("torch.script.class");
         auto cu = std::make_shared<CompilationUnit>();
         auto classType =
             ClassType::create(c10::QualifiedName(qualifiedName), cu);
