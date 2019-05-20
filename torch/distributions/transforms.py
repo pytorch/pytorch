@@ -355,8 +355,6 @@ class SigmoidTransform(Transform):
         return torch.sigmoid(x)
 
     def _inverse(self, y):
-        finfo = torch.finfo(y.dtype)
-        y = y.clamp(min=finfo.tiny, max=1. - finfo.eps)
         return y.log() - (-y).log1p()
 
     def log_abs_det_jacobian(self, x, y):
