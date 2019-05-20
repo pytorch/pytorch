@@ -263,13 +263,12 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     if(!PyTuple_Check(py_data) || PyTuple_GET_SIZE(py_data) != 2) {
       throw TypeError("`data` must be a 2-tuple of (int, bool)");
     }
-    PyTuple_GET_ITEM(py_data, 0);
     data_ptr = PyLong_AsVoidPtr(PyTuple_GET_ITEM(py_data, 0));
     if (data_ptr == nullptr && PyErr_Occurred()) {
       throw python_error();
     }
     int read_only = PyObject_IsTrue(PyTuple_GET_ITEM(py_data, 1));
-    if (PyErr_Occurred() || read_only == -1) {
+    if (read_only == -1) {
       throw python_error();
     }
     if (read_only) {
