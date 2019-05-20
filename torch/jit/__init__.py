@@ -1798,46 +1798,50 @@ def _get_builtin_table():
     for mod in _modules_containing_builtins:
         register_all(mod)
 
-    _builtin_table[id(warnings.warn)] = "aten::warn"
-    _builtin_table[id(_single)] = "aten::_single"
-    _builtin_table[id(_pair)] = "aten::_pair"
-    _builtin_table[id(_triple)] = "aten::_triple"
-    _builtin_table[id(_quadruple)] = "aten::_quadruple"
-    _builtin_table[id(_list_with_default)] = "aten::list_with_default"
-    _builtin_table[id(_unwrap_optional)] = "aten::_unwrap_optional"
-    _builtin_table[id(cudnn.is_acceptable)] = "aten::cudnn_is_acceptable"
-    _builtin_table[id(torch._C._infer_size)] = "aten::_infer_size"
-    _builtin_table[id(torch.nn.functional._no_grad_embedding_renorm_)] = "aten::_no_grad_embedding_renorm_"
+    builtin_ops = [
+        # Pairs of (function, op_name)
+        (_list_with_default, "aten::list_with_default"),
+        (_pair, "aten::_pair"),
+        (_quadruple, "aten::_quadruple"),
+        (_single, "aten::_single"),
+        (_triple, "aten::_triple"),
+        (_unwrap_optional, "aten::_unwrap_optional"),
+        (_wait, 'aten::wait'),
+        (cudnn.is_acceptable, "aten::cudnn_is_acceptable"),
+        (math.ceil, "aten::ceil"),
+        (math.copysign, "aten::copysign"),
+        (math.erf, "aten::erf"),
+        (math.erfc, "aten::erfc"),
+        (math.exp, "aten::exp"),
+        (math.expm1, "aten::expm1"),
+        (math.fabs, "aten::fabs"),
+        (math.floor, "aten::floor"),
+        (math.gamma, "aten::gamma"),
+        (math.lgamma, "aten::lgamma"),
+        (math.log, "aten::log"),
+        (math.log10, "aten::log10"),
+        (math.log1p, "aten::log1p"),
+        (math.pow, "aten::pow"),
+        (math.sqrt, "aten::sqrt"),
+        (torch._C._infer_size, "aten::_infer_size"),
+        (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
+        (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
+        (torch.nn.functional.interpolate, "aten::__interpolate"),
+        (torch.nn.functional.upsample_bilinear, "aten::__upsample_bilinear"),
+        (torch.nn.functional.upsample_nearest, "aten::__upsample_nearest"),
+        (torch.nn.functional.upsample, "aten::__upsample"),
+        (torch.nn.init._no_grad_fill_, "aten::_no_grad_fill_"),
+        (torch.nn.init._no_grad_normal_, "aten::_no_grad_normal_"),
+        (torch.nn.init._no_grad_uniform_, "aten::_no_grad_uniform_"),
+        (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
+        (torch.nn.utils.rnn.get_packed_sequence, "aten::_pack_sequence"),
+        (warnings.warn, "aten::warn"),
+    ]
 
-    _builtin_table[id(math.floor)] = "aten::floor"
-    _builtin_table[id(math.ceil)] = "aten::ceil"
-    _builtin_table[id(math.log)] = "aten::log"
-    _builtin_table[id(math.log1p)] = "aten::log1p"
-    _builtin_table[id(math.log10)] = "aten::log10"
-    _builtin_table[id(math.exp)] = "aten::exp"
-    _builtin_table[id(math.sqrt)] = "aten::sqrt"
-    _builtin_table[id(math.pow)] = "aten::pow"
-    _builtin_table[id(math.copysign)] = "aten::copysign"
-    _builtin_table[id(math.erf)] = "aten::erf"
-    _builtin_table[id(math.erfc)] = "aten::erfc"
-    _builtin_table[id(math.expm1)] = "aten::expm1"
-    _builtin_table[id(math.fabs)] = "aten::fabs"
-    _builtin_table[id(math.gamma)] = "aten::gamma"
-    _builtin_table[id(math.lgamma)] = "aten::lgamma"
+    for builtin, aten_op in builtin_ops:
+        _builtin_table[id(builtin)] = aten_op
     if not PY2:
         _builtin_table[id(math.gcd)] = "aten::gcd"
-
-    _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
-    _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
-    _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
-    _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
-    _builtin_table[id(torch.nn.functional.assert_int_or_pair)] = "aten::_assert_int_or_pair"
-    _builtin_table[id(torch.nn.utils.rnn.get_packed_sequence)] = "aten::_pack_sequence"
-
-    _builtin_table[id(torch.nn.init._no_grad_fill_)] = "aten::_no_grad_fill_"
-    _builtin_table[id(torch.nn.init._no_grad_normal_)] = "aten::_no_grad_normal_"
-    _builtin_table[id(torch.nn.init._no_grad_uniform_)] = "aten::_no_grad_uniform_"
-    _builtin_table[id(torch.nn.init._no_grad_zero_)] = "aten::_no_grad_zero_"
 
     return _builtin_table
 
@@ -1848,10 +1852,6 @@ def _register_builtin(fn, op):
 
 def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
-
-
-_register_builtin(len, 'aten::len')
-_register_builtin(_wait, 'aten::wait')
 
 # qualified_name => ScriptClass mapping
 _script_classes = {}
