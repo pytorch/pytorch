@@ -31,7 +31,7 @@ SKIP_PYTHON_BINDINGS = [
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
     'copy_sparse_to_sparse_', 'copy_',
-    'nonzero(_(out|tuple))?',
+    'nonzero(_(out|numpy))?',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
