@@ -12608,8 +12608,8 @@ a")
                 self.param = torch.nn.Parameter(torch.ones(2, 2))
                 self.some_unscriptable_method
 
-            def some_unscriptable_method():
-                import pdb
+            def some_unscriptable_method(self):
+                import pdb as _  # noqa: F401
                 return 100
 
             def forward(self, t):
