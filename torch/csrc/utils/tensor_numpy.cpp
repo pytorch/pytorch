@@ -53,6 +53,22 @@ static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
   return result;
 }
 
+static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
+  int ndim = PySequence_Length(py_seq);
+  if (ndim == -1) {
+    throw TypeError("shape and strides must be sequences");
+  }
+  auto result = std::vector<int64_t>(ndim);
+  for (int i = 0; i < ndim; i++) {
+    auto item = THPObjectPtr(PySequence_GetItem(py_seq, i));
+    if (!item) throw python_error();
+
+    result[i] = PyLong_AsLongLong(item);
+    if (result[i] == -1 && PyErr_Occurred()) throw python_error();
+  }
+  return result;
+}
+
 static int aten_to_dtype(const ScalarType scalar_type);
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
@@ -209,7 +225,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   // In the following code block, we extract the values of `__cuda_array_interface__`
   std::vector<int64_t> sizes;
   ScalarType dtype;
-  npy_intp data_ptr;
+  void *data_ptr;
   std::vector<int64_t> strides;
   try {
     if (!PyDict_Check(cuda_dict)) {
@@ -223,13 +239,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     }
 
     // Extract the `shape` attribute
-    int ndim = PySequence_Length(py_shape);
-    if (ndim == -1) {
-      throw TypeError("shape must be a sequence");
-    }
-    std::vector<npy_intp> npy_shape(ndim);
-    PyArray_IntpFromSequence(py_shape, npy_shape.data(), ndim);
-    sizes = to_aten_shape(ndim, npy_shape.data());
+    sizes = seq_to_aten_shape(py_shape);
 
     // Extract the `typestr` attribute
     int dtype_size_in_bytes;
@@ -247,25 +257,22 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     if(!PyTuple_Check(py_data) || PyTuple_GET_SIZE(py_data) != 2) {
       throw TypeError("`data` must be a 2-tuple of (int, bool)");
     }
-    PyErr_Clear();
-    data_ptr = PyArray_PyIntAsIntp(PyTuple_GET_ITEM(py_data, 0));
-    npy_bool read_only;
-    if (PyErr_Occurred() || !PyArray_BoolConverter(PyTuple_GET_ITEM(py_data, 1), &read_only)) {
+    data_ptr = PyLong_AsVoidPtr(PyTuple_GET_ITEM(py_data, 0));
+    int read_only = PyObject_IsTrue(PyTuple_GET_ITEM(py_data, 1));
+    if (PyErr_Occurred() || read_only == -1) {
       throw TypeError("`data` must be a 2-tuple (int, bool)");
     }
     if (read_only) {
-      throw TypeError("the read only flag is not supported");
+      throw TypeError("the read only flag is not supported, should always be False");
     }
 
     // Extract the `strides` attribute
     PyObject *py_strides = PyDict_GetItemString(cuda_dict, "strides");
     if (py_strides != nullptr && py_strides != Py_None) {
-      if (PySequence_Length(py_shape) == -1 || PySequence_Length(py_shape) != ndim) {
+      if (PySequence_Length(py_strides) == -1 || PySequence_Length(py_strides) != PySequence_Length(py_shape)) {
         throw TypeError("strides must be a sequence of the same length as shape");
       }
-      std::vector<npy_intp> npy_strides(ndim);
-      PyArray_IntpFromSequence(py_strides, npy_strides.data(), ndim);
-      strides = to_aten_shape(ndim, npy_strides.data());
+      strides = seq_to_aten_shape(py_strides);
     } else {
       strides = at::detail::defaultStrides(sizes);
     }
@@ -286,7 +293,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 
   Py_INCREF(obj);
   return at::from_blob(
-      (void*) data_ptr,
+      data_ptr,
       sizes,
       strides,
       [obj](void* data) {
