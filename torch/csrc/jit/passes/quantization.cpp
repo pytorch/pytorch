@@ -124,8 +124,7 @@ Value* insertScalarType(Node* ins_node, at::ScalarType t) {
 
 // Create Quant Node
 Node* createQuantNode(Value* v, Graph* g) {
-  Node* quant = g->create(
-      at::Symbol::fromQualString("aten::quantize_linear"));
+  Node* quant = g->create(at::Symbol::fromQualString("aten::quantize_linear"));
   TORCH_INTERNAL_ASSERT(quant != nullptr, "Failed to create quant node");
   quant->output()->setUniqueName(v->uniqueName() + ".quant");
   return quant;
@@ -133,8 +132,8 @@ Node* createQuantNode(Value* v, Graph* g) {
 
 // Create Dequant node
 Node* createDeQuantNode(Value* v, Graph* g) {
-  Node* dequant = g->create(
-      at::Symbol::fromQualString("aten::dequantize_linear"));
+  Node* dequant =
+      g->create(at::Symbol::fromQualString("aten::dequantize_linear"));
   TORCH_INTERNAL_ASSERT(dequant != nullptr, "Failed to create dequant node");
   dequant->output()->setUniqueName(v->uniqueName() + ".dequant");
   return dequant;
@@ -142,8 +141,7 @@ Node* createDeQuantNode(Value* v, Graph* g) {
 
 // Create IntTensor Node
 Node* createIntReprNode(Value* v, Graph* g) {
-  Node* intrepr =
-      g->create(at::Symbol::fromQualString("aten::int_repr"));
+  Node* intrepr = g->create(at::Symbol::fromQualString("aten::int_repr"));
   TORCH_INTERNAL_ASSERT(intrepr != nullptr, "Failed to create inttensor node");
   intrepr->output()->setUniqueName(v->uniqueName() + ".intrepr");
   return intrepr;
