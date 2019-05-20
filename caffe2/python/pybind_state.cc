@@ -1819,8 +1819,6 @@ void addGlobalMethods(py::module& m) {
 PYBIND11_MODULE(caffe2_pybind11_state, m) {
   m.doc() = "pybind11 stateful interface to Caffe2 workspaces";
 
-  C10_LOG_API_USAGE_ONCE("caffe2.python.import");
-
   addGlobalMethods(m);
   addObjectMethods(m);
   for (const auto& addition : PybindAdditionRegistry()->Keys()) {
