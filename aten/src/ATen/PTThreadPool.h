@@ -16,10 +16,18 @@ struct PTThreadPoolEnvironment {
     std::function<void()> f;
   };
 
-  using EnvThread = std::thread;
+  class EnvThread {
+   public:
+    EnvThread(std::function<void()> f) : thr_(std::move(f)) {}
+    ~EnvThread() { thr_.join(); }
+    void OnCancel() { }
+
+   private:
+    std::thread thr_;
+  };
 
   EnvThread* CreateThread(std::function<void()> func) {
-    return new std::thread([func]() {
+    return new EnvThread([func]() {
       c10::setThreadName("PTThreadPool-Eigen");
       at::init_num_threads();
       func();
@@ -27,7 +35,7 @@ struct PTThreadPoolEnvironment {
   }
 
   Task CreateTask(std::function<void()> func) {
-    return Task { func };
+    return Task { std::move(func) };
   }
 
   void ExecuteTask(Task task) {
