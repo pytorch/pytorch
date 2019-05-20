@@ -327,3 +327,7 @@ private:
 };
 
 }
+
+namespace torch {
+  using RegisterOperators = c10::RegisterOperators;
+}

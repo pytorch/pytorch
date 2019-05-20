@@ -255,6 +255,4 @@ struct TORCH_API RegisterOperators {
 
 } // namespace jit
 
-using RegisterOperators = c10::RegisterOperators;
-
 } // namespace torch
