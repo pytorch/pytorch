@@ -488,6 +488,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         " inputs, but got only ",
         stack.size());
 
+    C10_LOG_API_USAGE_ONCE("torch.graph_executor.run");
     logging::getLogger()->addStatValue(
         logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
@@ -579,7 +580,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
       for (Node* dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
-        // Run post differentiation optimizations, Autodiff will replace some 
+        // Run post differentiation optimizations, Autodiff will replace some
         // parts of graph with new graph, these new graphs usually consists of
         // control flows and miss shape information on nodes, so we run shape
         // prop and differentiable optimizations to ensure the graph is optimized
