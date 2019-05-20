@@ -102,10 +102,10 @@ class ComputeNormForBlobsTest(unittest.TestCase):
         workspace.RunNetOnce(model.net)
 
         fc1_w = workspace.FetchBlob('fc1_w')
-        fc1_w_l2_averaged_norm = workspace.FetchBlob('fc1_w_averaged_l2_norm')
+        fc1_w_averaged_l2_norm = workspace.FetchBlob('fc1_w_averaged_l2_norm')
 
-        self.assertEqual(fc1_w_l2_averaged_norm.size, 1)
-        self.assertAlmostEqual(fc1_w_l2_averaged_norm[0],
+        self.assertEqual(fc1_w_averaged_l2_norm.size, 1)
+        self.assertAlmostEqual(fc1_w_averaged_l2_norm[0],
                                np.linalg.norm(fc1_w)**2 / fc1_w.size,
                                delta=1e-5)
 
@@ -203,3 +203,30 @@ class ComputeNormForBlobsTest(unittest.TestCase):
                                delta=1e-5)
 
         self.assertEqual(len(model.net.Proto().op), 8)
+
+    def test_compute_norm_row_index_for_blobs(self):
+        model = model_helper.ModelHelper(name="test")
+        data = model.net.AddExternalInput("data")
+        fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
+
+        net_modifier = ComputeNormForBlobs(
+            blobs=['fc1_w'],
+            logging_frequency=10,
+            compute_averaged_norm=True,
+            row_index=1
+        )
+
+        net_modifier(model.net)
+
+        workspace.FeedBlob('data', np.random.rand(10, 4).astype(np.float32))
+
+        workspace.RunNetOnce(model.param_init_net)
+        workspace.RunNetOnce(model.net)
+
+        fc1_w = workspace.FetchBlob('fc1_w')
+        fc1_w_row_1_averaged_l2_norm = workspace.FetchBlob('fc1_w_row_1_averaged_l2_norm')
+
+        self.assertEqual(fc1_w_row_1_averaged_l2_norm.size, 1)
+        self.assertAlmostEqual(fc1_w_row_1_averaged_l2_norm[0],
+                               np.linalg.norm(fc1_w[1])**2 / fc1_w[1].size,
+                               delta=1e-5)

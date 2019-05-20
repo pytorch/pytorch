@@ -212,7 +212,9 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
   [&] {                                                                 \
     switch (TYPE) {                                                     \
       AT_PRIVATE_CASE_TYPE(                                             \
-          at::ScalarType::QUInt8, quint8, __VA_ARGS__)                    \
+          at::ScalarType::QInt8, qint8, __VA_ARGS__)                    \
+      AT_PRIVATE_CASE_TYPE(                                             \
+          at::ScalarType::QUInt8, quint8, __VA_ARGS__)                  \
       AT_PRIVATE_CASE_TYPE(                                             \
           at::ScalarType::QInt32, qint32, __VA_ARGS__)                  \
       default:                                                          \
