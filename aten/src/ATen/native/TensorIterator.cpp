@@ -409,6 +409,23 @@ bool TensorIterator::is_trivial_1d() const {
   return ndim() == 1;
 }
 
+bool TensorIterator::is_contiguous() const {
+  if (numel() == 1) {
+    return true;
+  }
+  if (ndim() != 1) {
+    return false;
+  }
+  int num_tensors = ntensors();
+  for (int i = 0; i < num_tensors; i++) {
+    if (strides(i)[0] != element_size(i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+
 bool TensorIterator::is_scalar(int arg) const {
   const auto& stride = operands_[arg].stride_bytes;
   for (int i = 0; i < ndim(); i++) {
