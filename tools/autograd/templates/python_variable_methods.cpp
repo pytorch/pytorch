@@ -332,10 +332,10 @@ static Tensor dispatch_nonzero(const Tensor & self) {
   return self.nonzero();
 }
 
-static std::vector<Tensor> dispatch_nonzero_tuple(const Tensor & self) {
+static std::vector<Tensor> dispatch_nonzero_numpy(const Tensor & self) {
   AutoNoGIL no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  return self.nonzero_tuple();
+  return self.nonzero_numpy();
 }
 
 static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -351,7 +351,7 @@ static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* 
   if (r.idx == 0 || (r.idx == 1 && !r.toBool(0))) {
     return wrap(dispatch_nonzero(self_));
   } else {
-    return wrap(dispatch_nonzero_tuple(self_));
+    return wrap(dispatch_nonzero_numpy(self_));
   }
   END_HANDLE_TH_ERRORS
 }

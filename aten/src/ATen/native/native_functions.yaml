@@ -3427,7 +3427,7 @@
 - func: nonzero(Tensor self) -> Tensor
   variants: method, function
 
-- func: nonzero_tuple(Tensor self) -> Tensor[]
+- func: nonzero_numpy(Tensor self) -> Tensor[]
   variants: method, function
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)

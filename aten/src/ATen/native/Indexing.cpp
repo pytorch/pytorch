@@ -568,7 +568,7 @@ Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& in
     return at::_sparse_coo_tensor_unsafe(sparse_ind, grad.reshape(-1), self.sizes());
 }
 
-std::vector<Tensor> nonzero_tuple(const Tensor& self) {
+std::vector<Tensor> nonzero_numpy(const Tensor& self) {
   // special case scalar for compatibility with numpy:
   //
   // >>> np.array(5).nonzero()
