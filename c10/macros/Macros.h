@@ -29,10 +29,21 @@
   classname(const classname&) = delete;        \
   classname& operator=(const classname&) = delete
 
-#define CONCAT_IMPL(x, y) x##y
-#define MACRO_CONCAT(x, y) CONCAT_IMPL(x, y)
+#define C10_CONCATENATE_IMPL(s1, s2) s1##s2
+#define C10_CONCATENATE(s1, s2) C10_CONCATENATE_IMPL(s1, s2)
 
-#define MACRO_EXPAND(args) args
+#define C10_MACRO_EXPAND(args) args
+
+/**
+ * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
+ * str and ending with a number that varies with the line.
+ */
+#ifdef __COUNTER__
+#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __COUNTER__)
+#else
+#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
+#endif
+
 
 /// C10_NODISCARD - Warn if a type or return value is discarded.
 

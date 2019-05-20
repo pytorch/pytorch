@@ -7,7 +7,7 @@ import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
 from torch._six import PY2, with_metaclass, get_function_from_type, \
-    string_classes
+    string_classes, builtins
 from torch._jit_internal import ignore  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
@@ -900,9 +900,47 @@ def _try_compile_weak_script(fn):
         _jit_internal.compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
         entry["status"] = _jit_internal.COMPILED
         return compiled_fn
+        # TODO: use fn.__closure__
+        raise RuntimeError("Cannot make resolutionCallback in Python 2")
     else:
         return entry["compiled_fn"]
 
+
+class ScriptWarning(Warning):
+    pass
+
+
+def createResolutionCallbackFromClosure(fn):
+    """
+    Create a resolutionCallback by introspecting the function instead of
+    looking up the stack for the enclosing scope
+    """
+    var_names = fn.__code__.co_freevars
+
+    # map of captured name -> value
+    free_vars = {}
+
+    for index, name in enumerate(var_names):
+        free_vars[name] = fn.__closure__[index].cell_contents
+    f_globals = fn.__globals__
+
+    def env(key):
+        if key in free_vars:
+            return free_vars[key]
+        elif hasattr(builtins, key):
+            return getattr(builtins, key)
+        else:
+            return f_globals.get(key)
+
+    return env
+
+
+def _try_compile_fn(fn):
+    if inspect.ismethod(fn) or _is_ignored_function(fn):
+        # Skip methods
+        return None
+    rcb = createResolutionCallbackFromClosure(fn)
+    return torch.jit.script(fn, _rcb=rcb)
 
 # ScriptClasses must be new-style classes because we construct them using their
 # __new__ method.
@@ -955,6 +993,13 @@ def _qualified_name(obj):
                            "'{}' is not a valid identifier".format(name, name))
 
     return module_name + "." + name
+
+
+@contextlib.contextmanager
+def _enable_recursive_script():
+    torch._C._jit_recursive_script(True)
+    yield
+    torch._C._jit_recursive_script(False)
 
 
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
@@ -1011,7 +1056,7 @@ def _try_get_weak_module(mod):
     return _jit_internal.weak_modules.get(mod)
 
 
-def _try_get_ignored_op(fn):
+def _is_ignored_function(fn):
     if not callable(fn):
         return False
     if hasattr(fn, '__func__'):

@@ -186,7 +186,8 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
         return typePtr;
       }
     }
-    throw ErrorReport(expr) << "Unknown type name " << *name;
+
+    throw ErrorReport(expr) << "Unknown type name '" << *name << "'";
   }
   throw ErrorReport(expr.range())
       << "Expression of type " << kindToString(expr.kind())
