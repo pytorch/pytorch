@@ -1658,6 +1658,13 @@ nelement() -> int
 Alias for :meth:`~Tensor.numel`
 """)
 
+add_docstr_all('nonzero',
+               r"""
+nonzero() -> LongTensor
+
+See :func:`torch.nonzero`
+""")
+
 add_docstr_all('norm',
                r"""
 norm(p=2, dim=None, keepdim=False) -> Tensor
