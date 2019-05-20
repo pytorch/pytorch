@@ -17,11 +17,11 @@ inline int end_index(int a, int b, int c) {
 }
 
 static void avg_pool2d_shapecheck(
-    Tensor& input,
-    Tensor* output,
-    IntList kernel_size,
-    IntList stride_size,
-    IntList pad_size,
+    const Tensor& input,
+    const Tensor* output,
+    IntArrayRef kernel_size,
+    IntArrayRef stride_size,
+    IntArrayRef pad_size,
     bool ceil_mode) {
   auto kH = kernel_size[0];
   auto kW = kernel_size[1];
@@ -105,7 +105,7 @@ static void avg_pool2d_shapecheck(
 
 template <typename scalar_t>
 static void avg_pool2d_out_cpu_frame(
-    Tensor& input,
+    const Tensor& input,
     Tensor& output,
     int64_t nInputPlane,
     int64_t inputHeight,
@@ -113,9 +113,9 @@ static void avg_pool2d_out_cpu_frame(
     int64_t outputHeight,
     int64_t outputWidth,
     int64_t nbatch,
-    IntList kernel_size,
-    IntList stride_size,
-    IntList pad_size,
+    IntArrayRef kernel_size,
+    IntArrayRef stride_size,
+    IntArrayRef pad_size,
     bool count_include_pad) {
   auto kH = kernel_size[0];
   auto kW = kernel_size[1];
@@ -178,11 +178,11 @@ static void avg_pool2d_out_cpu_frame(
 }
 
 static void avg_pool2d_out_cpu_template(
-    Tensor& input,
+    const Tensor& input,
     Tensor& output,
-    IntList kernel_size,
-    IntList stride_size,
-    IntList pad_size,
+    IntArrayRef kernel_size,
+    IntArrayRef stride_size,
+    IntArrayRef pad_size,
     bool ceil_mode,
     bool count_include_pad) {
   auto kH = kernel_size[0];
@@ -227,10 +227,10 @@ static void avg_pool2d_out_cpu_template(
   else
     output.resize_({input.size(0), nInputPlane, outputHeight, outputWidth});
 
-  input = input.contiguous();
+  // input = input.contiguous();
 
-  if (!output.is_contiguous()) {
-    AT_ERROR("output must be contiguous");
+  if (!output.is_contiguous() || !input.is_contiguous()) {
+    AT_ERROR("input and output must be contiguous");
   }
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -253,8 +253,8 @@ static void avg_pool2d_out_cpu_template(
 
 template <typename scalar_t>
 static void avg_pool2d_backward_cpu_frame(
-  Tensor& gradInput,
-  Tensor& gradOutput,
+  const Tensor& gradInput,
+  const Tensor& gradOutput,
   int64_t nInputPlane,
   int64_t inputHeight,
   int64_t inputWidth,
@@ -262,9 +262,9 @@ static void avg_pool2d_backward_cpu_frame(
   int64_t outputWidth,
   int64_t nbatch,
   bool count_include_pad,
-  IntList kernel_size,
-  IntList stride_size,
-  IntList pad_size
+  IntArrayRef kernel_size,
+  IntArrayRef stride_size,
+  IntArrayRef pad_size
 ) {
   scalar_t *gradInput_data = gradInput.data<scalar_t>();
   scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
@@ -327,12 +327,12 @@ static void avg_pool2d_backward_cpu_frame(
 }
 
 static void avg_pool2d_backward_cpu_template(
-  Tensor& input,
-  Tensor& gradOutput,
+  const Tensor& input,
+  const Tensor& gradOutput,
   Tensor& gradInput,
-  IntList kernel_size,
-  IntList stride_size,
-  IntList pad_size,
+  IntArrayRef kernel_size,
+  IntArrayRef stride_size,
+  IntArrayRef pad_size,
   bool ceil_mode,
   bool count_include_pad)
 {
@@ -374,15 +374,8 @@ static void avg_pool2d_backward_cpu_template(
   outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
 
   gradInput.resize_as_(input);
-
-  if (input.dim() == 3)
-    gradOutput.resize_({nInputPlane, outputHeight, outputWidth});
-  else
-    gradOutput.resize_({input.size(0), nInputPlane, outputHeight, outputWidth});
-
-  gradOutput = gradOutput.contiguous();
-  if (!gradInput.is_contiguous())
-    AT_ERROR("gradInput must be contiguous");
+  if (!gradInput.is_contiguous() || !gradOutput.is_contiguous())
+    AT_ERROR("gradInput and gradOutput must be contiguous");
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     gradOutput.scalar_type(), "avg_pool2d", [&] {
@@ -405,13 +398,13 @@ static void avg_pool2d_backward_cpu_template(
 } // namespace
 
 Tensor& avg_pool2d_out_cpu(
-  Tensor& input,
-  IntList kernel_size,
-  IntList stride,
-  IntList padding,
+  Tensor& output,
+  const Tensor& input,
+  IntArrayRef kernel_size,
+  IntArrayRef stride,
+  IntArrayRef padding,
   bool ceil_mode,
-  bool count_include_pad,
-  Tensor& output)
+  bool count_include_pad)
   {
     avg_pool2d_out_cpu_template(
       input, output, kernel_size, stride, padding, ceil_mode, count_include_pad);
@@ -419,10 +412,10 @@ Tensor& avg_pool2d_out_cpu(
   }
 
 Tensor avg_pool2d_cpu(
-  Tensor& input,
-  IntList kernel_size,
-  IntList stride,
-  IntList padding,
+  const Tensor& input,
+  IntArrayRef kernel_size,
+  IntArrayRef stride,
+  IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad)
   {
@@ -433,33 +426,33 @@ Tensor avg_pool2d_cpu(
   }
 
   Tensor& avg_pool2d_backward_out_cpu(
-    Tensor& gradOutput,
+    Tensor& gradInput,
+    const Tensor& gradOutput,
     Tensor& input,
-    IntList kernel_size,
-    IntList stride,
-    IntList padding,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
     bool ceil_mode,
-    bool count_include_pad,
-    Tensor& gradInput)
+    bool count_include_pad)
   {
     avg_pool2d_backward_cpu_template(
       input, gradOutput, gradInput, kernel_size, stride, padding, ceil_mode, count_include_pad);
-    return gradOutput;
+    return gradInput;
   }
 
   Tensor avg_pool2d_backward_cpu(
-    Tensor& gradOutput,
-    Tensor& input,
-    IntList kernel_size,
-    IntList stride,
-    IntList padding,
+    const Tensor& gradOutput,
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad)
   {
     auto gradInput = at::zeros_like(input);
     avg_pool2d_backward_cpu_template(
       input, gradOutput, gradInput, kernel_size, stride, padding, ceil_mode, count_include_pad);
-    return gradOutput;
+    return gradInput;
   }
 } // namespace native
 } // namespace at
