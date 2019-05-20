@@ -29,6 +29,7 @@ if (USE_CUDA)
 endif()
 
 add_executable(test_api ${TORCH_API_TEST_SOURCES})
+MESSAGE(STATUS "DEBUG in test api : ATen_CPU_INCLUDE = ${ATen_CPU_INCLUDE}")
 target_include_directories(test_api PRIVATE ${ATen_CPU_INCLUDE})
 target_link_libraries(test_api PRIVATE caffe2 gtest)
 

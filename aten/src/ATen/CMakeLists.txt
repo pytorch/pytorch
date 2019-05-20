@@ -118,7 +118,7 @@ ENDIF()
 
 IF (USE_TBB)
   message("ATen is compiled with TBB (${TBB_ROOT_DIR})")
-  list(APPEND ATen_THIRD_PARTY_INCLUDE ${TBB_ROOT_DIR}/include)
+  list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb)
 ENDIF()
 
