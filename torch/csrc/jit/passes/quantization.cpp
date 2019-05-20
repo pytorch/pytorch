@@ -156,7 +156,6 @@ Node* addQuantDeQuantNodesFor(
     const std::tuple<std::string, float, int>& qparam,
     at::ScalarType t = at::ScalarType::Undefined) {
   TORCH_INTERNAL_ASSERT(v != nullptr);
-  WithInsertPoint ins(insert_point);
   WithCurrentScope scope_guard(
       *insert_point->owningGraph(), insert_point->scope());
   Node* quant = createQuantNode(v, insert_point->owningGraph());
