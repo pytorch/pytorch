@@ -42,6 +42,8 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     const py::function& var_name_lookup_fn,
     bool force_outplace,
     const std::shared_ptr<script::Module>& self) {
+  C10_LOG_API_USAGE_ONCE("torch.tracer");
+
   auto enter_info = tracer::enter(std::move(trace_inputs), self);
   auto graph = enter_info.first->graph;
 
@@ -101,9 +103,7 @@ Node* preRecordPythonTrace(
 }
 
 void pythonRecordSourceLocation(Node* n) {
-  auto sl =
-      std::make_shared<StringSourceLocation>(getPythonInterpreterStackTrace());
-  n->setSourceLocation(sl);
+  n->setSourceRange(SourceRange(getPythonInterpreterStackTrace()));
 }
 
 void pythonWarn(const std::string& reason) {

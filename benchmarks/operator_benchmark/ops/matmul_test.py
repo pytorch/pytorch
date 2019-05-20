@@ -17,6 +17,8 @@ long_config = generate_configs(
     K=get_n_rand_nums(min_val=1, max_val=128, n=2),
     trans_a=[False, True],
     trans_b=[True, False],
+    dtype=[torch.float32, torch.int32],
+    contig=[True, False],
     mode=['long'],
     sample_func=cross_product
 )
@@ -28,6 +30,8 @@ short_config = generate_configs(
     K=[64, 128],
     trans_a=[False, True],
     trans_b=[True, False],
+    dtype=[torch.float32, torch.int32],
+    contig=[True, False],
     mode=['short'],
     sample_func=cross_product
 )

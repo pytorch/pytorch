@@ -6,6 +6,12 @@ REGISTER_CPU_OPERATOR(LearningRate, LearningRateOp<float, CPUContext>);
 OPERATOR_SCHEMA(LearningRate)
     .NumInputs(1)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef&,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out[0] = in[0];
+      return out;
+    })
     .SetDoc(R"DOC(
 Learning rate is a decreasing function of time. With low learning rates the
 improvements will be linear. With high learning rates they will start to look

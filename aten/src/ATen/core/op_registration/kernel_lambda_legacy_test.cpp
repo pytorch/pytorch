@@ -17,8 +17,6 @@
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 using c10::RegisterOperators;
-using c10::kernel;
-using c10::dispatchKey;
 using c10::TensorTypeId;
 using c10::KernelCache;
 using c10::Stack;
@@ -27,8 +25,10 @@ using c10::ivalue::TensorList;
 using c10::ivalue::IntList;
 using c10::intrusive_ptr;
 using c10::ArrayRef;
-using std::unique_ptr;
+using c10::Dict;
 using at::Tensor;
+using std::string;
+using std::unique_ptr;
 
 namespace {
 
@@ -193,9 +193,16 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListOut
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-     .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[])", [] (Tensor) -> std::tuple<Tensor, int64_t, std::vector<Tensor>> {
-       return std::tuple<Tensor, int64_t, std::vector<Tensor>>(
-         dummyTensor(TensorType2()), 5, {dummyTensor(TensorType1()), dummyTensor(TensorType2())}
+     .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", [] (Tensor) -> std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> {
+       Dict<string, Tensor> dict;
+       dict.insert("first", dummyTensor(TensorType1()));
+       dict.insert("second", dummyTensor(TensorType2()));
+       return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
+         dummyTensor(TensorType2()),
+         5,
+         {dummyTensor(TensorType1()), dummyTensor(TensorType2())},
+         c10::optional<int64_t>(c10::in_place, 0),
+         dict
        );
      });
 
@@ -203,12 +210,17 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMultipleOu
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()));
-  EXPECT_EQ(3, result.size());
+  EXPECT_EQ(5, result.size());
   EXPECT_EQ(TensorType2(), result[0].toTensor().type_id());
   EXPECT_EQ(5, result[1].toInt());
   EXPECT_EQ(2, result[2].toTensorListRef().size());
   EXPECT_EQ(TensorType1(), result[2].toTensorListRef()[0].type_id());
   EXPECT_EQ(TensorType2(), result[2].toTensorListRef()[1].type_id());
+  EXPECT_EQ(0, result[3].toInt());
+  auto result_dict = c10::impl::toTypedDict<string, Tensor>(std::move(result[4].toGenericDict()->elements()));
+  EXPECT_EQ(2, result_dict.size());
+  EXPECT_EQ(TensorType1(), result_dict.at("first").type_id());
+  EXPECT_EQ(TensorType2(), result_dict.at("second").type_id());
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
@@ -432,6 +444,246 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTens
   auto outputs = callOp(*op, TensorList::create({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
+}
+
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithStringListOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::stringlist_output(str[] input) -> str[]", [](std::vector<std::string> input) {
+        return input;
+      });
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::stringlist_output", "");
+  ASSERT_TRUE(op.has_value());
+
+  std::vector<std::string> list{"value1", "value2"};
+  auto outputs = callOp(*op, list);
+  EXPECT_EQ(1, outputs.size());
+  auto output = std::move(outputs[0].toGenericList()->elements());
+
+  EXPECT_EQ(2, output.size());
+  EXPECT_EQ("value1", output[0].toString()->string());
+  EXPECT_EQ("value2", output[1].toString()->string());
+}
+
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+  int captured_dict_size = 0;
+
+  auto registrar = RegisterOperators()
+      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", [&] (Dict<string, Tensor> input1) {
+        captured_dict_size = input1.size();
+      });
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  captured_dict_size = 0;
+  Dict<string, Tensor> dict;
+  dict.insert("key1", dummyTensor(TensorType1()));
+  dict.insert("key2", dummyTensor(TensorType2()));
+  auto outputs = callOp(*op, dict);
+  EXPECT_EQ(0, outputs.size());
+  EXPECT_EQ(2, captured_dict_size);
+}
+
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::dict_input(Dict(str, str) input) -> str", [&] (Dict<string, string> input1) {
+        return input1.at("key2");
+      });
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  Dict<string, string> dict;
+  dict.insert("key1", "value1");
+  dict.insert("key2", "value2");
+  auto outputs = callOp(*op, dict);
+  EXPECT_EQ(1, outputs.size());
+  EXPECT_EQ("value2", outputs[0].toString()->string());
+}
+
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+    .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", [] (Dict<string, string> input) {
+      return input;
+    });
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
+  ASSERT_TRUE(op.has_value());
+
+  Dict<string, string> dict;
+  dict.insert("key1", "value1");
+  dict.insert("key2", "value2");
+  auto outputs = callOp(*op, dict);
+  EXPECT_EQ(1, outputs.size());
+  auto output = c10::impl::toTypedDict<string, string>(std::move(outputs[0].toGenericDict()->elements()));
+
+  EXPECT_EQ(2, output.size());
+  EXPECT_EQ("value1", output.at("key1"));
+  EXPECT_EQ("value2", output.at("key2"));
+}
+
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedMapInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+  int captured_dict_size = 0;
+
+  auto registrar = RegisterOperators()
+      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", [&] (std::unordered_map<string, Tensor> input1) {
+        captured_dict_size = input1.size();
+      });
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  captured_dict_size = 0;
+  std::unordered_map<string, Tensor> dict;
+  dict.emplace("key1", dummyTensor(TensorType1()));
+  dict.emplace("key2", dummyTensor(TensorType2()));
+  auto outputs = callOp(*op, dict);
+  EXPECT_EQ(0, outputs.size());
+  EXPECT_EQ(2, captured_dict_size);
+}
+
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedMapInput_withOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::dict_input(Dict(str, str) input) -> str", [&] (std::unordered_map<string, string> input1) {
+        return input1.at("key2");
+      });
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
+  ASSERT_TRUE(op.has_value());
+
+  std::unordered_map<string, string> dict;
+  dict.emplace("key1", "value1");
+  dict.emplace("key2", "value2");
+  auto outputs = callOp(*op, dict);
+  EXPECT_EQ(1, outputs.size());
+  EXPECT_EQ("value2", outputs[0].toString()->string());
+}
+
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedMapOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+    .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", [] (std::unordered_map<string, string> input) {
+      return input;
+    });
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
+  ASSERT_TRUE(op.has_value());
+
+  std::unordered_map<string, string> dict;
+  dict.emplace("key1", "value1");
+  dict.emplace("key2", "value2");
+  auto outputs = callOp(*op, dict);
+  EXPECT_EQ(1, outputs.size());
+  auto output = c10::impl::toTypedDict<string, string>(std::move(outputs[0].toGenericDict()->elements()));
+
+  EXPECT_EQ(2, output.size());
+  EXPECT_EQ("value1", output.at("key1"));
+  EXPECT_EQ("value2", output.at("key2"));
+}
+
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMapOfList_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::dict_output(Dict(str, int[]) input) -> Dict(str, int[])", [](std::unordered_map<string, std::vector<int64_t>> input) {
+        return input;
+      });
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
+  ASSERT_TRUE(op.has_value());
+
+  std::unordered_map<string, std::vector<int64_t>> dict;
+  dict.insert({"key1", std::vector<int64_t>{10, 20}});
+  dict.insert({"key2", std::vector<int64_t>{30, 40}});
+  auto outputs = callOp(*op, dict);
+  EXPECT_EQ(1, outputs.size());
+  auto output = c10::impl::toTypedDict<string, std::vector<int64_t>>(std::move(outputs[0].toGenericDict()->elements()));
+
+  EXPECT_EQ(2, output.size());
+  EXPECT_EQ(2, output.at("key1").size());
+  EXPECT_EQ(10, output.at("key1")[0]);
+  EXPECT_EQ(20, output.at("key1")[1]);
+  EXPECT_EQ(2, output.at("key2").size());
+  EXPECT_EQ(30, output.at("key2")[0]);
+  EXPECT_EQ(40, output.at("key2")[1]);
+}
+
+
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMapOfListOfMap_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::dict_output(Dict(str, Dict(int,str)[]) input) -> Dict(str, Dict(int,str)[])", [](std::unordered_map<string, std::vector<std::unordered_map<int64_t, string>>> input) {
+        return input;
+      });
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
+  ASSERT_TRUE(op.has_value());
+
+  std::unordered_map<string, std::vector<std::unordered_map<int64_t, string>>> dict;
+  dict.insert({"key1", {{{10, "10"}, {20, "20"}}}});
+  dict.insert({"key2", {{{30, "30"}, {40, "40"}}}});
+  auto outputs = callOp(*op, dict);
+  EXPECT_EQ(1, outputs.size());
+  auto output = c10::impl::toTypedDict<string, std::vector<std::unordered_map<int64_t, string>>>(std::move(outputs[0].toGenericDict()->elements()));
+
+  EXPECT_EQ(2, output.size());
+  EXPECT_EQ(1, output.at("key1").size());
+  EXPECT_EQ(2, output.at("key1")[0].size());
+  EXPECT_EQ("10", output.at("key1")[0][10]);
+  EXPECT_EQ("20", output.at("key1")[0][20]);
+  EXPECT_EQ(2, output.at("key2")[0].size());
+  EXPECT_EQ("30", output.at("key2")[0][30]);
+  EXPECT_EQ("40", output.at("key2")[0][40]);
+}
+
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithListOfMap_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::list_output(Dict(str, int)[] input) -> Dict(str, int)[]", [](std::vector<std::unordered_map<string, int64_t>> input) {
+        return input;
+      });
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
+  ASSERT_TRUE(op.has_value());
+
+  std::vector<std::unordered_map<string, int64_t>> list{{{"1", 1}, {"2", 2}}, {{"3", 3}, {"4", 4}}};
+  auto outputs = callOp(*op, list);
+  EXPECT_EQ(1, outputs.size());
+  std::vector<c10::IValue> output = std::move(outputs[0].toGenericList()->elements());
+
+  EXPECT_EQ(2, output.size());
+  EXPECT_EQ(2, output[0].toGenericDictRef().size());
+  EXPECT_EQ(1, output[0].toGenericDictRef().at("1").toInt());
+  EXPECT_EQ(2, output[0].toGenericDictRef().at("2").toInt());
+  EXPECT_EQ(2, output[1].toGenericDictRef().size());
+  EXPECT_EQ(3, output[1].toGenericDictRef().at("3").toInt());
+  EXPECT_EQ(4, output[1].toGenericDictRef().at("4").toInt());
+}
+
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithListOfMapOfIntList_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::list_output(Dict(str, int[])[] input) -> Dict(str, int[])[]", [](std::vector<std::unordered_map<string, std::vector<int64_t>>> input) {
+        return input;
+      });
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
+  ASSERT_TRUE(op.has_value());
+
+  std::vector<std::unordered_map<string, std::vector<int64_t>>> list{{{"1", {1, 2}}, {"3", {3, 4}}}, {{"5", {5, 6}}, {"7", {7, 8}}}};
+  auto outputs = callOp(*op, list);
+  EXPECT_EQ(1, outputs.size());
+  std::vector<c10::IValue> output = std::move(outputs[0].toGenericList()->elements());
+
+  EXPECT_EQ(2, output.size());
+  EXPECT_EQ(2, output[0].toGenericDictRef().size());
+  EXPECT_EQ(2, output[0].toGenericDictRef().at("1").toIntListRef().size());
+  EXPECT_EQ(1, output[0].toGenericDictRef().at("1").toIntListRef()[0]);
+  EXPECT_EQ(2, output[0].toGenericDictRef().at("1").toIntListRef()[1]);
+  EXPECT_EQ(2, output[0].toGenericDictRef().at("3").toIntListRef().size());
+  EXPECT_EQ(3, output[0].toGenericDictRef().at("3").toIntListRef()[0]);
+  EXPECT_EQ(4, output[0].toGenericDictRef().at("3").toIntListRef()[1]);
+  EXPECT_EQ(2, output[1].toGenericDictRef().at("5").toIntListRef().size());
+  EXPECT_EQ(5, output[1].toGenericDictRef().at("5").toIntListRef()[0]);
+  EXPECT_EQ(6, output[1].toGenericDictRef().at("5").toIntListRef()[1]);
+  EXPECT_EQ(2, output[1].toGenericDictRef().at("7").toIntListRef().size());
+  EXPECT_EQ(7, output[1].toGenericDictRef().at("7").toIntListRef()[0]);
+  EXPECT_EQ(8, output[1].toGenericDictRef().at("7").toIntListRef()[1]);
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {

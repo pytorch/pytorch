@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import time
 from collections import OrderedDict
@@ -169,6 +170,12 @@ class GraphPy(object):
                 self.nodes_io[key].uniqueName = self.unique_name_to_scoped_name[node.uniqueName]
 
     def to_proto(self):
+        """
+        Converts graph representation of GraphPy object to TensorBoard
+        required format.
+        """
+        # TODO: compute correct memory usage and CPU time once
+        # PyTorch supports it
         nodes = []
         node_stats = []
         for v in self.nodes_io.values():

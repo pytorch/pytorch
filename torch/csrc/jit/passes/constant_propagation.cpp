@@ -4,7 +4,6 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
@@ -133,7 +132,7 @@ void replaceAndRemoveIfOutput(Node* n, size_t i, Value* replacement) {
 
 // remove extra outputs from the node
 bool removeExtraIfOutputs(Node* n) {
-  AT_CHECK(n->kind() == prim::If, "Only supported for If nodes");
+  TORCH_CHECK(n->kind() == prim::If, "Only supported for If nodes");
   auto true_block = n->blocks()[0];
   auto false_block = n->blocks()[1];
   auto graph = n->owningGraph();

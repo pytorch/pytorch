@@ -75,8 +75,13 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
 
         data_queue.cancel_join_thread()
 
+        init_exception = None
+
         if init_fn is not None:
-            init_fn(worker_id)
+            try:
+                init_fn(worker_id)
+            except Exception:
+                init_exception = ExceptionWrapper(sys.exc_info())
 
         watchdog = ManagerWatchdog()
 
@@ -96,7 +101,11 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
                 continue
             idx, batch_indices = r
             try:
-                samples = collate_fn([dataset[i] for i in batch_indices])
+                if init_exception is not None:
+                    samples = init_exception
+                    init_exception = None
+                else:
+                    samples = collate_fn([dataset[i] for i in batch_indices])
             except Exception:
                 # It is important that we don't store exc_info in a variable,
                 # see NOTE [ Python Traceback Reference Cycle Problem ]

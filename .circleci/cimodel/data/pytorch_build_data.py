@@ -8,12 +8,18 @@ CONFIG_TREE_DATA = [
         (None, [
             X("2.7.9"),
             X("2.7"),
-            X("3.5"),
+            ("3.5", [("important", [X(True)])]),
             X("nightly"),
         ]),
         ("gcc", [
             ("4.8", [X("3.6")]),
-            ("5.4", [("3.6", [X(False), X(True)])]),
+            ("5.4", [
+                X("3.6"),
+                ("3.6", [
+                    ("xla", [X(True)]),
+                    ("namedtensor", [X(True)]),
+                ]),
+            ]),
             ("7", [X("3.6")]),
         ]),
     ]),
@@ -22,7 +28,6 @@ CONFIG_TREE_DATA = [
             ("5", [X("3.6")]),
         ]),
         ("cuda", [
-            ("8", [X("3.6")]),
             ("9", [
                 # Note there are magic strings here
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L21
@@ -31,7 +36,7 @@ CONFIG_TREE_DATA = [
                 # and
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
-                X("2.7"),
+                ("2.7", [("important", [X(True)])]),
                 X("3.6"),
             ]),
             ("9.2", [X("3.6")]),
@@ -117,7 +122,22 @@ class PyVerConfigNode(TreeConfigNode):
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
-        return XlaConfigNode
+        return ExperimentalFeatureConfigNode
+
+
+class ExperimentalFeatureConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["experimental_feature"] = node_name
+
+    def child_constructor(self):
+        experimental_feature = self.find_prop("experimental_feature")
+
+        next_nodes = {
+            "xla": XlaConfigNode,
+            "namedtensor": NamedTensorConfigNode,
+            "important": ImportantConfigNode,
+        }
+        return next_nodes[experimental_feature]
 
 
 class XlaConfigNode(TreeConfigNode):
@@ -126,6 +146,22 @@ class XlaConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_xla"] = node_name
+
+
+class NamedTensorConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "NAMEDTENSOR=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_namedtensor"] = node_name
+
+
+class ImportantConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "IMPORTANT=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_important"] = node_name
 
 
 class XenialCompilerConfigNode(TreeConfigNode):

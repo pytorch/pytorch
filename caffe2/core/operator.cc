@@ -29,8 +29,14 @@ C10_DEFINE_bool(
 C10_DEFINE_bool(
     caffe2_operator_throw_if_fp_exceptions,
     false,
-    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID, "
-    "FE_OVERFLOW) are detected when running any operator.");
+    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID) "
+    "are detected when running any operator. FE_OVERFLOW is handled separately "
+    "by caffe2_operator_throw_if_fp_overflow_exceptions option.");
+C10_DEFINE_bool(
+    caffe2_operator_throw_if_fp_overflow_exceptions,
+    false,
+    "If set, throws if floating point exception FE_OVERFLOW is detected when "
+    "running any operator.");
 
 namespace caffe2 {
 
@@ -63,8 +69,11 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   type_ = operator_def.type();
 }
 
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 namespace {
-int compute_input_size_(const std::vector<c10::IValue>& inputs) {
+int
+C10_UNUSED  // Suppress unused function warning on mobile.
+compute_input_size_(const std::vector<c10::IValue>& inputs) {
   if (inputs.empty()) {
     return 0;
   }
@@ -103,6 +112,7 @@ OperatorBase::OperatorBase(
   input_tensors_.resize(input_size_);
   output_tensors_.resize(newstyle_outputs_.size());
 }
+#endif
 
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
   vector<TensorShape> tps;
@@ -376,6 +386,7 @@ C10_DEFINE_REGISTRY(
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
+  C10_LOG_API_USAGE_ONCE("caffe2.gradient_maker");
   std::unique_ptr<GradientMakerBase> maker(
       GradientRegistry()->Create(def.type(), def, g_output));
   CAFFE_ENFORCE(maker,
@@ -577,11 +588,18 @@ TensorShapes InferBlobShapesAndTypes(
   return tps;
 }
 
-void LoadInt8TensorInfoOfBlob(float* scale, float* offset, const Blob* b) {
-  const int8::Int8TensorCPU* i8tc =
+void LoadInt8TensorInfoOfBlob(
+    std::vector<float>* scale,
+    std::vector<float>* offset,
+    uint32_t* axis,
+    const Blob* b) {
+  const int8::Int8TensorCPU* int8_tensor =
       static_cast<const int8::Int8TensorCPU*>(b->GetRaw());
-  *scale = i8tc->scale;
-  *offset = i8tc->zero_point;
+  scale->clear();
+  offset->clear();
+  scale->push_back(int8_tensor->scale);
+  offset->push_back(int8_tensor->zero_point);
+  *axis = 1;
 }
 
 TensorShape GetTensorShapeOfBlob(const Blob* b) {
@@ -737,7 +755,11 @@ std::function<void(const OperatorDef&)> GetOperatorLogger() {
 
 c10::optional<int> OperatorBase::argumentIndexWithName(
     const std::string& name) const {
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
   return getFunctionSchema().argumentIndexWithName(name);
+#else
+  CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
+#endif
 }
 
 OperatorBase::~OperatorBase() noexcept = default;

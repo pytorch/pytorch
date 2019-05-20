@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
 
 #include <stack>
 
@@ -11,9 +10,14 @@ namespace torch {
 namespace jit {
 namespace {
 // QuantizerUtils
+struct param_info_t {
+  Value* v;
+  Node* n; // Value consumer
+  size_t idx; // Index in input param vector
+};
 
-bool checkIfNodeQuantizable(Node* n) {
-  AT_ASSERT(n != nullptr);
+Operator* checkIfNodeQuantizable(Node* n) {
+  TORCH_INTERNAL_ASSERT(n != nullptr);
   // This is map for quantizable nodes. It will be expanded in future to
   // support more ops and patterns.
   static const OperatorSet quantnodeLookup = {
@@ -24,6 +28,62 @@ stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
 stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, \
 int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"};
   return quantnodeLookup.find(n);
+}
+
+// Look for index of particular param in op schema
+size_t getParamIndexinOpArgs(Node* n, const std::string& param_name) {
+  TORCH_INTERNAL_ASSERT(n != nullptr);
+  Operator* optr = checkIfNodeQuantizable(n);
+  if (optr == nullptr) {
+    return static_cast<size_t>(-1);
+  }
+  auto& opargs = optr->schema().arguments();
+  for (size_t idx = 0; idx < opargs.size(); idx++) {
+    if (opargs[idx].name() == param_name) {
+      return idx;
+    }
+  }
+  return static_cast<size_t>(-1);
+}
+
+std::vector<param_info_t> getQuantizableParamsofName(
+    script::Method& method,
+    const std::string& param_name) {
+  std::vector<param_info_t> params_to_insert_qdq;
+  auto graph = method.graph();
+  // Parameters input to this method
+  size_t param_input_len = method.initial_ivalues().size();
+  // External inputs to this method
+  size_t ext_input_len = method.num_inputs();
+  std::unordered_map<Node*, size_t> node_paramidx_map;
+
+  for (size_t idx = 0; idx < param_input_len; idx++) {
+    auto& v = graph->inputs()[idx + ext_input_len];
+    if (!v->type()->isSubtypeOf(TensorType::get()) || !v->hasUses()) {
+      continue;
+    }
+    Node* n = v->uses()[0].user;
+
+    // For every param name, we match it against the quantizable op schema and
+    // find its position. if the param is present we store it in vector so
+    // later we can insert quant-dequant nodes. Caching the param index helps
+    // faster lookup for same kind of node visited multiple timees.
+    size_t param_idx;
+    auto it = node_paramidx_map.find(n);
+    if (it != node_paramidx_map.end()) {
+      param_idx = it->second;
+    } else {
+      param_idx = getParamIndexinOpArgs(n, param_name);
+      node_paramidx_map.emplace(n, param_idx);
+    }
+    if (param_idx >= n->inputs().size() || n->inputs()[param_idx] != v) {
+      // Either node does not contain param or this Value
+      // is not of type param_name
+      continue;
+    }
+    params_to_insert_qdq.emplace_back(param_info_t{v, n, idx});
+  }
+  return params_to_insert_qdq;
 }
 
 std::vector<Value*> insertQuantParamNodes(
@@ -44,7 +104,7 @@ std::vector<Value*> insertQuantParamNodes(
 }
 
 Value* insertScalarType(Node* ins_node, at::ScalarType t) {
-  AT_ASSERT(t != at::ScalarType::Undefined);
+  TORCH_INTERNAL_ASSERT(t != at::ScalarType::Undefined);
   WithInsertPoint ins(ins_node);
   // ScalarType inserted before ins_node node which is
   // beginning of the quant-dequant pattern
@@ -57,7 +117,7 @@ Value* insertScalarType(Node* ins_node, at::ScalarType t) {
 Node* createQuantNode(Value* v, Node* n) {
   Node* quant = n->owningGraph()->create(
       at::Symbol::fromQualString("aten::quantize_linear"));
-  AT_ASSERTM(quant != nullptr, "Failed to create quant node");
+  TORCH_INTERNAL_ASSERT(quant != nullptr, "Failed to create quant node");
   quant->output()->setUniqueName(v->uniqueName() + ".quant");
   quant->setScope(n->scope());
   return quant;
@@ -67,7 +127,7 @@ Node* createQuantNode(Value* v, Node* n) {
 Node* createDeQuantNode(Value* v, Node* n) {
   Node* dequant = n->owningGraph()->create(
       at::Symbol::fromQualString("aten::dequantize_linear"));
-  AT_ASSERTM(dequant != nullptr, "Failed to create dequant node");
+  TORCH_INTERNAL_ASSERT(dequant != nullptr, "Failed to create dequant node");
   dequant->output()->setUniqueName(v->uniqueName() + ".dequant");
   dequant->setScope(n->scope());
   return dequant;
@@ -77,7 +137,7 @@ Node* createDeQuantNode(Value* v, Node* n) {
 Node* createIntReprNode(Value* v, Node* n) {
   Node* intrepr =
       n->owningGraph()->create(at::Symbol::fromQualString("aten::int_repr"));
-  AT_ASSERTM(intrepr != nullptr, "Failed to create inttensor node");
+  TORCH_INTERNAL_ASSERT(intrepr != nullptr, "Failed to create inttensor node");
   intrepr->output()->setUniqueName(v->uniqueName() + ".intrepr");
   intrepr->setScope(n->scope());
   return intrepr;
@@ -88,7 +148,7 @@ void addQuantDeQuantNodes(
     Value* v,
     const std::tuple<std::string, float, int>& qparam,
     at::ScalarType t = at::ScalarType::Undefined) {
-  AT_ASSERT(v != nullptr);
+  TORCH_INTERNAL_ASSERT(v != nullptr);
   Node* n = v->node();
   Node* quant = createQuantNode(v, n);
   Node* intrepr = createIntReprNode(v, n);
@@ -114,7 +174,7 @@ void addQuantDeQuantNodes(
   // of specific attributes eg: bias.
   if (t != at::ScalarType::Undefined) {
     Value* scalartype_v = insertScalarType(quant, t);
-    AT_ASSERT(scalartype_v != nullptr);
+    TORCH_INTERNAL_ASSERT(scalartype_v != nullptr);
     quant->addInput(scalartype_v);
     dequant->addInput(scalartype_v);
   }
@@ -126,8 +186,8 @@ void addQuantDeQuantNodesForInput(
     Node* n,
     const std::tuple<std::string, float, int>& qparam,
     at::ScalarType t = at::ScalarType::Undefined) {
-  AT_ASSERT(v != nullptr);
-  AT_ASSERT(n != nullptr);
+  TORCH_INTERNAL_ASSERT(v != nullptr);
+  TORCH_INTERNAL_ASSERT(n != nullptr);
   Node* quant = createQuantNode(v, n);
   Node* intrepr = createIntReprNode(v, n);
   Node* dequant = createDeQuantNode(v, n);
@@ -152,7 +212,7 @@ void addQuantDeQuantNodesForInput(
   }
   if (t != at::ScalarType::Undefined) {
     Value* scalartype_v = insertScalarType(quant, t);
-    AT_ASSERT(scalartype_v != nullptr);
+    TORCH_INTERNAL_ASSERT(scalartype_v != nullptr);
     quant->addInput(scalartype_v);
     dequant->addInput(scalartype_v);
   }
@@ -170,7 +230,7 @@ bool matchQParamDictKeytoObserver(
   // For observer node, qparam dict key matches the
   // second input name for observer node
   Value* vname = n->inputs()[1];
-  AT_ASSERT(toIValue(vname).has_value());
+  TORCH_INTERNAL_ASSERT(toIValue(vname).has_value());
   IValue valuekey = toIValue(vname).value();
   if (!valuekey.isString()) {
     return false;
@@ -195,7 +255,7 @@ static Node* addObserverFor(
     Value* v,
     Node* original_observer_node,
     Node* insert_point) {
-  AT_ASSERT(insert_point != nullptr);
+  TORCH_INTERNAL_ASSERT(insert_point != nullptr);
   WithInsertPoint ins(insert_point);
 
   // We need to pass the value name to observer function - create a constant
@@ -226,10 +286,10 @@ void InsertObserverNodes(
     const std::shared_ptr<Graph>& graph,
     Node* observer_node,
     size_t num_activation_inputs) {
-  AT_ASSERT(graph != nullptr);
+  TORCH_CHECK(graph != nullptr);
   // num_activation_inputs is the number of activations or external data
   // excluding the parameters
-  AT_ASSERT(num_activation_inputs <= graph->inputs().size());
+  TORCH_CHECK(num_activation_inputs <= graph->inputs().size());
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -425,6 +485,46 @@ void QuantLinting(std::shared_ptr<Graph>& graph) {
 void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
+
+void InsertQuantDequantNodesForParam(
+    script::Method& method,
+    const std::string& param_name,
+    const std::function<std::tuple<std::string, float, int>(at::Tensor)>&
+        getQParamFunc,
+    at::ScalarType t) {
+  TORCH_CHECK(getQParamFunc != nullptr);
+  auto params_to_insert_qdq = getQuantizableParamsofName(method, param_name);
+
+  for (auto& param_info : params_to_insert_qdq) {
+    auto& param_slot = method.initial_ivalues()[param_info.idx];
+    const auto& itensor = param_slot.value();
+    at::Tensor tensor_var = itensor.toTensor().detach();
+    auto qparam = getQParamFunc(tensor_var);
+    addQuantDeQuantNodesForInput(param_info.v, param_info.n, qparam, t);
+  }
+}
+
+// Exposing the template api helps reuse the same interface for different
+// qparamfunc for different qschemes.
+template <typename Fn>
+void InsertQuantDequantNodesForParam(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::string& param_name,
+    const Fn& getQParamFunc,
+    at::ScalarType t) {
+  auto& method = moduleObj->get_method(method_name);
+  InsertQuantDequantNodesForParam(method, param_name, getQParamFunc, t);
+}
+
+// Explicit Supported Template specialization for getQParamFunc.
+template TORCH_API void InsertQuantDequantNodesForParam(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::string& param_name,
+    const std::function<std::tuple<std::string, float, int>(at::Tensor)>&
+        getQParamFunc,
+    at::ScalarType t);
 
 } // namespace jit
 } // namespace torch
