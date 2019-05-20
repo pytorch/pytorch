@@ -386,7 +386,6 @@ C10_DEFINE_REGISTRY(
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
-  C10_LOG_API_USAGE_ONCE("caffe2.gradient_maker");
   std::unique_ptr<GradientMakerBase> maker(
       GradientRegistry()->Create(def.type(), def, g_output));
   CAFFE_ENFORCE(maker,
