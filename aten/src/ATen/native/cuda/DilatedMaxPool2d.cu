@@ -146,8 +146,16 @@ void max_pool2d_with_indices_out_cuda_template(
   checkAllSameGPU("max_pool2d_with_indices_out_cuda",
                   {output_arg, indices_arg, input_arg});
 
+  // XXX [JIT] Pooling.cpp checks this, too:
   if (stride.empty()) {
     stride = kernel_size;
+  }
+  // XXX Workarounds for IntegrationTest.MNIST:
+  if (padding.size() == 1) {
+    padding = IntArrayRef({padding[0], padding[0]});
+  }
+  if (dilation.size() == 1) {
+    dilation = IntArrayRef({dilation[0], dilation[0]});
   }
 
   TORCH_CHECK(kernel_size.size() == 2 && stride.size() == 2 &&
@@ -234,8 +242,16 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   checkAllSameGPU("max_pool2d_with_indices_out_cuda",
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
 
+  // XXX [JIT] Pooling.cpp checks this, too:
   if (stride.empty()) {
     stride = kernel_size;
+  }
+  // XXX Workarounds for IntegrationTest.MNIST:
+  if (padding.size() == 1) {
+    padding = IntArrayRef({padding[0], padding[0]});
+  }
+  if (dilation.size() == 1) {
+    dilation = IntArrayRef({dilation[0], dilation[0]});
   }
 
   TORCH_CHECK(kernel_size.size() == 2 && stride.size() == 2 &&
@@ -332,10 +348,10 @@ std::tuple<Tensor& ,Tensor&> max_pool2d_with_indices_out_cuda(
     output,
     indices,
     input,
-    kernel_size, 
-    stride, 
-    padding, 
-    dilation, 
+    kernel_size,
+    stride,
+    padding,
+    dilation,
     ceil_mode);
   return std::tuple<Tensor&, Tensor&>(output, indices);
 }
@@ -354,10 +370,10 @@ std::tuple<Tensor ,Tensor> max_pool2d_with_indices_cuda(
     output,
     indices,
     input,
-    kernel_size, 
-    stride, 
-    padding, 
-    dilation, 
+    kernel_size,
+    stride,
+    padding,
+    dilation,
     ceil_mode);
   return std::tuple<Tensor&, Tensor&>(output, indices);
 }
@@ -378,10 +394,10 @@ Tensor& max_pool2d_with_indices_backward_out_cuda(
     gradOutput_,
     input,
     indices,
-    kernel_size, 
-    stride, 
-    padding, 
-    dilation, 
+    kernel_size,
+    stride,
+    padding,
+    dilation,
     ceil_mode);
   return gradInput;
 }
@@ -402,10 +418,10 @@ Tensor max_pool2d_with_indices_backward_cuda(
     gradOutput_,
     input,
     indices,
-    kernel_size, 
-    stride, 
-    padding, 
-    dilation, 
+    kernel_size,
+    stride,
+    padding,
+    dilation,
     ceil_mode);
   return gradInput;
 }

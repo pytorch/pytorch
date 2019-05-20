@@ -94,7 +94,7 @@ static void max_pool2d_with_indices_out_frame(
           int64_t inputHeight,
           int64_t outputWidth,
           int64_t outputHeight,
-          int kW, 
+          int kW,
           int kH,
           int dW,
           int dH,
@@ -129,8 +129,16 @@ void max_pool2d_with_indices_out_cpu_template(
           IntArrayRef dilation,
           bool ceil_mode)
 {
+  // XXX [JIT] Pooling.cpp checks this, too:
   if (stride.empty()) {
     stride = kernel_size;
+  }
+  // XXX Workarounds for IntegrationTest.MNIST:
+  if (padding.size() == 1) {
+    padding = IntArrayRef({padding[0], padding[0]});
+  }
+  if (dilation.size() == 1) {
+    dilation = IntArrayRef({dilation[0], dilation[0]});
   }
 
   TORCH_CHECK(kernel_size.size() == 2 && stride.size() == 2 &&
@@ -288,7 +296,7 @@ static void max_pool2d_with_indices_backward_out_frame(
     }
   });
 }
- 
+
 Tensor& max_pool2d_with_indices_backward_out_cpu_template(
           Tensor& gradInput,
           const Tensor& gradOutput_,
@@ -300,8 +308,16 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
           IntArrayRef dilation,
           bool ceil_mode)
 {
+  // XXX [JIT] Pooling.cpp checks this, too:
   if (stride.empty()) {
     stride = kernel_size;
+  }
+  // XXX Workarounds for IntegrationTest.MNIST:
+  if (padding.size() == 1) {
+    padding = IntArrayRef({padding[0], padding[0]});
+  }
+  if (dilation.size() == 1) {
+    dilation = IntArrayRef({dilation[0], dilation[0]});
   }
 
   TORCH_CHECK(kernel_size.size() == 2 && stride.size() == 2 &&
@@ -411,10 +427,10 @@ std::tuple<Tensor& ,Tensor&> max_pool2d_with_indices_out_cpu(
     output,
     indices,
     input,
-    kernel_size, 
-    stride, 
-    padding, 
-    dilation, 
+    kernel_size,
+    stride,
+    padding,
+    dilation,
     ceil_mode);
   return std::tuple<Tensor&, Tensor&>(output, indices);
 }
@@ -434,8 +450,8 @@ std::tuple<Tensor ,Tensor> max_pool2d_with_indices_cpu(
     indices,
     input,
     kernel_size, 
-    stride, 
-    padding, 
+    stride,
+    padding,
     dilation, 
     ceil_mode);
   return std::tuple<Tensor&, Tensor&>(output, indices);
@@ -457,10 +473,10 @@ Tensor& max_pool2d_with_indices_backward_out_cpu(
     gradOutput_,
     input,
     indices,
-    kernel_size, 
-    stride, 
-    padding, 
-    dilation, 
+    kernel_size,
+    stride,
+    padding,
+    dilation,
     ceil_mode);
   return gradInput;
 }
