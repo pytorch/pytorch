@@ -68,11 +68,11 @@ static bool hasContiguousSubspace(TensorList tl) {
 }
 
 
-// Transposes the tensor and indices together so that all the non-null indices		
-// index the first k dimensions of the tensor. Returns the transposed tensor		
-// and the reordered indices. For example:		
-// transposeToFront(tensor, {nullptr, a, nullptr, b})		
-// returns		
+// Transposes the tensor and indices together so that all the non-null indices
+// index the first k dimensions of the tensor. Returns the transposed tensor
+// and the reordered indices. For example:
+// transposeToFront(tensor, {nullptr, a, nullptr, b})
+// returns
 // tensor.permute([1, 3, 0, 2]), {a, b, nullptr, nullptr}
 static std::tuple<Tensor, std::vector<Tensor>>
 transposeToFront(Tensor self, TensorList indices) {

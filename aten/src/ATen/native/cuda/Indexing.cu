@@ -27,7 +27,7 @@ static const int WARP_SIZE = 32;
 
 
 
-template <typename scalar_t>
+template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel(
   int64_t* input, int64_t* indices, scalar_t* grad_output, scalar_t* grad_weight,
   int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim) {
@@ -37,7 +37,7 @@ __global__ void indexing_backward_kernel(
 //if indexing starts from the 0th dimension, stride_before does not matter because blockIdx.z will be 0 in thei case
 //outer_dim is number of elements in the first unindexed dimensions
   using accscalar_t = at::acc_type<scalar_t, true>;
-  int idx = blockIdx.x * 4 + threadIdx.y;
+  int idx = blockIdx.x * blockDim.y + threadIdx.y;
 
   // Each warp is responsible for an input into the LookupTable.
   // If the preceding input has the same as this input, then the warp
@@ -51,7 +51,6 @@ __global__ void indexing_backward_kernel(
   // 8     <warp 4>
 
   // Number of values proceessed by each thread (grain size)
-  const int SZ = 4;
   for (int z = blockIdx.z; z < outer_dim; z += gridDim.z){
     if (idx < numel
         && (idx == 0 || input[idx] != input[idx - 1])){
@@ -227,13 +226,15 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
       TORCH_INTERNAL_ASSERT(self.numel() < std::numeric_limits<int>::max(), "index_put_ with accumulation is not supported on large tensors, number of source elements =", self.numel());
       TORCH_INTERNAL_ASSERT(value.numel() < std::numeric_limits<int>::max(), "index_put_ with accumulation is not supported on large tensors, number of source elements =", value.numel());
-      dim3 grid(THCCeilDiv(num_indices, (int64_t) 4),
-           std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], THCCeilDiv(sliceSize, (int64_t) 128)),
+      const int UNROLL = 4;
+      const int indices_per_block = 4;
+      dim3 grid(THCCeilDiv(num_indices, (int64_t) indices_per_block),
+           std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], THCCeilDiv(sliceSize, (int64_t) (WARP_SIZE*UNROLL))),
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
-      dim3 block(32, 4);
+      dim3 block(WARP_SIZE, indices_per_block);
   
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(value_.scalar_type(), "embedding_backward", [&] {
-      indexing_backward_kernel<<<grid, block, 0, stream>>>(
+      indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
         sorted_indices.data<int64_t>(),
         orig_indices.data<int64_t>(),
         value_.data<scalar_t>(),
