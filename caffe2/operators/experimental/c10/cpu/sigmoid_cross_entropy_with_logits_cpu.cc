@@ -72,10 +72,11 @@ void sigmoid_cross_entropy_with_logits_op_cpu_impl(
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::SigmoidCrossEntropyWithLogits",
-    c10::kernel<
+    c10::RegisterOperators::options()
+      .kernel<
         decltype(sigmoid_cross_entropy_with_logits_op_cpu_impl),
-        &sigmoid_cross_entropy_with_logits_op_cpu_impl>(),
-    c10::dispatchKey(CPUTensorId()));
+        &sigmoid_cross_entropy_with_logits_op_cpu_impl>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 
