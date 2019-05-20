@@ -160,6 +160,14 @@ RegisterOperators reg(
            };
          }),
      Operator(
+         "prim::Guard(Tensor(a) t) -> Tensor(a)",
+         [](const Node* node) {
+           return [](Stack& stack) {
+             AT_ERROR("Should be replaced by prim::BailOut");
+             return 0;
+           };
+         }),
+     Operator(
          "prim::rangelist(int n) -> int[]",
          [](Stack& stack) {
            int64_t n;
