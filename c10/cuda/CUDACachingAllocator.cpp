@@ -378,17 +378,21 @@ struct THCCachingAllocator
 
   void recordStream(void* ptr, cuda::CUDAStream stream)
   {
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-    Block* block = find_allocated_block(ptr);
-    if (!block) {
-      AT_ERROR("invalid device pointer: ", ptr);
+    // Empty tensor's storage().data() might be a null ptr. As there is no
+    // blocks associated with those tensors, it is fine to do nothing here.
+    if (ptr) {
+      std::lock_guard<std::recursive_mutex> lock(mutex);
+      Block* block = find_allocated_block(ptr);
+      if (!block) {
+        AT_ERROR("invalid device pointer: ", ptr);
+      }
+      if (stream.stream() == block->stream) {
+        // ignore uses on the allocation stream, since those don't require any
+        // special synchronization
+        return;
+      }
+      block->stream_uses.insert(stream);
     }
-    if (stream.stream() == block->stream) {
-      // ignore uses on the allocation stream, since those don't require any
-      // special synchronization
-      return;
-    }
-    block->stream_uses.insert(stream);
   }
 
   /** moves a block into a pool of cached free blocks */
