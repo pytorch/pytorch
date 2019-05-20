@@ -16,6 +16,16 @@ TH_API void THNN_(SpatialConvolutionMM_updateOutput)(
           int dW, int dH,
           int padW, int padH);
 
+TH_API void THNN_(SpatialSumPooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          bool ceil_mode,
+          bool count_include_pad);
+
 #if !defined(TH_REAL_IS_LONG)
 
 TH_API void THNN_(AbsCriterion_updateOutput)(

@@ -254,6 +254,26 @@ Examples::
 
 """)
 
+sum_pool2d = _add_docstr(torch._C._nn.sum_pool2d, r"""
+sum_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
+
+Applies 2D sum-pooling operation in :math:`kH \times kW` regions by step size
+:math:`sH \times sW` steps. The number of output features is equal to the number of
+input planes.
+
+Args:
+    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+    kernel_size: size of the pooling region. Can be a single number or a
+      tuple `(kH, kW)`
+    stride: stride of the pooling operation. Can be a single number or a
+      tuple `(sH, sW)`. Default: :attr:`kernel_size`
+    padding: implicit zero paddings on both sides of the input. Can be a
+      single number or a tuple `(padH, padW)`. Default: 0
+    ceil_mode: when True, will use `ceil` instead of `floor` in the formula
+        to compute the output shape. Default: ``False``
+    count_include_pad: when True, will include the zero-padding in the
+        averaging calculation. Default: ``True``
+""")
 
 avg_pool2d = _add_docstr(torch._C._nn.avg_pool2d, r"""
 avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor

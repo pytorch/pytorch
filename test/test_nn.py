@@ -504,6 +504,27 @@ class TestLongTensor(TestCase):
         d_result = torch.nn.functional.conv2d(d_input, d_filter)
         self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
 
+    def test_longtensor_sum_pool2d(self):
+        n = 50
+        m = 50
+        input = torch.rand(1, n, m).cpu()
+        for i in range(1, n+1):
+            for j in range(1, m+1):
+                acctual = torch.nn.functional.sum_pool2d(input, (i, j))
+                expected = torch.nn.functional.avg_pool2d(input, (i, j)) * (i * j)
+                self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
+
+    def test_longtensor_sum_pool2d_same_as_doubletensor(self):
+        n = 32
+        m = 32
+        l_input = torch.rand(1, n, m).cpu()
+        d_input = l_input.clone().double()
+        for i in range(n):
+            for j in range(m):
+                l_result = torch.nn.functional.sum_pool2d(l_input, (i + 1, j + 1))
+                d_result = torch.nn.functional.sum_pool2d(d_input, (i + 1, j + 1))
+                self.assertTrue(torch.allclose(l_result.double(), d_result, atol=1e-5))
+
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
 
