@@ -55,13 +55,22 @@ static void abs_kernel(TensorIterator& iter) {
 }
 
 static void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "fill_cpu", [&]() {
-    scalar_t value = value_scalar.to<scalar_t>();
+  if( iter.dtype() == ScalarType::Half ) {
+    auto value = value_scalar.to<at::Half>().x;
+    using H = decltype(value);
     unary_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return value; },
-        [=](Vec256<scalar_t> a) { return Vec256<scalar_t>(value); });
-  });
+        [=](H a) -> H { return value; },
+        [=](Vec256<H> a) { return Vec256<H>(value); });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "fill_cpu", [&]() {
+      scalar_t value = value_scalar.to<scalar_t>();
+      unary_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return value; },
+          [=](Vec256<scalar_t> a) { return Vec256<scalar_t>(value); });
+    });
+  }
 }
 
 static void frac_kernel(TensorIterator& iter) {

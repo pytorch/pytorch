@@ -86,7 +86,6 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 }
 
 Tensor& fill_out(Tensor& self, const Scalar value) {
-  at::assert_no_internal_overlap(self, "fill");
   auto iter = TensorIterator::unary_op(self, self);
   fill_stub(iter->device_type(), *iter, value);
   return self;
