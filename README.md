@@ -156,8 +156,8 @@ You will get a high-quality BLAS library (MKL) and you get a controlled compiler
 Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
 
 If you want to compile with CUDA support, install
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
-- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v6.x or above
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9 or above
+- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 Other potentially useful environment variables may be found in `setup.py`.
@@ -175,7 +175,7 @@ conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
 On Linux
 ```bash
 # Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda90 # or [magma-cuda80 | magma-cuda92 | magma-cuda100 ] depending on your cuda version
+conda install -c pytorch magma-cuda90 # or [magma-cuda92 | magma-cuda100 ] depending on your cuda version
 ```
 
 #### Get the PyTorch Source
