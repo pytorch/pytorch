@@ -133,7 +133,8 @@ How to adjust Learning Rate
 rate based on the number of epochs. :class:`torch.optim.lr_scheduler.ReduceLROnPlateau`
 allows dynamic learning rate reducing based on some validation measurements.
 
-Learning rate scheduling should be applied after optimizer's update. The pattern is the following:
+Learning rate scheduling should be applied after optimizer's update; e.g., you
+should write your code this way:
 
     >>> scheduler = ...
     >>> for epoch in range(100):
@@ -142,9 +143,12 @@ Learning rate scheduling should be applied after optimizer's update. The pattern
     >>>     scheduler.step()
 
 .. warning::
-  This pattern has changed at version 1.1.0. Using learning rate scheduler (calling `scheduler.step()`)
-  before optimizer's update (i.e. `optimizer.step()`) may result in skipping the first value of the 
-  learning rate scheduler.
+  Prior to PyTorch 1.1.0, the learning rate scheduler was expected to be called before
+  the optimizer's update; 1.1.0 changed this behavior in a BC-breaking way.  If you use
+  the learning rate scheduler (calling `scheduler.step()`) before the optimizer's update
+  (calling `optimizer.step()`), this will skip the first value of the learning rate schedule.
+  If you are unable to reproduce results after upgrading to PyTorch 1.1.0, please check
+  if you are calling `scheduler.step()` at the wrong time.
 
 
 .. autoclass:: torch.optim.lr_scheduler.LambdaLR
