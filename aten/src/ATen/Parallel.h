@@ -44,7 +44,7 @@ f: user function applied in parallel to the chunks, signature:
   void f(int64_t begin, int64_t end)
 */
 template <class F>
-void parallel_for(
+inline void parallel_for(
     const int64_t begin,
     const int64_t end,
     const int64_t grain_size,
@@ -84,13 +84,13 @@ two partial results and an identity.
 [1] https://software.intel.com/en-us/node/506154
 */
 template <class scalar_t, class F, class SF>
-scalar_t parallel_reduce(
+inline scalar_t parallel_reduce(
     const int64_t begin,
     const int64_t end,
     const int64_t grain_size,
     const scalar_t ident,
-    const F f,
-    const SF sf);
+    const F& f,
+    const SF& sf);
 
 // Returns a detailed string describing parallelization settings
 CAFFE2_API std::string get_parallel_info();
