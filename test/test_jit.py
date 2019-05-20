@@ -7621,7 +7621,8 @@ a")
             self.derived.set_(torch.rand(1, dtype=torch.float).detach())
 
         @torch.jit.script_method
-        def _unpack(self):
+        def __setstate__(self, state):
+            # type: (Tuple[]) -> None
             self.unpack_called.set_(torch.ones(1, dtype=torch.long))
             self.derived.set_(torch.neg(self.param).detach())
 
@@ -7660,7 +7661,9 @@ a")
                 self.buf.set_(torch.zeros(1, dtype=torch.double))
 
             @torch.jit.script_method
-            def _unpack(self):
+        def __setstate__(self, state):
+            # type: (Tuple[]) -> None
+
                 self.buf.set_(torch.ones(3, 4, dtype=torch.double) * 3)
 
             @torch.jit.script_method

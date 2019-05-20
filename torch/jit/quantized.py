@@ -27,15 +27,18 @@ class QuantizedLinear(torch.jit.ScriptModule):
             torch.fbgemm_pack_quantized_matrix(self.weight.clone(), self.weight.size(1), self.weight.size(0)))
 
     @torch.jit.script_method
-    def _unpack(self):
+    def __setstate__(self, state):
+        # type: (Tuple[]) -> None
         self.packed_tensor_ptr.set_(
             torch.fbgemm_pack_quantized_matrix(
                 self.weight, self.weight.size(1), self.weight.size(0)))
 
     @torch.jit.script_method
-    def _pack(self):
+    def __getstate__(self):
+        # type: () -> Tuple[]
         self.packed_tensor_ptr.set_(
             torch.zeros(torch.jit.annotate(List[int], []), dtype=torch.uint8).detach())
+        return ()
 
     @torch.jit.script_method
     def forward(self, input):
@@ -115,16 +118,19 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
     # deleter. This is bizarre and should probably get fixed.
     # @torch._jit_internal.weak_script_method
     @torch.jit.script_method
-    def _unpack(self):
+    def __getstate__(self):
+        # type: () -> Tuple[]
         self.packed_ih.set_(torch.fbgemm_pack_quantized_matrix(
             self.weight_ih, self.weight_ih.size(1), self.weight_ih.size(0)))
         self.packed_hh.set_(
             torch.fbgemm_pack_quantized_matrix(
                 self.weight_hh, self.weight_hh.size(1), self.weight_hh.size(0)))
+        return ()
 
     # @torch._jit_internal.weak_script_method
     @torch.jit.script_method
-    def _pack(self):
+    def __setstate__(self, state):
+        # type: (Tuple[]) -> None
         self.packed_ih.set_(
             torch.zeros(torch.jit.annotate(List[int], []), dtype=torch.uint8).detach())
         self.packed_hh.set_(
@@ -340,7 +346,8 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
     # deleter. This is bizarre and should probably get fixed.
     # @torch._jit_internal.torch.jit.script_method
     @torch.jit.script_method
-    def _unpack(self):
+    def __getstate__(self):
+        # type: () -> Tuple[]
         packed_weights = self._get_packed_weights()
         quantized_weights = self._get_quantized_weights()
         assert len(packed_weights) == len(quantized_weights)
@@ -349,10 +356,12 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
             quantized = quantized_weights[i]
             packed.set_(torch.fbgemm_pack_quantized_matrix(
                 quantized, quantized.size(1), quantized.size(0)))
+        return ()
 
     # @torch._jit_internal.torch.jit.script_method
     @torch.jit.script_method
-    def _pack(self):
+    def __setstate__(self, state):
+        # type: (Tuple[]) -> None
         for weight in self._get_packed_weights():
             weight.set_(torch.zeros(torch.jit.annotate(List[int], []),
                         dtype=torch.uint8).detach())
