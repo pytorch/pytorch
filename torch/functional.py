@@ -934,6 +934,7 @@ def btrisolve(b, LU_data, LU_pivots, out=None):
                   "removed in the next release. Please use torch.lu_solve instead.", stacklevel=2)
     return torch.lu_solve(b, LU_data=LU_data, LU_pivots=LU_pivots, out=out)
 
+
 def lu(A, pivot=True, get_infos=False, out=None):
     r"""Computes the LU factorization of a square matrix or batches of square matrices
     :attr:`A`. Returns a tuple containing the LU factorization and pivots of :attr:`A`.
