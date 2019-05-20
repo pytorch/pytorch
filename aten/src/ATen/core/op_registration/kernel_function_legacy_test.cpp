@@ -18,8 +18,6 @@
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 using c10::RegisterOperators;
-using c10::kernel;
-using c10::dispatchKey;
 using c10::TensorTypeId;
 using c10::KernelCache;
 using c10::Stack;

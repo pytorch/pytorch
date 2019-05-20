@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Half.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -13,10 +14,8 @@
 
 #define AT_QINT_PRIVATE_CASE_TYPE(enum_type, type, underlying_type, ...) \
   case enum_type: {                                                     \
-    using scalar_t = type;                                              \
-    using underlying_t = underlying_type;                               \
-    __attribute__ ((scalar_t))                                          \
-    __attribute__ ((underlying_t))                                      \
+    using scalar_t C10_UNUSED = type;                                              \
+    using underlying_t C10_UNUSED = underlying_type;                               \
     return __VA_ARGS__();                                               \
   }
 

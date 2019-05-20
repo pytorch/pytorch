@@ -42,8 +42,9 @@ void relu_op_cpu_impl(
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::Relu",
-    c10::kernel<decltype(relu_op_cpu_impl<float>), &relu_op_cpu_impl<float>>(),
-    c10::dispatchKey(CPUTensorId()));
+    c10::RegisterOperators::options()
+      .kernel<decltype(relu_op_cpu_impl<float>), &relu_op_cpu_impl<float>>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 

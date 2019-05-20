@@ -56,8 +56,9 @@ class expand_dims_cpu final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::ExpandDims",
-    c10::kernel<expand_dims_cpu<float>>(),
-    c10::dispatchKey(CPUTensorId()));
+    c10::RegisterOperators::options()
+      .kernel<expand_dims_cpu<float>>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 
