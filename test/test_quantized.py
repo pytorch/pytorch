@@ -356,6 +356,40 @@ class TestQuantizedFC(unittest.TestCase):
         # Assert equal
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
+    """Tests the correctness of the quantized::fbgemm_linear_unpack op."""
+    def test_fbgemm_linear_unpack(self):
+        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
+
+        input_channels = 16
+        output_channels = 8
+
+        W_scale = 0.4
+        # W_zp is the zero point for int8 quantization.
+        W_zp = 2
+        W_value_min = -128
+        W_value_max = 127
+        W_q0 = np.round(
+            # np.random.rand(output_channels, input_channels)
+            np.ones((output_channels, input_channels))
+            * (W_value_max - W_value_min)
+            + W_value_min
+        ).astype(np.int8)
+
+        W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
+        # W_zp + 128 is the zero point for uint8 quantization.
+        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp + 128, dtype=torch.quint8)
+
+        # Weight prepacking operator for quantized Linear
+        W_prepack = qlinear_prepack(W_q)
+        # Weight unpack operator for quantized Linear (Used for serialization)
+        W_q_origin = qlinear_unpack(W_prepack)
+
+        # Assert equal
+        np.testing.assert_equal(W_q.int_repr(), W_q_origin.int_repr().numpy())
+        np.testing.assert_equal(W_q.q_scale(), W_q_origin.q_scale())
+        np.testing.assert_equal(W_q.q_zero_point(), W_q_origin.q_zero_point())
+
 
 if __name__ == "__main__":
     run_tests()
