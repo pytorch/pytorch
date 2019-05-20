@@ -3,8 +3,8 @@
 #include "c10/util/Flags.h"
 
 #include <algorithm>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <numeric>
 
@@ -59,7 +59,8 @@ using APIUsageLoggerType = std::function<void(const std::string&)>;
 
 namespace {
 bool IsAPIUsageDebugMode() {
-  return getenv("PYTORCH_API_USAGE_STDERR");
+  const char* val = getenv("PYTORCH_API_USAGE_STDERR");
+  return val && *val; // any non-empty value
 }
 
 void APIUsageDebug(const string& event) {
@@ -88,7 +89,7 @@ bool LogAPIUsageFakeReturn(const std::string& event) {
   (*GetAPIUsageLogger())(event);
   return true;
 }
-}
+} // namespace detail
 
 } // namespace c10
 
