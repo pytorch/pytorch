@@ -141,6 +141,11 @@ Learning rate scheduling should be applied after optimizer's update. The pattern
     >>>     validate(...)
     >>>     scheduler.step()
 
+.. warning::
+  This pattern has changed at version 1.1.0. Using learning rate scheduler (calling `scheduler.step()`)
+  before optimizer's update (i.e. `optimizer.step()`) may result in skipping the first value of the 
+  learning rate scheduler.
+
 
 .. autoclass:: torch.optim.lr_scheduler.LambdaLR
     :members:
