@@ -940,7 +940,10 @@ def _make_strong_submodule(field, module, parent):
         # It's not a submodule, don't do anything
         return None
 
-    return _make_strong(module, _methods=['forward'])
+    try:
+        return _make_strong(module, _methods=['forward'])
+    except Exception as e:
+        print(e)
 
 
 def _try_compile_fn(fn):
@@ -949,7 +952,10 @@ def _try_compile_fn(fn):
         return None
 
     rcb = createResolutionCallbackFromClosure(fn)
-    return torch.jit.script(fn, _rcb=rcb)
+    try:
+        return torch.jit.script(fn, _rcb=rcb)
+    except Exception as e:
+        print(e)
 
 
 # ScriptClasses must be new-style classes because we construct them using their
