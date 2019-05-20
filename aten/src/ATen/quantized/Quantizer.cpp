@@ -152,11 +152,13 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t ze
   return rtensor;
 }
 #endif
-
+template CAFFE2_API qint8 quantize_val<qint8>(float scale, int32_t zero_point, float value);
 template CAFFE2_API quint8 quantize_val<quint8>(float scale, int32_t zero_point, float value);
 template CAFFE2_API qint32 quantize_val<qint32>(float scale, int32_t zero_point, float value);
+template CAFFE2_API Tensor quantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
 template CAFFE2_API Tensor quantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
 template CAFFE2_API Tensor quantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
+template CAFFE2_API Tensor dequantize_tensor<qint8>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
 template CAFFE2_API Tensor dequantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
 template CAFFE2_API Tensor dequantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
 

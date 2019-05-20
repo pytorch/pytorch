@@ -29,8 +29,14 @@ C10_DEFINE_bool(
 C10_DEFINE_bool(
     caffe2_operator_throw_if_fp_exceptions,
     false,
-    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID, "
-    "FE_OVERFLOW) are detected when running any operator.");
+    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID) "
+    "are detected when running any operator. FE_OVERFLOW is handled separately "
+    "by caffe2_operator_throw_if_fp_overflow_exceptions option.");
+C10_DEFINE_bool(
+    caffe2_operator_throw_if_fp_overflow_exceptions,
+    false,
+    "If set, throws if floating point exception FE_OVERFLOW is detected when "
+    "running any operator.");
 
 namespace caffe2 {
 
@@ -380,6 +386,7 @@ C10_DEFINE_REGISTRY(
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
+  C10_LOG_API_USAGE_ONCE("caffe2.gradient_maker");
   std::unique_ptr<GradientMakerBase> maker(
       GradientRegistry()->Create(def.type(), def, g_output));
   CAFFE_ENFORCE(maker,

@@ -665,15 +665,6 @@ struct PythonPrintPass {
 
     if (!print_const && node->kind() == prim::Constant)
       return;
-    if (node->kind() == prim::PythonOp) {
-      auto value = static_cast<const PythonOp*>(node);
-      if (enforce_importable_ && value->ignore_on_export) {
-        // Op has been marked as ignored, so insert an error in its place
-        indent();
-        body_ << "ops.prim.IgnoredPythonOp()\n";
-        return;
-      }
-    }
     splitLongInlines(node->inputs());
     switch (node->kind()) {
       case prim::Return:
@@ -849,7 +840,7 @@ struct PythonPrintPass {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
-        if (enforce_importable_) {
+        if (enforce_importable_ && !value->ignore_on_export) {
           throw script::ErrorReport(node->sourceRange())
               << "could not export python function call " << value->name()
               << ". Remove calls to Python functions before export. "
@@ -857,8 +848,12 @@ struct PythonPrintPass {
               << "If this is a nn.ModuleList, add it to __constants__.";
         }
 
-        stmt << "^" << value->name();
-        value->writeScalars(stmt);
+        if (value->ignore_on_export) {
+          stmt << "ops.prim.IgnoredPythonOp";
+        } else {
+          stmt << "^" << value->name();
+          value->writeScalars(stmt);
+        }
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
       case prim::Constant: {
