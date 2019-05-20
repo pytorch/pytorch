@@ -48,7 +48,8 @@
 #endif
 #endif
 
-#if !defined(C10_DEPRECATED_USING) && defined(_MSC_VER) && defined(__CUDACC__)
+#if !defined(C10_DEPRECATED_USING) && defined(_MSC_VER)
+#if defined(__CUDACC__)
 // [[deprecated]] doesn't work on nvcc on Windows;
 // you get the error:
 //
@@ -56,6 +57,11 @@
 //
 // So we just turn the macro off in this case.
 # define C10_DEPRECATED_USING
+#else
+// [[deprecated]] does work in windows without nvcc, though msc doesn't support
+// `__has_cpp_attribute`.
+# define C10_DEPRECATED_USING [[deprecated]]
+#endif
 #endif
 
 #if !defined(C10_DEPRECATED_USING) && defined(__GNUC__)
