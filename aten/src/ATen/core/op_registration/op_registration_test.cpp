@@ -549,43 +549,47 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
 
   // list types (with empty list)
-  testArgTypes<c10::ArrayRef<double>, std::vector<double>>::test(
-    c10::ArrayRef<double>(), [] (c10::ArrayRef<double> v) {EXPECT_EQ(0, v.size());},
+  testArgTypes<std::vector<double>>::test(
+    std::vector<double>(), [] (const std::vector<double>& v) {EXPECT_EQ(0, v.size());},
     std::vector<double>(), [] (const IValue& v) {EXPECT_EQ(0, v.toDoubleListRef().size());},
     "(float[] a) -> float[]");
-  testArgTypes<c10::ArrayRef<int64_t>, std::vector<int64_t>>::test(
-    c10::ArrayRef<int64_t>(), [] (c10::ArrayRef<int64_t> v) {EXPECT_EQ(0, v.size());},
+  testArgTypes<std::vector<int64_t>, std::vector<int64_t>>::test(
+    std::vector<int64_t>(), [] (const std::vector<int64_t>& v) {EXPECT_EQ(0, v.size());},
     std::vector<int64_t>(), [] (const IValue& v) {EXPECT_EQ(0, v.toIntListRef().size());},
     "(int[] a) -> int[]");
-  // TODO Converting std::vector<bool> to ArrayRef<bool> doesn't work, so we
-  //      need to find an alternative
-  // testArgTypes<c10::ArrayRef<bool>, std::vector<bool>>::test(
-  //   c10::ArrayRef<bool>(), [] (c10::ArrayRef<bool> v) {EXPECT_EQ(0, v.size());},
-  //   std::vector<bool>(), [] (const IValue& v) {EXPECT_EQ(0, v.toBoolListRef().size());},
-  //   "(bool[] a) -> bool[]");
-  // testArgTypes<c10::ArrayRef<bool>, std::vector<bool>>::test(
-  //   c10::ArrayRef<bool>(), [] (c10::ArrayRef<bool> v) {EXPECT_EQ(0, v.size());},
-  //   std::vector<bool>(), [] (const IValue& v) {EXPECT_EQ(0, v.toBoolListRef().size());},
-  //   "(bool[] a) -> bool[]");
-  // TODO We currently don't support str[] (i.e. string list) as type. Do we want to?
-  // testArgTypes<c10::ArrayRef<std::string>, std::vector<std::string>>::test(
-  //   c10::ArrayRef<std::string>(), [] (c10::ArrayRef<std::string> v) {EXPECT_EQ(0, v.size());},
-  //   std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toStringListRef().size());},
-  //   "(str[] a) -> str[]");
+  testArgTypes<std::vector<bool>>::test(
+    std::vector<bool>(), [] (const std::vector<bool>& v) {EXPECT_EQ(0, v.size());},
+    std::vector<bool>(), [] (const IValue& v) {EXPECT_EQ(0, v.toBoolListRef().size());},
+    "(bool[] a) -> bool[]");
+  testArgTypes<std::vector<std::string>>::test(
+    std::vector<std::string>(), [] (const std::vector<std::string>& v) {EXPECT_EQ(0, v.size());},
+    std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
+    "(str[] a) -> str[]");
 
 
   // list types (with non-empty list)
-  testArgTypes<c10::ArrayRef<double>, std::vector<double>>::test(
-    c10::ArrayRef<double>({1.5, 2.5}), [] (c10::ArrayRef<double> v) {EXPECT_EQ(c10::ArrayRef<double>({1.5, 2.5}), v);},
+  testArgTypes<std::vector<double>>::test(
+    std::vector<double>({1.5, 2.5}), [] (const std::vector<double>& v) {EXPECT_EQ(std::vector<double>({1.5, 2.5}), v);},
     std::vector<double>({3.5, 4.5}), [] (const IValue& v) {EXPECT_EQ(std::vector<double>({3.5, 4.5}), v.toDoubleListRef());},
     "(float[] a) -> float[]");
-  testArgTypes<c10::ArrayRef<int64_t>, std::vector<int64_t>>::test(
-    c10::ArrayRef<int64_t>({1, 2}), [] (c10::ArrayRef<int64_t> v) {EXPECT_EQ(c10::ArrayRef<int64_t>({1, 2}), v);},
+  testArgTypes<std::vector<int64_t>>::test(
+    std::vector<int64_t>({1, 2}), [] (const std::vector<int64_t>& v) {EXPECT_EQ(std::vector<int64_t>({1, 2}), v);},
     std::vector<int64_t>({3, 4}), [] (const IValue& v) {EXPECT_EQ(std::vector<int64_t>({3, 4}), v.toIntListRef());},
     "(int[] a) -> int[]");
-  // TODO When fixing bool[] and str[] (see above), also add them here
-  testArgTypes<c10::ArrayRef<Tensor>, std::vector<Tensor>>::test(
-    c10::ArrayRef<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}), [] (c10::ArrayRef<Tensor> v) {
+  testArgTypes<std::vector<bool>>::test(
+    std::vector<bool>({true, false}), [] (const std::vector<bool>& v) {EXPECT_EQ(std::vector<bool>({true, false}), v);},
+    std::vector<bool>({true, false}), [] (const IValue& v) {EXPECT_EQ(std::vector<bool>({true, false}), v.toBoolListRef());},
+    "(bool[] a) -> bool[]");
+  testArgTypes<std::vector<std::string>>::test(
+    std::vector<std::string>({"first", "second"}), [] (const std::vector<std::string>& v) {EXPECT_EQ(std::vector<std::string>({"first", "second"}), v);},
+    std::vector<std::string>({"first", "second"}), [] (const IValue& v) {
+      EXPECT_EQ(2, v.toGenericListRef().size());
+      EXPECT_EQ("first", v.toGenericListRef()[0].toStringRef());
+      EXPECT_EQ("second", v.toGenericListRef()[1].toStringRef());
+    },
+    "(str[] a) -> str[]");
+  testArgTypes<std::vector<Tensor>>::test(
+    std::vector<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}), [] (const std::vector<Tensor>& v) {
       EXPECT_EQ(2, v.size());
       EXPECT_EQ(TensorType1(), v[0].type_id());
       EXPECT_EQ(TensorType2(), v[1].type_id());
@@ -598,20 +602,20 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(Tensor[] a) -> Tensor[]");
 
   // Test optional of list (with nullopt)
-  testArgTypes<c10::optional<c10::ArrayRef<int64_t>>, c10::optional<std::vector<int64_t>>>::test(
-    c10::optional<c10::ArrayRef<int64_t>>(c10::nullopt), [] (c10::optional<c10::ArrayRef<int64_t>> v) {EXPECT_FALSE(v.has_value());},
+  testArgTypes<c10::optional<std::vector<int64_t>>>::test(
+    c10::optional<std::vector<int64_t>>(c10::nullopt), [] (const c10::optional<std::vector<int64_t>>& v) {EXPECT_FALSE(v.has_value());},
     c10::optional<std::vector<int64_t>>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(int[]? a) -> int[]?");
 
   // Test optional of list (with empty list)
-  testArgTypes<c10::optional<c10::ArrayRef<int64_t>>, c10::optional<std::vector<int64_t>>>::test(
-    c10::optional<c10::ArrayRef<int64_t>>(c10::ArrayRef<int64_t>{}), [] (c10::optional<c10::ArrayRef<int64_t>> v) {EXPECT_EQ(0, v.value().size());},
+  testArgTypes<c10::optional<std::vector<int64_t>>>::test(
+    c10::optional<std::vector<int64_t>>(std::vector<int64_t>{}), [] (const c10::optional<std::vector<int64_t>>& v) {EXPECT_EQ(0, v.value().size());},
     c10::optional<std::vector<int64_t>>(std::vector<int64_t>{}), [] (const IValue& v) {EXPECT_EQ(0, v.toIntListRef().size());},
     "(int[]? a) -> int[]?");
 
   // Test optional of list (with values)
-  testArgTypes<c10::optional<c10::ArrayRef<int64_t>>, c10::optional<std::vector<int64_t>>>::test(
-    c10::optional<c10::ArrayRef<int64_t>>({1, 2}), [] (c10::optional<c10::ArrayRef<int64_t>> v) {EXPECT_EQ(c10::ArrayRef<int64_t>({1, 2}), v.value());},
+  testArgTypes<c10::optional<std::vector<int64_t>>>::test(
+    c10::optional<std::vector<int64_t>>({1, 2}), [] (const c10::optional<std::vector<int64_t>>& v) {EXPECT_EQ(std::vector<int64_t>({1, 2}), v.value());},
     c10::optional<std::vector<int64_t>>({3, 4}), [] (const IValue& v) {EXPECT_EQ(std::vector<int64_t>({3, 4}), v.toIntListRef());},
     "(int[]? a) -> int[]?");
 
