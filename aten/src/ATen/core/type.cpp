@@ -25,7 +25,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     }
     out << ")";
   } else if (auto value = t.cast<ProfiledTensorType>()) {
-    out << "Tensor(dtype = ";
+    out << "ProfiledTensor(dtype = ";
     if  (value->scalarType().has_value())
     {
         out << *value->scalarType();
