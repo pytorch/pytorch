@@ -750,7 +750,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * this is the responsibility of the caller
    */
   void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride) {
-    TORCH_INTERNAL_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
     TORCH_CHECK(
         new_size.size() == new_stride.size(),
