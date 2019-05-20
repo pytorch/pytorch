@@ -27,7 +27,7 @@ CAFFE2_API void _unset_thread_num();
 }
 
 template <class F>
-void parallel_for(
+inline void parallel_for(
     const int64_t begin,
     const int64_t end,
     const int64_t grain_size,
@@ -47,19 +47,10 @@ void parallel_for(
     chunk_size = std::max((size_t)grain_size, chunk_size);
     size_t num_tasks = divup((end - begin), chunk_size);
 
-    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
-    std::exception_ptr eptr;
-
     auto task = [&](int64_t task_id, int64_t local_start, int64_t local_end) {
       internal::_set_thread_num(task_id);
       internal::_set_in_parallel_region(true);
-      try {
-        f(local_start, local_end);
-      } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
-        }
-      }
+      f(local_start, local_end);
       internal::_set_in_parallel_region(false);
       internal::_unset_thread_num();
     };
@@ -92,23 +83,19 @@ void parallel_for(
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       futures[task_id]->wait();
     }
-
-    if (eptr) {
-      std::rethrow_exception(eptr);
-    }
   } else {
     f(begin, end);
   }
 }
 
 template <class scalar_t, class F, class SF>
-scalar_t parallel_reduce(
+inline scalar_t parallel_reduce(
     const int64_t begin,
     const int64_t end,
     const int64_t grain_size,
     const scalar_t ident,
-    const F f,
-    const SF sf) {
+    const F& f,
+    const SF& sf) {
   if (begin >= end) {
     return ident;
   }
@@ -124,19 +111,10 @@ scalar_t parallel_reduce(
     std::vector<scalar_t> results(num_tasks);
     scalar_t* results_data = results.data();
 
-    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
-    std::exception_ptr eptr;
-
     auto task = [&](int64_t task_id, int64_t local_start, int64_t local_end) {
       internal::_set_thread_num(task_id);
       internal::_set_in_parallel_region(true);
-      try {
-        results_data[task_id] = f(local_start, local_end, ident);
-      } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
-        }
-      }
+      results_data[task_id] = f(local_start, local_end, ident);
       internal::_set_in_parallel_region(false);
       internal::_unset_thread_num();
     };
@@ -164,10 +142,6 @@ scalar_t parallel_reduce(
 
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       futures[task_id]->wait();
-    }
-
-    if (eptr) {
-      std::rethrow_exception(eptr);
     }
 
     return std::accumulate(
