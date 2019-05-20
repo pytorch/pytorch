@@ -223,7 +223,7 @@ inline IValue toIValue(
       if (var.is_sparse()) {
         AT_ERROR("sparse tensors not supported");
       }
-      return var;
+      return at::Tensor(std::move(var));
     }
     case TypeKind::FloatType:
       return py::cast<double>(obj);

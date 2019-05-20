@@ -70,8 +70,8 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   }
 
   if (jit::tracer::isTracing() && data && data != Py_None && THPVariable_Check(data)) {
-    if (auto *v = jit::tracer::getValueTrace(((THPVariable*)data)->cdata)) {
-      jit::tracer::setValueTrace(var, v);
+    if (auto *v = jit::tracer::getValueTrace(at::Tensor(((THPVariable*)data)->cdata))) {
+      jit::tracer::setValueTrace(at::Tensor(var), v);
     }
   }
 

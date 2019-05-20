@@ -91,7 +91,7 @@ Node* preRecordPythonTrace(
   recordSourceLocation(n);
 
   for (const Variable& input : inputs) {
-    n->addInput(getValueTrace(input));
+    n->addInput(getValueTrace(at::Tensor(input)));
   }
 
   // NB: Order matters. This must append after inputs but before outputs.
@@ -155,10 +155,10 @@ void initPythonTracerBindings(PyObject* module) {
     return setTracingState(state);
   });
   m.def("_get_value_trace", [](const Variable& var) {
-    return getValueTrace(var);
+    return getValueTrace(at::Tensor(var));
   });
   m.def("_set_value_trace", [](const Variable& var, Value* value) {
-    return setValueTrace(var, value);
+    return setValueTrace(at::Tensor(var), value);
   });
   m.def("_tracer_set_get_unique_name_fn", [](py::function func) {
     const auto& tracing_state = getTracingState();
