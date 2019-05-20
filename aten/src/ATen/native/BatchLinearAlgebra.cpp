@@ -9,7 +9,6 @@
 
 #include <TH/TH.h>  // for USE_LAPACK
 
-#include <iostream>
 #include <vector>
 
 // First the required LAPACK implementations are registered here.
@@ -771,8 +770,8 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   // matrix input to GEQRF.
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto self_sizes = self.sizes().vec();
-  self_sizes[self.dim() - 2] = std::min(m, n);
   self_sizes.pop_back();
+  self_sizes[self.dim() - 2] = std::min(m, n);
   auto tau_working_copy = at::zeros(self_sizes, self.options());
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "qr_cpu", [&]{
     apply_geqrf<scalar_t>(self_working_copy, tau_working_copy, infos);
@@ -784,21 +783,14 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   }
 
   // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
-  // We first need to compute the required size of Q based on the `some` option
+  std::vector<int64_t> q_sizes, q_strides;
   int64_t n_columns_q;
-  auto q_sizes = self.sizes().vec();
-  if (!some && m > n) {
-    q_sizes[self.dim() - 1] = m;
-    n_columns_q = m;
-  } else {
-    q_sizes[self.dim() - 1] = n;
-    n_columns_q = std::min(m, n);
-  }
-  auto R = self_working_copy.narrow_copy(-2, 0, n_columns_q).triu_();
+  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, some);
 
-  auto q_working_copy = at::empty(q_sizes, self.options());
-  q_working_copy.narrow(-1, 0, n).copy_(self_working_copy);
-  q_working_copy = cloneBatchedColumnMajor(q_working_copy);
+  auto q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
+  q_working_copy.narrow(-1, 0, n).copy_(self);
+
+  auto R = self_working_copy.narrow_copy(-2, 0, n_columns_q).triu_();
 
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "qr_cpu", [&]{
     apply_orgqr<scalar_t>(q_working_copy, tau_working_copy, n_columns_q, infos);
