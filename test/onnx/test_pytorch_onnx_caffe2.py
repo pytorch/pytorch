@@ -148,7 +148,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
         onnxir, torch_out = do_export(model, input, export_params=self.embed_params, verbose=False,
                                       example_outputs=example_outputs,
-                                      do_constant_folding=False)
+                                      do_constant_folding=False, training=train)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -178,7 +178,8 @@ class TestCaffe2Backend(unittest.TestCase):
 
         # Verify the model runs the same in Caffe2
         verify.verify(model, input, c2, rtol=rtol, atol=atol,
-                      do_constant_folding=do_constant_folding)
+                      do_constant_folding=do_constant_folding,
+                      training=train)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
@@ -1671,6 +1672,26 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randint(0, 1, (3, 5))
         y = torch.randint(0, 1, (3, 5))
         self.run_model_test(OrModel(), train=False, input=(x, y), batch_size=BATCH_SIZE)
+
+    def test_dropout(self):
+            class DropoutModel(torch.nn.Module):
+                def __init__(self):
+                    super(DropoutModel, self).__init__()
+                    self.dropout = torch.nn.Dropout(0.5)
+
+                def forward(self, x):
+                    return self.dropout(x)
+
+            x = torch.randn(10, 20, 30)
+            self.run_model_test(DropoutModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+            try:
+                self.run_model_test(DropoutModel(), train=True, input=x, batch_size=BATCH_SIZE)
+            except AssertionError:
+                return
+            # if the dropout does not mismatch numbers in training mode,
+            # we should not get to this point
+            assert False
 
 # a bit of metaprogramming to set up all the rnn tests
 
