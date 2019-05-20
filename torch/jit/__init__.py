@@ -1466,7 +1466,7 @@ if _enabled:
                 return super(ScriptModule, self).__setattr__(attr, value)
 
             if hasattr(self, attr):
-                raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
+                raise RuntimeError("attempting to re-assign constant '{}' in {}".format(attr, type(self).__name__))
 
             def conv_module_to_const(module_value):
                 if not isinstance(module_value, (ModuleList, Sequential)):
@@ -1530,7 +1530,6 @@ if _enabled:
             # __init__ can run correctly
             self.__dict__['_initialized'] = False
             super(WeakScriptModuleProxy, self).__init__()
-
             # Store a weak reference to the original module
             self.__dict__["_original"] = weakref.ref(original)
 
@@ -1551,6 +1550,8 @@ if _enabled:
                 elif item is self:
                     continue
                 elif isinstance(item, (Parameter, Module, Attribute)):
+                    if isinstance(item, (ModuleList, Sequential)):
+                        continue
                     ScriptModule.__setattr__(self, name, item)
 
             # Copy buffers
@@ -1564,7 +1565,9 @@ if _enabled:
             self.__dict__["_constants_set"] = constants_set
             for name in self.__dict__["_constants_set"]:
                 if hasattr(original, name):
-                    self.__dict__[name] = getattr(original, name)
+                    if (name in original._parameters or name in original._buffers) and item is not None:
+                        continue
+                    ScriptModule.__setattr__(self, name, getattr(original, name))
 
             # Copy overloads
             self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
