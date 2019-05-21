@@ -535,7 +535,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern, r'Old pattern')
+        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
 
     def test_old_pattern_warning_with_arg(self):
         epochs = 35
@@ -546,7 +546,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step(e)
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern2, r'Old pattern')
+        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
 
     def test_old_pattern_warning_resuming(self):
         epochs = 35
@@ -560,7 +560,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step()
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern, r'Old pattern')
+        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
 
     def test_old_pattern_warning_resuming_with_arg(self):
         epochs = 35
@@ -574,7 +574,7 @@ class TestLRScheduler(TestCase):
                 scheduler.step(e)
                 self.opt.step()
 
-        self.assertWarnsRegex(old_pattern2, r'Old pattern')
+        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
 
     def test_new_pattern_no_warning(self):
         import warnings
