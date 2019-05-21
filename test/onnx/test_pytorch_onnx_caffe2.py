@@ -1257,7 +1257,8 @@ class TestCaffe2Backend(unittest.TestCase):
         input = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
-        self.run_model_test(ScatterModel(), train=False, input=(input, indices, values), batch_size=BATCH_SIZE)
+        self.run_model_test(ScatterModel(), train=False, input=(input, indices, values),
+                            batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):

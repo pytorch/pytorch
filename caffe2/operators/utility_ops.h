@@ -739,19 +739,22 @@ class ScatterAssignOp : public Operator<Context> {
 };
 
 template <class Context>
-class ScatterOp : public Operator<Context> {
+class ScatterOp : public Operator<CPUContext> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   template <class... Args>
   explicit ScatterOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, 1) {
   }
 
   virtual ~ScatterOp() noexcept override {}
 
   bool RunOnDevice() override {
+    
+    TORCH_CHECK(Context::GetDeviceType() == kCPU, "ScatterOp currently only supports CPU.")
+
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, this->template Input<Tensor>(INDICES, CPU));
   }
