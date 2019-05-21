@@ -152,7 +152,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
             arg.name(), arg.type(), arg.N(), value, arg.kwarg_only());
       } catch (py::cast_error& e) {
         throw ErrorReport(range)
-            << "Expected a default value of type " << arg.type()->str()
+            << "Expected a default value of type " << arg.type()->python_str()
             << " on parameter \"" << arg.name() << "\"";
       }
     } else {
@@ -312,6 +312,11 @@ void initJitScriptBindings(PyObject* module) {
           },
           py::return_value_policy::reference_internal)
       .def("_register_parameter", &Module::register_parameter)
+      .def(
+          "_get_functions",
+          [](Module& self) {
+            return self.class_compilation_unit().get_functions();
+          })
       .def(
           "_register_attribute",
           [](Module& self, std::string name, TypePtr type, py::object value) {
@@ -520,7 +525,9 @@ void initJitScriptBindings(PyObject* module) {
         PythonPrint(ss, self.function(), true, tensors, classes, false);
         return ss.str();
       });
-
+  m.def(
+      "_jit_recursive_script",
+      [](bool recurse) { getRecursiveScriptMode() = recurse; });
   m.def(
       "_jit_script_compile",
       [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {

@@ -21,10 +21,11 @@ void stop_gradient_op_cpu_impl(
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::StopGradient",
-    c10::kernel<
+    c10::RegisterOperators::options()
+      .kernel<
         decltype(stop_gradient_op_cpu_impl<float>),
-        &stop_gradient_op_cpu_impl<float>>(),
-    c10::dispatchKey(CPUTensorId()));
+        &stop_gradient_op_cpu_impl<float>>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 
