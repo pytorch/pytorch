@@ -304,6 +304,13 @@ PyObject *THPVariable_get_requires_grad(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_get_ndim(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  return PyInt_FromLong(self->cdata.dim());
+  END_HANDLE_TH_ERRORS
+}
+
 int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
@@ -443,6 +450,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
+  {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
@@ -508,8 +516,8 @@ void initTensorImplConversion(PyObject* module) {
   m.def("_wrap_tensor_impl", [](void* ptr) {
     auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
         unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
-    AT_CHECK(p.defined(), "Can't wrap undefined tensor");
-    AT_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
+    TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
+    TORCH_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
     auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
     return py::cast(torch::autograd::Variable(
         torch::autograd::make_variable(std::move(tensor), false)));

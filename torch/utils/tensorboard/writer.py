@@ -888,6 +888,16 @@ class SummaryWriter(object):
         """
         self._get_file_writer().add_summary(mesh(tag, vertices, colors, faces, config_dict), global_step, walltime)
 
+    def flush(self):
+        """Flushes the event file to disk.
+        Call this method to make sure that all pending events have been written to
+        disk.
+        """
+        if self.all_writers is None:
+            return
+        for writer in self.all_writers.values():
+            writer.flush()
+
     def close(self):
         if self.all_writers is None:
             return  # ignore double close

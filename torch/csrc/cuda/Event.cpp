@@ -56,10 +56,10 @@ static PyObject * THCPEvent_from_ipc_handle(
   at::Device device = r.device(0);
   std::string handle_string = r.string(1);
 
-  AT_CHECK(handle_string.size() == sizeof(cudaIpcEventHandle_t),
+  TORCH_CHECK(handle_string.size() == sizeof(cudaIpcEventHandle_t),
     "cudaIpcEventHandle_t expects byte-like object of size ",
     sizeof(cudaIpcEventHandle_t), ", but got ", handle_string.size());
-  AT_CHECK(device.type() == at::kCUDA, "Event can only be created on "
+  TORCH_CHECK(device.type() == at::kCUDA, "Event can only be created on "
     "CUDA devices, but got device type ", device.type())
 
   THPObjectPtr ptr(type->tp_alloc(type, 0));

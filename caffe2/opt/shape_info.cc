@@ -14,7 +14,23 @@ ShapeInfo getShapeInfoFromBlob(const Blob* blob) {
   if (blob->meta().id() == TypeMeta::Id<int8::Int8TensorCPU>()) {
     shape_info.is_quantized = true;
     LoadInt8TensorInfoOfBlob(
-        &shape_info.q_info.scale, &shape_info.q_info.offset, blob);
+        &shape_info.q_info.scale,
+        &shape_info.q_info.offset,
+        &shape_info.q_info.axis,
+        blob);
+  } else {
+#ifndef C10_MOBILE
+    auto function_ptr =
+        ExternalTensorFunctionsBaseRegistry()->Create(blob->meta().id());
+    if (function_ptr != nullptr) {
+      shape_info.is_quantized = true;
+      function_ptr->LoadInfoOfBlob(
+          blob,
+          &shape_info.q_info.scale,
+          &shape_info.q_info.offset,
+          &shape_info.q_info.axis);
+    }
+#endif
   }
   return shape_info;
 }

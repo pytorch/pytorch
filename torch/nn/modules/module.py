@@ -761,6 +761,7 @@ class Module(object):
                     load(child, prefix + name + '.')
 
         load(self)
+        load = None  # break load->load reference cycle
 
         if strict:
             if len(unexpected_keys) > 0:

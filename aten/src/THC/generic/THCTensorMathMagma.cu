@@ -64,7 +64,7 @@ void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 1, "A should be (non-empty) 2 dimensional");
   THArgCheck(!b_->is_empty() && b_->dim() == 2, 1, "b should be (non-empty) 2 dimensional");
-  AT_CHECK(a_->size(0) == b_->size(0), "Expected A and b to have same size "
+  TORCH_CHECK(a_->size(0) == b_->size(0), "Expected A and b to have same size "
       "at dim 0, but A has ", a_->size(0), " rows and B has ", b_->size(0), " rows");
   THArgCheck(a_->size(0) >= a_->size(1), 2, "Expected A with shape (m x n) to have "
       "m >= n. The case for m < n is not implemented yet.");
@@ -331,112 +331,6 @@ void THCTensor_(gesdd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTens
   magma_free_pinned(a_data);
 #else
   THError(NoMagma(gesdd2));
-#endif
-}
-
-void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
-{
-  THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be non-empty 2 dimensional");
-  THArgCheck(a->size(0) == a->size(1), 2, "A should be square");
-
-#ifdef USE_MAGMA
-  int info;
-  int64_t n = a->size(0);
-  int lwork = n * magma_get_sgetri_nb(n);
-
-  THCTensor *input = THCTensor_(newColumnMajor)(state, ra_, a);
-  scalar_t *input_data = THCTensor_(data)(state, input);
-
-  int *ipiv = th_magma_malloc_pinned<int>(n);
-
-  THCTensor *work = THCTensor_(newWithSize1d)(state, lwork);
-  scalar_t *work_data = THCTensor_(data)(state, work);
-
-  // Run LU
-#if defined(THC_REAL_IS_FLOAT)
-  magma_sgetrf_gpu(n, n, input_data, n, ipiv, &info);
-#else
-  magma_dgetrf_gpu(n, n, input_data, n, ipiv, &info);
-#endif
-
-  if (info > 0)
-    THError("MAGMA getrf : U(%d,%d) is 0, U is singular", info, info);
-  else if (info < 0)
-    THError("MAGMA getrf : Argument %d : illegal value", -info);
-
-  // Inverse
-#if defined(THC_REAL_IS_FLOAT)
-  magma_sgetri_gpu(n, input_data, n, ipiv, work_data, lwork, &info);
-#else
-  magma_dgetri_gpu(n, input_data, n, ipiv, work_data, lwork, &info);
-#endif
-
-  if (info > 0)
-    THError("MAGMA getri : U(%d,%d) is 0, U is singular", info, info);
-  else if (info < 0)
-    THError("MAGMA getri : Argument %d : illegal value", -info);
-
-  THCTensor_(free)(state, work);
-  magma_free_pinned(ipiv);
-  THCTensor_(freeCopyTo)(state, input, ra_);
-#else
-  int64_t n = a->size(0);
-
-  // input
-  THCTensor *input = THCTensor_(newColumnMajor)(state, a, a);
-  THCTensor_(resizeNd)(state, ra_, 2, THTensor_getSizePtr(input), THTensor_getStridePtr(input));
-
-  scalar_t *matrices1[1] = { THCTensor_(data)(state, input) };
-  scalar_t *matrices2[1] = { THCTensor_(data)(state, ra_) };
-
-  // Copy pointers to device.
-  auto d_matrices1 = static_cast<scalar_t**>(THCudaMalloc(state, sizeof(scalar_t*)));
-  auto d_matrices2 = static_cast<scalar_t**>(THCudaMalloc(state, sizeof(scalar_t*)));
-
-  THCudaCheck(cudaMemcpyAsync(d_matrices1, matrices1, sizeof(scalar_t*),
-                              cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
-  THCudaCheck(cudaMemcpyAsync(d_matrices2, matrices2, sizeof(scalar_t*),
-                              cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
-  int info;
-  auto info_gpu = static_cast<int*>(THCudaMalloc(state, sizeof(int)));
-
-  auto ipiv_gpu = static_cast<int*>(THCudaMalloc(state, n * sizeof(int)));
-
-  // Run LU
-#if defined(THC_REAL_IS_FLOAT)
-  THCudaBlas_Sgetrf(state, n, d_matrices1, n, ipiv_gpu, info_gpu, 1);
-#else
-  THCudaBlas_Dgetrf(state, n, d_matrices1, n, ipiv_gpu, info_gpu, 1);
-#endif
-
-  THCudaCheck(cudaMemcpy(&info, info_gpu, sizeof(int), cudaMemcpyDeviceToHost));
-
-  if (info > 0)
-    THError("CUBLAS getrf : U(%d,%d) is 0, U is singular", info, info);
-  else if (info < 0)
-    THError("CUBLAS getrf : Argument %d : illegal value", -info);
-
-  // Inverse
-#if defined(THC_REAL_IS_FLOAT)
-  THCudaBlas_Sgetri(state, n, (const scalar_t**)d_matrices1, n, ipiv_gpu, d_matrices2, n, info_gpu, 1);
-#else
-  THCudaBlas_Dgetri(state, n, (const scalar_t**)d_matrices1, n, ipiv_gpu, d_matrices2, n, info_gpu, 1);
-#endif
-
-  THCudaCheck(cudaMemcpy(&info, info_gpu, sizeof(int), cudaMemcpyDeviceToHost));
-
-  if (info > 0)
-    THError("CUBLAS getri : U(%d,%d) is 0, U is singular", info, info);
-  else if (info < 0)
-    THError("CUBLAS getri : Argument %d : illegal value", -info);
-
-  THCudaFree(state, ipiv_gpu);
-  THCudaFree(state, info_gpu);
-
-  THCudaFree(state, d_matrices1);
-  THCudaFree(state, d_matrices2);
-
-  THCTensor_(free)(state, input);
 #endif
 }
 
