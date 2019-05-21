@@ -407,18 +407,18 @@ void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Gene
         gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) -> ulonglong2 {
           ulonglong2 ret;
+          uint4 rand_val;
         #ifndef __HIP_PLATFORM_HCC__
-          uint4 rand = curand4(state);
+          rand_val = curand4(state);
         #else
           // HIP doesn't have curand4
-          uint4 rand;
-          rand.x = curand(state);
-          rand.y = curand(state);
-          rand.z = curand(state);
-          rand.w = curand(state);
+          rand_val.x = curand(state);
+          rand_val.y = curand(state);
+          rand_val.z = curand(state);
+          rand_val.w = curand(state);
         #endif
-          ret.x = (static_cast<uint64_t>(rand.x) << 32) | rand.y;
-          ret.y = (static_cast<uint64_t>(rand.z) << 32) | rand.w;
+          ret.x = (static_cast<uint64_t>(rand_val.x) << 32) | rand_val.y;
+          ret.y = (static_cast<uint64_t>(rand_val.z) << 32) | rand_val.w;
           return ret;
         },
         random_func);
@@ -429,17 +429,17 @@ void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Gene
       distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
         gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) {
+          uint4 rand_val;
         #ifndef __HIP_PLATFORM_HCC__
-          return curand4(state);
+          rand_val = curand4(state);
         #else
           // HIP doesn't have curand4
-          uint4 rand;
-          rand.x = curand(state);
-          rand.y = curand(state);
-          rand.z = curand(state);
-          rand.w = curand(state);
-          return rand;
+          rand_val.x = curand(state);
+          rand_val.y = curand(state);
+          rand_val.z = curand(state);
+          rand_val.w = curand(state);
         #endif
+          return rand_val;
         },
         random_func);
     }
