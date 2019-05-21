@@ -11,13 +11,6 @@
     return __VA_ARGS__();                          \
   }
 
-#define AT_QINT_PRIVATE_CASE_TYPE(enum_type, type, underlying_type, ...) \
-  case enum_type: {                                                     \
-    using scalar_t = type;                                              \
-    using underlying_t = underlying_type;                               \
-    return __VA_ARGS__();                                               \
-  }
-
 namespace detail {
 
 template <at::ScalarType N>
@@ -217,13 +210,13 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 
 #define AT_DISPATCH_QINT_TYPES(TYPE, NAME, ...)                         \
   [&] {                                                                 \
-  switch (TYPE) {                                                       \
-      AT_QINT_PRIVATE_CASE_TYPE(                                        \
-          at::ScalarType::QInt8, qint8, int8_t, __VA_ARGS__)            \
-        AT_QINT_PRIVATE_CASE_TYPE(                                      \
-            at::ScalarType::QUInt8, quint8, uint8_t, __VA_ARGS__)       \
-        AT_QINT_PRIVATE_CASE_TYPE(                                      \
-            at::ScalarType::QInt32, qint32, int, __VA_ARGS__)           \
+    switch (TYPE) {                                                     \
+      AT_PRIVATE_CASE_TYPE(                                             \
+          at::ScalarType::QInt8, qint8, __VA_ARGS__)                    \
+      AT_PRIVATE_CASE_TYPE(                                             \
+          at::ScalarType::QUInt8, quint8, __VA_ARGS__)                  \
+      AT_PRIVATE_CASE_TYPE(                                             \
+          at::ScalarType::QInt32, qint32, __VA_ARGS__)                  \
       default:                                                          \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");  \
     }                                                                   \

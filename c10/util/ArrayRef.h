@@ -145,13 +145,13 @@ class ArrayRef final {
 
   /// front - Get the first element.
   AT_CPP14_CONSTEXPR const T& front() const {
-    AT_CHECK(!empty(), "ArrayRef: attempted to access front() of empty list");
+    TORCH_CHECK(!empty(), "ArrayRef: attempted to access front() of empty list");
     return Data[0];
   }
 
   /// back - Get the last element.
   AT_CPP14_CONSTEXPR const T& back() const {
-    AT_CHECK(!empty(), "ArrayRef: attempted to access back() of empty list");
+    TORCH_CHECK(!empty(), "ArrayRef: attempted to access back() of empty list");
     return Data[Length - 1];
   }
 
@@ -163,7 +163,7 @@ class ArrayRef final {
   /// slice(n, m) - Chop off the first N elements of the array, and keep M
   /// elements in the array.
   AT_CPP14_CONSTEXPR ArrayRef<T> slice(size_t N, size_t M) const {
-    AT_CHECK(
+    TORCH_CHECK(
         N + M <= size(),
         "ArrayRef: invalid slice, N = ",
         N,
@@ -188,7 +188,7 @@ class ArrayRef final {
 
   /// Vector compatibility
   AT_CPP14_CONSTEXPR const T& at(size_t Index) const {
-    AT_CHECK(
+    TORCH_CHECK(
         Index < Length,
         "ArrayRef: invalid index Index = ",
         Index,

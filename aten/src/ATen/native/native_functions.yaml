@@ -424,7 +424,7 @@
 - func: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
   variants: function
 
-- func: contiguous(Tensor self) -> Tensor
+- func: contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor
   variants: method
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
@@ -455,29 +455,6 @@
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: method
   device_guard: False
-
-- func: s_copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  dispatch:
-    CPU: _s_copy__cpu
-    CUDA: _s_copy__cuda
-    QuantizedCPU: _s_copy__quantized
-
-- func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  dispatch:
-    CUDA: _s_copy_from_cuda
-
-- func: _copy_same_type_(Tensor(a!) self, Tensor src) -> void
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  dispatch:
-    CPU: _copy_same_type__cpu
 
 - func: cos(Tensor self) -> Tensor
   variants: function, method
@@ -1832,6 +1809,12 @@
 - func: std(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   variants: function, method
 
+- func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+  variants: function
+
+- func: std_mean(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+  variants: function
+
 - func: std(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
@@ -2007,6 +1990,12 @@
   variants: function, method
 
 - func: var(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+  variants: function
+
+- func: var_mean(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+  variants: function
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
   variants: method
@@ -2561,11 +2550,6 @@
   variants: function, method
   dispatch:
     QuantizedCPU: dequantize_quant
-
-- func: dequantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
-  variants: function, method
-  dispatch:
-    CPU: dequantize_linear_cpu
 
 - func: q_scale(Tensor self) -> Scalar
   variants: function, method

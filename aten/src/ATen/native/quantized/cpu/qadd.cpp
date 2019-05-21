@@ -15,7 +15,7 @@ class QAddInt8 final : public c10::OperatorKernel {
   Tensor operator()(at::Tensor qa, at::Tensor qb,
                     double scale, int64_t zero_point) {
     AT_ASSERTM(qa.numel() == qb.numel(), "Add operands must be the same size!");
-    AT_CHECK(qa.scalar_type() == qb.scalar_type(), "Add operands should have same data type.");
+    TORCH_CHECK(qa.scalar_type() == qb.scalar_type(), "Add operands should have same data type.");
     auto a = qa.dequantize();
     auto b = qb.dequantize();
     auto c = at::empty_like(a);
@@ -37,11 +37,13 @@ class QAddInt8 final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators()
 .op("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
-    c10::kernel<QAddInt8</*ReLUFused=*/false>>(),
-    c10::dispatchKey(QuantizedCPUTensorId()))
+    c10::RegisterOperators::options()
+      .kernel<QAddInt8</*ReLUFused=*/false>>()
+      .dispatchKey(QuantizedCPUTensorId()))
 .op("quantized::add_relu(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
-    c10::kernel<QAddInt8</*ReLUFused=*/true>>(),
-    c10::dispatchKey(QuantizedCPUTensorId()));
+    c10::RegisterOperators::options()
+      .kernel<QAddInt8</*ReLUFused=*/true>>()
+      .dispatchKey(QuantizedCPUTensorId()));
 }  // namespace
 }}  // namespace at::native

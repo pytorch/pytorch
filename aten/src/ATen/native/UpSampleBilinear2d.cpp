@@ -159,7 +159,7 @@ static void upsample_bilinear2d_out_cpu_template(
     const Tensor& input_,
     IntArrayRef output_size,
     bool align_corners) {
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
       output_size.size());
@@ -214,12 +214,12 @@ static void upsample_bilinear2d_backward_out_cpu_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners) {
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
       output_size.size());
 
-  AT_CHECK(
+  TORCH_CHECK(
       input_size.size() == 4,
       "It is expected input_size equals to 4, but got size ",
       input_size.size());
