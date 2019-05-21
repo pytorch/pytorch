@@ -77,17 +77,6 @@ class TestDocCoverage(unittest.TestCase):
         in_rst = self.parse_rst('tensors.rst', r2)
         classes = [torch.FloatTensor, torch.LongTensor, torch.ByteTensor]
         has_docstring = set(x for c in classes for x in dir(c) if not x.startswith('_') and getattr(c, x).__doc__)
-        whitelist = {
-            'std_mean', 'var_mean'
-        }
-        self.assertEqual(
-            has_docstring & whitelist, whitelist,
-            textwrap.dedent('''
-            The whitelist in test_docs_coverage.py contains something
-            that don't have docstring or not in Tensor.*. If you just
-            removed something from Tensor.*, please remove it from whiltelist
-            in test_docs_coverage.py'''))
-        has_docstring -= whitelist
         self.assertEqual(
             has_docstring, in_rst,
             textwrap.dedent('''
