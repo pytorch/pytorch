@@ -5611,7 +5611,7 @@ a")
         self.checkScript(test_not_cast, (torch.tensor(1),))
         self.checkScript(test_not_cast, (torch.tensor(0),))
 
-        with self.assertRaisesRegex(RuntimeError, "expected"):
+        with self.assertRaisesRegex(RuntimeError, "Could not cast value of type Tuple\[Tensor, Tensor\]"):  # noqa: W605
             @torch.jit.script
             def test_mult(x, y):
                 return not(x, y)
@@ -5636,7 +5636,7 @@ a")
         self.checkScript(test_cast_float, (0.,))
         self.checkScript(test_cast_float, (-1.,))
 
-        with self.assertRaisesRegex(RuntimeError, "expected a bool, int, float, or Tensor"):
+        with self.assertRaisesRegex(RuntimeError, "Could not cast value of type Tuple\[int, int\] to bool"):  # noqa: W605
             @torch.jit.script
             def test_bad_conditional(x):
                 if (1, 2):
@@ -15604,6 +15604,53 @@ class TestClassType(JitTestCase):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
+
+    def test_cast_overloads(self):
+        @torch.jit.script
+        class Foo(object):
+            def __init__(self, val):
+                # type: (float) -> None
+                self.val = val
+
+            def __int__(self):
+                return int(self.val)
+
+            def __float__(self):
+                return self.val
+
+            def __bool__(self):
+                return bool(self.val)
+
+            def __str__(self):
+                return str(self.val)
+
+        def test(foo):
+            # type: (Foo) -> Tuple[int, float, bool]
+            if foo:
+                pass
+            return int(foo), float(foo), bool(foo)
+
+        fn = torch.jit.script(test)
+        self.assertEqual(fn(Foo(0.5)), test(0.5))
+        self.assertEqual(fn(Foo(0.)), test(0.0))
+        # str has slightly different formatting
+        self.assertTrue("0.5" in (str(Foo(0.5))))
+        self.assertTrue("0." in (str(Foo(0.0))))
+
+        @torch.jit.script
+        class BadBool(object):
+            def __init__(self):
+                pass
+
+            def __bool__(self):
+                return (1, 2)
+
+        with self.assertRaisesRegex(RuntimeError, "expected a bool expression for condition"):
+            @torch.jit.script
+            def test():
+                if BadBool():
+                    print(1)
+                    pass
 
     def test_init_compiled_first(self):
         @torch.jit.script  # noqa: B903
