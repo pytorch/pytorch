@@ -12,6 +12,8 @@
     - attach_workspace:
         at: ~/workspace
     - run:
+        <<: *should_run_job
+    - run:
         <<: *setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
@@ -46,6 +48,8 @@
     steps:
     - attach_workspace:
         at: ~/workspace
+    - run:
+        <<: *should_run_job
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -93,6 +97,8 @@
     steps:
       - checkout
       - run:
+          <<: *should_run_job
+      - run:
           <<: *macos_brew_update
       - run:
           name: Build
@@ -139,6 +145,8 @@
       - attach_workspace:
           at: /Users/distiller/pytorch-ci-env
       - run:
+          <<: *should_run_job
+      - run:
           <<: *macos_brew_update
       - run:
           name: Test
@@ -160,6 +168,8 @@
       xcode: "9.0"
     steps:
       - checkout
+      - run:
+          <<: *should_run_job
       - run:
           <<: *macos_brew_update
       - run:

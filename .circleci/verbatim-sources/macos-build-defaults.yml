@@ -9,6 +9,8 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
   steps:
     - checkout
     - run:
+        <<: *should_run_job
+    - run:
         <<: *macos_brew_update
     - run:
         name: Build

@@ -130,10 +130,16 @@ install_doc_push_script: &install_doc_push_script
     EOL
     chmod +x /home/circleci/project/doc_push_script.sh
 
-# `setup_ci_environment` has to be run **after** the ``checkout`` step because
-# it writes into the checkout directory and otherwise git will complain
+# `should_run_job` has to be run **after** the ``checkout`` step because
+# it uses scripts and Git the checkout directory and otherwise git will complain
 # that
 #   Directory (/home/circleci/project) you are trying to checkout to is not empty and not git repository
+should_run_job: &should_run_job
+  name: Should Run Job After checkout
+  no_output_timeout: "2m"
+  command: ~/workspace/.circleci/scripts/should_run_job.sh
+
+# Also needs to be run after checkout
 setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment After Checkout
   no_output_timeout: "1h"
@@ -172,9 +178,11 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   steps:
   - attach_workspace:
       at: ~/workspace
+  - checkout
+  - run:
+      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
-  - checkout
   - run:
       <<: *setup_ci_environment
   - run:
@@ -220,9 +228,11 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
   steps:
   - attach_workspace:
       at: ~/workspace
+  - checkout
+  - run:
+      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
-  - checkout
   - run:
       <<: *setup_ci_environment
   - run:
@@ -258,9 +268,11 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   steps:
   - attach_workspace:
       at: ~/workspace
+  - checkout
+  - run:
+      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
-  - checkout
   - run:
       <<: *setup_ci_environment
   - run:
@@ -319,6 +331,8 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   steps:
   - attach_workspace:
       at: ~/workspace
+  - run:
+      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
   - run:
@@ -387,6 +401,8 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
     xcode: "9.0"
   steps:
     - checkout
+    - run:
+        <<: *should_run_job
     - run:
         <<: *macos_brew_update
     - run:
@@ -539,6 +555,8 @@ binary_linux_build: &binary_linux_build
   - attach_workspace:
       at: ~/workspace
   - run:
+      <<: *should_run_job
+  - run:
       <<: *binary_checkout
   - run:
       <<: *binary_populate_env
@@ -591,6 +609,8 @@ binary_linux_test: &binary_linux_test
   - attach_workspace:
       at: /home/circleci/project
   - run:
+      <<: *should_run_job
+  - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
@@ -611,6 +631,8 @@ binary_linux_upload: &binary_linux_upload
   steps:
   - attach_workspace:
       at: ~/workspace
+  - run:
+      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
   - run:
@@ -707,6 +729,8 @@ smoke_linux_test: &smoke_linux_test
   - attach_workspace:
       at: /home/circleci/project
   - run:
+      <<: *should_run_job
+  - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
@@ -736,6 +760,8 @@ smoke_mac_test: &smoke_mac_test
         at: ~/workspace
     - attach_workspace: # TODO - we can `cp` from ~/workspace
         at: /Users/distiller/project
+    - run:
+        <<: *should_run_job
     - run:
         <<: *binary_checkout
     - run:
@@ -1024,6 +1050,8 @@ jobs:
     - attach_workspace:
         at: ~/workspace
     - run:
+        <<: *should_run_job
+    - run:
         <<: *setup_linux_system_environment
     - run:
         <<: *setup_ci_environment
@@ -1058,6 +1086,8 @@ jobs:
     steps:
     - attach_workspace:
         at: ~/workspace
+    - run:
+        <<: *should_run_job
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -1105,6 +1135,8 @@ jobs:
     steps:
       - checkout
       - run:
+          <<: *should_run_job
+      - run:
           <<: *macos_brew_update
       - run:
           name: Build
@@ -1151,6 +1183,8 @@ jobs:
       - attach_workspace:
           at: /Users/distiller/pytorch-ci-env
       - run:
+          <<: *should_run_job
+      - run:
           <<: *macos_brew_update
       - run:
           name: Test
@@ -1172,6 +1206,8 @@ jobs:
       xcode: "9.0"
     steps:
       - checkout
+      - run:
+          <<: *should_run_job
       - run:
           <<: *macos_brew_update
       - run:
