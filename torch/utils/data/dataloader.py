@@ -434,9 +434,10 @@ class _DataLoaderIter(object):
 
         self.sample_iter = iter(self.batch_sampler)
 
-        base_seed = torch.LongTensor(1).random_().item()
-
         if self.num_workers > 0:
+            # determine base seed only if num_workers > 0
+            base_seed = torch.LongTensor(1).random_().item()
+            
             self.worker_init_fn = loader.worker_init_fn
             self.worker_queue_idx = 0
             self.worker_result_queue = multiprocessing.Queue()
