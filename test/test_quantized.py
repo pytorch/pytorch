@@ -218,7 +218,6 @@ class TestQuantizedFC(unittest.TestCase):
         ).astype(np.uint8)
 
         W_scale = 0.4
-        # W_zp is the zero point for int8 quantization.
         W_zp = 2
         W_value_min = -128
         W_value_max = 127
@@ -244,8 +243,7 @@ class TestQuantizedFC(unittest.TestCase):
         W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
 
         X_q = X.quantize_linear(scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-        # W_zp + 128 is the zero point for uint8 quantization.
-        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp + 128, dtype=torch.quint8)
+        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
         b_q = torch.round(torch.rand(output_channels) * 10 - 10).to(dtype=torch.int32)
 
         # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
@@ -322,7 +320,7 @@ class TestQuantizedFC(unittest.TestCase):
         W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
 
         X_q = X.quantize_linear(scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp + 128, dtype=torch.quint8)
+        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
         b_q = torch.round(torch.rand(output_channels) * 10 - 10).to(dtype=torch.int32)
 
         # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
