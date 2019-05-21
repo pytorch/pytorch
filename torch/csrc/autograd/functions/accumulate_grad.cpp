@@ -66,7 +66,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     if (grad_variable.is_sparse() && !new_grad.is_sparse()) {
       grad_variable = new_grad + grad_variable;
     } else {
-      grad_variable += new_grad;
+      grad_variable.set_data(grad_variable + new_grad);
     }
   } else {
     variable.grad() = grad + new_grad;
