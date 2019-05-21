@@ -211,7 +211,11 @@ def run_cmake(version,
         USE_REDIS=os.getenv('USE_REDIS'),
         USE_GLOG=os.getenv('USE_GLOG'),
         USE_GFLAGS=os.getenv('USE_GFLAGS'),
+        USE_ASAN=check_env_flag('USE_ASAN'),
         WERROR=os.getenv('WERROR'))
+
+    if os.getenv('_GLIBCXX_USE_CXX11_ABI'):
+        cmake_defines(cmake_args, GLIBCXX_USE_CXX11_ABI=os.getenv('_GLIBCXX_USE_CXX11_ABI'))
 
     if os.getenv('USE_OPENMP'):
         cmake_defines(cmake_args, USE_OPENMP=check_env_flag('USE_OPENMP'))

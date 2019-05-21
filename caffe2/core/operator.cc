@@ -29,8 +29,14 @@ C10_DEFINE_bool(
 C10_DEFINE_bool(
     caffe2_operator_throw_if_fp_exceptions,
     false,
-    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID, "
-    "FE_OVERFLOW) are detected when running any operator.");
+    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID) "
+    "are detected when running any operator. FE_OVERFLOW is handled separately "
+    "by caffe2_operator_throw_if_fp_overflow_exceptions option.");
+C10_DEFINE_bool(
+    caffe2_operator_throw_if_fp_overflow_exceptions,
+    false,
+    "If set, throws if floating point exception FE_OVERFLOW is detected when "
+    "running any operator.");
 
 namespace caffe2 {
 
@@ -581,18 +587,43 @@ TensorShapes InferBlobShapesAndTypes(
   return tps;
 }
 
-void LoadInt8TensorInfoOfBlob(float* scale, float* offset, const Blob* b) {
-  const int8::Int8TensorCPU* i8tc =
+void LoadInt8TensorInfoOfBlob(
+    std::vector<float>* scale,
+    std::vector<float>* offset,
+    uint32_t* axis,
+    const Blob* b) {
+  const int8::Int8TensorCPU* int8_tensor =
       static_cast<const int8::Int8TensorCPU*>(b->GetRaw());
-  *scale = i8tc->scale;
-  *offset = i8tc->zero_point;
+  scale->clear();
+  offset->clear();
+  scale->push_back(int8_tensor->scale);
+  offset->push_back(int8_tensor->zero_point);
+  *axis = 1;
 }
 
 TensorShape GetTensorShapeOfBlob(const Blob* b) {
+  TensorShape tp;
+#ifndef C10_MOBILE
+  auto function_ptr =
+      ExternalTensorFunctionsBaseRegistry()->Create(b->meta().id());
+  if (function_ptr != nullptr) {
+    // This is dnnlowp tensor and we cant deal with it using regular path
+    auto dtype = function_ptr->GetExternalTensorType(b->GetRaw());
+    tp.set_data_type(TypeMetaToDataType(dtype));
+
+    size_t _capacity;
+    DeviceOption _device;
+    auto dshape =
+        function_ptr->GetExternalTensorInfo(b->GetRaw(), &_capacity, &_device);
+    for (auto d : dshape) {
+      tp.add_dims(d);
+    }
+    return tp;
+  }
+#endif
+
   TypeCall type_fun = GetTypeCallFunction(b->meta().id());
   TensorInfoCall tensor_info_fun = GetTensorInfoFunction(b->meta().id());
-  TensorShape tp;
-
   if (type_fun) {
     tp.set_data_type(TypeMetaToDataType(type_fun(b->GetRaw())));
   }
@@ -749,5 +780,13 @@ c10::optional<int> OperatorBase::argumentIndexWithName(
 }
 
 OperatorBase::~OperatorBase() noexcept = default;
+
+#ifndef C10_MOBILE
+C10_DEFINE_TYPED_REGISTRY(
+    ExternalTensorFunctionsBaseRegistry,
+    TypeIdentifier,
+    ExternalTensorFunctionsBase,
+    std::unique_ptr);
+#endif
 
 }  // namespace caffe2

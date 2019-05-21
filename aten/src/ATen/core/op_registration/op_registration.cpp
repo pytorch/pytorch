@@ -38,48 +38,48 @@ private:
   c10::optional<RegistrationHandleRAII> kernel_registration_handle_;
 };
 
-void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNameStr, detail::KernelRegistrationConfig&& config) {
+void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNameStr, Options&& options) {
   #if defined(CAFFE2_IS_XPLAT_BUILD)
     throw std::logic_error("We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
   #else
     either<OperatorName, FunctionSchema> schemaOrName = torch::jit::parseSchemaOrName(schemaOrNameStr);
     if (schemaOrName.is_right()) {
       // schema was explicitly specified. Check it matches the inferred one and register the op.
-      checkSchemaAndRegisterOp_(std::move(schemaOrName).right(), std::move(config));
+      checkSchemaAndRegisterOp_(std::move(schemaOrName).right(), std::move(options));
     } else {
       // schema wasn't explicitly specified. Take the inferred schema for registering the op.
-      AT_ASSERTM(nullptr != config.inferred_function_schema.get(), "Cannot infer schema from this kernel function. Please explicitly specify the operator schema.");
+      AT_ASSERTM(nullptr != options.config.inferred_function_schema.get(), "Cannot infer schema from this kernel function. Please explicitly specify the operator schema.");
       OperatorName name = std::move(schemaOrName).left();
       FunctionSchema inferredSchema(
         std::move(name.name),
         std::move(name.overload_name),
-        config.inferred_function_schema->arguments(),
-        config.inferred_function_schema->returns(),
-        config.inferred_function_schema->is_vararg(),
-        config.inferred_function_schema->is_varret()
+        options.config.inferred_function_schema->arguments(),
+        options.config.inferred_function_schema->returns(),
+        options.config.inferred_function_schema->is_vararg(),
+        options.config.inferred_function_schema->is_varret()
       );
-      registerOp_(std::move(inferredSchema), std::move(config));
+      registerOp_(std::move(inferredSchema), std::move(options));
     }
   #endif
 }
 
-void RegisterOperators::checkSchemaAndRegisterOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config) {
-  if (config.inferred_function_schema.get() != nullptr) {
-    assertSchemasHaveSameSignature(*config.inferred_function_schema, schema);
+void RegisterOperators::checkSchemaAndRegisterOp_(FunctionSchema&& schema, Options&& options) {
+  if (options.config.inferred_function_schema.get() != nullptr) {
+    assertSchemasHaveSameSignature(*options.config.inferred_function_schema, schema);
   }
 
-  registerOp_(std::move(schema), std::move(config));
+  registerOp_(std::move(schema), std::move(options));
 }
 
-void RegisterOperators::registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config) {
-  TORCH_CHECK(!config.dispatch_key.has_value() || config.kernel_func != nullptr,
+void RegisterOperators::registerOp_(FunctionSchema&& schema, Options&& options) {
+  TORCH_CHECK(!options.config.dispatch_key.has_value() || options.config.kernel_func != nullptr,
     "Tried to register an operator with a dispatch key but without a kernel. "
     "Please either specify a kernel or omit the dispatch key to only register the schema.");
 
   // if kernel_func is set, so must be cache_creator_func, the API shouldn't allow anything else.
-  AT_ASSERT((config.kernel_func != nullptr) == static_cast<bool>(config.cache_creator_func));
+  AT_ASSERT((options.config.kernel_func != nullptr) == static_cast<bool>(options.config.cache_creator_func));
 
-  registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, std::move(config.cache_creator_func));
+  registrars_.emplace_back(std::move(schema), options.config.dispatch_key, options.config.kernel_func, std::move(options.config.cache_creator_func));
 }
 
 RegisterOperators::RegisterOperators() = default;
