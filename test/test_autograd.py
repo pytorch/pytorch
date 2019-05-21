@@ -3162,6 +3162,12 @@ def add_test(
         def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
                     output_process_fn=output_process_fn):
             def check(name):
+                def get_attr(self_variable, name, args_variable, kwargs_variable):
+                    if hasattr(self_variable, name):
+                        return getattr(self_variable, name)(*args_variable, **kwargs_variable)
+                    else:
+                        args_v = (self_variable,) + args_variable
+                        return getattr(torch, name)(*args_v, **kwargs_variable)
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
                 is_inplace = name[-1] == "_" and not is_magic_method
                 self_variable = create_input((self_size,))[0][0]
@@ -3172,16 +3178,16 @@ def add_test(
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
-                output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
+                output_variable = get_attr(self_variable, name, args_variable, kwargs_variable)
                 if not exclude_tensor_method(name, test_name):
-                    output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
+                    output_tensor = get_attr(self_tensor, name, args_tensor, kwargs_variable)
                     if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
                         output_tensor = torch.DoubleTensor((output_tensor,))
                     self.assertEqual(unpack_variables(output_variable), output_tensor)
                     # TODO: check that both have changed after adding all inplace ops
 
                 def fn(*inputs):
-                    output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
+                    output = get_attr(inputs[0], name, inputs[1:], kwargs)
                     return output_process_fn(output)
 
                 if not is_inplace and name not in EXCLUDE_GRADCHECK:
@@ -3204,7 +3210,7 @@ def add_test(
                 if not is_inplace:
                     self_variable = create_input((self_size,), requires_grad=True)[0][0]
                     args_variable, kwargs_variable = create_input(args, requires_grad=False, call_kwargs=kwargs)
-                    output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
+                    output_variable = get_attr(self_variable, name, args_variable, kwargs_variable)
                     if isinstance(output_variable, torch.autograd.Variable):
                         output_variable.backward(randn_like(output_variable))
                         self.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
@@ -3216,7 +3222,7 @@ def add_test(
                     skip_inplace = ('broadcast_lhs' in test_name or
                                     'broadcast_all' in test_name)
                     if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
-                        output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
+                        output_variable = get_attr(self_variable, name, args_variable, kwargs_variable)
                         if not isinstance(output_variable, tuple):
                             output_variable = (output_variable,)
                         inplace_self_variable = deepcopy(self_variable)
@@ -3227,8 +3233,8 @@ def add_test(
                                                            for i in inplace_args_variable)
 
                         inplace_output_variable = (
-                            getattr(inplace_self_variable_copy[0], inplace_name)(*inplace_args_variable_copy,
-                                                                                 **kwargs_variable))
+                            get_attr(inplace_self_variable_copy[0], inplace_name, inplace_args_variable_copy,
+                                                                                 kwargs_variable))
                         if not isinstance(inplace_output_variable, tuple):
                             inplace_output_variable = (inplace_output_variable,)
                         self.assertEqual(inplace_output_variable, output_variable)
