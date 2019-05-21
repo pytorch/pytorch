@@ -6,12 +6,15 @@
 #include <climits>
 #include <cstddef>
 #include <exception>
+#include <functional>
 #include <set>
+#include <string>
 #include <typeinfo>
 #include <vector>
 
-#include "c10/macros/Macros.h"
-#include "c10/util/Registry.h"
+#include <c10/macros/Macros.h>
+#include <c10/util/Registry.h>
+#include <c10/util/typeid.h>
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
@@ -1430,6 +1433,57 @@ CAFFE2_API std::set<std::string> GetRegisteredOperators();
 // Operator logging capabilities
 CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
 std::function<void(const OperatorDef&)> GetOperatorLogger();
+
+#ifndef C10_MOBILE
+// This is for transferring tensor data between C2 and backends.
+struct ExternalTensorDescriptor {
+  uint64_t dataType;
+  uint32_t dimensions;
+  const uint64_t* shape;
+  uint32_t quantizationAxis;
+  uint64_t quantizationParams;
+  const float* scales;
+  const int32_t* biases;
+  uint64_t buffer;
+};
+
+class ExternalTensorFunctionsBase {
+ public:
+  explicit ExternalTensorFunctionsBase() {}
+  virtual ~ExternalTensorFunctionsBase() {}
+  virtual bool IsSameMetaType(TypeIdentifier id) = 0;
+  virtual void SetupExternalTensorDescriptor(
+      const Blob* blob,
+      std::vector<std::vector<uint64_t>>* shapes,
+      std::vector<std::vector<float>>* all_scales,
+      std::vector<std::vector<float>>* all_offsets,
+      ExternalTensorDescriptor* desc) = 0;
+  virtual void LoadInfoOfBlob(
+      const Blob* blob,
+      std::vector<float>* scale,
+      std::vector<float>* offset,
+      uint32_t* axis) = 0;
+  virtual TypeIdentifier GetTypeMetaId(const string& name) = 0;
+  virtual TypeMeta GetExternalTensorType(const void* c) = 0;
+  virtual vector<int64_t> GetExternalTensorInfo(
+      const void* c,
+      size_t* capacity,
+      DeviceOption* device) = 0;
+};
+
+C10_DECLARE_TYPED_REGISTRY(
+    ExternalTensorFunctionsBaseRegistry,
+    TypeIdentifier,
+    ExternalTensorFunctionsBase,
+    std::unique_ptr);
+
+#define REGISTER_EXTERNAL_TENSOR_FUNCTIONS(id, ...) \
+  C10_REGISTER_TYPED_CLASS(ExternalTensorFunctionsBaseRegistry, id, __VA_ARGS__)
+inline unique_ptr<ExternalTensorFunctionsBase> CreateExternalTensorFunctions(
+    TypeIdentifier id) {
+  return ExternalTensorFunctionsBaseRegistry()->Create(id);
+}
+#endif // C10_MOBILE
 
 }  // namespace caffe2
 

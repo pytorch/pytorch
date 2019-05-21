@@ -55,7 +55,9 @@ inline scalar_t parallel_reduce(
     const scalar_t ident,
     const F& f,
     const SF& sf) {
-  if (in_parallel_region() || get_num_threads() == 1) {
+  if (begin >= end) {
+    return ident;
+  } else if (in_parallel_region() || get_num_threads() == 1) {
     return f(begin, end, ident);
   } else {
     const int64_t num_results = divup((end - begin), grain_size);
