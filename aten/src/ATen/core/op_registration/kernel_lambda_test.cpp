@@ -13,7 +13,6 @@ using c10::guts::make_unique;
 using c10::ivalue::TensorList;
 using c10::ivalue::IntList;
 using c10::intrusive_ptr;
-using c10::ArrayRef;
 using c10::Dict;
 using at::Tensor;
 using std::string;
@@ -346,7 +345,7 @@ int64_t captured_input_list_size = 0;
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> ()",
-        RegisterOperators::options().kernel([] (Tensor, ArrayRef<int64_t> a) {captured_input_list_size = a.size();})
+        RegisterOperators::options().kernel([] (Tensor, const std::vector<int64_t>& a) {captured_input_list_size = a.size();})
         .dispatchKey(TensorType1()));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::int_list_input", "");
@@ -361,7 +360,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListInput_wit
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> int",
-        RegisterOperators::options().kernel([] (Tensor, ArrayRef<int64_t> a) -> int64_t {return a.size();})
+        RegisterOperators::options().kernel([] (Tensor, const std::vector<int64_t>& a) -> int64_t {return a.size();})
         .dispatchKey(TensorType1()));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::int_list_input", "");
@@ -375,7 +374,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListInput_wit
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()",
-        RegisterOperators::options().kernel([] (ArrayRef<Tensor> a) -> void {captured_input_list_size = a.size();})
+        RegisterOperators::options().kernel([] (const std::vector<Tensor>& a) -> void {captured_input_list_size = a.size();})
         .dispatchKey(TensorType1()));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
@@ -390,7 +389,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListInput_
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int",
-         RegisterOperators::options().kernel([] (ArrayRef<Tensor> a) -> int64_t {return a.size();})
+         RegisterOperators::options().kernel([] (const std::vector<Tensor>& a) -> int64_t {return a.size();})
          .dispatchKey(TensorType1()));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
@@ -593,7 +592,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_w
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenInfersSchema) {
   auto registrar = RegisterOperators()
-      .op("_test::no_schema_specified", RegisterOperators::options().kernel([] (Tensor arg1, int64_t arg2, ArrayRef<Tensor> arg3) -> std::tuple<int64_t, Tensor> {return {};}));
+      .op("_test::no_schema_specified", RegisterOperators::options().kernel([] (Tensor arg1, int64_t arg2, const std::vector<Tensor>& arg3) -> std::tuple<int64_t, Tensor> {return {};}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::no_schema_specified", "");
   ASSERT_TRUE(op.has_value());
