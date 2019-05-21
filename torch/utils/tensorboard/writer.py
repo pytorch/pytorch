@@ -392,6 +392,38 @@ class SummaryWriter(object):
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
             see: https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/histogram/README.md
+
+        Examples::
+
+            from torch.utils.tensorboard import SummaryWriter
+            import numpy as np
+            writer = SummaryWriter()
+            dummy_data = []
+            for idx, value in enumerate(range(50)):
+                dummy_data += [idx + 0.001] * value
+
+            bins = list(range(50+2))
+            bins = np.array(bins)
+            values = np.array(dummy_data).astype(float).reshape(-1)
+            counts, limits = np.histogram(values, bins=bins)
+            sum_sq = values.dot(values)
+            writer.add_histogram_raw(
+                tag='histogram_with_raw_data',
+                min=values.min(),
+                max=values.max(),
+                num=len(values),
+                sum=values.sum(),
+                sum_squares=sum_sq,
+                bucket_limits=limits.tolist(),
+                bucket_counts=counts.tolist(),
+                global_step=0)
+            writer.close()
+
+        Expected result:
+
+        .. image:: _static/img/tensorboard/add_histogram_raw.png
+           :scale: 50 %
+
         """
         if len(bucket_limits) != len(bucket_counts):
             raise ValueError('len(bucket_limits) != len(bucket_counts), see the document.')
