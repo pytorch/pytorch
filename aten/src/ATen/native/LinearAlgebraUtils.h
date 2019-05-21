@@ -99,11 +99,11 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
     AT_ERROR(ss.str());
   }
 
-  AT_CHECK(A.size(-1) == A.size(-2),
+  TORCH_CHECK(A.size(-1) == A.size(-2),
            "A must be batches of square matrices, "
            "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
 
-  AT_CHECK(A.size(-1) == self.size(-2),
+  TORCH_CHECK(A.size(-1) == self.size(-2),
            "Incompatible matrix sizes for matmul: each A "
            "matrix is ", A.size(-1), " by ", A.size(-1),
            " but each b matrix is ", self.size(-2), " by ", self.size(-1));
@@ -111,7 +111,7 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
 
 // Validates input shapes for operations on batches of square matrices (inverse, cholesky, lu)
 static inline void squareCheckInputs(const Tensor& self) {
-  AT_CHECK(self.size(-1) == self.size(-2),
+  TORCH_CHECK(self.size(-1) == self.size(-2),
            "A must be batches of square matrices, "
            "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
 }
@@ -164,7 +164,7 @@ static inline void singleCheckErrors(int64_t info, const char* name) {
 // Checks if all the Tensors in a TensorList are of the same dimensions
 static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   for (auto &t : tensors) {
-    AT_CHECK(t.dim() == dim, "Tensor dimension is ", t.dim(), ", expected ", dim, " instead.");
+    TORCH_CHECK(t.dim() == dim, "Tensor dimension is ", t.dim(), ", expected ", dim, " instead.");
   }
 }
 

@@ -883,14 +883,14 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
 
   TORCH_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
            "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
-  AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
+  TORCH_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
            "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
-  AT_CHECK(!dhy.defined() || dhy.sizes().equals(hidden_size),
+  TORCH_CHECK(!dhy.defined() || dhy.sizes().equals(hidden_size),
            "Expected d_hidden size ", IntArrayRef{hidden_size}, ", got ", dhy.sizes());
-  AT_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
+  TORCH_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
            "Expected d_cell size ", IntArrayRef{hidden_size}, ", got ", dcy.sizes());
 
-  AT_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
+  TORCH_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
            "Gradients aren't CUDA tensors");
 
   cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors, input);
@@ -965,7 +965,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   auto handle = getCudnnHandle();
 
   if (fn.rnn.mode != CUDNN_LSTM) {
-    AT_CHECK(!cx.defined(),
+    TORCH_CHECK(!cx.defined(),
              "rnn: illegal defined cx for non-LSTM RNN");
   }
 
@@ -978,20 +978,20 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   auto input_size = _input_size(fn.tensors);
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
 
-  AT_CHECK(fn_train,
+  TORCH_CHECK(fn_train,
            "cudnn RNN backward can only be called in training mode");
 
-  AT_CHECK(input.sizes().equals(input_size),
+  TORCH_CHECK(input.sizes().equals(input_size),
            "Expected input size ", IntArrayRef{input_size}, ", got ", input.sizes());
-  AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
+  TORCH_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
            "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
 
   // TODO: the above were the only checks in rnn.py, but it doesn't seem
   // like these checks are enough
 
-  AT_CHECK(hx.is_contiguous(),
+  TORCH_CHECK(hx.is_contiguous(),
            "rnn: hx is not contiguous");
-  AT_CHECK(!cx.defined() || cx.is_contiguous(),
+  TORCH_CHECK(!cx.defined() || cx.is_contiguous(),
            "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
@@ -1236,7 +1236,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
     AT_WARN(WEIGHT_FORMAT_WARN);
   }
 
-  AT_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
+  TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
   IntArrayRef batch_sizes { _batch_sizes.data<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());

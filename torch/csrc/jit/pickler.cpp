@@ -446,7 +446,7 @@ void Pickler::pushDict(const IValue& ivalue) {
 }
 
 void Pickler::pushMemoization(const void* item) {
-  AT_CHECK(item != nullptr, "Pickler cannot memoize a nullptr");
+  TORCH_CHECK(item != nullptr, "Pickler cannot memoize a nullptr");
   memo_map_[item] = pushNextBinPut();
 }
 
@@ -467,7 +467,7 @@ size_t Pickler::pushNextBinPut() {
 void Pickler::pushMemoization(const IValue& ivalue) {
   auto ptr = getPointer(ivalue);
   memoized_ivalues_.push_back(ivalue);
-  AT_CHECK(
+  TORCH_CHECK(
       ptr != nullptr,
       "Pickler cannot memoize ",
       ivalue.tagKind(),
@@ -505,7 +505,7 @@ void Pickler::pushTuple(const IValue& ivalue) {
 
 std::vector<IValue> Unpickler::parse_ivalue_list() {
   run();
-  AT_CHECK(
+  TORCH_CHECK(
       stack_.size() == 1,
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
@@ -535,12 +535,12 @@ double Unpickler::readFloat() {
 
 void Unpickler::run() {
   // Expect a PROTO opcode and protocol number at the start of blob
-  AT_CHECK(
+  TORCH_CHECK(
       readOpCode() == OpCode::PROTO,
       "Expected PROTO opcode at the start"
       " of pickle archive");
   uint8_t protocol = read<uint8_t>();
-  AT_CHECK(
+  TORCH_CHECK(
       protocol == 2,
       "Only Pickle protocol 2 is supported, found protocol = ",
       protocol);
@@ -563,11 +563,11 @@ OpCode Unpickler::readInstruction() {
       if (last_opcode_ == OpCode::NEWOBJ) {
         // TODO [unpickler refactor] remove this case
         // It's a list specialization, the enum ID of which is on the stack
-        AT_CHECK(
+        TORCH_CHECK(
             stack_.size() > 0,
             "Unpickler found an empty stack when it expected a value");
         auto value = stack_.back().ivalue().toInt();
-        AT_CHECK(
+        TORCH_CHECK(
             value >= 0 && value <= std::numeric_limits<uint8_t>::max(),
             "Unpickler could not decode PicklerClass for ",
             value);
@@ -606,7 +606,7 @@ OpCode Unpickler::readInstruction() {
       memo_table_.push_back(stack_.back());
     } break;
     case OpCode::LONG_BINPUT: {
-      AT_CHECK(
+      TORCH_CHECK(
           std::numeric_limits<size_t>::max() >=
               std::numeric_limits<uint32_t>::max(),
           "Found a LONG_BINPUT opcode, but size_t on this system is "
@@ -826,7 +826,7 @@ std::string Unpickler::readString() {
     }
 
     // Simple check just in case there is no terminating '\n'
-    AT_CHECK(
+    TORCH_CHECK(
         is_valid_python_id_char(c),
         "Found character '",
         uint8_t(c),
@@ -835,7 +835,7 @@ std::string Unpickler::readString() {
 
     // Increment after to exclude newline from string
     ++n;
-    AT_CHECK(
+    TORCH_CHECK(
         chars + n < char_end_ptr,
         "Unpickler overran buffer while reading a string (expected a newline)");
   }
@@ -865,7 +865,7 @@ std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
                              {static_cast<int64_t>(tensor.storage().size())},
                              /* stride = */ {1})
                          .cpu();
-    AT_CHECK(
+    TORCH_CHECK(
         storage_tensor.element_size() * storage_tensor.storage().size() ==
             record_size,
         "Storage tensor size did not match record size");

@@ -158,6 +158,8 @@ struct SchemaParser {
           return static_cast<int64_t>(at::kStrided);
         } else if ("Mean" == text) {
           return static_cast<int64_t>(Reduction::Mean);
+        } else if ("contiguous_format" == text) {
+          return static_cast<int64_t>(c10::MemoryFormat::Contiguous);
         } else {
           throw ErrorReport(L.cur().range) << "invalid numeric default value";
         }
@@ -278,7 +280,7 @@ C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(const std::str
 
 C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   auto parsed = parseSchemaOrName(schema);
-  AT_CHECK(parsed.is_right(), "Tried to parse a function schema but only the operator name was given");
+  TORCH_CHECK(parsed.is_right(), "Tried to parse a function schema but only the operator name was given");
   return parsed.right();
 }
 
