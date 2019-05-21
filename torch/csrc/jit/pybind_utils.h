@@ -91,7 +91,10 @@ inline c10::optional<TypePtr> unifyOrInitializeType(
 inline TypedIValue toTypedIValue(py::handle input) {
   if (THPVariable_Check(input.ptr())) {
     auto ten = py::cast<at::Tensor>(input);
-    auto complete = CompleteTensorType::create(ten.scalar_type(), ten.device(), ten.sizes());
+    if (ten.is_sparse()) {
+      AT_ERROR("sparse tensors not supported");
+    }
+    auto complete = CompleteTensorType::create(ten);
     return TypedIValue(ten, complete);
   } else if (six::isTuple(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
@@ -218,6 +221,9 @@ inline IValue toIValue(
     case TypeKind::ProfiledTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
+      if (var.is_sparse()) {
+        AT_ERROR("sparse tensors not supported");
+      }
       return var;
     }
     case TypeKind::FloatType:
@@ -369,6 +375,9 @@ inline py::object toPyObject(IValue&& ivalue) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
+    if (tensor.is_sparse()) {
+      AT_ERROR("sparse tensors not supported");
+    }
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
     return py::cast(ivalue.toDouble());

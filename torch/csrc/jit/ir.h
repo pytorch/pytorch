@@ -163,7 +163,7 @@ struct Value {
  public:
   Value* setType(TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
-    auto complete = CompleteTensorType::create(output.scalar_type(), output.options().device(), output.sizes());
+    auto complete = CompleteTensorType::create(output);
     setType(complete);
   }
   const TypePtr& type() const {

@@ -2435,6 +2435,21 @@ graph(%Ra, %Rb):
         ten = torch.rand(3, 3)
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
+    def test_sparse_tensors_error(self):
+        def get_sparse():
+            return torch.sparse.FloatTensor(2, 3)
+
+        @torch.jit.script
+        def sparse(input):
+            output = get_sparse()
+            return output, input
+
+        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
+            sparse(get_sparse())
+
+        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
+            sparse(torch.tensor([1]))
+
     def test_tuple_specialization(self):
         @torch.jit.script
         def f(t, s):
@@ -13125,6 +13140,8 @@ EXCLUDE_TRACED = {
     'test___getitem___adv_index_sub_3',
     'test___getitem___adv_index_var',
 
+    # jit doesn't support sparse tensors.
+    'test_to_sparse',
 }
 
 EXCLUDE_TYPE_CHECK = {
@@ -13154,6 +13171,8 @@ EXCLUDE_SCRIPT = {
 
     # unknown builtin op
     'test_nn_fold',
+
+    'test_to_sparse'
 }
 
 # chunk returns a list in scripting and we don't unpack the list,
