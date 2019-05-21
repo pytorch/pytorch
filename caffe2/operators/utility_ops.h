@@ -765,7 +765,7 @@ class ScatterOp : public Operator<Context> {
     size_t item_bytesize = dataType.itemsize();
 
     // ONNX allows negative axis to index from the back, valid range: [-r, r].
-    axis_ = = data.canonical_axis_index(axis_);
+    axis_ = data.canonical_axis_index(axis_);
     
     CAFFE_ENFORCE_GE(data.dim(), axis_ + 1, "DATA should be at least [axis+1]-D");
     CAFFE_ENFORCE_GE(axis_, 0, "Axis should be non-negative");
@@ -784,7 +784,7 @@ class ScatterOp : public Operator<Context> {
     }
 
     const IndexType* idxs = indices.template data<IndexType>();
-    char* src_base = static_cast<const char*>(updates.raw_data());
+    const char* src_base = static_cast<const char*>(updates.raw_data());
 
     const int64_t outer_dims_product = updates.size_to_dim(axis_);
     const int64_t block_size = updates.size_from_dim(axis_ + 1);
@@ -796,7 +796,7 @@ class ScatterOp : public Operator<Context> {
     
     const int64_t N = indices.size(axis_);
 
-    check_indexarray_range<Index>(idxs, N, src_indexing_axis_dim);
+    check_indexarray_range<IndexType>(idxs, N, src_indexing_axis_dim);
 
     int64_t i = 0;
     for (int64_t batch = 0; batch < outer_dims_product; ++batch) {

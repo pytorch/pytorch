@@ -71,9 +71,11 @@ class Registry {
     if (registry_.count(key) != 0) {
       auto cur_priority = priority_[key];
       if (priority > cur_priority) {
+  #ifdef DEBUG
         std::string warn_msg =
             "Overwriting already registered item for key " + KeyStrRepr(key);
         fprintf(stderr, "%s\n", warn_msg.c_str());
+  #endif
         registry_[key] = creator;
         priority_[key] = priority;
       } else if (priority == cur_priority) {

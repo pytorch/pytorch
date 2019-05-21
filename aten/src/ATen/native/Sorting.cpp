@@ -138,11 +138,11 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
   // FIXME: This seems bogus, I only do this because it was the old behaviour.
   //        The reductions are fine, as long as the axis being reduced along
   //        isn't of 0 elements (and the output has elements).
-  AT_CHECK(
+  TORCH_CHECK(
       self.numel() > 0,
       "cannot perform reduction function kthvalue",
       " on tensor with no elements because the operation does not have an identity");
-  AT_CHECK(
+  TORCH_CHECK(
       k > 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
       "selected index k out of range");
 
@@ -225,7 +225,7 @@ std::tuple<Tensor, Tensor> median(
 
 // this does not reduce to median with dim beause we don't want to copy twice
 Tensor median_cpu(const Tensor& self) {
-  AT_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
+  TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
   if (self.dim() == 0 && self.numel() == 1) {
     return self.clone();
   }
