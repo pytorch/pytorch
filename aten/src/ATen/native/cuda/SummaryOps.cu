@@ -311,7 +311,7 @@ Tensor _histc_cuda_template(
   if (nbins <= 0) {
     AT_ERROR("bins must be > 0");
   }
-  Tensor output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
+  Tensor output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(self.scalar_type()));
   input_t minvalue = min;
   input_t maxvalue = max;
   if (min == max) {
@@ -322,7 +322,8 @@ Tensor _histc_cuda_template(
     minvalue = minvalue - 1;
     maxvalue = maxvalue + 1;
   }
-  auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
+
+  auto ret = cuda::CUDA_tensor_histogram<input_t, input_t, false>(
     output, self, Tensor(), nbins, minvalue, maxvalue);
   return output;
 }

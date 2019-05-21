@@ -156,18 +156,17 @@ void adaptive_max_pool3d_out_cpu_template(
   int64_t istrideW = 0;
 
   for (int64_t i = 0; i < input.ndimension(); i++) {
-    AT_CHECK(input.size(i) > 0,
+    TORCH_CHECK(input.size(i) > 0,
       "adaptive_max_pool3d: expected input to have non-empty spatial dimensions, "
       "but input has sizes ", input.sizes(), " with dimension ", i, " being "
       "empty");
   }
 
-  AT_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
+  TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
 
-  // Issue #20215: the JIT sometimes passes output_size.size() == 1.
-  AT_CHECK(output_size.size() == 1 || output_size.size() == 3,
-    "adaptive_max_pool3d: internal error: output_size.size() must be 1 or 3");
+  TORCH_CHECK(output_size.size() == 3,
+    "adaptive_max_pool3d: internal error: output_size.size() must be 3");
 
   if (input.ndimension() == 5)
   {
@@ -191,8 +190,8 @@ void adaptive_max_pool3d_out_cpu_template(
   istrideW = input.stride(dimW);
 
   int64_t osizeT = output_size[0];
-  int64_t osizeH = output_size.size() == 1 ? output_size[0] : output_size[1];
-  int64_t osizeW = output_size.size() == 1 ? output_size[0] : output_size[2];
+  int64_t osizeH = output_size[1];
+  int64_t osizeW = output_size[2];
 
   /* resize output */
   if (input.ndimension() == 4)

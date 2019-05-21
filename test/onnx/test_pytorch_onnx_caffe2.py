@@ -129,8 +129,7 @@ class TestCaffe2Backend(unittest.TestCase):
         return cuda_model, cuda_input
 
     def run_debug_test(self, model, train, batch_size, state_dict=None,
-                       input=None, use_gpu=True, example_outputs=None,
-                       do_constant_folding=False):
+                       input=None, use_gpu=True, example_outputs=None):
         """
         # TODO: remove this from the final release version
         This test is for our debugging only for the case where
@@ -149,7 +148,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
         onnxir, torch_out = do_export(model, input, export_params=self.embed_params, verbose=False,
                                       example_outputs=example_outputs,
-                                      do_constant_folding=do_constant_folding)
+                                      do_constant_folding=False)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -183,8 +182,12 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                       example_outputs=None, do_constant_folding=False):
+                       example_outputs=None, do_constant_folding=True):
         use_gpu_ = torch.cuda.is_available() and use_gpu
+        # NOTE: do_constant_folding is turned on only when model has
+        # parameters embedded (which are needed for constant folding),
+        # i.e. for self.embed_params=True case. self.embed_params=True
+        # for the TestCaffe2BackendEmbed class defined at the bottom.
         if self.embed_params:
             self.run_actual_test(model, train, batch_size, state_dict, input,
                                  use_gpu=use_gpu_, rtol=rtol, atol=atol,
@@ -192,8 +195,7 @@ class TestCaffe2Backend(unittest.TestCase):
                                  do_constant_folding=do_constant_folding)
         else:
             self.run_debug_test(model, train, batch_size, state_dict, input,
-                                use_gpu=use_gpu_, example_outputs=example_outputs,
-                                do_constant_folding=do_constant_folding)
+                                use_gpu=use_gpu_, example_outputs=example_outputs)
 
     def test_linear(self):
         class MyModel(torch.nn.Module):
@@ -1366,7 +1368,7 @@ class TestCaffe2Backend(unittest.TestCase):
                 bbox_deltas = self.conv(feature)
                 a, b = torch.ops._caffe2.GenerateProposals(
                     feature, bbox_deltas, im_info, anchors,
-                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
                 )
                 output = torch.ops._caffe2.RoIAlign(
                     feature, a,
@@ -1422,7 +1424,7 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, scores, bbox_deltas, im_info, anchors):
                 a, b = torch.ops._caffe2.GenerateProposals(
                     scores, bbox_deltas, im_info, anchors,
-                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
                 )
                 return a, b
 
@@ -1456,6 +1458,7 @@ class TestCaffe2Backend(unittest.TestCase):
                     angle_bound_lo=-90,
                     angle_bound_hi=90,
                     clip_angle_thresh=0.5,
+                    legacy_plus_one=True,
                 )
                 return a, b
 
@@ -1473,7 +1476,7 @@ class TestCaffe2Backend(unittest.TestCase):
         im_info[:, 2] = 1.0
         im_info = torch.zeros((batch_size, 3))
         inputs = (torch.tensor(rois), torch.tensor(deltas), torch.tensor(im_info))
-        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3, use_gpu=False)
 
     # BoxWithNMSLimits has requirements for the inputs, so randomly generated inputs
     # in Caffe2BackendTestEmbed doesn't work with this op.
@@ -1500,6 +1503,7 @@ class TestCaffe2Backend(unittest.TestCase):
                 -90,
                 90,
                 clip_angle_thresh,
+                legacy_plus_one=True,
             )
         ]
         class_prob = np.random.randn(sum(roi_counts), num_classes).astype(np.float32)
@@ -1527,11 +1531,12 @@ class TestCaffe2Backend(unittest.TestCase):
                     cls_agnostic_bbox_reg=False,
                     input_boxes_include_bg_cls=True,
                     output_classes_include_bg_cls=True,
+                    legacy_plus_one=True,
                 )
                 return a, b, c, d
 
         inputs = (torch.tensor(class_prob), torch.tensor(pred_bbox), torch.tensor(batch_splits))
-        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3, use_gpu=False)
 
     def test_c2_inference_lstm(self):
         num_layers = 4
@@ -1570,7 +1575,15 @@ class TestCaffe2Backend(unittest.TestCase):
             torch.from_numpy(hx),
         ] + [param.detach() for param in torch_lstm._flat_weights]
 
-        self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3)
+        self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3, use_gpu=False)
+
+    def test_topk(self):
+        class TopKModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.topk(input, 3)
+        model = TopKModel()
+        x = torch.arange(1., 6.)
+        self.run_model_test(TopKModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_floor(self):
         class FloorModel(torch.nn.Module):
@@ -1640,6 +1653,24 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, input):
                 return view_by_prim_shape(input)
         self.run_model_test(PrimShapeModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_and(self):
+        class AndModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x & y
+
+        x = torch.randint(0, 1, (3, 5))
+        y = torch.randint(0, 1, (3, 5))
+        self.run_model_test(AndModel(), train=False, input=(x, y), batch_size=BATCH_SIZE)
+
+    def test_or(self):
+        class OrModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x | y
+
+        x = torch.randint(0, 1, (3, 5))
+        y = torch.randint(0, 1, (3, 5))
+        self.run_model_test(OrModel(), train=False, input=(x, y), batch_size=BATCH_SIZE)
 
 # a bit of metaprogramming to set up all the rnn tests
 

@@ -21,24 +21,24 @@ class SubgraphMatcher {
    * is the same as in the corresponding matchGraph node, its type is the same,
    * and all nodes producing input-values also match.
    */
-  bool matchesSubgraphFromAnchorNode(const Node* anchor);
+  bool matchesSubgraphFromAnchorNode(Node* anchor);
 
   /** \brief Return match map for nodes. */
-  std::unordered_map<const Node*, const Node*> nodes_map() const {
+  std::unordered_map<const Node*, Node*> nodes_map() const {
     return nodes_map_;
   }
 
   /** \brief Return match map for values. */
-  std::unordered_map<const Value*, const Value*> values_map() const {
+  std::unordered_map<const Value*, Value*> values_map() const {
     return values_map_;
   }
 
  private:
-  bool matchValues(const Value* v1, const Value* v2);
-  bool matchNodes(const Node* n1, const Node* n2);
+  bool matchValues(const Value* v1, Value* v2);
+  bool matchNodes(const Node* n1, Node* n2);
 
-  std::unordered_map<const Node*, const Node*> nodes_map_;
-  std::unordered_map<const Value*, const Value*> values_map_;
+  std::unordered_map<const Node*, Node*> nodes_map_;
+  std::unordered_map<const Value*, Value*> values_map_;
 
   const Graph& pattern_;
   const Node* anchor_ = nullptr;
@@ -73,7 +73,7 @@ bool patternGraphIsValid(const Graph& pattern) {
  * 1) the nodes defining them match
  * 2) they have the same number of uses, except they are entry or exit nodes.
  */
-bool SubgraphMatcher::matchValues(const Value* v1, const Value* v2) {
+bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
   // Check if we've already visited these values.
   if (values_map_.count(v1)) {
     return values_map_.at(v1) == v2;
@@ -104,7 +104,7 @@ bool SubgraphMatcher::matchValues(const Value* v1, const Value* v2) {
  * A special case is when N1 is PARAM - this is considered outside the pattern,
  * so it matches everything.
  */
-bool SubgraphMatcher::matchNodes(const Node* n1, const Node* n2) {
+bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
   // Check if we've already visited these nodes.
   if (nodes_map_.count(n1)) {
     return nodes_map_.at(n1) == n2;
@@ -123,7 +123,8 @@ bool SubgraphMatcher::matchNodes(const Node* n1, const Node* n2) {
 
   if (n1->kind() != n2->kind() ||
       n1->outputs().size() != n2->outputs().size() ||
-      n1->inputs().size() != n2->inputs().size()) {
+      n1->inputs().size() != n2->inputs().size() ||
+      n1->numAttributes() != n2->numAttributes()) {
     return false;
   }
 
@@ -140,6 +141,31 @@ bool SubgraphMatcher::matchNodes(const Node* n1, const Node* n2) {
       return false;
     }
   }
+  for (const Symbol& attr_name : n1->attributeNames()) {
+    if (n1->kindOf(attr_name) != n2->kindOf(attr_name)) {
+      return false;
+    }
+    switch (n1->kindOf(attr_name)) {
+      case AttributeKind::s:
+        if (n1->s(attr_name) != n2->s(attr_name)) {
+          return false;
+        }
+        break;
+      case AttributeKind::f:
+        if (n1->f(attr_name) != n2->f(attr_name)) {
+          return false;
+        }
+        break;
+      case AttributeKind::i:
+        if (n1->i(attr_name) != n2->i(attr_name)) {
+          return false;
+        }
+        break;
+      default:
+        // Other attributes types not supported yet
+        return false;
+    }
+  }
 
   return true;
 }
@@ -148,7 +174,7 @@ bool SubgraphMatcher::matchNodes(const Node* n1, const Node* n2) {
  * Recursively try to match pattern with the actual graph starting from the
  * exiting node in the pattern and anchor node in the actual graph.
  */
-bool SubgraphMatcher::matchesSubgraphFromAnchorNode(const Node* anchor) {
+bool SubgraphMatcher::matchesSubgraphFromAnchorNode(Node* anchor) {
   nodes_map_.clear();
   values_map_.clear();
   anchor_ = anchor;
@@ -167,26 +193,24 @@ bool SubgraphMatcher::matchesSubgraphFromAnchorNode(const Node* anchor) {
 } // unnamed namespace
 
 // Main entry point for the subgraph matching.
-std::vector<Match> findPatternMatches(
-    const Graph& pattern,
-    const Graph& graph) {
+std::vector<Match> findPatternMatches(const Graph& pattern, Graph& graph) {
   AT_ASSERT(patternGraphIsValid(pattern));
 
   SubgraphMatcher m(pattern);
   std::vector<Match> matches;
-  std::stack<const Block*> blocks_to_visit;
+  std::stack<Block*> blocks_to_visit;
 
   // Iterate over all nodes in the graph (including nodes in subblocks) trying
   // to match the pattern each node.
   blocks_to_visit.push(graph.block());
   while (!blocks_to_visit.empty()) {
-    const Block* block = blocks_to_visit.top();
+    Block* block = blocks_to_visit.top();
     blocks_to_visit.pop();
-    for (const Node* n : block->nodes()) {
+    for (Node* n : block->nodes()) {
       if (m.matchesSubgraphFromAnchorNode(n)) {
         matches.push_back({n, m.nodes_map(), m.values_map()});
       }
-      for (const Block* subblock : n->blocks()) {
+      for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);
       }
     }

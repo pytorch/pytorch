@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
@@ -169,6 +170,24 @@ void initJITBindings(PyObject* module) {
             return InsertQuantDequantNodes(g, qparam_dict);
           })
       .def(
+          "_jit_pass_insert_quantdequant_for_param",
+          [](std::shared_ptr<script::Module>& moduleObj,
+             const std::string& method_name,
+             const std::string& param_name,
+             py::function pyGetQParamFunc) {
+            if (param_name == std::string("weight")) {
+              auto getQParamFunc =
+                  py::cast<std::function<std::tuple<std::string, float, int>(
+                      at::Tensor)>>(pyGetQParamFunc);
+              InsertQuantDequantNodesForParam(
+                  moduleObj,
+                  method_name,
+                  param_name,
+                  getQParamFunc,
+                  at::ScalarType::QUInt8);
+            }
+          })
+      .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
       .def(
@@ -274,6 +293,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
+      .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def(
@@ -293,6 +313,9 @@ void initJITBindings(PyObject* module) {
             auto stack = toStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
+      .def(
+          "_jit_set_profiling_mode",
+          [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
@@ -372,8 +395,8 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(qualified_name);
           auto operations = getAllOperatorsFor(symbol);
-          AT_CHECK(!operations.empty(), "No such operator ", qualified_name);
-          AT_CHECK(
+          TORCH_CHECK(!operations.empty(), "No such operator ", qualified_name);
+          TORCH_CHECK(
               operations.size() == 1,
               "Found ",
               operations.size(),
