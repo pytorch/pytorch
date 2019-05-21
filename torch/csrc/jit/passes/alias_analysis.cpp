@@ -1283,12 +1283,8 @@ bool AliasDb::isBeforeSameGraph(const Node* a, const Node* b) const {
 }
 
 c10::optional<const Node*> AliasDb::getLastWildcard() const {
-  auto it = std::max_element(
-      wildcardNodes_.cbegin(),
-      wildcardNodes_.cend(),
-      [this](const Node* a, const Node* b) { return isBeforeSameGraph(a, b); });
-  if (it != wildcardNodes_.end()) {
-    return *it;
+  if (!wildcardNodes_.empty()) {
+    return *std::prev(wildcardNodes_.end());
   } else {
     return c10::nullopt;
   }

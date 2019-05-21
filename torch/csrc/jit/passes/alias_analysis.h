@@ -239,8 +239,9 @@ class AliasDb {
   ValueSet wildcards_;
   // All nodes that write to a wildcard
   std::unordered_set<Node*> wildcardWriters_;
-  // All nodes that contain a wildcard
-  std::unordered_set<const Node*> wildcardNodes_;
+  // All nodes that contain a wildcard, sorted to make queries for the last fast.
+  std::set<const Node*, std::function<bool (const Node*, const Node*)>> wildcardNodes_
+    { [this](const Node* a, const Node* b) { return isBeforeSameGraph(a, b); } };
 
   // State for tracking write info
   size_t numWrites_ = 0;
