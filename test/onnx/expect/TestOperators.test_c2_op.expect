@@ -60,6 +60,16 @@ graph {
       i: 1
       type: INT
     }
+    attribute {
+      name: "anchor_clip_pre_nms"
+      i: 0
+      type: INT
+    }
+    attribute {
+      name: "normalized"
+      i: 0
+      type: INT
+    }
     domain: "org.pytorch._caffe2"
   }
   name: "torch-jit-export"

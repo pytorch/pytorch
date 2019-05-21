@@ -34,7 +34,13 @@ class BBoxTransformOp final : public Operator<Context> {
         clip_angle_thresh_(
             this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)),
         legacy_plus_one_(
-            this->template GetSingleArgument<bool>("legacy_plus_one", true)) {
+            this->template GetSingleArgument<bool>("legacy_plus_one", true)),
+        clip_boxes_(
+            this->template GetSingleArgument<bool>("clip_boxes", true)),
+        share_location_(
+            this->template GetSingleArgument<bool>("share_location", false)),
+        normalized_(
+            this->template GetSingleArgument<bool>("normalized", false)) {
     CAFFE_ENFORCE_EQ(
         weights_.size(),
         4,
@@ -66,6 +72,12 @@ class BBoxTransformOp final : public Operator<Context> {
   float clip_angle_thresh_{1.0};
   // The infamous "+ 1" for box width and height dating back to the DPM days
   bool legacy_plus_one_{true};
+  // Specifies, if we want to clip boxes after transform
+  bool clip_boxes_{true};
+  // Set to true, if input boxes are shared in batch (as priors)
+  bool share_location_{false};
+  // Set to true, if input boxes are in normalized coordinates
+  bool normalized_{false};
 };
 
 } // namespace caffe2

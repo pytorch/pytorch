@@ -75,6 +75,9 @@ class TorchIntegration(hu.HypothesisTestCase):
         rotated=st.booleans(),
         angle_bound_on=st.booleans(),
         clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
+        clip_boxes=st.booleans(),
+        share_location=st.booleans(),
+        normalized=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_bbox_transform(
@@ -84,12 +87,18 @@ class TorchIntegration(hu.HypothesisTestCase):
         rotated,
         angle_bound_on,
         clip_angle_thresh,
+        clip_boxes,
+        share_location,
+        normalized,
         gc,
         dc,
     ):
         """
         Test with rois for multiple images in a batch
         """
+        if share_location:
+            roi_counts = [roi_counts[0]]
+
         rois, deltas, im_info = create_bbox_transform_inputs(
             roi_counts, num_classes, rotated
         )
@@ -103,6 +112,9 @@ class TorchIntegration(hu.HypothesisTestCase):
                 rotated=rotated,
                 angle_bound_on=angle_bound_on,
                 clip_angle_thresh=clip_angle_thresh,
+                clip_boxes=clip_boxes,
+                share_location=share_location,
+                normalized=normalized,
             )
             workspace.FeedBlob("rois", rois)
             workspace.FeedBlob("deltas", deltas)
@@ -123,6 +135,9 @@ class TorchIntegration(hu.HypothesisTestCase):
             90,
             clip_angle_thresh,
             legacy_plus_one=True,
+            clip_boxes=clip_boxes,
+            share_location=share_location,
+            normalized=normalized,
         )
 
         torch.testing.assert_allclose(box_out, a)
@@ -163,8 +178,12 @@ class TorchIntegration(hu.HypothesisTestCase):
                 90,
                 clip_angle_thresh,
                 legacy_plus_one=True,
+                clip_boxes=True,
+                share_location=False,
+                normalized=False
             )
         ]
+
         class_prob = np.random.randn(sum(roi_counts), num_classes).astype(np.float32)
         score_thresh = 0.5
         nms_thresh = 0.5
@@ -262,6 +281,8 @@ class TorchIntegration(hu.HypothesisTestCase):
             90,
             1.0,
             legacy_plus_one=True,
+            anchor_clip_pre_nms=False,
+            normalized=False,
         )
         torch.testing.assert_allclose(rois, a)
         torch.testing.assert_allclose(rois_probs, b)
@@ -397,6 +418,8 @@ class TorchIntegration(hu.HypothesisTestCase):
             90,
             1.0,
             legacy_plus_one=True,
+            anchor_clip_pre_nms=False,
+            normalized=False,
         )
         torch.testing.assert_allclose(rois, a.cpu())
         torch.testing.assert_allclose(rois_probs, b.cpu())

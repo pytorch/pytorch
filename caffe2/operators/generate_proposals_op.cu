@@ -27,7 +27,8 @@ __global__ void GeneratePreNMSUprightBoxesKernel(
     float4* d_out_boxes,
     const int prenms_nboxes, // leading dimension of out_boxes
     float* d_inout_scores,
-    char* d_boxes_keep_flags) {
+    char* d_boxes_keep_flags,
+    bool anchor_clip_pre_nms) {
   const int K = H * W;
   const int KA = K * A;
   CUDA_2D_KERNEL_LOOP(ibox, nboxes_to_generate, image_index, num_images) {
@@ -60,6 +61,16 @@ __global__ void GeneratePreNMSUprightBoxesKernel(
     float y1 = shift_h + anchor.y;
     float y2 = shift_h + anchor.w;
 
+    const float img_height = d_img_info_vec[3 * image_index + 0];
+    const float img_width = d_img_info_vec[3 * image_index + 1];
+
+    if (anchor_clip_pre_nms) {
+        x1 = fmaxf(fminf(x1, img_width - float(int(legacy_plus_one))), 0.0f);
+        y1 = fmaxf(fminf(y1, img_height - float(int(legacy_plus_one))), 0.0f);
+        x2 = fmaxf(fminf(x2, img_width - float(int(legacy_plus_one))), 0.0f);
+        y2 = fmaxf(fminf(y2, img_height - float(int(legacy_plus_one))), 0.0f);
+    }
+
     // TODO use fast math when possible
 
     // Deltas for that box
@@ -78,8 +89,8 @@ __global__ void GeneratePreNMSUprightBoxesKernel(
     float dh = d_bbox_deltas[deltas_idx];
 
     // Upper bound on dw,dh
-    dw = fmin(dw, bbox_xform_clip);
-    dh = fmin(dh, bbox_xform_clip);
+    dw = fminf(dw, bbox_xform_clip);
+    dh = fminf(dh, bbox_xform_clip);
 
     // Applying the deltas
     float width = x2 - x1 + float(int(legacy_plus_one));
@@ -97,21 +108,20 @@ __global__ void GeneratePreNMSUprightBoxesKernel(
     y2 = pred_ctr_y + 0.5f * pred_h - float(int(legacy_plus_one));
 
     // Clipping box to image
-    const float img_height = d_img_info_vec[3 * image_index + 0];
-    const float img_width = d_img_info_vec[3 * image_index + 1];
     const float min_size_scaled =
         min_size * d_img_info_vec[3 * image_index + 2];
-    x1 = fmax(fmin(x1, img_width - float(int(legacy_plus_one))), 0.0f);
-    y1 = fmax(fmin(y1, img_height - float(int(legacy_plus_one))), 0.0f);
-    x2 = fmax(fmin(x2, img_width - float(int(legacy_plus_one))), 0.0f);
-    y2 = fmax(fmin(y2, img_height - float(int(legacy_plus_one))), 0.0f);
+    x1 = fmaxf(fminf(x1, img_width - float(int(legacy_plus_one))), 0.0f);
+    y1 = fmaxf(fminf(y1, img_height - float(int(legacy_plus_one))), 0.0f);
+    x2 = fmaxf(fminf(x2, img_width - float(int(legacy_plus_one))), 0.0f);
+    y2 = fmaxf(fminf(y2, img_height - float(int(legacy_plus_one))), 0.0f);
 
     // Filter boxes
     // Removing boxes with one dim < min_size
     // (center of box is in image, because of previous step)
     width = x2 - x1 + float(int(legacy_plus_one)); // may have changed
     height = y2 - y1 + float(int(legacy_plus_one));
-    bool keep_box = fmin(width, height) >= min_size_scaled;
+    bool keep_box = (fminf(width, height) >= min_size_scaled) &&
+         ((y1 + 0.5 * height) < img_height) && ((x1 + 0.5 * width) < img_width);
 
     // We are not deleting the box right now even if !keep_box
     // we want to keep the relative order of the elements stable
@@ -120,6 +130,7 @@ __global__ void GeneratePreNMSUprightBoxesKernel(
     // d_out_boxes size: (num_images,prenms_nboxes)
     const int out_index = image_index * prenms_nboxes + ibox;
     d_boxes_keep_flags[out_index] = keep_box;
+
     d_out_boxes[out_index] = {x1, y1, x2, y2};
 
     // d_inout_scores size: (num_images,KA)
@@ -196,8 +207,8 @@ __global__ void GeneratePreNMSRotatedBoxesKernel(
     delta.a = d_bbox_deltas[deltas_idx + K * 4];
 
     // Upper bound on dw,dh
-    delta.w = fmin(delta.w, bbox_xform_clip);
-    delta.h = fmin(delta.h, bbox_xform_clip);
+    delta.w = fminf(delta.w, bbox_xform_clip);
+    delta.h = fminf(delta.h, bbox_xform_clip);
 
     // Convert back to degrees
     delta.a *= 180.f / PI;
@@ -237,10 +248,10 @@ __global__ void GeneratePreNMSRotatedBoxesKernel(
       float y2 = y1 + box.h - float(int(legacy_plus_one));
 
       // Clip
-      x1 = fmax(fmin(x1, img_width - float(int(legacy_plus_one))), 0.0f);
-      y1 = fmax(fmin(y1, img_height - float(int(legacy_plus_one))), 0.0f);
-      x2 = fmax(fmin(x2, img_width - float(int(legacy_plus_one))), 0.0f);
-      y2 = fmax(fmin(y2, img_height - float(int(legacy_plus_one))), 0.0f);
+      x1 = fmaxf(fminf(x1, img_width - float(int(legacy_plus_one))), 0.0f);
+      y1 = fmaxf(fminf(y1, img_height - float(int(legacy_plus_one))), 0.0f);
+      x2 = fmaxf(fminf(x2, img_width - float(int(legacy_plus_one))), 0.0f);
+      y2 = fmaxf(fminf(y2, img_height - float(int(legacy_plus_one))), 0.0f);
 
       // Convert back to [x_ctr, y_ctr, w, h]
       box.x_ctr = (x1 + x2) / 2.f;
@@ -251,7 +262,7 @@ __global__ void GeneratePreNMSRotatedBoxesKernel(
 
     // Filter boxes.
     // Removing boxes with one dim < min_size or center outside the image.
-    bool keep_box = (fmin(box.w, box.h) >= min_size_scaled) &&
+    bool keep_box = (fminf(box.w, box.h) >= min_size_scaled) &&
         (box.x_ctr < img_width) && (box.y_ctr < img_height);
 
     // We are not deleting the box right now even if !keep_box
@@ -277,7 +288,20 @@ __global__ void WriteUprightBoxesOutput(
     const int nboxes,
     const int image_index,
     float* d_image_out_rois,
-    float* d_image_out_rois_probs) {
+    float* d_image_out_rois_probs,
+    bool normalized,
+    const float* d_img_info_vec) {
+
+  const float img_height = d_img_info_vec[3 * image_index + 0];
+  const float img_width = d_img_info_vec[3 * image_index + 1];
+  float height_coeff = 1.0f;
+  float width_coeff = 1.0f;
+
+  if (normalized) {
+    height_coeff /= img_height;
+    width_coeff /= img_width;
+  }
+
   CUDA_1D_KERNEL_LOOP(i, nboxes) {
     const int ibox = d_image_boxes_keep_list[i];
     const float4 box = d_image_boxes[ibox];
@@ -287,10 +311,10 @@ __global__ void WriteUprightBoxesOutput(
     d_image_out_rois_probs[i] = score;
     const int base_idx = 5 * i;
     d_image_out_rois[base_idx + 0] = image_index;
-    d_image_out_rois[base_idx + 1] = box.x;
-    d_image_out_rois[base_idx + 2] = box.y;
-    d_image_out_rois[base_idx + 3] = box.z;
-    d_image_out_rois[base_idx + 4] = box.w;
+    d_image_out_rois[base_idx + 1] = width_coeff * box.x;
+    d_image_out_rois[base_idx + 2] = height_coeff * box.y;
+    d_image_out_rois[base_idx + 3] = width_coeff * box.z;
+    d_image_out_rois[base_idx + 4] = height_coeff * box.w;
   }
 }
 
@@ -491,7 +515,8 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
         reinterpret_cast<float4*>(d_boxes),
         nboxes_to_generate,
         d_sorted_scores,
-        d_boxes_keep_flags);
+        d_boxes_keep_flags,
+        anchor_clip_pre_nms_);
   } else {
     GeneratePreNMSRotatedBoxesKernel<<<
         (CAFFE_GET_BLOCKS(nboxes_to_generate), num_images),
@@ -628,7 +653,9 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
           postnms_nboxes,
           image_index,
           d_image_postnms_rois,
-          d_image_postnms_rois_probs);
+          d_image_postnms_rois_probs,
+          normalized_,
+          d_im_info_vec);
     } else {
       WriteRotatedBoxesOutput<<<
           CAFFE_GET_BLOCKS(postnms_nboxes),

@@ -218,8 +218,17 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
 
   // Compute anchors specific to the ordered and pre-filtered indices
   // in (A, H, W) format.
-  const auto& all_anchors_sorted =
+  auto all_anchors_sorted =
       utils::ComputeSortedAnchors(anchors, H, W, feat_stride_, order);
+
+  if (anchor_clip_pre_nms_) {
+     all_anchors_sorted = utils::clip_boxes(
+         all_anchors_sorted,
+         im_info[0],
+         im_info[1],
+         clip_angle_thresh_,
+         legacy_plus_one_);
+  }
 
   // Transform anchors into proposals via bbox transformations
   static const std::vector<float> bbox_weights{1.0, 1.0, 1.0, 1.0};
@@ -262,6 +271,14 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   // Generate outputs
   utils::GetSubArrayRows(proposals, utils::AsEArrXt(keep), out_boxes);
   utils::GetSubArray(scores_sorted, utils::AsEArrXt(keep), out_probs);
+
+  if (normalized_) {
+    out_boxes->col(0) /= im_info[1];
+    out_boxes->col(1) /= im_info[0];
+    out_boxes->col(2) /= im_info[1];
+    out_boxes->col(3) /= im_info[0];
+  }
+
 }
 
 template <>
@@ -387,6 +404,11 @@ non-maximum suppression is applied to generate the final bounding boxes.
         "float (default 1.0 degrees). For RRPN, clip almost horizontal boxes "
         "within this threshold of tolerance for backward compatibility. "
         "Set to negative value for no clipping.")
+    .Arg(
+        "anchor_clip_pre_nms",
+        "bool (default false). Specifies, whether to clip anchors before applying nms.")
+    .Arg("normalized",
+        "bool (default false) Specifies if to output proposals in normalized coordinates")
     .Input(0, "scores", "Scores from conv layer, size (img_count, A, H, W)")
     .Input(
         1,
@@ -431,7 +453,10 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
       "int angle_bound_lo, "
       "int angle_bound_hi, "
       "float clip_angle_thresh, "
-      "bool legacy_plus_one"
+      "bool legacy_plus_one, "
+      "bool anchor_clip_pre_nms, "
+      "bool normalized"
     ") -> (Tensor output_0, Tensor output_1)",
     caffe2::GenerateProposalsOp<caffe2::CPUContext>);
 // clang-format on
+

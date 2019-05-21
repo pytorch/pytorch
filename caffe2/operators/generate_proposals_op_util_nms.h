@@ -34,7 +34,8 @@ std::vector<int> nms_cpu_upright(
   CAFFE_ENFORCE_EQ(scores.cols(), 1);
   CAFFE_ENFORCE_LE(sorted_indices.size(), proposals.rows());
 
-  using EArrX = EArrXt<typename Derived1::Scalar>;
+  using scalar_type = typename Derived1::Scalar;
+  using EArrX = EArrXt<scalar_type>;
 
   auto x1 = proposals.col(0);
   auto y1 = proposals.col(1);
@@ -65,6 +66,11 @@ std::vector<int> nms_cpu_upright(
     EArrX h = (yy2 - yy1 + int(legacy_plus_one)).cwiseMax(0.0);
     EArrX inter = w * h;
     EArrX ovr = inter / (areas[i] + GetSubArray(areas, rest_indices) - inter);
+
+    // replace nans in case of zero area
+    if (!legacy_plus_one) {
+      ovr = ovr.unaryExpr([](scalar_type v) { return std::isnan(v)? static_cast<scalar_type>(0) : v; });
+    }
 
     // indices for sub array order[1:n]
     auto inds = GetArrayIndices(ovr <= thresh);

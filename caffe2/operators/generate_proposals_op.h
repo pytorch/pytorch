@@ -101,7 +101,11 @@ class GenerateProposalsOp final : public Operator<Context> {
         clip_angle_thresh_(
             this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)),
         legacy_plus_one_(
-            this->template GetSingleArgument<bool>("legacy_plus_one", true)) {}
+            this->template GetSingleArgument<bool>("legacy_plus_one", true)),
+        anchor_clip_pre_nms_(
+            this->template GetSingleArgument<bool>("anchor_clip_pre_nms", false)),
+        normalized_(
+            this->template GetSingleArgument<bool>("normalized", false)) {}
 
   ~GenerateProposalsOp() {}
 
@@ -146,6 +150,10 @@ class GenerateProposalsOp final : public Operator<Context> {
   float clip_angle_thresh_{1.0};
   // The infamous "+ 1" for box width and height dating back to the DPM days
   bool legacy_plus_one_{true};
+    // Specifies, whether to clip anchors before applying nms
+  bool anchor_clip_pre_nms_{false};
+  // Set to true, to output proposals in normalized coordinates
+  bool normalized_{false};
 
   // Scratch space required by the CUDA version
   // CUB buffers
