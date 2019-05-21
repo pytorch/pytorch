@@ -96,7 +96,7 @@ Tensor& fill_(Tensor& self, Scalar value) {
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
-  AT_ASSERTM(value.dim() == 0, "fill_ only supports 0-dimension value tensor.");
+  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
   return fill_out(self, value.item());
 }
 
