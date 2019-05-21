@@ -18,6 +18,9 @@ inline void parallel_for(
     const int64_t end,
     const int64_t grain_size,
     const F& f) {
+  if (begin >= end) {
+    return;
+  }
 #ifdef _OPENMP
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
@@ -41,9 +44,7 @@ inline void parallel_for(
     std::rethrow_exception(eptr);
   }
 #else
-  if (begin < end) {
-    f(begin, end);
-  }
+  f(begin, end);
 #endif
 }
 
