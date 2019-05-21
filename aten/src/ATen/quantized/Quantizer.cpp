@@ -75,7 +75,7 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale;
   qparams.zero_point = zero_point;
-  qparams.precision = std::numeric_limits<typename T::underlying>::digits;
+  qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
   fbgemm::Quantize<typename T::underlying>(/*src=*/rd,
                              /*dst=*/qd,
                              /*len=*/rtensor.numel(),
