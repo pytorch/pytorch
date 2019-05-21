@@ -1116,22 +1116,29 @@ const std::vector<std::string> functions = {
         def dropout(input,
                     p: float,
                     train: bool):
-            def backward_no_training(grad_input):
-                return grad_input, None, None
-            if p == 0 or !train or input.numel() == 0:
-                return input, backward_no_training
-            use_cuda = input.is_cuda
-            # lowering is specialized for cuda because cuda fuser can efficiently fuse those operations
-            # for cpu backend, where fusions are disabled, a different lowering that is more efficient
-            # in the absence of fusion is used
-            p1m = 1. - p
-            if use_cuda:
-                mask = torch.rand_like(input) < p1m
-                res = mask.type_as(input) * input * (1./p1m)
+            # TODO: we have to do this gross branching because we don't have
+            # first-class closures, so we need define a single backward(). So
+            # we define a dummy mask to save memory when we capture it in eval
+            # mode. Once first-class closures are available, this code can look
+            # a lot cleaner.
+            is_training = p != 0 and train and input.numel() != 0
+            if is_training:
+                use_cuda = input.is_cuda
+                # lowering is specialized for cuda because cuda fuser can efficiently fuse those operations
+                # for cpu backend, where fusions are disabled, a different lowering that is more efficient
+                # in the absence of fusion is used
+                p1m = 1. - p
+                if use_cuda:
+                    mask = torch.rand_like(input) < p1m
+                    res = mask.type_as(input) * input * (1./p1m)
+                else:
+                    mask = torch.empty_like(input)
+                    mask.bernoulli_(p1m)
+                    res = mask * input / p1m
             else:
-                mask = torch.empty_like(input)
-                mask.bernoulli_(p1m)
-                res = mask * input / p1m
+                p1m = 1.
+                res = input
+                mask = torch.zeros(0)
 
             def backward(grad_output):
                 use_cuda = grad_output.is_cuda
