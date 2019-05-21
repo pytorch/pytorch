@@ -80,7 +80,6 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(self.defined(), "src is undefined");
 
-  Tensor b_src;
   if (self.is_sparse() && src.is_sparse()) {
     return at::copy_sparse_to_sparse_(self, src, non_blocking);
   } else if (self.is_sparse() || src.is_sparse()) {
@@ -89,6 +88,15 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
 
   if (self.is_same(src)) {
+    return self;
+  }
+
+  // Re-dispatch copies with src device not implemented here (e.g. XLA).
+  // This includes: cpu_tensor.copy_(xla_tensor) which
+  // calls xla_tensor._copy_from(cpu_tensor)
+  if (!src.device().is_cuda() && !src.device().is_cpu()) {
+    TORCH_INTERNAL_ASSERT(self.device().is_cuda() || self.device().is_cpu());
+    at::_copy_from(src, self, non_blocking);
     return self;
   }
 
