@@ -31,8 +31,7 @@ int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"};
 }
 
 Value* getScaleValue(Node* n) {
-  if (n->kind().toQualString() !=
-      std::string("aten::dequantize_linear")) {
+  if (n->kind().toQualString() != std::string("aten::dequantize_linear")) {
     return nullptr;
   }
   TORCH_CHECK(n->inputs().size() == 4);
