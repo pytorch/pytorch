@@ -12,6 +12,25 @@ Tensor quantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point,
   return quantizer->quantize(self);
 }
 
+Tensor quantize_linear_per_channel_cpu(const Tensor& self, const Tensor& scales, const Tensor& zero_points, const Tensor& axis, ScalarType dtype) {
+  TORCH_CHECK(scales.dim() == 1, "scale tensor must have dimension 1");
+  TORCH_CHECK(zero_points.dim() == 1, "zero_points tensor must have dimension 1");
+  TORCH_CHECK(scales.numel() == zero_points.numel(), "number of elements in scales and zero_points must match");
+  TORCH_CHECK(axis.dim() == 1, "axis tensor must have dimension 1");
+  std::vector<float> scale_vals;
+  std::vector<int32_t> zero_point_vals;
+  std::vector<int64_t> axis_vals;
+  for (auto i = 0; i < scales.numel(); ++i) {
+    scale_vals.push_back(scales.data<float>()[i]);
+    zero_point_vals.push_back(zero_points.data<int32_t>()[i]);
+  }
+  for (auto i = 0; i < axis.numel(); ++i) {
+    axis_vals.push_back(axis.data<int64_t>()[i]);
+  }
+  auto quantizer = make_per_channel_affine_quantizer(scale_vals, zero_point_vals, axis_vals, dtype);
+  return quantizer->quantize(self);
+}
+
 Tensor dequantize_quant(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }

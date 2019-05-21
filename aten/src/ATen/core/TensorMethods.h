@@ -801,6 +801,9 @@ inline Tensor Tensor::to_mkldnn() const {
 inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const {
     return dispatch_type().quantize_linear(*this, scale, zero_point, dtype);
 }
+inline Tensor Tensor::quantize_linear_per_channel(const Tensor & scales, const Tensor & zero_points, const Tensor & axis, ScalarType dtype) const {
+    return dispatch_type().quantize_linear_per_channel(*this, scales, zero_points, axis, dtype);
+}
 inline Tensor Tensor::dequantize() const {
     return dispatch_type().dequantize(*this);
 }

@@ -1413,7 +1413,7 @@
 
 - func: poisson_nll_loss(Tensor input, Tensor target, bool log_input, bool full, float eps, int reduction) -> Tensor
   variants: function
-  
+
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2568,6 +2568,11 @@
   variants: function, method
   dispatch:
     CPU: quantize_linear_cpu
+
+- func: quantize_linear_per_channel(Tensor self, Tensor scales, Tensor zero_points, Tensor axis, ScalarType dtype) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: quantize_linear_per_channel_cpu
 
 - func: dequantize(Tensor self) -> Tensor
   variants: function, method
