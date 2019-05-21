@@ -114,10 +114,10 @@ def create_build_env():
         my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
 
     if IS_WINDOWS:
-        my_env = overlay_windows_vcvars(my_env)
         # When using Ninja under Windows, the gcc toolchain will be chosen as default.
         # But it should be set to MSVC as the user's first choice.
         if USE_NINJA:
+            my_env = overlay_windows_vcvars(my_env)
             cc = my_env.get('CC', 'cl')
             cxx = my_env.get('CXX', 'cl')
             my_env['CC'] = cc
@@ -213,6 +213,9 @@ def run_cmake(version,
         USE_GFLAGS=os.getenv('USE_GFLAGS'),
         WERROR=os.getenv('WERROR'))
 
+    if os.getenv('_GLIBCXX_USE_CXX11_ABI'):
+        cmake_defines(cmake_args, GLIBCXX_USE_CXX11_ABI=os.getenv('_GLIBCXX_USE_CXX11_ABI'))
+
     if os.getenv('USE_OPENMP'):
         cmake_defines(cmake_args, USE_OPENMP=check_env_flag('USE_OPENMP'))
 
@@ -287,7 +290,7 @@ def build_caffe2(version,
             check_call(build_cmd, cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
-            ninja_cmd = ['ninja', 'install', '-v']
+            ninja_cmd = ['ninja', 'install']
             if max_jobs is not None:
                 ninja_cmd += ['-j', max_jobs]
             check_call(ninja_cmd, cwd=build_dir, env=my_env)

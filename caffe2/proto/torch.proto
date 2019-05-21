@@ -79,7 +79,7 @@ message LibDef {
 }
 
 enum ProtoVersion {
-  PROTO_VERSION_NEWEST = 0x0000000000000003;
+  PROTO_VERSION_NEWEST = 0x0000000000000004;
 }
 
 message ModelDef {

@@ -86,7 +86,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda(
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_backward", [&] {
       auto mean_st = running_mean.dtype();
       auto var_st = running_var.dtype();
-      AT_CHECK(mean_st == var_st, "running_mean and running_var need to have the same data types");
+      TORCH_CHECK(mean_st == var_st, "running_mean and running_var need to have the same data types");
       // <sigh> Some workloads depend on passing in half input and float stats, which is
       // usually handled by cuDNN. However, the JIT sometimes replaces cuDNN calls with this
       // one so it needs to support the same case, or people start to complain.
