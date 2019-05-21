@@ -469,7 +469,7 @@ def _get_tensor_summary(name, display_name, description, tensor, content_type, j
         combination of name and type to make it unique even outside of this
         summary.
       display_name: Will be used as the display name in TensorBoard.
-        Defaults to `tag`.
+        Defaults to `name`.
       description: A longform readable description of the summary data. Markdown
         is supported.
       tensor: Tensor to display in summary.
@@ -549,4 +549,4 @@ def mesh(tag, vertices, colors, faces, config_dict, display_name=None, descripti
         summaries.append(
             _get_tensor_summary(tag, display_name, description, tensor, content_type, json_config))
 
-    return Summary(value=summaries)  # return only vertices for testing
+    return Summary(value=summaries)
