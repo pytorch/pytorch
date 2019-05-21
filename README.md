@@ -151,7 +151,7 @@ They requires JetPack 4.2 and above and are maintained by @dusty-nv
 ### From Source
 
 If you are installing from source, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
-You will get a high-quality BLAS library (MKL) and you get a controlled compiler version regardless of your Linux distro.
+You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
 Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
 
@@ -183,7 +183,7 @@ conda install -c pytorch magma-cuda90 # or [magma-cuda80 | magma-cuda92 | magma-
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
 # if you are updating an existing checkout
-git submodule sync 
+git submodule sync
 git submodule update --init --recursive
 ```
 
