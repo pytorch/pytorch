@@ -476,7 +476,19 @@ void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Gene
       };
       distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
         gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand4(state); },
+        [] __device__ (curandStatePhilox4_32_10_t* state) {
+        #ifndef __HIP_PLATFORM_HCC__
+          return curand4(state);
+        #else
+          // HIP doesn't have curand4
+          uint4 rand;
+          rand.x = curand(state);
+          rand.y = curand(state);
+          rand.z = curand(state);
+          rand.w = curand(state);
+          return rand;
+        #endif
+        },
         random_func);
     }
    });
