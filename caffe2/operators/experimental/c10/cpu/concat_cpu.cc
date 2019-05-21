@@ -13,7 +13,7 @@ namespace caffe2 {
 namespace {
 template <class DataType, class Context>
 void concat_op_cpu_impl(
-    ArrayRef<at::Tensor> inputs,
+    std::vector<at::Tensor> inputs,
     const at::Tensor& output_,
     const at::Tensor& split_,
     int64_t axis,

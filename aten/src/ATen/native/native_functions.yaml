@@ -456,29 +456,6 @@
   variants: method
   device_guard: False
 
-- func: s_copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  dispatch:
-    CPU: _s_copy__cpu
-    CUDA: _s_copy__cuda
-    QuantizedCPU: _s_copy__quantized
-
-- func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  dispatch:
-    CUDA: _s_copy_from_cuda
-
-- func: _copy_same_type_(Tensor(a!) self, Tensor src) -> void
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  dispatch:
-    CPU: _copy_same_type__cpu
-
 - func: cos(Tensor self) -> Tensor
   variants: function, method
 

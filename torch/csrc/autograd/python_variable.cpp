@@ -304,6 +304,13 @@ PyObject *THPVariable_get_requires_grad(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_get_ndim(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  return PyInt_FromLong(self->cdata.dim());
+  END_HANDLE_TH_ERRORS
+}
+
 int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
@@ -443,6 +450,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
+  {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
   {nullptr}
 };
 

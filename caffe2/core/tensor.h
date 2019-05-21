@@ -649,6 +649,9 @@ Tensor TensorCPUFromValues(at::IntArrayRef dims, at::ArrayRef<T> values) {
   return r;
 }
 
+vector<int64_t>
+GetTensorInfo(const void* c, size_t* capacity, DeviceOption* device);
+
 class CAFFE2_API TensorPrinter {
  public:
   explicit TensorPrinter(
