@@ -1141,12 +1141,15 @@ const std::vector<std::string> functions = {
                 mask = torch.zeros(0)
 
             def backward(grad_output):
-                use_cuda = grad_output.is_cuda
-                if use_cuda:
-                    grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
+                if not is_training:
+                    return grad_output, None, None
                 else:
-                    grad_input = grad_output * mask / p1m
-                return grad_input, None, None
+                    use_cuda = grad_output.is_cuda
+                    if use_cuda:
+                        grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
+                    else:
+                        grad_input = grad_output * mask / p1m
+                    return grad_input, None, None
             return res, backward
 
         def embedding(weight,
