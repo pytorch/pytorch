@@ -1116,8 +1116,8 @@ const std::vector<std::string> functions = {
         def dropout(input,
                     p: float,
                     train: bool):
-            def backward_no_training():
-                return 1
+            def backward_no_training(grad_input):
+                return grad_input, None, None
             if p == 0 or !train or input.numel() == 0:
                 return input, backward_no_training
             use_cuda = input.is_cuda
