@@ -15,11 +15,3 @@ class TestCaffe2Backend_opset10(unittest.TestCase):
         x = torch.tensor([1.0, float('nan'), 2.0])
         run_model_test(self, IsNanModel(), train=False, input=x,
                        batch_size=BATCH_SIZE, use_gpu=False, opset_version=10)
-
-    def test_topk(self):
-        class TopKModel(torch.nn.Module):
-            def forward(self, input):
-                return torch.topk(input, 3)
-        x = torch.arange(1., 6.)
-        run_model_test(self, TopKModel(), train=False, input=x,
-                       batch_size=BATCH_SIZE, opset_version=10)
