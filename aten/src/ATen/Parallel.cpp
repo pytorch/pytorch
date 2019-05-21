@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <sstream>
+#include <thread>
 
 #ifdef TH_BLAS_MKL
 #include <mkl.h>
@@ -13,8 +14,43 @@
 namespace at {
 
 namespace {
+const int NOT_SET = -1;
+const int CONSUMED = -2;
+
 // Number of threads set by the user
-std::atomic<int> num_threads(-1);
+std::atomic<int> num_threads{NOT_SET};
+
+// Number of inter-op threads set by the user;
+// NOT_SET -> positive value -> CONSUMED
+// (CONSUMED - thread pool is initialized)
+// or
+// NOT_SET -> CONSUMED
+std::atomic<int> num_interop_threads{NOT_SET};
+
+// thread pool global instance is hidden,
+// users should use at::launch and get/set_num_interop_threads interface
+TaskThreadPoolBase& get_pool() {
+  static std::shared_ptr<TaskThreadPoolBase> pool =
+      ThreadPoolRegistry()->Create(
+          "C10",
+          /* device_id */ 0,
+          /* pool_size */ num_interop_threads.exchange(CONSUMED),
+          /* create_new */ true);
+  return *pool;
+}
+
+ // Factory function for ThreadPoolRegistry
+std::shared_ptr<TaskThreadPoolBase> create_c10_threadpool(
+    int device_id,
+    int pool_size,
+    bool create_new) {
+  // For now, the only accepted device id is 0
+  AT_CHECK(device_id == 0);
+  // Create new thread pool
+  AT_CHECK(create_new);
+  return std::make_shared<PTThreadPool>(pool_size);
+}
+
 }
 
 void init_num_threads() {
@@ -32,10 +68,9 @@ void init_num_threads() {
   }
 }
 
-void set_num_threads(size_t nthreads) {
-  if (nthreads == 0) {
-    return;
-  }
+void set_num_threads(int nthreads) {
+  AT_CHECK(nthreads > 0, "Expected positive number of threads");
+
   num_threads.store(nthreads);
 #ifdef _OPENMP
   omp_set_num_threads(nthreads);
@@ -56,7 +91,7 @@ void set_num_threads(size_t nthreads) {
 // region might be different in the new thread;
 // Use init_num_threads() during thread initialization to ensure
 // consistent size of parallel region in different threads
-size_t get_num_threads() {
+int get_num_threads() {
 #ifdef _OPENMP
   return omp_get_max_threads();
 #else
@@ -100,7 +135,7 @@ std::string get_parallel_info() {
 }
 
 PTThreadPool::PTThreadPool(
-    std::size_t pool_size,
+    int pool_size,
     int numa_node_id)
     : c10::ThreadPool(pool_size, numa_node_id) {}
 
@@ -109,26 +144,31 @@ void PTThreadPool::init_thread() {
   at::init_num_threads();
 }
 
-namespace {
+C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, create_c10_threadpool);
 
-std::shared_ptr<TaskThreadPoolBase> createC10ThreadPool(
-    int device_id,
-    int pool_size,
-    bool create_new) {
-  static std::shared_ptr<TaskThreadPoolBase> pool =
-      std::make_shared<PTThreadPool>(pool_size);
-  // For now, the only accepted device id is 0
-  // for the JIT inter-op pool (CPU),
-  AT_ASSERT(device_id == 0);
-  // we use the shared thread pool
-  AT_ASSERT(!create_new);
-  // and the size does not change
-  AT_ASSERT(pool->size() == pool_size);
-  return pool;
+void set_num_interop_threads(int nthreads) {
+  AT_CHECK(nthreads > 0, "Expected positive number of threads");
+
+  int no_value = NOT_SET;
+  AT_CHECK(num_interop_threads.compare_exchange_strong(no_value, nthreads),
+      "Error: cannot set number of interop threads after parallel work "
+      "has started or set_num_interop_threads called");
 }
 
-} // namespace
+int get_num_interop_threads() {
+  int nthreads = num_interop_threads.load();
+  if (nthreads > 0) {
+    return nthreads;
+  } else if (nthreads == NOT_SET) {
+    // return default value
+    return TaskThreadPoolBase::defaultNumThreads();
+  } else {
+    return get_pool().size();
+  }
+}
 
-C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, createC10ThreadPool);
+void launch(const std::function<void()>& func) {
+  get_pool().run(func);
+}
 
 } // namespace at

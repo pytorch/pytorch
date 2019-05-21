@@ -1,8 +1,12 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/native/DispatchStub.h>
 
 namespace at {
+
+struct TensorIterator;
+
 namespace native {
 
 // Note [Implicit conversion between signed and unsigned]
@@ -42,6 +46,10 @@ struct inter_copy_type<uint8_t> {
 
 template <typename T>
 using inter_copy_type_t = typename inter_copy_type<T>::type;
+
+using copy_fn = void (*)(TensorIterator&, bool non_blocking);
+
+DECLARE_DISPATCH(copy_fn, copy_stub);
 
 } // namespace native
 } // namespace at

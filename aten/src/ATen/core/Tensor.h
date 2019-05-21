@@ -3,6 +3,7 @@
 #include <ATen/core/Type.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include <ATen/core/SparseTensorRef.h>
@@ -154,7 +155,7 @@ class CAFFE2_API Tensor {
     return impl_.weak_use_count();
   }
 
-  const char * toString() const;
+  std::string toString() const;
 
   IntArrayRef sizes() const {
     return impl_->sizes();
@@ -165,8 +166,8 @@ class CAFFE2_API Tensor {
   int64_t ndimension() const {
     return dim();
   }
-  bool is_contiguous() const {
-    return impl_->is_contiguous();
+  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const {
+    return impl_->is_contiguous(memory_format);
   }
 
   // Total bytes consumed by the "view" of elements of the array.  Does not
@@ -193,7 +194,7 @@ class CAFFE2_API Tensor {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
         tensorTypeIdToBackend(type_id()),
         scalar_type(),
-        is_variable() && !at::NonVariableTypeMode::is_enabled());
+        is_variable());
   }
   Type & dispatch_type() const {
     return legacyTensorType(*impl_);
@@ -266,7 +267,7 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
-    AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
+    TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
   template<typename T, size_t N>
@@ -280,7 +281,7 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
-    AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
+    TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
   }
   template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
@@ -373,7 +374,7 @@ class CAFFE2_API Tensor {
   Tensor & clamp_max_(Scalar max);
   Tensor clamp_min(Scalar min) const;
   Tensor & clamp_min_(Scalar min);
-  Tensor contiguous() const;
+  Tensor contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor cos() const;
   Tensor & cos_();
@@ -580,7 +581,7 @@ class CAFFE2_API Tensor {
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
-  Tensor quantize_linear(double scale, int64_t zero_point) const;
+  Tensor quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const;
   Tensor dequantize() const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;

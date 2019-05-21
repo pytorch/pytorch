@@ -63,7 +63,7 @@ static inline void checkInBoundsForStorage(
     return;
   }
   int64_t new_storage_size = new_storage.numel();
-  AT_CHECK(
+  TORCH_CHECK(
       storage_offset + storage_size <= new_storage_size,
       "setStorage: sizes ", size, ", strides ", stride, ","
       " and storage offset ", storage_offset,
@@ -84,7 +84,7 @@ inline void setStrided(
   checkInBoundsForStorage(size, stride, storage_offset, self_->storage());
 
   /* storage offset */
-  AT_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
   self_->set_storage_offset(storage_offset);
 
   /* size and stride */

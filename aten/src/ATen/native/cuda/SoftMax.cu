@@ -330,6 +330,7 @@ blockReduce(AccumT* smem, AccumT val,
   AccumT warpVal = defaultVal;
 
   // First warp will perform per-warp reductions for the remaining warps
+  uint32_t mask = (((uint64_t)1) << (blockDim.x / 32)) - 1;
   if (threadIdx.x < 32) {
     int lane = threadIdx.x % 32;
     if (lane < blockDim.x / 32) {
@@ -337,6 +338,9 @@ blockReduce(AccumT* smem, AccumT val,
       for (int i = 0; i < 32; ++i) {
         warpVal = r(warpVal, smem[lane * 32 + i]);
       }
+#if CUDA_VERSION >= 9000
+      __syncwarp(mask);
+#endif
       smem[lane] = warpVal;
     }
   }
@@ -482,7 +486,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
   static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
   if (input.dim() == 0) input = input.view(1);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
-  AT_CHECK(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
+  TORCH_CHECK(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
 
@@ -557,7 +561,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
   auto grad = grad_.contiguous();
   static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
   if (grad.dim() == 0) grad = grad.view(1);
-  AT_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
+  TORCH_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
   auto output = output_.contiguous();
   if (output.dim() == 0) output = output.view(1);
   int64_t outer_size = 1;

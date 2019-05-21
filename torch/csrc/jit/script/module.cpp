@@ -195,7 +195,9 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     }
     if (e.n->kind() != prim::GetAttr) {
       throw ErrorReport(e.n->sourceRange())
-          << "temporary: the only valid use of a module is looking up an attribute";
+          << "temporary: the only valid use of a module is looking up an "
+             "attribute but found "
+          << *e.n;
     }
     Slot slot(e.mod, e.mod->type()->getAttributeSlot(e.n->s(attr::name)));
     if (ClassTypePtr c = e.n->output()->type()->cast<ClassType>()) {
