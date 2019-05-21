@@ -4396,6 +4396,19 @@ class TestNN(NNTestCase):
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
 
+    @unittest.skipIf(not PY3, 'Python 2.7 generates cyclic trash')
+    def test_load_state_dict_ref_cycle(self):
+        # load_state_dict shouldn't cause a reference cycle involving Tensors
+        import gc
+
+        m = torch.nn.LSTM(16, 16, bidirectional=True)
+
+        gc.collect()
+        m.load_state_dict(deepcopy(m).state_dict())
+        refcycles = gc.collect()
+
+        self.assertEqual(refcycles, 0)
+
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
 
