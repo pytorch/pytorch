@@ -55,7 +55,7 @@ Tensor int_repr_quant(const Tensor& self) {
         underlying_t* self_data = reinterpret_cast<underlying_t *>(self.data<scalar_t>());
         underlying_t* dst_data = dst.data<underlying_t>();
         if (self.numel() > 0) {
-          memcpy(dst_data, self_data, self.numel());
+          memcpy(dst_data, self_data, self.nbytes());
         }});
   return dst;
 }

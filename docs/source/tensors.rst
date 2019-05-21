@@ -142,6 +142,7 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: is_cuda
    .. autoattribute:: device
    .. autoattribute:: grad
+   .. autoattribute:: ndim
 
    .. automethod:: abs
    .. automethod:: abs_
