@@ -63,7 +63,6 @@ class Module(object):
     _version = 1
 
     def __init__(self):
-        torch._C._log_api_usage_once("python.nn_module")
         self._backend = thnn_backend
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
