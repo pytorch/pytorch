@@ -18,8 +18,6 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
 from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
 from tensorboard.plugins.custom_scalar import layout_pb2
-from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
-from tensorboard.plugins.mesh.summary import _get_json_config
 
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
@@ -533,6 +531,9 @@ def mesh(tag, vertices, colors, faces, config_dict, display_name=None, descripti
       Returns:
         Merged summary for mesh/point cloud representation.
       """
+    from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
+    from tensorboard.plugins.mesh.summary import _get_json_config
+
     json_config = _get_json_config(config_dict)
 
     summaries = []
