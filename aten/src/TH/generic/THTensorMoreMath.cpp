@@ -71,6 +71,10 @@ void THTensor_(sign)(THTensor *r_, THTensor *t)
   TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
     if (*t_data > 0) *r__data = 1;
     else *r__data = 0;);
+#elif defined (TH_REAL_IS_BOOL)
+TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
+  if (*t_data == true) *r__data = false;
+  else *r__data = true;);
 #else
   TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
     if (*t_data > 0) *r__data = 1;
