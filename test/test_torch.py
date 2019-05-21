@@ -2649,12 +2649,12 @@ class _TestTorchMixin(object):
         y = torch.empty(100, 100, dtype=torch.float)
         y.copy_(x)
         self.assertEqual(y[:, 0], range(100))
-        self.assertEqual(y[:, 40], range(100*40, 100*41))
+        self.assertEqual(y[:, 40], range(4000, 4100))
 
         y = torch.empty(100, 100, dtype=torch.double)
         y.copy_(x)
         self.assertEqual(y[:, 0], range(100))
-        self.assertEqual(y[:, 40], range(100*40, 100*41))
+        self.assertEqual(y[:, 40], range(4000, 4100))
 
     def test_device(self):
         cpu = torch.device('cpu')
