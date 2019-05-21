@@ -12029,6 +12029,15 @@ a")
 
         self.checkScript(fn, ("abcde",))
 
+    def test_str_cmp(self):
+        def test(a, b):
+            # type: (str, str) -> Tuple[bool, bool, bool, bool, bool, bool]
+            return a != b, a == b, a < b, a > b, a <= b, a >= b
+
+        self.checkScript(test, ("1", "2"))
+        self.checkScript(test, ("2", "1"))
+        self.checkScript(test, ("1", "1"))
+
     def test_ord(self):
         def fn(x):
             # type: (str) -> int
