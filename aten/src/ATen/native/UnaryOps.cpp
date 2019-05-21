@@ -86,7 +86,7 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 }
 
 Tensor& fill_out(Tensor& self, const Scalar value) {
-  auto iter = TensorIterator::unary_op(self, self);
+  auto iter = TensorIterator::nullary_op(self);
   fill_stub(iter->device_type(), *iter, value);
   return self;
 }
@@ -96,6 +96,7 @@ Tensor& fill_(Tensor& self, Scalar value) {
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
+  AT_ASSERTM(value.dim() == 0, "fill_ only supports 0-dimension value tensor.");
   return fill_out(self, value.item());
 }
 

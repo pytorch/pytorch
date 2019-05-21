@@ -58,17 +58,17 @@ static void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
   if( iter.dtype() == ScalarType::Half ) {
     auto value = value_scalar.to<at::Half>().x;
     using H = decltype(value);
-    unary_kernel_vec(
+    nullary_kernel_vec(
         iter,
-        [=](H a) -> H { return value; },
-        [=](Vec256<H> a) { return Vec256<H>(value); });
+        [=]() -> H { return value; },
+        [=]() { return Vec256<H>(value); });
   } else {
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "fill_cpu", [&]() {
       scalar_t value = value_scalar.to<scalar_t>();
-      unary_kernel_vec(
+      nullary_kernel_vec(
           iter,
-          [=](scalar_t a) -> scalar_t { return value; },
-          [=](Vec256<scalar_t> a) { return Vec256<scalar_t>(value); });
+          [=]() -> scalar_t { return value; },
+          [=]() { return Vec256<scalar_t>(value); });
     });
   }
 }
