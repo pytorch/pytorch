@@ -18,8 +18,6 @@
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 using c10::RegisterOperators;
-using c10::kernel;
-using c10::dispatchKey;
 using c10::TensorTypeId;
 using c10::KernelCache;
 using c10::Stack;
@@ -27,7 +25,6 @@ using c10::guts::make_unique;
 using c10::ivalue::TensorList;
 using c10::ivalue::IntList;
 using c10::intrusive_ptr;
-using c10::ArrayRef;
 using c10::Dict;
 using at::Tensor;
 using std::string;
@@ -364,7 +361,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntInput
 
 int64_t captured_input_list_size = 0;
 
-void kernelWithIntListInputWithoutOutput(Tensor, ArrayRef<int64_t> input1) {
+void kernelWithIntListInputWithoutOutput(Tensor, const std::vector<int64_t>& input1) {
   captured_input_list_size = input1.size();
 }
 
@@ -381,7 +378,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListI
   EXPECT_EQ(3, captured_input_list_size);
 }
 
-int64_t kernelWithIntListInputWithOutput(Tensor, ArrayRef<int64_t> input1) {
+int64_t kernelWithIntListInputWithOutput(Tensor, const std::vector<int64_t>& input1) {
   return input1.size();
 }
 
@@ -397,7 +394,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListI
   EXPECT_EQ(3, outputs[0].toInt());
 }
 
-void kernelWithTensorListInputWithoutOutput(ArrayRef<Tensor> input1) {
+void kernelWithTensorListInputWithoutOutput(const std::vector<Tensor>& input1) {
   captured_input_list_size = input1.size();
 }
 
@@ -414,7 +411,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
   EXPECT_EQ(2, captured_input_list_size);
 }
 
-int64_t kernelWithTensorListInputWithOutput(ArrayRef<Tensor> input1) {
+int64_t kernelWithTensorListInputWithOutput(const std::vector<Tensor>& input1) {
   return input1.size();
 }
 
@@ -893,7 +890,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptional
   EXPECT_TRUE(outputs[2].isNone());
 }
 
-std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, ArrayRef<Tensor> arg3) {
+std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, const std::vector<Tensor>& arg3) {
   return {};
 }
 
