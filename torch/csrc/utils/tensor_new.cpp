@@ -220,6 +220,16 @@ Tensor internal_new_from_data(
   }
 
 #ifdef USE_NUMPY
+  if (PyObject_HasAttrString(data, "__cuda_array_interface__")) {
+    AT_CHECK(!pin_memory, "Can't pin tensor constructed from __cuda_array_interface__");
+    auto tensor = autograd::make_variable(tensor_from_cuda_array_interface(data), /*requires_grad=*/false);
+    const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
+    auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
+    AutoNoGIL no_gil;
+    maybe_initialize_cuda(device);
+    return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
+  }
+
   if (PyArray_Check(data)) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);

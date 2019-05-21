@@ -99,6 +99,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
             nms_thres_,
             soft_nms_min_score_thres_,
             soft_nms_method_,
+            -1, /* topN */
             legacy_plus_one_);
       } else {
         std::sort(
