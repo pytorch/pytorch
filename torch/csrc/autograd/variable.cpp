@@ -107,7 +107,11 @@ void Variable::set_data(const at::Tensor &new_data) {
   // Version counter is not shared when we replace a `Variable`'s underlying `Tensor`
   // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
   // See NOTE [ Version Counter Sharing ] for details.
-  get()->shallow_copy_from(new_data.getIntrusivePtr());
+  std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_detached = get()->detach_autograd_meta();
+  impl_ = new_data.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/get()->version_counter(),
+        /*allow_tensor_metadata_change=*/get()->allow_tensor_metadata_change());
+  impl_->set_autograd_meta(std::move(autograd_meta_detached));
 }
 
 Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)
