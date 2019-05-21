@@ -39,7 +39,6 @@ namespace detail {
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
 std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
-  C10_LOG_API_USAGE_ONCE("aten.init.cuda");
   THCState* thc_state = THCState_alloc();
 
   THCudaInit(thc_state);

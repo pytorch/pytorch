@@ -186,6 +186,18 @@ class Registerer {
 };
 
 /**
+ * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
+ * str and ending with a number that varies with the line.
+ */
+#define C10_CONCATENATE_IMPL(s1, s2) s1##s2
+#define C10_CONCATENATE(s1, s2) C10_CONCATENATE_IMPL(s1, s2)
+#ifdef __COUNTER__
+#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __COUNTER__)
+#else
+#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
+#endif
+
+/**
  * C10_DECLARE_TYPED_REGISTRY is a macro that expands to a function
  * declaration, as well as creating a convenient typename for its corresponding
  * registerer.
