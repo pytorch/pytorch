@@ -409,10 +409,10 @@ void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generat
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "uniform_cuda", [&] {
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);
-    AT_CHECK(from <= to,
+    TORCH_CHECK(from <= to,
       "uniform_ expects to return a [from, to) range, but found from=", from,
       " > to=", to);
-    AT_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
+    TORCH_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
           "uniform_ expects to-from <= std::numeric_limits<", toString(iter.dtype()),
           ">::max(), but found to=", to, " and from=", from,
           " which result in to-from to exceed the limit");
@@ -445,7 +445,7 @@ void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generat
 
 void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
   auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "random_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, iter.dtype(), "random_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
       // define lambda to mod with range and add base
@@ -498,16 +498,9 @@ Tensor& random_cuda_(Tensor& self, Generator* gen) {
 }
 
 Tensor& clamped_random_cuda_(Tensor& self, int64_t from, int64_t to, Generator* gen) {
-  AT_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
+  TORCH_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
   auto iter = TensorIterator::nullary_op(self);
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter->dtype(), "range_check", [&] {
-    AT_CHECK(from >= std::numeric_limits<scalar_t>::min() && to <= std::numeric_limits<scalar_t>::max(),
-             "[from, to] is outside the range of the tensor data type: ", toString(iter->dtype()),
-             ". Expected [from, to] to be inside [", std::numeric_limits<scalar_t>::min(),
-             ", ", std::numeric_limits<scalar_t>::max(), "]",
-             " but found [from, to] to be [", from, ", ", to, "]");
-  });
-  auto range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
+  uint64_t range = to - from;
   random_kernel_cuda(*iter, range, from, gen);
   return self;
 }

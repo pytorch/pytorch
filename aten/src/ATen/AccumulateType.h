@@ -22,6 +22,7 @@ struct AccumulateType { };
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <> struct AccumulateType<half, true> { using type = float; };
 #endif
+template <> struct AccumulateType<bool, true> { using type = bool; };
 template <> struct AccumulateType<Half, true> { using type = float; };
 template <> struct AccumulateType<float, true> { using type = float; };
 template <> struct AccumulateType<double, true> { using type = double; };
@@ -31,6 +32,7 @@ template <> struct AccumulateType<char, true> { using type = int64_t; };
 template <> struct AccumulateType<int16_t, true> { using type = int64_t; };
 template <> struct AccumulateType<int32_t, true> { using type = int64_t; };
 template <> struct AccumulateType<int64_t, true> { using type = int64_t; };
+template <> struct AccumulateType<bool, false> { using type = bool; };
 template <> struct AccumulateType<float, false> { using type = double; };
 template <> struct AccumulateType<double, false> { using type = double; };
 template <> struct AccumulateType<int8_t, false> { using type = int64_t; };
