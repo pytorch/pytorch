@@ -82,7 +82,7 @@ TEST(TestQTensor, EmptyQuantized) {
   int zero_point = 10;
   int val = 100;
   int numel = 10;
-  Tensor q = at::_empty_affine_quantized({numel}, at::device(at::kCPU).dtype(kQUInt8), scale, zero_point);
+  Tensor q = at::_empty_affine_quantized({numel}, scale, zero_point, at::device(at::kCPU).dtype(kQUInt8));
   // Assigning to QTensor
   auto* q_data = q.data<quint8>();
   for (int i = 0; i < numel; ++i) {

@@ -114,9 +114,9 @@ class QFCInt8 final : public c10::OperatorKernel {
     // Allocate output Tensor and a buffer for fbgemmPacked to use
     auto output = _empty_affine_quantized(
         {M, N},
-        at::device(kCPU).dtype(kQUInt8),
         output_scale,
-        output_zero_point);
+        output_zero_point,
+        at::device(kCPU).dtype(kQUInt8));
 
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
