@@ -749,14 +749,14 @@ class ScatterOp : public Operator<Context> {
         OP_SINGLE_ARG(int, "axis", axis_, 1) {
   }
 
-  virtual ~ScatterOp() noexcept {}
+  virtual ~ScatterOp() noexcept override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, this->template Input<Tensor>(INDICES, CPU));
   }
 
-  template <typename Index>
+  template <typename IndexType>
   bool DoRunWithType() {
     const Tensor& data = Input(DATA);
     const Tensor& indices = Input(INDICES);
@@ -765,9 +765,7 @@ class ScatterOp : public Operator<Context> {
     size_t item_bytesize = dataType.itemsize();
 
     // ONNX allows negative axis to index from the back, valid range: [-r, r].
-    if (axis_ < 0) {
-      axis_ = data.dim() + axis_;
-    }
+    axis_ = = data.canonical_axis_index(axis_);
     
     CAFFE_ENFORCE_GE(data.dim(), axis_ + 1, "DATA should be at least [axis+1]-D");
     CAFFE_ENFORCE_GE(axis_, 0, "Axis should be non-negative");
@@ -775,7 +773,7 @@ class ScatterOp : public Operator<Context> {
 
     Tensor* output = Output(0, data.sizes().vec(), at::dtype(dataType));
     output->CopyFrom(data);
-    auto out = static_cast<char*>(output->raw_mutable_data(dataType));
+    char* out = static_cast<char*>(output->raw_mutable_data(dataType));
 
     // Succeed if size of output is zero, which can happen for empty batch which
     // would have data dimension size of 0.
@@ -785,8 +783,8 @@ class ScatterOp : public Operator<Context> {
       return true;
     }
 
-    const Index* idxs = indices.template data<Index>();
-    auto src_base = static_cast<const char*>(updates.raw_data());
+    const IndexType* idxs = indices.template data<IndexType>();
+    char* src_base = static_cast<const char*>(updates.raw_data());
 
     const int64_t outer_dims_product = updates.size_to_dim(axis_);
     const int64_t block_size = updates.size_from_dim(axis_ + 1);
