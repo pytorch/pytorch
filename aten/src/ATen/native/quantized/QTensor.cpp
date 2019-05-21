@@ -16,6 +16,21 @@ Tensor dequantize_quant(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
+Tensor dequantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point, ScalarType dtype) {
+  AT_CHECK(isQIntType(toQIntType(self.scalar_type())),
+           "Scalar type for quantized Tensor must have same underlying type as input.");
+  AT_CHECK(dtype == ScalarType::Float, "ScalarType for target Tensor must be float.");
+  Tensor f = at::empty(self.sizes(), self.options().dtype(dtype));
+  AT_DISPATCH_QINT_TYPES(
+      toQIntType(self.scalar_type()), "dequantize_linear_cpu", [&]() {
+        underlying_t* qdata = self.data<underlying_t>();
+        auto* fdata = f.data<float>();
+        for (int i = 0; i < self.numel(); ++i) {
+          fdata[i] = (static_cast<float>(qdata[i]) - zero_point) * scale;
+        }});
+  return f;
+}
+
 Scalar q_scale_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);

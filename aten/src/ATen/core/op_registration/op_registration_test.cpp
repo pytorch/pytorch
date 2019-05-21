@@ -384,7 +384,23 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenNewer
   }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
 }
 
+TEST(OperatorRegistrationTest, whenTryingToRegisterWithMultipleKernels_thenFails) {
+  expectThrows<c10::Error>([&] {
+    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>().kernel<DummyKernel>());
+  }, "Cannot register multiple kernels in the same op() call");
+}
 
+TEST(OperatorRegistrationTest, whenTryingToRegisterWithMultipleDispatchKeys_thenFails) {
+  expectThrows<c10::Error>([&] {
+    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>().dispatchKey(TensorType1()).dispatchKey(TensorType2()));
+  }, "Cannot register multiple dispatch keys in the same op() call");
+}
+
+TEST(OperatorRegistrationTest, whenTryingToRegisterWithDispatchKeyWithoutKernel_thenFails) {
+  expectThrows<c10::Error>([&] {
+    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().dispatchKey(TensorType1()));
+  }, "Tried to register an operator with a dispatch key but without a kernel");
+}
 
 /**
  * This is used to check that a given type works correctly when passed as input

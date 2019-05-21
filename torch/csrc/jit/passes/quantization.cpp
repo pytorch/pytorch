@@ -508,8 +508,10 @@ void InsertQuantDequantNodesForParam(
   auto params_to_insert_qdq = getQuantizableParamsofName(method, param_name);
 
   for (param_info_t& param_info : params_to_insert_qdq) {
-    // This getQParamFunc requires scale for weight and activation. if
-    // either of these attr not present we skip inserting q-dq node.
+    // This getQParamFunc requires scale for weight and activation because for
+    // quantized ops that involve matmul with weight and bias(WX+b), input scale
+    // for bias is computed from input activation and weight. if weight attr
+    // not present we skip inserting q-dq node.
     Node* n = param_info.n;
     // Check if this node has weight attr as input
     size_t param_index = getParamIndexinOpArgs(n, std::string("weight"));
