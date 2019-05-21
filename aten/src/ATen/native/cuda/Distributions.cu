@@ -446,17 +446,25 @@ void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generat
 void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
   auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, iter.dtype(), "random_cuda", [&] {
-    using accscalar_t = at::acc_type<scalar_t, true>;
     if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
       // define lambda to mod with range and add base
       auto random_func = [range, base] __device__ (uint64_t rand) {
-        return static_cast<scalar_t>(rand % range + base);
+        return static_cast<int64_t>(rand % range + base);
       };
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+      distribution_nullary_kernel<scalar_t, uint64_t, curand4_engine_calls/2>(iter,
         gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) -> ulonglong2 {
           ulonglong2 ret;
+        #ifndef __HIP_PLATFORM_HCC__
           uint4 rand = curand4(state);
+        #else
+          // HIP doesn't have curand4
+          uint4 rand;
+          rand.x = curand(state);
+          rand.y = curand(state);
+          rand.z = curand(state);
+          rand.w = curand(state);
+        #endif
           ret.x = (static_cast<uint64_t>(rand.x) << 32) | rand.y;
           ret.y = (static_cast<uint64_t>(rand.z) << 32) | rand.w;
           return ret;
@@ -464,9 +472,9 @@ void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Gene
         random_func);
     } else {
       auto random_func = [range, base] __device__ (uint32_t rand) {
-        return static_cast<scalar_t>(rand % static_cast<uint32_t>(range) + static_cast<int32_t>(base));
+        return static_cast<int32_t>(rand % static_cast<uint32_t>(range) + static_cast<int32_t>(base));
       };
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+      distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
         gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) { return curand4(state); },
         random_func);
@@ -529,19 +537,19 @@ void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* ge
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto lambda = static_cast<accscalar_t>(lambda_);
     // define lambda for exponential transformation
-    auto cauchy_func = [lambda] __device__ (accscalar_t rand) {
+    auto exponential_func = [lambda] __device__ (accscalar_t rand) {
       return static_cast<scalar_t>(static_cast<scalar_t>(-1.0) / lambda * ::log(rand));
     };
     if (std::is_same<scalar_t, double>::value) {
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
         gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
-        cauchy_func);
+        exponential_func);
     } else {
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
         gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
-        cauchy_func);
+        exponential_func);
     }
    });
 }
