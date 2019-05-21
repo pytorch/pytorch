@@ -7489,6 +7489,17 @@ a")
         with self.assertRaisesRegex(RuntimeError, "is not usable in a script method"):
             M()
 
+    def test_script_module_fail_exist(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.whatisgoingon
+        with self.assertRaisesRegex(RuntimeError, "does not exist"):
+            M()
+
     def test_script_module_valid_consts(self):
         tester = self
 
