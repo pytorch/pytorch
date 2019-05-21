@@ -218,7 +218,6 @@ class TestQuantizedFC(unittest.TestCase):
         ).astype(np.uint8)
 
         W_scale = 0.4
-        # W_zp is the zero point for int8 quantization.
         W_zp = 2
         W_value_min = -128
         W_value_max = 127
@@ -227,6 +226,12 @@ class TestQuantizedFC(unittest.TestCase):
             * (W_value_max - W_value_min)
             + W_value_min
         ).astype(np.int8)
+
+        b_value_min = -10
+        b_value_max = 10
+        b_q0 = np.round(
+            np.random.rand(output_channels) * (b_value_max - b_value_min) + b_value_min
+        ).astype(np.int32)
 
         avoid_vpmaddubsw_overflow_fc(
             batch_size,
@@ -242,11 +247,11 @@ class TestQuantizedFC(unittest.TestCase):
 
         X = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
         W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
+        b = torch.from_numpy(_dequantize(b_q0, X_scale * W_scale, 0)).to(dtype=torch.float)
 
         X_q = X.quantize_linear(scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-        # W_zp + 128 is the zero point for uint8 quantization.
-        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp + 128, dtype=torch.quint8)
-        b_q = torch.round(torch.rand(output_channels) * 10 - 10).to(dtype=torch.int32)
+        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
+        b_q = b.quantize_linear(scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
 
         # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
         # Y_scale * 255 (max for uint8).
@@ -254,7 +259,7 @@ class TestQuantizedFC(unittest.TestCase):
         Y_zp = 5
 
         # Reference quantized FC operator
-        Y_q_ref = qfc_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q.numpy(), Y_scale, Y_zp)
+        Y_q_ref = qfc_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
 
         # Weight prepacking operator for quantized FC
         W_prepack = qfc_prepack(W_q)
@@ -270,7 +275,7 @@ class TestQuantizedFC(unittest.TestCase):
         # Reference quantized result from PyTorch Linear operator
         W_fp32 = W_q.dequantize().to(dtype=torch.float)
         X_fp32 = X_q.dequantize().to(dtype=torch.float)
-        b_fp32 = torch.from_numpy(_dequantize(b_q.numpy(), W_scale * X_scale, 0).astype(np.float)).to(dtype=torch.float)
+        b_fp32 = b_q.dequantize().to(dtype=torch.float)
         Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
         Y_q_ref2 = Y_fp32_ref.quantize_linear(Y_scale, Y_zp, torch.quint8)
 
@@ -306,6 +311,12 @@ class TestQuantizedFC(unittest.TestCase):
             + W_value_min
         ).astype(np.int8)
 
+        b_value_min = -10
+        b_value_max = 10
+        b_q0 = np.round(
+            np.random.rand(output_channels) * (b_value_max - b_value_min) + b_value_min
+        ).astype(np.int32)
+
         avoid_vpmaddubsw_overflow_fc(
             batch_size,
             input_channels,
@@ -320,10 +331,11 @@ class TestQuantizedFC(unittest.TestCase):
 
         X = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
         W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
+        b = torch.from_numpy(_dequantize(b_q0, X_scale * W_scale, 0)).to(dtype=torch.float)
 
         X_q = X.quantize_linear(scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp + 128, dtype=torch.quint8)
-        b_q = torch.round(torch.rand(output_channels) * 10 - 10).to(dtype=torch.int32)
+        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
+        b_q = b.quantize_linear(scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
 
         # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
         # Y_scale * 255 (max for uint8).
@@ -331,7 +343,7 @@ class TestQuantizedFC(unittest.TestCase):
         Y_zp = 5
 
         # Reference quantized FC operator
-        Y_q_ref = qfc_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q.numpy(), Y_scale, Y_zp)
+        Y_q_ref = qfc_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
         Y_q_ref[Y_q_ref < Y_zp] = Y_zp
 
         # Weight prepacking operator for quantized FC
@@ -348,7 +360,7 @@ class TestQuantizedFC(unittest.TestCase):
         # Reference quantized result from PyTorch Linear operator
         W_fp32 = W_q.dequantize().to(dtype=torch.float)
         X_fp32 = X_q.dequantize().to(dtype=torch.float)
-        b_fp32 = torch.from_numpy(_dequantize(b_q.numpy(), W_scale * X_scale, 0).astype(np.float)).to(dtype=torch.float)
+        b_fp32 = b_q.dequantize().to(dtype=torch.float)
         Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
         Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
         Y_q_ref2 = Y_fp32_ref.quantize_linear(Y_scale, Y_zp, torch.quint8)

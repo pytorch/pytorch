@@ -81,7 +81,7 @@ void adaptive_avg_pool3d_out_cpu_template(
     Tensor const& input,
     IntArrayRef output_size) {
   for (int64_t i = 0; i < input.ndimension(); i++) {
-    AT_CHECK(
+    TORCH_CHECK(
         input.size(i) > 0,
         "adaptive_avg_pool3d(): expected input to have non-empty spatial dimensions, "
         "but input has sizes ",
@@ -92,7 +92,7 @@ void adaptive_avg_pool3d_out_cpu_template(
         "empty");
   }
 
-  AT_CHECK(
+  TORCH_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
       "non-empty 4D or 5D (batch mode) tensor expected for input");
 
