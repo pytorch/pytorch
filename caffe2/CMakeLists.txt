@@ -389,6 +389,7 @@ if (NOT INTERN_BUILD_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/common_subexpression_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/insert_guards.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
