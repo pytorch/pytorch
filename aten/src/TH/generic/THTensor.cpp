@@ -154,7 +154,7 @@ THTensor *THTensor_(newClone)(THTensor *self)
   THTensor_(resizeAs)(tensor, self);
   at::Tensor tensor_wrap = THTensor_wrap(tensor);
   at::Tensor self_wrap = THTensor_wrap(self);
-  at::_copy_same_type_(tensor_wrap, self_wrap);
+  at::native::copy_(tensor_wrap, self_wrap, false);
   return tensor;
 }
 
@@ -596,7 +596,7 @@ void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)
   if(self != dst) {
     at::Tensor dst_wrap = THTensor_wrap(dst);
     at::Tensor self_wrap = THTensor_wrap(self);
-    at::_copy_same_type_(dst_wrap, self_wrap);
+    at::native::copy_(dst_wrap, self_wrap, false);
   }
 
   THTensor_(free)(self);
@@ -816,7 +816,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
         THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
         at::Tensor nt__wrap = THTensor_wrap(nt);
         at::Tensor inputs_wrap = THTensor_wrap(inputs[j]);
-        at::_copy_same_type_(nt__wrap, inputs_wrap);
+        at::native::copy_(nt__wrap, inputs_wrap, false);
         c10::raw::intrusive_ptr::decref(nt);
         offset += dimSize;
       }
