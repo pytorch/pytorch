@@ -991,6 +991,31 @@ class TestCuda(TestCase):
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
+    def test_copy_broadcast(self):
+        x = torch.randn(10, 5)
+        y = torch.randn(5, device='cuda')
+        x.copy_(y)
+        self.assertEqual(x[3], y.cpu())
+
+        x = torch.randn(10, 5, device='cuda')
+        y = torch.randn(5)
+        x.copy_(y)
+        self.assertEqual(x[3].cpu(), y)
+
+    def test_copy_noncontig(self):
+        def do_test(d0, d1):
+            x = torch.tensor([1.5, 2.5, 3.5, 4.5, 5.5, 6.5], device=d0)
+            y = torch.tensor([0, 0, 0, 0, 0, 0], device=d1)
+            self.assertNotEqual(x.dtype, y.dtype)
+
+            y[::2].copy_(x[::2])
+            self.assertEqual(y, [1, 0, 3, 0, 5, 0])
+
+        do_test('cpu', 'cuda')
+        do_test('cuda', 'cpu')
+        if TEST_MULTIGPU:
+            do_test('cuda:0', 'cuda:1')
+
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
         y = torch.IntTensor(2, 5).fill_(0).cuda()
