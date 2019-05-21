@@ -1116,6 +1116,10 @@ const std::vector<std::string> functions = {
         def dropout(input,
                     p: float,
                     train: bool):
+            def backward_no_training():
+                return 1
+            if p == 0 or !train or input.numel() == 0:
+                return input, backward_no_training
             use_cuda = input.is_cuda
             # lowering is specialized for cuda because cuda fuser can efficiently fuse those operations
             # for cpu backend, where fusions are disabled, a different lowering that is more efficient
