@@ -23,6 +23,7 @@
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
+#include "torch/csrc/jit/passes/insert_guards.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
@@ -683,13 +684,15 @@ void testRecordFunction() {
         for (const auto& input : inputs) {
           if (input.isTensor()) {
             sizes.push_back(input.toTensor().sizes().vec());
-          } else if (input.isScalar()){
+          } else if (input.isScalar()) {
             sizes.push_back(std::vector<int64_t>());
           }
         }
         traced_inputs.push_back(
             std::make_tuple(std::string(getFullName(&fn)), sizes));
-      }, [](const autograd::profiler::RecordFunction&) {}, true);
+      },
+      [](const autograd::profiler::RecordFunction&) {},
+      true);
 
   autograd::profiler::setSamplingProbability(1.0);
 
@@ -816,7 +819,6 @@ void testModuleConversion() {
   }
 }
 
-
 static int testPassValue = 0;
 void fakePass(std::shared_ptr<Graph>& g) {
   testPassValue++;
@@ -843,12 +845,51 @@ graph(%a):
   AT_ASSERT(testPassValue);
 }
 
-static void checkShape(Node* n, std::vector<int64_t> expected) {
-  auto profile = n->inputs().at(0)->node();
-  AT_ASSERT(profile->kind() == prim::profile);
+static void checkShape(
+    Node* n,
+    std::vector<int64_t> expected,
+    bool prev = true) {
+  auto profile = (prev) ? n->inputs().at(0)->node() : n;
   auto tp = profile->output()->type();
   auto ptp = tp->expect<ProfiledTensorType>();
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+}
+
+void testInsertGuards() {
+  static const auto basic_example = R"JIT(
+  def basic(x, y):
+    a = x + y
+    b = x * y
+    c = x + 1
+    d = a - c
+    e = b - c
+    return d + e
+  )JIT";
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("basic");
+  auto pr = ProfilingRecord::instrumentGraph(fun.graph());
+  auto x = at::randn({2, 3}, at::kCPU);
+  auto y = at::randn({2, 3}, at::kCPU);
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+  auto stack = createStack({v(x), v(y)});
+  // introduce some profiling information
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+  auto copy = pr->profiled_graph_->copy();
+  InsertGuards(copy);
+  auto nodes = copy->block()->nodes();
+  auto guard = std::find_if(nodes.begin(), nodes.end(), [](Node* n) {
+    return n->kind() == prim::Guard;
+  });
+  ASSERT_NE(guard, nodes.end());
+  ASSERT_EQ(guard->input()->type()->cast<ProfiledTensorType>(), nullptr);
+  checkShape(*guard, {2, 3}, false);
+  int num_guards = std::count_if(nodes.begin(), nodes.end(), [](Node* n) {
+    return n->kind() == prim::Guard;
+  });
+  ASSERT_EQ(num_guards, 11);
 }
 
 void testProfiler() {

@@ -11529,6 +11529,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         f = Foo2()
         self.assertEqual(f.foo(), 5)
 
+    def test_ndim(self):
+        a = torch.randn(1, 2, 3)
+        self.assertEqual(3, a.ndim)
+        b = torch.randn(())
+        self.assertEqual(0, b.ndim)
+        c = torch.randn(1, 0)
+        self.assertEqual(2, c.ndim)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
