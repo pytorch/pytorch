@@ -488,7 +488,6 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         " inputs, but got only ",
         stack.size());
 
-    C10_LOG_API_USAGE_ONCE("torch.graph_executor.run");
     logging::getLogger()->addStatValue(
         logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
@@ -583,7 +582,8 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         // Run post differentiation optimizations, Autodiff will replace some
         // parts of graph with new graph, these new graphs usually consists of
         // control flows and miss shape information on nodes, so we run shape
-        // prop and differentiable optimizations to ensure the graph is optimized
+        // prop and differentiable optimizations to ensure the graph is
+        // optimized
         PropagateInputShapes(gradient.f);
         runOptimization(gradient.f);
         // run non diff optimization on the forward graph
