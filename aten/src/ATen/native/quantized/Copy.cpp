@@ -1,16 +1,18 @@
-#include <ATen/native/Copy.h>
+#include <ATen/native/quantized/Copy.h>
 
 #include <ATen/ATen.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
 
 namespace at {
 namespace native {
-Tensor& _s_copy__quantized(Tensor& self, const Tensor& src, bool /* unused */) {
+Tensor& quantized_copy_(Tensor& self, const Tensor& src) {
   TORCH_CHECK(
       src.scalar_type() == at::kFloat,
       "Quantized copy only works with kFloat as source Tensor");
+  TORCH_CHECK(self.is_contiguous() && src.is_contiguous(),
+      "Quantized copy only works with contiguous Tensors");
+  TORCH_CHECK(self.sizes().equals(src.sizes()),
+      "Quantized copy only works with Tensors with the same shape");
   float* src_data = src.data<float>();
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "Copy", [&]() {
     scalar_t* self_data = self.data<scalar_t>();
