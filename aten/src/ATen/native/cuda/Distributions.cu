@@ -409,10 +409,10 @@ void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generat
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "uniform_cuda", [&] {
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);
-    AT_CHECK(from <= to,
+    TORCH_CHECK(from <= to,
       "uniform_ expects to return a [from, to) range, but found from=", from,
       " > to=", to);
-    AT_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
+    TORCH_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
           "uniform_ expects to-from <= std::numeric_limits<", toString(iter.dtype()),
           ">::max(), but found to=", to, " and from=", from,
           " which result in to-from to exceed the limit");
@@ -445,7 +445,7 @@ void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generat
 
 void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
   auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "random_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, iter.dtype(), "random_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
       // define lambda to mod with range and add base
@@ -621,16 +621,9 @@ Tensor& random_cuda_(Tensor& self, Generator* gen) {
 }
 
 Tensor& clamped_random_cuda_(Tensor& self, int64_t from, int64_t to, Generator* gen) {
-  AT_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
+  TORCH_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
   auto iter = TensorIterator::nullary_op(self);
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter->dtype(), "range_check", [&] {
-    AT_CHECK(from >= std::numeric_limits<scalar_t>::min() && to <= std::numeric_limits<scalar_t>::max(),
-             "[from, to] is outside the range of the tensor data type: ", toString(iter->dtype()),
-             ". Expected [from, to] to be inside [", std::numeric_limits<scalar_t>::min(),
-             ", ", std::numeric_limits<scalar_t>::max(), "]",
-             " but found [from, to] to be [", from, ", ", to, "]");
-  });
-  auto range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
+  uint64_t range = to - from;
   random_kernel_cuda(*iter, range, from, gen);
   return self;
 }
@@ -640,7 +633,7 @@ Tensor& capped_random_cuda_(Tensor& self, int64_t to, Generator* gen) {
 }
 
 Tensor& normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
-  AT_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
+  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
   auto iter = TensorIterator::nullary_op(self);
   normal_kernel_cuda(*iter, mean, std, gen);
   return self;
@@ -658,11 +651,8 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean_, double std, Generat
 Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std_, Generator* gen) {
   auto std = std::get<0>(expand_inplace(output, std_.to(kCUDA)));
   normal_cuda_(output, 0, 1, gen);
-  at::mul_out(output, output, std);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(), "normal_out_cuda_cadd", [&] {
-    auto ones = at::ones_like(output);
-    at::add_out(output, output, ones, static_cast<scalar_t>(mean));
-   });
+  auto mean_tensor = at::full({1}, mean, output.options());
+  at::native::addcmul_out(output, mean_tensor, output, std, 1);
   return output;
 }
 
@@ -670,10 +660,7 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean_, const Tensor& std_,
   auto std = std::get<0>(expand_inplace(output, std_.to(kCUDA)));
   auto mean = std::get<0>(expand_inplace(output, mean_.to(kCUDA)));
   normal_cuda_(output, 0, 1, gen);
-  at::mul_out(output, output, std);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(), "normal_out_cuda_cadd", [&] {
-    at::add_out(output, output, mean, static_cast<scalar_t>(1));
-   });
+  at::native::addcmul_out(output, mean, output, std, 1);
   return output; 
 }
 
@@ -708,14 +695,14 @@ Tensor& exponential_cuda_(Tensor& self, double lambda, Generator* gen) {
 }
 
 Tensor& log_normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
-  AT_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
   auto iter = TensorIterator::nullary_op(self);
   log_normal_kernel_cuda(*iter, mean, std, gen);
   return self;
 }
 
 Tensor& geometric_cuda_(Tensor& self, double p, Generator* gen) {
-  AT_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
+  TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
   auto iter = TensorIterator::nullary_op(self);
   geometric_kernel_cuda(*iter, p, gen);
   return self;
