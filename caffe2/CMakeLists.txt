@@ -389,6 +389,7 @@ if (NOT INTERN_BUILD_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/common_subexpression_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/insert_guards.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
@@ -817,9 +818,15 @@ if(USE_ROCM)
 endif()
 
 
-if (NOT WIN32)
-    # FIXME kostmo
-#  target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
+if (NOT WIN32 AND NOT USE_ASAN)
+  # Enable hidden visibility by default to make it easier to debug issues with
+  # TORCH_API annotations. Hidden visibility with selective default visibility
+  # behaves close enough to Windows' dllimport/dllexport.
+  #
+  # Unfortunately, hidden visibility messes up some ubsan warnings because
+  # templated classes crossing library boundary get duplicated (but identical)
+  # definitions. It's easier to just disable it.
+  target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
 endif()
 
 
@@ -855,6 +862,16 @@ torch_set_target_props(caffe2)
 #endif()
 
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+
+# Parallelism settings
+#  OPENMP - OpenMP for intra-op, native thread pool for inter-op parallelism
+set(PARALLEL_BACKEND "OPENMP" CACHE STRING "ATen parallel backend")
+if ("${PARALLEL_BACKEND}" STREQUAL "OPENMP")
+  target_compile_definitions(caffe2 PUBLIC "-DAT_PARALLEL_OPENMP=1")
+else()
+  message(FATAL_ERROR "Unknown parallel backend: ${PARALLEL_BACKEND}")
+endif()
+
 if (MSVC AND NOT BUILD_SHARED_LIBS)
   # Note [Supporting both static and dynamic libraries on Windows]
   # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

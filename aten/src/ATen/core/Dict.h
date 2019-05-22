@@ -2,31 +2,45 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeTraits.h>
+#include <c10/util/TypeList.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10 {
 struct IValue;
-template<class Key, class Value> class Dict;
+template<class Key, class Value> class DictPtr;
+
+/**
+ * Creates an empty dict.
+ */
+template<class Key, class Value>
+DictPtr<Key, Value> make_dict();
+
 namespace impl {
 bool shallowEquals(const IValue& lhs, const IValue& rhs);
 }
 
 namespace detail {
 
-struct DictHash {
+struct DictKeyHash {
   size_t operator()(const IValue& ivalue) const;
 };
 
-struct DictEqualTo {
+struct DictKeyEqualTo {
   bool operator()(const IValue& lhs, const IValue& rhs) const {
     return impl::shallowEquals(lhs, rhs);
   }
 };
 
 struct DictImpl final : public c10::intrusive_ptr_target {
-  using dict_map_type = ska::flat_hash_map<IValue, IValue, DictHash, DictEqualTo>;
+  using dict_map_type = ska::flat_hash_map<IValue, IValue, DictKeyHash, DictKeyEqualTo>;
   dict_map_type dict;
+
+  intrusive_ptr<DictImpl> copy() const {
+    auto result = make_intrusive<DictImpl>();
+    result->dict = dict;
+    return result;
+  }
 };
 
 }
@@ -67,7 +81,7 @@ public:
 private:
   Iterator iterator_;
   friend class DictIterator<Key, Value, Iterator>;
-  friend class Dict<Key, Value>;
+  friend class DictPtr<Key, Value>;
   friend bool operator==<Key, Value, Iterator>(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs);
 };
 
@@ -117,7 +131,7 @@ private:
   DictEntryRef<Key, Value, Iterator> entryRef_;
 
   friend class DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::iterator>;
-  friend class Dict<Key, Value>;
+  friend class DictPtr<Key, Value>;
   friend bool operator==<Key, Value, Iterator>(const DictIterator& lhs, const DictIterator& rhs);
 };
 
@@ -131,18 +145,19 @@ inline bool operator!=(const DictIterator<Key, Value, Iterator>& lhs, const Dict
   return !(lhs == rhs);
 }
 
-template<class Key, class Value> Dict<Key, Value> toTypedDict(Dict<IValue, IValue> dict);
-template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Value> dict);
+template<class Key, class Value> DictPtr<Key, Value> toTypedDict(DictPtr<IValue, IValue> dict);
+template<class Key, class Value> DictPtr<IValue, IValue> toGenericDict(DictPtr<Key, Value> dict);
 }
 
 /**
  * An object of this class stores a map from Key to Value.
+ * You can create instances using the make_dict<Key, Value>() function.
  *
- * This is a reference type. After a copy, both Dicts
+ * This is a pointer type. After a copy, both DictPtrs
  * will share the same storage:
  *
- * > Dict<int, string> a;
- * > Dict<int, string> b = a;
+ * > DictPtr<int, string> a = make_dict<int, string>();
+ * > DictPtr<int, string> b = a;
  * > b.insert(3, "three");
  * > ASSERT("three" == a.at(3));
  *
@@ -152,21 +167,21 @@ template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Va
  * for the kernel API.
  */
 template<class Key, class Value>
-class Dict final {
+class DictPtr final {
 private:
   // impl_ stores the underlying map as a ska::flat_hash_map.
   // We intentionally don't offer conversion from/to
   // ska::flat_hash_map, return references to it or something like that,
   // because such operations would get expensive if we switch out
   // the actual map implementation.
-  // This is an intrusive_ptr because Dict is a reference type.
+  // This is an intrusive_ptr because DictPtr is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid
   // DictImpl.
   c10::intrusive_ptr<detail::DictImpl> impl_;
 
-  explicit Dict(c10::intrusive_ptr<detail::DictImpl>&& impl): impl_(std::move(impl)) {}
-  template<class K, class V> friend Dict<K, V> impl::toTypedDict(Dict<IValue, IValue>);
-  template<class K, class V> friend Dict<IValue, IValue> impl::toGenericDict(Dict<K, V>);
+  explicit DictPtr(c10::intrusive_ptr<detail::DictImpl>&& impl): impl_(std::move(impl)) {}
+  template<class K, class V> friend DictPtr<K, V> impl::toTypedDict(DictPtr<IValue, IValue>);
+  template<class K, class V> friend DictPtr<IValue, IValue> impl::toGenericDict(DictPtr<K, V>);
 
 public:
   using key_type = Key;
@@ -178,14 +193,21 @@ public:
   /**
    * Creates an empty dict.
    */
-  explicit Dict();
+  friend DictPtr make_dict<Key, Value>();
 
-  ~Dict() = default;
+  ~DictPtr() = default;
 
-  Dict(const Dict&) = default;
-  Dict& operator=(const Dict&) = default;
-  Dict(Dict&&) noexcept;
-  Dict& operator=(Dict&&) noexcept;
+  DictPtr(const DictPtr&) = default;
+  DictPtr& operator=(const DictPtr&) = default;
+  DictPtr(DictPtr&&) noexcept;
+  DictPtr& operator=(DictPtr&&) noexcept;
+
+  /**
+   * Create a new DictPtr pointing to a deep copy of the same data.
+   * The DictPtr returned is a new dict with separate storage.
+   * Changes in it are not reflected in the original dict or vice versa.
+   */
+  DictPtr copy() const;
 
   /**
    * Returns an iterator to the first element of the container.
@@ -310,19 +332,23 @@ public:
 };
 
 namespace impl {
-// GenericDict is how IValue stores dicts. It is, however, not part of the
+// GenericDictPtr is how IValue stores dicts. It is, however, not part of the
 // public API. Kernels should use Dicts with concrete Key, Value types instead
 // (maybe except for some internal prim ops).
-using GenericDict = Dict<IValue, IValue>;
+using GenericDictPtr = DictPtr<IValue, IValue>;
 
-template<class Key, class Value>
-Dict<Key, Value> toTypedDict(GenericDict dict) {
-  return Dict<Key, Value>(std::move(dict.impl_));
+inline GenericDictPtr make_generic_dict() {
+  return make_dict<IValue, IValue>();
 }
 
 template<class Key, class Value>
-GenericDict toGenericDict(Dict<Key, Value> dict) {
-  return GenericDict(std::move(dict.impl_));
+DictPtr<Key, Value> toTypedDict(GenericDictPtr dict) {
+  return DictPtr<Key, Value>(std::move(dict.impl_));
+}
+
+template<class Key, class Value>
+GenericDictPtr toGenericDict(DictPtr<Key, Value> dict) {
+  return GenericDictPtr(std::move(dict.impl_));
 }
 }
 
