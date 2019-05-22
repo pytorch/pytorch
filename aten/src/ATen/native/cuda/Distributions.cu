@@ -40,7 +40,7 @@
  * we are using curand distributions that utilize curand4 call. curand4 call doesn't have the
  * register spilling problem.
  */
- 
+
 THCGenerator* THCRandom_getGenerator(THCState* state);
 
 namespace {
@@ -48,7 +48,7 @@ namespace {
 // each thread. It is the user's responsibility to make sure that the increment for philox is never
 // smaller than the number of curand() calls. Increment value > the number of curand() calls
 // won't harm but anything less would mean that you would be reusing random values from
-// previous calls. 
+// previous calls.
 // e.g. In many kernels below, we use distributions that utilize curand4 call in the kernel.
 //      Hence, increment value should be at least 4 for those kernels.
 std::pair<uint64_t, uint64_t> next_philox_seed(at::Generator* gen, uint64_t increment) {
@@ -70,7 +70,7 @@ const uint32_t curand4_engine_calls = 4;
 // thread yielding one element per thread. For the edge of the grid-stride
 // loop, if the tensor size is large, the unroll loop will kick in and the float4
 // from curand4 will start getting utilized (for common tensor sizes, we end up
-// using rand.x from each thread). Hence, the philox_offset is 
+// using rand.x from each thread). Hence, the philox_offset is
 // (number of elements per thread * number of engine calls), which makes
 // sure that philox offset increment is not less than the number of randoms used
 // in each thread.
@@ -115,11 +115,11 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
         transform_func(li, static_cast<accscalar_t>((&rand.x)[ii]));
       }
     }
-    __syncthreads(); 
+    __syncthreads();
   }
 }
 
-template<typename scalar_t, 
+template<typename scalar_t,
          typename accscalar_t,
          int unroll_factor,
          typename dist_t,
@@ -133,7 +133,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
   if (numel == 0) {
     return;
   }
-  
+
   auto execution_policy = calc_execution_policy(numel);
   auto counter_offset = std::get<0>(execution_policy);
   auto grid = std::get<1>(execution_policy);
@@ -348,7 +348,7 @@ void dirichlet_scalar_cuda_kernel(
 namespace at { namespace native {
 Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
   Tensor ret = at::empty(lambda.sizes(), lambda.options());
-  AT_DISPATCH_ALL_TYPES_AND(ret.scalar_type(), "poisson_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "poisson_cuda", [&] {
     poisson_cuda_kernel<scalar_t>(ret, lambda, next_philox_seed(gen, 20));
   });
   return ret;
@@ -356,7 +356,7 @@ Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
 
 Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
-  AT_DISPATCH_ALL_TYPES_AND(ret.scalar_type(), "gamma_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "gamma_cuda", [&] {
      gamma_cuda_kernel<scalar_t>(ret, alpha, next_philox_seed(gen, 10));
    });
   return ret;
