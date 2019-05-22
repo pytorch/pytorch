@@ -219,6 +219,8 @@ class GradientHelper {
       SymbolicVariable fw_output) {
     Value* size;
     {
+      // We insert after the current node because we want to use
+      // its output.
       WithInsertPoint insert_guard{node->next()};
       size = SymbolicVariable(node->namedInput(input_name))
                  .size_if_not_equal(fw_output);
