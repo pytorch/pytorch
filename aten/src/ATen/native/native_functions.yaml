@@ -1390,7 +1390,7 @@
 
 - func: poisson_nll_loss(Tensor input, Tensor target, bool log_input, bool full, float eps, int reduction) -> Tensor
   variants: function
-  
+
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1485,6 +1485,8 @@
     CUDA: _neg__cuda
 
 - func: neg(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  cpu_bool: True
+  cuda_bool: True
   dispatch:
     CPU: _neg_out_cpu
     CUDA: _neg_out_cuda
