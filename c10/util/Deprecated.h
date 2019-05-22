@@ -39,36 +39,45 @@
 // Sample usage:
 //
 //    using BadType C10_DEPRECATED_USING = int;
-//
 
-#if defined(__cplusplus) && __cplusplus >= 201402L
+// technically [[deprecated]] syntax is from c++14 standard, but it works in
+// many compilers.
+#if defined(__has_cpp_attribute)
+#if __has_cpp_attribute(deprecated)
 # define C10_DEPRECATED_USING [[deprecated]]
-#elif defined(_MSC_VER) && defined(__CUDACC__)
-// Apparently, [[deprecated]] doesn't work on nvcc on Windows;
+#endif
+#endif
+
+#if !defined(C10_DEPRECATED_USING) && defined(_MSC_VER)
+#if defined(__CUDACC__)
+// [[deprecated]] doesn't work on nvcc on Windows;
 // you get the error:
 //
 //    error: attribute does not apply to any entity
 //
 // So we just turn the macro off in this case.
 # define C10_DEPRECATED_USING
-#elif defined(_MSC_VER)
-// __declspec(deprecated) does not work in using declarations:
-//  https://godbolt.org/z/lOwe1h
-// but it seems that most of C++14 is available in MSVC even if you don't ask for
-// it. (It's also harmless to specify an attribute because it is C++11 supported
-// syntax; you mostly risk it not being understood).  Some more notes at
-// https://blogs.msdn.microsoft.com/vcblog/2016/06/07/standards-version-switches-in-the-compiler/
+#else
+// [[deprecated]] does work in windows without nvcc, though msc doesn't support
+// `__has_cpp_attribute`.
 # define C10_DEPRECATED_USING [[deprecated]]
-#elif defined(__CUDACC__)
+#endif
+#endif
+
+#if !defined(C10_DEPRECATED_USING) && defined(__GNUC__)
 // nvcc has a bug where it doesn't understand __attribute__((deprecated))
-// declarations even when the host compiler supports it.  It's OK
-// with [[deprecated]] though (although, if you are on an old version
-// of gcc which doesn't understand attributes, you'll get a -Wattributes
-// error that it is ignored
-# define C10_DEPRECATED_USING [[deprecated]]
-#elif defined(__GNUC__)
+// declarations even when the host compiler supports it. We'll only use this gcc
+// attribute when not cuda, and when using a GCC compiler that doesn't support
+// the c++14 syntax we checked for above (availble in __GNUC__ >= 5)
+#if !defined(__CUDACC__)
 # define C10_DEPRECATED_USING __attribute__((deprecated))
 #else
+// using cuda + gcc < 5, neither deprecated syntax is available so turning off.
+# define C10_DEPRECATED_USING
+#endif
+#endif
+
+#if ! defined(C10_DEPRECATED_USING)
 # warning "You need to implement C10_DEPRECATED_USING for this compiler"
 # define C10_DEPRECATED_USING
 #endif
