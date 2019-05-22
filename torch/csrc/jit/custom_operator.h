@@ -2,7 +2,7 @@
 
 #include <torch/csrc/jit/operator.h>
 #include <ATen/core/stack.h>
-#include <ATen/core/op_registration/infer_schema.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
@@ -83,7 +83,7 @@ inline void checkArgumentVector(
     const FunctionSchema& inferredSchema,
     const FunctionSchema& providedSchema) {
   // clang-format off
-  AT_CHECK(
+  TORCH_CHECK(
       inferred.size() == provided.size(),
       "Inferred ", inferred.size(), " ", what,
       "(s) for operator implementation, but the provided schema specified ",
@@ -92,7 +92,7 @@ inline void checkArgumentVector(
   // clang-format on
   for (size_t i = 0; i < provided.size(); ++i) {
     // clang-format off
-    AT_CHECK(
+    TORCH_CHECK(
         provided[i].type()->isSubtypeOf(inferred[i].type()),
         "Inferred type for ", what, " #", i, " was ", *inferred[i].type(),
         ", but the provided schema specified type ", *provided[i].type(),
@@ -170,7 +170,8 @@ FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
 template <typename Implementation>
 Operator createOperator(
     const std::string& schemaOrName,
-    Implementation&& implementation) {
+    Implementation&& implementation,
+    OperatorOptions options = OperatorOptions()) {
   using Traits = c10::guts::infer_function_traits_t<Implementation>;
   using ArgumentTypes =
       c10::guts::typelist::map_t<decay_t, typename Traits::parameter_types>;
@@ -201,16 +202,20 @@ Operator createOperator(
         name.ns().toUnqualString());
   }
 
-  return Operator(schema, [implementation, schema](Stack& stack) {
-    ArgumentTuple tuple;
-    torch::jit::detail::callOperatorWithTuple(
-        schema,
-        std::move(implementation), // NOLINT(bugprone-move-forwarding-reference)
-        stack,
-        tuple,
-        typename MakeIndices<kNumberOfArguments>::indices{});
-    return 0;
-  });
+  return Operator(
+      schema,
+      [implementation, schema](Stack& stack) {
+        ArgumentTuple tuple;
+        torch::jit::detail::callOperatorWithTuple(
+            schema,
+            std::move(
+                implementation), // NOLINT(bugprone-move-forwarding-reference)
+            stack,
+            tuple,
+            typename MakeIndices<kNumberOfArguments>::indices{});
+        return 0;
+      },
+      std::move(options));
 }
 
 /// Registration class for new operators. Effectively calls
@@ -240,12 +245,34 @@ struct TORCH_API RegisterOperators {
   template <typename Implementation>
   RegisterOperators& op(
       const std::string& name,
-      Implementation&& implementation) {
-    registerOperator(
-        createOperator(name, std::forward<Implementation>(implementation)));
+      Implementation&& implementation,
+      OperatorOptions options) {
+
+    registerOperator(createOperator(
+        name, std::forward<Implementation>(implementation), options));
     return *this;
   }
+
+  template <typename Implementation>
+  RegisterOperators& op(
+      const std::string& name,
+      Implementation&& implementation) {
+    registrars_.emplace_back(std::make_shared<c10::RegisterOperators>(name, std::forward<Implementation>(implementation)));
+
+    return *this;
+  }
+
+private:
+  // A c10::RegisterOperators instance is not copyable, so to make
+  // torch::jit::RegisterOperators copyable, we use shared_ptrs.
+  // We need to keep the c10::RegisterOperators instances around
+  // because this is an RAII pattern. In the destructor, the registered
+  // ops get de-registered.
+  std::vector<std::shared_ptr<c10::RegisterOperators>> registrars_;
 };
 
 } // namespace jit
+
+using RegisterOperators = c10::RegisterOperators;
+
 } // namespace torch

@@ -1,32 +1,10 @@
 #include <math.h>
 
 #include <ATen/ATen.h>
+#include <ATen/TensorUtils.h>
 
 namespace at {
 namespace native {
-
-// Corresponds to THNN_CHECK_DIM_SIZE
-static inline void check_dim_size(
-    const Tensor& data,
-    int64_t dim,
-    int64_t dim_size,
-    int64_t size) {
-  /* Check dimension size of a tensor */
-  AT_CHECK(
-      data.dim() == dim && data.size(dim_size) == size,
-      "Expected tensor of dimension ",
-      dim,
-      " and tensor.size[",
-      dim_size,
-      "] == ",
-      size,
-      " but got: dimension ",
-      data.dim(),
-      " and tensor.size[",
-      dim_size,
-      "] = ",
-      data.size(dim_size));
-}
 
 static inline void upsample_1d_shape_check(
     const Tensor& input,
@@ -35,7 +13,7 @@ static inline void upsample_1d_shape_check(
     int64_t nchannels,
     int64_t input_width,
     int64_t output_width) {
-  AT_CHECK(
+  TORCH_CHECK(
       input_width > 0 && output_width > 0,
       "Input and output sizes should be greater than 0, but got input (W: ",
       input_width,
@@ -44,7 +22,7 @@ static inline void upsample_1d_shape_check(
       ")");
 
   if (input.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         input.numel() != 0 && input.dim() == 3,
         "Non-empty 3D data tensor expected but got a tensor with sizes ",
         input.sizes());
@@ -64,7 +42,7 @@ static inline void upsample_2d_shape_check(
     int64_t input_width,
     int64_t output_height,
     int64_t output_width) {
-  AT_CHECK(
+  TORCH_CHECK(
       input_height > 0 && input_width > 0 && output_height > 0 &&
           output_width > 0,
       "Input and output sizes should be greater than 0,"
@@ -79,7 +57,7 @@ static inline void upsample_2d_shape_check(
       ")");
 
   if (input.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         input.numel() != 0 && input.dim() == 4,
         "Non-empty 4D data tensor expected but got a tensor with sizes ",
         input.sizes());
@@ -102,7 +80,7 @@ static inline void upsample_3d_shape_check(
     int64_t output_depth,
     int64_t output_height,
     int64_t output_width) {
-  AT_CHECK(
+  TORCH_CHECK(
       input_depth > 0 && input_height > 0 && input_width > 0 &&
           output_depth > 0 && output_height > 0 && output_width > 0,
       "Input and output sizes should be greater than 0, but got input (D: ",
@@ -120,7 +98,7 @@ static inline void upsample_3d_shape_check(
       ")");
 
   if (input.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         input.numel() != 0 && input.dim() == 5,
         "Non-empty 5D data tensor expected but got a tensor with sizes ",
         input.sizes());
@@ -134,7 +112,7 @@ static inline void upsample_3d_shape_check(
 }
 
 template <typename scalar_t>
-static inline scalar_t linear_upsample_compute_scale(
+static inline scalar_t area_pixel_compute_scale(
     int64_t input_size,
     int64_t output_size,
     bool align_corners) {
@@ -159,15 +137,28 @@ static inline scalar_t linear_upsample_compute_scale(
 }
 
 template <typename scalar_t>
-static inline scalar_t linear_upsample_compute_source_index(
+static inline scalar_t area_pixel_compute_source_index(
     scalar_t scale,
     int64_t dst_index,
-    bool align_corners) {
+    bool align_corners,
+    bool cubic) {
   if (align_corners) {
     return scale * dst_index;
   } else {
     scalar_t src_idx = scale * (dst_index + 0.5) - 0.5;
-    return src_idx < 0 ? scalar_t(0) : src_idx;
+    // [Note] Follow Opencv resize logic:
+    // We allow negative src_idx here and later will use
+    //   dx = src_idx - floorf(src_idx)
+    // to compute the "distance"(which affects weights).
+    // For linear modes, weight distribution doesn't matter
+    // for negative indices as they use 2 pixels to interpolate.
+    // For example, [-1, 0], they both use pixel 0 value so it
+    // doesn't affect if we bound the src_idx to 0 or not.
+    // TODO: Our current linear mode impls use unbound indices
+    // where we should and then remove this cubic flag.
+    // This matters in cubic mode, as we might need [-1, 0, 1, 2]
+    // to interpolate and the weights can be affected.
+    return (!cubic && src_idx < 0) ? scalar_t(0) : src_idx;
   }
 }
 

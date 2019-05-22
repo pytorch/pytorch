@@ -2,9 +2,11 @@
 
 #include <functional>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include <torch/csrc/jit/script/lexer.h>
+#include <c10/util/SmallVector.h>
 
 namespace torch {
 namespace jit {
@@ -28,7 +30,7 @@ namespace script {
 
 struct Tree;
 using TreeRef = std::shared_ptr<Tree>;
-using TreeList = std::vector<TreeRef>;
+using TreeList = at::SmallVector<TreeRef, 4>;
 
 static const TreeList empty_trees = {};
 
@@ -62,7 +64,7 @@ struct Tree : std::enable_shared_from_this<Tree> {
   }
   template <typename... Args>
   void matchD(int k, const char* filename, int lineno, Args&... args) {
-    std::initializer_list<TreeRef*> vars = {&args...};
+    std::initializer_list<TreeRef*> vars = {args...};
     matchNumSubtreesD(k, filename, lineno, vars.size(), true);
     size_t i = 0;
     for (TreeRef* v : vars) {

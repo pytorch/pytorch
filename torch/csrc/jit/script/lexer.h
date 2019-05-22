@@ -1,17 +1,16 @@
 #pragma once
-#include <c10/util/Exception.h>
+#include <ATen/core/Macros.h>
 #include <c10/util/C++17.h>
-#include <torch/csrc/jit/source_range.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/script/strtod.h>
+#include <torch/csrc/jit/source_range.h>
 #include <algorithm>
 #include <clocale>
-#include <cstring>
 #include <cstdlib>
-#include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace torch {
@@ -100,7 +99,8 @@ namespace script {
   _(TK_DOTS, "dots", "...")                      \
   _(TK_LIST_COMP, "list comprehension", "")      \
   _(TK_PASS, "pass", "pass")                     \
-  _(TK_CLASS_DEF, "class", "class")
+  _(TK_CLASS_DEF, "class", "class")              \
+  _(TK_IMPORT, "import", "import")
 
 static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|";
 
@@ -114,8 +114,8 @@ enum TokenKind {
 #undef DEFINE_TOKEN
 };
 
-std::string kindToString(int kind);
-int stringToKind(const std::string& str);
+CAFFE2_API std::string kindToString(int kind);
+CAFFE2_API int stringToKind(const std::string& str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;
@@ -148,7 +148,7 @@ struct TokenTrie {
 
 // stuff that is shared against all TC lexers/parsers and is initialized only
 // once.
-struct SharedParserData {
+struct CAFFE2_API SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
     std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
@@ -352,7 +352,7 @@ struct SharedParserData {
   TokenTrieRef head;
 };
 
-SharedParserData& sharedParserData();
+CAFFE2_API SharedParserData& sharedParserData();
 
 struct Token {
   int kind;
@@ -469,7 +469,8 @@ struct Lexer {
             indent_stack.pop_back();
             next_tokens.emplace_back(TK_DEDENT, r.range);
             if (indent_stack.size() == 0) {
-              reportError("invalid indent level " + c10::guts::to_string(depth), r);
+              reportError(
+                  "invalid indent level " + c10::guts::to_string(depth), r);
             }
           }
           return; // We've already queued the tokens

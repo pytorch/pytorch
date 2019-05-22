@@ -24,10 +24,10 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   long versionCuDNN() const override;
   std::string showConfig() const override;
   double batchnormMinEpsilonCuDNN() const override;
-  int64_t cuFFTGetPlanCacheMaxSize() const override;
-  void cuFFTSetPlanCacheMaxSize(int64_t max_size) const override;
-  int64_t cuFFTGetPlanCacheSize() const override;
-  void cuFFTClearPlanCache() const override;
+  int64_t cuFFTGetPlanCacheMaxSize(int64_t device_index) const override;
+  void cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const override;
+  int64_t cuFFTGetPlanCacheSize(int64_t device_index) const override;
+  void cuFFTClearPlanCache(int64_t device_index) const override;
   int getNumGPUs() const override;
 };
 

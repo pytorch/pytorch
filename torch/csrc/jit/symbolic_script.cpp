@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/symbolic_script.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/script/compiler.h>
 
 namespace torch {
 namespace jit {
@@ -385,7 +387,7 @@ const std::vector<std::string> functions = {
                     tensor1,
                     tensor2,
                     *,
-                    value: float = 1.0):
+                    value: number = 1.0):
             def backward(grad_output):
                 grad = grad_output * value
                 grad_tensor1 = (grad * tensor2)._grad_sum_to_size(tensor1.size())
@@ -400,11 +402,11 @@ const std::vector<std::string> functions = {
 
             return torch._dim_arange(like, dim), backward
 
-        def contiguous(self):
+        def contiguous(self, *, memory_format: int=0):
             def backward(grad_output):
-                return grad_output
+                return grad_output, None
 
-            return self.contiguous(), backward
+            return self.contiguous(memory_format=memory_format), backward
 
         def dot(self, tensor):
             def backward(grad_output):
@@ -448,10 +450,10 @@ const std::vector<std::string> functions = {
 
         def lerp_0(self,
                    end,
-                   weight: float):
+                   weight: number):
             def backward(grad_output):
-                grad_self = (grad_output * (1 - weight))._grad_sum_to_size(self.size())
-                grad_end = (grad_output * weight)._grad_sum_to_size(end.size())
+                grad_self = (grad_output * (1 - float(weight)))._grad_sum_to_size(self.size())
+                grad_end = (grad_output * float(weight))._grad_sum_to_size(end.size())
                 return grad_self, grad_end, None
             return torch.lerp(self, end, weight), backward
 
@@ -578,9 +580,12 @@ const std::vector<std::string> functions = {
             return torch.ones_like(self), backward
 
         def pow_0(self,
-                  exponent: float):
+                  exponent: number):
             def backward(grad_output):
-                grad_self = torch.where(torch.tensor(exponent == 0.0), torch.zeros_like(self), grad_output * exponent * torch.pow(self, exponent - 1))
+                if float(exponent) == 0.0:
+                    grad_self = torch.zeros_like(self)
+                else:
+                    grad_self = grad_output * exponent * torch.pow(self, float(exponent) - 1)
                 return grad_self, None
 
             return torch.pow(self, exponent), backward
@@ -594,16 +599,16 @@ const std::vector<std::string> functions = {
 
             return torch.pow(self, exponent), backward
 
-        def pow_2(self: float,
+        def pow_2(self: number,
                   exponent):
             def backward(grad_output):
-                grad_exponent = grad_output * torch.pow(self, exponent) * torch.log(torch.tensor(self))
+                grad_exponent = grad_output * torch.pow(self, exponent) * torch.log(float(self))
                 return None, grad_exponent
 
             return torch.pow(self, exponent), backward
 
         def rsub_0(self, other,
-                   alpha: float = 1.0):
+                   alpha: number = 1.0):
             self_size = self.size()
             other_size = other.size()
             def backward(grad_output):
@@ -614,8 +619,8 @@ const std::vector<std::string> functions = {
             return torch.rsub(self, other, alpha), backward
 
         def rsub_1(self,
-                   other: float,
-                   alpha: float = 1.0):
+                   other: number,
+                   alpha: number = 1.0):
             self_size = self.size()
             def backward(grad_output):
                 grad_self = (- grad_output * alpha)._grad_sum_to_size(self_size)
@@ -1005,6 +1010,18 @@ const std::vector<std::string> functions = {
 
             return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad), backward
 
+        def max_pool2d(self,
+                       kernel_size: List[int],
+                       stride: List[int],
+                       padding: List[int],
+                       dilation: List[int],
+                       ceil_mode: bool):
+            output, indices = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
+            def backward(grad_output):
+                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
+                return grad_self, None, None, None, None, None
+            return output, backward
+
         def batch_norm(input : Tensor,
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
@@ -1029,7 +1046,8 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
-        def layer_norm(input : Tensor,
+        # disable the layernorm AD temporarily because of bug in https://github.com/pytorch/pytorch/issues/19769
+        def layer_norm_disabled(input : Tensor,
                        normalized_shape : List[int],
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
@@ -1112,6 +1130,7 @@ const std::vector<std::string> functions = {
                 res = mask * input / p1m
 
             def backward(grad_output):
+                use_cuda = grad_output.is_cuda
                 if use_cuda:
                     grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
                 else:
@@ -1257,20 +1276,20 @@ std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 } // anonymous namespace
 
 std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
-  AT_CHECK(
+  TORCH_CHECK(
       closure->node()->kind() == prim::TupleConstruct,
       "closure must be a literal tuple construct");
   Value* fn = closure->node()->inputs().at(0);
   Value* context = closure->node()->inputs().at(1);
 
-  AT_CHECK(
+  TORCH_CHECK(
       fn->node()->kind() == prim::Function,
       "closure tuple must contain a prim::Function");
   return std::make_pair(fn->node()->g(attr::Subgraph), context);
 }
 
 Argument originalReturnType(const TupleTypePtr& tup) {
-  AT_CHECK(tup->elements().size() > 1);
+  TORCH_CHECK(tup->elements().size() > 1);
   if (tup->elements().size() == 2)
     return Argument("", tup->elements().at(0));
   std::vector<TypePtr> types = tup->elements().vec();
@@ -1315,7 +1334,7 @@ void loadModule(const script::CompilationUnit& module) {
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw script::ErrorReport(forward_tuple->getSourceLocation())
+      throw script::ErrorReport(forward_tuple->sourceRange())
           << "gradient must return literal a tuple";
     }
 
@@ -1357,7 +1376,7 @@ void loadModule(const script::CompilationUnit& module) {
 void loadFunctions() {
   for (const std::string& str : functions) {
     script::CompilationUnit cu;
-    cu.define(str, script::nativeResolver, nullptr);
+    cu.define(str, script::nativeResolver(), nullptr);
     loadModule(cu);
   }
 }
@@ -1373,14 +1392,6 @@ c10::optional<GradientPair> gradientInfoForSchema(
     return cache_it->second;
   } else {
     auto schema_str = canonicalSchemaString(schema);
-    // Specialize Scalar to float for the arg type of the node schema
-    // this is used to:
-    // 1. define scalar type as float in TorchScript autodiff formula
-    // 2. to make sure the input of any graph node does not contain scalar type
-    //    in its argument, all scalar arg should already be passed with float
-    //    value since scalar/int aren't differentiable either way.
-    //
-    c10::ReplaceAll(schema_str, "Scalar", "float");
     // For debugging AD change:
     // std::cout << "Looking for " << schema_str << std::endl;
 

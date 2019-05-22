@@ -99,17 +99,11 @@ Value* tryConvertToType(
     if (concrete_type->isSubtypeOf(NumberType::get()) &&
         value->type()->isSubtypeOf(TensorType::get())) {
       auto n = graph.createImplicitTensorToNum(concrete_type, value);
-      value = graph.insertNode(n)
-                  ->setSourceLocation(std::make_shared<SourceRange>(loc))
-                  ->output();
+      value = graph.insertNode(n)->setSourceRange(loc)->output();
     }
     if (value->type()->isSubtypeOf(StringType::get()) &&
         DeviceObjType::get()->isSubtypeOf(concrete_type)) {
       return graph.insert(aten::device, {value}, {}, loc);
-    }
-    if (concrete_type == FloatType::get() &&
-        value->type() == NumberType::get()) {
-      return graph.insert(prim::Float, {value}, {}, loc);
     }
   }
 
@@ -138,8 +132,8 @@ Value* tryMatchArgument(
   const MatchTypeReturn matched_type =
       matchTypeVariables(arg.type(), value->type(), type_env);
   if (!matched_type.type) {
-    err() << "could not match type " << value->type()->str() << " to "
-          << arg.type()->str() << " in argument '" << arg.name()
+    err() << "could not match type " << value->type()->python_str() << " to "
+          << arg.type()->python_str() << " in argument '" << arg.name()
           << "': " << matched_type.errMsg << "\n"
           << named_value.locOr(loc);
     return nullptr;
@@ -149,9 +143,10 @@ Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
-    auto& ostream = err() << "expected a value of type " << concrete_type->str()
-                          << " for argument '" << arg.name() << "' but found "
-                          << value->type()->str() << "\n";
+    auto& ostream = err() << "expected a value of type "
+                          << concrete_type->python_str() << " for argument '"
+                          << arg.name() << "' but found "
+                          << value->type()->python_str() << "\n";
 
     if (auto v = value->type()->cast<ListType>()) {
       if (v->getElementType()->isSubtypeOf(TensorType::get())) {
@@ -359,7 +354,7 @@ static Value* emitBuiltinNode(
     Graph& graph,
     Symbol name) {
   auto n = graph.insertNode(graph.create(name, matched_schema.inputs, 0))
-               ->setSourceLocation(std::make_shared<SourceRange>(loc));
+               ->setSourceRange(loc);
 
   for (auto& ret : matched_schema.return_types) {
     n->addOutput()->setType(ret);

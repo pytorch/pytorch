@@ -5,6 +5,8 @@
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <cstddef>
 #include <vector>
 
@@ -76,7 +78,7 @@ struct ConvOptions {
 
 /// Base class for all (dimension-specialized) convolution modules.
 template <size_t D, typename Derived>
-class ConvImpl : public torch::nn::Cloneable<Derived> {
+class TORCH_API ConvImpl : public torch::nn::Cloneable<Derived> {
  public:
   ConvImpl(
       int64_t input_channels,

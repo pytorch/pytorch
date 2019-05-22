@@ -142,6 +142,7 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: is_cuda
    .. autoattribute:: device
    .. autoattribute:: grad
+   .. autoattribute:: ndim
 
    .. automethod:: abs
    .. automethod:: abs_
@@ -179,6 +180,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bernoulli_
    .. automethod:: bincount
    .. automethod:: bmm
+   .. automethod:: bool
    .. automethod:: byte
    .. automethod:: btrifact
    .. automethod:: btrifact_with_info
@@ -188,6 +190,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ceil_
    .. automethod:: char
    .. automethod:: cholesky
+   .. automethod:: cholesky_inverse
    .. automethod:: cholesky_solve
    .. automethod:: chunk
    .. automethod:: clamp
@@ -206,6 +209,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumsum
    .. automethod:: data_ptr
    .. automethod:: dequantize
+   .. automethod:: dequantize_linear
    .. automethod:: det
    .. automethod:: dense_dim
    .. automethod:: detach
