@@ -286,7 +286,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     throw ErrorReport(loc) << "attribute '" << field << "' does not exist";
   }
 
-  if (py::object attr = py::getattr(py_module_, field.c_str(), py::none())) {
+  if (py::object attr = py::getattr(py_module_, field.c_str())) {
     if (py::isinstance<py::function>(attr) &&
         py::hasattr(attr, "_parameter_names_fn")) {
       // Fetch the names of the parameters in the list so they're in the
