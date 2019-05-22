@@ -38,7 +38,7 @@ class AliasDb {
   //
   // These nodes are considered not safe to eliminate or mutate under any
   // circumstances.
-  bool hasUntrackedEffects(Node* n) const;
+  bool writesToWildcard(Node* n) const;
 
   // Does `n` write to an alias of one of the values in `vs`?
   // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
@@ -77,17 +77,6 @@ class AliasDb {
       const U<const Value*, Other2...>& b) const {
     if (a.empty() || b.empty()) {
       return false;
-    }
-    // Short-circuit for special case: if any value is a wildcard, the two sets
-    // may alias
-    if (std::any_of(
-            a.cbegin(),
-            a.cend(),
-            [this](const Value* v) { return isWildcard(v); }) ||
-        std::any_of(b.cbegin(), b.cend(), [this](const Value* v) {
-          return isWildcard(v);
-        })) {
-      return true;
     }
 
     T<Element*> aElements;
@@ -139,14 +128,11 @@ class AliasDb {
   /**
    * Write and read internal API
    */
-  // Does `n` write to any alias sets?
-  bool hasWrites(Node* n) const;
   // Get all the values that `n` writes to.
   // NOTE: this only returns values directly written to, not aliases thereof
   //
   // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
   ValueSet getWrites(Node* n, bool recurseBlocks = false) const;
-  ValueSet getWrites(Block* b) const;
   void getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks = false) const;
   void getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
   // Do any nodes write to `v`s memory location?
@@ -158,26 +144,11 @@ class AliasDb {
   ValueSet getReads(Node* n, bool recurseBlocks = false) const;
   void getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
 
-  // Does `n` write to a value that may alias one of the graph inputs?
-  bool writesToInputAlias(Node* n) const;
-  // Does `n` write to `v` or any aliases of `v`?
-  bool writesTo(Node* n, const Value* v) const;
-
   /**
    * Wildcard methods
    */
-  // is `v` a wildcard?
-  TORCH_API bool isWildcard(const Value* v) const;
   // Register `v` as a wildcard value.
   void setWildcard(const Value* v);
-  // Get all nodes that write to a wildcard value.
-  const std::unordered_set<Node*>& getWildcardWriters() const {
-    return wildcardWriters_;
-  }
-  // Does `n` use or write to any wildcard aliases?
-  bool hasWildcard(const Node* n) const;
-  // Returns nullopt if there are no wildcard nodes
-  c10::optional<const Node*> getLastWildcard() const;
 
   // Is the element a wildcard or an unhandled container type,
   // or does the element contain an element for which that's true
@@ -220,38 +191,28 @@ class AliasDb {
 
   static bool shouldAnnotate(const Value* v);
   static bool shouldAnnotate(const TypePtr& type);
+  static c10::optional<TypeKind> getMutableTypeKind(const TypePtr& type);
 
   static bool isContainerType(const TypePtr& type);
 
-  bool hasUsesAfter(Symbol alias, const Node* n) const;
-  bool isBeforeSameGraph(const Node* lhs, const Node* rhs) const;
-
-  // Returns true iff `v` is part of the alias tracker/is a wildcard
-  bool isTracked(const Value* v) const;
-
-  // Get the values that represent the memory locations that `v` may point to.
-  // Return values are guaranteed to be "fresh" tensors--they do not point to
-  // anything else.
-  ValueSet getMemoryLocations(const Value* v) const;
-
   std::shared_ptr<Graph> graph_;
-  std::unordered_map<const Graph*, const Node*> subgraphToOwner_;
 
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAG> memoryDAG_;
   // Mapping of values to MemoryDAG elements
   std::unordered_map<const Value*, Element*> elementMap_;
+  // All wildcard elements (one for each unique mutable type).
+  std::map<TypeKind, Element*> wildcardIndex_;
+  Element* getWildcard(const TypePtr& type) const;
+  Element* getOrCreateWildcard(const TypePtr& type);
+  bool mayAliasWildcard(const Value* v) const;
 
-  // All values that may point to a wildcard value.
-  ValueSet wildcards_;
-  // All nodes that write to a wildcard
-  std::unordered_set<Node*> wildcardWriters_;
-  // All nodes that contain a wildcard
-  std::unordered_set<const Node*> wildcardNodes_;
-
-  // State for tracking write info
-  size_t numWrites_ = 0;
+  /**
+   * State for tracking write info.
+   */
+  // Map of nodes to the values that they write to
   std::unordered_map<Node*, ValueSet> writeIndex_;
+  // Set of all memory locations that may have been written to.
   mutable std::unordered_set<const Element*> writeCache_;
   mutable bool isWriteCacheStale_ = true;
   void rebuildWriteCache() const;
