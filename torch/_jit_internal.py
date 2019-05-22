@@ -159,22 +159,73 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     }
     return fn
 
+def get_class_attribute_dict(fn, frames_up=2):
+    """
+    Get the frame for class attribute definitions (the top level frame
+    containing methods and class variables defined outside methods)
+    """
+    # default to 2 frames up:
+    #   0 - get_class_attribute_dict
+    #   1 - some decorator
+    #   2 - the class definition
+    frame = inspect.currentframe()
+    i = 0
+    while i < frames_up:
+        frame = frame.f_back
+        i += 1
+
+    # The locals of the class definition frame contain any class attributes
+    # (such as __constants__)
+    return frame.f_locals
 
 def export(fn):
+    """
+    This decorator indicates that a method is used as an entry point into a
+    ScriptModule.
+
+    Methods are added to a ScriptModule as they are called in Python. If a
+    method is never called, it will not be included in the ScriptModule when
+    saving. This decorator explicitly marks that a method should be included
+    even if it is not called from Python.
+    """
+    class_dict = get_class_attribute_dict(fn, frames_up=3)
+    if '__export__' not in class_dict:
+        class_dict['__export__'] = set()
+    class_dict['__export__'].add(fn.__name__)
     return fn
+
+def _add_ignored_fn(fn, drop_on_export):
+    class_dict = get_class_attribute_dict(fn, frames_up=3)
+
+    # Add '__ignore__' to class attributes if it does not already exist
+    if '__ignore__' not in class_dict:
+        class_dict['__ignore__'] = {}
+    class_dict['__ignore__'][fn.__name__] = {"drop_on_export": drop_on_export}
 
 
 def ignore(drop_on_export=False):
+    """
+    This decorator indicates to the compiler that a function or method should
+    be ignored and left as a Python function.
+
+    With `drop_on_export=False` (the default), calls to this function will
+    prevent saving a TorchScript model.
+
+    With `drop_on_export=True`, any calls to this function from other
+    TorchScript code will be replaced with a `raise`. This allows you to leave
+    code in your TorchScript model that is only ever run when the Python
+    interpreter is present.
+    """
     if callable(drop_on_export):
         # used without any args, so drop_on_export is actually a function
         #   @torch.jit.ignore
         #   def fn(...):
         fn = drop_on_export
-        ignored_fns[fn] = {"drop_on_export": False}
+        _add_ignored_fn(fn, drop_on_export=False)
         return drop_on_export
     elif isinstance(drop_on_export, bool):
         def decorator(fn):
-            ignored_fns[fn] = {"drop_on_export": drop_on_export}
+            _add_ignored_fn(fn, drop_on_export=drop_on_export)
             return fn
         return decorator
     else:
