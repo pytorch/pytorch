@@ -12085,7 +12085,7 @@ a")
             return s.upper(), s.lower()
 
         inputs = ["", "12a", "!B", "12", "a", "B", "aB", "$12", "B12", "AB ",
-                  "  \t", "  \n", "\na"]
+                  "  \t", "  \n", "\na", "abc"]
 
         for input in inputs:
             self.checkScript(test_str_is, (input,))
