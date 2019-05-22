@@ -70,6 +70,13 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   });
 }
 
+// Devices directly supported by this copy implementation. Other device types
+// (e.g. XLA) may be supported by overriding copy_ and _copy_from.
+bool is_supported_device(Device device) {
+  DeviceType device_type = device.type();
+  return device_type == kCPU || device_type == kCUDA || device_type == kHIP;
+}
+
 } // namespace
 
 namespace at {
@@ -91,11 +98,11 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     return self;
   }
 
-  // Re-dispatch copies with src device not implemented here (e.g. XLA).
+  // Re-dispatch copies when src device not implemented here (e.g. XLA).
   // This includes: cpu_tensor.copy_(xla_tensor) which
   // calls xla_tensor._copy_from(cpu_tensor)
-  if (!src.device().is_cuda() && !src.device().is_cpu()) {
-    TORCH_INTERNAL_ASSERT(self.device().is_cuda() || self.device().is_cpu());
+  if (!is_supported_device(src.device())) {
+    TORCH_INTERNAL_ASSERT(is_supported_device(self.device()));
     at::_copy_from(src, self, non_blocking);
     return self;
   }
