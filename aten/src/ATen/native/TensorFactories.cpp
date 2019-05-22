@@ -91,7 +91,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
+Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, MemoryFormat memory_format) {
   AT_ASSERT(options.backend() == Backend::CPU);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
@@ -117,6 +117,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
+  tensor.unsafeGetTensorImpl()->update_strides_to_format(memory_format);
   return tensor;
 }
 
@@ -127,12 +128,16 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptio
   return t;
 }
 
-Tensor& empty_out(Tensor& result, IntArrayRef size) {
+Tensor& empty_out(
+    Tensor& result,
+    IntArrayRef size,
+    MemoryFormat memory_format) {
   check_size_nonnegative(size);
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0);
   } else {
     result.resize_(size);
+    result.unsafeGetTensorImpl()->update_strides_to_format(memory_format);
   }
   return result;
 }
@@ -157,13 +162,31 @@ Tensor empty_like(const Tensor& self) {
   return native::empty_like(self, self.options());
 }
 
-Tensor empty_like(const Tensor& self, const TensorOptions& options) {
+Tensor empty_like(
+    const Tensor& self,
+    const TensorOptions& options,
+    MemoryFormat memory_format) {
+  TORCH_CHECK(
+      options.layout() != kSparse ||
+          memory_format != MemoryFormat::ChannelsLast,
+      " channels_last memory format is incompatible with sparse tensors");
   if (options.layout() == kSparse && self.is_sparse()) {
-    auto res = at::empty({0}, options); // to be resized
-    res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
-    return res;
+    auto result = at::empty({0}, options); // to be resized
+    result.sparse_resize_and_clear_(
+        self.sizes(), self.sparse_dim(), self.dense_dim());
+    return result;
   }
-  return at::empty(self.sizes(), options);
+
+  auto use_memory_format = memory_format;
+  if (memory_format == MemoryFormat::Preserve) {
+    if (self.is_contiguous(MemoryFormat::ChannelsLast)) {
+      use_memory_format = MemoryFormat::ChannelsLast;
+    } else {
+      use_memory_format = MemoryFormat::Contiguous;
+    }
+  }
+
+  return at::empty(self.sizes(), options, use_memory_format);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -2,6 +2,7 @@
 
 #include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ArrayRef.h>
 
 #include <iostream>
 
@@ -44,6 +45,16 @@ inline std::ostream& operator<<(
     default:
       AT_ERROR("Unknown memory format");
   }
+}
+
+inline std::vector<int64_t> get_channels_last_strides(IntArrayRef sizes) {
+  AT_ASSERT(sizes.size() == 4);
+  std::vector<int64_t> strides(sizes.size());
+  strides[1] = 1;
+  strides[3] = sizes[1];
+  strides[2] = strides[3] * sizes[3];
+  strides[0] = strides[2] * sizes[2];
+  return strides;
 }
 
 } // namespace c10

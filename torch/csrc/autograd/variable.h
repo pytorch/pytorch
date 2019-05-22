@@ -416,6 +416,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
+  void update_strides_to_format(at::MemoryFormat memory_format) override;
 
   int64_t dim() const override;
   bool has_storage() const override;

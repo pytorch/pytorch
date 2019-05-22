@@ -1344,6 +1344,29 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     device_opt_ = storage_.device();
   }
 
+  virtual void update_strides_to_format(MemoryFormat memory_format) {
+    TORCH_CHECK(!is_variable()); // TODO: remove this when Variable and Tensor are
+                               // merged
+    switch (memory_format) {
+      case MemoryFormat::Any:
+      case MemoryFormat::Contiguous: {
+        auto old_dim = sizes_.size();
+        update_to_contiguous_strides(old_dim);
+        return;
+      }
+      case MemoryFormat::ChannelsLast: {
+        TORCH_CHECK(
+            dim() == 4,
+            "required rank 4 tensor to use channels_last format");
+        set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
+        refresh_contiguous();
+        return;
+      }
+      case MemoryFormat::Preserve:
+        AT_ERROR("unsupported memory format")
+    }
+  }
+
 private:
 
   // The Caffe2 Resize() method supports being called both as Resize({2,2}) as

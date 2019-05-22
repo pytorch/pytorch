@@ -86,6 +86,10 @@ void Variable::Impl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("variable impl does not have set_storage_offset");
 }
 
+void Variable::Impl::update_strides_to_format(at::MemoryFormat memory_format) {
+  data_.unsafeGetTensorImpl()->update_strides_to_format(memory_format);
+}
+
 void* Variable::Impl::slow_data() const {
   return data_.unsafeGetTensorImpl()->slow_data();
 }

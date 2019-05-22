@@ -114,6 +114,7 @@ def type_to_python(typename, size=None):
         'IndexTensor': 'Tensor',
         'SparseTensorRef': 'Tensor',
         'Tensor': 'Tensor',
+        'MemoryFormat': 'torch.memory_format',
         'IntArrayRef': '_size',
         'IntArrayRef[]': 'Union[_int, _size]',
         'TensorList': 'Union[Tuple[Tensor, ...], List[Tensor]]',
