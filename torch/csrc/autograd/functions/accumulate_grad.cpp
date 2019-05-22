@@ -64,11 +64,20 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       // If `grad_variable` is sparse and `new_grad` is not sparse, their sum is not
       // sparse, and we must change the TensorImpl type of `grad_variable` for it to
       // store the result. However, changing the TensorImpl type of a tensor requires
-      // changing the tensor itself, and thus for this case we have to change the grad
+      // changing the tensor itself, and thus in this case we have to change the grad
       // tensor.
       grad_variable = new_grad + grad_variable;
     } else {
-      // In this case we can avoid changing the grad tensor.
+      // In this case we can avoid changing the grad tensor. There are three scenarios
+      // when we'll hit this case:
+      //
+      // 1. `grad_variable` is sparse, and `new_grad` is sparse.
+      // 2. `grad_variable` is dense, and `new_grad` is sparse.
+      // 3. `grad_variable` is dense, and `new_grad` is dense.
+      //
+      // In all of these three cases, `grad_variable += new_grad` is a valid operation
+      // which does in-place summation of `grad_variable` and `new_grad`. `grad_variable`
+      // is thus still referring to the same tensor after the operation.
       grad_variable += new_grad;
     }
   } else {
