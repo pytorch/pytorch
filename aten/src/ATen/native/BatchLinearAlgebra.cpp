@@ -765,14 +765,38 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
 
-  // First perform GEQRF for R and TAU (the elementary reflectors)
-  // We will need to generate R from the upper triangular matrix from the
-  // matrix input to GEQRF.
+  // Setup inputs for apply_geqrf
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto self_sizes = self.sizes().vec();
   self_sizes.pop_back();
   self_sizes[self.dim() - 2] = std::min(m, n);
   auto tau_working_copy = at::zeros(self_sizes, self.options());
+  Tensor q_working_copy;
+
+  // Setup input geometry for apply_orgqr
+  std::vector<int64_t> q_sizes, q_strides;
+  int64_t n_columns_q;
+  Tensor R;
+  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, some);
+
+  // If there are no elements, then we simply return a pair of tensors of required dimensions
+  if (self.numel() == 0) {
+    // Fix the number of columns of q appropriately
+    q_sizes[self.dim() - 1] = n_columns_q;
+    q_working_copy = at::empty(q_sizes, self.options());
+
+    // We repurpose the same q_sizes for R
+    // Fix the number of rows and columns of q_working_copy appropriately
+    q_sizes[self.dim() - 1] = n;
+    q_sizes[self.dim() - 2] = n_columns_q;
+    R = at::empty(q_sizes, self.options());
+    return std::make_tuple(at::empty(q_sizes, self.options()),
+                           at::empty(q_sizes, self.options()));
+  }
+
+  // First perform GEQRF for R and TAU (the elementary reflectors)
+  // We will need to generate R from the upper triangular matrix from the
+  // matrix input to GEQRF.
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "qr_cpu", [&]{
     apply_geqrf<scalar_t>(self_working_copy, tau_working_copy, infos);
   });
@@ -783,14 +807,10 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   }
 
   // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
-  std::vector<int64_t> q_sizes, q_strides;
-  int64_t n_columns_q;
-  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, some);
-
-  auto q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
+  q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
   q_working_copy.narrow(-1, 0, n).copy_(self_working_copy);
 
-  auto R = self_working_copy.narrow_copy(-2, 0, n_columns_q).triu_();
+  R = self_working_copy.narrow_copy(-2, 0, n_columns_q).triu_();
 
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "qr_cpu", [&]{
     apply_orgqr<scalar_t>(q_working_copy, tau_working_copy, n_columns_q, infos);

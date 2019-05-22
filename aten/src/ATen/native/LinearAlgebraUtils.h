@@ -196,7 +196,7 @@ static inline std::tuple<std::vector<int64_t>,
 
   // Q should be a column-major or a batch of column-major matrices
   // ... x m x n will have strides: ...., n, 1
-  // We require: ... x 1 x m
+  // We require: ...., 1, m
   auto q_strides = input.strides().vec();
   q_strides[input.dim() - 2] = 1;
   q_strides[input.dim() - 1] = m;

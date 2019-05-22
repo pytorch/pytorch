@@ -995,13 +995,30 @@ AT_ERROR("qr: MAGMA library not found in "
 
 std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, bool some) {
   std::vector<int64_t> infos(batchCount(self), 0);
+
+  // Setup input geometry and inputs for apply_qr
   std::vector<int64_t> q_sizes, q_strides;
   int64_t n_columns_q;
   std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, some);
+  Tensor q_working_copy, r_working_copy;
 
-  auto q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
+  // If there are no elements, then we simply return a pair of tensors of required dimensions
+  if (self.numel() == 0) {
+    // Fix the number of columns of q_working_copy appropriately
+    q_sizes[self.dim() - 1] = n_columns_q;
+    q_working_copy = at::empty(q_sizes, self.options());
+
+    // We repurpose the same q_sizes for r_working_copy
+    // Fix the number of rows and columns of q_working_copy appropriately
+    q_sizes[self.dim() - 1] = self.size(-1);
+    q_sizes[self.dim() - 2] = n_columns_q;
+    r_working_copy = at::empty(q_sizes, self.options());
+    return std::make_tuple(q_working_copy, r_working_copy);
+  }
+
+  q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
   q_working_copy.narrow(-1, 0, self.size(-1)).copy_(self);
-  auto r_working_copy = cloneBatchedColumnMajor(self);
+  r_working_copy = cloneBatchedColumnMajor(self);
 
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "qr_cuda", [&]{
     apply_qr<scalar_t>(q_working_copy, r_working_copy, n_columns_q, infos);
