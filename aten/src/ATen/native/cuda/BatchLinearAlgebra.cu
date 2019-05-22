@@ -964,7 +964,7 @@ AT_ERROR("qr: MAGMA library not found in "
   magma_int_t info = 0;
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* r_working_ptr = &r_data[i * r_matrix_stride];
-    magmaGeqrf<scalar_t>(m, n, r_working_ptr, m, tau_data, work_data, &info, true);
+    magmaGeqrf<scalar_t>(m, n, r_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/true);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -973,13 +973,13 @@ AT_ERROR("qr: MAGMA library not found in "
 
   // This phase computes Q (the raw version)
   // We require to perform ?geqrf_gpu again due to this bug in MAGMA:
-  // - ?geqrf_gpu allows fast computation of Q via ?orqrf_gpu, but doesn't give R properly.
-  // - ?geqrf2_gpu gives correct R, but doesn't allow computation of Q via ?orqrf_gpu
+  // - ?geqrf_gpu allows fast computation of Q via ?orgqr_gpu, but doesn't give R properly.
+  // - ?geqrf2_gpu gives correct R, but doesn't allow computation of Q via ?orgqr_gpu
   // Refer to the below link for more details:
   // http://icl.cs.utk.edu/magma/forum/viewtopic.php?f=2&t=1015&p=2800&hilit=geqrf_gpu#p2800
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* q_working_ptr = &q_data[i * q_matrix_stride];
-    magmaGeqrf<scalar_t>(m, n, q_working_ptr, m, tau_data, work_data, &info, false);
+    magmaGeqrf<scalar_t>(m, n, q_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/false);
     infos[i] = info;
     if (info != 0) {
       return;

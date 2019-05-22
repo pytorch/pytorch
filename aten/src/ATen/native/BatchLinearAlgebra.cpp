@@ -788,7 +788,7 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, some);
 
   auto q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
-  q_working_copy.narrow(-1, 0, n).copy_(self);
+  q_working_copy.narrow(-1, 0, n).copy_(self_working_copy);
 
   auto R = self_working_copy.narrow_copy(-2, 0, n_columns_q).triu_();
 

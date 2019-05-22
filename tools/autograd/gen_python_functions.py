@@ -27,7 +27,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_solve.*', '_getri.*', '_inverse.*',
-    '_cholesky.*', '_triangular_solve.*',
+    '_cholesky.*', '_triangular_solve.*', '_qr.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
     'copy_sparse_to_sparse_', 'copy_',
