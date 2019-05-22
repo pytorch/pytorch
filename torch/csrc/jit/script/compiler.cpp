@@ -24,7 +24,6 @@ namespace torch {
 namespace jit {
 namespace script {
 
-using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 using FunctionTable = std::unordered_map<std::string, Function&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
@@ -145,6 +144,13 @@ static Value* asSimple(const SugaredValuePtr& value) {
   }
   return nullptr;
 }
+
+static std::shared_ptr<MagicMethod> makeMagic(
+    const std::string& name,
+    SugaredValuePtr base) {
+  return std::make_shared<MagicMethod>(name, base);
+}
+
 // we consider _N where N is a number, to be a non-meaningful name
 // and do not record it as a unique name. This allows python printing to
 // be able to export and import more consistently named graphs
@@ -388,17 +394,32 @@ struct Environment {
     if (!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
           {"print", std::make_shared<PrintValue>()},
-          {"float", std::make_shared<CastValue>(FloatType::get(), prim::Float)},
-          {"int", std::make_shared<CastValue>(IntType::get(), prim::Int)},
-          {"bool", std::make_shared<CastValue>(BoolType::get(), prim::Bool)},
-          {"str", std::make_shared<CastValue>(StringType::get(), prim::str)},
+          {"float",
+           makeMagic(
+               "__float__",
+               std::make_shared<CastValue>(FloatType::get(), prim::Float))},
+          {"int",
+           makeMagic(
+               "__int__",
+               std::make_shared<CastValue>(IntType::get(), prim::Int))},
+          {"bool",
+           makeMagic(
+               "__bool__",
+               std::make_shared<CastValue>(BoolType::get(), prim::Bool))},
+          {"str",
+           makeMagic(
+               "__str__",
+               std::make_shared<CastValue>(StringType::get(), prim::str))},
           {"getattr", std::make_shared<GetAttrValue>()},
           {"isinstance", std::make_shared<IsInstanceValue>()},
           // todo(zach): remove when we can correctly export torch.full via ONNX
           // or we have implicit conversion that can convert numbers to tensors
           {"_to_tensor",
            std::make_shared<CastValue>(TensorType::get(), prim::NumToTensor)},
-          {"len", std::make_shared<OperatorOverload>(aten::len, "__len__")},
+          {"len",
+           makeMagic(
+               "__len__",
+               std::make_shared<BuiltinFunction>(aten::len, at::nullopt))},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
@@ -1117,26 +1138,21 @@ struct to_ir {
 
   Value* emitCond(const Expr& cond) {
     Value* v = emitExpr(cond);
-    if (!v->type()->isSubtypeOf(BoolType::get())) {
-      Value* cast_v = emitBuiltinCall(
-          cond.get()->range(),
-          *v->owningGraph(),
-          prim::Bool,
-          c10::nullopt,
-          {v},
-          {},
-          /*required*/ false);
-      if (cast_v == nullptr) {
-        ErrorReport error(cond);
-        error
-            << "expected a bool, int, float, or Tensor expression for condition but found "
-            << v->type()->python_str();
-        throw error;
-      } else {
-        v = cast_v;
-      }
+    Value* out;
+    try {
+      auto bool_cast = environment_stack->getSugaredVar("bool", cond.range());
+      out = asSimple(bool_cast->call(cond.get()->range(), method, {v}, {}, 0));
+    } catch (...) {
+      throw ErrorReport(cond.range()) << "Could not cast value of type "
+                                      << v->type()->python_str() << " to bool";
     }
-    return v;
+    // cast value not response for checking output type
+    if (!out->type()->isSubtypeOf(BoolType::get())) {
+      throw ErrorReport(cond)
+          << "expected a bool expression for condition but found "
+          << out->type()->python_str();
+    }
+    return out;
   }
 
   void emitIfElseBlocks(Value* cond_value, const If& stmt) {
@@ -2349,8 +2365,10 @@ struct to_ir {
     const auto& inputs = tree->trees();
     auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
     auto neg_val =
-        asSimple(OperatorOverload(aten::neg, "__neg__")
-                     .call(tree->range(), method, named_values, {}, 0));
+        asSimple(makeMagic(
+                     "__neg__",
+                     std::make_shared<BuiltinFunction>(aten::neg, at::nullopt))
+                     ->call(tree->range(), method, named_values, {}, 0));
 
     // constant fold the input if possible
 
@@ -2437,8 +2455,10 @@ struct to_ir {
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto overload = getOperatorOverload(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-        return asSimple(OperatorOverload(kind, overload)
-                            .call(tree->range(), method, named_values, {}, 0));
+        return asSimple(
+            makeMagic(
+                overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+                ->call(tree->range(), method, named_values, {}, 0));
       }
       case TK_NOT: {
         Value* input = emitCond(Expr(tree->trees()[0]));
