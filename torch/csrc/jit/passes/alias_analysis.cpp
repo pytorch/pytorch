@@ -405,8 +405,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::GradOf:
       return analyzeGradOf(node);
     case prim::Constant:
-    case prim::DictConstruct:
-    case prim::ListConstruct:
     case prim::AutogradZero:
     case prim::AutogradAdd:
     case prim::FusedConcat:
@@ -417,6 +415,9 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Function:
     case prim::CreateObject:
       return analyzeCreator(node);
+    case prim::DictConstruct:
+    case prim::ListConstruct:
+      return analyzeContainerConstruct(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
     case prim::DictIndex:
@@ -483,7 +484,8 @@ void AliasDb::analyzeImpl(Node* node) {
     return analyzeCustomOp(node);
   }
 
-  // Bind formal alias annotation to actual alias sets
+  // Bind the schema's "formal" alias annotation to the actual values those
+  // schema arguments represent
   std::unordered_map<Symbol, Value*> formalToActual;
   for (size_t i = 0; i < schema.arguments().size(); i++) {
     const auto& formal = schema.arguments()[i].alias_info();
@@ -498,11 +500,12 @@ void AliasDb::analyzeImpl(Node* node) {
       continue;
     }
 
-    // We don't support composite types for alias analysis yet.
+    // Do sanity checks on the alias annotation
+    // - We don't support composite types for alias analysis yet.
     AT_ASSERT(formal->containedTypes().size() == 0);
-    // TODO neither unions nor wildcards make sense on an input. We should
-    // disallow them in function schema
-    AT_ASSERT(!formal->isWildcard())
+    // - Doesn't make sense for a value to start annotated as a wildcard.
+    AT_ASSERT(!formal->isWildcardBefore());
+
     const auto& formalAlias = formal->beforeSet();
 
     // skip if we've already bound this alias
@@ -516,6 +519,15 @@ void AliasDb::analyzeImpl(Node* node) {
     // Record writes
     if (formal->isWrite()) {
       registerWrite(actualValue, node);
+    }
+
+    // Now deal with sets after the '->'
+    if (formal->isWildcardAfter()) {
+      setWildcard(actualValue);
+    } else {
+      // We don't understand anything else in the after yet, so assert there's
+      // been no change.
+      AT_ASSERT(formal->beforeSets() == formal->afterSets());
     }
   }
 
@@ -537,7 +549,7 @@ void AliasDb::analyzeImpl(Node* node) {
     // We don't support composite types for alias analysis yet.
     AT_ASSERT(formal->containedTypes().size() == 0);
 
-    if (formal->isWildcard()) {
+    if (formal->isWildcardBefore() || formal->isWildcardAfter()) {
       setWildcard(actual);
       continue;
     }
@@ -771,6 +783,23 @@ void AliasDb::analyzeCustomOp(Node* node) {
   // alias any input.
   for (const auto output : node->outputs()) {
     setWildcard(output);
+  }
+}
+
+// List or dict construct: create an aliasing element for the actual container,
+// then mark all inputs as wildcards, since they've gone inside the container.
+// TODO: tuples are treated differently since we actually compare the contained
+// values for aliasing, so we don't need wildcards.
+void AliasDb::analyzeContainerConstruct(Node* node) {
+  AT_ASSERT(
+      node->kind() == prim::ListConstruct ||
+      node->kind() == prim::DictConstruct);
+
+  for (auto input : node->inputs()) {
+    setWildcard(input);
+  }
+  for (auto output : node->outputs()) {
+    giveFreshAlias(output);
   }
 }
 

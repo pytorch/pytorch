@@ -1752,7 +1752,7 @@ RegisterOperators reg2({
       listSelect<Shared<c_type>>),                                          \
       Operator(                                                             \
           "aten::append( " decl_type "[](a!) self, " decl_type              \
-          "(c) el) -> " decl_type "[](a!)",                                 \
+          "(c -> *) el) -> " decl_type "[](a!)",                            \
           listAppend<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
           "aten::reverse( " decl_type "[](a!) self) -> ()",                 \
@@ -1768,7 +1768,7 @@ RegisterOperators reg2({
           listCopy<Shared<c_type>>),                                        \
       Operator(                                                             \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type      \
-          " el) -> " decl_type "[](a!)",                                    \
+          "(b -> *) el) -> " decl_type "[](a!)",                            \
           listSetItem<Shared<c_type>, c_type::ElemType>),                   \
       Operator(                                                             \
           "aten::clear( " decl_type "[](a!) self) -> ()",                   \
@@ -1776,7 +1776,7 @@ RegisterOperators reg2({
       Operator(                                                             \
           "aten::insert( " decl_type                                        \
           "[](a!) self, int idx,                 \
-          " decl_type " el) -> ()",                                         \
+          " decl_type "(b -> *) el) -> ()",                                 \
           listInsert<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
           "aten::pop(" decl_type                                            \
@@ -2263,7 +2263,7 @@ RegisterOperators reg2({
           dictGetDefault),                                                    \
       Operator(                                                               \
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
-          " idx, t v) -> ()",                                                 \
+          " idx, t(b -> *) v) -> ()",                                         \
           dictSetItem)
 
     CREATE_DICT_OPS("str"),
