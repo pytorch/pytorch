@@ -1390,7 +1390,7 @@
 
 - func: poisson_nll_loss(Tensor input, Tensor target, bool log_input, bool full, float eps, int reduction) -> Tensor
   variants: function
-  
+
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1599,6 +1599,11 @@
 - func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
 
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
+
+- func: mkldnn_sigmoid(Tensor self) -> Tensor
+  dispatch:
+    MkldnnCPU: mkldnn_sigmoid
+  requires_tensor: True
 
 - func: sigmoid(Tensor self) -> Tensor
   variants: function, method

@@ -123,6 +123,9 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 }
 
 Tensor sigmoid(const Tensor& self) {
+  if (self.is_mkldnn()) {
+    return at::native::mkldnn_sigmoid(self);
+  }
   Tensor result = at::empty({0}, self.options());
   return at::sigmoid_out(result, self);
 }
