@@ -594,10 +594,11 @@ main_link_args.extend(CAFFE2_LIBS)
 
 try:
     import numpy as np
-    NUMPY_INCLUDE_DIR = np.get_include()
-    USE_NUMPY = True
 except ImportError:
     USE_NUMPY = False
+else:
+    NUMPY_INCLUDE_DIR = np.get_include()
+    USE_NUMPY = True
 
 if USE_CUDA:
     if IS_WINDOWS:

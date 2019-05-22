@@ -244,8 +244,13 @@ Tensor & random__cpu(Tensor& self, Generator * generator) {
   return at::legacy::cpu::_th_random_(self, generator);
 }
 
+<<<<<<< HEAD
+Tensor & uniform_cpu_(Tensor& self, double from, double to, Generator * generator) {
+  return at::legacy::th::_th_uniform_(self, from, to, generator);
+=======
 Tensor & uniform__cpu(Tensor& self, double from, double to, Generator * generator) {
   return at::legacy::cpu::_th_uniform_(self, from, to, generator);
+>>>>>>> Generate TH functions outside of Type
 }
 
 Tensor & normal__cpu(Tensor& self, double mean, double std, Generator * generator) {
@@ -400,10 +405,17 @@ Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tenso
 
 Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
   if (mask.dtype() == at::ScalarType::Byte) {
+<<<<<<< HEAD
+    return at::legacy::th::_th_masked_select(self, mask);
+  } else {
+    return at::legacy::th::_th_masked_select_bool(self, mask);
+  }
+=======
   return at::legacy::cpu::_th_masked_select(self, mask);
 } else {
   return at::legacy::cpu::_th_masked_select_bool(self, mask);
 }
+>>>>>>> Generate TH functions outside of Type
 }
 
 Tensor & nonzero_out_cpu(Tensor & result, const Tensor & self) {

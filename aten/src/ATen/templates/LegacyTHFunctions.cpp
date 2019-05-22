@@ -11,6 +11,7 @@ ${extra_cuda_headers}
 
 namespace at {
 namespace legacy {
+namespace native {
 namespace ${namespace} {
 
 namespace {
@@ -38,4 +39,5 @@ ${legacy_th_definitions}
 
 } // namespace th
 } // namespace legacy
+} // namespace native
 } // namespace at
