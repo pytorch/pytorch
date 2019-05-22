@@ -414,7 +414,7 @@ class SummaryWriter(object):
                 num=len(values),
                 sum=values.sum(),
                 sum_squares=sum_sq,
-                bucket_limits=limits.tolist(),
+                bucket_limits=limits[1:].tolist(),
                 bucket_counts=counts.tolist(),
                 global_step=0)
             writer.close()
