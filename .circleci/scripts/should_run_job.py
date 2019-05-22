@@ -62,6 +62,8 @@ args = parser.parse_args()
 
 commit_msg = subprocess.check_output(("git", "log", "--format=%B", "-n", "1", "HEAD"), universal_newlines=True)
 
+# Matches anything that looks like [foo ci] or [ci foo] or [foo test]
+# or [test foo]
 RE_MARKER = re.compile(r'\[(?:([^ \[\]]+) )?(?:ci|test)(?: ([^ \[\]]+))?\]')
 
 markers = RE_MARKER.finditer(commit_msg)
