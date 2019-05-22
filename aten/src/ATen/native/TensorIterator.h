@@ -64,6 +64,7 @@ struct DimCounter {
   DimVector values;
   int64_t offset;
 };
+
 struct CAFFE2_API OperandInfo {
   OperandInfo() {}
   explicit OperandInfo(const Tensor& t, const Backend backend=Backend::Undefined, const ScalarType dtype=ScalarType::Undefined)
@@ -148,11 +149,14 @@ struct CAFFE2_API TensorIterator {
   static std::unique_ptr<TensorIterator> unary_op(Tensor& out, const Tensor& a);
   static std::unique_ptr<TensorIterator> nullary_op(Tensor& out);
   static std::unique_ptr<TensorIterator> reduce_op(Tensor& out, const Tensor& a);
+  static std::unique_ptr<TensorIterator> reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
   int ndim() const { return shape_.size(); }
   IntArrayRef shape() const { return shape_; }
   int64_t numel() const;
   int ntensors() const { return operands_.size(); }
+  int noutputs() const { return num_outputs_; }
+  int ninputs() const { return ntensors() - noutputs(); }
 
   /// number of elements in the output operand. this is the same as numel() for
   /// operations that are not reductions.
@@ -163,6 +167,8 @@ struct CAFFE2_API TensorIterator {
 
   /// 1-dimensional iteration and no buffering or type conversion
   bool is_trivial_1d() const;
+  /// Reducible to 1-dimensional and all operands are contiguous
+  bool is_contiguous() const;
   bool is_dim_reduced(int dim) const;
 
   /// Accessors for each operand
@@ -170,6 +176,7 @@ struct CAFFE2_API TensorIterator {
   void* data_ptr(int arg) const;
   ScalarType dtype(int arg=0) const { return operands_[arg].dtype; }
   DeviceType device_type(int arg=0) const { return backendToDeviceType(operands_[arg].backend); }
+  Device device(int arg=0) const { return operands_[arg].tensor.device(); }
   int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
   bool is_scalar(int arg) const;
   bool is_cpu_scalar(int arg) const;
@@ -180,6 +187,11 @@ struct CAFFE2_API TensorIterator {
   Tensor output(int arg=0) const {
     AT_ASSERT(arg < num_outputs_);
     return operands_[arg].tensor;
+  }
+
+  Tensor input(int arg=0) const {
+    AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
+    return operands_[num_outputs_ + arg].tensor;
   }
 
   /// Removes an operand from this iterator

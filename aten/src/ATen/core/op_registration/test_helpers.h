@@ -36,6 +36,30 @@ struct InputToIValue<c10::ArrayRef<T>> final {
   }
 };
 template<class Key, class Value>
+struct InputToIValue<std::vector<std::unordered_map<Key, Value>>> final {
+  template<class T_>
+  static c10::IValue call(T_&& v) {
+    auto list = c10::ivalue::GenericList::create({});
+    list->elements().reserve(v.size());
+    for (std::unordered_map<Key, Value>& e : v) {
+      list->elements().push_back(InputToIValue<std::unordered_map<Key, Value>>::call(std::move(e)));
+    }
+    return list;
+  }
+};
+template<>
+struct InputToIValue<std::vector<std::string>> final {
+  template<class T_>
+  static c10::IValue call(T_&& v) {
+    auto list = c10::ivalue::GenericList::create({});
+    list->elements().reserve(v.size());
+    for (std::string& e : v) {
+      list->elements().push_back(InputToIValue<std::string>::call(std::move(e)));
+    }
+    return list;
+  }
+};
+template<class Key, class Value>
 struct InputToIValue<c10::Dict<Key, Value>> final {
   template<class T_>
   static c10::IValue call(T_&& v) {
@@ -46,12 +70,12 @@ template<class Key, class Value>
 struct InputToIValue<std::unordered_map<Key, Value>> final {
   template<class T_>
   static c10::IValue call(T_&& v) {
-    c10::Dict<Key, Value> dict;
+    c10::impl::GenericDict dict;
     dict.reserve(v.size());
     for (auto& element : v) {
-      dict.insert(element.first, element.second);
+      dict.insert(InputToIValue<Key>::call(element.first), InputToIValue<Value>::call(element.second));
     }
-    return InputToIValue<c10::Dict<Key, Value>>::call(std::move(dict));
+    return c10::IValue(std::move(dict));
   }
 };
 }

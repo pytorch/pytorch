@@ -353,9 +353,9 @@ struct Environment {
               unshapedType(simple_parent->type()))) {
         std::stringstream errMsg;
         errMsg << "variable '" << name << "' previously has type "
-               << simple_parent->type()->str()
+               << simple_parent->type()->python_str()
                << " but is now being assigned to a value of type "
-               << as_simple_value->type()->str();
+               << as_simple_value->type()->python_str();
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
             as_simple_value->type()->kind() == TypeKind::ListType) {
@@ -498,7 +498,7 @@ static Value* materializeConstant(
 static Value* ensureInt(const SourceRange& range, Value* v) {
   if (!v->type()->isSubtypeOf(IntType::get())) {
     throw ErrorReport(range)
-        << "expected a int but found a " << v->type()->str();
+        << "expected a int but found a " << v->type()->python_str();
   }
   return v;
 }
@@ -952,8 +952,7 @@ struct to_ir {
   }
 
   Node* create(Symbol kind, const SourceRange& loc, size_t n_outputs) {
-    return graph->create(kind, n_outputs)
-        ->setSourceRange(loc);
+    return graph->create(kind, n_outputs)->setSourceRange(loc);
   }
 
   Value* emitTernaryIf(const TernaryIf& expr) {
@@ -1106,8 +1105,8 @@ struct to_ir {
     auto unified = unifyTypes(true_type, false_type);
     if (!unified) {
       throw ErrorReport(range)
-          << "if-expression's true branch has type " << true_type->str()
-          << " but false branch has type " << false_type->str();
+          << "if-expression's true branch has type " << true_type->python_str()
+          << " but false branch has type " << false_type->python_str();
     }
 
     // Add op outputs
@@ -1131,7 +1130,7 @@ struct to_ir {
         ErrorReport error(cond);
         error
             << "expected a bool, int, float, or Tensor expression for condition but found "
-            << v->type()->str();
+            << v->type()->python_str();
         throw error;
       } else {
         v = cast_v;
@@ -1210,8 +1209,9 @@ struct to_ir {
       if (!unified) {
         ErrorReport error(stmt);
         error << "Type mismatch: " << x << " is set to type "
-              << tv->type()->str() << " in the true branch"
-              << " and type " << fv->type()->str() << " in the false branch";
+              << tv->type()->python_str() << " in the true branch"
+              << " and type " << fv->type()->python_str()
+              << " in the false branch";
         if (save_true->findInParentFrame(x) ||
             save_false->findInParentFrame(x)) {
           throw error;
@@ -2239,10 +2239,11 @@ struct to_ir {
             << arg->kind() << " instead";
       }
       if (class_arg->type_ != classNew->type_) {
-        throw ErrorReport(loc) << "Argument to __new__() must match the class "
-                               << "you are calling __new__() on. "
-                               << "Got: " << class_arg->type_->str()
-                               << ", expected: " << classNew->type_->str();
+        throw ErrorReport(loc)
+            << "Argument to __new__() must match the class "
+            << "you are calling __new__() on. "
+            << "Got: " << class_arg->type_->python_str()
+            << ", expected: " << classNew->type_->python_str();
       }
 
       return classNew->createObject(apply.range(), method);
@@ -2376,10 +2377,9 @@ struct to_ir {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes) {
     // Build the fork node without inputs
-    auto fork_node =
-        method.graph()
-            ->insertNode(method.graph()->create(prim::fork, 1))
-            ->setSourceRange(loc);
+    auto fork_node = method.graph()
+                         ->insertNode(method.graph()->create(prim::fork, 1))
+                         ->setSourceRange(loc);
     auto body_block = fork_node->addBlock();
 
     // Build a template of the graph to be executed
@@ -2723,7 +2723,7 @@ struct to_ir {
       }
       throw ErrorReport(loc)
           << "Unsupported operation: indexing tensor with unsupported index type '"
-          << index->type()->str()
+          << index->type()->python_str()
           << "'. Only ints, slices, and tensors are supported";
     }
     // at::index takes in a List[Optional[Tensor]] where some dims can be None.
@@ -2980,8 +2980,7 @@ struct FunctionResolver : public Resolver {
       functionTable_;
 };
 
-CompilationUnit::CompilationUnit(const std::string& source)
-{
+CompilationUnit::CompilationUnit(const std::string& source) {
   // calles the define with native resolver to generate the graph for functions
   define(source, nativeResolver(), nullptr);
 }
