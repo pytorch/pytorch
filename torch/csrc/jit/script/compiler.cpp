@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -6,7 +7,6 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -1397,7 +1397,6 @@ struct to_ir {
       const Ident& target,
       const List<Expr>& args,
       const List<Stmt>& body) {
-    // TODO: start, stop, step loop
     Value *end_val, *start_val, *step_val;
     if (args.size() == 1) {
       end_val = ensureInt(range, emitExpr(args[0]));

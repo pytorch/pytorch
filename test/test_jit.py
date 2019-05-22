@@ -6075,6 +6075,33 @@ a")
 
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
 
+    def test_script_for_in_range_start_end(self):
+        @torch.jit.script
+        def fn(x):
+            x = 0
+            for i in range(7, 100):
+                x += i
+            return x
+        self.checkScript(fn, (), outputs=4929, optimize=True)
+
+    def test_script_for_in_range_start_end_step(self):
+        @torch.jit.script
+        def fn(x):
+            x = 0
+            for i in range(7, 100, 7):
+                x += i
+            return x
+        self.checkScript(fn, (), outputs=735, optimize=True)
+
+    def test_script_for_in_range_negative_step(self):
+        @torch.jit.script
+        def fn(x):
+            x = 0
+            for i in range(2, -11, -3):
+                x += i
+            return x
+        self.checkScript(fn, (), outputs=-20, optimize=True)
+
     def test_script_optional_none(self):
         def none_stmt(x):
             output = None
