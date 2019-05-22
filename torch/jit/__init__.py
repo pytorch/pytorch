@@ -1086,8 +1086,11 @@ def _is_ignored_function(fn):
 
 
 def _should_drop_on_export(fn):
-    if not _is_ignored_function(fn):
+    if not callable(fn):
         return False
+    if hasattr(fn, '__func__'):
+        fn = fn.__func__
+    print("Should drop? ", _jit_internal.ignored_fns[fn]["drop_on_export"])
     return _jit_internal.ignored_fns[fn]["drop_on_export"]
 
 

@@ -174,7 +174,7 @@ def ignore(drop_on_export=False):
         return drop_on_export
     elif isinstance(drop_on_export, bool):
         def decorator(fn):
-            ignored_fns[fn] = {"drop_on_export": False}
+            ignored_fns[fn] = {"drop_on_export": drop_on_export}
             return fn
         return decorator
     else:
