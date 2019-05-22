@@ -7497,7 +7497,7 @@ a")
             @torch.jit.script_method
             def forward(self, x):
                 return x + self.whatisgoingon
-        with self.assertRaisesRegex(RuntimeError, "does not exist"):
+        with self.assertRaisesRegex(RuntimeError, "module has no attribute"):
             M()
 
     def test_script_module_none_exist_fail(self):
