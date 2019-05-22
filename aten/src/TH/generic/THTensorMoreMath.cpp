@@ -82,26 +82,6 @@ TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
 #endif
 }
 
-void THTensor_(sign)(THTensor *r_, THTensor *t)
-{
-  THTensor_(resizeAs)(r_, t);
-
-#if defined (TH_REAL_IS_BYTE)
-  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-    if (*t_data > 0) *r__data = 1;
-    else *r__data = 0;);
-#elif defined (TH_REAL_IS_BOOL)
-TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-  if (*t_data == true) *r__data = false;
-  else *r__data = true;);
-#else
-  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-    if (*t_data > 0) *r__data = 1;
-    else if (*t_data < 0) *r__data = -1;
-    else *r__data = 0;);
-#endif
-}
-
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
