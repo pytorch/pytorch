@@ -126,7 +126,7 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
         it->namedInput(attr::eps)
       };
 
-      // inline the compiled decomposed layernorm
+      // inline the compiled decomposed batchnorm
       std::shared_ptr<Graph> d_graph = decompose_funcs.get_function("batch_norm").graph();
       Value* new_output = inlineCallTo(*graph, *d_graph, inputs).at(0);
 
@@ -167,13 +167,10 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
       // post processing the graph
       Value* weight = it->namedInput(attr::weight);
       Value* bias = it->namedInput(attr::bias);
-      auto weight_defined = isDefined(weight).value();
-      auto bias_defined = isDefined(bias).value();
-      if (weight_defined && bias_defined) {
-        new_output = graph->insert(aten::addcmul, {bias, new_output, weight});
-      } else if (weight_defined) {
+      if (isDefined(weight).value()) {
         new_output = graph->insert(aten::mul, {new_output, weight});
-      } else if (bias_defined) {
+      } 
+      if (isDefined(bias).value()) {
         new_output = graph->insert(aten::add, {new_output, bias});
       }
       it->output()->replaceAllUsesWith(new_output);
