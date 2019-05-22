@@ -37,9 +37,9 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
         int batch_element_count = (i >= local_batches) ? 0 : element_count;
         for (int it = 0;it < WARP_ITERATIONS;it += 1) {
             int element_index = local_idx + it * WARP_SIZE;
-	    elements[i][it] = -std::numeric_limits<acc_t>::infinity();
+            elements[i][it] = -std::numeric_limits<acc_t>::infinity();
             if (element_index < batch_element_count) {
-	        elements[i][it] = src[i*element_count+it*WARP_SIZE];
+                elements[i][it] = src[i*element_count+it*WARP_SIZE];
             }
         }
     }
@@ -110,11 +110,11 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
         for (int it = 0;it < WARP_ITERATIONS;it += 1) {
             int element_index = local_idx + it * WARP_SIZE;
             if (element_index < element_count) {
-		if (is_log_softmax) {
-		    dst[i*element_count+it*WARP_SIZE] = elements[i][it] - sum[i];
-		} else {
-		    dst[i*element_count+it*WARP_SIZE] = elements[i][it] / sum[i];
-		}
+                if (is_log_softmax) {
+                    dst[i*element_count+it*WARP_SIZE] = elements[i][it] - sum[i];
+                } else {
+                    dst[i*element_count+it*WARP_SIZE] = elements[i][it] / sum[i];
+                }
             } else {
                 break;
             }
@@ -247,8 +247,8 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
         for (int it = 0;it < WARP_ITERATIONS;it += 1) {
             int element_index = local_idx + it * WARP_SIZE;
             if (element_index < batch_element_count) {
-	        grad_reg[i][it] = grad[i*element_count+it*WARP_SIZE];
-		output_reg[i][it] = output[i*element_count+it*WARP_SIZE];
+                grad_reg[i][it] = grad[i*element_count+it*WARP_SIZE];
+                output_reg[i][it] = output[i*element_count+it*WARP_SIZE];
             }
         }
     }
@@ -258,7 +258,7 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
     #pragma unroll
     for (int it = 0;it < WARP_ITERATIONS;++it) {
         for (int i = 0;i < WARP_BATCH;++i) {
-	    sum[i] += grad_reg[i][it];
+            sum[i] += grad_reg[i][it];
         }
     }
 
@@ -282,11 +282,11 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
             int element_index = local_idx + it * WARP_SIZE;
             if (element_index < element_count) {
                 // compute gradients
-	        if (is_log_softmax) {
-	  	    gradInput[i*element_count+it*WARP_SIZE] = (grad_reg[i][it] - std::exp(output_reg[i][it]) * sum[i]);
-	        } else {
-		    gradInput[i*element_count+it*WARP_SIZE] = (grad_reg[i][it] - output_reg[i][it] * sum[i]);
-	        }
+                if (is_log_softmax) {
+                      gradInput[i*element_count+it*WARP_SIZE] = (grad_reg[i][it] - std::exp(output_reg[i][it]) * sum[i]);
+                } else {
+                    gradInput[i*element_count+it*WARP_SIZE] = (grad_reg[i][it] - output_reg[i][it] * sum[i]);
+                }
             }
         }
     }

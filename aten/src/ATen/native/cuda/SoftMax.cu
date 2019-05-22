@@ -508,25 +508,25 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "host_softmax", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       if (!half_to_float) {
-	if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
-	  dispatch_softmax<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
-	      output.data<scalar_t>(), input.data<scalar_t>(), dim_size, dim_size, outer_size);
-	} else {
+        if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
+          dispatch_softmax<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
+              output.data<scalar_t>(), input.data<scalar_t>(), dim_size, dim_size, outer_size);
+        } else {
           cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
             <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
               output.data<scalar_t>(), input.data<scalar_t>(), dim_size
           );
-	}
+        }
       } else {
-	if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
+        if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
           dispatch_softmax<scalar_t, accscalar_t, accscalar_t, is_log_softmax>(
               output.data<accscalar_t>(), input.data<scalar_t>(), dim_size, dim_size, outer_size);
-	} else {
+        } else {
           cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
             <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
               output.data<accscalar_t>(), input.data<scalar_t>(), dim_size
           );
-	}
+        }
       }
       });
     // This kernel runs in a 2D grid, where each application along y dimension has a fixed
@@ -593,8 +593,8 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     using accscalar_t = acc_type<scalar_t, true>;
     if (!half_to_float) {
       if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
-	dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
-	    gI.data<scalar_t>(), grad.data<scalar_t>(), output.data<scalar_t>(), dim_size, dim_size, outer_size);
+        dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
+            gI.data<scalar_t>(), grad.data<scalar_t>(), output.data<scalar_t>(), dim_size, dim_size, outer_size);
       } else {
         cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
@@ -603,8 +603,8 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
       }
     } else {
       if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
-	dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax>(
-	    gI.data<scalar_t>(), grad.data<accscalar_t>(), output.data<accscalar_t>(), dim_size, dim_size, outer_size);
+        dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax>(
+            gI.data<scalar_t>(), grad.data<accscalar_t>(), output.data<accscalar_t>(), dim_size, dim_size, outer_size);
       } else {
         cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
