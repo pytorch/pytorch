@@ -27,6 +27,8 @@ std::list<std::shared_ptr<RangeEventList>> all_event_lists;
 thread_local std::shared_ptr<RangeEventList> event_list;
 thread_local uint16_t thread_id;
 
+ProfilerConfig::~ProfilerConfig() = default;
+
 RangeEventList& getEventList() {
   if (!event_list) {
     std::lock_guard<std::mutex> guard(all_event_lists_mutex);
@@ -52,7 +54,11 @@ void mark(std::string name, bool include_cuda /* = true */) {
   }
 }
 
-void pushRangeImpl(const StringView& name, const char* msg="", int64_t sequence_nr=-1) {
+void pushRangeImpl(
+    const StringView& name,
+    const char* msg = "",
+    int64_t sequence_nr = -1,
+    std::vector<std::vector<int64_t>>&& shapes = {}) {
   if (state == ProfilerState::Disabled) {
     return;
   }
@@ -69,7 +75,8 @@ void pushRangeImpl(const StringView& name, const char* msg="", int64_t sequence_
         EventKind::PushRange,
         name,
         thread_id,
-        state == ProfilerState::CUDA);
+        state == ProfilerState::CUDA,
+        std::move(shapes));
   }
 }
 
@@ -92,21 +99,40 @@ void popRange() {
   }
 }
 
-void enableProfiler(ProfilerState new_state) {
+void enableProfiler(ProfilerConfig config) {
+  ProfilerState new_state = config.state;
   AT_ASSERT(new_state != ProfilerState::Disabled);
   if (new_state == ProfilerState::NVTX && !cuda_stubs->enabled())
     throw std::runtime_error("Can't use NVTX profiler - PyTorch was compiled without CUDA");
   if (state != ProfilerState::Disabled && new_state != state) {
-      throw std::runtime_error("can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
+    throw std::runtime_error("can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
   }
 
-  pushCallback([](const RecordFunction& fn) {
-    auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
-    pushRangeImpl(fn.name(), msg, fn.seqNr());
-  },
-  [](const RecordFunction& /* unused */) {
-    popRange();
-  });
+  pushCallback(
+      [config](const RecordFunction& fn) {
+        auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
+        if (config.report_input_shapes) {
+          std::vector<std::vector<int64_t>> inputSizes;
+          inputSizes.reserve(fn.inputs().size());
+          for (const c10::IValue& input : fn.inputs()) {
+            if (!input.isTensor()) {
+              inputSizes.emplace_back();
+              continue;
+            }
+            const at::Tensor& tensor = input.toTensor();
+            if (tensor.defined()) {
+              inputSizes.push_back(input.toTensor().sizes().vec());
+            } else {
+              inputSizes.emplace_back();
+            }
+          }
+          pushRangeImpl(fn.name(), msg, fn.seqNr(), std::move(inputSizes));
+        } else {
+          pushRangeImpl(fn.name(), msg, fn.seqNr(), {});
+        }
+      },
+      [](const RecordFunction& /* unused */) { popRange(); },
+      config.report_input_shapes);
   state = new_state;
 
   if(state == ProfilerState::CUDA) {
@@ -204,7 +230,7 @@ RecordProfile::RecordProfile(const std::string& filename)
 }
 
 void RecordProfile::init() {
-  enableProfiler(ProfilerState::CPU);
+  enableProfiler(ProfilerConfig(ProfilerState::CPU, false /* report shapes */));
 }
 
 RecordProfile::~RecordProfile() {
@@ -222,7 +248,7 @@ RecordProfile::~RecordProfile() {
 }
 
 void RecordProfile::processEvents(const std::vector<Event*>& events) {
-  AT_CHECK(out_, "could not open file");
+  TORCH_CHECK(out_, "could not open file");
   Event* start = nullptr;
   for (Event* e : events) {
     if(0 == strcmp(e->name(), "__start_profile")) {
@@ -230,7 +256,7 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
       break;
     }
   }
-  AT_CHECK(start, "could not find start?");
+  TORCH_CHECK(start, "could not find start?");
   std::vector<Event*> stack;
   out_ << "[\n";
   bool first = true;

@@ -1280,6 +1280,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
     }
   } else {
     // generic code
+    alignas(64) at::Half vtmp1[8] = {0};
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
@@ -1324,10 +1325,10 @@ static bool Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
           _mm_prefetch(
               reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);
         }
-        alignas(64) at::Half vtmp1[8];
         for (; j < block_size; j++) {
           vtmp1[0] = ip[j];
-          __m256 vtmp2 = _mm256_cvtph_ps(*((__m128i*)vtmp1));
+          __m256 vtmp2 =
+              _mm256_cvtph_ps(*(reinterpret_cast<const __m128i*>(vtmp1)));
           op[j] += wgt * ((float*)(&vtmp2))[0];
         }
       }
@@ -1821,6 +1822,7 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
     }
   } else {
     // generic code
+    alignas(64) at::Half vtmp1[8] = {0};
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
       int64_t j = 0;
@@ -1865,10 +1867,10 @@ static bool Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
           _mm_prefetch(
               reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);
         }
-        alignas(64) at::Half vtmp1[8];
         for (; j < block_size; j++) {
           vtmp1[0] = ip[j];
-          __m256 vtmp2 = _mm256_cvtph_ps(*((__m128i*)vtmp1));
+          __m256 vtmp2 =
+              _mm256_cvtph_ps(*(reinterpret_cast<const __m128i*>(vtmp1)));
           op[j] += wgt * ((float*)(&vtmp2))[0];
         }
       }

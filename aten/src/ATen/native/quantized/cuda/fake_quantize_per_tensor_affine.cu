@@ -23,7 +23,6 @@ Notes:
     beginning of the training.
   - quantization range [0, 2^bits - 1]
 */
-
 class FakeQuantizePerTensorAffineOp_forward : public c10::OperatorKernel {
  public:
   at::Tensor operator()(
@@ -35,8 +34,8 @@ class FakeQuantizePerTensorAffineOp_forward : public c10::OperatorKernel {
       int64_t iter = 0
     ) {
     // Sanity checks.
-    AT_CHECK(X.is_cuda());
-    AT_CHECK(X.scalar_type() == ScalarType::Float);
+    TORCH_CHECK(X.is_cuda());
+    TORCH_CHECK(X.scalar_type() == ScalarType::Float);
     if (num_bits > 32 || num_bits < 1) {
       throw std::invalid_argument("`num_bits` should be in the [1, 32] range.");
     }
@@ -104,8 +103,8 @@ class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
       int64_t quant_delay = 0,
       int64_t iter = 0) {
     // Sanity checks.
-    AT_CHECK(X.is_cuda());
-    AT_CHECK(X.scalar_type() == ScalarType::Float);
+    TORCH_CHECK(X.is_cuda());
+    TORCH_CHECK(X.scalar_type() == ScalarType::Float);
     if (num_bits > 32 || num_bits < 1) {
       throw std::invalid_argument("`num_bits` should be in the [1, 32] range.");
     }
@@ -116,7 +115,7 @@ class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
       throw std::invalid_argument("`quant_delay` must be a positive integer.");
     }
     if (X.numel() <= 0) {
-      throw std::length_error("`X` is empty");
+      return X;
     }
     if (X.numel() != dY.numel()) {
       throw std::invalid_argument("`X` and `dY` are not the same size");
@@ -151,13 +150,16 @@ class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
   }
 };
 
-static auto registry = c10::RegisterOperators()
-.op("quantized::fake_quantize_per_tensor_affine_forward(Tensor X, float scale, int zero_point, int num_bits = 8, int quant_delay = 0, int iter = 0) -> Tensor",
-    c10::kernel<FakeQuantizePerTensorAffineOp_forward>(),
-    c10::dispatchKey(CUDATensorId()))
-.op("quantized::fake_quantize_per_tensor_affine_backward(Tensor X, Tensor dY, float scale, int zero_point, int num_bits=8, int quant_delay=0, int iter = 0) -> Tensor",
-    c10::kernel<FakeQuantizePerTensorAffineOp_backward>(),
-    c10::dispatchKey(CUDATensorId()));
+static auto registry =
+  c10::RegisterOperators()
+  .op("quantized::fake_quantize_per_tensor_affine_forward(Tensor X, float scale, int zero_point, int num_bits = 8, int quant_delay = 0, int iter = 0) -> Tensor",
+      c10::RegisterOperators::options()
+      .kernel<FakeQuantizePerTensorAffineOp_forward>()
+      .dispatchKey(CUDATensorId()))
+  .op("quantized::fake_quantize_per_tensor_affine_backward(Tensor X, Tensor dY, float scale, int zero_point, int num_bits=8, int quant_delay=0, int iter = 0) -> Tensor",
+      c10::RegisterOperators::options()
+      .kernel<FakeQuantizePerTensorAffineOp_backward>()
+      .dispatchKey(CUDATensorId()));
 
 } // namespace
 }} // namespace at::native

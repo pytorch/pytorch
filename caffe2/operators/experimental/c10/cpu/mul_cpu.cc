@@ -72,18 +72,10 @@ void mul_op_cpu_impl(
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::Mul",
-        "",
-        (std::vector<c10::Argument>{
-            c10::Argument("input1"),
-            c10::Argument("input2"),
-            c10::Argument("output"),
-            c10::Argument("legacy_broadcast", BoolType::get()),
-            c10::Argument("axis", IntType::get())}),
-        (std::vector<c10::Argument>{})),
-    c10::kernel<decltype(mul_op_cpu_impl<float>), &mul_op_cpu_impl<float>>(),
-    c10::dispatchKey(CPUTensorId()));
+    "_c10_experimental::Mul",
+    c10::RegisterOperators::options()
+      .kernel<decltype(mul_op_cpu_impl<float>), &mul_op_cpu_impl<float>>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 

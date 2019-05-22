@@ -34,8 +34,10 @@ popd
 doxygen 2> original-doxygen-log.txt
 cp original-doxygen-log.txt doxygen-log.txt
 
-echo "Original output"
-cat original-doxygen-log.txt
+# Uncomment this if you need it for debugging; we're not printing this
+# by default because it is confusing.
+# echo "Original output"
+# cat original-doxygen-log.txt
 
 # Filter out some warnings.
 ignore_warning "warning: no uniquely matching class member found for"
@@ -44,9 +46,12 @@ ignore_warning "warning: explicit link request to 'Item' could not be resolved"
 # Count the number of remaining warnings.
 warnings="$(grep 'warning:' doxygen-log.txt | wc -l)"
 
+echo "Treating all remaining warnings as errors"
+
 if [[ "$warnings" -ne "0" ]]; then
-  echo "Filtered output"
+  echo "Failing Doxygen test because the following warnings were treated fatally:"
   cat doxygen-log.txt
+  echo "Please fix these warnings.  To run this test locally, use docs/cpp/source/check-doxygen.sh"
   rm -f doxygen-log.txt original-doxygen-log.txt
   exit 1
 fi

@@ -304,6 +304,10 @@ class OnnxifiOp final : public Operator<Context> {
   // dim but uint64_t for onnxDesciptor dim. Maybe we should just use int64_t
   c10::SmallVector<int64_t, 4> tensor_dims_int64_;
 
+  // This is for multi group quantization info
+  std::vector<std::vector<float>> all_scales_;
+  std::vector<std::vector<float>> all_offsets_;
+
   // output shape hints
   std::unordered_map<int, TensorInfo> output_shape_hints_;
 

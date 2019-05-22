@@ -494,6 +494,15 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
       return ProfiledTensorTypePtr(new ProfiledTensorType(scalar_type, device, sizes, strides, requires_grad));
   }
 
+  static ProfiledTensorTypePtr create(ProfiledTensorTypePtr pttp) {
+    return ProfiledTensorTypePtr(new ProfiledTensorType(
+        pttp->scalarType(),
+        pttp->device(),
+        pttp->sizes(),
+        pttp->strides(),
+        pttp->requiresGrad()));
+  }
+
   const VaryingShape& sizes() const { return sizes_; }
   const VaryingStrides& strides() const { return strides_; }
   c10::optional<at::Device> device() const { return device_; }
@@ -1270,6 +1279,14 @@ struct getTypePtr_<std::unordered_map<K, V>> final {
     return type;
   }
 };
+template <class K, class V>
+struct getTypePtr_<c10::Dict<K, V>> final {
+  static TypePtr call() {
+    static auto type =
+        DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
+    return type;
+  }
+};
 template <class T>
 struct getTypePtr_<at::optional<T>> final {
   static TypePtr call() {
@@ -1310,7 +1327,7 @@ using ::torch::jit::script::Function;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public Type {
-  // Create a user type and register it globally.
+  // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       QualifiedName qualifiedName,
       std::shared_ptr<CompilationUnit> cu);
@@ -1318,11 +1335,6 @@ struct CAFFE2_API ClassType : public Type {
   // Create a type representing a Module,
   // These do not have methods, and are not globally registered
   static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
-
-  // returns nullptr if there is no type with that name
-  static ClassTypePtr get(const QualifiedName& qualifiedName);
-  // For testing: delete all registered types
-  static void clearRegistry();
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {

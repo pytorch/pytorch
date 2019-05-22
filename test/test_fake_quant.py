@@ -78,7 +78,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         num_bits = 8
         X = np.random.rand(20, 20) * 125
         X_torch = torch.from_numpy(X).float()
-        Y = X_torch.quantize_linear(scale, zero_point).dequantize()
+        Y = torch.dequantize(torch.quantize_linear(X_torch, scale, zero_point, torch.qint8))
         Y_prime = fake_quantize_per_tensor_affine_forward(
             X=X_torch, scale=scale, zero_point=zero_point, num_bits=num_bits,
             quant_delay=0, iter=0)
@@ -138,7 +138,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         num_bits = 8
         X = np.random.rand(20, 20) * 125
         X_torch = torch.from_numpy(X).float()
-        Y = X_torch.quantize_linear(scale, zero_point).dequantize()
+        Y = torch.dequantize(torch.quantize_linear(X_torch, scale, zero_point, torch.qint8))
         Y_prime = fake_quantize_per_tensor_affine_forward(
             X=X_torch.cuda(), scale=scale, zero_point=zero_point, num_bits=num_bits,
             quant_delay=0, iter=0)
