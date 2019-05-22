@@ -11,11 +11,6 @@ Tensor get_dtype_tensor(caffe2::TypeMeta dtype) {
       Storage(
           dtype, 0, at::DataPtr(nullptr, Device(DeviceType::MSNPU, 0)), nullptr, false),
       MSNPUTensorId());
-  // NOTE: We set `tensor_impl`'s size to {1}, so that `tensor_impl->numel()` can return 1
-  // which is required for MSNPU extension tests to work. It's okay that this size doesn't
-  // agree with the size of the storage (which is 0), because checking whether they agree
-  // is not the goal of the MSNPU extension tests.
-  tensor_impl->set_sizes_and_strides({1}, {0});
   return Tensor(std::move(tensor_impl));
 }
 
