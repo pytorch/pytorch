@@ -64,9 +64,16 @@ class CAFFE2_API DeprecatedTypeProperties {
   }
 
   std::string toString() const {
-    std::stringstream ss;
-    ss << at::toString(backend()) << at::toString(scalarType()) << "Type";
-    return ss.str();
+    std::string base_str;
+    if (backend_ == Backend::Undefined || scalar_type_ == ScalarType::Undefined) {
+      base_str = "UndefinedType";
+    } else {
+      base_str = std::string(at::toString(backend_)) + at::toString(scalar_type_) + "Type";
+    }
+    if (is_variable_) {
+      return "Variable[" + base_str + "]";
+    }
+    return base_str;
   }
 
   DeprecatedTypeProperties & toBackend(Backend b) const {

@@ -2258,6 +2258,15 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDAGuard.h", ("ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h", API_PYTORCH)),
     ("c10/cuda/CUDACachingAllocator.h", ("ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h", API_PYTORCH)),
     ("c10/cuda/CUDAStream.h", ("ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h", API_PYTORCH)),
+    ("gloo/cuda.h", ("gloo/hip.h", API_PYTORCH)),
+    ("gloo/cuda_allreduce_halving_doubling.h", ("gloo/hip_allreduce_halving_doubling.h", API_PYTORCH)),
+    ("gloo/cuda_allreduce_halving_doubling_pipelined.h", ("gloo/hip_allreduce_halving_doubling_pipelined.h", API_PYTORCH)),
+    ("gloo/cuda_allreduce_ring.h", ("gloo/hip_allreduce_ring.h", API_PYTORCH)),
+    ("gloo/cuda_broadcast_one_to_all.h", ("gloo/hip_broadcast_one_to_all.h", API_PYTORCH)),
+    ("gloo::CudaAllreduceHalvingDoublingPipelined", ("gloo::HipAllreduceHalvingDoublingPipelined", API_PYTORCH)),
+    ("gloo::CudaBroadcastOneToAll", ("gloo::HipBroadcastOneToAll", API_PYTORCH)),
+    ("gloo::CudaHostWorkspace", ("gloo::HipHostWorkspace", API_PYTORCH)),
+    ("gloo::CudaDeviceWorkspace", ("gloo::HipDeviceWorkspace", API_PYTORCH)),
 ])
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
@@ -2310,6 +2319,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cuda::CUDAStreamGuard", ("hip::HIPStreamGuard", API_CAFFE2)),
     ("cuda::OptionalCUDAStreamGuard", ("hip::OptionalHIPStreamGuard", API_CAFFE2)),
     ("c10/cuda/CUDAGuard.h", ("c10/hip/HIPGuard.h", API_CAFFE2)),
+    ("gloo/cuda", ("gloo/hip", API_CAFFE2)),
 ])
 
 # We must tread very carefully here.  Blanket conversions like are done
