@@ -118,7 +118,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
 
   // Mark if function is ignored on export
   if (py::cast<bool>(
-          py::module::import("torch.jit").attr("_is_ignored_function")(self))) {
+          py::module::import("torch.jit").attr("_should_drop_on_export")(self))) {
     auto python_op = static_cast<PythonOp*>(new_node);
     python_op->ignore_on_export = true;
   }
@@ -319,9 +319,22 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         }
       }
       return toSugaredValue(attr, m, loc, true);
-    } else if (
-        py::isinstance<py::function>(attr) ||
-        py_module_.attr("_constants_set").contains(field.c_str())) {
+    } else if (py::isinstance<py::function>(attr)) {
+      if (getRecursiveScriptMode()) {
+        // Compile the function
+        auto stub =
+            py::module::import("torch.jit").attr("_get_method_stub")(attr);
+        if (!stub.is_none()) {
+          auto creator =
+              py::module::import("torch.jit").attr("_create_methods_from_stubs");
+
+          // Add the method to the module
+          creator(py_module_, stub);
+          return SimpleValue(self_).attr(loc, m, field);
+        }
+      }
+      return toSugaredValue(attr, m, loc, true);
+    } else if (py_module_.attr("_constants_set").contains(field.c_str())) {
       return toSugaredValue(attr, m, loc, true);
     } else {
       std::string hint = "did you forget to add it __constants__?";

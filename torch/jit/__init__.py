@@ -8,7 +8,7 @@ import torch.jit.annotations
 import torch._jit_internal as _jit_internal
 from torch._six import PY2, with_metaclass, get_function_from_type, \
     string_classes, builtins
-from torch._jit_internal import ignore  # noqa: F401
+from torch._jit_internal import ignore, export  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
@@ -944,12 +944,21 @@ def _make_strong_submodule(field, module, parent):
 
 
 def _try_compile_fn(fn):
-    if inspect.ismethod(fn) or _is_ignored_function(fn):
-        # Skip methods
+    if _is_ignored_function(fn):
+        # Don't do anything for @ignore'd functions
         return None
 
+    # We don't have the actual scope where the function was defined, but we can
+    # extract the necessary info from the closed over variables on the function
+    # object
     rcb = createResolutionCallbackFromClosure(fn)
     return torch.jit.script(fn, _rcb=rcb)
+
+
+def _get_method_stub(method):
+    if _is_ignored_function(method):
+        return None
+    return [script_method(method, createResolutionCallbackFromClosure(method))]
 
 
 # ScriptClasses must be new-style classes because we construct them using their
@@ -1017,7 +1026,9 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         return obj
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-    if inspect.isclass(obj):
+    if isinstance(obj, torch.nn.Module):
+        return _convert_to_script_module(obj)
+    elif inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
         qualified_name = _qualified_name(obj)
@@ -1072,6 +1083,12 @@ def _is_ignored_function(fn):
     if hasattr(fn, '__func__'):
         fn = fn.__func__
     return fn in _jit_internal.ignored_fns
+
+
+def _should_drop_on_export(fn):
+    if not _is_ignored_function(fn):
+        return False
+    return _jit_internal.ignored_fns[fn]["drop_on_export"]
 
 
 def _is_weak_type(cls):

@@ -26,7 +26,7 @@ boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Python Op functions that should be ignored by the compiler. These will be replaced
 # with an operator that always throws an error
-ignored_fns = weakref.WeakSet()  # noqa: T484
+ignored_fns = weakref.WeakKeyDictionary()  # noqa: T484
 
 COMPILATION_PENDING = object()
 COMPILED = object()
@@ -160,9 +160,26 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     return fn
 
 
-def ignore(fn):
-    ignored_fns.add(fn)
+def export(fn):
     return fn
+
+
+def ignore(drop_on_export=False):
+    if callable(drop_on_export):
+        # used without any args, so drop_on_export is actually a function
+        #   @torch.jit.ignore
+        #   def fn(...):
+        fn = drop_on_export
+        ignored_fns[fn] = {"drop_on_export": False}
+        return drop_on_export
+    elif isinstance(drop_on_export, bool):
+        def decorator(fn):
+            ignored_fns[fn] = {"drop_on_export": False}
+            return fn
+        return decorator
+    else:
+        raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
+                           "a function but got {}".format(drop_on_export))
 
 
 def _parameter_list(parameter_names_fn):
