@@ -110,3 +110,7 @@
     ignore = dirty
     path = third_party/foxi
     url = https://github.com/houseroad/foxi.git
+[submodule "third_party/tbb"]
+	path = third_party/tbb
+	url = https://github.com/01org/tbb
+	branch = tbb_2018

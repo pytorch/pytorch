@@ -50,6 +50,16 @@ std::string get_parallel_info() {
   ss << "\tOMP_NUM_THREADS : " << get_env_var("OMP_NUM_THREADS") << std::endl;
   ss << "\tMKL_NUM_THREADS : " << get_env_var("MKL_NUM_THREADS") << std::endl;
 
+  ss << "Parallel backend: ";
+  #if AT_PARALLEL_OPENMP
+  ss << "OpenMP";
+  #elif AT_PARALLEL_NATIVE
+  ss << "native thread pool";
+  #elif AT_PARALLEL_NATIVE_TBB
+  ss << "native thread pool and TBB";
+  #endif
+  ss << std::endl;
+
   return ss.str();
 }
 

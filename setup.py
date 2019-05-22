@@ -155,6 +155,10 @@
 #     possible values:
 #       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
+#       NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
+#
+#   USE_TBB
+#      use TBB for parallelization
 #
 #   USE_EIGEN_THEADPOOL
 #      use Eigen thread pool as a native implementation of thread pool
@@ -289,6 +293,7 @@ def build_deps():
     check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
     check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
     check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
     check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'foxi', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))

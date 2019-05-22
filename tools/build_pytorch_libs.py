@@ -219,8 +219,14 @@ def run_cmake(version,
     if os.getenv('USE_OPENMP'):
         cmake_defines(cmake_args, USE_OPENMP=check_env_flag('USE_OPENMP'))
 
+    if os.getenv('USE_TBB'):
+        cmake_defines(cmake_args, USE_TBB=check_env_flag('USE_TBB'))
+
     if os.getenv('MKL_SEQ'):
         cmake_defines(cmake_args, INTEL_MKL_SEQUENTIAL=check_env_flag('MKL_SEQ'))
+
+    if os.getenv('MKL_TBB'):
+        cmake_defines(cmake_args, INTEL_MKL_TBB=check_env_flag('MKL_TBB'))
 
     mkldnn_threading = os.getenv('MKLDNN_THREADING')
     if mkldnn_threading:
