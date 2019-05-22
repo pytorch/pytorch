@@ -37,13 +37,22 @@ thread_local size_t thread_num_ = 0;
 
 namespace internal {
 
+int _num_threads(int nthreads) {
+  if (nthreads == NOT_SET) {
+    nthreads = TaskThreadPoolBase::defaultNumThreads();
+  } else {
+    TORCH_CHECK(nthreads > 0);
+  }
+  // minus one because of the master thread
+  return nthreads - 1;
+}
+
 TaskThreadPoolBase& _get_intraop_pool() {
   static std::shared_ptr<TaskThreadPoolBase> pool =
       ThreadPoolRegistry()->Create(
           "C10",
           /* device_id */ 0,
-          // minus one because of the master thread
-          /* pool_size */ num_intraop_threads.exchange(CONSUMED) - 1,
+          /* pool_size */ _num_threads(num_intraop_threads.exchange(CONSUMED)),
           /* create_new */ true); // create a separate thread pool for intra-op
   return *pool;
 }
@@ -74,9 +83,9 @@ void init_num_threads() {
 }
 
 void set_num_threads(int nthreads) {
-  AT_CHECK(nthreads > 0, "Expected positive number of threads");
+  TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
   int no_value = NOT_SET;
-  AT_CHECK(num_intraop_threads.compare_exchange_strong(no_value, nthreads),
+  TORCH_CHECK(num_intraop_threads.compare_exchange_strong(no_value, nthreads),
       "Error: cannot set number of interop threads "
       "after parallel work has started or after set_num_threads call");
 }
@@ -88,11 +97,9 @@ int get_num_threads() {
   if (nthreads > 0) {
     return nthreads;
   } else if (nthreads == NOT_SET) {
-    // add plus one because master thread is also used in
-    // parallel computation
-    return TaskThreadPoolBase::defaultNumThreads() + 1;
+    return TaskThreadPoolBase::defaultNumThreads();
   } else {
-    AT_ASSERT(nthreads == CONSUMED);
+    TORCH_CHECK(nthreads == CONSUMED);
     return internal::_get_intraop_pool().size() + 1;
   }
 }

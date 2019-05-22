@@ -32,25 +32,31 @@ inline void parallel_for(
     const int64_t end,
     const int64_t grain_size,
     const F& f) {
+  TORCH_CHECK(grain_size >= 0);
   if (begin >= end) {
     return;
   }
 
-  if (grain_size < 0) {
-    throw std::runtime_error("Invalid begin, end or grain_size in parallel_for");
-  }
-
   if (((end - begin) >= grain_size) && !in_parallel_region()) {
-    // choose number of tasks based on grain size and number of threads;
+    // choose number of tasks based on grain size and number of threads
     size_t chunk_size = divup((end - begin), get_num_threads());
     // make sure each task is at least grain_size size
     chunk_size = std::max((size_t)grain_size, chunk_size);
     size_t num_tasks = divup((end - begin), chunk_size);
 
-    auto task = [&](int64_t task_id, int64_t local_start, int64_t local_end) {
+    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+    std::exception_ptr eptr;
+    auto task = [f, &eptr, &err_flag]
+        (int64_t task_id, int64_t local_start, int64_t local_end) {
       internal::_set_thread_num(task_id);
       internal::_set_in_parallel_region(true);
-      f(local_start, local_end);
+      try {
+        f(local_start, local_end);
+      } catch (...) {
+        if (!err_flag.test_and_set()) {
+          eptr = std::current_exception();
+        }
+      }
       internal::_set_in_parallel_region(false);
       internal::_unset_thread_num();
     };
@@ -67,7 +73,7 @@ inline void parallel_for(
         int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
         internal::_get_intraop_pool().run(
             // copy future_ptr, task_id, local_start, local_end
-            [&, future_ptr, task_id, local_start, local_end]() {
+            [task, future_ptr, task_id, local_start, local_end]() {
           task(task_id, local_start, local_end);
           future_ptr->markCompleted(IValue());
         });
@@ -78,10 +84,12 @@ inline void parallel_for(
 
     int64_t first_task_end = std::min(end, (int64_t)(chunk_size + begin));
     task(0, begin, first_task_end);
-
     // wait for all tasks to finish
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       futures[task_id]->wait();
+    }
+    if (eptr) {
+      std::rethrow_exception(eptr);
     }
   } else {
     f(begin, end);
@@ -96,12 +104,9 @@ inline scalar_t parallel_reduce(
     const scalar_t ident,
     const F& f,
     const SF& sf) {
+  TORCH_CHECK(grain_size >= 0);
   if (begin >= end) {
     return ident;
-  }
-
-  if (grain_size < 0) {
-    throw std::runtime_error("Invalid begin, end or grain_size in parallel_reduce");
   }
 
   if (((end - begin) >= grain_size) && !in_parallel_region()) {
@@ -111,10 +116,19 @@ inline scalar_t parallel_reduce(
     std::vector<scalar_t> results(num_tasks);
     scalar_t* results_data = results.data();
 
-    auto task = [&](int64_t task_id, int64_t local_start, int64_t local_end) {
+    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+    std::exception_ptr eptr;
+    auto task = [f, ident, results_data, &eptr, &err_flag]
+        (int64_t task_id, int64_t local_start, int64_t local_end) {
       internal::_set_thread_num(task_id);
       internal::_set_in_parallel_region(true);
-      results_data[task_id] = f(local_start, local_end, ident);
+      try {
+        results_data[task_id] = f(local_start, local_end, ident);
+      } catch (...) {
+        if (!err_flag.test_and_set()) {
+          eptr = std::current_exception();
+        }
+      }
       internal::_set_in_parallel_region(false);
       internal::_unset_thread_num();
     };
@@ -139,13 +153,18 @@ inline scalar_t parallel_reduce(
 
     int64_t first_task_end = std::min(end, (int64_t)(chunk_size + begin));
     task(0, begin, first_task_end);
-
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       futures[task_id]->wait();
     }
+    if (eptr) {
+      std::rethrow_exception(eptr);
+    }
 
-    return std::accumulate(
-        results_data, results_data + results.size(), ident, sf);
+    scalar_t result = ident;
+    for (auto partial_result : results) {
+      result = sf(result, partial_result);
+    }
+    return result;
   } else {
     return f(begin, end, ident);
   }
