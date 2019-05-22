@@ -462,64 +462,6 @@ Tensor instance_norm(
   return out.view(input.sizes());
 }
 
-Tensor layer_norm(const Tensor& input, IntArrayRef normalized_shape,
-    const Tensor& weight /* optional */, const Tensor& bias /* optional */,
-    double eps, bool cudnn_enabled) {
-
-    int64_t normalized_ndim = normalized_shape.size();
-
-    TORCH_CHECK(normalized_ndim >= 1,
-             "Expected normalized_shape to be at least 1-dimensional, i.e., ",
-             "containing at least one element, but got normalized_shape=",
-             normalized_shape);
-
-    TORCH_CHECK(!weight.defined() || weight.sizes().equals(normalized_shape),
-             "Expected weight to be of same shape as normalized_shape, but got ",
-             "weight of shape ", weight.sizes(), " and normalized_shape=",
-             normalized_shape);
-    TORCH_CHECK(!bias.defined() || bias.sizes().equals(normalized_shape),
-             "Expected bias to be of same shape as normalized_shape, but got ",
-             "bias of shape ", bias.sizes(), " and normalized_shape=",
-             normalized_shape);
-
-    auto input_shape = input.sizes();
-    auto input_ndim = input.dim();
-
-    if (input_ndim < normalized_ndim ||
-        !input_shape.slice(input_ndim - normalized_ndim).equals(normalized_shape)) {
-      std::stringstream ss;
-      ss << "Given normalized_shape=" << normalized_shape
-         << ", expected input with shape [*";
-      for (auto size : normalized_shape) {
-        ss << ", " << size;
-      }
-      ss << "], but got input of size" << input_shape;
-      AT_ERROR(ss.str());
-    }
-
-    int64_t n = 1;
-    for (int64_t i = 0; i < input_ndim - normalized_ndim; i++) {
-      n *= input_shape[i];
-    }
-
-    // Apply layer norm
-    auto input_reshaped = input.contiguous().view({1, n, -1});
-
-    auto out = at::batch_norm(input_reshaped, {}, {}, {}, {}, true, 0, eps,
-                              cudnn_enabled);
-    out = out.view(input_shape);
-
-    if (weight.defined() && bias.defined()) {
-      return bias.addcmul(out, weight, 1);
-    } else if (weight.defined()) {
-      return out.mul(weight);
-    } else if (bias.defined()) {
-      return out.add(bias);
-    } else {
-      return out;
-    }
-}
-
 Tensor group_norm(const Tensor& input, int64_t num_groups,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     double eps, bool cudnn_enabled) {

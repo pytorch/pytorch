@@ -296,16 +296,16 @@ inline void deprecated_AT_CHECK() {}
 /*
 // Deprecation disabled until we fix sites in our codebase
 C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an internal invariant failure, use " \
-                       "AT_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
-                       "AT_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
+                       "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
+                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERT() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
 C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an internal invariant failure, use " \
-                       "AT_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
-                       "AT_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
+                       "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
+                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERTM() {}
 
