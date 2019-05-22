@@ -6099,6 +6099,14 @@ a")
             return x
         self.checkScript(fn, (), outputs=-20, optimize=True)
 
+    def test_script_for_zero_step(self):
+        def fn():
+            x = 0
+            for i in range(2, -11, -3):
+                x += i
+            return x
+        self.checkScript(fn, (), outputs=-20, optimize=True)
+
     def test_script_optional_none(self):
         def none_stmt(x):
             output = None
@@ -9840,7 +9848,7 @@ a")
         self.checkScript(return_stmt, (torch.rand(1),))
 
     def test_for_range_no_arg(self):
-        with self.assertRaisesRegex(RuntimeError, r'range() expected at most 3 arguments but got 0'):
+        with self.assertRaisesRegex(RuntimeError, r'range expected 1 arguments, got 0'):
             @torch.jit.script
             def range_no_arg(x):
                 for _ in range():

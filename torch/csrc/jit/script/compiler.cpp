@@ -1406,7 +1406,7 @@ struct to_ir {
       end_val = argVals[0];
       start_val = end_val->owningGraph()->insertConstant(0);
       step_val = end_val->owningGraph()->insertConstant(1);
-    } else if (args.size() <= 3) {
+    } else if (args.size() == 2 || args.size() == 3) {
       start_val = argVals[0];
       end_val = argVals[1];
       if (args.size() == 3) {
@@ -1414,9 +1414,12 @@ struct to_ir {
       } else {
         step_val = end_val->owningGraph()->insertConstant(1);
       }
+    } else if (args.size() == 0) {
+      throw ErrorReport(range)
+          << "range expected 1 arguments, got 0";
     } else {
       throw ErrorReport(range)
-          << "range() expected at most 3 arguments, got " << args.size();
+          << "range expected at most 3 arguments, got " << args.size();
     }
     const auto& ident_name = target.name();
     AT_CHECK(end_val != nullptr && start_val != nullptr && step_val != nullptr, "Expected non-null pointers for range() arguments");
@@ -1442,6 +1445,26 @@ struct to_ir {
       max_trip_count_val = end_val;
     } else {
       auto g = start_val->owningGraph();
+      Value* cond_value = emitBuiltinCall(
+            range,
+            *g,
+            aten::eq,
+            c10::nullopt,
+            {step_val, g->insertConstant(0)},
+            {},
+          /*required=*/true);
+      Node* n = g->insertNode(create(prim::If, range, 0));
+      n->addInput(cond_value);
+      auto true_block = n->addBlock();
+      n->addBlock();
+      {
+        WithInsertPoint guard(true_block);
+        g->insert(
+            prim::RaiseException,
+            {std::string("range() arg 3 must not be zero")},
+            {},
+            range);
+      }
       max_trip_count_val = addOp(g, aten::__range_length, {start_val, end_val, step_val});
     }
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);

@@ -1996,9 +1996,6 @@ RegisterOperators reg2({
         [](Stack& stack) {
           int64_t lo, hi, step;
           pop(stack, lo, hi, step);
-          if (step == 0){
-            throw std::runtime_error("for loop has 0 as step parameter");
-          }
           if (step > 0 && lo < hi)
             push(stack, 1 + (hi - 1 - lo) / step);
           else if (step < 0 && lo > hi)
