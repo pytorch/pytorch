@@ -39,7 +39,7 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
     TensorImpl::copy_tensor_data(src_impl, dest_impl, version_counter, allow_tensor_metadata_change);
 
     // OpaqueTensorImpl-specific fields.
-    auto src_q_impl = static_cast<QTensorImpl*>(src_impl);
+    auto src_q_impl = static_cast<const QTensorImpl*>(src_impl);
     auto dest_q_impl = static_cast<QTensorImpl*>(dest_impl);
     dest_q_impl->quantizer_ = src_q_impl->quantizer_;
   }

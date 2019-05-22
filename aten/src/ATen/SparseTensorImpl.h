@@ -197,7 +197,7 @@ public:
     TensorImpl::copy_tensor_data(src_impl, dest_impl, version_counter, allow_tensor_metadata_change);
 
     // Sparse-specific fields
-    auto src_sparse_impl = static_cast<SparseTensorImpl*>(src_impl);
+    auto src_sparse_impl = static_cast<const SparseTensorImpl*>(src_impl);
     auto dest_sparse_impl = static_cast<SparseTensorImpl*>(dest_impl);
     dest_sparse_impl->sparse_dim_ = src_sparse_impl->sparse_dim();
     dest_sparse_impl->dense_dim_ = src_sparse_impl->dense_dim();

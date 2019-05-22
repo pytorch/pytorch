@@ -91,7 +91,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     TensorImpl::copy_tensor_data(src_impl, dest_impl, version_counter, allow_tensor_metadata_change);
 
     // OpaqueTensorImpl-specific fields.
-    auto src_opaque_impl = static_cast<OpaqueTensorImpl<OpaqueHandle>*>(src_impl);
+    auto src_opaque_impl = static_cast<const OpaqueTensorImpl<OpaqueHandle>*>(src_impl);
     auto dest_opaque_impl = static_cast<OpaqueTensorImpl<OpaqueHandle>*>(dest_impl);
     dest_opaque_impl->opaque_handle_ = src_opaque_impl->opaque_handle_;
   }
