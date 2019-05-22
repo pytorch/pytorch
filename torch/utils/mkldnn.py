@@ -8,8 +8,10 @@ class MkldnnLinear(torch.jit.ScriptModule):
         super(MkldnnLinear, self).__init__()
         self.register_buffer('weight', dense_module.weight.to_mkldnn())
         if dense_module.bias is not None:
+            self.has_bias = torch.jit.Attribute(True, bool)
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
         else:
+            self.has_bias = torch.jit.Attribute(False, bool)
             # TODO: Remove this once ScriptModule supports registering None buffer
             self.register_buffer(
                 'bias',
@@ -17,13 +19,14 @@ class MkldnnLinear(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def __getstate__(self):
-        return (self.weight.to_dense(), self.bias.to_dense())
+        return (self.weight.to_dense(), self.bias.to_dense(), self.has_bias)
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        # type: (Tuple[Tensor, Tensor]) -> None
+        # type: (Tuple[Tensor, Tensor, bool]) -> None
         self.weight = state[0].to_mkldnn()
         self.bias = state[1].to_mkldnn()
+        self.has_bias = state[2]
 
     @torch.jit.script_method
     def forward(self, x):
@@ -43,8 +46,10 @@ class MkldnnConv2d(torch.jit.ScriptModule):
 
         self.register_buffer('weight', dense_module.weight.to_mkldnn())
         if dense_module.bias is not None:
+            self.has_bias = torch.jit.Attribute(True, bool)
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
         else:
+            self.has_bias = torch.jit.Attribute(False, bool)
             # TODO: Remove this once ScriptModule supports registering None buffer
             self.register_buffer(
                 'bias',
@@ -52,11 +57,11 @@ class MkldnnConv2d(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def __getstate__(self):
-        return (self.weight.to_dense(), self.bias.to_dense())
+        return (self.weight.to_dense(), self.bias.to_dense(), self.has_bias)
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        # type: (Tuple[Tensor, Tensor]) -> None
+        # type: (Tuple[Tensor, Tensor, bool]) -> None
         self.weight = torch._C._nn.mkldnn_reorder_conv2d_weight(
             state[0].to_mkldnn(),
             self.padding,
@@ -64,6 +69,7 @@ class MkldnnConv2d(torch.jit.ScriptModule):
             self.dilation,
             self.groups)
         self.bias = state[1].to_mkldnn()
+        self.has_bias = state[2]
 
     @torch.jit.script_method
     def forward(self, x):
