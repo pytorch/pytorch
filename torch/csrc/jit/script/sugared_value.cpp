@@ -37,8 +37,7 @@ std::shared_ptr<SugaredValue> PrintValue::call(
     }
     lowered_inputs.erase(lowered_inputs.begin());
   }
-  g.insertNode(g.create(prim::Print, lowered_inputs, 0)
-                   ->setSourceRange(loc));
+  g.insertNode(g.create(prim::Print, lowered_inputs, 0)->setSourceRange(loc));
   return std::make_shared<NoneValue>();
 }
 
@@ -157,7 +156,7 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
         graph->insertNode(graph->createListUnpack(value_, *size_hint));
     return fmap(unpack->outputs(), make_simple_value);
   }
-  throw ErrorReport(loc) << value_->type()->str()
+  throw ErrorReport(loc) << value_->type()->python_str()
                          << " cannot be used as a tuple";
 }
 
@@ -169,7 +168,8 @@ void SimpleValue::setAttr(
   const auto classType = value_->type()->cast<ClassType>();
   if (!classType) {
     throw ErrorReport(loc) << "Tried to set an attribute: " << field
-                           << " on a non-class: " << value_->type()->str();
+                           << " on a non-class: "
+                           << value_->type()->python_str();
   }
   auto expectedType = classType->getAttribute(field);
   if (!expectedType) {
@@ -209,8 +209,8 @@ void SimpleValue::setAttr(
   const auto newType = newValue->type();
   if (!newType->isSubtypeOf(expectedType)) {
     throw ErrorReport(loc) << "Wrong type for attribute assignment. Expected "
-                           << expectedType->str() << " but got "
-                           << newType->str();
+                           << expectedType->python_str() << " but got "
+                           << newType->python_str();
   }
 
   auto& g = *m.graph();
