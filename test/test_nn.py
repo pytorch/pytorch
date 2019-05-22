@@ -2313,12 +2313,17 @@ class TestNN(NNTestCase):
     def _test_gumbel_isinf(self, cuda=True, shape=(10000000,)):
         # This verifies that 0 can be sampled from the exponential distribution, 
         # which will result in 'inf' from 'log(0)' in 'gumbel_softmax' function.
+        import torch
+        torch.manual_seed(0)
+        torch.cuda.set_device(0)
+
         num_draws = 100
         samples = torch.empty(shape)
         if cuda:
             samples = samples.cuda()
         for i in range(num_draws):
-            gumbels = -samples.exponential_().log() 
+            #gumbels = -samples.exponential_().log() 
+            gumbels = torch.empty(shape, device=torch.cuda.current_device()).exponential_() 
             isinf = torch.isinf(gumbels).any()
             self.assertFalse(isinf)
 
