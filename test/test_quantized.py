@@ -31,7 +31,7 @@ def _dequantize(qx, scale, zero_point):
 # unsigned 8-bit integer from a with the corresponding signed 8-bit integer from
 # b, producing intermediate signed 16-bit integers. This function modifies the
 # weights to eliminate the overflow on the signed 16-bit integers.
-def avoid_vpmaddubsw_overflow_fc(
+def avoid_vpmaddubsw_overflow_linear(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
     for i, j in np.ndindex((batch_size, output_channels)):
@@ -57,8 +57,8 @@ def avoid_vpmaddubsw_overflow_fc(
             assert -(1 << 15) <= x0 * w0 + x1 * w1 < (1 << 15)
 
 
-# Reference quantized FC operator
-def qfc_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
+# Reference quantized Linear operator
+def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
     row_offsets_ref = X_q.sum(axis=1).astype(np.int32).reshape((-1, 1))
     col_offsets_ref = W_q.sum(axis=1).astype(np.int32).reshape((1, -1))
     assert X_q.ndim == 2
@@ -193,16 +193,16 @@ class TestQuantizedOps(unittest.TestCase):
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-    " Quantized FC requires FBGEMM. FBGEMM does not play"
+    " Quantized Linear requires FBGEMM. FBGEMM does not play"
     " well with UBSAN at the moment, so we skip the test if"
     " we are in a UBSAN environment.",
 )
-class TestQuantizedFC(unittest.TestCase):
-    """Tests the correctness of the quantized::fc op."""
+class TestQuantizedLinear(unittest.TestCase):
+    """Tests the correctness of the quantized::fbgemm_linear op."""
 
-    def test_qfc(self):
-        qfc_prepack = torch.ops.quantized.fbgemm_linear_prepack
-        qfc = torch.ops.quantized.fbgemm_linear
+    def test_qlinear(self):
+        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qlinear = torch.ops.quantized.fbgemm_linear
 
         batch_size = 4
         input_channels = 16
@@ -233,7 +233,7 @@ class TestQuantizedFC(unittest.TestCase):
             np.random.rand(output_channels) * (b_value_max - b_value_min) + b_value_min
         ).astype(np.int32)
 
-        avoid_vpmaddubsw_overflow_fc(
+        avoid_vpmaddubsw_overflow_linear(
             batch_size,
             input_channels,
             output_channels,
@@ -258,13 +258,13 @@ class TestQuantizedFC(unittest.TestCase):
         Y_scale = 125.1234
         Y_zp = 5
 
-        # Reference quantized FC operator
-        Y_q_ref = qfc_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
+        # Reference quantized Linear operator
+        Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
 
-        # Weight prepacking operator for quantized FC
-        W_prepack = qfc_prepack(W_q)
-        # Quantized FC operator with prepacked weight
-        Y_q = qfc(X_q, W_prepack, b_q, Y_scale, Y_zp)
+        # Weight prepacking operator for quantized Linear
+        W_prepack = qlinear_prepack(W_q)
+        # Quantized Linear operator with prepacked weight
+        Y_q = qlinear(X_q, W_prepack, b_q, Y_scale, Y_zp)
 
         # Y_q_ref_real = _dequantize(Y_q_ref, Y_scale, Y_zp)
         # Y_q_real = Y_q.dequantize()
@@ -283,10 +283,10 @@ class TestQuantizedFC(unittest.TestCase):
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
 
-    """Tests the correctness of the quantized::fc op."""
-    def test_qfcrelu(self):
-        qfc_prepack = torch.ops.quantized.fbgemm_linear_prepack
-        qfcrelu = torch.ops.quantized.fbgemm_linear_relu
+    """Tests the correctness of the quantized::fbgemm_linear_relu op."""
+    def test_qlinear_relu(self):
+        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qlinear_relu = torch.ops.quantized.fbgemm_linear_relu
 
         batch_size = 4
         input_channels = 16
@@ -317,7 +317,7 @@ class TestQuantizedFC(unittest.TestCase):
             np.random.rand(output_channels) * (b_value_max - b_value_min) + b_value_min
         ).astype(np.int32)
 
-        avoid_vpmaddubsw_overflow_fc(
+        avoid_vpmaddubsw_overflow_linear(
             batch_size,
             input_channels,
             output_channels,
@@ -342,14 +342,14 @@ class TestQuantizedFC(unittest.TestCase):
         Y_scale = 125.1234
         Y_zp = 5
 
-        # Reference quantized FC operator
-        Y_q_ref = qfc_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
+        # Reference quantized Linear operator
+        Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
         Y_q_ref[Y_q_ref < Y_zp] = Y_zp
 
-        # Weight prepacking operator for quantized FC
-        W_prepack = qfc_prepack(W_q)
-        # Quantized FC operator with prepacked weight
-        Y_q = qfcrelu(X_q, W_prepack, b_q, Y_scale, Y_zp)
+        # Weight prepacking operator for quantized Linear
+        W_prepack = qlinear_prepack(W_q)
+        # Quantized Linear operator with prepacked weight
+        Y_q = qlinear_relu(X_q, W_prepack, b_q, Y_scale, Y_zp)
 
         # Y_q_ref_real = _dequantize(Y_q_ref, Y_scale, Y_zp)
         # Y_q_real = Y_q.dequantize()
