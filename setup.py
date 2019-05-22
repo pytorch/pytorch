@@ -157,9 +157,6 @@
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
 #       NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
 #
-#   USE_EIGEN_THEADPOOL
-#      use Eigen thread pool as a native implementation of thread pool
-#
 #   USE_TBB
 #      use TBB for parallelization
 #
