@@ -140,8 +140,8 @@ should_run_job: &should_run_job
   command: |
     if [ -e ~/workspace/.circleci/scripts/should_run_job.sh ]; then
       ~/workspace/.circleci/scripts/should_run_job.sh
-    elif [ -e /Users/distiller/project/.circleci/scripts/should_run_job.sh ]; then
-      /Users/distiller/project/.circleci/scripts/should_run_job.sh
+    elif [ -e /Users/distiller/pytorch-ci-env/workspace/.circleci/scripts/should_run_job.sh ]; then
+      /Users/distiller/pytorch-ci-env/workspace/.circleci/scripts/should_run_job.sh
     else
       .circleci/scripts/should_run_job.sh
     fi
