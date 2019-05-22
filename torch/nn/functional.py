@@ -3206,10 +3206,15 @@ def multi_head_attention_forward(query,                  # type: Tensor
         k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
         v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
         if attn_mask is not None:
-            attn_mask = torch.cat([attn_mask, torch.zeros((attn_mask.size(0), 1), dtype=attn_mask.dtype, device=attn_mask.device)], dim=1)
+            attn_mask = torch.cat([attn_mask,
+                                  torch.zeros((attn_mask.size(0), 1),
+                                              dtype=attn_mask.dtype,
+                                              device=attn_mask.device)], dim=1)
         if key_padding_mask is not None:
             key_padding_mask = torch.cat(
-                [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1), dtype=key_padding_mask.dtype, device=key_padding_mask.device)], dim=1)
+                [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
+                                               dtype=key_padding_mask.dtype,
+                                               device=key_padding_mask.device)], dim=1)
     else:
         assert bias_k is None
         assert bias_v is None
@@ -3228,16 +3233,17 @@ def multi_head_attention_forward(query,                  # type: Tensor
 
     if add_zero_attn:
         src_len += 1
-        k = torch.cat([k, torch.zeros((k.size(0), 1) + k.size()[2:], dtype=k.dtype, device=k.device)], dim=1) 
-        v = torch.cat([v, torch.zeros((v.size(0), 1) + v.size()[2:], dtype=v.dtype, device=v.device)], dim=1) 
+        k = torch.cat([k, torch.zeros((k.size(0), 1) + k.size()[2:], dtype=k.dtype, device=k.device)], dim=1)
+        v = torch.cat([v, torch.zeros((v.size(0), 1) + v.size()[2:], dtype=v.dtype, device=v.device)], dim=1)
         if attn_mask is not None:
-            attn_mask = torch.cat([attn_mask, torch.zeros((attn_mask.size(0), 1), dtype=attn_mask.dtype, device=attn_mask.device)], dim=1)
+            attn_mask = torch.cat([attn_mask, torch.zeros((attn_mask.size(0), 1),
+                                                          dtype=attn_mask.dtype,
+                                                          device=attn_mask.device)], dim=1)
         if key_padding_mask is not None:
             key_padding_mask = torch.cat(
-                [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1), dtype=key_padding_mask.dtype, device=key_padding_mask.device)], dim=1)
-
-#    a = q[0][0][0]
-#    print(a)
+                [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
+                                               dtype=key_padding_mask.dtype,
+                                               device=key_padding_mask.device)], dim=1)
 
     attn_output_weights = torch.bmm(q, k.transpose(1, 2))
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
