@@ -11,6 +11,8 @@ namespace at { namespace native {
 
 using unary_fn = void(*)(TensorIterator&);
 
+DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar), fill_stub);
+
 DECLARE_DISPATCH(unary_fn, abs_stub);
 DECLARE_DISPATCH(unary_fn, acos_stub);
 DECLARE_DISPATCH(unary_fn, asin_stub);
@@ -46,7 +48,6 @@ DECLARE_DISPATCH(void(*)(Tensor&, const double, Generator *), bernoulli_mkl_stub
 // digamma
 // lgamma
 // erfinv
-// fill
 // clone
 // contiguous
 // clamp/_min/_max

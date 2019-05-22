@@ -67,7 +67,7 @@ Tensor affine_grid_generator_5D(
 }
 
 Tensor affine_grid_generator(const Tensor& theta, IntArrayRef size) {
-  AT_CHECK(
+  TORCH_CHECK(
       size.size() == 4 || size.size() == 5,
       "AffineGridGenerator needs 4d (spatial) or 5d (volumetric) inputs.");
   if (size.size() == 4) {
@@ -108,7 +108,7 @@ Tensor affine_grid_generator_5D_backward(
 }
 
 Tensor affine_grid_generator_backward(const Tensor& grad, IntArrayRef size) {
-  AT_CHECK(
+  TORCH_CHECK(
       size.size() == 4 || size.size() == 5,
       "AffineGridGenerator needs 4d (spatial) or 5d (volumetric) inputs.");
   if (size.size() == 4) {
