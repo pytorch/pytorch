@@ -1149,6 +1149,10 @@ jobs:
 
             export IN_CIRCLECI=1
 
+            # Persist should_run_job.sh to the workspace so test can
+            # run even if should_run_job.sh bugs out
+            mkdir -p /Users/distiller/pytorch-ci-env/workspace/.circleci/.scripts
+            cp .circleci/scripts/should_run_job.sh /Users/distiller/pytorch-ci-env/workspace/.circleci/.scripts
             source .circleci/scripts/should_run_job.sh
 
             # Install sccache
@@ -1164,8 +1168,6 @@ jobs:
 
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
-
-            mkdir -p /Users/distiller/pytorch-ci-env/workspace
 
             # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
             cp -a /Users/distiller/project/. /Users/distiller/pytorch-ci-env/workspace
