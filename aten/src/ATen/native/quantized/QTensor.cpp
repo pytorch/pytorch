@@ -48,12 +48,15 @@ Quantizer* quantizer(const Tensor& self) {
 }
 
 Tensor int_repr_quant(const Tensor& self) {
-  Tensor dst = at::empty(self.sizes(), self.options().dtype(at::kByte));
-  uint8_t* self_data = reinterpret_cast<uint8_t *>(self.data<quint8>());
-  uint8_t* dst_data = dst.data<uint8_t>();
-  if (self.numel() > 0) {
-    memcpy(dst_data, self_data, self.numel());
-  }
+  Tensor dst;
+  AT_DISPATCH_QINT_TYPES(
+      self.scalar_type(), "int_repr", [&]() {
+        dst = at::empty(self.sizes(), self.options().dtype(UNDERLYING_TYPE));
+        underlying_t* self_data = reinterpret_cast<underlying_t *>(self.data<scalar_t>());
+        underlying_t* dst_data = dst.data<underlying_t>();
+        if (self.numel() > 0) {
+          memcpy(dst_data, self_data, self.nbytes());
+        }});
   return dst;
 }
 
