@@ -1398,10 +1398,9 @@ struct to_ir {
       const List<Expr>& args,
       const List<Stmt>& body) {
     Value *end_val, *start_val, *step_val;
-    if (args.size() == 1) {
+    bool isSimpleRange = (args.size() == 1);
+    if (isSimpleRange) {
       end_val = ensureInt(range, emitExpr(args[0]));
-      start_val = end_val->owningGraph()->insertConstant(0);
-      step_val = end_val->owningGraph()->insertConstant(1);
     } else if (args.size() == 2) {
       start_val = ensureInt(range, emitExpr(args[0]));
       end_val = ensureInt(range, emitExpr(args[1]));
@@ -1415,41 +1414,52 @@ struct to_ir {
           << "range() expects 1-3 arguments but got " << args.size();
     }
     const auto& ident_name = target.name();
-    auto assigner = [ident_name, range, start_val, step_val](
+    auto assigner = [ident_name, range, start_val, step_val, isSimpleRange](
                         Value* index, std::shared_ptr<Environment> env) {
-      auto g = index->owningGraph();
-      auto offset = g->insertNode(g->create(aten::mul, {index, step_val}, 1))
-                        ->output()
-                        ->setType(IntType::get());
-      auto derived_index =
-          g->insertNode(g->create(aten::add, {offset, start_val}, 1))
-              ->output()
-              ->setType(IntType::get());
+      Value* derived_index;
+      if (isSimpleRange) {
+        derived_index = index;
+      } else {
+        auto g = index->owningGraph();
+        auto offset = g->insertNode(g->create(aten::mul, {index, step_val}, 1))
+                          ->output()
+                          ->setType(IntType::get());
+        derived_index =
+            g->insertNode(g->create(aten::add, {offset, start_val}, 1))
+                ->output()
+                ->setType(IntType::get());
+      }
       env->setVar(range, ident_name, derived_index);
     };
-    auto g = start_val->owningGraph();
-    // (abs(end-start) + abs(step)-1)/abs(step) = # of iterations
-    auto diff = g->insertNode(g->create(aten::sub, {end_val, start_val}, 1))
-                    ->output()
-                    ->setType(IntType::get());
-    auto diff_abs = g->insertNode(g->create(prim::abs, {diff}, 1))
-                        ->output()
-                        ->setType(IntType::get());
-    auto step_abs = g->insertNode(g->create(prim::abs, {step_val}, 1))
-                        ->output()
-                        ->setType(IntType::get());
-    auto ceil_offset =
-        g->insertNode(g->create(aten::sub, {step_abs, g->insertConstant(1)}, 1))
-            ->output()
-            ->setType(IntType::get());
-    auto diff_sum =
-        g->insertNode(g->create(aten::add, {diff_abs, ceil_offset}, 1))
-            ->output()
-            ->setType(IntType::get());
-    auto max_trip_count_val =
-        g->insertNode(g->create(aten::floordiv, {diff_sum, step_abs}, 1))
-            ->output()
-            ->setType(IntType::get());
+    Value* max_trip_count_val;
+    if (isSimpleRange) {
+      max_trip_count_val = end_val;
+    } else {
+      auto g = start_val->owningGraph();
+      // (abs(end-start) + abs(step)-1)/abs(step) = # of iterations
+      auto diff = g->insertNode(g->create(aten::sub, {end_val, start_val}, 1))
+                      ->output()
+                      ->setType(IntType::get());
+      auto diff_abs = g->insertNode(g->create(prim::abs, {diff}, 1))
+                          ->output()
+                          ->setType(IntType::get());
+      auto step_abs = g->insertNode(g->create(prim::abs, {step_val}, 1))
+                          ->output()
+                          ->setType(IntType::get());
+      auto ceil_offset =
+          g->insertNode(
+               g->create(aten::sub, {step_abs, g->insertConstant(1)}, 1))
+              ->output()
+              ->setType(IntType::get());
+      auto diff_sum =
+          g->insertNode(g->create(aten::add, {diff_abs, ceil_offset}, 1))
+              ->output()
+              ->setType(IntType::get());
+      max_trip_count_val =
+          g->insertNode(g->create(aten::floordiv, {diff_sum, step_abs}, 1))
+              ->output()
+              ->setType(IntType::get());
+    }
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
