@@ -508,37 +508,6 @@ void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, i
 }
 #endif
 
-/* Inverse */
-void THCudaBlas_Sgetrf(THCState *state, int n, float **a, int lda, int *pivot, int *info, int batchSize) {
-#ifndef __HIP_PLATFORM_HCC__
-  if( (n >= INT_MAX) || (lda >= INT_MAX) || (batchSize >= INT_MAX) )
-  {
-    THError("Cublas_Sgetrf only supports n, lda, batchSize"
-            "with the bound [val] <= %d", INT_MAX);
-  }
-  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-  cublasSetStream(handle, THCState_getCurrentStream(state));
-  THCublasCheck(cublasSgetrfBatched(handle, n, a, lda, pivot, info, batchSize));
-#else
-  THError("THCudaBlas_Sgetrf not supported in ROCM.");
-#endif
-}
-
-void THCudaBlas_Dgetrf(THCState *state, int n, double **a, int lda, int *pivot, int *info, int batchSize) {
-#ifndef __HIP_PLATFORM_HCC__
-  if( (n >= INT_MAX) || (lda >= INT_MAX) || (batchSize >= INT_MAX) )
-  {
-    THError("Cublas_Dgetrf only supports n, lda, batchSize"
-            "with the bound [val] <= %d", INT_MAX);
-  }
-  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-  cublasSetStream(handle, THCState_getCurrentStream(state));
-  THCublasCheck(cublasDgetrfBatched(handle, n, a, lda, pivot, info, batchSize));
-#else
-  THError("THCudaBlas_Dgetrf not supported in ROCM.");
-#endif
-}
-
 void THCudaBlas_Sgetrs(THCState *state, char transa, int n, int nrhs, const float **a, int lda, int *pivot, float **b, int ldb, int *info, int batchSize)
 {
 #ifndef __HIP_PLATFORM_HCC__
@@ -577,35 +546,5 @@ void THCudaBlas_Dgetrs(THCState *state, char transa, int n, int nrhs, const doub
   THCublasCheck(cublasDgetrsBatched(handle, opa, n, nrhs, a, lda, pivot, b, ldb, info, batchSize));
 #else
   THError("THCudaBlas_Dgetrs not supported in ROCM.");
-#endif
-}
-
-void THCudaBlas_Sgetri(THCState *state, int n, const float **a, int lda, int *pivot, float **c, int ldc, int *info, int batchSize) {
-#ifndef __HIP_PLATFORM_HCC__
-  if( (n >= INT_MAX) || (lda >= INT_MAX)|| (ldc >= INT_MAX) || (batchSize >= INT_MAX) )
-  {
-    THError("Cublas_Sgetri only supports n, lda, ldc, batchSize"
-            "with the bound [val] <= %d", INT_MAX);
-  }
-  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-  cublasSetStream(handle, THCState_getCurrentStream(state));
-  THCublasCheck(cublasSgetriBatched(handle, n, a, lda, pivot, c, ldc, info, batchSize));
-#else
-  THError("THCudaBlas_Sgetri not supported in ROCM.");
-#endif
-}
-
-void THCudaBlas_Dgetri(THCState *state, int n, const double **a, int lda, int *pivot, double **c, int ldc, int *info, int batchSize) {
-#ifndef __HIP_PLATFORM_HCC__
-  if( (n >= INT_MAX) || (lda >= INT_MAX)|| (ldc >= INT_MAX) || (batchSize >= INT_MAX) )
-  {
-    THError("Cublas_Dgetri only supports n, lda, ldc, batchSize"
-            "with the bound [val] <= %d", INT_MAX);
-  }
-  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-  cublasSetStream(handle, THCState_getCurrentStream(state));
-  THCublasCheck(cublasDgetriBatched(handle, n, a, lda, pivot, c, ldc, info, batchSize));
-#else
-  THError("THCudaBlas_Dgetri not supported in ROCM.");
 #endif
 }

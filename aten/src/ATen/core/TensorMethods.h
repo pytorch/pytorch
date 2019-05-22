@@ -804,6 +804,9 @@ inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point, ScalarTy
 inline Tensor Tensor::dequantize() const {
     return dispatch_type().dequantize(*this);
 }
+inline Tensor Tensor::dequantize_linear(double scale, int64_t zero_point, ScalarType dtype) const {
+    return dispatch_type().dequantize_linear(*this, scale, zero_point, dtype);
+}
 inline Scalar Tensor::q_scale() const {
     return dispatch_type().q_scale(*this);
 }
