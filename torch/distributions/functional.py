@@ -2,19 +2,12 @@ import math
 import numbers
 import torch
 
-from torch.distributions import constraints
 from torch.distributions.utils import _sum_rightmost
 from torch.nn.functional import pad
 
 __all__ = [
-    'compose_transform_domain',
-    'compose_transform_codomain',
-    'compose_transform_bijective',
-    'compose_transform_sign',
-    'compose_transform_event_dim',
     'compose_transform_call_',
     'compose_transform_log_abs_det_jacobian',
-    'compose_transform_repr_',
     'exp_transform_call',
     'exp_transform_inverse',
     'exp_transform_log_abs_det_jacobian',
@@ -26,7 +19,6 @@ __all__ = [
     'sigmoid_transform_log_abs_det_jacobian',
     'abs_transform_call',
     'abs_transform_inverse',
-    'affine_transform_sign',
     'affine_transform_call',
     'affine_transform_inverse',
     'affine_transform_log_abs_det_jacobian',
@@ -40,44 +32,11 @@ __all__ = [
     'cat_transform_call',
     'cat_transform_inverse',
     'cat_transform_log_abs_det_jacobian',
-    'cat_transform_bijective',
-    'cat_transform_domain',
-    'cat_transform_codomain',
     'stack_transform_slice',
     'stack_transform_call',
     'stack_transform_inverse',
     'stack_transform_log_abs_det_jacobian',
-    'stack_transform_bijective',
-    'stack_transform_domain',
-    'stack_transform_codomain',
 ]
-
-
-def compose_transform_domain(parts):
-    if not parts:
-        return constraints.real
-    return parts[0].domain
-
-
-def compose_transform_codomain(parts):
-    if not parts:
-        return constraints.real
-    return parts[-1].codomain
-
-
-def compose_transform_bijective(parts):
-    return all(p.bijective for p in parts)
-
-
-def compose_transform_sign(parts):
-    sign = 1
-    for p in parts:
-        sign = sign * p.sign
-    return sign
-
-
-def compose_transform_event_dim(parts):
-    return max(p.event_dim for p in parts) if parts else 0
 
 
 def compose_transform_call_(parts, x):
@@ -96,13 +55,6 @@ def compose_transform_log_abs_det_jacobian(parts, event_dim, x, y):
                                          event_dim - part.event_dim)
         x = y
     return result
-
-
-def compose_transform_repr_(parts, class_name):
-    fmt_string = class_name + '(\n    '
-    fmt_string += ',\n    '.join([p.__repr__() for p in parts])
-    fmt_string += '\n)'
-    return fmt_string
 
 
 def exp_transform_call(x):
@@ -147,12 +99,6 @@ def abs_transform_call(x):
 
 def abs_transform_inverse(y):
     return y
-
-
-def affine_transform_sign(scale):
-    if isinstance(scale, numbers.Number):
-        return 1 if scale > 0 else -1 if scale < 0 else 0
-    return scale.sign()
 
 
 def affine_transform_call(scale, loc, x):
@@ -264,20 +210,6 @@ def cat_transform_log_abs_det_jacobian(dim, length_to_check, lengths, transforms
     return torch.cat(logdetjacs, dim=dim)
 
 
-def cat_transform_bijective(transforms):
-    return all(t.bijective for t in transforms)
-
-
-def cat_transform_domain(dim, lengths, transforms):
-    return constraints.cat([t.domain for t in transforms],
-                           dim, lengths)
-
-
-def cat_transform_codomain(dim, lengths, transforms):
-    return constraints.cat([t.codomain for t in transforms],
-                           dim, lengths)
-
-
 def stack_transform_slice(dim, z):
     return [z.select(dim, i) for i in range(z.size(dim))]
 
@@ -311,15 +243,3 @@ def stack_transform_log_abs_det_jacobian(dim, transforms, x, y):
     for xslice, yslice, trans in zip(xslices, yslices, transforms):
         logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
     return torch.stack(logdetjacs, dim=dim)
-
-
-def stack_transform_bijective(transforms):
-    return all(t.bijective for t in transforms)
-
-
-def stack_transform_domain(dim, transforms):
-    return constraints.stack([t.domain for t in transforms], dim)
-
-
-def stack_transform_codomain(dim, transforms):
-    return constraints.stack([t.codomain for t in transforms], dim)

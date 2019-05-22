@@ -225,23 +225,30 @@ class ComposeTransform(Transform):
 
     @constraints.dependent_property
     def domain(self):
-        return F.compose_transform_domain(self.parts)
+        if not self.parts:
+            return constraints.real
+        return self.parts[0].domain
 
     @constraints.dependent_property
     def codomain(self):
-        return F.compose_transform_codomain(self.parts)
+        if not self.parts:
+            return constraints.real
+        return self.parts[-1].codomain
 
     @lazy_property
     def bijective(self):
-        return F.compose_transform_bijective(self.parts)
+        return all(p.bijective for p in self.parts)
 
     @lazy_property
     def sign(self):
-        return F.compose_transform_sign(self.parts)
+        sign = 1
+        for p in self.parts:
+            sign = sign * p.sign
+        return sign
 
     @lazy_property
     def event_dim(self):
-        return F.compose_transform_event_dim(self.parts)
+        return max(p.event_dim for p in self.parts) if self.parts else 0
 
     @property
     def inv(self):
@@ -261,7 +268,10 @@ class ComposeTransform(Transform):
         return F.compose_transform_log_abs_det_jacobian(self.parts, self.event_dim, x, y)
 
     def __repr__(self):
-        return F.compose_transform_repr_(self.parts, self.__class__.__name__)
+        fmt_string = self.__class__.__name__ + '(\n    '
+        fmt_string += ',\n    '.join([p.__repr__() for p in self.parts])
+        fmt_string += '\n)'
+        return fmt_string
 
 
 identity_transform = ComposeTransform([])
@@ -399,7 +409,9 @@ class AffineTransform(Transform):
 
     @property
     def sign(self):
-        return F.affine_transform_sign(self.scale)
+        if isinstance(self.scale, numbers.Number):
+            return 1 if self.scale > 0 else -1 if self.scale < 0 else 0
+        return self.scale.sign()
 
     def _call(self, x):
         return F.affine_transform_call(self.scale, self.loc, x)
@@ -525,15 +537,17 @@ class CatTransform(Transform):
 
     @property
     def bijective(self):
-        return F.cat_transform_bijective(self.transforms)
+        return all(t.bijective for t in self.transforms)
 
     @constraints.dependent_property
     def domain(self):
-        return F.cat_transform_domain(self.dim, self.lengths, self.transforms)
+        return constraints.cat([t.domain for t in self.transforms],
+                               self.dim, self.lengths)
 
     @constraints.dependent_property
     def codomain(self):
-        return F.cat_transform_codomain(self.dim, self.lengths, self.transforms)
+        return constraints.cat([t.codomain for t in self.transforms],
+                               self.dim, self.lengths)
 
 
 class StackTransform(Transform):
@@ -564,12 +578,12 @@ class StackTransform(Transform):
 
     @property
     def bijective(self):
-        return F.stack_transform_bijective(self.transforms)
+        return all(t.bijective for t in self.transforms)
 
     @constraints.dependent_property
     def domain(self):
-        return F.stack_transform_domain(self.dim, self.transforms)
+        return constraints.stack([t.domain for t in self.transforms], self.dim)
 
     @constraints.dependent_property
     def codomain(self):
-        return F.stack_transform_codomain(self.dim, self.transforms)
+        return constraints.stack([t.codomain for t in self.transforms], self.dim)
