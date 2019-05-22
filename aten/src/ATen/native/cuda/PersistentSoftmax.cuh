@@ -7,24 +7,6 @@
 #include <stdint.h>
 #include <cuda_fp16.h>
 
-namespace {
-    template <typename Datatype, int ELEMENTS_PER_LDG>
-    __device__ __inline__ void copy_vector(Datatype *dst, const Datatype *src);
-
-    template <>
-    __device__ __inline__ void copy_vector<__half, 1>(__half *dst, const __half *src) { *dst = *src; }
-
-    template <>
-    __device__ __inline__ void copy_vector<c10::Half, 1>(c10::Half *dst, const c10::Half *src) { *dst = *src; }
-
-    template <>
-    __device__ __inline__ void copy_vector<float, 1>(float *dst, const float *src) { *dst = *src; }
-
-    template <>
-    __device__ __inline__ void copy_vector<double, 1>(double* dst, const double *src) { *dst = *src; }
-
-} // namespace anonymous
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Warp Softmax forward
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -32,12 +14,9 @@ namespace {
 // WARP_BATCH number of batches.
 // WARP_ITERATOINS The number of iterations required for one warp to iterate over all data.
 // WARP_SIZE number of elements working on a single batch, has to be a power of two.
-// ELEMENTS_PER_LDG_STG has to be 1.
-template <typename input_t, typename output_t, typename acc_t, int WARP_BATCH, int WARP_ITERATIONS, int WARP_SIZE = 32, int ELEMENTS_PER_LDG_STG=1, bool is_log_softmax=true>
+template <typename input_t, typename output_t, typename acc_t, int WARP_BATCH, int WARP_ITERATIONS, int WARP_SIZE = 32, bool is_log_softmax=true>
 __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batch_size, int stride, int element_count)
 {
-    assert(ELEMENTS_PER_LDG_STG==1);
-
     int first_batch = (blockDim.y * blockIdx.x + threadIdx.y) * WARP_BATCH;
 
     // batch_size might not be a multiple of WARP_BATCH. Check how
@@ -49,32 +28,19 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     // there might be multiple batches per warp. compute the index within the batch
     int local_idx = threadIdx.x;
 
-    src += first_batch * stride + ELEMENTS_PER_LDG_STG * local_idx;
-    dst += first_batch * stride + ELEMENTS_PER_LDG_STG * local_idx;
+    src += first_batch * stride + local_idx;
+    dst += first_batch * stride + local_idx;
 
     // load data from global memory
-    input_t elements_input[WARP_BATCH][WARP_ITERATIONS];
-    for (int i = 0;i < WARP_BATCH;++i) {
-        int batch_element_count = (i >= local_batches) ? 0 : element_count;
-        for (int it = 0;it < WARP_ITERATIONS;it += ELEMENTS_PER_LDG_STG) {
-            int element_index = ELEMENTS_PER_LDG_STG * local_idx + it * WARP_SIZE;
-            #pragma unroll
-            for (int element = 0;element < ELEMENTS_PER_LDG_STG;++element) {
-                elements_input[i][it + element] = -std::numeric_limits<float>::infinity();
-            }
-
-            if (element_index < batch_element_count) {
-                copy_vector<input_t, ELEMENTS_PER_LDG_STG>(&elements_input[i][it], src + i * element_count + it * WARP_SIZE);
-            }
-
-        }
-    }
-
-    // convert input_t to acc_t
     acc_t elements[WARP_BATCH][WARP_ITERATIONS];
     for (int i = 0;i < WARP_BATCH;++i) {
-        for (int it = 0;it < WARP_ITERATIONS;++it) {
-            elements[i][it] = elements_input[i][it];
+        int batch_element_count = (i >= local_batches) ? 0 : element_count;
+        for (int it = 0;it < WARP_ITERATIONS;it += 1) {
+            int element_index = local_idx + it * WARP_SIZE;
+	    elements[i][it] = -std::numeric_limits<acc_t>::infinity();
+            if (element_index < batch_element_count) {
+	        elements[i][it] = src[i*element_count+it*WARP_SIZE];
+            }
         }
     }
 
@@ -99,7 +65,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     // reduction max_value
     #pragma unroll
     for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
-        float val[WARP_BATCH];
+        acc_t val[WARP_BATCH];
         #pragma unroll
         for (int i = 0;i < WARP_BATCH;++i) {
             val[i] = __shfl_xor_sync(FULL_MASK, max_value[i], offset, WARP_SIZE);
@@ -117,9 +83,9 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     for (int i = 0;i < WARP_BATCH;++i) {
         for (int it = 0;it < WARP_ITERATIONS;++it) {
             if (is_log_softmax) {
-              sum[i] += expf(elements[i][it] - max_value[i]);
+              sum[i] += std::exp(elements[i][it] - max_value[i]);
             } else {
-              elements[i][it] = expf(elements[i][it] - max_value[i]);
+              elements[i][it] = std::exp(elements[i][it] - max_value[i]);
               sum[i] += elements[i][it];
             }
         }
@@ -139,23 +105,17 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     for (int i = 0;i < WARP_BATCH;++i) {
         if (i >= local_batches)
             break;
-        if (is_log_softmax) sum[i] = max_value[i] + logf(sum[i]);
+        if (is_log_softmax) sum[i] = max_value[i] + std::log(sum[i]);
         #pragma unroll
-        for (int it = 0;it < WARP_ITERATIONS;it += ELEMENTS_PER_LDG_STG) {
-            int element_index = ELEMENTS_PER_LDG_STG * local_idx + it * WARP_SIZE;
+        for (int it = 0;it < WARP_ITERATIONS;it += 1) {
+            int element_index = local_idx + it * WARP_SIZE;
             if (element_index < element_count) {
-                //dst[i * element_count + it * WARP_SIZE] = elements[i][it] / sum[i];
-                output_t out[ELEMENTS_PER_LDG_STG];
-                for (int element = 0;element < ELEMENTS_PER_LDG_STG;++element) {
-                    if (is_log_softmax) {
-                      out[element] = elements[i][it + element] - sum[i];
-                    } else {
-                      out[element] = elements[i][it + element] / sum[i];
-                    }
-                }
-                copy_vector<output_t, ELEMENTS_PER_LDG_STG>(dst + i * element_count + it * WARP_SIZE, out);
-            }
-            else {
+		if (is_log_softmax) {
+		    dst[i*element_count+it*WARP_SIZE] = elements[i][it] - sum[i];
+		} else {
+		    dst[i*element_count+it*WARP_SIZE] = elements[i][it] / sum[i];
+		}
+            } else {
                 break;
             }
         }
@@ -166,7 +126,6 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
 // WARP_BATCH number of batches.
 // WARP_ITERATOINS The number of iterations required for one warp to iterate over all data.
 // WARP_SIZE number of elements working on a single batch, has to be a power of two.
-// ELEMENTS_PER_LDG_STG has to be 1.
 template <typename input_t, typename output_t>
 using softmax_forward_func = void(*)(output_t *dst, const input_t *src, int batch_size, int stride, int element_count);
 
@@ -181,37 +140,37 @@ bool warp_softmax_kernel(int log2_elements, int &warp_size, int &batches_per_war
 
     switch (log2_elements) {
     case 0: // 1
-        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,1,1,1, is_log_softmax>;
+        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,1,1, is_log_softmax>;
         break;
     case 1: // 2
-        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,1,2,1, is_log_softmax>;
+        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,1,2, is_log_softmax>;
         break;
     case 2: // 4
-        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,1,4,1, is_log_softmax>;
+        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,1,4, is_log_softmax>;
         break;
     case 3: // 8
-        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,1,8,1, is_log_softmax>;
+        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,1,8, is_log_softmax>;
         break;
     case 4: // 16
-        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,1,16,1, is_log_softmax>;
+        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,1,16, is_log_softmax>;
         break;
     case 5: // 32
-        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,1,32,1, is_log_softmax>;
+        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,1,32, is_log_softmax>;
         break;
     case 6: // 64
-        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,2,32,1, is_log_softmax>;
+        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,2,32, is_log_softmax>;
         break;
     case 7: // 128
-        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,4,32,1, is_log_softmax>;
+        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 2,4,32, is_log_softmax>;
         break;
     case 8: // 256
-        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 1,8,32,1, is_log_softmax>;
+        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 1,8,32, is_log_softmax>;
         break;
     case 9: // 512
-        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 1,16,32,1, is_log_softmax>;
+        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 1,16,32, is_log_softmax>;
         break;
     case 10: // 1024
-        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 1,32,32,1, is_log_softmax>;
+        kernel = &softmax_warp_forward<input_t, output_t, acc_t, 1,32,32, is_log_softmax>;
         break;
     default:
         return false;
@@ -258,7 +217,7 @@ bool dispatch_softmax(output_t *dst, const input_t *src, int softmax_elements, i
 // Warp softmax backward
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template <typename input_t, typename output_t, typename acc_t, int WARP_BATCH, int WARP_ITERATIONS, int WARP_SIZE=32, int ELEMENTS_PER_LDG_STG=1, bool is_log_softmax>
+template <typename input_t, typename output_t, typename acc_t, int WARP_BATCH, int WARP_ITERATIONS, int WARP_SIZE=32, bool is_log_softmax>
 __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, const input_t *output, int batch_size, int stride, int element_count)
 {
     int first_batch = (blockDim.y * blockIdx.x + threadIdx.y) * WARP_BATCH;
@@ -273,39 +232,26 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
     int local_idx = threadIdx.x % WARP_SIZE;
 
     // the first element to process by the current thread
-    int thread_offset = first_batch * stride + ELEMENTS_PER_LDG_STG * local_idx;
+    int thread_offset = first_batch * stride + local_idx;
     grad += thread_offset;
     output += thread_offset;
     gradInput += thread_offset;
 
     // load data from global memory
-    input_t grad_reg_input[WARP_BATCH][WARP_ITERATIONS] = {0.0f};
-    input_t output_reg_input[WARP_BATCH][WARP_ITERATIONS] = {0.0f};
-    #pragma unroll
-    for (int i = 0;i < WARP_BATCH;++i) {
-        int batch_element_count = (i >= local_batches) ? 0 : element_count;
-        #pragma unroll
-        for (int it = 0;it < WARP_ITERATIONS;it += ELEMENTS_PER_LDG_STG) {
-            int element_index = ELEMENTS_PER_LDG_STG * local_idx + it * WARP_SIZE;
-            if (element_index < batch_element_count) {
-                copy_vector<input_t, ELEMENTS_PER_LDG_STG>(&grad_reg_input[i][it], grad + i * element_count + it * WARP_SIZE);
-                copy_vector<input_t,ELEMENTS_PER_LDG_STG>(&output_reg_input[i][it], output + i * element_count + it * WARP_SIZE);
-            }
-
-        }
-    }
-
-    // convert half to floating point
     acc_t grad_reg[WARP_BATCH][WARP_ITERATIONS];
     acc_t output_reg[WARP_BATCH][WARP_ITERATIONS];
     #pragma unroll
     for (int i = 0;i < WARP_BATCH;++i) {
-        for (int it = 0;it < WARP_ITERATIONS;++it) {
-            grad_reg[i][it] = grad_reg_input[i][it];
-            output_reg[i][it] = output_reg_input[i][it];
+        int batch_element_count = (i >= local_batches) ? 0 : element_count;
+        #pragma unroll
+        for (int it = 0;it < WARP_ITERATIONS;it += 1) {
+            int element_index = local_idx + it * WARP_SIZE;
+            if (element_index < batch_element_count) {
+	        grad_reg[i][it] = grad[i*element_count+it*WARP_SIZE];
+		output_reg[i][it] = output[i*element_count+it*WARP_SIZE];
+            }
         }
     }
-
 
     // compute thread local sum
     acc_t sum[WARP_BATCH] = {0};
@@ -332,20 +278,15 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
         if (i >= local_batches)
             break;
         #pragma unroll
-        for (int it = 0;it < WARP_ITERATIONS;it += ELEMENTS_PER_LDG_STG) {
-            int element_index = ELEMENTS_PER_LDG_STG * local_idx + it * WARP_SIZE;
+        for (int it = 0;it < WARP_ITERATIONS;it += 1) {
+            int element_index = local_idx + it * WARP_SIZE;
             if (element_index < element_count) {
                 // compute gradients
-                output_t out[ELEMENTS_PER_LDG_STG];
-                for (int element = 0;element < ELEMENTS_PER_LDG_STG;++element) {
-                  if (is_log_softmax) {
-                    out[element] = (grad_reg[i][it+element] - expf(output_reg[i][it+element]) * sum[i]);
-                  } else {
-		    out[element] = (grad_reg[i][it+element] - output_reg[i][it+element] * sum[i]);
-                  }
-                }
-                // store them in global memory
-                copy_vector<output_t, ELEMENTS_PER_LDG_STG>(gradInput + i * element_count + it * WARP_SIZE, out);
+	        if (is_log_softmax) {
+	  	    gradInput[i*element_count+it*WARP_SIZE] = (grad_reg[i][it] - std::exp(output_reg[i][it]) * sum[i]);
+	        } else {
+		    gradInput[i*element_count+it*WARP_SIZE] = (grad_reg[i][it] - output_reg[i][it] * sum[i]);
+	        }
             }
         }
     }
@@ -356,7 +297,6 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
 // WARP_BATCH number of batches.
 // WARP_ITERATOINS The number of iterations required for one warp to iterate over all data.
 // WARP_SIZE number of elements working on a single batch, has to be a power of two.
-// ELEMENTS_PER_LDG_STG has to be 1.
 template <typename input_t, typename output_t>
 using softmax_backward_func = void(*)(output_t *gradInput, const input_t *grad, const input_t *output, int batch_size, int stride, int element_count);
 
@@ -371,37 +311,37 @@ bool warp_softmax_backward_kernel(int log2_elements, int &warp_size, int &batche
 
     switch (log2_elements) {
     case 0: // 1
-        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,1,1,1, is_log_softmax>;
+        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,1,1, is_log_softmax>;
         break;
     case 1: // 2
-        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,1,2,1, is_log_softmax>;
+        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,1,2, is_log_softmax>;
         break;
     case 2: // 4
-        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,1,4,1, is_log_softmax>;
+        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,1,4, is_log_softmax>;
         break;
     case 3: // 8
-        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,1,8,1, is_log_softmax>;
+        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,1,8, is_log_softmax>;
         break;
     case 4: // 16
-        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,1,16,1, is_log_softmax>;
+        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,1,16, is_log_softmax>;
         break;
     case 5: // 32
-        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,1,32,1, is_log_softmax>;
+        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,1,32, is_log_softmax>;
         break;
     case 6: // 64
-        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,2,32,1, is_log_softmax>;
+        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,2,32, is_log_softmax>;
         break;
     case 7: // 128
-        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,4,32,1, is_log_softmax>;
+        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 2,4,32, is_log_softmax>;
         break;
     case 8: // 256
-        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 1,8,32,1, is_log_softmax>;
+        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 1,8,32, is_log_softmax>;
         break;
     case 9: // 512
-        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 1,16,32,1, is_log_softmax>;
+        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 1,16,32, is_log_softmax>;
         break;
     case 10: // 1024
-        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 1,32,32,1, is_log_softmax>;
+        kernel = &softmax_warp_backward<input_t, output_t, acc_t, 1,32,32, is_log_softmax>;
         break;
     default:
         return false;
