@@ -940,7 +940,7 @@ struct to_ir {
           emitSugaredExpr(expr, 0);
         } break;
         case TK_RAISE:
-          emitRaise(Raise(stmt).range());
+          emitRaise(Raise(stmt));
           break;
         case TK_ASSERT:
           emitAssert(Assert(stmt));
@@ -1597,10 +1597,16 @@ struct to_ir {
   // else
   //   raise Exception("Hi")
   // print(a)
-  void emitRaise(const SourceRange& loc) {
-    const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, nullptr, loc);
-    graph->insert(prim::RaiseException, {string_input}, {}, loc);
+  void emitRaise(const Raise& stmt) {
+    if (stmt.expr().kind() == TK_APPLY) {
+      auto apply = Apply(stmt.expr().get());
+      auto exception_name = Var(apply.callee()).name().name();
+      const std::string exception = exception_name+"_asdf";
+      auto string_input = insertConstant(*graph, exception, nullptr, stmt.range());
+      graph->insert(prim::RaiseException, {string_input}, {}, stmt.range());
+    } else {
+        throw ErrorReport(stmt.range());
+    }
   }
 
   void emitAssert(const Assert& stmt) {
@@ -1614,7 +1620,7 @@ struct to_ir {
     // if assert test is false throw exception
     pushFrame(false_block);
     WithInsertPoint guard(false_block);
-    emitRaise(stmt.range());
+    emitRaise(Raise::create(stmt.range(), stmt.msg()));
     popFrame();
   }
 
