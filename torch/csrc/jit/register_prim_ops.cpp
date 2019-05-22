@@ -1990,6 +1990,23 @@ RegisterOperators reg2({
     // only used in loop unrolling, not exposed to end users
     DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
 
+    Operator(
+        "aten::__range_length(int a, int b, int c) -> int",
+        [](Stack& stack) {
+          int64_t lo, hi, step;
+          pop(stack, lo, hi, step);
+          if (step == 0){
+            throw std::runtime_error("for loop has 0 as step parameter");
+          }
+          if (step > 0 && lo < hi)
+            push(stack, 1 + (hi - 1 - lo) / step);
+          else if (step < 0 && lo > hi)
+            push(stack, 1 + (lo - 1 - hi) / (0 - step));
+          else
+            push(stack, 0);
+          return 0;
+        }),
+
     DEFINE_INT_OP(aten::__and__, a& b),
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),

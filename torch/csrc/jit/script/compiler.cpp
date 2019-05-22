@@ -1415,9 +1415,13 @@ struct to_ir {
           << "range() expected at most 3 arguments, got " << args.size();
     }
     const auto& ident_name = target.name();
-    assert(end_val != nullptr);
-    assert(start_val != nullptr);
-    assert(step_val != nullptr);
+    AT_CHECK(end_val != nullptr && start_val != nullptr && step_val != nullptr, "Expected non-null pointers for range() arguments");
+    auto addOp = [end_val](Graph *g, NodeKind x, ArrayRef<Value*> inputs) {
+      return g->insertNode(g->create(x, inputs, 1))
+          ->setSourceRange(end_val->node()->sourceRange())
+          ->output()
+          ->setType(IntType::get());
+    };
     auto assigner = [ident_name, range, start_val, step_val, isSimpleRange](
                         Value* index, std::shared_ptr<Environment> env) {
       Value* derived_index;
@@ -1440,19 +1444,7 @@ struct to_ir {
       max_trip_count_val = end_val;
     } else {
       auto g = start_val->owningGraph();
-      // (abs(end-start) + abs(step)-1)//abs(step) = # of iterations
-      auto addOp = [g, end_val](NodeKind x, ArrayRef<Value*> inputs) {
-        return g->insertNode(g->create(x, inputs, 1))
-            ->setSourceRange(end_val->node()->sourceRange())
-            ->output()
-            ->setType(IntType::get());
-      };
-      auto diff = addOp(prim::abs, {addOp(aten::sub, {end_val, start_val})});
-      auto step_abs = addOp(prim::abs, {step_val});
-      auto ceil_diff = addOp(
-          aten::add,
-          {diff, addOp(aten::sub, {step_abs, g->insertConstant(1)})});
-      max_trip_count_val = addOp(aten::floordiv, {ceil_diff, step_abs});
+      max_trip_count_val = addOp(g, aten::__range_length, {start_val, end_val, step_val});
     }
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
