@@ -717,11 +717,10 @@ graph():
 
     // But we know `fresh` didn't go into a list, so x, y, and z should not
     // alias it.
-
-    // auto fresh = vmap["fresh"];
-    // ASSERT_FALSE(aliasDb.mayAlias(x, fresh));
-    // ASSERT_FALSE(aliasDb.mayAlias(y, fresh));
-    // ASSERT_FALSE(aliasDb.mayAlias(z, fresh));
+    auto fresh = vmap["fresh"];
+    ASSERT_FALSE(aliasDb.mayAlias(x, fresh));
+    ASSERT_FALSE(aliasDb.mayAlias(y, fresh));
+    ASSERT_FALSE(aliasDb.mayAlias(z, fresh));
   }
 }
 

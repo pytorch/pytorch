@@ -26,10 +26,11 @@ void enforce_finite_op_impl_cpu(const at::Tensor& input_) {
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::EnforceFinite",
-    c10::kernel<
+    c10::RegisterOperators::options()
+      .kernel<
         decltype(enforce_finite_op_impl_cpu<float>),
-        &enforce_finite_op_impl_cpu<float>>(),
-    c10::dispatchKey(CPUTensorId()));
+        &enforce_finite_op_impl_cpu<float>>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 

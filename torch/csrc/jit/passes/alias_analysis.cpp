@@ -23,17 +23,10 @@ c10::optional<TypeKind> AliasDb::getMutableTypeKind(const TypePtr& type) {
 
   switch (type->kind()) {
     case TypeKind::ListType:
-      return TypeKind::ListType;
     case TypeKind::TupleType:
-      return TypeKind::TupleType;
     case TypeKind::DictType:
-      return TypeKind::DictType;
-    case TypeKind::VarType:
-      return TypeKind::VarType;
-    case TypeKind::FutureType:
-      return TypeKind::FutureType;
     case TypeKind::ClassType:
-      return TypeKind::ClassType;
+      return type->kind();
     case TypeKind::OptionalType:
       return getMutableTypeKind(type->cast<OptionalType>()->getElementType());
     default:
@@ -68,26 +61,6 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
   analyze(graph_);
 }
 
-bool AliasDb::writesTo(Node* n, const Value* v) const {
-  if (!shouldAnnotate(v) || v->mustBeNone()) {
-    // This is a non-aliasing value
-    return false;
-  }
-
-  if (!elementMap_.count(v) || !writeIndex_.count(n)) {
-    return false;
-  }
-
-  // Can short-circuit if we know this node writes directly to `v`
-  if (writeIndex_.at(n).count(v)) {
-    return true;
-  }
-
-  // Otherwise, check if `v` may alias any of written-to values in `n`
-  const auto vSet = ValueSet{v};
-  return mayAlias(vSet, writeIndex_.at(n));
-}
-
 bool AliasDb::hasWriters(const Node* n) const {
   for (const auto input : n->inputs()) {
     if (hasWriters(input)) {
@@ -120,20 +93,6 @@ bool AliasDb::hasWriters(const Value* v) const {
   return false;
 }
 
-bool AliasDb::hasWrites(Node* n) const {
-  for (const auto input : n->inputs()) {
-    if (writesTo(n, input)) {
-      return true;
-    }
-  }
-  for (const auto output : n->outputs()) {
-    if (writesTo(n, output)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 void AliasDb::getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks) const {
   for (auto node : b->nodes()) {
     getWritesImpl(node, ret, recurseBlocks);
@@ -141,14 +100,10 @@ void AliasDb::getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks) const {
 }
 
 void AliasDb::getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
-  for (const auto input : n->inputs()) {
-    if (writesTo(n, input)) {
-      ret.insert(input);
-    }
-  }
-  for (const auto output : n->outputs()) {
-    if (writesTo(n, output)) {
-      ret.insert(output);
+  if (writeIndex_.count(n)) {
+    const auto& writes = writeIndex_.at(n);
+    for (const auto write : writes) {
+      ret.insert(write);
     }
   }
 
@@ -157,13 +112,6 @@ void AliasDb::getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
       getWritesImpl(block, ret, recurseBlocks);
     }
   }
-}
-
-// Get all writes by all nodes in a block, recursively exploring sub-blocks
-ValueSet AliasDb::getWrites(Block* b) const {
-  ValueSet writes;
-  getWritesImpl(b, writes, /*recurseBlocks=*/true);
-  return writes;
 }
 
 // Does `n` write to an alias of one of the values in `vs`?
@@ -486,8 +434,7 @@ void AliasDb::registerWrite(const Value* v, Node* n) {
     // don't need to register a write if the value isn't mutable
     return;
   }
-
-  AT_ASSERT(elementMap_.count(v));
+  TORCH_INTERNAL_ASSERT(elementMap_.count(v));
   writeIndex_[n].insert(v);
 }
 
@@ -538,9 +485,6 @@ void AliasDb::analyzeGradOf(Node* node) {
 
 void AliasDb::analyzeSubgraph(Node* node) {
   const auto subgraph = node->g(attr::Subgraph).get();
-
-  subgraphToOwner_.insert({subgraph, node});
-
   const auto subgraphBlock = subgraph->block();
   mapAliases(subgraphBlock->inputs(), node->inputs());
 
@@ -577,16 +521,10 @@ void AliasDb::analyzeChunk(Node* node) {
   }
 }
 
-// Propagate aliasing and write information from the subgraph outputs to the
-// outputs of the corresponding aten::wait() calls, since that's where the
-// values will eventually emerge.
 void AliasDb::analyzeFork(Node* node) {
-  const auto subgraph = node->g(attr::Subgraph).get();
-  subgraphToOwner_.insert({subgraph, node});
-
-  const auto subgraphBlock = subgraph->block();
-  mapAliases(subgraphBlock->inputs(), node->inputs());
-  analyze(subgraphBlock);
+  for (const auto input : node->inputs()) {
+    setWildcard(input);
+  }
 
   // Give the future that the fork emits a fresh value
   for (const auto output : node->outputs()) {
@@ -595,44 +533,23 @@ void AliasDb::analyzeFork(Node* node) {
 }
 
 void AliasDb::analyzeWait(Node* node) {
-  const auto fut = node->input();
-  AT_ASSERT(fut->type()->kind() == TypeKind::FutureType);
-
-  const auto originFuts = getOriginFutures(fut);
-  for (const auto originFut : originFuts) {
-    const auto subgraphNode = originFut->node();
-
-    const auto subgraph = subgraphNode->g(attr::Subgraph).get();
-    const auto subgraphWrites = getWrites(subgraph->block());
-
-    // Retrieve aliasing info from the subgraph
-    mapAliases(node->outputs(), subgraph->outputs());
-
-    // Propagate write information to the `wait` node.
-    //
-    // We need to do this for all writes in the entire subgraph, so that we
-    // disallow reorders past a call to "aten::wait".
-    //
-    // Consider the following Fork where the subgraph writes to %a:
-    //
-    //   %c : Future[Tensor] = prim::Fork(%a, %b) <-- writes to %a
-    //   ...
-    //   aten::wait(%c)
-    //   aten::use(%a)   <-- we can't move this node before the `wait` safely!
-    //
-    // Say we define the "live interval" of a fork the interval between the
-    // `fork` and its first corresponding `wait` (inclusive).
-    //
-    // Any writes in the subgraph can happen at any point in the live interval,
-    // so it's not safe to re-order any reads to those memory locations from
-    // outside the live interval to inside.
-    //
-    // In reality, any reads *inside* the live interval are undefined behavior,
-    // since the writes may or may not have been executed yet. But we'll let
-    // users do that and shoot themselves in the foot for now.
-    for (const auto write : subgraphWrites) {
-      registerWrite(write, node);
-    }
+  TORCH_INTERNAL_ASSERT(node->kind() == aten::wait);
+  for (const auto output : node->outputs()) {
+    setWildcard(output);
+  }
+  // the forked subgraph that `wait` is waiting on may write to any of its
+  // inputs. We don't have a reliable way of recovering the fork inputs, so
+  // for safety we just register a write to every wildcard.
+  for (const auto& pr : wildcardIndex_) {
+    // TODO: Given the way the write query API is written, we can't regiser a
+    // write directly against the wildcard element. So find a wildcard value in
+    // the graph to write to.
+    const auto el = pr.second;
+    const auto& pointedFrom = el->pointedFrom;
+    TORCH_INTERNAL_ASSERT(!pointedFrom.empty());
+    const auto wildcardValue = (*pointedFrom.begin())->value;
+    TORCH_INTERNAL_ASSERT(wildcardValue);
+    registerWrite(wildcardValue, node);
   }
 }
 
@@ -654,6 +571,9 @@ void AliasDb::analyzeSetAttr(Node* node) {
   const auto self = node->inputs().at(0);
   AT_ASSERT(self->type()->kind() == TypeKind::ClassType);
   registerWrite(self, node);
+  // Also the value being set must become a wildcard.
+  const auto newValue = node->inputs().at(1);
+  setWildcard(newValue);
 }
 
 // Custom ops may write to any input and produce wildcards
@@ -1114,22 +1034,15 @@ void AliasDb::move(Node* toMove, Node* movePoint, MoveSide moveSide) {
   }
 }
 
-bool AliasDb::hasUntrackedEffects(Node* n) const {
-  std::vector<const Value*> writes;
-  for (const auto input : n->inputs()) {
-    if (writesTo(n, input)) {
-      writes.push_back(input);
-    }
+bool AliasDb::writesToWildcard(Node* n) const {
+  if (!writeIndex_.count(n)) {
+    return false;
   }
-  for (const auto output : n->outputs()) {
-    if (writesTo(n, output)) {
-      writes.push_back(output);
-    }
-  }
+  const auto& writes = writeIndex_.at(n);
 
   // For all writes, check if the written value is a wildcard
   return std::any_of(writes.cbegin(), writes.cend(), [&](const Value* v) {
-    return isWildcard(v);
+    return mayAliasWildcard(v);
   });
 }
 
@@ -1189,7 +1102,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
   return handled.count(symbol) || purposefully_not_handled.count(symbol);
 }
 
-bool AliasDb::isWildcard(const Value* v) const {
+bool AliasDb::mayAliasWildcard(const Value* v) const {
   if (!shouldAnnotate(v)) {
     return false;
   }
@@ -1247,35 +1160,6 @@ void AliasDb::rebuildWriteCache() const {
     }
   }
   isWriteCacheStale_ = false;
-}
-
-// Given a future value `v`, figure out what the "original" futures that
-// produced it were. Necessary for things like:
-//   if cond:
-//     fut = fork(async_fn, ...)
-//   else:
-//     fut = fork(another_async_fn, ...)
-//   wait(fut)
-// Because we need to propagate the aliasing information from the async_fn's
-// subgraph to the return value of the corresponding `wait`, we need to know the
-// original `fork` nodes that `fut` came from.
-ValueSet AliasDb::getOriginFutures(const Value* v) const {
-  TORCH_INTERNAL_ASSERT(v->type()->kind() == TypeKind::FutureType);
-  ValueSet ret;
-  if (!elementMap_.count(v)) {
-    return ret;
-  }
-
-  for (const auto el : elementMap_.at(v)->getMemoryLocations()) {
-    if (el->value == nullptr) {
-      // Some elements (like wildcards) don't have value representations in the
-      // IR. Since we only care about finding `wait` nodes, it's fine to ignore
-      // them in this case.
-      continue;
-    }
-    ret.insert(el->value);
-  }
-  return ret;
 }
 } // namespace jit
 } // namespace torch

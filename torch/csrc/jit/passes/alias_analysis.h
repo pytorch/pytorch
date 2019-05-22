@@ -38,7 +38,7 @@ class AliasDb {
   //
   // These nodes are considered not safe to eliminate or mutate under any
   // circumstances.
-  bool hasUntrackedEffects(Node* n) const;
+  bool writesToWildcard(Node* n) const;
 
   // Does `n` write to an alias of one of the values in `vs`?
   // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
@@ -128,14 +128,11 @@ class AliasDb {
   /**
    * Write and read internal API
    */
-  // Does `n` write to any alias sets?
-  bool hasWrites(Node* n) const;
   // Get all the values that `n` writes to.
   // NOTE: this only returns values directly written to, not aliases thereof
   //
   // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
   ValueSet getWrites(Node* n, bool recurseBlocks = false) const;
-  ValueSet getWrites(Block* b) const;
   void getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks = false) const;
   void getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
   // Do any nodes write to `v`s memory location?
@@ -146,9 +143,6 @@ class AliasDb {
   // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
   ValueSet getReads(Node* n, bool recurseBlocks = false) const;
   void getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
-
-  // Does `n` write to `v` or any aliases of `v`?
-  bool writesTo(Node* n, const Value* v) const;
 
   /**
    * Wildcard methods
@@ -201,10 +195,7 @@ class AliasDb {
 
   static bool isContainerType(const TypePtr& type);
 
-  ValueSet getOriginFutures(const Value* v) const;
-
   std::shared_ptr<Graph> graph_;
-  std::unordered_map<const Graph*, const Node*> subgraphToOwner_;
 
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAG> memoryDAG_;
@@ -214,7 +205,7 @@ class AliasDb {
   std::map<TypeKind, Element*> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
   Element* getOrCreateWildcard(const TypePtr& type);
-  bool isWildcard(const Value* v) const;
+  bool mayAliasWildcard(const Value* v) const;
 
   /**
    * State for tracking write info.

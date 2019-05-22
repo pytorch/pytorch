@@ -1476,7 +1476,7 @@ class TestCaffe2Backend(unittest.TestCase):
         im_info[:, 2] = 1.0
         im_info = torch.zeros((batch_size, 3))
         inputs = (torch.tensor(rois), torch.tensor(deltas), torch.tensor(im_info))
-        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3, use_gpu=False)
 
     # BoxWithNMSLimits has requirements for the inputs, so randomly generated inputs
     # in Caffe2BackendTestEmbed doesn't work with this op.
@@ -1536,7 +1536,7 @@ class TestCaffe2Backend(unittest.TestCase):
                 return a, b, c, d
 
         inputs = (torch.tensor(class_prob), torch.tensor(pred_bbox), torch.tensor(batch_splits))
-        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3, use_gpu=False)
 
     def test_c2_inference_lstm(self):
         num_layers = 4
@@ -1575,7 +1575,7 @@ class TestCaffe2Backend(unittest.TestCase):
             torch.from_numpy(hx),
         ] + [param.detach() for param in torch_lstm._flat_weights]
 
-        self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3)
+        self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3, use_gpu=False)
 
     def test_topk(self):
         class TopKModel(torch.nn.Module):
