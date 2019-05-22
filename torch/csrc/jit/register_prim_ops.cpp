@@ -19,8 +19,8 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/core/ivalue.h>
 #include <ATen/core/Dict.h>
+#include <ATen/core/ivalue.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
@@ -1049,12 +1049,21 @@ RegisterOperators logging_operators(
     return 0;                                                   \
   })
 
+#define DEFINE_STR_CMP_OP(aten_op, op)                           \
+  Operator(#aten_op "(str a, str b) -> bool", [](Stack& stack) { \
+    auto b = pop(stack).toStringRef();                           \
+    auto a = pop(stack).toStringRef();                           \
+    push(stack, op);                                             \
+    return 0;                                                    \
+  })
+
 #define DEFINE_BINARY_OP(aten_op, op)             \
   DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
       DEFINE_INT_FLOAT_OP(aten_op, op, float)
 #define DEFINE_COMPARISON_OP(aten_op, op)         \
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
-      DEFINE_INT_FLOAT_OP(aten_op, op, bool)
+      DEFINE_INT_FLOAT_OP(aten_op, op, bool), DEFINE_STR_CMP_OP(aten_op, op)
+
 #define DEFINE_BOOL_OP(aten_op, op)                                \
   Operator(#aten_op "(bool a, bool b) -> bool", [](Stack& stack) { \
     bool a, b;                                                     \
@@ -1735,8 +1744,7 @@ RegisterOperators reg2({
           }
           push(stack, chars);
           return 0;
-        }
-    ),
+        }),
 // Mutable ops for lists containing mutable types.
 #define CREATE_MUTABLE_LIST_OPS(decl_type, c_type)                          \
   Operator(                                                                 \
@@ -2189,7 +2197,6 @@ RegisterOperators reg2({
     DEFINE_COMPARISON_OP(aten::gt, a > b),
     DEFINE_COMPARISON_OP(aten::le, a <= b),
     DEFINE_COMPARISON_OP(aten::ge, a >= b),
-
     DEFINE_BOOL_OP(aten::__and__, a&& b),
     DEFINE_BOOL_OP(aten::__or__, a || b),
     DEFINE_BOOL_OP(aten::__xor__, a != b),

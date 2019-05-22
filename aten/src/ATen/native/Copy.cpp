@@ -14,6 +14,7 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
   const int MIN_SZ = 60 * 60;
   return self.is_contiguous() && src.numel() != 0 && src.dim() == 2 &&
       src.stride(0) == 1 && src.stride(1) == src.size(0) &&
+      self.scalar_type() == src.scalar_type() &&
       self.numel() >= MIN_SZ;
 }
 
