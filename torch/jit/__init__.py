@@ -638,6 +638,15 @@ def make_module(mod, _module_class, executor_options):
         _module_class = TopLevelTracedModule
     return _module_class(mod, **executor_options)
 
+def wrap_check_inputs(check_inputs):
+    if check_inputs is None:
+        return None
+
+    canon_check_inputs = []
+    for check_input in check_inputs:
+        canon_check_inputs.append({'forward': check_input})
+
+    return canon_check_inputs
 
 def trace(func,
           example_inputs,
@@ -721,13 +730,14 @@ def trace(func,
 
     if isinstance(func, torch.nn.Module):
         return trace_module(func, {'forward': example_inputs}, optimize,
-                            check_trace, check_inputs,
+                            check_trace, wrap_check_inputs(check_inputs),
                             check_tolerance, _force_outplace, _module_class)
 
     if (hasattr(func, '__self__') and isinstance(func.__self__, torch.nn.Module) and
             func.__name__ == 'forward'):
+
         return trace_module(func.__self__, {'forward': example_inputs}, optimize,
-                            check_trace, check_inputs,
+                            check_trace, wrap_check_inputs(check_inputs),
                             check_tolerance, _force_outplace, _module_class)
 
     executor_options = {'optimize': bool(optimize)}
