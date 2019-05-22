@@ -1962,7 +1962,7 @@ RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::add, a + b),
     DEFINE_BINARY_OP(aten::sub, a - b),
     DEFINE_BINARY_OP(aten::mul, a* b),
-    DEFINE_BINARY_OP(aten::pow, static_cast<decltype(a)>(pow(a, b))),
+    DEFINE_BINARY_OP(aten::pow, pow(a, b)),
     // min and max are in prim:: because there is a difference between
     // the python builtin 'min' and 'torch.min'
     DEFINE_BINARY_OP(prim::min, a < b ? a : b),
@@ -2034,24 +2034,6 @@ RegisterOperators reg2({
           double a, b;
           pop(stack, a, b);
           push(stack, a / b);
-          return 0;
-        }),
-
-    Operator(
-        "aten::pow(float a, float b) -> float",
-        [](Stack& stack) {
-          double a, b;
-          pop(stack, a, b);
-          push(stack, std::pow(a, b));
-          return 0;
-        }),
-    Operator(
-        "aten::pow(float a, int b) -> float",
-        [](Stack& stack) {
-          double a;
-          int b;
-          pop(stack, a, b);
-          push(stack, std::pow(a, b));
           return 0;
         }),
 
