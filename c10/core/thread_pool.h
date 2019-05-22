@@ -38,7 +38,11 @@ class C10_API TaskThreadPoolBase {
   virtual ~TaskThreadPoolBase() noexcept {}
 
   static size_t defaultNumThreads() {
-    return std::thread::hardware_concurrency();
+    auto num_threads = std::thread::hardware_concurrency();
+#if defined(_M_X64) || defined(__x86_64__)
+    num_threads /= 2;
+#endif
+    return num_threads;
   }
 };
 

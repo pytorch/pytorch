@@ -31,7 +31,7 @@ void init_num_threads() {
 }
 
 void set_num_threads(int nthreads) {
-  AT_CHECK(nthreads > 0, "Expected positive number of threads");
+  TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
   num_threads.store(nthreads);
 #ifdef _OPENMP
   omp_set_num_threads(nthreads);
