@@ -872,7 +872,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
    */
-  void copy_tensor_data(
+  virtual void copy_tensor_data(
       const TensorImpl* src_impl,
       TensorImpl* dest_impl,
       const c10::VariableVersion& version_counter,

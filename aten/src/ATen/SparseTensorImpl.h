@@ -184,6 +184,29 @@ public:
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
 
   /**
+   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * from one TensorImpl to another TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  void copy_tensor_data(
+      const TensorImpl* src_impl,
+      TensorImpl* dest_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    TensorImpl::copy_tensor_data(src_impl, dest_impl, version_counter, allow_tensor_metadata_change);
+
+    // Sparse-specific fields
+    auto src_sparse_impl = static_cast<SparseTensorImpl*>(src_impl);
+    auto dest_sparse_impl = static_cast<SparseTensorImpl*>(dest_impl);
+    dest_sparse_impl->sparse_dim_ = src_sparse_impl->sparse_dim();
+    dest_sparse_impl->dense_dim_ = src_sparse_impl->dense_dim();
+    dest_sparse_impl->indices_ = src_sparse_impl->indices();
+    dest_sparse_impl->values_ = src_sparse_impl->values();
+    dest_sparse_impl->coalesced_ = src_sparse_impl->coalesced();
+  }
+
+  /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`,
@@ -198,36 +221,8 @@ public:
       /*dest_impl=*/impl.get(),
       /*version_counter=*/version_counter,
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-
-    // Sparse-specific fields
-    impl->sparse_dim_ = sparse_dim();
-    impl->dense_dim_ = dense_dim();
-    impl->indices_ = indices();
-    impl->values_ = values();
-    impl->coalesced_ = coalesced();
     impl->refresh_numel();
     return impl;
-  }
-
-  /**
-   * Shallow-copies data from another TensorImpl into this TensorImpl.
-   */
-  void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
-    AT_ASSERT(impl->is_sparse());
-    copy_tensor_data(
-      /*src_impl=*/impl.get(),
-      /*dest_impl=*/this,
-      /*version_counter=*/version_counter(),
-      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
-
-    // Sparse-specific fields
-    auto sparse_impl = static_cast<SparseTensorImpl*>(impl.get());
-    sparse_dim_ = sparse_impl->sparse_dim();
-    dense_dim_ = sparse_impl->dense_dim();
-    indices_ = sparse_impl->indices();
-    values_ = sparse_impl->values();
-    coalesced_ = sparse_impl->coalesced();
-    refresh_numel();
   }
 
 private:
