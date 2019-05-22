@@ -137,7 +137,7 @@ install_doc_push_script: &install_doc_push_script
 should_run_job: &should_run_job
   name: Should Run Job After checkout
   no_output_timeout: "2m"
-  command: ~/workspace/.circleci/scripts/should_run_job.sh
+  command: $CIRCLE_WORKING_DIRECTORY/.circleci/scripts/should_run_job.sh
 
 # Also needs to be run after checkout
 setup_ci_environment: &setup_ci_environment
