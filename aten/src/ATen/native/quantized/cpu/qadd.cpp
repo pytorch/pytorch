@@ -37,11 +37,13 @@ class QAddInt8 final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators()
 .op("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
-    c10::kernel<QAddInt8</*ReLUFused=*/false>>(),
-    c10::dispatchKey(QuantizedCPUTensorId()))
+    c10::RegisterOperators::options()
+      .kernel<QAddInt8</*ReLUFused=*/false>>()
+      .dispatchKey(QuantizedCPUTensorId()))
 .op("quantized::add_relu(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
-    c10::kernel<QAddInt8</*ReLUFused=*/true>>(),
-    c10::dispatchKey(QuantizedCPUTensorId()));
+    c10::RegisterOperators::options()
+      .kernel<QAddInt8</*ReLUFused=*/true>>()
+      .dispatchKey(QuantizedCPUTensorId()));
 }  // namespace
 }}  // namespace at::native
