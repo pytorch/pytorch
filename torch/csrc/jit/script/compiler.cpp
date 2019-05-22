@@ -1419,28 +1419,36 @@ struct to_ir {
     auto assigner = [ident_name, range, start_val, step_val](
                         Value* index, std::shared_ptr<Environment> env) {
       auto g = index->owningGraph();
-      auto offset = g->insertNode(g->create(aten::mul, {index, step_val}, 1))->output()->setType(IntType::get());
-      auto derived_index = g->insertNode(g->create(aten::add, {offset, start_val}, 1))->output()->setType(IntType::get());
+      auto offset = g->insertNode(g->create(aten::mul, {index, step_val}, 1))
+                        ->output()
+                        ->setType(IntType::get());
+      auto derived_index =
+          g->insertNode(g->create(aten::add, {offset, start_val}, 1))
+              ->output()
+              ->setType(IntType::get());
       env->setVar(range, ident_name, derived_index);
     };
     auto g = start_val->owningGraph();
     // (abs(end-start) + abs(step)-1)/abs(step) = # of iterations
     auto diff = g->insertNode(g->create(aten::sub, {end_val, start_val}, 1))
-            ->output()
-            ->setType(IntType::get());
+                    ->output()
+                    ->setType(IntType::get());
     auto diff_abs = g->insertNode(g->create(prim::abs, {diff}, 1))
-            ->output()
-            ->setType(IntType::get());
+                        ->output()
+                        ->setType(IntType::get());
     auto step_abs = g->insertNode(g->create(prim::abs, {step_val}, 1))
+                        ->output()
+                        ->setType(IntType::get());
+    auto ceil_offset =
+        g->insertNode(g->create(aten::sub, {step_abs, g->insertConstant(1)}, 1))
             ->output()
             ->setType(IntType::get());
-    auto ceil_offset = g->insertNode(g->create(aten::sub, {step_abs, g->insertConstant(1)}, 1))
+    auto diff_sum =
+        g->insertNode(g->create(aten::add, {diff_abs, ceil_offset}, 1))
             ->output()
             ->setType(IntType::get());
-    auto diff_sum = g->insertNode(g->create(aten::add, {diff_abs, ceil_offset}, 1))
-            ->output()
-            ->setType(IntType::get());
-    auto max_trip_count_val = g->insertNode(g->create(aten::floordiv, {diff_sum, step_abs}, 1))
+    auto max_trip_count_val =
+        g->insertNode(g->create(aten::floordiv, {diff_sum, step_abs}, 1))
             ->output()
             ->setType(IntType::get());
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
