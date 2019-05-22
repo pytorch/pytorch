@@ -164,6 +164,8 @@ struct Value {
   Value* setType(TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
     if (output.is_mkldnn()) {
+      // mkldnn tensor as opaque tensor doesn't have strides, so we can
+      // not create a CompleteTensorType
       setType(DimensionedTensorType::create(output));
       return;
     }
