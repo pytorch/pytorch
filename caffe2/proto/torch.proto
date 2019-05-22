@@ -69,6 +69,9 @@ message ModuleDef {
   optional bool optimize = 8;
 
   repeated AttributeDef attributes = 9;
+
+  // Used for retrieving module state from the pickled IValues table
+  optional int64 get_state_attribute_id = 10;
 }
 
 // Represents all non-module code that the model depends on.
@@ -79,7 +82,7 @@ message LibDef {
 }
 
 enum ProtoVersion {
-  PROTO_VERSION_NEWEST = 0x0000000000000004;
+  PROTO_VERSION_NEWEST = 0x0000000000000005;
 }
 
 message ModelDef {

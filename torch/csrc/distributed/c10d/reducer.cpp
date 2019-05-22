@@ -395,17 +395,19 @@ void Reducer::prepare_for_backward(
         "starting a new one. ",
         "",
         "This error indicates that your module has parameters that were ",
-        "not used in producing its output (the return value of `forward`). ",
+        "not used in producing loss. ",
         "",
-        "You can enable unused parameter detection by passing the keyword "
+        "You can enable unused parameter detection by (1) passing the keyword "
         "argument `find_unused_parameters=True` to ",
-        "`torch.nn.parallel.DistributedDataParallel`. ",
+        "`torch.nn.parallel.DistributedDataParallel`; (2) making sure all ",
+        "`forward` function outputs participate in calculating loss. "
         "",
-        "If you already have this argument set, then the distributed data ",
-        "parallel module wasn't able to locate the output tensors in the ",
+        "If you already have done the above two steps, then the distributed ",
+        "data parallel module wasn't able to locate the output tensors in the ",
         "return value of your module's `forward` function. ",
-        "Please include the structure of the return value of `forward` of ",
-        "your module when reporting this issue (e.g. list, dict, iterable).");
+        "Please include the loss function and the structure of the return ",
+        "value of `forward` of your module when reporting this issue (e.g. ",
+        "list, dict, iterable).");
   }
 
   // Reset accounting.
