@@ -42,8 +42,10 @@ class AliasDb {
 
   // Does `n` write to an alias of one of the values in `vs`?
   // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
-  TORCH_API bool writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks = false)
-      const;
+  TORCH_API bool writesToAlias(
+      Node* n,
+      const ValueSet& vs,
+      bool recurseBlocks = false) const;
 
   // Does `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
@@ -65,9 +67,11 @@ class AliasDb {
   // `Elements`.
   template <
       typename... Other1,
-      template <typename, typename...> class T,
+      template <typename, typename...>
+      class T,
       typename... Other2,
-      template <typename, typename...> class U>
+      template <typename, typename...>
+      class U>
   bool mayAlias(
       const T<const Value*, Other1...>& a,
       const U<const Value*, Other2...>& b) const {
@@ -199,6 +203,7 @@ class AliasDb {
   void analyzeSetAttr(Node* node);
   void analyzeTupleConstruct(Node* node);
   void analyzeCustomOp(Node* node);
+  void analyzeContainerConstruct(Node* node);
   bool tryRegisteredAnalysis(Node* node);
 
   /**
@@ -206,7 +211,9 @@ class AliasDb {
    */
   void makeAllAlias(const std::vector<Value*>& values);
   void makePointerTo(const Value* value, const Value* to);
-  TORCH_API void addToContainedElements(const Value* element, const Value* container);
+  TORCH_API void addToContainedElements(
+      const Value* element,
+      const Value* container);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
   void giveFreshAlias(const Value* value);
   Element* getOrCreateElement(const Value* value);
