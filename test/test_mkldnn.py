@@ -1,12 +1,12 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
 import unittest
-import tempfile
 
 import torch
 import torch.jit
 from torch.utils import mkldnn as mkldnn_utils
-from common_utils import TestCase, run_tests, IS_WINDOWS, IS_SANDCASTLE
+from common_utils import TestCase, run_tests, TemporaryFileName
+
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
 
@@ -257,14 +257,9 @@ class TestMkldnn(TestCase):
         )
 
     def _test_serialization(self, module, inputs):
-        if IS_WINDOWS or IS_SANDCASTLE:
-            # TemporaryFileName is not supported in Windows and Sandcastle
-            return
-
-        with tempfile.NamedTemporaryFile() as f:
-            torch.jit.save(module, f.name)
-            f.flush()
-            loaded = torch.jit.load(f.name)
+        with TemporaryFileName() as fname:
+            torch.jit.save(module, fname)
+            loaded = torch.jit.load(fname)
             self.assertEqual(
                 module(*inputs).to_dense(),
                 loaded(*inputs).to_dense())

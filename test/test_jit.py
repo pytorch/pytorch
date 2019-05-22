@@ -17,7 +17,7 @@ from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2, builtins, StringIO
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state, set_rng_seed, slowTest
+    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from common_nn import module_tests, new_module_tests, criterion_tests
 from textwrap import dedent
 from functools import wraps, reduce
@@ -82,25 +82,6 @@ RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
-
-
-if WINDOWS:
-    @contextmanager
-    def TemporaryFileName():
-        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
-        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
-        # close the file after creation and try to remove it manually
-        f = tempfile.NamedTemporaryFile(delete=False)
-        try:
-            f.close()
-            yield f.name
-        finally:
-            os.unlink(f.name)
-else:
-    @contextmanager  # noqa: T484
-    def TemporaryFileName():
-        with tempfile.NamedTemporaryFile() as f:
-            yield f.name
 
 
 def LSTMCellF(input, hx, cx, *params):
