@@ -105,9 +105,9 @@ static inline  __device__ void atomicAdd(at::Half *address, at::Half val) {
     do {
       assumed = old;
       at::Half hsum;
-      hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+      hsum.raw_bytes = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
       hsum = THCNumerics<at::Half>::add(hsum, val);
-      old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
+      old = (size_t)address & 2 ? (old & 0xffff) | (hsum.raw_bytes << 16) : (old & 0xffff0000) | hsum.raw_bytes;
       old = atomicCAS(address_as_ui, assumed, old);
     } while (assumed != old);
   #else

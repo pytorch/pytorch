@@ -699,7 +699,7 @@ TEST(TensorTest, Half) {
   TensorCPU* tensor = BlobGetMutableTensor(&blob, CPU);
   tensor->Resize(kSize);
   for (int i = 0; i < tensor->numel(); ++i) {
-    tensor->mutable_data<at::Half>()[i].x = i % 10000;
+    tensor->mutable_data<at::Half>()[i].raw_bytes = i % 10000;
   }
   string serialized = SerializeBlob(blob, "test");
   BlobProto proto;
@@ -713,7 +713,7 @@ TEST(TensorTest, Half) {
   if (FLAGS_caffe2_serialize_fp16_as_bytes) {
     EXPECT_EQ(tensor_proto.byte_data().size(), 2 * kSize);
     for (int i = 0; i < kSize; ++i) {
-      auto value = tensor->mutable_data<at::Half>()[i].x;
+      auto value = tensor->mutable_data<at::Half>()[i].raw_bytes;
       auto low_bits = static_cast<char>(value & 0xff);
       auto high_bits = static_cast<char>(value >> 8);
       EXPECT_EQ(tensor_proto.byte_data()[2 * i], low_bits);
@@ -729,7 +729,7 @@ TEST(TensorTest, Half) {
   EXPECT_EQ(new_tensor.dim(), 1);
   EXPECT_EQ(new_tensor.size(0), kSize);
   for (int i = 0; i < kSize; ++i) {
-    EXPECT_EQ(new_tensor.data<at::Half>()[i].x, i % 10000);
+    EXPECT_EQ(new_tensor.data<at::Half>()[i].raw_bytes, i % 10000);
   }
 }
 

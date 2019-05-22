@@ -18,9 +18,9 @@ namespace c10 {
 
 inline C10_HOST_DEVICE Half::Half(float value) {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-  x = __half_as_short(__float2half(value));
+  raw_bytes = __half_as_short(__float2half(value));
 #else
-  x = detail::fp16_ieee_from_fp32_value(value);
+  raw_bytes = detail::fp16_ieee_from_fp32_value(value);
 #endif
 }
 
@@ -28,18 +28,18 @@ inline C10_HOST_DEVICE Half::Half(float value) {
 
 inline C10_HOST_DEVICE Half::operator float() const {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-  return __half2float(*reinterpret_cast<const __half*>(&x));
+  return __half2float(*reinterpret_cast<const __half*>(&raw_bytes));
 #else
-  return detail::fp16_ieee_to_fp32_value(x);
+  return detail::fp16_ieee_to_fp32_value(raw_bytes);
 #endif
 }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 inline C10_HOST_DEVICE Half::Half(const __half& value) {
-  x = *reinterpret_cast<const unsigned short*>(&value);
+  raw_bytes = *reinterpret_cast<const unsigned short*>(&value);
 }
 inline C10_HOST_DEVICE Half::operator __half() const {
-  return *reinterpret_cast<const __half*>(&x);
+  return *reinterpret_cast<const __half*>(&raw_bytes);
 }
 #endif
 

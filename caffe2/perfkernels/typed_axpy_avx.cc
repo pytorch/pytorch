@@ -14,7 +14,7 @@ void TypedAxpyHalffloat__avx_f16c(
   // if x does not start at the 16 byte boundary, we will process the first few.
   // before we get to a real one.
   while ((reinterpret_cast<unsigned long>(x) % 16) && N) {
-    *(y++) += _cvtsh_ss((*(x++)).x) * a;
+    *(y++) += _cvtsh_ss((*(x++)).raw_bytes) * a;
     --N;
   }
 
@@ -36,7 +36,7 @@ void TypedAxpyHalffloat__avx_f16c(
 
   if (bound != N) {
     while (current < N) {
-      y[current] += _cvtsh_ss(x[current].x) * a;
+      y[current] += _cvtsh_ss(x[current].raw_bytes) * a;
       ++current;
     }
   }

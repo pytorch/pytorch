@@ -24,9 +24,9 @@ void TypedAxpyHalffloat__base(
       float floatval;
     } t1;
     uint32_t t2, t3;
-    t1.intval = x[i].x & 0x7fff; // Non-sign bits
-    t2 = x[i].x & 0x8000; // Sign bit
-    t3 = x[i].x & 0x7c00; // Exponent
+    t1.intval = x[i].raw_bytes & 0x7fff; // Non-sign bits
+    t2 = x[i].raw_bytes & 0x8000; // Sign bit
+    t3 = x[i].raw_bytes & 0x7c00; // Exponent
     t1.intval <<= 13; // Align mantissa on MSB
     t2 <<= 16; // Shift sign bit into position
     t1.intval += 0x38000000; // Adjust bias

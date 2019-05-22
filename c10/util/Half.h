@@ -322,7 +322,8 @@ namespace detail {
 } // namespace detail
 
 struct alignas(2) Half {
-  unsigned short x;
+  unsigned short raw_bytes;
+  using UnderlyingType = decltype(raw_bytes);
 
   struct from_bits_t {};
   static constexpr from_bits_t from_bits() {
@@ -336,7 +337,7 @@ struct alignas(2) Half {
   Half() = default;
 #endif
 
-  constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits){};
+  constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : raw_bytes(bits){};
   inline C10_HOST_DEVICE Half(float value);
   inline C10_HOST_DEVICE operator float() const;
 

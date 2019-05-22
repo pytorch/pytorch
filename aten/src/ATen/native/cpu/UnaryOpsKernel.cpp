@@ -56,8 +56,8 @@ static void abs_kernel(TensorIterator& iter) {
 
 static void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
   if( iter.dtype() == ScalarType::Half ) {
-    auto value = value_scalar.to<at::Half>().x;
-    using H = decltype(value);
+    auto value = value_scalar.to<at::Half>().raw_bytes;
+    using H = at::Half::UnderlyingType;
     nullary_kernel_vec(
         iter,
         [=]() -> H { return value; },

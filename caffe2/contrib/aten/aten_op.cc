@@ -19,7 +19,7 @@ void Set<at::Half, CPUContext>(
     const at::Half h,
     at::Half* v,
     CPUContext* c) {
-  Set(0, h.x, (uint16_t*)v, c);
+  Set(0, h.raw_bytes, (uint16_t*)v, c);
 }
 
 } // namespace math
