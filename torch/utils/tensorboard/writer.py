@@ -839,10 +839,10 @@ class SummaryWriter(object):
 
     def add_mesh(self, tag, vertices, colors=None, faces=None, config_dict=None, global_step=None, walltime=None):
         """Add meshes or 3D point clouds to TensorBoard. The visualization is based on Three.js,
-          so it allows users to interact with the rendered object. Besides the basic definitions
-          such as vertices, faces, users can further provide camera parameter, lighting condition, etc.
-          Please check https://threejs.org/docs/index.html#manual/en/introduction/Creating-a-scene for
-          advanced usage. Note that currently this depends on tb-nightly to show.
+        so it allows users to interact with the rendered object. Besides the basic definitions
+        such as vertices, faces, users can further provide camera parameter, lighting condition, etc.
+        Please check https://threejs.org/docs/index.html#manual/en/introduction/Creating-a-scene for
+        advanced usage. Note that currently this depends on tb-nightly to show.
 
         Args:
             tag (string): Data identifier
@@ -856,12 +856,14 @@ class SummaryWriter(object):
 
         Shape:
             vertices: :math:`(B, N, 3)`. (batch, number_of_vertices, channels)
+
             colors: :math:`(B, N, 3)`. The values should lie in [0, 255] for type `uint8` or [0, 1] for type `float`.
+
             faces: :math:`(B, N, 3)`. The values should lie in [0, number_of_vertices] for type `uint8`.
 
         Examples::
-            from torch.utils.tensorboard import SummaryWriter
 
+            from torch.utils.tensorboard import SummaryWriter
             vertices_tensor = torch.as_tensor([
                 [1, 1, 1],
                 [-1, -1, 1],
