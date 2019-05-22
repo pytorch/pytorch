@@ -113,7 +113,7 @@ class KernelTable_ final {
 class DispatchTable final {
  public:
   DispatchTable(const FunctionSchema& schema)
-  : kernels_(detail::KernelTable_())
+  : kernels_(make_left<detail::KernelTable_, DispatchTableEntry>())
   , dispatch_strategy_(get_dispatch_strategy_(schema))
   , operator_name_(schema.name()) {}
 
@@ -153,7 +153,7 @@ class DispatchTable final {
     } else {
       AT_ASSERTM(0 == kernels_.left().size(), "Tried to register a catch-all kernel for operator ", operator_name_, " which already has kernels with dispatch keys. An operator can only have either a catch-all kernel or kernels with dispatch keys.");
     }
-    kernels_ = kernel;
+    kernels_ = make_right<detail::KernelTable_, DispatchTableEntry>(kernel);
   }
 
   /**
@@ -161,7 +161,7 @@ class DispatchTable final {
    */
   void removeCatchallKernel() {
     AT_ASSERTM(kernels_.is_right(), "Tried to remove the catch-all kernel for operator ", operator_name_," but there is no catch-all kernel registered.");
-    kernels_ = detail::KernelTable_();
+    kernels_ = make_left<detail::KernelTable_, DispatchTableEntry>();
   }
 
   /**

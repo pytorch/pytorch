@@ -20,7 +20,7 @@ namespace {
 OperatorEntry::OperatorEntry(FunctionSchema&& schema)
 : schema_(std::move(schema))
 , dispatchTable_(schema_)
-, kernels_(ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>()) {}
+, kernels_(make_left<ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>, std::list<DispatchTableEntry>>()) {}
 
 void OperatorEntry::prepareForDeregistration() {
   return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {
@@ -58,7 +58,7 @@ RegistrationHandleRAII OperatorEntry::registerCatchallKernel(DispatchTableEntry 
 
   if (kernels_.is_left()) {
     AT_CHECK(0 == kernels_.left().size(), "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys ", listAllDispatchKeys(kernels_.left()), ". An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is ", toString(schema_));
-    kernels_ = std::list<DispatchTableEntry>();
+    kernels_ = make_right<ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>, std::list<DispatchTableEntry>>();
   }
 
   // Add the kernel to the kernels list,
@@ -104,7 +104,7 @@ void OperatorEntry::deregisterCatchallKernel_(std::list<DispatchTableEntry>::ite
   k.erase(kernel);
   if (k.empty()) {
     // the invariant says that the empty state is represented with is_left()
-    kernels_ = ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>();
+    kernels_ = make_left<ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>, std::list<DispatchTableEntry>>();
   }
 
   updateCatchallDispatchTable_();
