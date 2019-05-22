@@ -31,7 +31,7 @@ void launch_tasks() {
 
 void check_param(char* param_name, char* param_value) {
   int value = std::atoi(param_value);
-  AT_CHECK(value > 0);
+  TORCH_CHECK(value > 0);
   if (std::string(param_name) == "--iter") {
     iter = value;
   } else if (std::string(param_name) == "--threads") {
@@ -45,13 +45,13 @@ int main(int argc, char** argv) {
   at::init_num_threads();
 
   if (argc > 1) {
-    AT_CHECK(argc == 3 || argc == 5);
+    TORCH_CHECK(argc == 3 || argc == 5);
     check_param(argv[1], argv[2]);
     if (argc > 3) {
       check_param(argv[3], argv[4]);
     }
   } else {
-    AT_CHECK(argc == 1);
+    TORCH_CHECK(argc == 1);
   }
 
   at::set_num_interop_threads(threads);

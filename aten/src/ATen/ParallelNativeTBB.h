@@ -11,7 +11,7 @@
 namespace at {
 
 namespace internal {
-tbb::task_arena& _get_arena();
+CAFFE2_API tbb::task_arena& _get_arena();
 }
 
 template <class F>
@@ -20,26 +20,36 @@ inline void parallel_for(
     const int64_t end,
     const int64_t grain_size,
     const F& f) {
+  TORCH_CHECK(grain_size >= 0);
   if (begin >= end) {
     return;
-  }
-  if (grain_size < 0) {
-    throw std::runtime_error("Invalid begin, end or grain_size in parallel_for");
   }
 
   if ((end - begin) < grain_size || get_num_threads() == 1) {
     f(begin, end);
   } else {
+    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+    std::exception_ptr eptr;
     tbb::task_group tg;
-    internal::_get_arena().execute([&tg, begin, end, grain_size, f](){
-      tg.run([begin, end, grain_size, f]() {
+    internal::_get_arena().execute(
+        [&tg, &eptr, &err_flag, begin, end, grain_size, f]() {
+      tg.run([&eptr, &err_flag, begin, end, grain_size, f]() {
         tbb::parallel_for(tbb::blocked_range<int64_t>(begin, end, grain_size),
-          [&](const tbb::blocked_range<int64_t>& r) {
-            f(r.begin(), r.end());
+          [&eptr, &err_flag, f](const tbb::blocked_range<int64_t>& r) {
+            try {
+              f(r.begin(), r.end());
+            } catch (...) {
+              if (!err_flag.test_and_set()) {
+                eptr = std::current_exception();
+              }
+            }
           });
       });
     });
     tg.wait();
+    if (eptr) {
+      std::rethrow_exception(eptr);
+    }
   }
 }
 
@@ -51,31 +61,42 @@ inline scalar_t parallel_reduce(
     const scalar_t ident,
     const F& f,
     const SF& sf) {
+  TORCH_CHECK(grain_size >= 0);
   if (begin >= end) {
     return ident;
-  }
-  if (grain_size < 0) {
-    throw std::runtime_error("Invalid begin, end or grain_size in parallel_reduce");
   }
 
   if ((end - begin) < grain_size || get_num_threads() == 1) {
     return f(begin, end, ident);
   } else {
     scalar_t result;
+    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+    std::exception_ptr eptr;
     tbb::task_group tg;
     internal::_get_arena().execute(
-        [&tg, &result, begin, end, grain_size, ident, f, sf]() {
-      tg.run([&result, begin, end, grain_size, ident, f, sf]() {
+        [&tg, &result, &eptr, &err_flag, begin, end, grain_size, ident, f, sf]() {
+      tg.run([&result, &eptr, &err_flag, begin, end, grain_size, ident, f, sf]() {
         result = tbb::parallel_reduce(
           tbb::blocked_range<int64_t>(begin, end, grain_size), ident,
-          [&](const tbb::blocked_range<int64_t>& r, scalar_t ident) {
-            return f(r.begin(), r.end(), ident);
+          [&eptr, &err_flag, f, ident]
+              (const tbb::blocked_range<int64_t>& r, scalar_t ident) {
+            try {
+              return f(r.begin(), r.end(), ident);
+            } catch (...) {
+              if (!err_flag.test_and_set()) {
+                eptr = std::current_exception();
+              }
+              return ident;
+            }
           },
           sf
         );
       });
     });
     tg.wait();
+    if (eptr) {
+      std::rethrow_exception(eptr);
+    }
     return result;
   }
 }

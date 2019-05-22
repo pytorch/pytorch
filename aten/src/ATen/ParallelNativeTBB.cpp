@@ -40,10 +40,7 @@ void init_num_threads() {
 }
 
 void set_num_threads(int nthreads) {
-  if (nthreads <= 0) {
-    throw std::runtime_error(
-      "Expected positive number of threads");
-  }
+  TORCH_CHECK(nthreads > 0);
   int no_value = -1;
   if (internal::num_intraop_threads.compare_exchange_strong(no_value, nthreads)) {
     if (!internal::tbb_init.is_active()) {
@@ -53,7 +50,7 @@ void set_num_threads(int nthreads) {
       return;
     }
   }
-  throw std::runtime_error(
+  TORCH_CHECK(false,
     "Error: cannot set number of interop threads "
     "after parallel work has started or after set_num_threads call");
 }
