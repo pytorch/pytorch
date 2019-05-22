@@ -3491,6 +3491,9 @@ If :attr:`input` has `n` dimensions, then the resulting tuple contains `n` tenso
 of size `z`, where `z` is the total number of
 non-zero elements in the :attr:`input` tensor.
 
+As a special case, when :attr:`input` has zero dimensions and a nonzero scalar
+value, it is treated as a one-dimensional tensor with one element.
+
 Args:
     input (Tensor): the input tensor
     out (LongTensor, optional): the output tensor containing indices
@@ -3523,6 +3526,8 @@ Example::
                                     [0.0, 0.0, 1.2, 0.0],
                                     [0.0, 0.0, 0.0,-0.4]]), as_tuple=True)
     (tensor([0, 1, 2, 3]), tensor([0, 1, 2, 3]))
+    >>> torch.nonzero(torch.tensor(5), as_tuple=True)
+    (tensor([0]),)
 """)
 
 add_docstr(torch.normal,
