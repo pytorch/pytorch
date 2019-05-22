@@ -149,11 +149,6 @@
 #   LIBRARY_PATH
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
-#
-#   PARALLEL_BACKEND
-#     parallel backend to use for intra- and inter-op parallelism
-#     possible values:
-#       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
 
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, find_packages
@@ -599,10 +594,11 @@ main_link_args.extend(CAFFE2_LIBS)
 
 try:
     import numpy as np
-    NUMPY_INCLUDE_DIR = np.get_include()
-    USE_NUMPY = True
 except ImportError:
     USE_NUMPY = False
+else:
+    NUMPY_INCLUDE_DIR = np.get_include()
+    USE_NUMPY = True
 
 if USE_CUDA:
     if IS_WINDOWS:
