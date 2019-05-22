@@ -97,8 +97,6 @@
     steps:
       - checkout
       - run:
-          <<: *should_run_job
-      - run:
           <<: *macos_brew_update
       - run:
           name: Build
@@ -109,6 +107,8 @@
             set -e
 
             export IN_CIRCLECI=1
+
+            source .circleci/scripts/should_run_job.sh
 
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
@@ -145,8 +145,6 @@
       - attach_workspace:
           at: /Users/distiller/pytorch-ci-env
       - run:
-          <<: *should_run_job
-      - run:
           <<: *macos_brew_update
       - run:
           name: Test
@@ -159,6 +157,8 @@
 
             # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
             cp -a /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
+
+            source .circleci/scripts/should_run_job.sh
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
