@@ -6076,8 +6076,7 @@ a")
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
 
     def test_script_for_in_range_start_end(self):
-        @torch.jit.script
-        def fn(x):
+        def fn():
             x = 0
             for i in range(7, 100):
                 x += i
@@ -6085,8 +6084,7 @@ a")
         self.checkScript(fn, (), outputs=4929, optimize=True)
 
     def test_script_for_in_range_start_end_step(self):
-        @torch.jit.script
-        def fn(x):
+        def fn():
             x = 0
             for i in range(7, 100, 7):
                 x += i
@@ -6094,8 +6092,7 @@ a")
         self.checkScript(fn, (), outputs=735, optimize=True)
 
     def test_script_for_in_range_negative_step(self):
-        @torch.jit.script
-        def fn(x):
+        def fn():
             x = 0
             for i in range(2, -11, -3):
                 x += i
@@ -9843,7 +9840,7 @@ a")
         self.checkScript(return_stmt, (torch.rand(1),))
 
     def test_for_range_no_arg(self):
-        with self.assertRaisesRegex(RuntimeError, r'range\(\) expects 1 argument but got 0'):
+        with self.assertRaisesRegex(RuntimeError, r'range\(\) expects .* but got 0'):
             @torch.jit.script
             def range_no_arg(x):
                 for _ in range():
