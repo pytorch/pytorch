@@ -8,17 +8,9 @@ from torch.nn.functional import pad
 __all__ = [
     'compose_transform_call_',
     'compose_transform_log_abs_det_jacobian',
-    'exp_transform_call',
-    'exp_transform_inverse',
-    'exp_transform_log_abs_det_jacobian',
-    'power_transform_call',
-    'power_transform_inverse',
     'power_transform_log_abs_det_jacobian',
-    'sigmoid_transform_call',
     'sigmoid_transform_inverse',
     'sigmoid_transform_log_abs_det_jacobian',
-    'abs_transform_call',
-    'abs_transform_inverse',
     'affine_transform_call',
     'affine_transform_inverse',
     'affine_transform_log_abs_det_jacobian',
@@ -57,32 +49,8 @@ def compose_transform_log_abs_det_jacobian(parts, event_dim, x, y):
     return result
 
 
-def exp_transform_call(x):
-    return x.exp()
-
-
-def exp_transform_inverse(y):
-    return y.log()
-
-
-def exp_transform_log_abs_det_jacobian(x, y):
-    return x
-
-
-def power_transform_call(exponent, x):
-    return x.pow(exponent)
-
-
-def power_transform_inverse(exponent, y):
-    return y.pow(1 / exponent)
-
-
 def power_transform_log_abs_det_jacobian(exponent, x, y):
     return (exponent * y / x).abs().log()
-
-
-def sigmoid_transform_call(x):
-    return torch.sigmoid(x)
 
 
 def sigmoid_transform_inverse(y):
@@ -91,14 +59,6 @@ def sigmoid_transform_inverse(y):
 
 def sigmoid_transform_log_abs_det_jacobian(x, y):
     return -(y.reciprocal() + (1 - y).reciprocal()).log()
-
-
-def abs_transform_call(x):
-    return x.abs()
-
-
-def abs_transform_inverse(y):
-    return y
 
 
 def affine_transform_call(scale, loc, x):

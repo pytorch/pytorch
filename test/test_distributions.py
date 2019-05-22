@@ -4205,55 +4205,15 @@ class TestTransformFunctions(TestCase):
             log_abs_det_jacobian = log_abs_det_jacobian_fn(x, y)
             self.assertAlmostEqual(out_data[i], log_abs_det_jacobian, places=2)
 
-    def test_exp_transform_call(self):
-        self._test_call_helper(self.data_1, self.exp_y,
-                               functional.exp_transform_call)
-
-    def test_exp_transform_inverse(self):
-        self._test_inverse_helper(self.data_1,
-                                  functional.exp_transform_call,
-                                  functional.exp_transform_inverse)
-
-    def test_exp_transform_log_abs_det_jacobian(self):
-        self._test_log_abs_det_jacobian(self.data_1, self.exp_log_abs_det_jacobian,
-                                        functional.exp_transform_call,
-                                        functional.exp_transform_log_abs_det_jacobian)
-
-    def test_power_transform_call(self):
-        self._test_call_helper(self.data_1, self.pow_y,
-                               lambda x: functional.power_transform_call(2.0, x))
-
-    def test_power_transform_inverse(self):
-        self._test_inverse_helper(self.data_1,
-                                  lambda x: functional.power_transform_call(2.0, x),
-                                  lambda y: functional.power_transform_inverse(2.0, y))
-
-    def test_power_transform_log_abs_det_jacobian(self):
-        self._test_log_abs_det_jacobian(self.data_1, self.pow_log_abs_det_jacobian,
-                                        lambda x: functional.power_transform_call(2.0, x),
-                                        lambda x, y: functional.power_transform_log_abs_det_jacobian(2.0, x, y))
-
-    def test_sigmoid_transform_call(self):
-        self._test_call_helper(self.data_1, self.sigmoid_y,
-                               functional.sigmoid_transform_call)
-
     def test_sigmoid_transform_inverse(self):
         self._test_inverse_helper(self.data_1,
-                                  functional.sigmoid_transform_call,
+                                  torch.sigmoid,
                                   functional.sigmoid_transform_inverse)
 
     def test_sigmoid_transform_log_abs_det_jacobian(self):
         self._test_log_abs_det_jacobian(self.data_1, self.sigmoid_log_abs_det_jacobian,
-                                        functional.sigmoid_transform_call,
+                                        torch.sigmoid,
                                         functional.sigmoid_transform_log_abs_det_jacobian)
-
-    def test_abs_transform_call(self):
-        self._test_call_helper(self.data_2, self.data_1, functional.abs_transform_call)
-
-    def test_abs_transform_inverse(self):
-        self._test_inverse_helper(self.data_1,
-                                  functional.abs_transform_call,
-                                  functional.abs_transform_inverse)
 
     def test_affine_transform_call(self):
         self._test_call_helper(self.data_1, self.affine_y,

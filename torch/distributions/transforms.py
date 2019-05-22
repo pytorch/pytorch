@@ -1,6 +1,7 @@
 import numbers
 import weakref
 
+import torch
 from torch.distributions import constraints
 from torch.distributions import functional as F
 from torch.distributions.utils import (broadcast_all, lazy_property)
@@ -290,13 +291,13 @@ class ExpTransform(Transform):
         return isinstance(other, ExpTransform)
 
     def _call(self, x):
-        return F.exp_transform_call(x)
+        return x.exp()
 
     def _inverse(self, y):
-        return F.exp_transform_inverse(y)
+        return y.log()
 
     def log_abs_det_jacobian(self, x, y):
-        return F.exp_transform_log_abs_det_jacobian(x, y)
+        return x
 
 
 class PowerTransform(Transform):
@@ -318,10 +319,10 @@ class PowerTransform(Transform):
         return self.exponent.eq(other.exponent).all().item()
 
     def _call(self, x):
-        return F.power_transform_call(self.exponent, x)
+        return x.pow(self.exponent)
 
     def _inverse(self, y):
-        return F.power_transform_inverse(self.exponent, y)
+        return y.pow(1 / self.exponent)
 
     def log_abs_det_jacobian(self, x, y):
         return F.power_transform_log_abs_det_jacobian(self.exponent, x, y)
@@ -340,7 +341,7 @@ class SigmoidTransform(Transform):
         return isinstance(other, SigmoidTransform)
 
     def _call(self, x):
-        return F.sigmoid_transform_call(x)
+        return torch.sigmoid(x)
 
     def _inverse(self, y):
         return F.sigmoid_transform_inverse(y)
@@ -360,10 +361,10 @@ class AbsTransform(Transform):
         return isinstance(other, AbsTransform)
 
     def _call(self, x):
-        return F.abs_transform_call(x)
+        return x.abs()
 
     def _inverse(self, y):
-        return F.abs_transform_inverse(y)
+        return y
 
 
 class AffineTransform(Transform):
