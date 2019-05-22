@@ -717,11 +717,10 @@ graph():
 
     // But we know `fresh` didn't go into a list, so x, y, and z should not
     // alias it.
-
-    // auto fresh = vmap["fresh"];
-    // ASSERT_FALSE(aliasDb.mayAlias(x, fresh));
-    // ASSERT_FALSE(aliasDb.mayAlias(y, fresh));
-    // ASSERT_FALSE(aliasDb.mayAlias(z, fresh));
+    auto fresh = vmap["fresh"];
+    ASSERT_FALSE(aliasDb.mayAlias(x, fresh));
+    ASSERT_FALSE(aliasDb.mayAlias(y, fresh));
+    ASSERT_FALSE(aliasDb.mayAlias(z, fresh));
   }
 }
 
@@ -750,7 +749,7 @@ void testWildcards() {
     AliasDb aliasDb(graph);
 
     ASSERT_FALSE(aliasDb.mayAlias(a, fresh));
-    ASSERT_TRUE(aliasDb.mayAlias(wildcard, fresh));
+    ASSERT_FALSE(aliasDb.mayAlias(wildcard, fresh));
     ASSERT_TRUE(aliasDb.mayAlias(wildcard, a));
     ASSERT_FALSE(aliasDb.mayAlias(
         std::unordered_set<const Value*>({wildcard}),
@@ -762,8 +761,7 @@ void testWildcards() {
   {
     graph->lint();
     AliasDb aliasDb(graph);
-    // Any write should be considered a write to the wildcard
-    ASSERT_TRUE(aliasDb.hasWriters(wildcard->node()));
+    ASSERT_FALSE(aliasDb.hasWriters(wildcard->node()));
   }
 
   const auto wildcardWrite = graph->insert(writes, {wildcard})->node();
@@ -771,9 +769,9 @@ void testWildcards() {
     graph->lint();
     AliasDb aliasDb(graph);
     // Test writes to wildcards
-    ASSERT_TRUE(aliasDb.writesToAlias(
+    ASSERT_FALSE(aliasDb.writesToAlias(
         wildcardWrite, std::unordered_set<const Value*>{fresh}));
-    ASSERT_TRUE(aliasDb.writesToAlias(
+    ASSERT_FALSE(aliasDb.writesToAlias(
         wildcardWrite, std::unordered_set<const Value*>{fresh2}));
     ASSERT_TRUE(aliasDb.writesToAlias(
         wildcardWrite, std::unordered_set<const Value*>{a}));
