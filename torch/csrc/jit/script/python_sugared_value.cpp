@@ -282,6 +282,9 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return std::make_shared<OverloadedMethodValue>(
         self_, py::cast<std::vector<std::string>>(overloads));
   }
+  if (!py::hasattr(py_module_, field.c_str())) {
+    throw ErrorReport(loc) << "attribute '" << field << "' does not exist";
+  }
 
   if (py::object attr = py::getattr(py_module_, field.c_str(), py::none())) {
     if (py::isinstance<py::function>(attr) &&
@@ -304,8 +307,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
         py_module_.attr("_constants_set").contains(field.c_str())) {
       return toSugaredValue(attr, m, loc, true);
-    } else if (py::isinstance<py::none>(attr)) {
-      throw ErrorReport(loc) << "attribute '" << field << "' does not exist";
     } else {
       std::string hint = "did you forget to add it __constants__?";
       if (py::isinstance(attr, py::module::import("torch").attr("Tensor"))) {
