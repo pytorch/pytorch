@@ -7501,9 +7501,9 @@ a")
             M()
 
     def test_script_module_none_exist_fail(self):
-        class FooBar(torch.jit.ScriptModule):
+        class M(torch.jit.ScriptModule):
             def __init__(self, my_optional):
-                super().__init__()
+                super(M, self).__init__()
                 self.my_optional = my_optional
 
             @torch.jit.script_method
@@ -7513,7 +7513,7 @@ a")
                 return torch.neg(x)
         with self.assertRaisesRegex(RuntimeError, "is not usable in a script method"):
             x = torch.rand(3, 4)
-            fb = FooBar(None)
+            fb = M(None)
             fb(x)
 
     def test_script_module_valid_consts(self):
