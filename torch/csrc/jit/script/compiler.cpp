@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -7,12 +6,14 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/symbolic_variable.h>
 
 #include <c10/util/Optional.h>
 
@@ -1397,16 +1398,51 @@ struct to_ir {
       const List<Expr>& args,
       const List<Stmt>& body) {
     // TODO: start, stop, step loop
-    if (args.size() != 1) {
+    Value *end_val, *start_val, *step_val;
+    if (args.size() == 1) {
+      end_val = ensureInt(range, emitExpr(args[0]));
+      start_val = end_val->owningGraph()->insertConstant(0);
+      step_val = end_val->owningGraph()->insertConstant(1);
+    } else if (args.size() == 2) {
+      start_val = ensureInt(range, emitExpr(args[0]));
+      end_val = ensureInt(range, emitExpr(args[1]));
+      step_val = end_val->owningGraph()->insertConstant(1);
+    } else if (args.size() == 3) {
+      start_val = ensureInt(range, emitExpr(args[0]));
+      end_val = ensureInt(range, emitExpr(args[1]));
+      step_val = ensureInt(range, emitExpr(args[2]));
+    } else {
       throw ErrorReport(range)
-          << "range() expects 1 argument but got " << args.size();
+          << "range() expects 1-3 arguments but got " << args.size();
     }
-    auto max_trip_count_val = ensureInt(range, emitExpr(args[0]));
     const auto& ident_name = target.name();
-    auto assigner = [ident_name, range](
+    auto assigner = [ident_name, range, start_val, step_val](
                         Value* index, std::shared_ptr<Environment> env) {
-      env->setVar(range, ident_name, index);
+      auto g = index->owningGraph();
+      auto offset = g->insertNode(g->create(aten::mul, {index, step_val}, 1))->output()->setType(IntType::get());
+      auto derived_index = g->insertNode(g->create(aten::add, {offset, start_val}, 1))->output()->setType(IntType::get());
+      env->setVar(range, ident_name, derived_index);
     };
+    auto g = start_val->owningGraph();
+    // (abs(end-start) + abs(step)-1)/abs(step) = # of iterations
+    auto diff = g->insertNode(g->create(aten::sub, {end_val, start_val}, 1))
+            ->output()
+            ->setType(IntType::get());
+    auto diff_abs = g->insertNode(g->create(prim::abs, {diff}, 1))
+            ->output()
+            ->setType(IntType::get());
+    auto step_abs = g->insertNode(g->create(prim::abs, {step_val}, 1))
+            ->output()
+            ->setType(IntType::get());
+    auto ceil_offset = g->insertNode(g->create(aten::sub, {step_abs, g->insertConstant(1)}, 1))
+            ->output()
+            ->setType(IntType::get());
+    auto diff_sum = g->insertNode(g->create(aten::add, {diff_abs, ceil_offset}, 1))
+            ->output()
+            ->setType(IntType::get());
+    auto max_trip_count_val = g->insertNode(g->create(aten::floordiv, {diff_sum, step_abs}, 1))
+            ->output()
+            ->setType(IntType::get());
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
