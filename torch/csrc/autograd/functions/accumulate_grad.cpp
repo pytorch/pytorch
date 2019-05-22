@@ -76,8 +76,8 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       // 3. `grad_variable` is dense, and `new_grad` is dense.
       //
       // In all of these three cases, `grad_variable += new_grad` is a valid operation
-      // which does in-place summation of `grad_variable` and `new_grad`. `grad_variable`
-      // is thus still referring to the same tensor after the operation.
+      // which adds `new_grad` to `grad_variable` in place. `grad_variable` is thus
+      // still referring to the same tensor after the operation.
       grad_variable += new_grad;
     }
   } else {
