@@ -108,10 +108,6 @@
 
             export IN_CIRCLECI=1
 
-            # Persist should_run_job.sh to the workspace so test can
-            # run even if should_run_job.sh bugs out
-            mkdir -p /Users/distiller/pytorch-ci-env/workspace/.circleci/.scripts
-            cp .circleci/scripts/should_run_job.sh /Users/distiller/pytorch-ci-env/workspace/.circleci/.scripts
             source .circleci/scripts/should_run_job.sh
 
             # Install sccache
@@ -160,7 +156,14 @@
             # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
             cp -a /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
 
-            source .circleci/scripts/should_run_job.sh
+            if ! [ -e .circleci/scripts/should_run_job.sh ]; then
+              # The script doesn't exist, that means that we must have
+              # aborted the build step
+              circleci step halt
+              exit 0
+            else
+              source .circleci/scripts/should_run_job.sh
+            fi
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
