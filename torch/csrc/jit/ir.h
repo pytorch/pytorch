@@ -163,6 +163,10 @@ struct Value {
  public:
   Value* setType(TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
+    if (output.is_mkldnn()) {
+      setType(DimensionedTensorType::create(output));
+      return;
+    }
     setType(CompleteTensorType::create(output));
   }
   const TypePtr& type() const {
