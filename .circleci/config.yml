@@ -141,7 +141,7 @@ should_run_job: &should_run_job
     if [ -e ~/workspace/.circleci/scripts/should_run_job.sh ]; then
       ~/workspace/.circleci/scripts/should_run_job.sh
     else
-      .circleci/scripts/should_run_job.sh
+      /Users/distiller/pytorch-ci-env/workspace/.circleci/scripts/should_run_job.sh
     fi
 
 # Also needs to be run after checkout
@@ -734,8 +734,6 @@ smoke_linux_test: &smoke_linux_test
   - attach_workspace:
       at: /home/circleci/project
   - run:
-      <<: *should_run_job
-  - run:
       <<: *setup_linux_system_environment
   - run:
       <<: *setup_ci_environment
@@ -765,8 +763,6 @@ smoke_mac_test: &smoke_mac_test
         at: ~/workspace
     - attach_workspace: # TODO - we can `cp` from ~/workspace
         at: /Users/distiller/project
-    - run:
-        <<: *should_run_job
     - run:
         <<: *binary_checkout
     - run:

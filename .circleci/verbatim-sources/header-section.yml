@@ -141,7 +141,7 @@ should_run_job: &should_run_job
     if [ -e ~/workspace/.circleci/scripts/should_run_job.sh ]; then
       ~/workspace/.circleci/scripts/should_run_job.sh
     else
-      .circleci/scripts/should_run_job.sh
+      /Users/distiller/pytorch-ci-env/workspace/.circleci/scripts/should_run_job.sh
     fi
 
 # Also needs to be run after checkout
