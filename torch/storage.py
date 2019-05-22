@@ -87,6 +87,10 @@ class _StorageBase(object):
         """Casts this storage to bool type"""
         return self.type(type(self).__module__ + '.BoolStorage')
 
+    def qint8(self):
+        """Casts this storage to qint8 type"""
+        raise Exception("cannot cast storage to qint8 type")
+
     def pin_memory(self):
         """Copies the storage to pinned memory, if it's not already pinned."""
         if self.is_cuda:

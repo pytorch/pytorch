@@ -44,7 +44,19 @@ class Tensor(torch._C._TensorBase):
                 self.stride(),
                 self.requires_grad,
                 OrderedDict())  # previously was self._backward_hooks
-        return (torch._utils._rebuild_tensor_v2, args)
+        if self.is_quantized:
+            args = (self.storage(),
+                    self.storage_offset(),
+                    tuple(self.size()),
+                    self.stride(),
+                    self.requires_grad,
+                    OrderedDict(),
+                    self.q_scale(),
+                    self.q_zero_point())
+                    # TODO: self.qscheme
+            return (torch._utils._rebuild_qtensor, args)
+        else:
+            return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
         # Warning: this method is NOT called when you torch.load() a tensor;
