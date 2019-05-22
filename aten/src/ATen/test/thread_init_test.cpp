@@ -28,9 +28,6 @@ int main() {
   std::thread t1(test, 4);
   t1.join();
 
-  at::set_num_threads(5);
-  test(at::get_num_threads());
-
   // test inter-op settings
   at::set_num_interop_threads(5);
   ASSERT_EQ(at::get_num_interop_threads(), 5);
