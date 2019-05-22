@@ -579,6 +579,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         opts.threads = threads
         return opts
 
+    def test_empty_tensors(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        xs = [torch.FloatTensor([])]
+        pg.broadcast(xs).wait()
+        self.assertEqual(0, xs[0].numel())
+
     def test_broadcast_checks(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
@@ -1343,6 +1351,30 @@ class ProcessGroupNCCLTest(TestCase):
 
     def tearDown(self):
         pass
+
+    def test_empty_tensors(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        xs = [torch.cuda.FloatTensor([])]
+        pg.broadcast(xs).wait()
+        self.assertEqual(0, xs[0].numel())
+
+        pg.allreduce(xs).wait()
+        self.assertEqual(0, xs[0].numel())
+
+        pg.reduce(xs).wait()
+        self.assertEqual(0, xs[0].numel())
+
+        ys = [[torch.cuda.FloatTensor([]) for _ in range(self.world_size)]]
+        pg.allgather(ys, xs).wait()
+        for y in ys[0]:
+            self.assertEqual(0, y.numel())
+
+        ys = [torch.cuda.FloatTensor([])]
+        xs = [[torch.cuda.FloatTensor([]) for _ in range(self.world_size)]]
+        pg.reduce_scatter(ys, xs).wait()
+        self.assertEqual(0, ys[0].numel())
 
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)

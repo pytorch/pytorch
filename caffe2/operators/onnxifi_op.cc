@@ -95,22 +95,49 @@ void SetOutputTensorDescriptorTypeAndBuffer(
   desc->scales = &cpu_int8tensor->scale;
   desc->biases = &cpu_int8tensor->zero_point;
 }
+
+#ifndef C10_MOBILE
+void CopyDescriptor(
+    const ExternalTensorDescriptor* from,
+    onnxTensorDescriptorV1* to) {
+  to->dataType = from->dataType;
+  to->buffer = from->buffer;
+  to->quantizationParams = from->quantizationParams;
+  to->quantizationAxis = from->quantizationAxis;
+  to->scales = from->scales;
+  to->biases = from->biases;
+  to->dimensions = from->dimensions;
+  to->shape = from->shape;
+}
+#endif
+
 void BlobToTensorDescriptor(
     const std::string& name,
     Workspace* ws,
     onnxTensorDescriptorV1* desc,
-    std::vector<std::vector<uint64_t>>* shapes) {
+    std::vector<std::vector<uint64_t>>* shapes,
+    std::vector<std::vector<float>>* all_scales,
+    std::vector<std::vector<float>>* all_offsets) {
   const Blob* blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob ", name, " doesn't exist");
   const bool is_int8tensor =
       blob->meta().id() == TypeMeta::Id<int8::Int8TensorCPU>();
+  bool is_external_tensor;
+#ifndef C10_MOBILE
+  auto function_ptr =
+      ExternalTensorFunctionsBaseRegistry()->Create(blob->meta().id());
+  is_external_tensor = function_ptr != nullptr;
+#else
+  is_external_tensor = false;
+#endif
   // Memory type
   // We only allow weights to be CPU tensor or int8tensor for now
   CAFFE_ENFORCE(
-      (BlobIsTensorType(*blob, CPU) || BlobIsInt8TensorCPUType(*blob)),
+      (BlobIsTensorType(*blob, CPU) || BlobIsInt8TensorCPUType(*blob) ||
+       is_external_tensor),
       "Initialization blob ",
       name,
-      " needs to be TensorCPU or Int8TensorCPU");
+      " needs to be TensorCPU or Int8TensorCPU or Int8FCDNNLowPPackedWeightBlob Based class");
   desc->tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
   desc->memoryType = ONNXIFI_MEMORY_TYPE_CPU;
 
@@ -124,6 +151,13 @@ void BlobToTensorDescriptor(
     desc->dimensions = shape.size();
     shapes->emplace_back(shape.cbegin(), shape.cend());
     desc->shape = shapes->back().data();
+  } else if (is_external_tensor) {
+#ifndef C10_MOBILE
+    ExternalTensorDescriptor ext_desc;
+    function_ptr->SetupExternalTensorDescriptor(
+        blob, shapes, all_scales, all_offsets, &ext_desc);
+    CopyDescriptor(&ext_desc, desc);
+#endif
   } else {
     // Data type
     const auto& cpu_tensor = blob->template Get<TensorCPU>();
@@ -159,7 +193,8 @@ OnnxifiOp<CPUContext>::buildInitializationList(
       weight_names->emplace_back(s);
       onnxTensorDescriptorV1 tensor_desc;
       tensor_desc.name = weight_names->back().c_str();
-      BlobToTensorDescriptor(s, ws, &tensor_desc, weight_shapes);
+      BlobToTensorDescriptor(
+          s, ws, &tensor_desc, weight_shapes, &all_scales_, &all_offsets_);
       descs.push_back(tensor_desc);
       initialization_list.erase(it);
     }

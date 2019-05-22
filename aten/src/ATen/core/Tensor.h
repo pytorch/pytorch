@@ -583,6 +583,7 @@ class CAFFE2_API Tensor {
   Tensor to_mkldnn() const;
   Tensor quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const;
   Tensor dequantize() const;
+  Tensor dequantize_linear(double scale, int64_t zero_point, ScalarType dtype) const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;
   Tensor int_repr() const;
