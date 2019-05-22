@@ -104,7 +104,7 @@ void Variable::set_data(const at::Tensor &new_data) {
     }
   }
 
-  // Version counter is not shared when we replace a `Variable`'s underlying `Tensor`
+  // Version counter is not shared when we replace a `Variable`'s tensor data
   // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
   // See NOTE [ Version Counter Sharing ] for details.
   get()->shallow_copy_from(new_data.getIntrusivePtr());
