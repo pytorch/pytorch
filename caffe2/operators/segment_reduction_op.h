@@ -1,10 +1,15 @@
 #ifndef CAFFE2_OPERATORS_SEGMENT_REDUCTION_OP_H_
 #define CAFFE2_OPERATORS_SEGMENT_REDUCTION_OP_H_
 
+#include "caffe2/core/c10_operator.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/reducer_functors.h"
+
+C10_DECLARE_CAFFE2_OPERATOR(LengthsSum);
+C10_DECLARE_CAFFE2_OPERATOR(LengthsMean);
+C10_DECLARE_CAFFE2_OPERATOR(LengthsMax);
 
 namespace caffe2 {
 
