@@ -1398,18 +1398,22 @@ struct to_ir {
       const List<Stmt>& body) {
     Value *end_val = nullptr, *start_val = nullptr, *step_val = nullptr;
     bool isSimpleRange = (args.size() == 1);
+    std::vector<Value*> argVals;
+    for (auto i: args) {
+      argVals.push_back(ensureInt(range, emitExpr(i)));
+    }
     if (isSimpleRange) {
-      end_val = ensureInt(range, emitExpr(args[0]));
+      end_val = argVals[0];
       start_val = end_val->owningGraph()->insertConstant(0);
       step_val = end_val->owningGraph()->insertConstant(1);
-    } else if (args.size() == 2) {
-      start_val = ensureInt(range, emitExpr(args[0]));
-      end_val = ensureInt(range, emitExpr(args[1]));
-      step_val = end_val->owningGraph()->insertConstant(1);
-    } else if (args.size() == 3) {
-      start_val = ensureInt(range, emitExpr(args[0]));
-      end_val = ensureInt(range, emitExpr(args[1]));
-      step_val = ensureInt(range, emitExpr(args[2]));
+    } else if (args.size() <= 3) {
+      start_val = argVals[0];
+      end_val = argVals[1];
+      if (args.size() == 3) {
+        step_val = argVals[2];
+      } else {
+        step_val = end_val->owningGraph()->insertConstant(1);
+      }
     } else {
       throw ErrorReport(range)
           << "range() expected at most 3 arguments, got " << args.size();
@@ -1422,20 +1426,14 @@ struct to_ir {
           ->output()
           ->setType(IntType::get());
     };
-    auto assigner = [ident_name, range, start_val, step_val, isSimpleRange](
+    auto assigner = [addOp, ident_name, range, start_val, step_val, isSimpleRange](
                         Value* index, std::shared_ptr<Environment> env) {
       Value* derived_index;
       if (isSimpleRange) {
         derived_index = index;
       } else {
         auto g = index->owningGraph();
-        auto offset = g->insertNode(g->create(aten::mul, {index, step_val}, 1))
-                          ->output()
-                          ->setType(IntType::get());
-        derived_index =
-            g->insertNode(g->create(aten::add, {offset, start_val}, 1))
-                ->output()
-                ->setType(IntType::get());
+        derived_index = addOp(g, aten::__derive_index, {index, start_val, step_val});
       }
       env->setVar(range, ident_name, derived_index);
     };
