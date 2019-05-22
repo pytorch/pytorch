@@ -11,9 +11,9 @@ bool InferenceLSTMOp::RunOnDevice() {
   for (int i = 3; i < InputSize(); i++) {
     params.push_back(Input(i).UnsafeSharedInstance());
   }
+  CAFFE_ENFORCE(_input.numel() > 0, "Can't run LSTM with empty sequences");
   auto input = batch_first_ ? transpose(_input, 0, 1, &context_)
                             : _input.UnsafeSharedInstance();
-
   auto cell_params = gather_params(params, has_biases_, &context_);
   auto results = _lstm_impl(
       input,
@@ -52,10 +52,10 @@ NO_GRADIENT(InferenceLSTM);
 C10_REGISTER_CAFFE2_OPERATOR_CPU(
     InferenceLSTM,
     "_caffe2::InferenceLSTM("
-      "Tensor[] input_list, "
-      "int num_layers, "
-      "bool has_biases, "
-      "bool batch_first, "
-      "bool bidirectional"
+    "Tensor[] input_list, "
+    "int num_layers, "
+    "bool has_biases, "
+    "bool batch_first, "
+    "bool bidirectional"
     ") -> (Tensor output, Tensor hidden, Tensor cell)",
     caffe2::InferenceLSTMOp);
