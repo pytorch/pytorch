@@ -77,6 +77,11 @@ def skipIfEmbed(func):
 def do_export(model, inputs, *args, **kwargs):
     f = io.BytesIO()
     out = torch.onnx._export(model, inputs, f, *args, **kwargs)
+    if isinstance(model, torch.jit.ScriptModule):
+        # Special case for common case of passing a single Tensor
+        if isinstance(inputs, torch.Tensor):
+            inputs = (inputs,)
+        out = model(*inputs)
     return f.getvalue(), out
 
 
@@ -178,7 +183,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
         # Verify the model runs the same in Caffe2
         verify.verify(model, input, c2, rtol=rtol, atol=atol,
-                      do_constant_folding=do_constant_folding)
+                      example_outputs=example_outputs, do_constant_folding=do_constant_folding)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
@@ -1592,9 +1597,18 @@ class TestCaffe2Backend(unittest.TestCase):
         class TopKModel(torch.nn.Module):
             def forward(self, input):
                 return torch.topk(input, 3)
-        model = TopKModel()
+
         x = torch.arange(1., 6.)
         self.run_model_test(TopKModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_topk_script(self):
+        class TopKModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.topk(input, 3, dim=0)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        self.run_model_test(TopKModel(), train=False, input=(x,), batch_size=BATCH_SIZE, example_outputs=torch.topk(x, 3, dim=0))
 
     def test_floor(self):
         class FloorModel(torch.nn.Module):
