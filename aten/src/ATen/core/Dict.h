@@ -195,6 +195,9 @@ public:
    */
   friend DictPtr make_dict<Key, Value>();
 
+  // please use make_dict instead
+  DictPtr() = delete;
+
   ~DictPtr() = default;
 
   DictPtr(const DictPtr&) = default;
