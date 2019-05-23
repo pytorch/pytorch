@@ -139,19 +139,11 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
   return (S > S.max().mul_(tol)).sum();
 }
 
-static void check_1d(const Tensor& t, const char* arg, const char* fn) {
- TORCH_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
-}
-
 Tensor ger(const Tensor& self, const Tensor& vec2) {
-  check_1d(self, "self", "ger");
-  check_1d(vec2, "vec2", "ger");
   return at::legacy::th::_th_ger(self, vec2);
 }
 
 Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
-  check_1d(self, "self", "ger");
-  check_1d(vec2, "vec2", "ger");
   return at::legacy::th::_th_ger_out(result, self, vec2);
 }
 
@@ -170,45 +162,34 @@ Tensor& mm_out(Tensor& result, const Tensor& self, const Tensor& mat2) {
 }
 
 Tensor mv(const Tensor& self, const Tensor& vec) {
-  check_1d(vec, "vec", "mv");
   return at::legacy::th::_th_mv(self, vec);
 }
 
 Tensor& mv_out(Tensor& result, const Tensor& self, const Tensor& vec) {
-  check_1d(vec, "vec", "mv");
   return at::legacy::th::_th_mv_out(result, self, vec);
 }
 
 Tensor addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
   return at::legacy::th::_th_addmv(self, mat, vec, beta, alpha);
 }
 
 Tensor& addmv_(Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
   return at::legacy::th::_th_addmv_(self, mat, vec, beta, alpha);
 }
 
 Tensor& addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
   return at::legacy::th::_th_addmv_out(result, self, mat, vec, beta, alpha);
 }
 
 Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  check_1d(vec1, "vec1", "addr");
-  check_1d(vec2, "vec2", "addr");
   return at::legacy::th::_th_addr(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  check_1d(vec1, "vec1", "addr");
-  check_1d(vec2, "vec2", "addr");
   return at::legacy::th::_th_addr_(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  check_1d(vec1, "vec1", "addr");
-  check_1d(vec2, "vec2", "addr");
   return at::legacy::th::_th_addr_out(result, self, vec1, vec2, beta, alpha);
 }
 
@@ -361,8 +342,6 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
 }
 
 Tensor dot(const Tensor& self, const Tensor& tensor) {
-  check_1d(self, "self", "dot");
-  check_1d(tensor, "tensor", "dot");
   return at::legacy::th::_th_dot(self, tensor);
 }
 
