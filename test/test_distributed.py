@@ -645,7 +645,7 @@ class _DistTestBase(object):
                         tensor = tensor.cuda(rank_to_GPU[rank][0])
                     dist.broadcast(tensor, src, group_id)
                     self.assertEqual(tensor.size(), expected_tensor.size())
-                    self.assertEqual(tensor.ne(expected_tensor).max(), 0)
+                    self.assertEqual(tensor.ne(expected_tensor).max(), torch.tensor(False, dtype=torch.bool))
 
         self._barrier()
 

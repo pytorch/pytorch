@@ -109,7 +109,8 @@ namespace c10 {
   _(double, Double, d)                        \
   _(c10::qint8, QInt8, i)                     \
   _(c10::quint8, QUInt8, i)                   \
-  _(c10::qint32, QInt32, i)
+  _(c10::qint32, QInt32, i)                   \
+  _(bool, Bool, i)
 
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(_) \
   _(uint8_t, Byte, i)                                  \

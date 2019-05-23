@@ -33,6 +33,16 @@ void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) {
   add_kernel(iter, -alpha_scalar);
 }
 
+template <typename T>
+T multiply(T a, T b) {
+  return a * b;
+}
+
+template<>
+bool multiply<bool>(bool a, bool b) {
+  return a && b;
+}
+
 void mul_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     binary_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });

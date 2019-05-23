@@ -32,19 +32,19 @@ namespace {
 }
 
 template <>
-struct numeric_limits<bool> {
-  static inline __host__ __device__ bool lowest() { return false; }
-  static inline __host__ __device__ bool max() { return true; }
-  static inline __host__ __device__ bool lower_bound() { return false; }
-  static inline __host__ __device__ bool upper_bound() { return true; }
-};
-
-template <>
 struct numeric_limits<uint8_t> {
   static inline __host__ __device__ uint8_t lowest() { return 0; }
   static inline __host__ __device__ uint8_t max() { return UINT8_MAX; }
   static inline __host__ __device__ uint8_t lower_bound() { return 0; }
   static inline __host__ __device__ uint8_t upper_bound() { return UINT8_MAX; }
+};
+
+template <>
+struct numeric_limits<bool> {
+  static inline __host__ __device__ bool lowest() { return false; }
+  static inline __host__ __device__ bool max() { return true; }
+  static inline __host__ __device__ bool lower_bound() { return false; }
+  static inline __host__ __device__ bool upper_bound() { return true; }
 };
 
 template <>

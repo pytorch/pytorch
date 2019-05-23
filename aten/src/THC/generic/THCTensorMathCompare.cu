@@ -5,49 +5,49 @@
 void THCTensor_(ltValue)(THCState *state, THCudaByteTensor *self_, THCTensor *src, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  THC_logicalValue<uint8_t, scalar_t>(state, self_, src,
+  THC_logicalValue<bool, scalar_t>(state, self_, src,
                                   TensorLTValueOp<scalar_t,
-                                  unsigned char>(value));
+                                  bool>(value));
 }
 
 void THCTensor_(gtValue)(THCState *state, THCudaByteTensor *self_, THCTensor *src, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  THC_logicalValue<uint8_t, scalar_t>(state, self_, src,
+  THC_logicalValue<bool, scalar_t>(state, self_, src,
                                   TensorGTValueOp<scalar_t,
-                                  unsigned char>(value));
+                                  bool>(value));
 }
 
 void THCTensor_(leValue)(THCState *state, THCudaByteTensor *self_, THCTensor *src, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  THC_logicalValue<uint8_t, scalar_t>(state, self_, src,
+  THC_logicalValue<bool, scalar_t>(state, self_, src,
                                   TensorLEValueOp<scalar_t,
-                                  unsigned char>(value));
+                                  bool>(value));
 }
 
 void THCTensor_(geValue)(THCState *state, THCudaByteTensor *self_, THCTensor *src, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  THC_logicalValue<uint8_t, scalar_t>(state, self_, src,
+  THC_logicalValue<bool, scalar_t>(state, self_, src,
                                   TensorGEValueOp<scalar_t,
-                                  unsigned char>(value));
+                                  bool>(value));
 }
 
 void THCTensor_(eqValue)(THCState *state, THCudaByteTensor *self_, THCTensor *src, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  THC_logicalValue<uint8_t, scalar_t>(state, self_, src,
+  THC_logicalValue<bool, scalar_t>(state, self_, src,
                                   TensorEQValueOp<scalar_t,
-                                  unsigned char>(value));
+                                  bool>(value));
 }
 
 void THCTensor_(neValue)(THCState *state, THCudaByteTensor *self_, THCTensor *src, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  THC_logicalValue<uint8_t, scalar_t>(state, self_, src,
+  THC_logicalValue<bool, scalar_t>(state, self_, src,
                                   TensorNEValueOp<scalar_t,
-                                  unsigned char>(value));
+                                  bool>(value));
 }
 
 void THCTensor_(ltValueT)(THCState *state, THCTensor *self_, THCTensor *src, scalar_t value)

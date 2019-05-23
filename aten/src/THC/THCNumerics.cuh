@@ -83,6 +83,7 @@ struct THCNumerics<bool> {
   static inline __host__ __device__ bool div(bool a, bool b) { return a / b; }
   static inline __host__ __device__ bool neg(bool a) { return !a; }
   static inline __host__ __device__ bool abs(bool a) { return a; }
+
   static inline __host__ __device__ bool isnan(bool a) { return false; }
   static inline __host__ __device__ bool isinf(bool a) { return false; }
 };

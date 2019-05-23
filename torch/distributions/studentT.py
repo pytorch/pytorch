@@ -30,15 +30,15 @@ class StudentT(Distribution):
     @property
     def mean(self):
         m = self.loc.clone()
-        m[self.df <= 1] = nan
+        m[(self.df <= 1).byte()] = nan
         return m
 
     @property
     def variance(self):
         m = self.df.clone()
-        m[self.df > 2] = self.scale[self.df > 2].pow(2) * self.df[self.df > 2] / (self.df[self.df > 2] - 2)
-        m[(self.df <= 2) & (self.df > 1)] = inf
-        m[self.df <= 1] = nan
+        m[(self.df > 2).byte()] = self.scale[(self.df > 2).byte()].pow(2) * self.df[(self.df > 2).byte()] / (self.df[(self.df > 2).byte()] - 2)
+        m[(self.df <= 2).byte() & (self.df > 1).byte()] = inf
+        m[(self.df <= 1).byte()] = nan
         return m
 
     def __init__(self, df, loc=0., scale=1., validate_args=None):

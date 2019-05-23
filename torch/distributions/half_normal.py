@@ -50,7 +50,7 @@ class HalfNormal(TransformedDistribution):
 
     def log_prob(self, value):
         log_prob = self.base_dist.log_prob(value) + math.log(2)
-        log_prob[value.expand(log_prob.shape) < 0] = -inf
+        log_prob[(value.expand(log_prob.shape) < 0).byte()] = -inf
         return log_prob
 
     def cdf(self, value):

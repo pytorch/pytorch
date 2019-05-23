@@ -181,6 +181,8 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
       return onnx::TensorProto_DataType_INT32;
     case at::kLong:
       return onnx::TensorProto_DataType_INT64;
+    case at::kBool:
+      return onnx::TensorProto_DataType_BOOL;
     default:
       AT_ERROR("unexpected tensor scalar type");
   }

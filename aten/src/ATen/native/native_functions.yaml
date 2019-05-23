@@ -127,6 +127,8 @@
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function, method
+  cpu_bool: True
+  cuda_bool: True
   dispatch:
     CPU: add
     CUDA: add
@@ -136,6 +138,8 @@
 
 - func: add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  cpu_bool: True
+  cuda_bool: True
   dispatch:
     CPU: add_
     CUDA: add_
@@ -144,6 +148,8 @@
     MkldnnCPU: mkldnn_add_
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  cpu_bool: True
+  cuda_bool: True
   dispatch:
     CPU: add_out
     CUDA: add_out
