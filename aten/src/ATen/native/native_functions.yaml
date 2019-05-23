@@ -453,6 +453,9 @@
   variants: method
   device_guard: False
 
+- func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
+  dispatch: {}
+
 - func: cos(Tensor self) -> Tensor
   variants: function, method
 
