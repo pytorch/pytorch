@@ -106,6 +106,14 @@ class LayerModelHelper(model_helper.ModelHelper):
             (name, value)
         )
 
+    # an empty white_set will skip everything
+    def filter_metrics_schema(self, white_set):
+        logger.info("Filter metric schema with white_set {}".format(white_set))
+        field_names = self._metrics_schema.field_names()
+        for name in field_names:
+            if name not in white_set:
+                self._metrics_schema = self._metrics_schema - schema.Struct((name, schema.Scalar()))
+
     def add_ad_hoc_plot_blob(self, blob, dtype=None):
         assert isinstance(
             blob, (six.string_types, core.BlobReference)
