@@ -1130,6 +1130,7 @@ const std::vector<std::string> functions = {
                 res = mask * input / p1m
 
             if not train:
+                p1m = 1.
                 res = input
                 mask = torch.ones_like(input)
 
