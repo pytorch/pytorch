@@ -1568,6 +1568,3 @@
 
 - name: multinomial(Tensor self, int64_t num_samples, bool replacement, *, Generator generator)
   output_differentiability: [False]
-
-- name: is_nonzero(Tensor self)
-  output_differentiability: [False]
