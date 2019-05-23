@@ -2920,12 +2920,27 @@
 
 - func: random_(Tensor(a!) self, int from, int to, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  cpu_bool: True
+  cuda_bool: True
+  dispatch:
+    CPU: clamped_random_cpu_
+    CUDA: clamped_random_cuda_
 
 - func: random_(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  cpu_bool: True
+  cuda_bool: True
+  dispatch:
+    CPU: capped_random_cpu_
+    CUDA: capped_random_cuda_
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  cpu_bool: True
+  cuda_bool: True
+  dispatch:
+    CPU: random_cpu_
+    CUDA: random_cuda_
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
