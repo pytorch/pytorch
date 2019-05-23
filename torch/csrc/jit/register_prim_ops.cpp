@@ -24,8 +24,8 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
-#include <ctype.h>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <exception>
 #include <fstream>
