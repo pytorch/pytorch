@@ -10,6 +10,7 @@
 #include <TH/TH.h>  // for USE_LAPACK
 
 #include <vector>
+#include <iostream>
 
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
@@ -695,23 +696,22 @@ static void apply_geqrf(Tensor& self, Tensor& tau, std::vector<int64_t>& infos) 
   auto m = self.size(-2);
   auto n = self.size(-1);
 
-  int lwork;
-  scalar_t wkopt;
-  Tensor work;
-
   int info;
+
+  // Run once, first to get the optimum work size.
+  // Since we deal with batches of matrices with same dimensions, doing this outside saves
+  // batch_size - 1 calls to geqrf
+  int lwork = -1;
+  scalar_t wkopt;
+  lapackGeqrf<scalar_t>(m, n, self_data, m, tau_data, &wkopt, lwork, &info);
+  lwork = static_cast<int>(wkopt);
+  Tensor work = at::empty({lwork}, self.options());
+
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 
-    // Run twice, first to get the optimum work size
-    lwork = -1;
-    lapackGeqrf<scalar_t>(m, n, self_working_ptr, m, tau_working_ptr, &wkopt, lwork, &info);
-
-    lwork = static_cast<int>(wkopt);
-    work = at::empty({lwork}, self.options());
-
-    // now to compute the actual R and TAU
+    // now compute the actual R and TAU
     lapackGeqrf<scalar_t>(m, n, self_working_ptr, m, tau_working_ptr, work.data<scalar_t>(), lwork, &info);
     infos[i] = info;
     if (info != 0) {
@@ -735,23 +735,22 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns, std:
   auto n = self.size(-1);
   auto k = std::min(m, n);
 
-  int lwork;
-  scalar_t wkopt;
-  Tensor work;
-
   int info;
+
+  // Run once, first to get the optimum work size.
+  // Since we deal with batches of matrices with same dimensions, doing this outside saves
+  // batch_size - 1 calls to orgqr
+  int lwork = -1;
+  scalar_t wkopt;
+  lapackOrgqr<scalar_t>(m, n_columns, k, self_data, m, tau_data, &wkopt, lwork, &info);
+  lwork = static_cast<int>(wkopt);
+  Tensor work = at::empty({lwork}, self.options());
+
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 
-    // Run twice, first to get the optimum work size
-    lwork = -1;
-    lapackOrgqr<scalar_t>(m, n_columns, k, self_working_ptr, m, tau_working_ptr, &wkopt, lwork, &info);
-
-    lwork = static_cast<int>(wkopt);
-    work = at::empty({lwork}, self.options());
-
-    // now to compute the actual Q
+    // now compute the actual Q
     lapackOrgqr<scalar_t>(m, n_columns, k, self_working_ptr, m, tau_working_ptr, work.data<scalar_t>(), lwork, &info);
     infos[i] = info;
     if (info != 0) {

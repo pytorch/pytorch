@@ -5148,7 +5148,7 @@ class _TestTorchMixin(object):
             self.assertEqual(Q.size(-1), n_columns)
 
             # Check1: A = QR
-            self.assertEqual(A, torch.matmul(Q, R), "{}\n{}".format(Q.cpu() - A.cpu().qr(some)[0], R.cpu() - A.cpu().qr(some)[1]))
+            self.assertEqual(A, torch.matmul(Q, R))
 
             # Check2: A = QR (with out)
             Q_out, R_out = cast(torch.Tensor()), cast(torch.Tensor())
@@ -5166,8 +5166,10 @@ class _TestTorchMixin(object):
 
         tensor_dims_list = [(3, 5), (5, 5), (5, 3),  # Single matrix
                             (7, 3, 5), (7, 5, 5), (7, 5, 3),  # 3-dim Tensors
-                            (7, 5, 3, 5), (7, 5, 5, 5), (7, 5, 5, 3)]  # 4-dim Tensors
+                            (7, 5, 3, 5), (7, 5, 5, 5), (7, 5, 5, 3)  # 4-dim Tensors
+                           ]
         for tensor_dims, some in product(tensor_dims_list, [True, False]):
+            print("TD: {}\tSOME: {}".format(tensor_dims, some))
             run_test(tensor_dims, some)
 
     @skipIfNoLapack

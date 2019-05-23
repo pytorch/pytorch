@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/TensorUtils.h>
 #include <limits>
 #include <sstream>
 
@@ -194,14 +195,7 @@ static inline std::tuple<std::vector<int64_t>,
   int64_t m = input.size(-2), n = input.size(-1);
   int64_t n_columns_q;
 
-  // Q should be a column-major or a batch of column-major matrices
-  // ... x m x n will have strides: ...., n, 1
-  // We require: ...., 1, m
-  auto q_strides = input.strides().vec();
-  q_strides[input.dim() - 2] = 1;
-  q_strides[input.dim() - 1] = m;
-
-  // We also need to compute the required size of Q based on the `some` option
+  // We need to compute the required size of Q based on the `some` option
   auto q_sizes = input.sizes().vec();
   if (!some && m > n) {
     q_sizes[input.dim() - 1] = m;
@@ -210,6 +204,13 @@ static inline std::tuple<std::vector<int64_t>,
     q_sizes[input.dim() - 1] = n;
     n_columns_q = std::min(m, n);
   }
+  auto q_strides = at::detail::defaultStrides(q_sizes);
+
+  // Q should be a column-major or a batch of column-major matrices
+  // ... x m x n will have strides: ...., n, 1
+  // We require: ...., 1, m
+  q_strides[input.dim() - 1] = m;
+  q_strides[input.dim() - 2] = 1;
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 

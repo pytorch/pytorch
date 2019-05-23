@@ -3805,9 +3805,6 @@ Otherwise, if :attr:`some` is ``False``, this function returns the complete QR f
           give you the same one across platforms - it will depend on your
           LAPACK implementation.
 
-.. note:: Irrespective of the original strides, the returned matrix :math:`Q` will be
-          transposed, i.e. with strides `Q.contiguous().transpose(-2, -1).strides()`.
-
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
                 batch dimensions consisting of matrices of dimension :math:`m \times n`.
