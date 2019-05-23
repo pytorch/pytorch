@@ -145,9 +145,6 @@
 #include <THNN/generic/SpatialAveragePooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SpatialDilatedMaxPooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/SpatialMaxUnpooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
