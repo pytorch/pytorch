@@ -10,6 +10,8 @@ binary_mac_build: &binary_mac_build
   - attach_workspace:
       at: ~/workspace
   - run:
+      <<: *should_run_job
+  - run:
       <<: *binary_checkout
   - run:
       <<: *binary_populate_env
@@ -46,6 +48,8 @@ binary_mac_upload: &binary_mac_upload
   steps:
   - attach_workspace:
       at: ~/workspace
+  - run:
+      <<: *should_run_job
   - run:
       <<: *binary_checkout
   - run:
