@@ -1599,7 +1599,7 @@ struct to_ir {
   // print(a)
   void emitRaise(const Raise& stmt) {
     auto exceptionNode = stmt.expr().get().tree();
-    if (exceptionNode->kind() == TK_APPLY) {
+    if (exceptionNode->kind() == TK_APPLY && !Apply(exceptionNode).inputs().empty()) {
       auto apply = Apply(exceptionNode);
       auto exception_name = Var(apply.callee()).name().name();
       auto exception_arg_expr = Expr(apply.inputs()[0]);
@@ -1615,9 +1615,10 @@ struct to_ir {
                                exceptionNode->range())
                            ->setType(StringType::get());
       graph->insert(prim::RaiseException, {final_msg}, {}, stmt.range());
-    } else {
-      throw ErrorReport(stmt.range())
-          << "exceptions must derive from BaseException";
+    } else { // Exception isn't a function with at least one argument
+      const std::string exception = "Exception";
+      auto string_input = insertConstant(*graph, exception, nullptr, stmt.range());
+      graph->insert(prim::RaiseException, {string_input}, {}, stmt.range());
     }
   }
 
