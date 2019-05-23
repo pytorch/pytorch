@@ -162,15 +162,7 @@ struct Value {
 
  public:
   Value* setType(TypePtr type);
-  void inferTypeFrom(const at::Tensor& output) {
-    if (output.is_mkldnn()) {
-      // mkldnn tensor as opaque tensor doesn't have strides, so we can
-      // not create a CompleteTensorType
-      setType(DimensionedTensorType::create(output));
-      return;
-    }
-    setType(CompleteTensorType::create(output));
-  }
+  void inferTypeFrom(const at::Tensor& output);
   const TypePtr& type() const {
     AT_ASSERT(type_ != nullptr);
     return type_;

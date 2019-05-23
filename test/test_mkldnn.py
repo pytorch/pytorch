@@ -250,11 +250,15 @@ class TestMkldnn(TestCase):
 
     def test_sigmoid(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10
-        sigmoid = torch.nn.Sigmoid()
+        mkldnn_x = x.to_mkldnn()
         self.assertEqual(
-            sigmoid(x),
-            sigmoid(x.to_mkldnn()).to_dense(),
+            torch.sigmoid(x),
+            torch.sigmoid(mkldnn_x).to_dense(),
         )
+        # inplace
+        torch.sigmoid_(x)
+        torch.sigmoid_(mkldnn_x)
+        self.assertEqual(x, mkldnn_x.to_dense())
 
     def _test_serialization(self, module, inputs):
         with TemporaryFileName() as fname:
