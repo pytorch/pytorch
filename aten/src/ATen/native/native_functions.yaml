@@ -1593,12 +1593,17 @@
 
 - func: sigmoid(Tensor self) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: sigmoid
+    CUDA: sigmoid
+    MkldnnCPU: mkldnn_sigmoid
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
     CPU: _sigmoid__cpu
     CUDA: _sigmoid__cuda
+    MkldnnCPU: mkldnn_sigmoid_
 
 - func: sigmoid(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
