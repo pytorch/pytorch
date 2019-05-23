@@ -119,21 +119,6 @@ pip install --user pytest-sugar
 #####################
 # torchvision tests #
 #####################
-
-install_torchvision() {
-  echo "Installing torchvision at branch master"
-  rm -rf vision
-  # TODO: This git clone is bad, it means pushes to torchvision can break
-  # PyTorch CI
-  git clone https://github.com/pytorch/vision --quiet
-  pushd vision
-  pip install -q --user .
-  popd
-  rm -rf vision
-}
-
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-  # install cpu version of torchvision
-  install_torchvision
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
