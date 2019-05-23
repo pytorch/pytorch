@@ -12,7 +12,7 @@ struct Function;
 } // namespace jit
 } // namespace torch
 namespace c10 {
-template<class Key, class Value> class Dict;
+template<class Key, class Value> class DictPtr;
 template<class T> class ListPtr;
 struct IValue;
 namespace ivalue {
@@ -220,7 +220,7 @@ struct CAFFE2_API IValue final {
   const c10::ListPtr<bool>& toBoolListRef() const;
   const c10::ListPtr<at::Tensor>& toTensorListRef() const;
   const c10::ListPtr<IValue>& toGenericListRef() const;
-  const c10::Dict<IValue, IValue>& toGenericDictRef() const;
+  const c10::DictPtr<IValue, IValue>& toGenericDictRef() const;
   const std::string& toStringRef() const;
 
   // ConstantString
@@ -264,13 +264,13 @@ struct CAFFE2_API IValue final {
 
   // GenericDict
   IValue(c10::intrusive_ptr<ivalue::GenericDict> v);
-  IValue(c10::Dict<IValue, IValue> v);
+  IValue(c10::DictPtr<IValue, IValue> v);
   bool isGenericDict() const { return Tag::GenericDict == tag; }
   c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() &&;
   c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() const &;
 
   template<class Key, class Value>
-  IValue(c10::Dict<Key, Value> v);
+  IValue(c10::DictPtr<Key, Value> v);
 
   // ClassType
   IValue(c10::intrusive_ptr<ivalue::Object> v);

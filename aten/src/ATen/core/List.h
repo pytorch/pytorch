@@ -19,6 +19,7 @@ template<class T> ListPtr<T> make_list(ArrayRef<T> values);
 namespace detail {
 template<class T> T list_element_to(const T& element);
 template<class T> T list_element_to(const IValue& element);
+template<class T, class Enable> struct list_element_from;
 
 template<class StorageT>
 struct ListImpl final : public c10::intrusive_ptr_target {
@@ -157,7 +158,7 @@ private:
     bool,
     at::Tensor
   >;
-public: // TODO private
+
   using StorageT = guts::conditional_t<
     guts::typelist::contains<types_with_direct_list_implementation, T>::value,
     T, // The types listed in types_with_direct_list_implementation store the list as std::vector<T>
@@ -360,6 +361,7 @@ protected:
   template<class T_> friend ListPtr<T_> impl::toTypedList(ListPtr<IValue>);
   template<class T_> friend ListPtr<IValue> impl::toGenericList(ListPtr<T_>);
   friend const IValue* impl::ptr_to_first_element(const ListPtr<IValue>& list);
+  template<class T_, class Enable> friend struct detail::list_element_from;
 };
 
 namespace impl {

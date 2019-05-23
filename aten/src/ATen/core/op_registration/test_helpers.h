@@ -36,13 +36,13 @@ struct InputToIValue<c10::ListPtr<T>> final {
   }
 };
 template<class Key, class Value>
-struct InputToIValue<c10::ListPtr<c10::Dict<Key, Value>>> final {
+struct InputToIValue<c10::ListPtr<c10::DictPtr<Key, Value>>> final {
   template<class T_>
   static c10::IValue call(T_&& v) {
     auto list = c10::ivalue::GenericList::create(c10::impl::make_generic_list());
     list->elements().reserve(v.size());
-    for (c10::Dict<Key, Value> e : v) {
-      list->elements().push_back(InputToIValue<c10::Dict<Key, Value>>::call(std::move(e)));
+    for (c10::DictPtr<Key, Value> e : v) {
+      list->elements().push_back(InputToIValue<c10::DictPtr<Key, Value>>::call(std::move(e)));
     }
     return list;
   }
@@ -60,7 +60,7 @@ struct InputToIValue<c10::ListPtr<std::string>> final {
   }
 };
 template<class Key, class Value>
-struct InputToIValue<c10::Dict<Key, Value>> final {
+struct InputToIValue<c10::DictPtr<Key, Value>> final {
   template<class T_>
   static c10::IValue call(T_&& v) {
     return c10::IValue(c10::impl::toGenericDict(std::move(v)));

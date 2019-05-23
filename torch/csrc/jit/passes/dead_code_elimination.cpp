@@ -202,7 +202,7 @@ class DeadCodeEliminator {
       auto schema = node->maybeSchema();
       return schema && schema->is_mutable();
     } else {
-      return aliasDb_->hasUntrackedEffects(node);
+      return aliasDb_->writesToWildcard(node);
     }
   }
 

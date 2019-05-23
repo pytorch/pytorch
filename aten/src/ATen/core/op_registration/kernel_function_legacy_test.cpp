@@ -25,7 +25,8 @@ using c10::guts::make_unique;
 using c10::ivalue::TensorList;
 using c10::ivalue::IntList;
 using c10::intrusive_ptr;
-using c10::Dict;
+using c10::DictPtr;
+using c10::make_dict;
 using at::Tensor;
 using std::string;
 using std::unique_ptr;
@@ -209,11 +210,11 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListO
   EXPECT_EQ(6, result[0].toIntListRef()[2]);
 }
 
-std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> kernelWithMultipleOutputs(Tensor) {
-  Dict<string, Tensor> dict;
+std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>> kernelWithMultipleOutputs(Tensor) {
+  DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
   dict.insert("first", dummyTensor(TensorType1()));
   dict.insert("second", dummyTensor(TensorType2()));
-  return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
+  return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>>(
     dummyTensor(TensorType2()),
     5,
     {dummyTensor(TensorType1()), dummyTensor(TensorType2())},
@@ -516,7 +517,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithStringLi
 
 int captured_dict_size = 0;
 
-void kernelWithDictInputWithoutOutput(Dict<string, Tensor> input1) {
+void kernelWithDictInputWithoutOutput(DictPtr<string, Tensor> input1) {
   captured_dict_size = input1.size();
 }
 
@@ -528,7 +529,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictInpu
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
-  Dict<string, Tensor> dict;
+  DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
   dict.insert("key1", dummyTensor(TensorType1()));
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
@@ -536,7 +537,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictInpu
   EXPECT_EQ(2, captured_dict_size);
 }
 
-string kernelWithDictInputWithOutput(Dict<string, string> input1) {
+string kernelWithDictInputWithOutput(DictPtr<string, string> input1) {
   return input1.at("key2");
 }
 
@@ -547,7 +548,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictInpu
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
   ASSERT_TRUE(op.has_value());
 
-  Dict<string, string> dict;
+  DictPtr<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -555,7 +556,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictInpu
   EXPECT_EQ("value2", outputs[0].toString()->string());
 }
 
-Dict<string, string> kernelWithDictOutput(Dict<string, string> input) {
+DictPtr<string, string> kernelWithDictOutput(DictPtr<string, string> input) {
   return input;
 }
 
@@ -566,7 +567,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictOutp
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
   ASSERT_TRUE(op.has_value());
 
-  Dict<string, string> dict;
+  DictPtr<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -590,7 +591,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnordere
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
-  c10::Dict<string, Tensor> dict;
+  c10::DictPtr<string, Tensor> dict = c10::make_dict<string, Tensor>();
   dict.insert("key1", dummyTensor(TensorType1()));
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
@@ -609,7 +610,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnordere
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::Dict<string, string> dict;
+  c10::DictPtr<string, string> dict = c10::make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -628,7 +629,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnordere
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::Dict<string, string> dict;
+  c10::DictPtr<string, string> dict = c10::make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -651,7 +652,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMapOfLis
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::Dict<string, c10::ListPtr<int64_t>> dict;
+  c10::DictPtr<string, c10::ListPtr<int64_t>> dict = c10::make_dict<string, c10::ListPtr<int64_t>>();
   dict.insert("key1", c10::make_list<int64_t>({10, 20}));
   dict.insert("key2", c10::make_list<int64_t>({30, 40}));
   auto outputs = callOp(*op, dict);
@@ -678,18 +679,18 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMapOfLis
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::Dict<string, c10::ListPtr<c10::Dict<int64_t, string>>> dict;
-  auto dict1 = c10::Dict<int64_t, string>();
+  c10::DictPtr<string, c10::ListPtr<c10::DictPtr<int64_t, string>>> dict = c10::make_dict<string, c10::ListPtr<c10::DictPtr<int64_t, string>>>();
+  auto dict1 = c10::make_dict<int64_t, string>();
   dict1.insert(10, "10");
   dict1.insert(20, "20");
-  dict.insert("key1", c10::make_list<c10::Dict<int64_t, string>>({dict1}));
-  auto dict2 = c10::Dict<int64_t, string>();
+  dict.insert("key1", c10::make_list<c10::DictPtr<int64_t, string>>({dict1}));
+  auto dict2 = c10::make_dict<int64_t, string>();
   dict2.insert(30, "30");
   dict2.insert(40, "40");
-  dict.insert("key2", c10::make_list<c10::Dict<int64_t, string>>({dict2}));
+  dict.insert("key2", c10::make_list<c10::DictPtr<int64_t, string>>({dict2}));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  auto output = c10::impl::toTypedDict<string, c10::ListPtr<c10::Dict<int64_t, string>>>(std::move(outputs[0].toGenericDict()->elements()));
+  auto output = c10::impl::toTypedDict<string, c10::ListPtr<c10::DictPtr<int64_t, string>>>(std::move(outputs[0].toGenericDict()->elements()));
 
   EXPECT_EQ(2, output.size());
   EXPECT_EQ(1, output.at("key1").size());
@@ -712,13 +713,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMa
   auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::Dict<string, int64_t> dict1;
+  c10::DictPtr<string, int64_t> dict1 = c10::make_dict<string, int64_t>();
   dict1.insert("1", 1);
   dict1.insert("2", 2);
-  c10::Dict<string, int64_t> dict2;
+  c10::DictPtr<string, int64_t> dict2 = c10::make_dict<string, int64_t>();
   dict2.insert("3", 3);
   dict2.insert("4", 4);
-  c10::ListPtr<c10::Dict<string, int64_t>> list = c10::make_list<c10::Dict<string, int64_t>>({dict1, dict2});
+  c10::ListPtr<c10::DictPtr<string, int64_t>> list = c10::make_list<c10::DictPtr<string, int64_t>>({dict1, dict2});
   auto outputs = callOp(*op, list);
   EXPECT_EQ(1, outputs.size());
   c10::impl::GenericListPtr output = std::move(outputs[0].toGenericList()->elements());
@@ -743,14 +744,14 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMa
   auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::Dict<string, c10::ListPtr<int64_t>> dict1;
+  c10::DictPtr<string, c10::ListPtr<int64_t>> dict1 = c10::make_dict<string, c10::ListPtr<int64_t>>();
   dict1.insert("1", c10::make_list<int64_t>({1, 2}));
   dict1.insert("3", c10::make_list<int64_t>({3, 4}));
-  c10::Dict<string, c10::ListPtr<int64_t>> dict2;
+  c10::DictPtr<string, c10::ListPtr<int64_t>> dict2 = c10::make_dict<string, c10::ListPtr<int64_t>>();
   dict2.insert("5", c10::make_list<int64_t>({5, 6}));
   dict2.insert("7", c10::make_list<int64_t>({7, 8}));
-  c10::ListPtr<c10::Dict<string, c10::ListPtr<int64_t>>> list =
-      c10::make_list<c10::Dict<string, c10::ListPtr<int64_t>>>({ dict1, dict2 });
+  c10::ListPtr<c10::DictPtr<string, c10::ListPtr<int64_t>>> list =
+      c10::make_list<c10::DictPtr<string, c10::ListPtr<int64_t>>>({ dict1, dict2 });
   auto outputs = callOp(*op, list);
   EXPECT_EQ(1, outputs.size());
   c10::impl::GenericListPtr output = std::move(outputs[0].toGenericList()->elements());
