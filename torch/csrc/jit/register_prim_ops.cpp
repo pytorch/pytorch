@@ -1752,7 +1752,7 @@ RegisterOperators reg2({
       listSelect<Shared<c_type>>),                                          \
       Operator(                                                             \
           "aten::append( " decl_type "[](a!) self, " decl_type              \
-          "(c) el) -> " decl_type "[](a!)",                                 \
+          "(c -> *) el) -> " decl_type "[](a!)",                            \
           listAppend<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
           "aten::reverse( " decl_type "[](a!) self) -> ()",                 \
@@ -1768,7 +1768,7 @@ RegisterOperators reg2({
           listCopy<Shared<c_type>>),                                        \
       Operator(                                                             \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type      \
-          " el) -> " decl_type "[](a!)",                                    \
+          "(b -> *) el) -> " decl_type "[](a!)",                            \
           listSetItem<Shared<c_type>, c_type::ElemType>),                   \
       Operator(                                                             \
           "aten::clear( " decl_type "[](a!) self) -> ()",                   \
@@ -1776,7 +1776,7 @@ RegisterOperators reg2({
       Operator(                                                             \
           "aten::insert( " decl_type                                        \
           "[](a!) self, int idx,                 \
-          " decl_type " el) -> ()",                                         \
+          " decl_type "(b -> *) el) -> ()",                                 \
           listInsert<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
           "aten::pop(" decl_type                                            \
@@ -1962,7 +1962,7 @@ RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::add, a + b),
     DEFINE_BINARY_OP(aten::sub, a - b),
     DEFINE_BINARY_OP(aten::mul, a* b),
-    DEFINE_BINARY_OP(aten::pow, static_cast<decltype(a)>(pow(a, b))),
+    DEFINE_BINARY_OP(aten::pow, pow(a, b)),
     // min and max are in prim:: because there is a difference between
     // the python builtin 'min' and 'torch.min'
     DEFINE_BINARY_OP(prim::min, a < b ? a : b),
@@ -2034,24 +2034,6 @@ RegisterOperators reg2({
           double a, b;
           pop(stack, a, b);
           push(stack, a / b);
-          return 0;
-        }),
-
-    Operator(
-        "aten::pow(float a, float b) -> float",
-        [](Stack& stack) {
-          double a, b;
-          pop(stack, a, b);
-          push(stack, std::pow(a, b));
-          return 0;
-        }),
-    Operator(
-        "aten::pow(float a, int b) -> float",
-        [](Stack& stack) {
-          double a;
-          int b;
-          pop(stack, a, b);
-          push(stack, std::pow(a, b));
           return 0;
         }),
 
@@ -2281,7 +2263,7 @@ RegisterOperators reg2({
           dictGetDefault),                                                    \
       Operator(                                                               \
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
-          " idx, t v) -> ()",                                                 \
+          " idx, t(b -> *) v) -> ()",                                         \
           dictSetItem)
 
     CREATE_DICT_OPS("str"),
