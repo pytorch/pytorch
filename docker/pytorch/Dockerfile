@@ -5,10 +5,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
          cmake \
          git \
          curl \
-         vim \
          ca-certificates \
          libjpeg-dev \
-         libpng-dev &&\
+         libpng-dev && \
      rm -rf /var/lib/apt/lists/*
 
 
