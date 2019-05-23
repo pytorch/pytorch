@@ -638,33 +638,33 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   // TODO Do we want to support list of optional ?
 
   // dict types
-  c10::Dict<std::string, std::string> str_dict;
+  c10::DictPtr<std::string, std::string> str_dict = c10::make_dict<std::string, std::string>();
   str_dict.insert("key1", "value1");
   str_dict.insert("key2", "value2");
-  testArgTypes<c10::Dict<std::string, std::string>>::test(
-    str_dict, [] (c10::Dict<std::string, std::string> v) {
+  testArgTypes<c10::DictPtr<std::string, std::string>>::test(
+    str_dict, [] (c10::DictPtr<std::string, std::string> v) {
       EXPECT_EQ(2, v.size());
       EXPECT_EQ("value1", v.at("key1"));
       EXPECT_EQ("value2", v.at("key2"));
     },
     str_dict, [] (const IValue& v) {
-      c10::Dict<std::string, std::string> dict = c10::impl::toTypedDict<std::string, std::string>(std::move(v.toGenericDict()->elements()));
+      c10::DictPtr<std::string, std::string> dict = c10::impl::toTypedDict<std::string, std::string>(std::move(v.toGenericDict()->elements()));
       EXPECT_EQ(2, dict.size());
       EXPECT_EQ("value1", dict.at("key1"));
       EXPECT_EQ("value2", dict.at("key2"));
     },
     "(Dict(str, str) a) -> Dict(str, str)");
-  c10::Dict<int64_t, Tensor> tensor_dict;
+  c10::DictPtr<int64_t, Tensor> tensor_dict = c10::make_dict<int64_t, Tensor>();
   tensor_dict.insert(1, dummyTensor(TensorType1()));
   tensor_dict.insert(2, dummyTensor(TensorType2()));
-  testArgTypes<c10::Dict<int64_t, Tensor>>::test(
-    tensor_dict, [] (c10::Dict<int64_t, Tensor> v) {
+  testArgTypes<c10::DictPtr<int64_t, Tensor>>::test(
+    tensor_dict, [] (c10::DictPtr<int64_t, Tensor> v) {
       EXPECT_EQ(2, v.size());
       EXPECT_EQ(TensorType1(), v.at(1).type_id());
       EXPECT_EQ(TensorType2(), v.at(2).type_id());
     },
     tensor_dict, [] (const IValue& v) {
-      c10::Dict<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(std::move(v.toGenericDict()->elements()));
+      c10::DictPtr<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(std::move(v.toGenericDict()->elements()));
       EXPECT_EQ(2, dict.size());
       EXPECT_EQ(TensorType1(), dict.at(1).type_id());
       EXPECT_EQ(TensorType2(), dict.at(2).type_id());
