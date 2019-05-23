@@ -113,6 +113,31 @@ class TestLayers(LayersTestCase):
         assert core.BlobReference('loss_blob_in_tuple_1')\
          in self.model.loss.field_blobs()
 
+    def testFilterMetricSchema(self):
+        self.model.add_metric_field("a:b", schema.Scalar())
+        self.model.add_metric_field("a:c", schema.Scalar())
+        self.model.add_metric_field("d", schema.Scalar())
+
+        self.assertEqual(
+            self.model.metrics_schema,
+            schema.Struct(
+                ("a", schema.Struct(
+                    ("b", schema.Scalar()),
+                    ("c", schema.Scalar()),
+                )),
+                ("d", schema.Scalar()),
+            ))
+
+        self.model.filter_metrics_schema({"a:b", "d"})
+        self.assertEqual(
+            self.model.metrics_schema,
+            schema.Struct(
+                ("a", schema.Struct(
+                    ("b", schema.Scalar()),
+                )),
+                ("d", schema.Scalar()),
+            ))
+
     def testAddOutputSchema(self):
         # add the first field
         self.model.add_output_schema('struct', schema.Struct())
