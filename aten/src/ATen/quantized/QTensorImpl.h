@@ -26,25 +26,6 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
   }
 
   /**
-   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
-   * from one TensorImpl to another TensorImpl.
-   *
-   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
-   */
-  void copy_tensor_data(
-      const TensorImpl* src_impl,
-      TensorImpl* dest_impl,
-      const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const override {
-    TensorImpl::copy_tensor_data(src_impl, dest_impl, version_counter, allow_tensor_metadata_change);
-
-    // OpaqueTensorImpl-specific fields.
-    auto src_q_impl = static_cast<const QTensorImpl*>(src_impl);
-    auto dest_q_impl = static_cast<QTensorImpl*>(dest_impl);
-    dest_q_impl->quantizer_ = src_q_impl->quantizer_;
-  }
-
-  /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`,
@@ -80,6 +61,23 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
 
  private:
   QuantizerPtr quantizer_;
+
+  /**
+   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * from one TensorImpl to another TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  static void copy_tensor_data(
+      const QTensorImpl* src_q_impl,
+      QTensorImpl* dest_q_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    TensorImpl::copy_tensor_data(src_q_impl, dest_q_impl, version_counter, allow_tensor_metadata_change);
+
+    // OpaqueTensorImpl-specific fields.
+    dest_q_impl->quantizer_ = src_q_impl->quantizer_;
+  }
 };
 
 } // namespace at

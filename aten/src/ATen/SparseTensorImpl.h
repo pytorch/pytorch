@@ -184,29 +184,6 @@ public:
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
 
   /**
-   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
-   * from one TensorImpl to another TensorImpl.
-   *
-   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
-   */
-  void copy_tensor_data(
-      const TensorImpl* src_impl,
-      TensorImpl* dest_impl,
-      const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const override {
-    TensorImpl::copy_tensor_data(src_impl, dest_impl, version_counter, allow_tensor_metadata_change);
-
-    // Sparse-specific fields
-    auto src_sparse_impl = static_cast<const SparseTensorImpl*>(src_impl);
-    auto dest_sparse_impl = static_cast<SparseTensorImpl*>(dest_impl);
-    dest_sparse_impl->sparse_dim_ = src_sparse_impl->sparse_dim();
-    dest_sparse_impl->dense_dim_ = src_sparse_impl->dense_dim();
-    dest_sparse_impl->indices_ = src_sparse_impl->indices();
-    dest_sparse_impl->values_ = src_sparse_impl->values();
-    dest_sparse_impl->coalesced_ = src_sparse_impl->coalesced();
-  }
-
-  /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`,
@@ -238,6 +215,27 @@ public:
   }
 private:
     explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
+
+  /**
+   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * from one TensorImpl to another TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  static void copy_tensor_data(
+      const SparseTensorImpl* src_sparse_impl,
+      SparseTensorImpl* dest_sparse_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    TensorImpl::copy_tensor_data(src_sparse_impl, dest_sparse_impl, version_counter, allow_tensor_metadata_change);
+
+    // Sparse-specific fields
+    dest_sparse_impl->sparse_dim_ = src_sparse_impl->sparse_dim();
+    dest_sparse_impl->dense_dim_ = src_sparse_impl->dense_dim();
+    dest_sparse_impl->indices_ = src_sparse_impl->indices();
+    dest_sparse_impl->values_ = src_sparse_impl->values();
+    dest_sparse_impl->coalesced_ = src_sparse_impl->coalesced();
+  }
 };
 
 } // namespace at

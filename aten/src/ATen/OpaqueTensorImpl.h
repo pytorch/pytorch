@@ -78,25 +78,6 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
   }
 
   /**
-   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
-   * from one TensorImpl to another TensorImpl.
-   *
-   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
-   */
-  void copy_tensor_data(
-      const TensorImpl* src_impl,
-      TensorImpl* dest_impl,
-      const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const override {
-    TensorImpl::copy_tensor_data(src_impl, dest_impl, version_counter, allow_tensor_metadata_change);
-
-    // OpaqueTensorImpl-specific fields.
-    auto src_opaque_impl = static_cast<const OpaqueTensorImpl<OpaqueHandle>*>(src_impl);
-    auto dest_opaque_impl = static_cast<OpaqueTensorImpl<OpaqueHandle>*>(dest_impl);
-    dest_opaque_impl->opaque_handle_ = src_opaque_impl->opaque_handle_;
-  }
-
-  /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`,
@@ -132,6 +113,23 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
 
 private:
   OpaqueHandle opaque_handle_;
+
+  /**
+   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * from one TensorImpl to another TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  static void copy_tensor_data(
+      const OpaqueTensorImpl<OpaqueHandle>* src_opaque_impl,
+      OpaqueTensorImpl<OpaqueHandle>* dest_opaque_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    TensorImpl::copy_tensor_data(src_opaque_impl, dest_opaque_impl, version_counter, allow_tensor_metadata_change);
+
+    // OpaqueTensorImpl-specific fields.
+    dest_opaque_impl->opaque_handle_ = src_opaque_impl->opaque_handle_;
+  }
 };
 
 } // namespace at

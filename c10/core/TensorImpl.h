@@ -867,31 +867,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // storage / storage_offset). See NOTE [ Metadata Change for a Detached Tensor ] for details.
 
   /**
-   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
-   * from one TensorImpl to another TensorImpl.
-   *
-   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
-   */
-  virtual void copy_tensor_data(
-      const TensorImpl* src_impl,
-      TensorImpl* dest_impl,
-      const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const {
-    dest_impl->storage_ = src_impl->storage_;
-    dest_impl->sizes_ = src_impl->sizes_;
-    dest_impl->strides_ = src_impl->strides_;
-    dest_impl->storage_offset_ = src_impl->storage_offset_;
-    dest_impl->data_type_ = src_impl->data_type_;
-    dest_impl->device_opt_ = src_impl->device_opt_;
-    dest_impl->type_id_ = src_impl->type_id_;
-    dest_impl->is_contiguous_ = src_impl->is_contiguous_;
-    dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
-    dest_impl->reserved_ = src_impl->reserved_;
-    dest_impl->set_version_counter(version_counter);
-    dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-  }
-
-  /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`,
@@ -1424,6 +1399,31 @@ private:
    * strides of a tensor.
    */
   bool compute_contiguous() const;
+
+  /**
+   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * from one TensorImpl to another TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  static void copy_tensor_data(
+      const TensorImpl* src_impl,
+      TensorImpl* dest_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const {
+    dest_impl->storage_ = src_impl->storage_;
+    dest_impl->sizes_ = src_impl->sizes_;
+    dest_impl->strides_ = src_impl->strides_;
+    dest_impl->storage_offset_ = src_impl->storage_offset_;
+    dest_impl->data_type_ = src_impl->data_type_;
+    dest_impl->device_opt_ = src_impl->device_opt_;
+    dest_impl->type_id_ = src_impl->type_id_;
+    dest_impl->is_contiguous_ = src_impl->is_contiguous_;
+    dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
+    dest_impl->reserved_ = src_impl->reserved_;
+    dest_impl->set_version_counter(version_counter);
+    dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+  }
 
 protected:
   /**
