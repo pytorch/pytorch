@@ -89,9 +89,14 @@ class MkldnnBatchNorm2d(torch.jit.ScriptModule):
     def __init__(self, dense_module):
         super(MkldnnBatchNorm2d, self).__init__()
 
-        assert(not dense_module.training)
-        assert(dense_module.track_running_stats)
-        assert(dense_module.affine)
+        if dense_module.training:
+            raise ValueError(
+                'Trainign in Mkldnn BatchNorm2d is not supported yet')
+        if not dense_module.track_running_stats:
+            raise ValueError(
+                'Mkldnn BatchNorm2d only supports track_running_stats=True')
+        if not dense_module.affine:
+            raise ValueError('Mkldnn BatchNorm2d only supports affine=True')
 
         if dense_module.momentum is None:
             self.exponential_average_factor = 0.0
