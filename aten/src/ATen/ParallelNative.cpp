@@ -33,19 +33,19 @@ thread_local bool in_parallel_region_ = false;
 
 // thread number (task_id) set by parallel primitive
 thread_local size_t thread_num_ = 0;
-} // namespace
-
-namespace internal {
 
 int _num_threads(int nthreads) {
   if (nthreads == NOT_SET) {
     nthreads = TaskThreadPoolBase::defaultNumThreads();
   } else {
-    TORCH_CHECK(nthreads > 0);
+    TORCH_INTERNAL_ASSERT(nthreads > 0);
   }
   // minus one because of the master thread
   return nthreads - 1;
 }
+} // namespace
+
+namespace internal {
 
 TaskThreadPoolBase& _get_intraop_pool() {
   static std::shared_ptr<TaskThreadPoolBase> pool =
@@ -99,7 +99,7 @@ int get_num_threads() {
   } else if (nthreads == NOT_SET) {
     return TaskThreadPoolBase::defaultNumThreads();
   } else {
-    TORCH_CHECK(nthreads == CONSUMED);
+    TORCH_INTERNAL_ASSERT(nthreads == CONSUMED);
     return internal::_get_intraop_pool().size() + 1;
   }
 }
