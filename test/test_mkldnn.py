@@ -112,6 +112,7 @@ class TestMkldnn(TestCase):
                     mkldnn_conv2d(x.to_mkldnn()).to_dense())
 
                 self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
+                self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
@@ -177,6 +178,7 @@ class TestMkldnn(TestCase):
                 mkldnn_bn(x.to_mkldnn()).to_dense())
 
             self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
 
     def test_add(self):
         N = torch.randint(3, 10, (1,)).item()
@@ -244,6 +246,7 @@ class TestMkldnn(TestCase):
                 mkldnn_linear(x.to_mkldnn()).to_dense())
 
             self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
 
     def _test_serialization(self, module, inputs):
         with TemporaryFileName() as fname:
@@ -252,6 +255,12 @@ class TestMkldnn(TestCase):
             self.assertEqual(
                 module(*inputs).to_dense(),
                 loaded(*inputs).to_dense())
+
+    def _test_tracing(self, module, inputs):
+        traced = torch.jit.trace(module, inputs, check_trace=False)
+        self.assertEqual(
+            module(*inputs).to_dense(),
+            traced(*inputs).to_dense())
 
 
 if __name__ == '__main__':
