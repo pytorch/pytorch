@@ -2832,16 +2832,16 @@ class _TestTorchMixin(object):
 
     def test_qtensor_load_save(self):
         scale = 2.0
-        zero_point = 1
-        r = torch.ones(2, dtype=torch.float)
-        qr = r.quantize_linear(scale, zero_point, torch.quint8)
+        zero_point = 10
+        r = torch.ones(15, dtype=torch.float) * 2
+        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
         # Serializing and Deserializing Tensor
         handle = 'tensor.pt'
         torch.save(qr, handle)
         qr2 = torch.load(handle)
-        #self.assertEqual(qr.int_repr(), qr2.int_repr())
-        #self.assertEqual(qr.q_scale(), qr2.q_scale())
-        #self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())
+        self.assertEqual(qr.int_repr(), qr2.int_repr())
+        self.assertEqual(qr.q_scale(), qr2.q_scale())
+        self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
