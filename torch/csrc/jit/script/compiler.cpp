@@ -1598,12 +1598,18 @@ struct to_ir {
   //   raise Exception("Hi")
   // print(a)
   void emitRaise(const Raise& stmt) {
-    if (stmt.expr().kind() == TK_APPLY) {
-      auto apply = Apply(stmt.expr().get());
+    auto exceptionNode = stmt.get()->tree(0)->tree(0);
+    if (exceptionNode->kind() == TK_APPLY) {
+      auto apply = Apply(exceptionNode);
       auto exception_name = Var(apply.callee()).name().name();
-      const std::string exception = exception_name+"_asdf";
-      auto string_input = insertConstant(*graph, exception, nullptr, stmt.range());
-      graph->insert(prim::RaiseException, {string_input}, {}, stmt.range());
+      auto exceptionArg = apply.inputs()[0];
+      auto exceptionMsgVal = emitSugaredExpr(exceptionArg, 1);
+      std::cout<<"exceptionmsgkind: "<<exceptionMsgVal->kind()<<std::endl;
+      auto errorMsg = asSimple(exceptionMsgVal);
+      auto separator = insertConstant(*graph, ": ", nullptr, stmt.range());
+      auto exception_name_sep = graph->insert(aten::add, {exception_name, separator}, {}, stmt.range());
+      auto exceptionMsg = graph->insert(aten::add, {exception_name_sep, errorMsg}, {}, exceptionNode->range())->setType(StringType::get());
+      graph->insert(prim::RaiseException, {errorMsg}, {}, stmt.range());
     } else {
         throw ErrorReport(stmt.range());
     }
