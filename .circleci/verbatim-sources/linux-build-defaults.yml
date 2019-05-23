@@ -165,7 +165,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   - attach_workspace:
       at: ~/workspace
   - run:
-      <<: *should_run_test_job
+      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
   - run:
