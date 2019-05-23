@@ -3863,12 +3863,17 @@ a")
         def func2(a, b, c, d):
             return c + a ** b ** d
 
+        def func3(a, b):
+            # type: (int, float) -> float
+            return a ** b
+
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
         c = torch.rand(1, requires_grad=True)
         d = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
         self.checkScript(func2, (a, b, c, d), optimize=True)
+        self.checkScript(func3, (4, -0.5), optimize=True)
 
     @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
     def test_pow_scalar_backward_cuda(self):
@@ -12074,14 +12079,29 @@ a")
 
         self.checkScript(fn, ("abcde",))
 
-    def test_str_cmp(self):
-        def test(a, b):
+    def test_str_ops(self):
+        def test_str_is(s):
+            # type: (str) -> Tuple[bool, bool, bool, bool, bool, bool]
+            return s.isupper(), s.islower(), s.isdigit(), s.isspace(), \
+                s.isalnum(), s.isalpha()
+
+        def test_str_to(s):
+            # type: (str) -> Tuple[str, str]
+            return s.upper(), s.lower()
+
+        inputs = ["", "12a", "!B", "12", "a", "B", "aB", "$12", "B12", "AB ",
+                  "  \t", "  \n", "\na", "abc"]
+
+        for input in inputs:
+            self.checkScript(test_str_is, (input,))
+            self.checkScript(test_str_to, (input,))
+
+        def test_str_cmp(a, b):
             # type: (str, str) -> Tuple[bool, bool, bool, bool, bool, bool]
             return a != b, a == b, a < b, a > b, a <= b, a >= b
 
-        self.checkScript(test, ("1", "2"))
-        self.checkScript(test, ("2", "1"))
-        self.checkScript(test, ("1", "1"))
+        for i in range(len(inputs) - 1):
+            self.checkScript(test_str_cmp, (inputs[i], inputs[i + 1]))
 
     def test_ord(self):
         def fn(x):

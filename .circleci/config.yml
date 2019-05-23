@@ -138,13 +138,10 @@ should_run_job: &should_run_job
   name: Should Run Job After checkout
   no_output_timeout: "2m"
   command: |
-    if [ -e ~/workspace/.circleci/scripts/should_run_job.sh ]; then
-      ~/workspace/.circleci/scripts/should_run_job.sh
-    elif [ -e /Users/distiller/pytorch-ci-env/workspace/.circleci/scripts/should_run_job.sh ]; then
-      /Users/distiller/pytorch-ci-env/workspace/.circleci/scripts/should_run_job.sh
-    else
-      .circleci/scripts/should_run_job.sh
-    fi
+    # Don't assume that the CWD is right
+    pushd ~/workspace/
+    .circleci/scripts/should_run_job.sh
+    popd
 
 # Also needs to be run after checkout
 setup_ci_environment: &setup_ci_environment
@@ -339,7 +336,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   - attach_workspace:
       at: ~/workspace
   - run:
-      <<: *should_run_job
+      <<: *should_run_test_job
   - run:
       <<: *setup_linux_system_environment
   - run:
@@ -562,9 +559,9 @@ binary_linux_build: &binary_linux_build
   - attach_workspace:
       at: ~/workspace
   - run:
-      <<: *should_run_job
-  - run:
       <<: *binary_checkout
+  - run:
+      <<: *should_run_job
   - run:
       <<: *binary_populate_env
   - run:
@@ -667,9 +664,9 @@ binary_mac_build: &binary_mac_build
   - attach_workspace:
       at: ~/workspace
   - run:
-      <<: *should_run_job
-  - run:
       <<: *binary_checkout
+  - run:
+      <<: *should_run_job
   - run:
       <<: *binary_populate_env
   - run:
@@ -1060,6 +1057,8 @@ jobs:
     steps:
     - attach_workspace:
         at: ~/workspace
+    # This checkout solely exists to let should_run_job to work
+    - checkout
     - run:
         <<: *should_run_job
     - run:
@@ -1097,6 +1096,8 @@ jobs:
     steps:
     - attach_workspace:
         at: ~/workspace
+    # This checkout solely exists to let should_run_job to work
+    - checkout
     - run:
         <<: *should_run_job
     - run:
@@ -1141,23 +1142,23 @@ jobs:
           docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
 
   pytorch_macos_10_13_py3_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
     macos:
       xcode: "9.0"
     steps:
       - checkout
       - run:
+          <<: *should_run_job
+      - run:
           <<: *macos_brew_update
       - run:
           name: Build
-          environment:
-            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
           no_output_timeout: "1h"
           command: |
             set -e
 
             export IN_CIRCLECI=1
-
-            source .circleci/scripts/should_run_job.sh
 
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
@@ -1181,6 +1182,8 @@ jobs:
             - "*"
 
   pytorch_macos_10_13_py3_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
       xcode: "9.0"
     steps:
@@ -1192,22 +1195,22 @@ jobs:
       - attach_workspace:
           at: /Users/distiller/pytorch-ci-env
       - run:
-          <<: *macos_brew_update
-      - run:
-          name: Test
-          environment:
-            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
-          no_output_timeout: "1h"
+          name: Should Run Job
           command: |
-            set -e
-            export IN_CIRCLECI=1
-
             if ! [ -e /Users/distiller/pytorch-ci-env/workspace ]; then
               # The workspace doesn't exist; we must have abborted
               # previously
               circleci step halt
               exit 0
             fi
+      - run:
+          <<: *macos_brew_update
+      - run:
+          name: Test
+          no_output_timeout: "1h"
+          command: |
+            set -e
+            export IN_CIRCLECI=1
 
             # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
             cp -a /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
@@ -1218,6 +1221,8 @@ jobs:
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
 
   pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
     macos:
       xcode: "9.0"
     steps:
@@ -1228,8 +1233,6 @@ jobs:
           <<: *macos_brew_update
       - run:
           name: Build
-          environment:
-            BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
           no_output_timeout: "1h"
           command: |
             set -e
