@@ -57,7 +57,7 @@ static void _allocate_or_resize_output_with_indices(
     result_sizes[dim] = k;
   }
   if (values.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         self.type() == values.type(),
         "output values must be of same type as input");
     values.resize_(result_sizes);
@@ -65,9 +65,9 @@ static void _allocate_or_resize_output_with_indices(
     values = at::empty(result_sizes, self.options());
   }
   if (indices.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         indices.dtype() == kLong, "output indices must be of scalar type Long");
-    AT_CHECK(
+    TORCH_CHECK(
         indices.device() == self.device(),
         "output indices must be on same device as input");
     indices.resize_(result_sizes);

@@ -211,7 +211,7 @@ std::tuple<Tensor&, Tensor&> topk_out_cpu(
     bool largest,
     bool sorted) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
-  AT_CHECK(
+  TORCH_CHECK(
       k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
       "selected index k out of range");
 
