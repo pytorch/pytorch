@@ -206,9 +206,7 @@ class TestAutograd(TestCase):
     def test_accumulate_grad_tensor_reference(self):
         def _test_grad_tensor(params_grad_tensor, backward_grad_tensor, should_preserve_reference):
             params = torch.tensor([1.5, 1.5]).requires_grad_()
-            with torch.no_grad():
-                # Change gradient to a sparse tensor
-                params.grad = params_grad_tensor
+            params.grad = params_grad_tensor
             grad_saved = params.grad
             params.backward(backward_grad_tensor)
             self.assertEqual(id(grad_saved) == id(params.grad), should_preserve_reference)
