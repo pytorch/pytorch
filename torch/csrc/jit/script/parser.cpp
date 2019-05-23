@@ -447,7 +447,7 @@ struct ParserImpl {
         auto range = L.next().range;
         auto expr = parseExp();
         L.expect(TK_NEWLINE);
-        return Raise::create(range, expr);
+        return Raise::create(range, Maybe<Expr>::create(range, expr));
       }
       case TK_ASSERT: {
         auto range = L.next().range;

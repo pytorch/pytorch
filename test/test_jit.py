@@ -5482,6 +5482,16 @@ a")
         ast = torch.jit.frontend.get_jit_def(fn)
         self.assertExpected(str(ast))
 
+    def test_python_runtimeexception(self):
+        @torch.jit.script
+        def fn(x):
+            # type: (int) -> int
+            if x > 2:
+                raise RuntimeError("bad input, {} is too high".format(x))
+            return x + 3
+        with self.assertRaisesRegex(torch._C.JITException, "bad input, 5 is too high"):
+            fn(5)
+
     def _make_scalar_vars(self, arr, dtype):
         return [torch.tensor(val, dtype=dtype) for val in arr]
 
@@ -11313,7 +11323,7 @@ a")
         ''')
 
         cu.foo(torch.tensor(0))
-        with self.assertRaisesRegex(torch.jit.Error, "Exception"):
+        with self.assertRaisesRegex(torch.jit.Error, "3"):
             cu.foo(torch.tensor(1))
 
         @torch.jit.script
