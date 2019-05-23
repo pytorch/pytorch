@@ -905,6 +905,8 @@ class TestFuser(JitTestCase):
             res = module(s2 if i < 1 else s1, s2 if i < 2 else s1, s2)
             res.sum().backward()
             backward = backward_graph(module, bw_plan_idx=i)
+            if len([1 for o in backward.outputs() if o.node().kind() == "aten::_grad_sum_to_size"]) != i:
+                   print(backward)
             self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "aten::_grad_sum_to_size"]), i)
             self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "prim::Param"]), 3 - i)
 
