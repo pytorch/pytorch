@@ -105,7 +105,6 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
-    //AT_ASSERT(false);
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
       type_id(), dtype(), device(), opaque_handle_, sizes_);
     copy_tensor_data(
