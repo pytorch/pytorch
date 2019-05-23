@@ -8,6 +8,7 @@ binary_linux_build: &binary_linux_build
       at: ~/workspace
   - run:
       <<: *binary_checkout
+  - checkout
   - run:
       <<: *should_run_job
   - run:
@@ -60,6 +61,7 @@ binary_linux_test: &binary_linux_test
       at: ~/workspace
   - attach_workspace:
       at: /home/circleci/project
+  - checkout
   - run:
       <<: *should_run_job
   - run:
@@ -83,6 +85,7 @@ binary_linux_upload: &binary_linux_upload
   steps:
   - attach_workspace:
       at: ~/workspace
+  - checkout
   - run:
       <<: *should_run_job
   - run:

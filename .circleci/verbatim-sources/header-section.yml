@@ -142,9 +142,8 @@ should_run_job: &should_run_job
     # Don't assume that the CWD is right.
     # Note: if a tilde is in a variable, as it is the case in CIRCLE_WORKING_DIRECTORY
     # you won't get expansion to HOME.  So do it manually
-    pushd "${CIRCLE_WORKING_DIRECTORY/#\~/$HOME}"
+    cd "${CIRCLE_WORKING_DIRECTORY/#\~/$HOME}"
     .circleci/scripts/should_run_job.sh
-    popd
 
 # Also needs to be run after checkout
 setup_ci_environment: &setup_ci_environment

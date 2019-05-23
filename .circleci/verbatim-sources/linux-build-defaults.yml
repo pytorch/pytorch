@@ -164,6 +164,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   steps:
   - attach_workspace:
       at: ~/workspace
+  - checkout
   - run:
       <<: *should_run_job
   - run:
