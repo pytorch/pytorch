@@ -6084,28 +6084,31 @@ a")
         self.checkScript(fn, (), outputs=4929, optimize=True)
 
     def test_script_for_in_range_start_end_step(self):
-        def fn():
+        def fn(start, end, step):
+            # type: (int, int, int) -> int
             x = 0
-            for i in range(7, 100, 7):
+            for i in range(start, end, step):
                 x += i
             return x
-        self.checkScript(fn, (), outputs=735, optimize=True)
 
-    def test_script_for_in_range_negative_step(self):
-        def fn():
-            x = 0
-            for i in range(2, -11, -3):
-                x += i
-            return x
-        self.checkScript(fn, (), outputs=-20, optimize=True)
+        def check(inp):
+            self.checkScript(fn, inp, outputs=fn(*inp), optimize=True)
+        check((7, 100, 7))
+        check((7, 100, -7))
+        check((2, -11, -3))
+        check((2, -11, 3))
+        check((2, 10, 3))
+        check((-2, -10, -10))
 
     def test_script_for_zero_step(self):
+        @torch.jit.script
         def fn():
             x = 0
-            for i in range(2, -11, -3):
+            for i in range(2, -11, 0):
                 x += i
             return x
-        self.checkScript(fn, (), outputs=-20, optimize=True)
+        with self.assertRaisesRegex(torch.jit.Error, "must not be zero"):
+            fn()
 
     def test_script_optional_none(self):
         def none_stmt(x):
