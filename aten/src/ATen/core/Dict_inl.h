@@ -37,6 +37,12 @@ inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
   }
 }
 
+inline intrusive_ptr<DictImpl> DictImpl::copy() const {
+  auto result = make_intrusive<DictImpl>();
+  result->dict = dict;
+  return result;
+}
+
 }
 
 template<class Key, class Value>
@@ -48,6 +54,9 @@ template<class Key, class Value>
 DictPtr<Key, Value>::DictPtr(DictPtr&& rhs) noexcept: impl_(std::move(rhs.impl_)) {
   rhs.impl_ = make_intrusive<detail::DictImpl>();
 }
+
+template<class Key, class Value>
+DictPtr<Key, Value>::DictPtr(c10::intrusive_ptr<detail::DictImpl>&& impl): impl_(std::move(impl)) {}
 
 template<class Key, class Value>
 DictPtr<Key, Value>& DictPtr<Key, Value>::operator=(DictPtr&& rhs) noexcept {

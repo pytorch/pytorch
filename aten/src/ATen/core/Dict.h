@@ -36,11 +36,7 @@ struct DictImpl final : public c10::intrusive_ptr_target {
   using dict_map_type = ska::flat_hash_map<IValue, IValue, DictKeyHash, DictKeyEqualTo>;
   dict_map_type dict;
 
-  intrusive_ptr<DictImpl> copy() const {
-    auto result = make_intrusive<DictImpl>();
-    result->dict = dict;
-    return result;
-  }
+  intrusive_ptr<DictImpl> copy() const;
 };
 
 }
@@ -179,7 +175,7 @@ private:
   // DictImpl.
   c10::intrusive_ptr<detail::DictImpl> impl_;
 
-  explicit DictPtr(c10::intrusive_ptr<detail::DictImpl>&& impl): impl_(std::move(impl)) {}
+  explicit DictPtr(c10::intrusive_ptr<detail::DictImpl>&& impl);
   template<class K, class V> friend DictPtr<K, V> impl::toTypedDict(DictPtr<IValue, IValue>);
   template<class K, class V> friend DictPtr<IValue, IValue> impl::toGenericDict(DictPtr<K, V>);
 
