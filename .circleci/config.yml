@@ -614,8 +614,6 @@ binary_linux_test: &binary_linux_test
   steps:
   - attach_workspace:
       at: ~/workspace
-  - attach_workspace:
-      at: /home/circleci/project
   - checkout
   - run:
       <<: *should_run_job
