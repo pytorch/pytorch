@@ -37,7 +37,6 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
         int batch_element_count = (i >= local_batches) ? 0 : element_count;
         for (int it = 0;it < WARP_ITERATIONS;it += 1) {
             int element_index = local_idx + it * WARP_SIZE;
-            elements[i][it] = -std::numeric_limits<acc_t>::infinity();
             if (element_index < batch_element_count) {
                 elements[i][it] = src[i*element_count+it*WARP_SIZE];
             } else {
