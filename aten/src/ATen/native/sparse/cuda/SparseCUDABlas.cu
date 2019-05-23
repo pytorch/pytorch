@@ -56,7 +56,7 @@ std::string cusparseGetErrorString(cusparseStatus_t status) {
 inline void CUSPARSE_CHECK(cusparseStatus_t status)
 {
   if (status != CUSPARSE_STATUS_SUCCESS) {
-    AT_ERROR("cusparse runtime error: ", getCusparseErrorString(status));
+    AT_ERROR("cusparse runtime error: ", cusparseGetErrorString(status));
   }
 }
 
