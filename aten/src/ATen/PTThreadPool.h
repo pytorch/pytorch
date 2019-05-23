@@ -3,10 +3,10 @@
 #include <ATen/Parallel.h>
 #include <c10/core/thread_pool.h>
 
- namespace at {
+namespace at {
 
- class CAFFE2_API PTThreadPool : public c10::ThreadPool {
- public:
+class CAFFE2_API PTThreadPool : public c10::ThreadPool {
+public:
   explicit PTThreadPool(
       int pool_size,
       int numa_node_id = -1)
