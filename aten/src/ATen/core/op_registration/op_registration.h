@@ -173,12 +173,21 @@ public:
      * >         .dispatchKey(CUDATensorId()));
      */
     Options&& dispatchKey(TensorTypeId dispatch_key) && {
+      if (config.dispatch_key.has_value()) {
+        AT_ERROR("Operator registration: Cannot register multiple dispatch keys in the same op() call. Please call op() multiple times if you want to register multiple kernels.");
+      }
       config.dispatch_key = dispatch_key;
       return std::move(*this);
     }
 
   private:
     Options&& kernel(KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
+      if (nullptr != config.kernel_func) {
+        AT_ERROR("Operator registration: Cannot register multiple kernels in the same op() call. Please call op() multiple times if you want to register multiple kernels.");
+      }
+      AT_ASSERTM(nullptr == config.cache_creator_func, "kernel_func was nullptr, so cache_creator_func must be too");
+      AT_ASSERTM(nullptr == config.inferred_function_schema, "kernel_func was nullptr, so inferred_function_schema must be too");
+
       config.kernel_func = kernel_func;
       config.cache_creator_func = std::move(cache_creator);
       config.inferred_function_schema = std::move(inferred_function_schema);

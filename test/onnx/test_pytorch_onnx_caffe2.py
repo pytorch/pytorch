@@ -77,6 +77,11 @@ def skipIfEmbed(func):
 def do_export(model, inputs, *args, **kwargs):
     f = io.BytesIO()
     out = torch.onnx._export(model, inputs, f, *args, **kwargs)
+    if isinstance(model, torch.jit.ScriptModule):
+        # Special case for common case of passing a single Tensor
+        if isinstance(inputs, torch.Tensor):
+            inputs = (inputs,)
+        out = model(*inputs)
     return f.getvalue(), out
 
 
@@ -178,7 +183,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
         # Verify the model runs the same in Caffe2
         verify.verify(model, input, c2, rtol=rtol, atol=atol,
-                      do_constant_folding=do_constant_folding)
+                      example_outputs=example_outputs, do_constant_folding=do_constant_folding)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
@@ -1249,6 +1254,17 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.tensor([1.0, float('nan'), 2.0])
         self.run_model_test(IsNaNModel(), train=False, input=x, batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_scatter(self):
+        class ScatterModel(torch.nn.Module):
+            def forward(self, input, indices, values):
+                return input.scatter(1, indices, values)
+
+        input = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
+        self.run_model_test(ScatterModel(), train=False, input=(input, indices, values),
+                            batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):
@@ -1476,7 +1492,7 @@ class TestCaffe2Backend(unittest.TestCase):
         im_info[:, 2] = 1.0
         im_info = torch.zeros((batch_size, 3))
         inputs = (torch.tensor(rois), torch.tensor(deltas), torch.tensor(im_info))
-        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3, use_gpu=False)
 
     # BoxWithNMSLimits has requirements for the inputs, so randomly generated inputs
     # in Caffe2BackendTestEmbed doesn't work with this op.
@@ -1536,7 +1552,7 @@ class TestCaffe2Backend(unittest.TestCase):
                 return a, b, c, d
 
         inputs = (torch.tensor(class_prob), torch.tensor(pred_bbox), torch.tensor(batch_splits))
-        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3, use_gpu=False)
 
     def test_c2_inference_lstm(self):
         num_layers = 4
@@ -1575,15 +1591,24 @@ class TestCaffe2Backend(unittest.TestCase):
             torch.from_numpy(hx),
         ] + [param.detach() for param in torch_lstm._flat_weights]
 
-        self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3)
+        self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3, use_gpu=False)
 
     def test_topk(self):
         class TopKModel(torch.nn.Module):
             def forward(self, input):
                 return torch.topk(input, 3)
-        model = TopKModel()
+
         x = torch.arange(1., 6.)
         self.run_model_test(TopKModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_topk_script(self):
+        class TopKModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.topk(input, 3, dim=0)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        self.run_model_test(TopKModel(), train=False, input=(x,), batch_size=BATCH_SIZE, example_outputs=torch.topk(x, 3, dim=0))
 
     def test_floor(self):
         class FloorModel(torch.nn.Module):

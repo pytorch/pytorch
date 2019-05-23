@@ -456,29 +456,6 @@
   variants: method
   device_guard: False
 
-- func: s_copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  dispatch:
-    CPU: _s_copy__cpu
-    CUDA: _s_copy__cuda
-    QuantizedCPU: _s_copy__quantized
-
-- func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  dispatch:
-    CUDA: _s_copy_from_cuda
-
-- func: _copy_same_type_(Tensor(a!) self, Tensor src) -> void
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  dispatch:
-    CPU: _copy_same_type__cpu
-
 - func: cos(Tensor self) -> Tensor
   variants: function, method
 
@@ -1413,7 +1390,7 @@
 
 - func: poisson_nll_loss(Tensor input, Tensor target, bool log_input, bool full, float eps, int reduction) -> Tensor
   variants: function
-  
+
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1508,6 +1485,8 @@
     CUDA: _neg__cuda
 
 - func: neg(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  cpu_bool: True
+  cuda_bool: True
   dispatch:
     CPU: _neg_out_cpu
     CUDA: _neg_out_cuda
@@ -2574,6 +2553,11 @@
   dispatch:
     QuantizedCPU: dequantize_quant
 
+- func: dequantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: dequantize_linear_cpu
+
 - func: q_scale(Tensor self) -> Scalar
   variants: function, method
   dispatch:
@@ -2588,6 +2572,10 @@
   variants: function, method
   dispatch:
     QuantizedCPU: int_repr_quant
+
+- func: _per_tensor_affine_qtensor(Tensor self, float scale, int zero_point) -> Tensor
+  dispatch:
+    CPU: per_tensor_affine_qtensor_cpu
 
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
