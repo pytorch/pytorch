@@ -522,5 +522,58 @@ class TorchIntegration(hu.HypothesisTestCase):
         self._test_gelu_op(device="cuda")
 
 
+    @given(inputs=hu.lengths_tensor(
+        dtype=np.float32,
+        min_value=1,
+        max_value=5,
+        allow_empty=True,
+    ))
+    def _test_lengths_op(self, inputs, ref_op_name, torch_op, device):
+        data, lengths = inputs
+
+        def _lengths_ref(X, Y):
+            ref_op = core.CreateOperator(ref_op_name, ["X", "Y"], "out")
+            workspace.FeedBlob("X", X)
+            workspace.FeedBlob("Y", Y)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("out")
+
+        expected_output = _lengths_ref(data, lengths)
+        actual_output = torch_op(
+            torch.tensor(data), torch.tensor(lengths, dtype=torch.int32))
+
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def _test_lengths_sum_op(self, device):
+        self._test_lengths_op("LengthsSum", torch.ops._caffe2.LengthsSum, device)
+
+    def test_lengths_sum_op(self):
+        self._test_lengths_sum_op(device="cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_lengths_sum_op_cuda(self):
+        self._test_lengths_sum_op(device="cuda")
+
+    def _test_lengths_mean_op(self, device):
+        self._test_lengths_op("LengthsMean", torch.ops._caffe2.LengthsMean, device)
+
+    def test_lengths_mean_op(self):
+        self._test_lengths_mean_op(device="cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_lengths_mean_op_cuda(self):
+        self._test_lengths_mean_op(device="cuda")
+
+    def _test_lengths_max_op(self, device):
+        self._test_lengths_op("LengthsMax", torch.ops._caffe2.LengthsMax, device)
+
+    def test_lengths_max_op(self):
+        self._test_lengths_max_op(device="cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_lengths_max_op_cuda(self):
+        self._test_lengths_max_op(device="cuda")
+
+
 if __name__ == '__main__':
     unittest.main()

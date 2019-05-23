@@ -2798,8 +2798,16 @@ class _TestTorchMixin(object):
         zero_point = 10
         val = 100
         numel = 10
-        q = torch._empty_affine_quantized(numel, dtype=torch.quint8, scale=scale, zero_point=zero_point)
-        # TODO: check dequantized values?
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        self.assertEqual(scale, q.q_scale())
+        self.assertEqual(zero_point, q.q_zero_point())
+
+        # create Tensor from uint8_t Tensor, scale and zero_point
+        int_tensor = torch.randint(0, 100, size=(10,), dtype=torch.uint8)
+        q = torch._per_tensor_affine_qtensor(int_tensor, scale, zero_point)
+        self.assertEqual(int_tensor, q.int_repr())
+        self.assertEqual(scale, q.q_scale())
+        self.assertEqual(zero_point, q.q_zero_point())
 
     def test_qtensor_dtypes(self):
         r = np.random.rand(3, 2) * 2 - 4
