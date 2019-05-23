@@ -3738,7 +3738,7 @@
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_histc
-    CUDA: _histc_out_cuda
+    CUDA: _histc_cuda
 
 - func: sign(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
