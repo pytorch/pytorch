@@ -97,4 +97,3 @@ CAFFE2_API void launch(const std::function<void()>& func);
 #if AT_PARALLEL_OPENMP
 #include <ATen/ParallelOpenMP.h>
 #endif
-

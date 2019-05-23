@@ -72,4 +72,3 @@ void launch(const std::function<void()>& func) {
 
 } // namespace at
 #endif
-

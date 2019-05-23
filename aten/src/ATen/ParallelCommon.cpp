@@ -54,4 +54,3 @@ std::string get_parallel_info() {
 }
 
 } // namespace at
-

@@ -78,4 +78,3 @@ bool in_parallel_region() {
 
 } // namespace at
 #endif
-
