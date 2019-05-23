@@ -46,9 +46,6 @@ Note:
 def qtensor(draw, shapes, dtypes=None, float_min=-1e6, float_max=1e6):
     # In case shape is a strategy
     if isinstance(shapes, SearchStrategy):
-        # return shapes.flatmap(
-        #     lambda s: qtensor(s, dtypes, float_min, float_max)
-        # )
         shape = draw(shapes)
     else:
         shape = draw(st.sampled_from(shapes))

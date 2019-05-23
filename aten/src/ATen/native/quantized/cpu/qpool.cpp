@@ -64,7 +64,7 @@ void spatial_dilated_max_pooling(const T* iData,
 
           // local max
           int64_t max_index = -1;
-          auto max_val = std::numeric_limits<decltype(iData[0].val_)>::lowest();
+          auto max_val = std::numeric_limits<typename T::underlying>::lowest();
           int64_t tcntr = 0;  // center point
           int64_t x, y;
           for (y = h_start; y < h_end; y += dH) {
