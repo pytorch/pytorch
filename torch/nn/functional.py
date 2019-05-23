@@ -7,7 +7,6 @@ import math
 import torch
 from torch._C import _infer_size, _add_docstr
 from . import _reduction as _Reduction
-from .modules import utils
 from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
@@ -446,7 +445,7 @@ def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.MaxPool1d` for details.
     """
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(List[int], kernel_size)
     return torch.max_pool1d_with_indices(
         input, kernel_size, stride, padding, dilation, ceil_mode)
 
@@ -456,7 +455,7 @@ def _max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tensor  # noqa
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(List[int], kernel_size)
     return torch.max_pool1d(
         input, kernel_size, stride, padding, dilation, ceil_mode)
 
@@ -480,7 +479,7 @@ def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation
     See :class:`~torch.nn.MaxPool2d` for details.
     """
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(List[int], kernel_size)
     return torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
@@ -489,7 +488,7 @@ def _max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tensor  # noqa
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(List[int], kernel_size)
     return torch.max_pool2d(
         input, kernel_size, stride, padding, dilation, ceil_mode)
 
@@ -513,7 +512,7 @@ def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.MaxPool3d` for details.
     """
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(List[int], kernel_size)
     return torch._C._nn.max_pool3d_with_indices(
         input, kernel_size, stride, padding, dilation, ceil_mode)
 
@@ -523,7 +522,7 @@ def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tensor  # noqa
     if stride is None:
-        stride = torch.jit.annotate(List[int], [])
+        stride = torch.jit.annotate(List[int], kernel_size)
     return torch.max_pool3d(
         input, kernel_size, stride, padding, dilation, ceil_mode)
 
@@ -581,6 +580,8 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
     else:
         _stride = kernel_size
     padding = _single(padding)
+    # _unpool_output_size requires args to be expanded to the right size
+    # before passed in.
     output_size = _unpool_output_size(input, kernel_size, _stride, padding,
                                       output_size)
     if isinstance(output_size, list):
@@ -605,6 +606,8 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
     else:
         _stride = kernel_size
     padding = _pair(padding)
+    # _unpool_output_size requires args to be expanded to the right size
+    # before passed in.
     output_size = _unpool_output_size(input, kernel_size, _stride, padding,
                                       output_size)
     return torch._C._nn.max_unpool2d(input, indices, output_size)
@@ -624,6 +627,8 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
     else:
         _stride = kernel_size
     padding = _triple(padding)
+    # _unpool_output_size requires args to be expanded to the right size
+    # before passed in.
     output_size = _unpool_output_size(input, kernel_size, _stride, padding,
                                       output_size)
     return torch._C._nn.max_unpool3d(
@@ -632,18 +637,17 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
 
 @weak_script
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
-    # type: (Tensor, float, int, Optional[BroadcastingList2[int]], bool) -> Tensor
+    # type: (Tensor, float, BroadcastingList2[int], Optional[BroadcastingList2[int]], bool) -> Tensor
     r"""Applies a 2D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
     See :class:`~torch.nn.LPPool2d` for details.
     """
-    kw, kh = utils._pair(kernel_size)
-    if stride is not None:
-        out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
-    else:
-        out = avg_pool2d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
+    kw, kh = _pair(kernel_size)
+    if stride is None:
+        stride = torch.jit.annotate(List[int], kernel_size)
+    out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
 
     return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1. / norm_type)
 
@@ -657,10 +661,14 @@ def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
-    if stride is not None:
-        out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
-    else:
-        out = avg_pool1d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
+    if stride is None:
+        # TODO: Ideally we should have annotated kernel_size as BroadcastingList1[int]
+        # so that we can save a _single call. But lp_pool1d uses kernel_size
+        # in python computation below, it will confuse mul if kernel_size is
+        # annotated as List[int] instead of int. This should be fixed once
+        # lp_pool1d is ported to C++.
+        stride = torch.jit.annotate(List[int], _single(kernel_size))
+    out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
 
     return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1. / norm_type)
 
