@@ -331,20 +331,26 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
     ret.errMsg = ss.str();
     return ret;
   } else if(auto lt_formal = formal->cast<ListType>()) {
-    if(auto lt_actual = actual->cast<ListType>()) {
+    std::cout << "matching a list\n";
+    if (auto lt_actual = actual->cast<ListType>()) {
       const auto innerType = matchTypeVariables(
           lt_formal->getElementType(),
           lt_actual->getElementType(),
           type_env);
       if (!innerType.type) {
         // propagate the errMsg onward
+        std::cout << "Failed to match innertype on " << lt_formal->python_str() << "\n";
         return innerType;
       }
+      std::cout << "Matching inner type to " << (*innerType.type)->python_str() << "\n";
       ret.type = ListType::create(*innerType.type);
       return ret;
     } else {
-      std::stringstream ss;
-      ss << "Cannot match a list to " << actual->python_str();
+      std::cout << "Cannot match " << lt_formal->python_str() << " to "
+         << actual->python_str();
+               std::stringstream ss;
+      ss << "Cannot match " << lt_formal->python_str() << " to "
+         << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }

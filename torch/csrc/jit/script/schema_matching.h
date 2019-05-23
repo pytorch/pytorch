@@ -35,6 +35,11 @@ TORCH_API bool convertibleToList(
     const TypePtr& type,
     const TypePtr& list_type_);
 
+TORCH_API bool convertibleToList(
+    const TypePtr& type,
+    const TypePtr& list_type_,
+    TypeEnv& type_env);
+
 TORCH_API Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
@@ -57,7 +62,8 @@ TORCH_API Value* tryConvertToType(
     Graph& graph,
     const TypePtr& concrete_type,
     Value* value,
-    bool allow_conversions);
+    bool allow_conversions,
+    TypeEnv& type_env);
 } // namespace script
 } // namespace jit
 } // namespace torch
