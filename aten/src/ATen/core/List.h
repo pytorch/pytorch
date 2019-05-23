@@ -4,6 +4,7 @@
 #include <c10/util/TypeTraits.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/ArrayRef.h>
 #include <vector>
 
 namespace at {
@@ -13,11 +14,12 @@ namespace c10 {
 struct IValue;
 template<class T> class ListPtr;
 template<class T> ListPtr<T> make_list();
-template<class T> ListPtr<T> make_list(std::initializer_list<T> values);
+template<class T> ListPtr<T> make_list(ArrayRef<T> values);
 
 namespace detail {
 template<class T> T list_element_to(const T& element);
 template<class T> T list_element_to(const IValue& element);
+template<class T, class Enable> struct list_element_from;
 
 template<class StorageT>
 struct ListImpl final : public c10::intrusive_ptr_target {
@@ -185,7 +187,7 @@ public:
   /**
    * Constructs a list with some initial values
    */
-  friend ListPtr make_list<T>(std::initializer_list<T>);
+  friend ListPtr make_list<T>(ArrayRef<T>);
 
   // please use make_list instead.
   ListPtr() = delete;
@@ -359,6 +361,7 @@ protected:
   template<class T_> friend ListPtr<T_> impl::toTypedList(ListPtr<IValue>);
   template<class T_> friend ListPtr<IValue> impl::toGenericList(ListPtr<T_>);
   friend const IValue* impl::ptr_to_first_element(const ListPtr<IValue>& list);
+  template<class T_, class Enable> friend struct detail::list_element_from;
 };
 
 namespace impl {
@@ -371,7 +374,7 @@ inline GenericListPtr make_generic_list() {
   return make_list<IValue>();
 }
 
-inline GenericListPtr make_generic_list(std::initializer_list<IValue> values) {
+inline GenericListPtr make_generic_list(ArrayRef<IValue> values) {
   return make_list<IValue>(values);
 }
 
