@@ -76,8 +76,6 @@ void ThreadPool::waitWorkComplete() {
 }
 
 void ThreadPool::main_loop(std::size_t index) {
-  init_thread();
-
   std::unique_lock<std::mutex> lock(mutex_);
   while (running_) {
     // Wait on condition variable while the task is empty and
