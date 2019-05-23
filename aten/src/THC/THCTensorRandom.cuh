@@ -284,9 +284,7 @@ sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
                                  T* normDist) {
   // At the moment, each warp computes one sample value in the binary
   // search due to divergence. It seems possible to compute multiple
-  // values and limit divergence though later on. However, no matter
-  // what, all block threads must participate in the curand_uniform
-  // call to update the generator state.
+  // values and limit divergence though later on.
 
   int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.x;
   curandStatePhilox4_32_10_t state;
@@ -332,9 +330,7 @@ sampleMultinomialWithoutReplacement(std::pair<uint64_t, uint64_t> seeds,
                                     T* normDistPrefixSum) {
   // At the moment, each warp computes one sample value in the binary
   // search due to divergence. It seems possible to compute multiple
-  // values and limit divergence though later on. However, no matter
-  // what, all block threads must participate in the curand_uniform
-  // call to update the generator state.
+  // values and limit divergence though later on.
 
   int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.x;
   curandStatePhilox4_32_10_t state;

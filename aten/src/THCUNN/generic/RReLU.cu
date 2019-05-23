@@ -23,11 +23,6 @@ void THNN_(RReLU_updateOutput)(
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
   THCGenerator* gen = THCRandom_getGenerator(state);
-  // each thread will utilize one random, however, since we have to use
-  // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
-  // offset is 4.
-  uint64_t offset = gen->state.philox_seed_offset.fetch_add(4);
-  std::pair<uint64_t, uint64_t> next_philox_seed = std::make_pair(gen->state.initial_seed, offset);
 
   if (train)
   {
@@ -36,9 +31,17 @@ void THNN_(RReLU_updateOutput)(
     scalar_t *input_data = THCTensor_(data)(state, input);
     scalar_t *noise_data = THCTensor_(data)(state, noise);
     ptrdiff_t n = THCTensor_(nElement)(state, input);
+
+    // philox offset calculation for grid-stride loop utilizing curand4
+    const uint32_t curand4_engine_calls = 4;
+    dim3 grid = NUM_BLOCKS(n);
+    uint64_t counter_offset = ((n - 1) / (BLOCK_SIZE * grid.x) + 1) * curand4_engine_calls;
+    uint64_t offset = gen->state.philox_seed_offset.fetch_add(counter_offset);
+    std::pair<uint64_t, uint64_t> next_philox_seed = std::make_pair(gen->state.initial_seed, offset);
+
     if (inplace)
     {
-      rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
         n, next_philox_seed, input_data, noise_data, input_data, lower, upper);
       THCTensor_(set)(state, output, input);
     }
@@ -46,7 +49,7 @@ void THNN_(RReLU_updateOutput)(
     {
       THCTensor_(resizeAs)(state, output, input);
       scalar_t *output_data = THCTensor_(data)(state, output);
-      rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
         n, next_philox_seed, input_data, noise_data, output_data, lower, upper);
     }
     THCudaCheck(cudaGetLastError());
