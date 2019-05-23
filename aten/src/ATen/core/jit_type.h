@@ -139,13 +139,13 @@ public:
   template<typename T>
   std::shared_ptr<T> expect() {
     auto r = cast<T>();
-    AT_CHECK(r);
+    AT_CHECK(r, "Got unexpected type ", python_str());
     return r;
   }
   template<typename T>
   std::shared_ptr<const T> expect() const {
     auto r = cast<const T>();
-    AT_CHECK(r);
+    AT_CHECK(r, "Got unexpected type ", python_str());
     return r;
   }
   virtual ~Type() = default;

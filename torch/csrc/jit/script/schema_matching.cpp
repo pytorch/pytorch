@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/jit/script/error_report.h>
@@ -146,7 +147,7 @@ Value* tryMatchArgument(
   const MatchTypeReturn matched_type =
       matchTypeVariables(arg.type(), value->type(), type_env);
   if (!matched_type.type) {
-    err() << "could not match type " << value->type()->python_str() << " to "
+    err() << "Could not match type " << value->type()->python_str() << " to "
           << arg.type()->python_str() << " in argument '" << arg.name()
           << "': " << matched_type.errMsg << "\n"
           << named_value.locOr(loc);
@@ -159,7 +160,7 @@ Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
-    auto& ostream = err() << "expected a value of type "
+    auto& ostream = err() << "Expected a value of type "
                           << concrete_type->python_str() << " for argument '"
                           << arg.name() << "' but found "
                           << value->type()->python_str() << "\n";
@@ -223,7 +224,43 @@ Value* tryCreateList(
     }
     list_elements.push_back(matched_value);
   }
+  std::cout << "Matched to a list of " << elem_type->python_str() << "\n:";
+  for (auto e : list_elements) {
+    std::cout << "\t" << e->type()->python_str() << "\n";
+  }
+  if (elem_type->kind() == TypeKind::VarType) {
+    if (list_elements.size() == 0) {
+      // List didn't have any elements and elem_type was a vartype, so it
+      // couldn't be matched to anything
+      return nullptr;
+    }
+    return graph
+        .insertNode(
+            graph.createList(list_elements.at(0)->type(), list_elements))
+        ->output();
+  }
   return graph.insertNode(graph.createList(elem_type, list_elements))->output();
+}
+
+// Check if it is possible to convert all the remaining non-kwarg arguments
+// to a list. This allows zeros(IntArrayRef sizes) to work with zeros(1, 2) or
+// zeros(1)
+bool varargsCanBeUsedAsList(
+    const FunctionSchema& schema,
+    size_t arg_index,
+    const Argument& arg) {
+  // The arg must be the last one in the arg list that is not a kwarg
+  bool is_last_argument = arg_index + 1 == schema.arguments().size() ||
+                          schema.arguments()[arg_index + 1].kwarg_only();
+
+  // The formal must be a list
+  bool argument_is_list = arg.type()->kind() == TypeKind::ListType;
+
+  // it must not be a broadcasting list like int[3],
+  // otherwise a single int is a valid input
+  bool arg_is_broadcasting_list = bool(arg.N());
+
+  return is_last_argument && argument_is_list & !arg_is_broadcasting_list;
 }
 
 c10::optional<MatchedSchema> tryMatchSchema(
@@ -253,40 +290,26 @@ c10::optional<MatchedSchema> tryMatchSchema(
   for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
     if (print) std::cout << "MATCHING ARGUMENT " << schema_i << "\n";
     const auto& arg = schema.arguments()[schema_i];
-    c10::optional<NamedValue> v;
+    c10::optional<NamedValue> actual_named_value;
     if (arg.name() == "self" && self) {
-      v = self;
+      actual_named_value = self;
       self = c10::nullopt;
     } else if (!arg.kwarg_only() && used_args < args.size()) {
       // Try to convert all the remaining non-kwarg arguments (used_args) to a
       // list. Allow zeros(IntArrayRef sizes) to work with zeros(1, 2) or
       // zeros(1)
-      bool is_last_argument = schema_i + 1 == schema.arguments().size() ||
-                              schema.arguments()[schema_i + 1].kwarg_only();
-
-      // the formal must be a list
-      bool argument_is_list = arg.type()->kind() == TypeKind::ListType;
-
-      // it must not be a broadcasting list like int[3],
-      // otherwise a single int is a valid input
-      bool arg_is_broadcasting_list = bool(arg.N());
-
-      if (allow_conversions && is_last_argument &&
-          argument_is_list & !arg_is_broadcasting_list) {
+      if (allow_conversions && varargsCanBeUsedAsList(schema, schema_i, arg)) {
         auto value = args[used_args].value(graph);
         auto actual_type = value->type();
         // The actual cannot already be a list
-        if (actual_type->kind() != TypeKind::ListType &&
+        auto is_iterable = actual_type->kind() == TypeKind::ListType || actual_type->kind() == TypeKind::TupleType;
+        if (!is_iterable &&
             !convertibleToList(actual_type, unwrapOptional(arg.type()))) {
           auto formal_type =
               unwrapOptional(arg.type())->expect<ListType>()->getElementType();
           if (print)
             std::cout << "Creating " << formal_type->python_str() << " for "
                       << schema << "\n";
-
-          // if (formal_type->kind() == TypeKind::VarType) {
-          //   return c10::nullopt;
-          // }
 
           Value* list = tryCreateList(
               formal_type,
@@ -307,7 +330,8 @@ c10::optional<MatchedSchema> tryMatchSchema(
         }
       }
 
-      v = args[used_args];
+      // Set actual_named_value to the argument and mark the arg position as used
+      actual_named_value = args[used_args];
       used_args++;
     } else if (auto kwarg_idx = findInputWithName(arg.name(), kwargs)) {
       const NamedValue& nv = kwargs[*kwarg_idx];
@@ -318,19 +342,24 @@ c10::optional<MatchedSchema> tryMatchSchema(
         return c10::nullopt;
       }
       used_kwarg[*kwarg_idx] = true;
-      v = nv;
+      actual_named_value = nv;
     } else if (arg.default_value()) {
-      v = NamedValue(*arg.default_value());
+      // Argument has a default value and no value was provided, so use the
+      // default
+      actual_named_value = NamedValue(*arg.default_value());
     } else {
       err() << "argument " << schema.arguments()[schema_i].name()
             << " not provided.\n"
             << loc;
       return c10::nullopt;
     }
-    Value* positional =
-        tryMatchArgument(arg, graph, loc, *v, err, allow_conversions, type_env);
-    if (!positional)
+
+    // Make sure the actual_named_value found matches the type of arg
+    Value* positional = tryMatchArgument(
+        arg, graph, loc, *actual_named_value, err, allow_conversions, type_env);
+    if (!positional) {
       return c10::nullopt;
+    }
     positional_inputs.push_back(positional);
   }
   // check for unused self argument
