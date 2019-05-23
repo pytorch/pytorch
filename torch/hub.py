@@ -159,13 +159,12 @@ def _get_cache_or_reload(github, force_reload):
         url = _git_archive_link(repo_owner, repo_name, branch)
         _download_archive_zip(url, cached_file)
 
-        cached_zipfile = zipfile.ZipFile(cached_file)
-        extraced_repo_name = cached_zipfile.infolist()[0].filename
-        extracted_repo = os.path.join(hub_dir, extraced_repo_name)
-        _remove_if_exists(extracted_repo)
-        # Unzip the code and rename the base folder
-        cached_zipfile.extractall(hub_dir)
-        cached_zipfile.close()
+        with zipfile.ZipFile(cached_file) as cached_zipfile:
+            extraced_repo_name = cached_zipfile.infolist()[0].filename
+            extracted_repo = os.path.join(hub_dir, extraced_repo_name)
+            _remove_if_exists(extracted_repo)
+            # Unzip the code and rename the base folder
+            cached_zipfile.extractall(hub_dir)
 
         _remove_if_exists(cached_file)
         _remove_if_exists(repo_dir)
