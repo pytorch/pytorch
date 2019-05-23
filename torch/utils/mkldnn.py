@@ -1,4 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+from typing import Optional
 
 import torch
 
@@ -7,26 +8,29 @@ class MkldnnLinear(torch.jit.ScriptModule):
     def __init__(self, dense_module):
         super(MkldnnLinear, self).__init__()
         self.register_buffer('weight', dense_module.weight.to_mkldnn())
-        if dense_module.bias is not None:
-            self.has_bias = torch.jit.Attribute(True, bool)
-            self.register_buffer('bias', dense_module.bias.to_mkldnn())
+        if dense_module.bias is None:
+            self.bias = torch.jit.Attribute(
+                None, Optional[torch.Tensor])
         else:
-            self.has_bias = torch.jit.Attribute(False, bool)
-            # TODO: Remove this once ScriptModule supports registering None buffer
-            self.register_buffer(
-                'bias',
-                torch.zeros([dense_module.weight.size(0)], dtype=torch.float).to_mkldnn())
+            self.bias = torch.jit.Attribute(
+                dense_module.bias.to_mkldnn(), Optional[torch.Tensor])
 
     @torch.jit.script_method
     def __getstate__(self):
-        return (self.weight.to_dense(), self.bias.to_dense(), self.has_bias)
+        # type: () -> (Tuple[Tensor, Optional[Tensor]])
+        bias = self.bias
+        if bias is not None:
+            bias = bias.to_dense()
+        return (self.weight.to_dense(), bias)
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        # type: (Tuple[Tensor, Tensor, bool]) -> None
+        # type: (Tuple[Tensor, Optional[Tensor]]) -> None
         self.weight = state[0].to_mkldnn()
-        self.bias = state[1].to_mkldnn()
-        self.has_bias = state[2]
+        bias = state[1]
+        if bias is not None:
+            bias = bias.to_mkldnn()
+        self.bias = bias
 
     @torch.jit.script_method
     def forward(self, x):
@@ -45,31 +49,34 @@ class MkldnnConv2d(torch.jit.ScriptModule):
         self.groups = dense_module.groups
 
         self.register_buffer('weight', dense_module.weight.to_mkldnn())
-        if dense_module.bias is not None:
-            self.has_bias = torch.jit.Attribute(True, bool)
-            self.register_buffer('bias', dense_module.bias.to_mkldnn())
+        if dense_module.bias is None:
+            self.bias = torch.jit.Attribute(
+                None, Optional[torch.Tensor])
         else:
-            self.has_bias = torch.jit.Attribute(False, bool)
-            # TODO: Remove this once ScriptModule supports registering None buffer
-            self.register_buffer(
-                'bias',
-                torch.zeros([dense_module.weight.size(0)], dtype=torch.float).to_mkldnn())
+            self.bias = torch.jit.Attribute(
+                dense_module.bias.to_mkldnn(), Optional[torch.Tensor])
 
     @torch.jit.script_method
     def __getstate__(self):
-        return (self.weight.to_dense(), self.bias.to_dense(), self.has_bias)
+        # type: () -> (Tuple[Tensor, Optional[Tensor]])
+        bias = self.bias
+        if bias is not None:
+            bias = bias.to_dense()
+        return (self.weight.to_dense(), bias)
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        # type: (Tuple[Tensor, Tensor, bool]) -> None
+        # type: (Tuple[Tensor, Optional[Tensor]]) -> None
         self.weight = torch._C._nn.mkldnn_reorder_conv2d_weight(
             state[0].to_mkldnn(),
             self.padding,
             self.stride,
             self.dilation,
             self.groups)
-        self.bias = state[1].to_mkldnn()
-        self.has_bias = state[2]
+        bias = state[1]
+        if bias is not None:
+            bias = bias.to_mkldnn()
+        self.bias = bias
 
     @torch.jit.script_method
     def forward(self, x):
