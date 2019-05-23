@@ -1,3 +1,4 @@
+import os
 import sys
 import subprocess
 import torch
@@ -7,11 +8,13 @@ from common_utils import TestCase, run_tests
 class LoggingTest(TestCase):
     @staticmethod
     def _runAndCaptureStderr(code):
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
         pipes = subprocess.Popen(
             [sys.executable, '-c', code],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env={"PYTORCH_API_USAGE_STDERR": "1"})
+            env=env)
         return pipes.communicate()[1].decode('ascii')
 
     def testApiUsage(self):
