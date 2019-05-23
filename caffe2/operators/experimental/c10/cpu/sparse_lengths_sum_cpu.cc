@@ -83,10 +83,11 @@ void sparse_lengths_sum_op_cpu(
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::SparseLengthsSum",
-    c10::kernel<
+    c10::RegisterOperators::options()
+      .kernel<
         decltype(sparse_lengths_sum_op_cpu),
-        &sparse_lengths_sum_op_cpu>(),
-    c10::dispatchKey(CPUTensorId()));
+        &sparse_lengths_sum_op_cpu>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 

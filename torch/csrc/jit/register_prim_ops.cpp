@@ -8,9 +8,8 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/pickler.h>
-#include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/error_report.h>
@@ -18,21 +17,22 @@
 #include <torch/csrc/jit/script/logging.h>
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/core/ivalue.h>
 #include <ATen/core/Dict.h>
+#include <ATen/core/ivalue.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <ostream>
-#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <typeinfo>
@@ -98,13 +98,13 @@ static int64_t floordiv(int64_t a, int64_t b) {
 }
 
 static int gcd(int a, int b) {
-    while (b != 0) {
-        int r = a % b;
-        a = b;
-        b = r;
-    }
-    // in python gcd returns non-negative values
-    return std::abs(a);
+  while (b != 0) {
+    int r = a % b;
+    a = b;
+    b = r;
+  }
+  // in python gcd returns non-negative values
+  return std::abs(a);
 }
 
 // reference function THPVariable_to in python_variable_methods.cpp
@@ -155,6 +155,14 @@ RegisterOperators reg(
            return [key](Stack& stack) {
              RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
              runFusion(key, stack);
+             return 0;
+           };
+         }),
+     Operator(
+         "prim::Guard(Tensor(a) t) -> Tensor(a)",
+         [](const Node* node) {
+           return [](Stack& stack) {
+             AT_ERROR("Should be replaced by prim::BailOut");
              return 0;
            };
          }),
@@ -554,7 +562,7 @@ RegisterOperators reg(
          }),
 
      Operator(
-         "prim::IgnoredPythonOp(...) -> ()",
+         "prim::IgnoredPythonOp(...) -> None",
          [](Stack& stack) {
            throw JITException(
                "This Python function is annotated to be ignored"
@@ -906,7 +914,7 @@ RegisterOperators reg(
 
              push(stack, forked_interprester.getFuture());
 
-             c10::global_work_queue().run(std::move(continuation));
+             at::launch(std::move(continuation));
              return 0;
            };
          }),
@@ -1041,12 +1049,21 @@ RegisterOperators logging_operators(
     return 0;                                                   \
   })
 
+#define DEFINE_STR_CMP_OP(aten_op, op)                           \
+  Operator(#aten_op "(str a, str b) -> bool", [](Stack& stack) { \
+    auto b = pop(stack).toStringRef();                           \
+    auto a = pop(stack).toStringRef();                           \
+    push(stack, op);                                             \
+    return 0;                                                    \
+  })
+
 #define DEFINE_BINARY_OP(aten_op, op)             \
   DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
       DEFINE_INT_FLOAT_OP(aten_op, op, float)
 #define DEFINE_COMPARISON_OP(aten_op, op)         \
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
-      DEFINE_INT_FLOAT_OP(aten_op, op, bool)
+      DEFINE_INT_FLOAT_OP(aten_op, op, bool), DEFINE_STR_CMP_OP(aten_op, op)
+
 #define DEFINE_BOOL_OP(aten_op, op)                                \
   Operator(#aten_op "(bool a, bool b) -> bool", [](Stack& stack) { \
     bool a, b;                                                     \
@@ -1716,6 +1733,18 @@ RegisterOperators reg2({
           push(stack, t.sizes()[0]);
           return 0;
         }),
+    Operator(
+        "aten::list(str t) -> str[]",
+        [](Stack& stack) {
+          auto str = pop(stack).toStringRef();
+          std::vector<IValue> chars;
+          chars.reserve(str.size());
+          for (auto c : str) {
+            chars.push_back(std::string(1, c));
+          }
+          push(stack, chars);
+          return 0;
+        }),
 // Mutable ops for lists containing mutable types.
 #define CREATE_MUTABLE_LIST_OPS(decl_type, c_type)                          \
   Operator(                                                                 \
@@ -1723,7 +1752,7 @@ RegisterOperators reg2({
       listSelect<Shared<c_type>>),                                          \
       Operator(                                                             \
           "aten::append( " decl_type "[](a!) self, " decl_type              \
-          "(c) el) -> " decl_type "[](a!)",                                 \
+          "(c -> *) el) -> " decl_type "[](a!)",                            \
           listAppend<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
           "aten::reverse( " decl_type "[](a!) self) -> ()",                 \
@@ -1739,7 +1768,7 @@ RegisterOperators reg2({
           listCopy<Shared<c_type>>),                                        \
       Operator(                                                             \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type      \
-          " el) -> " decl_type "[](a!)",                                    \
+          "(b -> *) el) -> " decl_type "[](a!)",                            \
           listSetItem<Shared<c_type>, c_type::ElemType>),                   \
       Operator(                                                             \
           "aten::clear( " decl_type "[](a!) self) -> ()",                   \
@@ -1747,7 +1776,7 @@ RegisterOperators reg2({
       Operator(                                                             \
           "aten::insert( " decl_type                                        \
           "[](a!) self, int idx,                 \
-          " decl_type " el) -> ()",                                         \
+          " decl_type "(b -> *) el) -> ()",                                 \
           listInsert<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
           "aten::pop(" decl_type                                            \
@@ -1894,13 +1923,13 @@ RegisterOperators reg2({
           return 0;
         }),
     Operator(
-      "prim::str(t elem) -> str",
-      [](Stack& stack) {
-        std::stringstream ss;
-        ss << pop(stack);
-        push(stack, ss.str());
-        return 0;
-      }),
+        "prim::str(t elem) -> str",
+        [](Stack& stack) {
+          std::stringstream ss;
+          ss << pop(stack);
+          push(stack, ss.str());
+          return 0;
+        }),
     Operator(
         "aten::ord(str string) -> int",
         [](Stack& stack) {
@@ -1933,7 +1962,7 @@ RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::add, a + b),
     DEFINE_BINARY_OP(aten::sub, a - b),
     DEFINE_BINARY_OP(aten::mul, a* b),
-    DEFINE_BINARY_OP(aten::pow, static_cast<decltype(a)>(pow(a, b))),
+    DEFINE_BINARY_OP(aten::pow, pow(a, b)),
     // min and max are in prim:: because there is a difference between
     // the python builtin 'min' and 'torch.min'
     DEFINE_BINARY_OP(prim::min, a < b ? a : b),
@@ -2005,24 +2034,6 @@ RegisterOperators reg2({
           double a, b;
           pop(stack, a, b);
           push(stack, a / b);
-          return 0;
-        }),
-
-    Operator(
-        "aten::pow(float a, float b) -> float",
-        [](Stack& stack) {
-          double a, b;
-          pop(stack, a, b);
-          push(stack, std::pow(a, b));
-          return 0;
-        }),
-    Operator(
-        "aten::pow(float a, int b) -> float",
-        [](Stack& stack) {
-          double a;
-          int b;
-          pop(stack, a, b);
-          push(stack, std::pow(a, b));
           return 0;
         }),
 
@@ -2131,24 +2142,28 @@ RegisterOperators reg2({
 
     DEFINE_INT_OP(aten::gcd, gcd(a, b)),
 
-    DEFINE_GENERIC_OP(aten::copysign, std::copysign(a, b), std::copysign(a, b), float, float),
-    DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a,b), float),
+    DEFINE_GENERIC_OP(
+        aten::copysign,
+        std::copysign(a, b),
+        std::copysign(a, b),
+        float,
+        float),
+    DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a, b), float),
 
-#define DEFINE_MATH_OP(aten_op, op, int_result, float_result)              \
-  Operator(                                                                \
-      #aten_op "(int a) -> " #int_result,                                  \
-      [](Stack& stack) {                                                   \
-        int64_t a;                                                         \
-        pop(stack, a);                                                     \
-        push(stack, op);                                                   \
-        return 0;                                                          \
-      }),                                                                  \
-      Operator(#aten_op "(float a) -> " #float_result,                     \
-      [](Stack& stack) {                                                   \
-        double a;                                                          \
-        pop(stack, a);                                                     \
-        push(stack, op);                                                   \
-        return 0;                                                          \
+#define DEFINE_MATH_OP(aten_op, op, int_result, float_result)             \
+  Operator(                                                               \
+      #aten_op "(int a) -> " #int_result,                                 \
+      [](Stack& stack) {                                                  \
+        int64_t a;                                                        \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
+      }),                                                                 \
+      Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) { \
+        double a;                                                         \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
       })
 
     DEFINE_MATH_OP(aten::gamma, std::tgamma(a), float, float),
@@ -2164,7 +2179,6 @@ RegisterOperators reg2({
     DEFINE_COMPARISON_OP(aten::gt, a > b),
     DEFINE_COMPARISON_OP(aten::le, a <= b),
     DEFINE_COMPARISON_OP(aten::ge, a >= b),
-
     DEFINE_BOOL_OP(aten::__and__, a&& b),
     DEFINE_BOOL_OP(aten::__or__, a || b),
     DEFINE_BOOL_OP(aten::__xor__, a != b),
@@ -2249,7 +2263,7 @@ RegisterOperators reg2({
           dictGetDefault),                                                    \
       Operator(                                                               \
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
-          " idx, t v) -> ()",                                                 \
+          " idx, t(b -> *) v) -> ()",                                         \
           dictSetItem)
 
     CREATE_DICT_OPS("str"),
