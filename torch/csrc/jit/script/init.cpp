@@ -223,7 +223,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_and_output_shapes(
     output_values = output_values.at(0)->node()->inputs();
   }
   AT_ASSERT(output_values.size() == outputs.size());
-  for (size_t i = 0; i < retval->outputs().size(); ++i) {
+  for (size_t i = 0; i < outputs.size(); ++i) {
     auto scalar_type = outputs[i].scalar_type();
     auto sizes = outputs[i].sizes();
     auto type =
@@ -231,6 +231,17 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_and_output_shapes(
     output_values[i]->setType(type);
   }
   return retval;
+}
+
+void addFunctionToModule(
+    Module& module,
+    const std::shared_ptr<Function>& func) {
+  // Make a graph with a fake self argument
+  auto graph = func->graph()->copy();
+  auto v = graph->insertInput(0, "self");
+  v->setType(module.module_object()->type());
+  module.module_object()->type()->compilation_unit().create_function(
+      "forward", graph);
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -481,6 +492,27 @@ void initJitScriptBindings(PyObject* module) {
             }
             return result;
           })
+      .def(
+          "save",
+          [](std::shared_ptr<Function> self,
+             const std::string& filename,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            Module module;
+            addFunctionToModule(module, self);
+            module.save(filename, _extra_files);
+          },
+          py::arg("filename"),
+          py::arg("_extra_files") = ExtraFilesMap())
+      .def(
+          "save_to_buffer",
+          [](std::shared_ptr<Function> self,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            std::ostringstream buf;
+            Module module;
+            addFunctionToModule(module, self);
+            return py::bytes(buf.str());
+          },
+          py::arg("_extra_files") = ExtraFilesMap())
       .def_property_readonly("graph", &Function::graph)
       .def_property_readonly("schema", &Function::getSchema)
       .def_property_readonly(

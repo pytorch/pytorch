@@ -2513,58 +2513,59 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.zeros(shape), torch.zeros(shape, layout=torch.strided, out=out))
         self.assertEqual(torch.zeros(shape), torch.zeros(shape, device='cpu', out=out))
 
-    @staticmethod
-    def _test_histc(self, device):
-        # negative nbins throws
-        with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
-            torch.histc(torch.tensor([1], dtype=torch.float, device=device), bins=-1)
+    def test_histc(self):
+        for device in torch.testing.get_all_device_types():
+            # negative nbins throws
+            with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
+                torch.histc(torch.tensor([1], dtype=torch.float, device=device), bins=-1)
 
-        # without nbins
-        actual = torch.histc(
-            torch.tensor([2, 5], dtype=torch.float, device=device))
-        expected = torch.zeros(100, dtype=torch.float, device=device)
-        expected.data[0] = 1
-        expected.data[99] = 1
-        self.assertEqual(expected, actual)
-        # tensor with the same element
-        actual = torch.histc(torch.ones(5, dtype=torch.float, device=device), bins=5)
-        self.assertEqual(
-            torch.tensor([0, 0, 5, 0, 0], dtype=torch.float, device=device),
-            actual)
-        # no element falls between [min, max]
-        actual = torch.histc(
-            torch.ones(5, dtype=torch.float, device=device), bins=5, min=2, max=3)
-        self.assertEqual(
-            torch.tensor([0, 0, 0, 0, 0], dtype=torch.float, device=device),
-            actual)
-        # element falls below min + integral bin size and
-        actual = torch.histc(
-            torch.tensor([2, 4, 2, 2, 5, 4], dtype=torch.float, device=device),
-            bins=5, min=1, max=5)
-        self.assertEqual(
-            torch.tensor([0, 3, 0, 2, 1], dtype=torch.float, device=device),
-            actual)
-        # non-integral bin size
-        actual = torch.histc(
-            torch.tensor([1, 2, 1], dtype=torch.float, device=device),
-            bins=4, min=0, max=3)
-        self.assertEqual(
-            torch.tensor([0, 2, 1, 0], dtype=torch.float, device=device),
-            actual)
-        # double input
-        actual = torch.histc(
-            torch.tensor([1, 2, 1], dtype=torch.double, device=device),
-            bins=4, min=0, max=3)
-        self.assertEqual(
-            torch.tensor([0, 2, 1, 0], dtype=torch.double, device=device),
-            actual)
-        # mixed input
-        actual = torch.histc(
-            torch.tensor([1., 2, 1], dtype=torch.float, device=device),
-            bins=4, min=0, max=3)
-        self.assertEqual(
-            torch.tensor([0, 2, 1, 0], dtype=torch.float, device=device),
-            actual)
+            # without nbins
+            actual = torch.histc(
+                torch.tensor([2, 5], dtype=torch.float, device=device))
+            expected = torch.zeros(100, dtype=torch.float, device=device)
+            expected.data[0] = 1
+            expected.data[99] = 1
+            self.assertEqual(expected, actual)
+            # tensor with the same element
+            actual = torch.histc(torch.ones(5, dtype=torch.float, device=device), bins=5)
+            self.assertEqual(
+                torch.tensor([0, 0, 5, 0, 0], dtype=torch.float, device=device),
+                actual)
+            # no element falls between [min, max]
+            actual = torch.histc(
+                torch.ones(5, dtype=torch.float, device=device), bins=5, min=2, max=3)
+            self.assertEqual(
+                torch.tensor([0, 0, 0, 0, 0], dtype=torch.float, device=device),
+                actual)
+            # element falls below min + integral bin size and
+            actual = torch.histc(
+                torch.tensor([2, 4, 2, 2, 5, 4], dtype=torch.float, device=device),
+                bins=5, min=1, max=5)
+            self.assertEqual(
+                torch.tensor([0, 3, 0, 2, 1], dtype=torch.float, device=device),
+                actual)
+            # non-integral bin size
+            actual = torch.histc(
+                torch.tensor([1, 2, 1], dtype=torch.float, device=device),
+                bins=4, min=0, max=3)
+            self.assertEqual(
+                torch.tensor([0, 2, 1, 0], dtype=torch.float, device=device),
+                actual)
+            # double input
+            actual = torch.histc(
+                torch.tensor([1, 2, 1], dtype=torch.double, device=device), bins=4, min=0, max=3)
+            self.assertEqual(
+                torch.tensor([0, 2, 1, 0], dtype=torch.double, device=device),
+                actual)
+            self.assertEqual(actual.dtype, torch.double)
+            # mixed input
+            actual = torch.histc(
+                torch.tensor([1., 2, 1], dtype=torch.float, device=device),
+                bins=4, min=0, max=3)
+            self.assertEqual(
+                torch.tensor([0, 2, 1, 0], dtype=torch.float, device=device),
+                actual)
+            self.assertEqual(actual.dtype, torch.float)
 
         # test against numpy.histogram()
         def test_against_np(tensor, bins=100, min=0, max=0):
@@ -2594,9 +2595,6 @@ class _TestTorchMixin(object):
 
             expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
             test_against_np(expanded)
-
-    def test_histc_cpu(self):
-        self._test_histc(self, 'cpu')
 
     def test_ones(self):
         res1 = torch.ones(100, 100)
@@ -2645,6 +2643,18 @@ class _TestTorchMixin(object):
         for dtype in all_dtypes:
             copied_dtype = copy.deepcopy(dtype)
             self.assertIs(dtype, copied_dtype)
+
+    def test_copy_transpose(self):
+        x = torch.arange(100 * 100, dtype=torch.float).reshape(100, 100).t()
+        y = torch.empty(100, 100, dtype=torch.float)
+        y.copy_(x)
+        self.assertEqual(y[:, 0], range(100))
+        self.assertEqual(y[:, 40], range(4000, 4100))
+
+        y = torch.empty(100, 100, dtype=torch.double)
+        y.copy_(x)
+        self.assertEqual(y[:, 0], range(100))
+        self.assertEqual(y[:, 40], range(4000, 4100))
 
     def test_device(self):
         cpu = torch.device('cpu')
@@ -2788,8 +2798,16 @@ class _TestTorchMixin(object):
         zero_point = 10
         val = 100
         numel = 10
-        q = torch._empty_affine_quantized(numel, dtype=torch.quint8, scale=scale, zero_point=zero_point)
-        # TODO: check dequantized values?
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        self.assertEqual(scale, q.q_scale())
+        self.assertEqual(zero_point, q.q_zero_point())
+
+        # create Tensor from uint8_t Tensor, scale and zero_point
+        int_tensor = torch.randint(0, 100, size=(10,), dtype=torch.uint8)
+        q = torch._per_tensor_affine_qtensor(int_tensor, scale, zero_point)
+        self.assertEqual(int_tensor, q.int_repr())
+        self.assertEqual(scale, q.q_scale())
+        self.assertEqual(zero_point, q.q_zero_point())
 
     def test_qtensor_dtypes(self):
         r = np.random.rand(3, 2) * 2 - 4
@@ -2805,6 +2823,12 @@ class _TestTorchMixin(object):
         qr = r.quantize_linear(scale, zero_point, torch.qint32)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+
+    def test_qtensor_dequantize_linear(self):
+        t = torch.arange(-10, 10, dtype=torch.int8)
+        scale = 3
+        zero_point = 2
+        qt = torch.dequantize_linear(t, scale, zero_point, torch.float)
 
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
@@ -11535,6 +11559,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 return 5
         f = Foo2()
         self.assertEqual(f.foo(), 5)
+
+    def test_ndim(self):
+        a = torch.randn(1, 2, 3)
+        self.assertEqual(3, a.ndim)
+        b = torch.randn(())
+        self.assertEqual(0, b.ndim)
+        c = torch.randn(1, 0)
+        self.assertEqual(2, c.ndim)
 
 # Functions to test negative dimension wrapping
 METHOD = 1
