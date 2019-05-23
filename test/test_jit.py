@@ -12407,6 +12407,9 @@ a")
         key = torch.rand((src_l, bsz, embed_size))
         value = torch.rand((src_l, bsz, embed_size))
 
+        mask = (torch.triu(torch.ones(src_l, src_l)) == 1).transpose(0, 1)
+        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0)).double()
+
         jit_out = jit_multihead_attn_forward(query, key, value,
                                              embed_size, nhead,
                                              multi_head_attn.in_proj_weight,
@@ -12414,7 +12417,7 @@ a")
                                              multi_head_attn.bias_k, multi_head_attn.bias_v,
                                              multi_head_attn.add_zero_attn, multi_head_attn.dropout,
                                              multi_head_attn.out_proj.weight,
-                                             multi_head_attn.out_proj.bias)[0]
+                                             multi_head_attn.out_proj.bias, attn_mask=mask)[0]
 
         py_out = torch.nn.functional.multi_head_attention_forward(query, key, value,
                                                                   embed_size, nhead,
@@ -12425,7 +12428,7 @@ a")
                                                                   multi_head_attn.add_zero_attn,
                                                                   multi_head_attn.dropout,
                                                                   multi_head_attn.out_proj.weight,
-                                                                  multi_head_attn.out_proj.bias)[0]
+                                                                  multi_head_attn.out_proj.bias, attn_mask=mask)[0]
         # print("rel. error: ")
         # print(jit_out / py_out - 1)
         self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
