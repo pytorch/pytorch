@@ -676,6 +676,46 @@ Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbi
   return (2.0 / (_safe_size(self.sizes(), dim) - unbiased)) * grad * (self - self.mean(dim, true));
 }
 
+Tensor std_backward(const Tensor & result, const Tensor & grad, const Tensor & self, bool unbiased) {
+  return var_backward(grad / (result * 2), self, unbiased);
+}
+
+Tensor std_backward(const Tensor & result, Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  return var_backward(grad / (result * 2), self, dim, unbiased, keepdim);
+}
+
+Tensor mean_backward(Tensor grad, const IntArrayRef sizes, IntArrayRef dim, bool keepdim) {
+  return sum_backward(grad, sizes, dim, keepdim) / _safe_size(sizes, dim);
+}
+
+Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int numel) {
+  return grad.expand(sizes) / numel;
+}
+
+Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, IntArrayRef dim, bool unbiased, bool keepdim, bool is_std) {
+  Tensor grad;
+  if (grads[0].defined()) {
+    grad = is_std ? std_backward(r1, grads[0], self, dim, unbiased, keepdim) : var_backward(grads[0], self, dim, unbiased, keepdim);
+  }
+  if (grads[1].defined()) {
+    Tensor mean_grad = mean_backward(grads[1], self.sizes(), dim, keepdim);
+    grad = grads[0].defined() ? grad + mean_grad : mean_grad;
+  }
+  return grad;
+}
+
+Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, bool unbiased, bool is_std) {
+  Tensor grad;
+  if (grads[0].defined()) {
+    grad = is_std ? std_backward(r1, grads[0], self, unbiased) : var_backward(grads[0], self, unbiased);
+  }
+  if (grads[1].defined()) {
+    Tensor mean_grad = mean_backward(grads[1], self.sizes(), self.numel());
+    grad = grads[0].defined() ? grad + mean_grad : mean_grad;
+  }
+  return grad;
+}
+
 Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArrayRef sizes) {
   int64_t numel = 1;
   for (auto size : sizes) {

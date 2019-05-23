@@ -395,7 +395,7 @@ Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen) {
 }
 
 Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
-  AT_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
+  TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "bernoulli_scalar_cuda_", [&] {
     auto seeds = next_philox_seed(gen, 10);
     bernoulli_scalar_cuda_kernel<scalar_t>(self, p, seeds);
@@ -407,10 +407,10 @@ void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generat
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "uniform_cuda", [&] {
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);
-    AT_CHECK(from <= to,
+    TORCH_CHECK(from <= to,
       "uniform_ expects to return a [from, to) range, but found from=", from,
       " > to=", to);
-    AT_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
+    TORCH_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
           "uniform_ expects to-from <= std::numeric_limits<", toString(iter.dtype()),
           ">::max(), but found to=", to, " and from=", from,
           " which result in to-from to exceed the limit");

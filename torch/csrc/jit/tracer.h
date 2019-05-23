@@ -148,6 +148,7 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::ScalarType>& value);
+TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
 TORCH_API void addInputs(Node* n, const char* name, at::Generator* value);
 
 template<typename T>

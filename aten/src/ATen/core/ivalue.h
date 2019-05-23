@@ -132,6 +132,9 @@ struct CAFFE2_API IValue final {
   bool isTensor() const { return Tag::Tensor == tag; }
   at::Tensor toTensor() &&;
   at::Tensor toTensor() const &;
+  at::TensorImpl* unsafeToTensorImpl() const {
+    return static_cast<at::TensorImpl*>(payload.as_intrusive_ptr);
+  }
 
   const IValue& toIValue() const {
     return *this;
@@ -318,6 +321,12 @@ struct CAFFE2_API IValue final {
   at::Layout toLayout() const {
     return static_cast<at::Layout>(toInt());
   }
+
+  // MemoryFormat
+  at::MemoryFormat toMemoryFormat() const {
+    return static_cast<at::MemoryFormat>(toInt());
+  }
+
 
   // for debugging
   std::string tagKind() const {

@@ -402,11 +402,11 @@ const std::vector<std::string> functions = {
 
             return torch._dim_arange(like, dim), backward
 
-        def contiguous(self):
+        def contiguous(self, *, memory_format: int=0):
             def backward(grad_output):
-                return grad_output
+                return grad_output, None
 
-            return self.contiguous(), backward
+            return self.contiguous(memory_format=memory_format), backward
 
         def dot(self, tensor):
             def backward(grad_output):
@@ -1130,6 +1130,7 @@ const std::vector<std::string> functions = {
                 res = mask * input / p1m
 
             def backward(grad_output):
+                use_cuda = grad_output.is_cuda
                 if use_cuda:
                     grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
                 else:

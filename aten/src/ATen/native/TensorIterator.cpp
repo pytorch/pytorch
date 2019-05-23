@@ -409,6 +409,23 @@ bool TensorIterator::is_trivial_1d() const {
   return ndim() == 1;
 }
 
+bool TensorIterator::is_contiguous() const {
+  if (numel() == 1) {
+    return true;
+  }
+  if (ndim() != 1) {
+    return false;
+  }
+  int num_tensors = ntensors();
+  for (int i = 0; i < num_tensors; i++) {
+    if (strides(i)[0] != element_size(i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+
 bool TensorIterator::is_scalar(int arg) const {
   const auto& stride = operands_[arg].stride_bytes;
   for (int i = 0; i < ndim(); i++) {
@@ -498,6 +515,28 @@ std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Ten
   AT_ASSERT(out.defined());
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
+  builder.add_input(a);
+  builder.iter_->promote_gpu_output_dtypes_ = true;
+  builder.iter_->resize_outputs_ = false;
+  builder.iter_->is_reduction_ = true;
+  return builder.build();
+}
+
+std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
+  AT_ASSERT(out1.defined());
+  AT_ASSERT(out2.defined());
+  TORCH_CHECK((!a.is_cuda() && !out1.is_cuda() && !out2.is_cuda()) || (a.device() == out1.device() && out1.device() == out2.device()),
+      "reduce_op(): expected input and both outputs to be on same device, but input is on ", a.device(),
+      ", output1 is on ", out1.device(), " and output2 is on", out2.device());
+  TORCH_CHECK(out1.dim() == out2.dim(), "reduce_op(): expected both outputs to have same number of dims, but output1 has ", out1.dim(),
+      " and output2 has ", out2.dim());
+  TORCH_CHECK(out1.sizes() == out2.sizes(), "reduce_op(): expected both outputs to have same sizes, but output1 has ", out1.sizes(),
+      " and output2 has ", out2.sizes());
+  TORCH_CHECK(out1.strides() == out2.strides(), "reduce_op(): expected both outputs to have same strides, but output1 has ", out1.strides(),
+           " and output2 has ", out2.strides());
+  auto builder = TensorIterator::Builder();
+  builder.add_output(out1);
+  builder.add_output(out2);
   builder.add_input(a);
   builder.iter_->promote_gpu_output_dtypes_ = true;
   builder.iter_->resize_outputs_ = false;
