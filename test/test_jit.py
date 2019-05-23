@@ -5489,7 +5489,28 @@ a")
             if x > 2:
                 raise RuntimeError("bad input, {} is too high".format(x))
             return x + 3
-        with self.assertRaisesRegex(torch._C.JITException, "bad input, 5 is too high"):
+        with self.assertRaisesRegex(torch._C.JITException, "RuntimeError: bad input, 5 is too high"):
+            fn(5)
+
+    def test_python_raise_not_function(self):
+        @torch.jit.script
+        def fn(x):
+            # type: (int) -> int
+            if x > 2:
+                raise 5*3
+            return x + 3
+        with self.assertRaisesRegex(torch._C.JITException, ""):  # For backwards compatibility
+            fn(5)
+
+    def test_python_raise_non_string(self):
+        @torch.jit.script
+        def fn(x):
+            # type: (int) -> int
+            if x > 2:
+                raise ValueError(x)
+            return x + 3
+
+        with self.assertRaisesRegex(torch._C.JITException, "ValueError: 5"):
             fn(5)
 
     def _make_scalar_vars(self, arr, dtype):
@@ -11323,7 +11344,7 @@ a")
         ''')
 
         cu.foo(torch.tensor(0))
-        with self.assertRaisesRegex(torch.jit.Error, "3"):
+        with self.assertRaisesRegex(torch.jit.Error, "ValueError: 3"):
             cu.foo(torch.tensor(1))
 
         @torch.jit.script
@@ -11337,7 +11358,7 @@ a")
 
         foo(torch.tensor(0))
         # we don't currently validate the name of the exception
-        with self.assertRaisesRegex(torch.jit.Error, "3"):
+        with self.assertRaisesRegex(torch.jit.Error, "ArbitraryError: 3"):
             foo(torch.tensor(1))
 
         @torch.jit.script
