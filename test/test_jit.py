@@ -14315,6 +14315,7 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'pdist',
     'multilabel_margin_loss',
     'max_unpool3d',
+    'max_unpool3d_stride_none',
     'multi_margin_loss',
     'binary_cross_entropy',
     'binary_cross_entropy_size_average',
