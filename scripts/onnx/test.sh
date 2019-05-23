@@ -32,7 +32,7 @@ install_torchvision() {
   # PyTorch CI
   git clone https://github.com/pytorch/vision --quiet
   pushd vision
-  pip install -q .
+  pip install -q --user .
   popd
   rm -rf vision
 }
