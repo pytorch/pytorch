@@ -253,6 +253,10 @@ class CAFFE2_API Tensor {
   /// TensorOptions.h.
   TensorOptions options() const;
 
+  void* data_ptr() const {
+    return this->unsafeGetTensorImpl()->slow_data();
+  }
+
   template<typename T>
   T * data() const;
 
@@ -592,7 +596,6 @@ class CAFFE2_API Tensor {
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
   Scalar item() const;
-  void* data_ptr() const;
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride={});
   Tensor & set_(const Tensor & source);

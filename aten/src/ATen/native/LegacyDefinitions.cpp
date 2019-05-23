@@ -8,10 +8,6 @@ namespace at { namespace native {
 
 // Methods
 
-void* data_ptr(const Tensor & self) {
-  return self.unsafeGetTensorImpl()->slow_data();
-}
-
 Tensor & set_(Tensor& self, Storage source) {
   return at::legacy::th::_th_set_(self, source);
 }
