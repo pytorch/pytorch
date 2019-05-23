@@ -15,7 +15,7 @@ from textwrap import dedent
 from itertools import product, permutations
 
 from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
-    backward_graph, get_lstm_inputs, get_milstm_inputs, LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
+    backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
 
 class TestFuser(JitTestCase):
@@ -900,13 +900,23 @@ class TestFuser(JitTestCase):
         self.assertAllFused(forward_graph, except_for=("aten::size", "prim::BroadcastSizes",
                                                        "aten::_size_if_not_equal"))
 
+        old_plans = set()
         for i in range(3):
             # if we have s2, then the s1 are _grad_sum_to_size'd
+            args = s2 if i < 1 else s1, s2 if i < 2 else s1, s2
+            args = [a.detach_().requires_grad_() for a in args]
             res = module(s2 if i < 1 else s1, s2 if i < 2 else s1, s2)
-            res.sum().backward()
-            backward = backward_graph(module, bw_plan_idx=i)
-            if len([1 for o in backward.outputs() if o.node().kind() == "aten::_grad_sum_to_size"]) != i:
-                   print(backward)
+            grads = torch.autograd.grad(res.sum(), args)
+            for inp, gr in zip(args, grads):
+                self.assertEqual(inp.shape, gr.shape)
+            backward = None
+            # this is a workaround for the backward graphs not being
+            # in order for Python 2
+            for g in all_backward_graphs(module):
+                if str(g) not in old_plans:
+                    assert backward is None
+                    backward = g
+                    old_plans.add(str(backward))
             self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "aten::_grad_sum_to_size"]), i)
             self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "prim::Param"]), 3 - i)
 
