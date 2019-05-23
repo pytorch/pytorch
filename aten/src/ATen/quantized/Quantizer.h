@@ -224,6 +224,9 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
     return axis_;
   }
 
+  Tensor quantize(Tensor tensor) override;
+  Tensor dequantize(Tensor tensor) override;
+
  private:
   const std::vector<float> scales_;
   const std::vector<int32_t> zero_points_;
@@ -249,6 +252,9 @@ CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale,
 // argument types right now in native functions
 CAFFE2_API QuantizerPtr
 make_per_tensor_affine_quantizer(double scale, int64_t zero_point, ScalarType scalar_type);
+
+CAFFE2_API QuantizerPtr
+make_per_channel_affine_quantizer(std::vector<float> scales, std::vector<int32_t> zero_points, std::vector<int64_t> axis, ScalarType scalar_type);
 
 // Create a Quantized Tensor given arguments for normal Tensor and a quantizer
 CAFFE2_API Tensor new_qtensor_cpu(
