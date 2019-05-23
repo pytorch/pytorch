@@ -1,6 +1,7 @@
 import sys
 import ast
 import inspect
+import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
@@ -119,6 +120,11 @@ def get_type_line(source):
     type_lines = list(filter(lambda line: type_comment in line[1], lines))
 
     if len(type_lines) == 0:
+        type_pattern = re.compile('#[\t ]*type[\t ]*:')
+        wrong_type_lines = list(filter(lambda line: type_pattern.search(line[1]), lines))
+        if len(wrong_type_lines) > 0:
+            print("WARNING: the annotation prefix in line " + str(wrong_type_lines[0][0])
+                  + " is invalid. MyPy requires the exact prefix: '# type:'")
         return None
     elif len(type_lines) == 1:
         # Only 1 type line, quit now
