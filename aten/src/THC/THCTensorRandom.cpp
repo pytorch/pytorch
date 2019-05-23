@@ -4,8 +4,6 @@
 #include <random>
 #include <curand.h>
 
-
-void initializeGenerator(THCState *state, THCGenerator* gen);
 void createGeneratorState(THCGenerator* gen, uint64_t seed);
 
 
@@ -80,17 +78,10 @@ THCGenerator* THCRandom_getGenerator(THCState* state)
   std::lock_guard<std::mutex> lock(gen->mutex);
   if (gen->state.initf == 0)
   {
-    initializeGenerator(state, gen);
     createGeneratorState(gen, gen->state.initial_seed);
     gen->state.initf = 1;
   }
   return gen;
-}
-
-curandStateMtgp32* THCRandom_generatorStates(THCState* state)
-{
-  THCGenerator* gen = THCRandom_getGenerator(state);
-  return gen->state.gen_states;
 }
 
 /* Random seed */

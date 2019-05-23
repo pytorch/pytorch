@@ -3,6 +3,12 @@
 #else
 
 #include <THCUNN/common.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCTensorRandom.h>
+#include <THC/THCGenerator.hpp>
+#include <utility>
+
+THCGenerator* THCRandom_getGenerator(THCState* state);
 
 void THNN_(RReLU_updateOutput)(
            THCState *state,
@@ -16,7 +22,12 @@ void THNN_(RReLU_updateOutput)(
            void *generator)
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
-  curandStateMtgp32* gen_states = THCRandom_generatorStates(state);
+  THCGenerator* gen = THCRandom_getGenerator(state);
+  // each thread will utilize one random, however, since we have to use
+  // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
+  // offset is 4.
+  uint64_t offset = gen->state.philox_seed_offset.fetch_add(4);
+  std::pair<uint64_t, uint64_t> next_philox_seed = std::make_pair(gen->state.initial_seed, offset);
 
   if (train)
   {
@@ -28,7 +39,7 @@ void THNN_(RReLU_updateOutput)(
     if (inplace)
     {
       rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        n, gen_states, input_data, noise_data, input_data, lower, upper);
+        n, next_philox_seed, input_data, noise_data, input_data, lower, upper);
       THCTensor_(set)(state, output, input);
     }
     else
@@ -36,7 +47,7 @@ void THNN_(RReLU_updateOutput)(
       THCTensor_(resizeAs)(state, output, input);
       scalar_t *output_data = THCTensor_(data)(state, output);
       rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        n, gen_states, input_data, noise_data, output_data, lower, upper);
+        n, next_philox_seed, input_data, noise_data, output_data, lower, upper);
     }
     THCudaCheck(cudaGetLastError());
     THCTensor_(free)(state, input);
