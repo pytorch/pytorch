@@ -228,10 +228,9 @@ RegisterOperators reg({
         "aten::format(str self, ...) -> str",
         [](const Node* node) {
           size_t num_inputs = node->inputs().size();
-          std::regex unsupported_options("\\{(.*)\\}");
+          std::regex unsupported_options("\\{(.+)\\}");
           return [num_inputs, unsupported_options](Stack& stack) {
             auto format = peek(stack, 0, num_inputs).toStringRef();
-
             if (std::regex_search(format, unsupported_options)) {
               AT_WARN("Format options are not supported.");
             }

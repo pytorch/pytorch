@@ -1598,20 +1598,26 @@ struct to_ir {
   //   raise Exception("Hi")
   // print(a)
   void emitRaise(const Raise& stmt) {
-    auto exceptionNode = stmt.get()->tree(0)->tree(0);
+    auto exceptionNode = stmt.expr().get().tree();
     if (exceptionNode->kind() == TK_APPLY) {
       auto apply = Apply(exceptionNode);
       auto exception_name = Var(apply.callee()).name().name();
-      auto exceptionArg = apply.inputs()[0];
-      auto exceptionMsgVal = emitSugaredExpr(exceptionArg, 1);
-      std::cout<<"exceptionmsgkind: "<<exceptionMsgVal->kind()<<std::endl;
-      auto errorMsg = asSimple(exceptionMsgVal);
+      auto exception_arg_expr = Expr(apply.inputs()[0]);
+      auto exception_msg = asSimple(emitSugaredExpr(exception_arg_expr, 1));
       auto separator = insertConstant(*graph, ": ", nullptr, stmt.range());
-      auto exception_name_sep = graph->insert(aten::add, {exception_name, separator}, {}, stmt.range());
-      auto exceptionMsg = graph->insert(aten::add, {exception_name_sep, errorMsg}, {}, exceptionNode->range())->setType(StringType::get());
-      graph->insert(prim::RaiseException, {errorMsg}, {}, stmt.range());
+      auto exception_name_sep = graph->insert(
+          aten::add, {exception_name, separator}, {}, stmt.range());
+      auto final_msg = graph
+                           ->insert(
+                               aten::add,
+                               {exception_name_sep, exception_msg},
+                               {},
+                               exceptionNode->range())
+                           ->setType(StringType::get());
+      graph->insert(prim::RaiseException, {final_msg}, {}, stmt.range());
     } else {
-        throw ErrorReport(stmt.range());
+      throw ErrorReport(stmt.range())
+          << "exceptions must derive from BaseException";
     }
   }
 
