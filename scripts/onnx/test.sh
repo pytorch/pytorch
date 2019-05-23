@@ -25,7 +25,7 @@ set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
 pip install pytest scipy hypothesis
 # install cpu version of torchvision
-pip install --user https://download.pytorch.org/whl/cpu/torchvision-0.3.0-cp36-cp36m-linux_x86_64.whl
+pip install https://download.pytorch.org/whl/cpu/torchvision-0.3.0-cp36-cp36m-linux_x86_64.whl
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi
