@@ -40,6 +40,8 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
             elements[i][it] = -std::numeric_limits<acc_t>::infinity();
             if (element_index < batch_element_count) {
                 elements[i][it] = src[i*element_count+it*WARP_SIZE];
+            } else {
+                elements[i][it] = -std::numeric_limits<acc_t>::infinity();
             }
         }
     }
@@ -249,6 +251,9 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
             if (element_index < batch_element_count) {
                 grad_reg[i][it] = grad[i*element_count+it*WARP_SIZE];
                 output_reg[i][it] = output[i*element_count+it*WARP_SIZE];
+            } else {
+                grad_reg[i][it] = acc_t(0);
+                output_reg[i][it] = acc_t(0);
             }
         }
     }
