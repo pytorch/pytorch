@@ -24,8 +24,20 @@ done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
 pip install pytest scipy hypothesis
-# install cpu version of torchvision
-pip install https://download.pytorch.org/whl/cpu/torchvision-0.3.0-cp36-cp36m-linux_x86_64.whl
+
+install_torchvision() {
+  echo "Installing torchvision at branch master"
+  rm -rf vision
+  # TODO: This git clone is bad, it means pushes to torchvision can break
+  # PyTorch CI
+  git clone https://github.com/pytorch/vision --quiet
+  pushd vision
+  pip install -q --user .
+  popd
+  rm -rf vision
+}
+install_torchvision
+
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi
