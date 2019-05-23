@@ -1542,6 +1542,24 @@ def argmin(g, input, dim, keepdim):
         return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
 
 
+@parse_args('v', 'i', 'v', 'v')
+def scatter(g, self, dim, index, src):
+    return g.op("Scatter", self, index, src, axis_i=dim)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def scatter_add(g, self, dim, index, src):
+    if self.type().kind() != "CompleteTensorType":
+        return _unimplemented("scatter_add", "input size not accesible")
+    dtype = self.type().scalarType()
+    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    dims = self.type().sizes()
+    to_add = torch.zeros(dims)
+    to_add = g.op("Constant", value_t=to_add)
+    to_add = scatter(g, to_add, dim, index, src)
+    return add(g, self, to_add)
+
+
 def log2(g, self):
     _ln2 = 0.693147180559945309
     return g.op('Div', log(g, self), g.op('Constant', value_t=torch.Tensor([_ln2])))

@@ -95,6 +95,8 @@ class QFCInt8 final : public c10::OperatorKernel {
 
     // TODO: contiguous is called for further jit optimizations.
     auto bias_contig = bias.contiguous();
+    const auto* bias_ptr =
+        reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
 
     // After the uint8 * int8 matrix multiplication is performed, this operation
     // does:
@@ -108,7 +110,7 @@ class QFCInt8 final : public c10::OperatorKernel {
         /*Bq_zero_point=*/&weight_zero_point_int32,
         /*row_offsets=*/packA.getRowOffsetBuffer(),
         /*col_offsets=*/col_offsets.data(),
-        /*bias=*/bias_contig.data<int32_t>(),
+        /*bias=*/bias_ptr,
         /*nCol=*/N);
 
     // Allocate output Tensor and a buffer for fbgemmPacked to use
