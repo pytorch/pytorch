@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -7,6 +6,7 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -1598,37 +1598,37 @@ struct to_ir {
   //   raise Exception("Hi")
   // print(a)
   void emitRaise(const Raise& stmt) {
-    bool isProperException = stmt.expr().present();
-    if (isProperException) {
+    if (stmt.expr().present()) {
       auto exceptionNode = stmt.expr().get().tree();
-      if(exceptionNode->kind() != TK_APPLY || Apply(exceptionNode).inputs().empty()) {
-        isProperException = false;
-      }
-      if (isProperException) {
+      if (exceptionNode->kind() == TK_APPLY &&
+          !Apply(exceptionNode).inputs().empty()) {
         auto apply = Apply(exceptionNode);
-        auto exception_name = Var(apply.callee()).name().name();
-        auto exception_arg_expr = Expr(apply.inputs()[0]);
-        auto exception_msg = asSimple(emitSugaredExpr(exception_arg_expr, 1));
-        if (!exception_msg->type()->isSubtypeOf(StringType::get())) {
-          exception_msg = graph->insert(prim::str, {exception_msg}, {}, stmt.range());
+        if (apply.callee().kind() == TK_VAR) {
+          auto exception_name = Var(apply.callee()).name().name();
+          auto exception_arg_expr = Expr(apply.inputs()[0]);
+          auto exception_msg = asSimple(emitSugaredExpr(exception_arg_expr, 1));
+          if (!exception_msg->type()->isSubtypeOf(StringType::get())) {
+            exception_msg =
+                graph->insert(prim::str, {exception_msg}, {}, stmt.range());
+          }
+          auto separator = insertConstant(*graph, ": ", nullptr, stmt.range());
+          auto exception_name_sep = graph->insert(
+              aten::add, {exception_name, separator}, {}, stmt.range());
+          auto final_msg = graph
+                               ->insert(
+                                   aten::add,
+                                   {exception_name_sep, exception_msg},
+                                   {},
+                                   exceptionNode->range())
+                               ->setType(StringType::get());
+          graph->insert(prim::RaiseException, {final_msg}, {}, stmt.range());
+          return;
         }
-        auto separator = insertConstant(*graph, ": ", nullptr, stmt.range());
-        auto exception_name_sep = graph->insert(
-            aten::add, {exception_name, separator}, {}, stmt.range());
-        auto final_msg = graph
-                            ->insert(
-                                aten::add,
-                                {exception_name_sep, exception_msg},
-                                {},
-                                exceptionNode->range())
-                            ->setType(StringType::get());
-        graph->insert(prim::RaiseException, {final_msg}, {}, stmt.range());
-        return;
       }
     }
-    assert(!isProperException); // Exception isn't a function with at least one argument
     const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, nullptr, stmt.range());
+    auto string_input =
+        insertConstant(*graph, exception, nullptr, stmt.range());
     graph->insert(prim::RaiseException, {string_input}, {}, stmt.range());
   }
 

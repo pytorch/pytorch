@@ -11337,7 +11337,7 @@ a")
 
         foo(torch.tensor(0))
         # we don't currently validate the name of the exception
-        with self.assertRaisesRegex(torch.jit.Error, "Exception"):
+        with self.assertRaisesRegex(torch.jit.Error, "3"):
             foo(torch.tensor(1))
 
         @torch.jit.script
