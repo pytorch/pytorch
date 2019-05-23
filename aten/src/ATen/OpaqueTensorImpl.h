@@ -93,6 +93,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
       /*dest_impl=*/impl.get(),
       /*version_counter=*/version_counter,
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    impl->refresh_numel();
     return impl;
   }
 
@@ -110,6 +111,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
       /*dest_impl=*/this,
       /*version_counter=*/version_counter(),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
+    refresh_numel();
   }
 
   OpaqueHandle& unsafe_opaque_handle() {
