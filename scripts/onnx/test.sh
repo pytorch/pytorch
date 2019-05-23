@@ -24,7 +24,8 @@ done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
 pip install pytest scipy hypothesis
-pip install --user git+git://github.com/pytorch/vision.git@b3cb86f295c8b8af7142e9def3352c5e16e481b6
+# install cpu version of torchvision
+pip install --user https://download.pytorch.org/whl/cpu/torchvision-0.3.0-cp36-cp36m-linux_x86_64.whl
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi

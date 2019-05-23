@@ -120,6 +120,7 @@ pip install --user pytest-sugar
 # torchvision tests #
 #####################
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-  pip install --user git+git://github.com/pytorch/vision.git@b3cb86f295c8b8af7142e9def3352c5e16e481b6
+  # install cpu version of torchvision
+  pip install --user https://download.pytorch.org/whl/cpu/torchvision-0.3.0-cp36-cp36m-linux_x86_64.whl
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
