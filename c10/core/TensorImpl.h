@@ -1400,6 +1400,22 @@ private:
    */
   bool compute_contiguous() const;
 
+protected:
+  /**
+   * Recompute the cached numel of a tensor.  Call this if you modify sizes.
+   */
+  void refresh_numel() {
+    numel_ = compute_numel();
+  }
+
+  /**
+   * Recompute the cached contiguity of a tensor.  Call this if you modify sizes
+   * or strides.
+   */
+  void refresh_contiguous() {
+    is_contiguous_ = compute_contiguous();
+  }
+
   /**
    * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
    * from one TensorImpl to another TensorImpl.
@@ -1423,22 +1439,6 @@ private:
     dest_impl->reserved_ = src_impl->reserved_;
     dest_impl->set_version_counter(version_counter);
     dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-  }
-
-protected:
-  /**
-   * Recompute the cached numel of a tensor.  Call this if you modify sizes.
-   */
-  void refresh_numel() {
-    numel_ = compute_numel();
-  }
-
-  /**
-   * Recompute the cached contiguity of a tensor.  Call this if you modify sizes
-   * or strides.
-   */
-  void refresh_contiguous() {
-    is_contiguous_ = compute_contiguous();
   }
 
 protected:
