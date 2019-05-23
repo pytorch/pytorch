@@ -47,7 +47,24 @@ void checkZeroPoint(std::string fn_name, int32_t zero_point) {
            "zero_point is out of range.");
 }
 
+template <typename T>
+void checkZeroPoints(std::string fn_name, std::vector<int32_t> zero_points) {
+  for (int i = 0; i < zero_points.size(); ++i) {
+    TORCH_CHECK(zero_points[i] <= std::numeric_limits<T>::max(),
+                fn_name,
+                "zero_point",
+                i,
+                "is out of range.");
+    TORCH_CHECK(zero_points[i] >= std::numeric_limits<T>::min(),
+                fn_name,
+                "zero_point",
+                i,
+                "is out of range.");
+  }
+}
+
 #ifdef USE_FBGEMM
+// Note: quantize_val is only explicitly used in test outside of this file
 template <typename T>
 T quantize_val(float scale, int32_t zero_point, float value) {
   // Internally, fbgemm::Quantize uses std::nearbyint.
@@ -59,10 +76,15 @@ T quantize_val(float scale, int32_t zero_point, float value) {
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
   int32_t qvalue;
-  qvalue = fbgemm::Quantize<typename T::underlying>(value, zero_point, scale,
-                                                    /*result_precision=*/CHAR_BIT * sizeof(typename T::underlying));
+  qvalue = fbgemm::Quantize<typename T::underlying>(
+      value,
+      zero_point,
+      scale,
+      /*result_precision=*/CHAR_BIT * sizeof(typename T::underlying));
   return static_cast<T>(qvalue);
 }
+
+// TODO: dequantize_val?
 
 template <typename T>
 Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point) {
@@ -162,12 +184,90 @@ template CAFFE2_API Tensor dequantize_tensor<qint8>(Tensor rtensor, Tensor qtens
 template CAFFE2_API Tensor dequantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
 template CAFFE2_API Tensor dequantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, float scale, int32_t zero_point);
 
+
+// TODO: add fbgemm for per channel
+template <typename T>
+Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
+                                          Tensor qtensor,
+                                          std::vector<float> scales,
+                                          std::vector<int32_t> zero_points,
+                                          std::vector<int64_t> axis) {
+  auto fn_name = "quantize_tensor_per_channel_affine";
+  checkFloatCPUTensor(fn_name, rtensor);
+  checkQuantizedCPUTensor<T>(fn_name, qtensor);
+  checkZeroPoints<typename T::underlying>(fn_name, zero_points);
+  int64_t channel_axis = axis[0];
+  TORCH_CHECK(channel_axis < rtensor.dim(), "Channel axis out of range in per channel affine quantization.");
+  int64_t batches = size_to_dim_(channel_axis, rtensor.sizes());
+  int64_t elements_per_channel = size_from_dim_(channel_axis + 1, rtensor.sizes());
+  int64_t channel = rtensor.size(channel_axis);
+  TORCH_CHECK(channel == scales.size(),
+              "length of scales must equal to channel");
+  TORCH_CHECK(channel == zero_points.size(),
+              "length of zero_points must equal to channel");
+  const float* rdata = rtensor.data<float>();
+  auto qdata = qtensor.data<T>();
+  for (auto b = 0; b < batches; ++b) {
+    for (auto c = 0; c < channel; ++c) {
+      for (auto e = 0; e < elements_per_channel; ++e) {
+        auto i = b * channel * elements_per_channel + c * elements_per_channel + e;
+        qdata[i] = quantize_val<T>(scales[c], zero_points[c], rdata[i]);
+      }
+    }
+  }
+  return qtensor;
+}
+
+template <typename T>
+Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
+                                            Tensor rtensor,
+                                            std::vector<float> scales,
+                                            std::vector<int32_t> zero_points,
+                                            std::vector<int64_t> axis) {
+  auto fn_name = "dequantize_tensor_per_channel_affine";
+  checkFloatCPUTensor(fn_name, rtensor);
+  checkQuantizedCPUTensor<T>(fn_name, qtensor);
+  checkZeroPoints<typename T::underlying>(fn_name, zero_points);
+  int64_t channel_axis = axis[0];
+  TORCH_CHECK(channel_axis < qtensor.dim(),
+              "Channel axis out of range in per channel affine dequantization.");
+  int64_t batches = size_to_dim_(channel_axis, rtensor.sizes());
+  int64_t elements_per_channel = size_from_dim_(channel_axis + 1, rtensor.sizes());
+  int64_t channel = rtensor.size(channel_axis);
+  TORCH_CHECK(channel == scales.size(),
+              "length of scales must equal to channel");
+  TORCH_CHECK(channel == zero_points.size(),
+              "length of zero_points must equal to channel");
+  const auto* qd = qtensor.data<T>();
+  float* rd = rtensor.data<float>();
+  for (auto b = 0; b < batches; ++b) {
+    for (auto c = 0; c < channel; ++c) {
+      for (auto e = 0; e < elements_per_channel; ++e) {
+        auto i = b * channel * elements_per_channel + c * elements_per_channel + e;
+        // We need to convert the qint8 value to float to ensure the subtraction
+        // subexpression returns a float
+        rd[i] = (static_cast<float>(qd[i].val_) - zero_points[c]) * scales[c];
+      }
+    }
+  }
+  return rtensor;
+}
+
 QuantizerPtr make_per_tensor_affine_quantizer(
     double scale,
     int64_t zero_point,
     ScalarType scalar_type) {
   return c10::make_intrusive<PerTensorAffineQuantizer>(scalar_type,
       static_cast<float>(scale), static_cast<int32_t>(zero_point));
+}
+
+QuantizerPtr make_per_channel_affine_quantizer(
+    std::vector<float> scales,
+    std::vector<int32_t> zero_points,
+    std::vector<int64_t> axis,
+    ScalarType scalar_type) {
+  return c10::make_intrusive<PerChannelAffineQuantizer>(scalar_type,
+                                                        scales, zero_points, axis);
 }
 
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
@@ -237,6 +337,49 @@ Tensor PerTensorAffineQuantizer::dequantize(Tensor qtensor) {
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), "dequantize_tensor", [&]() {
     rtensor = dequantize_tensor<scalar_t>(qtensor, rtensor, scale_, zero_point_);
+  });
+
+  return rtensor;
+}
+
+Tensor PerChannelAffineQuantizer::quantize(Tensor rtensor) {
+  TORCH_CHECK(
+      rtensor.scalar_type() == kFloat,
+      "quantize only works on Float Tensor.");
+  TORCH_CHECK(
+      rtensor.device() == kCPU,
+      "quantize only works for CPU backend right now.");
+  // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
+  // quantizer that can be reused, so I'm using intrusive_from_this here
+  Tensor qtensor = new_qtensor_cpu(
+      rtensor.sizes(),
+      rtensor.options().dtype(scalar_type_),
+      intrusive_from_this());
+
+  rtensor = rtensor.contiguous();
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(),
+                         "quantize_tensor_per_channel_affine",
+                         [&]() {
+    qtensor = quantize_tensor_per_channel_affine<scalar_t>(
+        rtensor, qtensor, scales_, zero_points_, axis_);
+  });
+  return qtensor;
+}
+
+Tensor PerChannelAffineQuantizer::dequantize(Tensor qtensor) {
+  TORCH_CHECK(qtensor.is_quantized(),
+           "dequantize is only supported in quantized Tensor.");
+  TORCH_CHECK(
+      qtensor.device() == kCPU,
+      "dequantize only works for CPU backend right now.");
+  Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
+  qtensor = qtensor.contiguous();
+
+  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(),
+                         "dequantize_tensor_per_channel_affine",
+                         [&]() {
+    rtensor = dequantize_tensor_per_channel_affine<scalar_t>(
+        qtensor, rtensor, scales_, zero_points_, axis_);
   });
 
   return rtensor;
