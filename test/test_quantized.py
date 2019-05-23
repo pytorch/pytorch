@@ -25,6 +25,14 @@ def _dequantize(qx, scale, zero_point):
     return x
 
 
+def _requantize(x, multiplier, zero_point, qmin=0, qmax=255, qtype=np.uint8):
+    """Requantizes a numpy array, i.e., intermediate int32 or int16 values are
+    converted back to given type"""
+    qx = (x * multiplier).round() + zero_point
+    qx = np.clip(qx, qmin, qmax).astype(qtype)
+    return qx
+
+
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
 # for the 8-bit int multiplication. This instruction vertically multiplies each
@@ -367,6 +375,120 @@ class TestQuantizedLinear(unittest.TestCase):
 
         # Assert equal
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
+
+
+@unittest.skipIf(
+    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+    " Quantized convolution requires FBGEMM. FBGEMM does not play"
+    " well with UBSAN at the moment, so we skip the test if"
+    " we are in a UBSAN environment.",
+)
+class TestQuantizedConv(unittest.TestCase):
+    """Tests the correctness of quantized convolution op."""
+    def test_qconv(self):
+
+        qconv = torch.ops.quantized.fbgemm_conv2d
+        qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
+
+        # N
+        batch_size = 1
+        # C
+        input_channels = 16
+        # H, W
+        height = width = 24
+        # K
+        output_channels = 8
+
+        kernel_h = kernel_w = 3
+        stride_h = stride_w = 1
+        padding_h = padding_w = 1
+        dilation_h = dilation_w = 1
+        groups = 1
+
+        W_value_min = 0
+        W_value_max = 5
+        # We use small values to avoid overflow.
+        # (the operator expects them in the format (output_channels, input_channels/groups, kernel_h, kernel_w))
+
+        W_init = torch.randint(
+            W_value_min,
+            W_value_max,
+            (output_channels, int(input_channels / groups), kernel_h, kernel_w),
+        )
+
+        b_init = torch.randint(0, 10, (output_channels,))
+
+        # Existing floating point conv operator
+        conv_op = torch.nn.Conv2d(
+            input_channels,
+            output_channels,
+            (kernel_h, kernel_w),
+            (stride_h, stride_w),
+            (padding_h, padding_w),
+            (dilation_h, dilation_w),
+            groups,
+        )
+
+        # assign the weights
+        conv_op.weight = torch.nn.Parameter(
+            W_init.to(dtype=torch.float), requires_grad=False
+        )
+        conv_op.bias = torch.nn.Parameter(
+            b_init.to(dtype=torch.float), requires_grad=False
+        )
+
+        X_value_min = 0
+        X_value_max = 4
+        X_init = torch.randint(
+            X_value_min, X_value_max, (batch_size, input_channels, height, width)
+        )
+
+        # run on an input tensor
+        result_ref = conv_op(X_init.to(dtype=torch.float))
+
+        # reformat X_init and W_init in the required format by conv operator
+        # NCHW -> NHWC
+        X_NHWC = X_init.permute([0, 2, 3, 1]).contiguous()
+        # KCRS -> RSCK
+        W_RSCK = W_init.permute([2, 3, 1, 0]).contiguous()
+
+        X_scale = 1.5
+        # Currently only 0 as zero point is supported.
+        X_zero_point = 0
+        X = X_scale * (X_NHWC - X_zero_point).to(dtype=torch.float)
+
+        W_scale = 2.5
+        W_zero_point = 0
+        W = W_scale * (W_RSCK - W_zero_point).to(dtype=torch.float)
+
+        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
+        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zero_point, dtype=torch.quint8)
+        b_q = b_init.to(dtype=torch.int32)
+
+        W_prepack = qconv_prepack(W_q, groups)
+        Y_scale = 7.3
+        Y_zero_point = 5
+
+        Y_q = qconv(
+            X_q,
+            W_prepack,
+            b_q,
+            [1, 1],  # stride
+            [1, 1],  # padding
+            [1, 1],  # dilation
+            [0, 0],  # output_padding
+            1,  # groups
+            Y_scale,
+            Y_zero_point,
+        )
+
+        result_NHWK = result_ref.permute([0, 2, 3, 1])
+        result_q = _requantize(
+            result_NHWK.numpy(), X_scale * W_scale / Y_scale, Y_zero_point
+        )
+
+        # Make sure the results match
+        np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
 
 
 if __name__ == "__main__":
