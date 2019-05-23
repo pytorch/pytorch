@@ -249,7 +249,7 @@ Tensor & random_(Tensor& self, Generator * generator) {
   return at::legacy::th::_th_random_(self, generator);
 }
 
-Tensor & uniform_(Tensor& self, double from, double to, Generator * generator) {
+Tensor & uniform_cpu_(Tensor& self, double from, double to, Generator * generator) {
   return at::legacy::th::_th_uniform_(self, from, to, generator);
 }
 
@@ -405,10 +405,10 @@ Tensor & masked_select_out(Tensor & result, const Tensor & self, const Tensor & 
 
 Tensor masked_select(const Tensor & self, const Tensor & mask) {
   if (mask.dtype() == at::ScalarType::Byte) {
-  return at::legacy::th::_th_masked_select(self, mask);
-} else {
-  return at::legacy::th::_th_masked_select_bool(self, mask);
-}
+    return at::legacy::th::_th_masked_select(self, mask);
+  } else {
+    return at::legacy::th::_th_masked_select_bool(self, mask);
+  }
 }
 
 Tensor & nonzero_out(Tensor & result, const Tensor & self) {

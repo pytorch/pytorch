@@ -92,11 +92,13 @@
   options:
     - arguments:
       - arg: THTensor* self
+        broadcast: mask inplace fallback types:Bool
       - THBoolTensor* mask
       - real value
     - zero_dim_tensor_only: True
       arguments:
       - arg: THTensor* self
+        broadcast: mask inplace fallback types:Bool
       - THBoolTensor* mask
       - THTensor* value
 ]]
@@ -118,12 +120,15 @@
   return: self
   arguments:
     - arg: THTensor* self
+      broadcast: mask inplace fallback types:Bool
     - THBoolTensor* mask
     - THTensor* source
 ]]
 [[
   name: _th_masked_select
   cname: maskedSelect
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -137,6 +142,8 @@
 [[
   name: _th_masked_select_bool
   cname: maskedSelectBool
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -144,11 +151,13 @@
     - arg: THTensor* result
       output: True
     - arg: THTensor* self
+      broadcast: mask fallback types:Bool
     - THBoolTensor* mask
 ]]
 [[
   name: _th_nonzero
   cname: nonzero
+  cpu_half: True
   cpu_bool: True
   cuda_bool: True
   variants:
@@ -365,6 +374,8 @@
 ]]
 [[
   name: _th_and
+  cpu_bool: True
+  cuda_bool: True
   cname: __and__
   variants:
     - function
@@ -387,6 +398,8 @@
 [[
   name: _th_iand_
   cname: __iand__
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -406,6 +419,8 @@
 [[
   name: _th_or
   cname: __or__
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -427,6 +442,8 @@
 [[
   name: _th_ior_
   cname: __ior__
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -446,6 +463,8 @@
 [[
   name: _th_xor
   cname: __xor__
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -1771,6 +1790,8 @@
 [[
   name: _th_sign
   cname: sign
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -2363,22 +2384,6 @@
       default: S
 ]]
 [[
-  name: _th_getri_single
-  cname: getri
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* output
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_potri
   cname: potri
   types:
@@ -2624,7 +2629,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: uniform
   variants: function
   return: self

@@ -2162,6 +2162,24 @@ class TestAutograd(TestCase):
             run_functional_checks(self, "test_cdist", "cdist", f,
                                   True, f_args_variable, f_args_tensor)
 
+    def test_var_mean_differentiable(self):
+        dim = [2, 4]
+        keepdim = False
+        input1 = torch.randn(3, 4, 5, 6, 2, 3, requires_grad=True)
+        input2 = deepcopy(input1)
+        var1, mean1 = torch.var_mean(input1, dim=dim, keepdim=keepdim)
+        var2 = input2.var(dim=dim, keepdim=keepdim)
+        mean2 = input2.mean(dim=dim, keepdim=keepdim)
+        grad = torch.randn(3, 4, 6, 3, requires_grad=True)
+
+        r1 = var1 * var1 * mean1 * mean1
+        r2 = var2 * var2 * mean2 * mean2
+        self.assertTrue(torch.allclose(r1, r2, rtol=0.01, atol=0.0))
+
+        torch.autograd.backward(r1, grad)
+        torch.autograd.backward(r2, grad)
+        self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
+
     @skipIfNoLapack
     def test_cholesky(self):
         def func(root, upper):
@@ -3005,6 +3023,34 @@ class TestAutograd(TestCase):
         # This will segfault if the empty FunctionTask is not handled properly in the
         # gpu thread ReadyQueue
         out.sum().backward()
+
+    def test_version_counter(self):
+        x = torch.randn(1, 2)
+
+        # In-place op bumps version
+        x_saved_version = x._version
+        x.add_(1).add_(1)
+        self.assertTrue(x._version > x_saved_version)
+
+        # Differentiable view shares version counter
+        xz = x[:]
+        self.assertTrue(x._version == xz._version)
+        xz.add_(1)
+        self.assertTrue(x._version == xz._version)
+
+        # `x.data = y` preserves version counter of `x`
+        x_saved_version = x._version
+        x.data = torch.randn(2, 3)
+        self.assertTrue(x._version == x_saved_version)
+        x.add_(1)
+        self.assertTrue(x._version > x_saved_version)
+        # Make sure `x` is still using the same version counter it shares with `xz`
+        self.assertTrue(x._version == xz._version)
+
+        # In-place op on `xz` also updates version of `x`,
+        # because they share the version counter
+        xz.add_(1)
+        self.assertTrue(x._version == xz._version)
 
 
 def index_variable(shape, max_indices):

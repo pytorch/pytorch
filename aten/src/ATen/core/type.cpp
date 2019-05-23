@@ -25,7 +25,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     }
     out << ")";
   } else if (auto value = t.cast<ProfiledTensorType>()) {
-    out << "Tensor(dtype = ";
+    out << "ProfiledTensor(dtype = ";
     if  (value->scalarType().has_value())
     {
         out << *value->scalarType();
@@ -157,6 +157,8 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
     return TupleType::create(fmap(value.toTuple()->elements(), incompleteInferTypeFrom));
   } else if (value.isDevice()) {
     return DeviceObjType::get();
+  } else if (value.isObject()) {
+    return value.toObject()->type();
   }
   AT_ERROR("Type cannot be accurately recovered from this IValue.");
 }

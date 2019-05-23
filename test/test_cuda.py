@@ -974,15 +974,47 @@ class TestCuda(TestCase):
         self._test_copy_sync_current_stream(x0, x2)
 
     def test_copy_non_blocking(self):
-        x = torch.randn(5, 5).cuda()
-        y = torch.zeros(5, 5)
-        y.copy_(x, non_blocking=True)
-        self.assertEqual(x, y)
+        def _test_copy_non_blocking(a, b):
+            event = torch.cuda.Event()
+            a.copy_(b, non_blocking=True)
+            event.record()
+            self.assertFalse(event.query())
+            event.synchronize()
+            self.assertEqual(a, b)
 
-        x = torch.randn(5, 5)
-        y = torch.zeros(5, 5).cuda()
-        y.copy_(x, non_blocking=True)
-        self.assertEqual(x, y)
+        # 10MB copies
+        x = torch.ones(10000000, dtype=torch.uint8).cuda()
+        y = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
+        _test_copy_non_blocking(x, y)
+
+        x = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
+        y = torch.ones(10000000, dtype=torch.uint8).cuda()
+        _test_copy_non_blocking(x, y)
+
+    def test_copy_broadcast(self):
+        x = torch.randn(10, 5)
+        y = torch.randn(5, device='cuda')
+        x.copy_(y)
+        self.assertEqual(x[3], y.cpu())
+
+        x = torch.randn(10, 5, device='cuda')
+        y = torch.randn(5)
+        x.copy_(y)
+        self.assertEqual(x[3].cpu(), y)
+
+    def test_copy_noncontig(self):
+        def do_test(d0, d1):
+            x = torch.tensor([1.5, 2.5, 3.5, 4.5, 5.5, 6.5], device=d0)
+            y = torch.tensor([0, 0, 0, 0, 0, 0], device=d1)
+            self.assertNotEqual(x.dtype, y.dtype)
+
+            y[::2].copy_(x[::2])
+            self.assertEqual(y, [1, 0, 3, 0, 5, 0])
+
+        do_test('cpu', 'cuda')
+        do_test('cuda', 'cpu')
+        if TEST_MULTIGPU:
+            do_test('cuda:0', 'cuda:1')
 
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
@@ -2719,9 +2751,6 @@ class TestCuda(TestCase):
         t = torch.randint(2000, input_size, dtype=torch.int64, device='cuda')
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
-
-    def test_histc_cuda(self):
-        _TestTorchMixin._test_histc(self, device='cuda')
 
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()

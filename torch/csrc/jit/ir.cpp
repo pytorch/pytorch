@@ -200,6 +200,14 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
   out << "]";
 }
 
+SourceRange Node::sourceRange() const {
+ if(source_range_) {
+   return *source_range_;
+ }
+ std::stringstream ss;
+ return SourceRange(ss.str());
+}
+
 static std::ostream& indent(std::ostream& out, size_t level) {
   for (size_t i = 0; i < level; ++i) {
     out << "  ";
@@ -224,8 +232,10 @@ std::ostream& Node::print(
       if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
         printAttributes(out, /*ignore_subgraph=*/true);
       }
+
       groups->push_back(this);
     } else {
+
       out << kind().toQualString();
       if (hasAttributes()) {
         printAttributes(out);
@@ -241,6 +251,7 @@ std::ostream& Node::print(
     out << ", ";
     out << "scope: " << scName << "\n";
   }
+
   for (size_t i = 0; i < blocks().size(); ++i) {
     auto b = blocks()[i];
     indent(out, level + 1) << "block" << i << "("
@@ -251,6 +262,7 @@ std::ostream& Node::print(
     }
     indent(out, level + 2) << "-> (" << b->outputs() << ")\n";
   }
+
   return out;
 }
 
@@ -539,7 +551,6 @@ Block::Block(Graph* graph_, Node* node_)
       output_(graph_->create(prim::Return, 0)),
       input_(graph_->create(prim::Param, 0)),
       owning_node_(node_) {
-
   input_->next() = output_;
   input_->prev() = output_;
   output_->next() = input_;
@@ -640,6 +651,16 @@ void Block::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
 
 void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
   block()->remapTypes(type_map);
+}
+
+void Value::inferTypeFrom(const at::Tensor& output) {
+  if (output.is_mkldnn()) {
+    // mkldnn tensor as opaque tensor doesn't have strides, so we can
+    // not create a CompleteTensorType
+    setType(DimensionedTensorType::create(output));
+    return;
+  }
+  setType(CompleteTensorType::create(output));
 }
 
 bool Value::mustBeNone() const {
@@ -973,7 +994,7 @@ void Node::destroy() {
 }
 
 void Node::cloneFrom(Node* s) {
-  setSourceLocation(s->getSourceLocation());
+  s->source_range_ = s->source_range_;
   if (s->scope_ && !s->scope_->isBlank()) {
     scope_ = s->scope_;
   }
@@ -1107,7 +1128,9 @@ Node* Node::insertBefore(Node* n) {
 Node* Node::insertAfter(Node* n) {
   AT_ASSERT(!inBlockList() && n->inBlockList());
   AT_ASSERT(n->owningBlock());
-  AT_ASSERTM(n->kind() != prim::Return, "Attempting to insert a Node after the Return node or before the Param node");
+  AT_ASSERTM(
+      n->kind() != prim::Return,
+      "Attempting to insert a Node after the Return node or before the Param node");
   this->owning_block_ = n->owningBlock();
   Node* next = n->next();
   n->next() = this;
