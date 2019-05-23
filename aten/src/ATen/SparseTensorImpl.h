@@ -226,7 +226,7 @@ private:
       const SparseTensorImpl* src_sparse_impl,
       SparseTensorImpl* dest_sparse_impl,
       const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const override {
+      bool allow_tensor_metadata_change) {
     TensorImpl::copy_tensor_data(src_sparse_impl, dest_sparse_impl, version_counter, allow_tensor_metadata_change);
 
     // Sparse-specific fields

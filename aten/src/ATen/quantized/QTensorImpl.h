@@ -72,7 +72,7 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
       const QTensorImpl* src_q_impl,
       QTensorImpl* dest_q_impl,
       const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const override {
+      bool allow_tensor_metadata_change) {
     TensorImpl::copy_tensor_data(src_q_impl, dest_q_impl, version_counter, allow_tensor_metadata_change);
 
     // OpaqueTensorImpl-specific fields.

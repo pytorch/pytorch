@@ -1410,7 +1410,7 @@ private:
       const TensorImpl* src_impl,
       TensorImpl* dest_impl,
       const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const {
+      bool allow_tensor_metadata_change) {
     dest_impl->storage_ = src_impl->storage_;
     dest_impl->sizes_ = src_impl->sizes_;
     dest_impl->strides_ = src_impl->strides_;

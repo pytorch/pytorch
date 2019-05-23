@@ -124,7 +124,7 @@ private:
       const OpaqueTensorImpl<OpaqueHandle>* src_opaque_impl,
       OpaqueTensorImpl<OpaqueHandle>* dest_opaque_impl,
       const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const override {
+      bool allow_tensor_metadata_change) {
     TensorImpl::copy_tensor_data(src_opaque_impl, dest_opaque_impl, version_counter, allow_tensor_metadata_change);
 
     // OpaqueTensorImpl-specific fields.
