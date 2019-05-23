@@ -78,6 +78,76 @@ accreal THTensor_(sumall)(THTensor *tensor)
     scalar_t, tensor, *tensor_data, sum, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
   return sum;
 }
+
+void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
+{
+  ptrdiff_t numel = THByteTensor_sumall(mask);
+  scalar_t *tensor_data;
+
+#ifdef DEBUG
+  THAssert(numel <= LONG_MAX);
+#endif
+  THTensor_(resize1d)(tensor,numel);
+  tensor_data = tensor->data<scalar_t>();
+  TH_TENSOR_APPLY2(scalar_t, src, unsigned char, mask,
+                   if (*mask_data > 1)
+                   {
+                     THFree(mask_counter);
+                     THFree(src_counter);
+                     THError("Mask tensor can take 0 and 1 values only");
+                   }
+                   else if (*mask_data == 1)
+                   {
+                     *tensor_data = *src_data;
+                     tensor_data++;
+                   });
+}
+
+void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *mask)
+{
+  ptrdiff_t numel = THBoolTensor_sumall(mask);
+  scalar_t *tensor_data;
+
+#ifdef DEBUG
+  THAssert(numel <= LONG_MAX);
+#endif
+  THTensor_(resize1d)(tensor,numel);
+  tensor_data = tensor->data<scalar_t>();
+  TH_TENSOR_APPLY2(scalar_t, src, bool, mask,
+                   if (*mask_data)
+                   {
+                     *tensor_data = *src_data;
+                     tensor_data++;
+                   });
+}
+
+void THTensor_(bitand)(THTensor *r_, THTensor *t, scalar_t value)
+{
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+  (void)r_;
+  (void)t;
+  (void)value;
+  return THError("bitand is only supported for integer type tensors");
+#else
+  THTensor_(resizeAs)(r_, t);
+  int64_t r_Size = THTensor_(nElement)(r_);
+  int r_Contig = THTensor_(isContiguous)(r_);
+  int tContig = THTensor_(isContiguous)(t);
+  if (r_Contig && tContig) {
+    scalar_t *tp = t->data<scalar_t>();
+    scalar_t *rp = r_->data<scalar_t>();
+    at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD * 100,
+        [&](int64_t start, int64_t end) {
+      for (auto i = start; i < end; i++) {
+        rp[i] = tp[i] & value;
+      }
+    });
+  } else {
+    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data & value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+  }
+#endif
+}
+
 #if !defined(TH_REAL_IS_BOOL)
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
@@ -187,48 +257,6 @@ void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* s
                      cntr++;
                    });
   c10::raw::intrusive_ptr::decref(srct);
-}
-
-void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
-{
-  ptrdiff_t numel = THByteTensor_sumall(mask);
-  scalar_t *tensor_data;
-
-#ifdef DEBUG
-  THAssert(numel <= LONG_MAX);
-#endif
-  THTensor_(resize1d)(tensor,numel);
-  tensor_data = tensor->data<scalar_t>();
-  TH_TENSOR_APPLY2(scalar_t, src, unsigned char, mask,
-                   if (*mask_data > 1)
-                   {
-                     THFree(mask_counter);
-                     THFree(src_counter);
-                     THError("Mask tensor can take 0 and 1 values only");
-                   }
-                   else if (*mask_data == 1)
-                   {
-                     *tensor_data = *src_data;
-                     tensor_data++;
-                   });
-}
-
-void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *mask)
-{
-  ptrdiff_t numel = THBoolTensor_sumall(mask);
-  scalar_t *tensor_data;
-
-#ifdef DEBUG
-  THAssert(numel <= LONG_MAX);
-#endif
-  THTensor_(resize1d)(tensor,numel);
-  tensor_data = tensor->data<scalar_t>();
-  TH_TENSOR_APPLY2(scalar_t, src, bool, mask,
-                   if (*mask_data)
-                   {
-                     *tensor_data = *src_data;
-                     tensor_data++;
-                   });
 }
 
 void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
@@ -878,33 +906,6 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, scalar_t value)
         if (modulo_wrap(*r__data, value)) *r__data += value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
   }
-}
-
-void THTensor_(bitand)(THTensor *r_, THTensor *t, scalar_t value)
-{
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
-  (void)r_;
-  (void)t;
-  (void)value;
-  return THError("bitand is only supported for integer type tensors");
-#else
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD * 100,
-        [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
-        rp[i] = tp[i] & value;
-      }
-    });
-  } else {
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data & value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-  }
-#endif
 }
 
 #endif
