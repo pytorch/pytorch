@@ -8,11 +8,11 @@ import onnx
 
 import io
 
-import torch.onnx.symbolic_helper as sym_helper
+from torch.onnx.symbolic_helper import _export_onnx_opset_version
 from torch.onnx import ir_version, producer_name, producer_version
 
 
-def check_onnx_opset_operator(model, ops, opset_version=sym_helper._export_onnx_opset_version):
+def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_version):
     # check_onnx_components
     assert model.ir_version == ir_version and \
         model.producer_name == producer_name and \
