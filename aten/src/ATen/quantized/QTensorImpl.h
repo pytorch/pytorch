@@ -65,6 +65,19 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
     return impl;
   }
 
+  /**
+   * Shallow-copies data from another TensorImpl into this TensorImpl.
+   */
+  void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
+    copy_tensor_data(
+      /*src_impl=*/impl.get(),
+      /*dest_impl=*/this,
+      /*version_counter=*/version_counter(),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
+    refresh_numel();
+    refresh_contiguous();
+  }
+
  private:
   QuantizerPtr quantizer_;
 };

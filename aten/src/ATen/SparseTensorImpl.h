@@ -224,6 +224,18 @@ public:
     impl->refresh_numel();
     return impl;
   }
+
+  /**
+   * Shallow-copies data from another TensorImpl into this TensorImpl.
+   */
+  void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
+    copy_tensor_data(
+      /*src_impl=*/impl.get(),
+      /*dest_impl=*/this,
+      /*version_counter=*/version_counter(),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
+    refresh_numel();
+  }
 private:
     explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
 };
