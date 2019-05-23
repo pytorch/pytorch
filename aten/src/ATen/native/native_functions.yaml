@@ -1390,7 +1390,7 @@
 
 - func: poisson_nll_loss(Tensor input, Tensor target, bool log_input, bool full, float eps, int reduction) -> Tensor
   variants: function
-  
+
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2542,12 +2542,12 @@
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
 
 - func: quantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
-  variants: function, method
+  variants: function
   dispatch:
     CPU: quantize_linear_cpu
 
 - func: dequantize(Tensor self) -> Tensor
-  variants: function, method
+  variants: function
   dispatch:
     QuantizedCPU: dequantize_quant
 

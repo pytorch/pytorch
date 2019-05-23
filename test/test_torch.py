@@ -2745,7 +2745,7 @@ class _TestTorchMixin(object):
         r = torch.ones(num_elements, dtype=torch.float)
         scale = 1.0
         zero_point = 2
-        qr = r.quantize_linear(scale, zero_point, torch.quint8)
+        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
         self.assertEqual(qr.q_scale(), scale)
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
@@ -2757,13 +2757,13 @@ class _TestTorchMixin(object):
         for num in qr[2:].int_repr():
             self.assertEqual(num, 3)
         # dequantize
-        rqr = qr.dequantize()
+        rqr = torch.dequantize(qr)
         for i in range(num_elements):
             self.assertEqual(r[i], rqr[i])
         # Scalar Tensor
         # item
         r = torch.ones(1, dtype=torch.float)
-        qr = r.quantize_linear(scale, zero_point, torch.quint8)
+        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
         self.assertEqual(qr.item(), 1)
         self.assertEqual(qr[0].item(), 1)
         # assignment
@@ -2779,7 +2779,7 @@ class _TestTorchMixin(object):
                          "tensor([15.], size=(1,), dtype=torch.quint8, " +
                          "scale=1.0, zero_point=2)")
         empty_r = torch.ones((0, 1), dtype=torch.float)
-        empty_qr = empty_r.quantize_linear(scale, zero_point, torch.quint8)
+        empty_qr = torch.quantize_linear(empty_r, scale, zero_point, torch.quint8)
         self.assertEqual(str(empty_qr),
                          "tensor([], size=(0, 1), dtype=torch.quint8, " +
                          "scale=1.0, zero_point=2)")
@@ -2789,8 +2789,8 @@ class _TestTorchMixin(object):
         r = torch.from_numpy(r).float()
         scale = 2
         zero_point = 2
-        qr = r.quantize_linear(scale, zero_point, torch.quint8)
-        rqr = qr.dequantize()
+        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
+        rqr = torch.dequantize(qr)
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
     def test_qtensor_creation(self):
@@ -2806,14 +2806,14 @@ class _TestTorchMixin(object):
         r = torch.from_numpy(r).float()
         scale = 2
         zero_point = 2
-        qr = r.quantize_linear(scale, zero_point, torch.qint8)
-        rqr = qr.dequantize()
+        qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
+        rqr = torch.dequantize(qr)
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = r.quantize_linear(scale, zero_point, torch.quint8)
-        rqr = qr.dequantize()
+        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
+        rqr = torch.dequantize(qr)
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = r.quantize_linear(scale, zero_point, torch.qint32)
-        rqr = qr.dequantize()
+        qr = torch.quantize_linear(r, scale, zero_point, torch.qint32)
+        rqr = torch.dequantize(qr)
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
     def test_qtensor_dequantize_linear(self):

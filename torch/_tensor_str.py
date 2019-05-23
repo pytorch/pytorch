@@ -275,7 +275,7 @@ def _str(self):
         # suffixes.append('quantization_scheme=' + 'per_tensor_affine')
         suffixes.append('scale=' + str(self.q_scale().item()))
         suffixes.append('zero_point=' + str(self.q_zero_point().item()))
-        tensor_str = _tensor_str(self.dequantize(), indent)
+        tensor_str = _tensor_str(torch.dequantize(self), indent)
     else:
         if self.numel() == 0 and not self.is_sparse:
             # Explicitly print the shape if it is not (0,), to match NumPy behavior
