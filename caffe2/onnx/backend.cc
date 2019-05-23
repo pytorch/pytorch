@@ -1082,7 +1082,7 @@ Caffe2Ops Caffe2Backend::CreateDynamicSlice(
   // arguments to the caffe2 Slice operator.
   std::string axes_tensor;
   if (onnx_node->node.input_size() > 2) {
-    axes_tensor = onnx_node->node.input(3);
+    axes_tensor = onnx_node->node.input(2);
   } else {
     axes_tensor = dummy_->NewDummyName();
     auto* c2_op = ret.ops.Add();
