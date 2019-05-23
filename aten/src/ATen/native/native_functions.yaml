@@ -221,9 +221,6 @@
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   variants: function, method
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: as_strided_tensorimpl
     CUDA: as_strided_tensorimpl
@@ -673,9 +670,6 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
 - func: empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
@@ -688,9 +682,6 @@
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   variants: method
-  cpu_bool: True
-  cuda_bool: True
-  cpu_half: True
   device_guard: False
   dispatch:
     CPU: resize_cpu_
@@ -706,9 +697,6 @@
   device_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
@@ -1485,8 +1473,6 @@
     CUDA: _neg__cuda
 
 - func: neg(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: _neg_out_cpu
     CUDA: _neg_out_cuda
@@ -2122,9 +2108,6 @@
 
 - func: clone(Tensor self) -> Tensor
   variants: function, method
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: clone
     CUDA: clone
@@ -2133,9 +2116,6 @@
     MkldnnCPU: mkldnn_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
-  cpu_half: True
   variants: function, method
   dispatch:
     CPU: resize_as_
@@ -2160,9 +2140,6 @@
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   variants: method, function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: zero_
     CUDA: zero_
@@ -2517,14 +2494,12 @@
   variants: function, method
 
 - func: to_sparse(Tensor self, int sparse_dim) -> Tensor
-  cpu_half: True
   variants: method
   dispatch:
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
 
 - func: to_sparse(Tensor self) -> Tensor
-  cpu_half: True
   variants: method
   dispatch:
     CPU: dense_to_sparse
@@ -2608,12 +2583,7 @@
   variants: method
 
 # NB: Does NOT check precondition that numel == 1
-# WARNING: Use of cpu_half here is generally not supported; please
-# don't use it.
 - func: _local_scalar_dense(Tensor self) -> Scalar
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
@@ -2704,8 +2674,6 @@
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
-  cpu_bool: True
-  cuda_bool: True
   device_guard: False
 
 - func: masked_fill_(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
@@ -2727,9 +2695,6 @@
   variants: function, method
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   device_guard: False
 
