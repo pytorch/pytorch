@@ -275,17 +275,18 @@ c10::optional<MatchedSchema> tryMatchSchema(
           argument_is_list & !arg_is_broadcasting_list) {
         auto value = args[used_args].value(graph);
         auto actual_type = value->type();
-        bool is_iterable = actual_type->kind() == TypeKind::ListType ||
-            actual_type->kind() == TypeKind::TupleType;
         // The actual cannot already be a list
-        if (!is_iterable) {
+        if (actual_type->kind() != TypeKind::ListType &&
+            !convertibleToList(actual_type, unwrapOptional(arg.type()))) {
           auto formal_type =
               unwrapOptional(arg.type())->expect<ListType>()->getElementType();
-          if (print) std::cout << "Creating " << formal_type->python_str() << " for " << schema << "\n";
+          if (print)
+            std::cout << "Creating " << formal_type->python_str() << " for "
+                      << schema << "\n";
 
-          if (formal_type->kind() == TypeKind::VarType) {
-            return c10::nullopt;
-          }
+          // if (formal_type->kind() == TypeKind::VarType) {
+          //   return c10::nullopt;
+          // }
 
           Value* list = tryCreateList(
               formal_type,
