@@ -2009,9 +2009,6 @@ RegisterOperators reg2({
         [](Stack& stack) {
           int64_t index, start, step;
           pop(stack, index, start, step);
-          if (step == 0){
-            throw std::runtime_error("for loop has 0 as step parameter");
-          }
           push(stack, start + index * step);
           return 0;
         }),
