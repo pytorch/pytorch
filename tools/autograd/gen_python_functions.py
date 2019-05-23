@@ -751,9 +751,6 @@ def group_declarations(declarations):
     result = []
     for _, dictionary in sorted(grouped.items()):
         if 'base' not in dictionary:
-            print(dictionary)
-    for _, dictionary in sorted(grouped.items()):
-        if 'base' not in dictionary:
             raise RuntimeError("'base' not in dictionary", dictionary)
         result.append(dictionary)
     return sort_declarations(result)
