@@ -493,7 +493,7 @@ class TestFuser(JitTestCase):
         # test for layernorm decompose
         lm = nn.LayerNorm(8)
         test_norm_decompose(lm, ['aten::batch_norm_stats'],
-                            ['aten::layer_norm('], ['aten::sub', 'aten::mul', 'aten::addcmul'])
+                            ['aten::layer_norm('], ['aten::sub', 'aten::mul', 'aten::add'])
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
