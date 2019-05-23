@@ -2240,17 +2240,6 @@
           kwarg_only: True
         - THTensor* tensor1
         - THTensor* tensor2
-    - cname: spaddcmul
-      variants: function
-      return: argument 0
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - arg: real value
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THSTensor* tensor1
-        - THSTensor* tensor2
 ]]
 [[
   name: _th_addcdiv
