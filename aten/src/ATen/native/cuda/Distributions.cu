@@ -642,28 +642,22 @@ Tensor& normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
   return self;
 }
 
-Tensor& normal_out_cuda(Tensor& output, const Tensor& mean_, double std, Generator* gen) {
-  auto mean = std::get<0>(expand_inplace(output, mean_.to(kCUDA)));
+Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generator* gen) {
   normal_cuda_(output, 0, std, gen);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(output.scalar_type(), "normal_out_cuda_cadd", [&] {
-    at::add_out(output, output, mean, static_cast<scalar_t>(1));
-   });
+  output.add_(mean);
   return output;
 }
 
-Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std_, Generator* gen) {
-  auto std = std::get<0>(expand_inplace(output, std_.to(kCUDA)));
+Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
   auto mean_tensor = at::full({1}, mean, output.options());
-  at::native::addcmul_out(output, mean_tensor, output, std, 1);
+  output = mean_tensor.addcmul_(output, std);
   return output;
 }
 
-Tensor& normal_out_cuda(Tensor& output, const Tensor& mean_, const Tensor& std_, Generator* gen) {
-  auto std = std::get<0>(expand_inplace(output, std_.to(kCUDA)));
-  auto mean = std::get<0>(expand_inplace(output, mean_.to(kCUDA)));
+Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
-  at::native::addcmul_out(output, mean, output, std, 1);
+  output = mean.addcmul(output, std);
   return output; 
 }
 
