@@ -1310,15 +1310,15 @@ graph(%x : Tensor,
                 x = F.relu(self.conv1(x))
                 return x
 
-        trace = testModule()
+        scriptM = testModule()
 
         # Constant Propagation step is performed because this pass is intended
         # to insert quant-dequant nodes for quantizable tensors. The type analysis
         # happens as part of this jit pass
-        torch._C._jit_pass_constant_propagation(trace.graph)
+        torch._C._jit_pass_constant_propagation(scriptM.graph)
         # TODO: Build the qparam_dict from parse_ir directly for this pass
-        qparam_dict = _helper_generate_qparam(trace, input_data)
-        torch._C._jit_pass_insert_quantdequant(trace.graph, qparam_dict)
+        qparam_dict = _helper_generate_qparam(scriptM, input_data)
+        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
 
         # We expect to see quant-dequant node before and after
         # both conv and relu nodes and at external output since relu
@@ -1326,14 +1326,11 @@ graph(%x : Tensor,
         # quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
-                   .check("conv2d").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
+                   .check("conv2d").check("quantize_linear") \
                    .check_next("int_repr").check_next("dequantize_linear") \
-                   .run(str(trace.graph))
-        FileCheck().check("relu").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
+                   .check("relu").check("quantize_linear") \
                    .check_next("int_repr").check_next("dequantize_linear") \
-                   .check_next("return").run(str(trace.graph))
+                   .check_next("return").run(str(scriptM.graph))
 
     def test_insert_quantdequant_consecutive_qnodes_trace(self):
         input_data = torch.ones([1, 1, 5, 5])
@@ -1347,12 +1344,12 @@ graph(%x : Tensor,
                 x = F.relu(self.conv1(x))
                 return x
 
-        trace = torch.jit.trace(testModule(), (input_data))
+        scriptM = torch.jit.trace(testModule(), (input_data))
 
-        qparam_dict = _helper_generate_qparam(trace, input_data)
+        qparam_dict = _helper_generate_qparam(scriptM, input_data)
         if not len(qparam_dict):
             return
-        torch._C._jit_pass_insert_quantdequant(trace.graph, qparam_dict)
+        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
 
         # We expect to see quant-dequant node before and after
         # both conv and relu nodes and at external output since relu
@@ -1360,14 +1357,11 @@ graph(%x : Tensor,
         # quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
-                   .check("_convolution").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
+                   .check("_convolution").check("quantize_linear") \
                    .check_next("int_repr").check_next("dequantize_linear") \
-                   .run(str(trace.graph))
-        FileCheck().check("relu").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
+                   .check("relu").check("quantize_linear") \
                    .check_next("int_repr").check_next("dequantize_linear") \
-                   .check_next("return").run(str(trace.graph))
+                   .check_next("return").run(str(scriptM.graph))
 
     def test_insert_quantdequant_single_qnode(self):
         input_data = torch.ones([1, 1, 5, 5])
@@ -1383,26 +1377,24 @@ graph(%x : Tensor,
                 x1 = torch.add(x, 1)
                 return x1
 
-        trace = testModule()
+        scriptM = testModule()
 
         # Constant Propagation step is performed because this pass is intended
         # to insert quant-dequant nodes for quantizable tensors. The type analysis
         # happens as part of this jit pass
-        torch._C._jit_pass_constant_propagation(trace.graph)
+        torch._C._jit_pass_constant_propagation(scriptM.graph)
 
-        qparam_dict = _helper_generate_qparam(trace, input_data)
-        torch._C._jit_pass_insert_quantdequant(trace.graph, qparam_dict)
+        qparam_dict = _helper_generate_qparam(scriptM, input_data)
+        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
 
         # We expect to see quant-dequant node before and after
         # both conv and no quant-dequant after add. Constant nodes correspond
         # to params for the quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
-                   .check("conv2d").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
+                   .check("conv2d").check("quantize_linear") \
                    .check_next("int_repr").check_next("dequantize_linear") \
-                   .check_next("add").check_next("return") \
-                   .run(str(trace.graph))
+                   .check_next("add").check_next("return").run(str(scriptM.graph))
 
     def test_insert_quantdequant_alternate_qnode(self):
         input_data = torch.ones([1, 1, 5, 5])
@@ -1419,28 +1411,26 @@ graph(%x : Tensor,
                 x2 = F.relu(x1)
                 return x2
 
-        trace = testModule()
+        scriptM = testModule()
 
         # Constant Propagation step is performed because this pass is intended
         # to insert quant-dequant nodes for quantizable tensors. The type analysis
         # happens as part of this jit pass
-        torch._C._jit_pass_constant_propagation(trace.graph)
+        torch._C._jit_pass_constant_propagation(scriptM.graph)
 
-        qparam_dict = _helper_generate_qparam(trace, input_data)
-        torch._C._jit_pass_insert_quantdequant(trace.graph, qparam_dict)
+        qparam_dict = _helper_generate_qparam(scriptM, input_data)
+        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
 
         # We expect to see quant-dequant node before and after
         # conv, relu and add. Constant nodes correspond to params for the
         # quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear") \
-                   .check("conv2d").check_next("Constant") \
-                   .check_next("Constant").check_next("quantize_linear") \
-                   .check_next("int_repr").run(str(trace.graph))
-        FileCheck().check("add").check_next("Constant")\
-                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize_linear").check("conv2d") \
+                   .check("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear").run(str(scriptM.graph))
+        FileCheck().check("add").check("quantize_linear") \
                    .check_next("int_repr").check("dequantize_linear") \
-                   .run(str(trace.graph))
+                   .run(str(scriptM.graph))
 
     def test_insert_quantdequant_for_weight(self):
         input_data = torch.ones([1, 1, 1, 1])
@@ -1466,15 +1456,60 @@ graph(%x : Tensor,
         # to insert quant-dequant nodes for quantizable tensors. The type analysis
         # happens as part of this jit pass
         torch._C._jit_pass_constant_propagation(scriptModule.graph)
-        torch._C._jit_pass_insert_quantdequant_for_param(scriptModule._c,
-                                                         "forward",
-                                                         "weight",
-                                                         getQParamFunc)
+        torch._C._jit_pass_insert_quantdequant_for_weight_bias(scriptModule._c,
+                                                               "forward",
+                                                               "weight",
+                                                               getQParamFunc)
 
         # We expect to see quant-dequant node before conv node for weight.
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
                    .check("conv2d").run(str(scriptModule.graph))
+
+    def test_insert_quantdequant_for_bias(self):
+        # Inserting quant-dequant nodes for bias requires scale info present for
+        # activation and weight so q-dq pass done first for these inputs.
+
+        class testModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(testModule, self).__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1, 1).float()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = x.quantize_linear(1.0, 0, torch.uint8)
+                x = x.int_repr()
+                x = x.dequantize_linear(1.0, 0, torch.uint8)
+                x = self.conv1(x)
+                return x
+
+        def getQParamFuncW(value):
+            return 'per_tensor_quant', 0.5, 1
+
+        def getQParamFunc(input_scale, weight_scale):
+            scale = 1 / input_scale / weight_scale
+            zero_point = 0
+            return 'per_tensor_quant', scale, zero_point
+
+        scriptModule = testModule()
+
+        torch._C._jit_pass_constant_propagation(scriptModule.graph)
+        torch._C._jit_pass_insert_quantdequant_for_weight_bias(scriptModule._c,
+                                                               "forward",
+                                                               "weight",
+                                                               getQParamFuncW)
+        torch._C._jit_pass_insert_quantdequant_for_weight_bias(scriptModule._c,
+                                                               "forward",
+                                                               "bias",
+                                                               getQParamFunc)
+        # We expect to see 3 pairs of quant-dequant nodes.
+
+        FileCheck().check("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear").check("quantize_linear") \
+                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear").check("conv2d") \
+                   .run(str(scriptModule.graph))
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -2166,7 +2201,7 @@ graph(%Ra, %Rb):
             def forward(self, scores, bbox_deltas, im_info, anchors):
                 a, b = torch.ops._caffe2.GenerateProposals(
                     (scores), (bbox_deltas), (im_info), (anchors),
-                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
                 )
                 return a, b
         model = MyModel()
@@ -3137,6 +3172,21 @@ graph(%Ra, %Rb):
         warns = [str(w.message) for w in warns]
         self.assertEqual(len(warns), 0)
 
+    @unittest.skipIf(sys.platform == "win32", "temp file name on windows")
+    def test_trace_save(self):
+        def fn(x):
+            return x + 2
+
+        def check(func):
+            with tempfile.NamedTemporaryFile() as f:
+                func.save(f.name)
+                loaded = torch.jit.load(f.name)
+                input = torch.randn(2, 2)
+                self.assertEqual(func(input), loaded(input))
+
+        out = torch.jit.trace(fn, (torch.ones(2, 2),))
+        check(out)
+
     @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
     def test_torch_load_error(self):
         class J(torch.jit.ScriptModule):
@@ -3813,12 +3863,17 @@ a")
         def func2(a, b, c, d):
             return c + a ** b ** d
 
+        def func3(a, b):
+            # type: (int, float) -> float
+            return a ** b
+
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
         c = torch.rand(1, requires_grad=True)
         d = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
         self.checkScript(func2, (a, b, c, d), optimize=True)
+        self.checkScript(func3, (4, -0.5), optimize=True)
 
     @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
     def test_pow_scalar_backward_cuda(self):
@@ -4409,7 +4464,7 @@ a")
             if True:
                 x = [1, 2, 3]
             return
-        with self.assertRaisesRegex(RuntimeError, r"previously has type Tensor\[\]"):
+        with self.assertRaisesRegex(RuntimeError, r"previously has type List\[Tensor\]"):
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
@@ -5606,7 +5661,7 @@ a")
         self.checkScript(test_not_cast, (torch.tensor(1),))
         self.checkScript(test_not_cast, (torch.tensor(0),))
 
-        with self.assertRaisesRegex(RuntimeError, "expected"):
+        with self.assertRaisesRegex(RuntimeError, "Could not cast value of type Tuple\[Tensor, Tensor\]"):  # noqa: W605
             @torch.jit.script
             def test_mult(x, y):
                 return not(x, y)
@@ -5631,7 +5686,7 @@ a")
         self.checkScript(test_cast_float, (0.,))
         self.checkScript(test_cast_float, (-1.,))
 
-        with self.assertRaisesRegex(RuntimeError, "expected a bool, int, float, or Tensor"):
+        with self.assertRaisesRegex(RuntimeError, "Could not cast value of type Tuple\[int, int\] to bool"):  # noqa: W605
             @torch.jit.script
             def test_bad_conditional(x):
                 if (1, 2):
@@ -8240,7 +8295,7 @@ a")
         v = torch.rand(10, 3)
         self.checkScript(foo, (v,))
 
-        with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type \(Tensor, Tensor\)"):
+        with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type Tuple"):
             @torch.jit.script
             def mixtypes(x):
                 a = (x, x)
@@ -8498,7 +8553,7 @@ a")
             fn = get_fn('test_type_annotation_py3', script_path)
 
             with self.assertRaisesRegex(RuntimeError, r"expected a value of type Tensor for argument"
-                                                      r" '0' but found \(Tensor, Tensor\)"):
+                                                      r" '0' but found Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -9436,7 +9491,7 @@ a")
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but found int\[\]'):
+        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but found List\[int\]'):
             @torch.jit.script
             def f5(a):
                 torch.cat([3])
@@ -9493,7 +9548,7 @@ a")
         self.assertExpected(str(cu.foo.schema))
 
     def test_parser_type_annotations_unknown_type(self):
-        with self.assertRaisesRegex(RuntimeError, r'Unknown type name Foo'):
+        with self.assertRaisesRegex(RuntimeError, "Unknown type name 'Foo'"):
             cu = torch.jit.CompilationUnit('''
                 def foo(x : Tensor, y : Tuple[Tuple[Foo, Tensor], Tensor]) -> Tuple[Tensor, Tensor]:
                     return x, x
@@ -12024,6 +12079,15 @@ a")
 
         self.checkScript(fn, ("abcde",))
 
+    def test_str_cmp(self):
+        def test(a, b):
+            # type: (str, str) -> Tuple[bool, bool, bool, bool, bool, bool]
+            return a != b, a == b, a < b, a > b, a <= b, a >= b
+
+        self.checkScript(test, ("1", "2"))
+        self.checkScript(test, ("2", "1"))
+        self.checkScript(test, ("1", "1"))
+
     def test_ord(self):
         def fn(x):
             # type: (str) -> int
@@ -12038,6 +12102,48 @@ a")
 
         s = u'\u00a3'.encode('utf8')[:1]
         self.checkScript(index_str_to_tensor, (s,))
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    def test_get_set_state(self):
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['number']
+
+            def __init__(self, number, submodule=None):
+                super(M, self).__init__()
+                self.register_buffer('buffer1', torch.ones(2, 2))
+                self.register_buffer('buffer2', torch.ones(2, 2))
+                self.number = number
+                if submodule:
+                    self.submodule = submodule
+
+            @torch.jit.script_method
+            def __getstate__(self):
+                # type: () -> Tuple[Tensor, Tensor, int]
+                return (self.buffer1, self.buffer2, 74)
+
+            @torch.jit.script_method
+            def __setstate__(self, state):
+                # type: (Tuple[Tensor, Tensor, int]) -> None
+                self.buffer1 = state[0] + 10
+                self.buffer2 = state[1] + 10
+
+        with TemporaryFileName() as fname:
+            m = M(23, submodule=M(99))
+            m.save(fname)
+            loaded = torch.jit.load(fname)
+
+        # Check original module
+        self.assertEqual(m.buffer1, torch.ones(2, 2))
+        self.assertEqual(m.buffer2, torch.ones(2, 2))
+
+        # Check top level module
+        self.assertEqual(loaded.buffer1, torch.ones(2, 2) + 10)
+        self.assertEqual(loaded.buffer2, torch.ones(2, 2) + 10)
+
+        # Check submodule
+        self.assertEqual(loaded.submodule.buffer1, torch.ones(2, 2) + 10)
+        self.assertEqual(loaded.submodule.buffer2, torch.ones(2, 2) + 10)
+
 
     def test_string_slicing(self):
         def fn1(x):
@@ -12613,6 +12719,21 @@ a")
                     continue
                 self.assertEqual(item[1], loaded_item)
 
+    def test_script_recurse(self):
+        def a_python_fn(a, b, c):
+            return a + b + c
+
+        with torch.jit._enable_recursive_script():
+            @torch.jit.script
+            def a_script_fn(d, e, f):
+                return a_python_fn(d, e, f)
+
+        graph = str(a_script_fn.graph)
+        FileCheck().check("aten::add").run(graph)
+        FileCheck().check_not("a_python_fn").run(graph)
+        t = torch.ones(2, 2)
+        self.assertEqual(a_script_fn(t, t, t), t + t + t)
+
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):
         model = {
@@ -12829,6 +12950,13 @@ a")
         self._test_pickle_checkpoint('cpu')
         self._test_pickle_checkpoint_views('cpu')
 
+    def test_string_list(self):
+        def fn(string):
+            # type: (str) -> List[str]
+            return list(string)
+
+        self.checkScript(fn, ("abcdefgh",))
+
     def test_split(self):
         def split_two(tensor):
             a, b, c = torch.split(tensor, 2, dim=1)
@@ -12836,6 +12964,14 @@ a")
         x = torch.randn(3, 6)
         y = torch.randn(3, 6)
         self.checkScript(split_two, [(x + y)])
+
+    def test_python_op_name(self):
+        import random
+
+        with self.assertRaisesRegex(RuntimeError, "randint"):
+            @torch.jit.script
+            def fn():
+                return random.randint()
 
 
 class MnistNet(nn.Module):
@@ -15580,6 +15716,53 @@ class TestClassType(JitTestCase):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
+
+    def test_cast_overloads(self):
+        @torch.jit.script
+        class Foo(object):
+            def __init__(self, val):
+                # type: (float) -> None
+                self.val = val
+
+            def __int__(self):
+                return int(self.val)
+
+            def __float__(self):
+                return self.val
+
+            def __bool__(self):
+                return bool(self.val)
+
+            def __str__(self):
+                return str(self.val)
+
+        def test(foo):
+            # type: (Foo) -> Tuple[int, float, bool]
+            if foo:
+                pass
+            return int(foo), float(foo), bool(foo)
+
+        fn = torch.jit.script(test)
+        self.assertEqual(fn(Foo(0.5)), test(0.5))
+        self.assertEqual(fn(Foo(0.)), test(0.0))
+        # str has slightly different formatting
+        self.assertTrue("0.5" in (str(Foo(0.5))))
+        self.assertTrue("0." in (str(Foo(0.0))))
+
+        @torch.jit.script
+        class BadBool(object):
+            def __init__(self):
+                pass
+
+            def __bool__(self):
+                return (1, 2)
+
+        with self.assertRaisesRegex(RuntimeError, "expected a bool expression for condition"):
+            @torch.jit.script
+            def test():
+                if BadBool():
+                    print(1)
+                    pass
 
     def test_init_compiled_first(self):
         @torch.jit.script  # noqa: B903

@@ -24,6 +24,11 @@ std::shared_ptr<Function> as_function(const py::object& obj) {
   return nullptr;
 }
 
+thread_local bool recurse_on_python_ops = false;
+bool& getRecursiveScriptMode() {
+  return recurse_on_python_ops;
+}
+
 FunctionSchema PythonValue::getSchema(
     const size_t n_args,
     const size_t n_binders) {
@@ -73,6 +78,13 @@ FunctionSchema PythonValue::getSchema(
     }
     rets.push_back(Argument("0", ret_type, {}, {}, false));
   }
+  std::string name("");
+  // Use the qualified name if possible
+  if (py::hasattr(self, "__qualname__")) {
+    name = py::str(py::getattr(self, "__qualname__"));
+  } else if (py::hasattr(self, "__name__")) {
+    name = py::str(py::getattr(self, "__name__"));
+  }
   return FunctionSchema("", "", std::move(args), std::move(rets));
 }
 
@@ -106,7 +118,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
 
   // Mark if function is ignored on export
   if (py::cast<bool>(
-          py::module::import("torch.jit").attr("_try_get_ignored_op")(self))) {
+          py::module::import("torch.jit").attr("_is_ignored_function")(self))) {
     auto python_op = static_cast<PythonOp*>(new_node);
     python_op->ignore_on_export = true;
   }
@@ -330,6 +342,16 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
   return result;
 }
 
+void ModuleValue::setAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field,
+    Value* newValue) {
+  // Forward to SimpleValue::setAttr
+  SimpleValue simple(self_);
+  simple.setAttr(loc, m, field, newValue);
+}
+
 std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     const SourceRange& loc,
     Function& caller,
@@ -451,6 +473,14 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto& pyCu = CompilationUnit::_get_python_cu();
     if (auto classType = pyCu.get_class(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
+    }
+  }
+
+  if (recurse_on_python_ops && py::isinstance<py::function>(obj)) {
+    auto compiled_fn =
+        py::module::import("torch.jit").attr("_try_compile_fn")(obj);
+    if (auto callee = as_function(compiled_fn)) {
+      return std::make_shared<FunctionValue>(callee);
     }
   }
 
