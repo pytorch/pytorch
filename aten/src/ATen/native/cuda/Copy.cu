@@ -1,74 +1,39 @@
 #include <ATen/ATen.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/Loops.cuh>
+#include <THC/THC.h>
 
-namespace {
+namespace at {
+namespace native {
 
-using namespace at;
 using namespace at::cuda;
 
-// Copy operator for the pointwise apply kernel
-template <typename dst_T, typename src_T>
-struct CopyOp {
-  static void apply(Tensor& dst, const Tensor& src) {
-    CUDA_tensor_apply2<dst_T, src_T>(
-        dst, src, [] __device__(dst_T & dst_val, const src_T& src_val) {
-#if __CUDA_ARCH__ >= 350
-          dst_val = static_cast<dst_T>(
-              static_cast<native::inter_copy_type_t<dst_T>>(__ldg(&src_val)));
-#else
-          dst_val = static_cast<dst_T>(static_cast<native::inter_copy_type_t<dst_T>>(src_val));
-#endif
-      });
-  }
-};
-
-template<typename dst_T>
-struct CopyOp<dst_T, bool> {
-  static void apply(Tensor& dst, const Tensor& src) {
-    CUDA_tensor_apply2<dst_T, bool>(
-      dst, src, [] __device__(dst_T & dst_val, const bool& src_val) {
-        dst_val = static_cast<dst_T>(static_cast<native::inter_copy_type_t<dst_T>>(src_val));
-      });
-  }
-};
+template <typename dst_t, typename src_t>
+void copy_kernel_impl(TensorIterator& iter) {
+  gpu_unary_kernel(iter, []GPU_LAMBDA(src_t x) -> dst_t {
+    return static_cast<dst_t>(static_cast<native::inter_copy_type_t<dst_t>>(x));
+  });
+}
 
 // device-to-device copy, does type conversion
-template <typename dst_T, typename src_T>
-void copy_device_to_device(Tensor& dst, const Tensor& src) {
-  auto numel = dst.numel();
-  if (dst.is_same(src) || numel == 0) {
-    return;
-  }
+static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
+  int64_t numel = iter.numel();
 
-  // We can memcpy the memory if:
-  // -both tensors are contiguous; or,
-  // -there is only one element to copy; or,
-  // -FIXME: if both tensors have matching size and stride arrays, and no
-  // holes within (in other words, there is some permutation that can be applied
-  // to the size/strides such that the resulting tensor is
-  // contiguous).
-  // -AND: both tensors have the same type.
-  bool same_type = std::is_same<dst_T, src_T>::value;
-  bool memcpy_eligible =
-      ((src.is_contiguous() && dst.is_contiguous()) || (numel == 1)) &&
-      same_type;
+  // We can memcpy the memory if both tensors have the same type AND both
+  // tensors are contiguous after dimension coalescing and reordering.
+  bool same_type = iter.dtype(0) == iter.dtype(1);
+  bool memcpy_eligible = same_type && iter.is_contiguous();
 
-  Device src_device = src.device();
-  Device dst_device = dst.device();
+  Device dst_device = iter.device(0);
+  Device src_device = iter.device(1);
 
   CUDAGuard device_guard(src_device);
-
-  // Try to enable p2p access. This also handles the case src_device ==
-  // dst_device.
-  bool p2pEnabled = THCState_getPeerToPeerAccess(
-      globalContext().getTHCState(), src_device.index(), dst_device.index());
 
   // We always perform the copy on the source device, using the current stream
   // on the source device, and we fully synchronize on both src and dst's
@@ -94,61 +59,18 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
   if (memcpy_eligible) {
     // Perform the copy
     AT_CUDA_CHECK(cudaMemcpyAsync(
-        dst.data<dst_T>(),
-        src.data<src_T>(),
-        numel * sizeof(dst_T),
+        iter.data_ptr(0),
+        iter.data_ptr(1),
+        numel * iter.element_size(0),
         cudaMemcpyDeviceToDevice,
         copy_stream));
   } else {
-    // Non-contiguous copy or a type-conversion copy
-
-    // We avoid creating temporary memory copies if possible.
-    // If both src and dst are on the same device, or if they are on
-    // different devices and p2p access is enabled, perform the copy
-    // by a pointwise copy kernel.
-    // Otherwise, we'll have to make contiguous (which will in fact
-    // invoke copy() again), and then perform the copy.
-    // FIXME: might want to consider only running the pointwise kernel
-    // if both src and dst innermost dimensions are contiguous. If
-    // they are not, then taking the hit of the memory allocation/free
-    // might be worth it to avoid non-coalesced reads or writes.
-    if (p2pEnabled) {
-      CopyOp<dst_T, src_T>::apply(dst, src);
-    } else {
-      // GPUs can't access each other directly, but the tensors
-      // involved are non-contiguous and/or are different types.
-
-      // Make sure the src is contiguous and in the same type as dst
-      Tensor src_contig;
-      if (same_type) {
-        src_contig = src.contiguous();
-      } else {
-        // Types are different
-        // Copy into the new format, contiguous, on the source device
-        src_contig = at::empty_like(dst, src.options().dtype(dst.dtype()));
-
-        CopyOp<dst_T, src_T>::apply(src_contig, src);
-      }
-
-      // Make sure the dst is contiguous
-      device_guard.set_device(dst_device);
-      Tensor dst_contig = dst.contiguous();
-
-      // Now, we are ready for a cross-device memcpy of contiguous
-      // data, of the same layout and type
-      device_guard.set_device(src_device);
-
-      AT_CUDA_CHECK(cudaMemcpyAsync(
-          dst_contig.data<dst_T>(),
-          src_contig.data<dst_T>(),
-          numel * sizeof(dst_T),
-          cudaMemcpyDeviceToDevice,
-          copy_stream));
-
-      if (!dst.is_contiguous()) {
-        copy_device_to_device<dst_T, dst_T>(dst, dst_contig);
-      }
-    }
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(0), "copy_", [&] {
+      using dst_t = scalar_t;
+      AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(1), "copy_", [&] {
+        copy_kernel_impl<dst_t, scalar_t>(iter);
+      });
+    });
   }
 
   if (src_device != dst_device) {
@@ -166,143 +88,103 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-void copy_from_cpu(Tensor& dst, const Tensor& src) {
-  Tensor dst_contig = dst.contiguous();
-  Tensor src_contig = src.contiguous();
+static bool copy_requires_temporaries(TensorIterator& iter) {
+  Device dst_device = iter.device(0);
+  Device src_device = iter.device(1);
 
-  CUDAStream stream = getCurrentCUDAStream();
-
-  AT_CUDA_CHECK(cudaMemcpyAsync(
-      dst_contig.data_ptr(),
-      src_contig.data_ptr(),
-      src.numel() * src.element_size(),
-      cudaMemcpyHostToDevice,
-      stream));
-  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, src.scalar_type(), "copy_from_cpu", [&]() {
-    copy_device_to_device<scalar_t, scalar_t>(dst, dst_contig);
-  });
-}
-
-void copy_to_cpu(Tensor& dst, const Tensor& src) {
-  Tensor dst_contig = dst.contiguous();
-  Tensor src_contig = src.contiguous();
-
-  CUDAGuard device_guard(src.device());
-  CUDAStream stream = getCurrentCUDAStream();
-
-  AT_CUDA_CHECK(cudaMemcpyAsync(
-      dst_contig.data_ptr(),
-      src_contig.data_ptr(),
-      src.numel() * src.element_size(),
-      cudaMemcpyDeviceToHost,
-      stream));
-  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-  _copy_same_type_(dst, dst_contig);
-}
-
-void copy_from_cpu_async_(Tensor& dst, const Tensor& src) {
-  TORCH_CHECK(dst.is_contiguous(), "Target tensor must be contiguous.");
-  TORCH_CHECK(src.is_contiguous(), "Source tensor must be contiguous.");
-
-  if (dst.numel() == 0) {
-    return;
+  if (dst_device == src_device) {
+    // We never require temporaries for copies on the same GPU.
+    TORCH_INTERNAL_ASSERT(dst_device.is_cuda() && src_device.is_cuda());
+    return false;
   }
 
-  CUDAGuard device_guard(dst.device());
-  CUDAStream stream = getCurrentCUDAStream();
-
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, src.scalar_type(), "copy_from_cpu_async", [&]() {
-    AT_CUDA_CHECK(cudaMemcpyAsync(
-        dst.data<scalar_t>(),
-        src.data<scalar_t>(),
-        src.numel() * sizeof(scalar_t),
-        cudaMemcpyHostToDevice,
-        stream));
-    AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(
-        src.storage().data<scalar_t>(), stream));
-  });
-}
-
-void copy_to_cpu_async_(Tensor& dst, const Tensor& src) {
-  TORCH_CHECK(dst.is_contiguous(), "Target tensor must be contiguous.");
-  TORCH_CHECK(src.is_contiguous(), "Source tensor must be contiguous.");
-
-  if (dst.numel() == 0) {
-    return;
+  bool same_dtype = iter.dtype(0) == iter.dtype(1);
+  if (same_dtype && iter.is_contiguous()) {
+    // Contiguous same-dtype copies can always use cudaMemcpyAsync
+    return false;
+  } else if (dst_device.is_cuda() && src_device.is_cuda()) {
+    // Copies between GPUs can use the copy kernel if P2P is supported
+    return !THCState_getPeerToPeerAccess(
+        globalContext().getTHCState(), src_device.index(), dst_device.index());
+  } else {
+    // The remaining cases require temporaries. For example, this includes
+    // non-contiguous copies between CPU and GPU.
+    return true;
   }
-
-  CUDAGuard device_guard(src.device());
-  CUDAStream stream = getCurrentCUDAStream();
-
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, src.scalar_type(), "copy_to_cpu_async", [&]() {
-    AT_CUDA_CHECK(cudaMemcpyAsync(
-        dst.data<scalar_t>(),
-        src.data<scalar_t>(),
-        src.numel() * sizeof(scalar_t),
-        cudaMemcpyDeviceToHost,
-        stream));
-    AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(
-        src.storage().data<scalar_t>(), stream));
-  });
 }
 
-template <typename dst_T>
-void _copy__cuda(Tensor& dst, const Tensor& src, bool non_blocking) {
-  TORCH_CHECK(dst.numel() == src.numel(), "sizes do not match");
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, src.scalar_type(), "_copy__cuda", [&]() {
-    if (dst.is_cuda() && src.is_cuda()) {
-      copy_device_to_device<dst_T, scalar_t>(dst, src);
-    } else if (dst.is_cuda()) {
-      if (std::is_same<dst_T, scalar_t>::value) {
-        if (non_blocking) {
-          copy_from_cpu_async_(dst, src);
-        } else {
-          copy_from_cpu(dst, src);
-        }
-      } else {
-        // Do a dtype converting copy on the CPU, then copy to device
-        Tensor srcf = at::empty_like(src, src.options().dtype(dst.dtype()));
-        s_copy_(srcf, src);
-        copy_from_cpu(dst, srcf);
-      }
+static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
+  AT_ASSERT(iter.ntensors() == 2);
+
+  if (copy_requires_temporaries(iter)) {
+    // NB: this involves recursive calls to copy. Be careful that those copies
+    // don't require temporaries or you will cause an infinite recursion!
+    auto& dst = iter.tensor(0);
+    Tensor dst_contig;
+    Tensor src_contig;
+
+    // Type conversions are performed on the CPU for CPU-GPU copies and on
+    // the src device for GPU-GPU copies.
+    if (iter.device_type(0) == kCUDA) {
+      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst);
+      src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {
-      if (std::is_same<dst_T, scalar_t>::value) {
-        if (non_blocking) {
-          copy_to_cpu_async_(dst, src);
-        } else {
-          copy_to_cpu(dst, src);
-        }
-      } else {
-        // Copy to CPU as the same dtype, then do a dtype converting copy
-        Tensor srcf = at::empty_like(src, dst.options().dtype(src.dtype()));
-        copy_to_cpu(srcf, src);
-        s_copy_(dst, srcf);
-      }
+      bool same_type = iter.dtype(0) == iter.dtype(1);
+      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1));
+      src_contig = iter.tensor(1).expand_as(dst).contiguous();
     }
-  });
+
+    // perform a same-dtype copy on contiguous tensors
+    TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));
+    TORCH_INTERNAL_ASSERT(dst_contig.scalar_type() == src_contig.scalar_type());
+    dst_contig.copy_(src_contig, non_blocking);
+
+    // if necessary, copy back into dst
+    if (!dst_contig.is_same(dst)) {
+      TORCH_INTERNAL_ASSERT(dst_contig.device() == dst.device());
+      dst.copy_(dst_contig, non_blocking);
+    }
+    return;
+  }
+
+  Device dst_device = iter.device(0);
+  Device src_device = iter.device(1);
+
+  // Copy on GPU (or between GPUs)
+  if (dst_device.is_cuda() && src_device.is_cuda()) {
+    copy_device_to_device(iter, non_blocking);
+    return;
+  }
+
+  // Copy between CPU and GPU
+  cuda::OptionalCUDAGuard device_guard;
+  cudaMemcpyKind kind;
+  if (dst_device.is_cuda() && src_device.is_cpu()) {
+    device_guard.set_device(dst_device);
+    kind = cudaMemcpyHostToDevice;
+  } else if (dst_device.is_cpu() && src_device.is_cuda()) {
+    device_guard.set_device(src_device);
+    kind = cudaMemcpyDeviceToHost;
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "unsupported devices in GPU copy_()");
+  }
+
+  void* dst = iter.data_ptr(0);
+  void* src = iter.data_ptr(1);
+  int64_t nbytes = iter.numel() * iter.element_size(0);
+  CUDAStream stream = getCurrentCUDAStream();
+
+  AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
+
+  if (non_blocking) {
+    void* ptr = (dst_device == kCPU ? dst : src);
+    AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(ptr, stream));
+  } else {
+    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+  }
 }
 
-} // namespace
-
-namespace at {
-namespace native {
-
-Tensor& _s_copy__cuda(Tensor& self, const Tensor& src, bool non_blocking) {
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "_copy__cuda", [&]() {
-    ::_copy__cuda<scalar_t>(self, src, non_blocking);
-  });
-  return self;
-}
-
-Tensor _s_copy_from_cuda(
-    const Tensor& self,
-    const Tensor& dst,
-    bool non_blocking) {
-  Tensor dst_ = dst;
-  _s_copy__cuda(dst_, self, non_blocking);
-  return dst;
-}
+REGISTER_DISPATCH(copy_stub, &copy_kernel_cuda);
 
 } // namespace native
 } // namespace at
