@@ -237,15 +237,15 @@ Tensor & addcdiv_(Tensor& self, const Tensor & tensor1, const Tensor & tensor2, 
   return at::legacy::th::_th_addcdiv_(self, tensor1, tensor2, value);
 }
 
-Tensor & random_(Tensor& self, int64_t from, int64_t to, Generator * generator) {
+Tensor & clamped_random_cpu_(Tensor& self, int64_t from, int64_t to, Generator * generator) {
   return at::legacy::th::_th_random_(self, from, to, generator);
 }
 
-Tensor & random_(Tensor& self, int64_t to, Generator * generator) {
+Tensor & capped_random_cpu_(Tensor& self, int64_t to, Generator * generator) {
   return at::legacy::th::_th_random_(self, to, generator);
 }
 
-Tensor & random_(Tensor& self, Generator * generator) {
+Tensor & random_cpu_(Tensor& self, Generator * generator) {
   return at::legacy::th::_th_random_(self, generator);
 }
 
