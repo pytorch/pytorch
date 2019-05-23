@@ -23,7 +23,8 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-pip install pytest scipy torchvision hypothesis
+pip install pytest scipy hypothesis
+pip install --user git+git://github.com/pytorch/vision.git@b3cb86f295c8b8af7142e9def3352c5e16e481b6
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi
