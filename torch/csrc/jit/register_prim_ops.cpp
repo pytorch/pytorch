@@ -24,6 +24,7 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
+#include <cctype>
 #include <algorithm>
 #include <cmath>
 #include <exception>
@@ -1935,7 +1936,8 @@ RegisterOperators reg2({
           auto string = pop(stack).toStringRef();
           bool found_alpha = false;
           bool is_upper = true;
-          for (char c : string) {
+          for (size_t i = 0; i < string.size() && is_upper; ++i) {
+            char c = string[i];
             found_alpha |= std::isalpha(c);
             is_upper &= (!std::isalpha(c) || std::isupper(c));
           }
@@ -1948,7 +1950,8 @@ RegisterOperators reg2({
           auto string = pop(stack).toStringRef();
           bool found_alpha = false;
           bool is_lower = true;
-          for (char c : string) {
+          for (size_t i = 0; i < string.size() && is_lower; ++i) {
+            char c = string[i];
             found_alpha |= std::isalpha(c);
             is_lower &= (!std::isalpha(c) || std::islower(c));
           }
