@@ -60,7 +60,13 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
   if (self.is_contiguous(memory_format)) {
     return self;
   }
-  auto result = at::empty_like(self);
+  Tensor result;
+  if (self.is_quantized()) {
+    // FIXME: only works for PerTensorAffineQuantized now
+    result = at::_empty_affine_quantized(self.sizes(), self.options(), self.q_scale().toDouble(), self.q_zero_point().toLong());
+  } else {
+    result = at::empty_like(self);
+  }
   switch (memory_format) {
     case MemoryFormat::Any: // Back compatibility with old defaults
     case MemoryFormat::Contiguous: {
