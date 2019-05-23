@@ -11,7 +11,7 @@ if [ -z "${BUILD_ENVIRONMENT:-}" ]; then
   echo "CircleCI scripts are probably misconfigured."
   exit 1
 fi
-if ! git rev-parse --git-dir; then
+if ! [ -d ".git" ]; then
   echo "Cannot run should_run_job.sh if you don't have a Git checkout!"
   echo "CircleCI scripts are probably misconfigured."
   exit 1
