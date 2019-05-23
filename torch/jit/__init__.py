@@ -642,11 +642,7 @@ def wrap_check_inputs(check_inputs):
     if check_inputs is None:
         return None
 
-    canon_check_inputs = []
-    for check_input in check_inputs:
-        canon_check_inputs.append({'forward': check_input})
-
-    return canon_check_inputs
+    return [{'forward' : c} for c in check_inputs]
 
 def trace(func,
           example_inputs,
