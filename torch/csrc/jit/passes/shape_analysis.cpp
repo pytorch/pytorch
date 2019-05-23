@@ -73,7 +73,8 @@ class ShapePropagator {
       } catch (propagation_error& e) {
         setUnshapedType(node);
       } catch (std::exception& e) {
-         node->sourceRange().wrapAndRethrowException(e, "operation failed shape propagation");
+        node->sourceRange().wrapAndRethrowException(
+            e, "operation failed shape propagation");
       }
     }
   }
@@ -84,9 +85,13 @@ class ShapePropagator {
 
   bool resizesInput(Node* n) {
     static std::unordered_set<Symbol> resize_ops{
-        aten::resize_,    aten::resize_as_, aten::copy_,    aten::set_,
+        aten::resize_,
+        aten::resize_as_,
+        aten::copy_,
+        aten::set_,
         aten::unsqueeze_,
-        aten::t_, aten::transpose_, // could preserve DimensionedTensorType Here
+        aten::t_,
+        aten::transpose_, // could preserve DimensionedTensorType Here
     };
 
     if (resize_ops.count(n->kind()))
@@ -1237,7 +1242,7 @@ class ShapePropagator {
     //   - has ScalarType dtype, Layeout layout and Device device arguments
     static const register_formula_for like_factories_with_options{
         {
-            "aten::empty_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::empty_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat memory_format=contiguous_format) -> Tensor",
             "aten::full_like(Tensor self, Scalar fill_value, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
             "aten::ones_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
             "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
@@ -1266,7 +1271,7 @@ class ShapePropagator {
     //   arguments
     static const register_formula_for size_factories_with_options{
         {
-            "aten::empty(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::empty(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory, MemoryFormat memory_format=contiguous_format) -> Tensor",
             "aten::full(int[] size, Scalar fill_value, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
             "aten::ones(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
             "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
