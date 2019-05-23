@@ -407,6 +407,7 @@ Environment = TypedDict('Environment', {
     'THTensor': str,
     'THType': str,
     'Backend': str,
+    'DeviceType': str,
     'AccScalarName': str,
 })
 
@@ -1174,11 +1175,11 @@ def create_generic(top_env, declarations):
 
 
 def create_derived(backend_type_env, declarations):
-    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str]]
-    type_object_declarations = []
-    type_object_definitions = []
-    legacy_th_declarations = []
-    legacy_th_definitions = []
+    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[str], List[str]]
+    type_object_declarations = []  # type: List[str]
+    type_object_definitions = []  # type: List[str]
+    legacy_th_declarations = []  # type: List[str]
+    legacy_th_definitions = []  # type: List[str]
     is_cuda = 'CUDA' in backend_type_env['Backend']
 
     def replace_with_null(argument):
@@ -1610,8 +1611,8 @@ def create_derived(backend_type_env, declarations):
 
 def create_extension_backend(backend_type_env, declarations):
     # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str]]
-    type_object_declarations = []
-    type_object_definitions = []
+    type_object_declarations = []  # type: List[str]
+    type_object_definitions = []  # type: List[str]
 
     for declaration in declarations:
         for option in declaration['options']:

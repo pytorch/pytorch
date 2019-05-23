@@ -3732,11 +3732,13 @@
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_histc_out
+    CUDA: _histc_out_cuda
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_histc
+    CUDA: _histc_out_cuda
 
 - func: sign(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
