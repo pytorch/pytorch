@@ -55,7 +55,7 @@ class DataLoaderBase {
   /// standard algorithms like `std::copy(dataloader.begin(), dataloader.end(),
   /// output_iterator)`  are supported too.
   Iterator<Batch> begin() {
-    AT_CHECK(
+    TORCH_CHECK(
         shuttle_.in_flight_jobs() == 0,
         "Attempted to get a new DataLoader iterator "
         "while another iterator is not yet exhausted");

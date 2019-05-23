@@ -137,11 +137,10 @@ def run_cmake(version,
     if USE_NINJA:
         cmake_args.append('-GNinja')
     elif IS_WINDOWS:
+        cmake_args.append('-GVisual Studio 15 2017')
         if IS_64BIT:
-            cmake_args.append('-GVisual Studio 15 2017 Win64')
+            cmake_args.append('-Ax64')
             cmake_args.append('-Thost=x64')
-        else:
-            cmake_args.append('-GVisual Studio 15 2017')
     try:
         import numpy as np
         NUMPY_INCLUDE_DIR = np.get_include()
@@ -211,7 +210,11 @@ def run_cmake(version,
         USE_REDIS=os.getenv('USE_REDIS'),
         USE_GLOG=os.getenv('USE_GLOG'),
         USE_GFLAGS=os.getenv('USE_GFLAGS'),
+        USE_ASAN=check_env_flag('USE_ASAN'),
         WERROR=os.getenv('WERROR'))
+
+    if os.getenv('_GLIBCXX_USE_CXX11_ABI'):
+        cmake_defines(cmake_args, GLIBCXX_USE_CXX11_ABI=os.getenv('_GLIBCXX_USE_CXX11_ABI'))
 
     if os.getenv('USE_OPENMP'):
         cmake_defines(cmake_args, USE_OPENMP=check_env_flag('USE_OPENMP'))
@@ -287,7 +290,7 @@ def build_caffe2(version,
             check_call(build_cmd, cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
-            ninja_cmd = ['ninja', 'install', '-v']
+            ninja_cmd = ['ninja', 'install']
             if max_jobs is not None:
                 ninja_cmd += ['-j', max_jobs]
             check_call(ninja_cmd, cwd=build_dir, env=my_env)

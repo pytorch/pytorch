@@ -8,9 +8,8 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/pickler.h>
-#include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/error_report.h>
@@ -18,7 +17,9 @@
 #include <torch/csrc/jit/script/logging.h>
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/core/Dict.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
@@ -26,12 +27,12 @@
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <ostream>
-#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <typeinfo>
@@ -97,13 +98,13 @@ static int64_t floordiv(int64_t a, int64_t b) {
 }
 
 static int gcd(int a, int b) {
-    while (b != 0) {
-        int r = a % b;
-        a = b;
-        b = r;
-    }
-    // in python gcd returns non-negative values
-    return std::abs(a);
+  while (b != 0) {
+    int r = a % b;
+    a = b;
+    b = r;
+  }
+  // in python gcd returns non-negative values
+  return std::abs(a);
 }
 
 // reference function THPVariable_to in python_variable_methods.cpp
@@ -154,6 +155,14 @@ RegisterOperators reg(
            return [key](Stack& stack) {
              RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
              runFusion(key, stack);
+             return 0;
+           };
+         }),
+     Operator(
+         "prim::Guard(Tensor(a) t) -> Tensor(a)",
+         [](const Node* node) {
+           return [](Stack& stack) {
+             AT_ERROR("Should be replaced by prim::BailOut");
              return 0;
            };
          }),
@@ -512,7 +521,7 @@ RegisterOperators reg(
              std::vector<int64_t> regular_shape = shape;
              std::vector<int64_t> last_shape = shape;
              int64_t dim = at::maybe_wrap_dim(raw_dim, shape.size());
-             AT_CHECK(
+             TORCH_CHECK(
                  dim < (int64_t)regular_shape.size(),
                  "Dimension out of range for chunk");
              int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
@@ -553,7 +562,7 @@ RegisterOperators reg(
          }),
 
      Operator(
-         "prim::IgnoredPythonOp(...) -> ()",
+         "prim::IgnoredPythonOp(...) -> None",
          [](Stack& stack) {
            throw JITException(
                "This Python function is annotated to be ignored"
@@ -738,7 +747,7 @@ RegisterOperators reg(
              int64_t num_results = result.size();
              if (num_results != chunks) {
                if (num_results > chunks) {
-                 AT_CHECK(
+                 TORCH_CHECK(
                      num_results == chunks,
                      "Expected chunk to return ",
                      chunks,
@@ -746,7 +755,7 @@ RegisterOperators reg(
                      num_results);
                }
                for (int64_t i = num_results; i < chunks; ++i) {
-                 AT_CHECK(
+                 TORCH_CHECK(
                      !outputs_used[i],
                      "Expected chunk to return at least ",
                      chunks,
@@ -769,7 +778,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                auto ilist = pop(stack);
                const auto& list = ilist.toIntList()->elements();
-               AT_CHECK(
+               TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
@@ -782,7 +791,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                auto ilist = pop(stack);
                const auto& list = ilist.toDoubleList()->elements();
-               AT_CHECK(
+               TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
@@ -795,7 +804,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                auto ilist = pop(stack);
                const auto& list = ilist.toTensorList()->elements();
-               AT_CHECK(
+               TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
@@ -808,7 +817,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                auto glist = pop(stack);
                const auto& list = glist.toGenericList()->elements();
-               AT_CHECK(
+               TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
@@ -865,11 +874,11 @@ RegisterOperators reg(
                  "DictConstruct must have an even number of inputs");
            }
            return [=](Stack& stack) {
-             c10::ivalue::UnorderedMap vals;
+             c10::impl::GenericDict vals;
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
-               vals[key] = val;
+               vals.insert_or_assign(std::move(key), std::move(val));
              }
              push(stack, std::move(vals));
              return 0;
@@ -879,7 +888,7 @@ RegisterOperators reg(
          "aten::_unwrap_optional(t(a)? optional) -> t(a)",
          [](Stack& stack) {
            auto val = pop(stack);
-           AT_CHECK(!val.isNone(), "Unwrapping null optional");
+           TORCH_CHECK(!val.isNone(), "Unwrapping null optional");
            push(stack, val);
            return 0;
          }),
@@ -905,7 +914,7 @@ RegisterOperators reg(
 
              push(stack, forked_interprester.getFuture());
 
-             c10::global_work_queue().run(std::move(continuation));
+             at::launch(std::move(continuation));
              return 0;
            };
          }),
@@ -1040,12 +1049,21 @@ RegisterOperators logging_operators(
     return 0;                                                   \
   })
 
+#define DEFINE_STR_CMP_OP(aten_op, op)                           \
+  Operator(#aten_op "(str a, str b) -> bool", [](Stack& stack) { \
+    auto b = pop(stack).toStringRef();                           \
+    auto a = pop(stack).toStringRef();                           \
+    push(stack, op);                                             \
+    return 0;                                                    \
+  })
+
 #define DEFINE_BINARY_OP(aten_op, op)             \
   DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
       DEFINE_INT_FLOAT_OP(aten_op, op, float)
 #define DEFINE_COMPARISON_OP(aten_op, op)         \
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
-      DEFINE_INT_FLOAT_OP(aten_op, op, bool)
+      DEFINE_INT_FLOAT_OP(aten_op, op, bool), DEFINE_STR_CMP_OP(aten_op, op)
+
 #define DEFINE_BOOL_OP(aten_op, op)                                \
   Operator(#aten_op "(bool a, bool b) -> bool", [](Stack& stack) { \
     bool a, b;                                                     \
@@ -1056,7 +1074,7 @@ RegisterOperators logging_operators(
 
 int stringSlice(Stack& stack) {
   auto step = pop(stack).toInt();
-  AT_CHECK(step == 1, "Slicing a string only supports step=1");
+  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
 
   auto end = pop(stack).toInt();
   auto start = pop(stack).toInt();
@@ -1583,24 +1601,24 @@ int listSetItem<Shared<BoolList>, bool>(Stack& stack) {
 int dictSetItem(Stack& stack) {
   auto value = pop(stack);
   auto idx = pop(stack);
-  auto& dict = pop(stack).toGenericDict()->elements();
-  dict[idx] = value;
-  push(stack, dict);
+  auto dict = pop(stack).toGenericDict();
+  dict->elements().insert_or_assign(std::move(idx), std::move(value));
+  push(stack, std::move(dict));
   return 0;
 }
 
 int dictLen(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
-  push(stack, int64_t(dict.size()));
+  auto dict = pop(stack).toGenericDict();
+  push(stack, int64_t(dict->elements().size()));
   return 0;
 }
 
 int dictKeys(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
+  auto dict = pop(stack).toGenericDict();
   std::vector<IValue> keys;
-  keys.reserve(dict.size());
-  for (auto item : dict) {
-    keys.push_back(item.first);
+  keys.reserve(dict->elements().size());
+  for (auto item : dict->elements()) {
+    keys.push_back(item.key());
   }
   push(stack, IValue(keys));
   return 0;
@@ -1644,7 +1662,7 @@ int dictIndex(Stack& stack) {
   if (value == elems.end()) {
     AT_ERROR("KeyError: '", index, "'");
   }
-  push(stack, value->second);
+  push(stack, value->value());
   return 0;
 }
 
@@ -1656,7 +1674,7 @@ int dictGet(Stack& stack) {
   if (value == elems.end()) {
     push(stack, IValue());
   } else {
-    push(stack, value->second);
+    push(stack, value->value());
   }
   return 0;
 }
@@ -1670,7 +1688,7 @@ int dictGetDefault(Stack& stack) {
   if (value == elems.end()) {
     push(stack, default_value);
   } else {
-    push(stack, value->second);
+    push(stack, value->value());
   }
   return 0;
 }
@@ -1713,6 +1731,18 @@ RegisterOperators reg2({
             AT_ERROR("len() of a 0-d tensor");
           }
           push(stack, t.sizes()[0]);
+          return 0;
+        }),
+    Operator(
+        "aten::list(str t) -> str[]",
+        [](Stack& stack) {
+          auto str = pop(stack).toStringRef();
+          std::vector<IValue> chars;
+          chars.reserve(str.size());
+          for (auto c : str) {
+            chars.push_back(std::string(1, c));
+          }
+          push(stack, chars);
           return 0;
         }),
 // Mutable ops for lists containing mutable types.
@@ -1893,18 +1923,18 @@ RegisterOperators reg2({
           return 0;
         }),
     Operator(
-      "prim::str(t elem) -> str",
-      [](Stack& stack) {
-        std::stringstream ss;
-        ss << pop(stack);
-        push(stack, ss.str());
-        return 0;
-      }),
+        "prim::str(t elem) -> str",
+        [](Stack& stack) {
+          std::stringstream ss;
+          ss << pop(stack);
+          push(stack, ss.str());
+          return 0;
+        }),
     Operator(
         "aten::ord(str string) -> int",
         [](Stack& stack) {
           auto string = pop(stack).toStringRef();
-          AT_CHECK(
+          TORCH_CHECK(
               string.size() == 1,
               "String for ord() must be 1 character, found",
               string.size());
@@ -2130,24 +2160,28 @@ RegisterOperators reg2({
 
     DEFINE_INT_OP(aten::gcd, gcd(a, b)),
 
-    DEFINE_GENERIC_OP(aten::copysign, std::copysign(a, b), std::copysign(a, b), float, float),
-    DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a,b), float),
+    DEFINE_GENERIC_OP(
+        aten::copysign,
+        std::copysign(a, b),
+        std::copysign(a, b),
+        float,
+        float),
+    DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a, b), float),
 
-#define DEFINE_MATH_OP(aten_op, op, int_result, float_result)              \
-  Operator(                                                                \
-      #aten_op "(int a) -> " #int_result,                                  \
-      [](Stack& stack) {                                                   \
-        int64_t a;                                                         \
-        pop(stack, a);                                                     \
-        push(stack, op);                                                   \
-        return 0;                                                          \
-      }),                                                                  \
-      Operator(#aten_op "(float a) -> " #float_result,                     \
-      [](Stack& stack) {                                                   \
-        double a;                                                          \
-        pop(stack, a);                                                     \
-        push(stack, op);                                                   \
-        return 0;                                                          \
+#define DEFINE_MATH_OP(aten_op, op, int_result, float_result)             \
+  Operator(                                                               \
+      #aten_op "(int a) -> " #int_result,                                 \
+      [](Stack& stack) {                                                  \
+        int64_t a;                                                        \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
+      }),                                                                 \
+      Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) { \
+        double a;                                                         \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
       })
 
     DEFINE_MATH_OP(aten::gamma, std::tgamma(a), float, float),
@@ -2163,7 +2197,6 @@ RegisterOperators reg2({
     DEFINE_COMPARISON_OP(aten::gt, a > b),
     DEFINE_COMPARISON_OP(aten::le, a <= b),
     DEFINE_COMPARISON_OP(aten::ge, a >= b),
-
     DEFINE_BOOL_OP(aten::__and__, a&& b),
     DEFINE_BOOL_OP(aten::__or__, a || b),
     DEFINE_BOOL_OP(aten::__xor__, a != b),

@@ -12,11 +12,11 @@
 namespace at {
 
 void checkFloatCPUTensor(std::string fn_name, Tensor t) {
-  AT_CHECK(
+  TORCH_CHECK(
       t.scalar_type() == kFloat,
       fn_name,
       "expects a Float Tensor.");
-  AT_CHECK(
+  TORCH_CHECK(
       t.device() == kCPU,
       fn_name,
       "expects a CPU Tensor.");
@@ -24,25 +24,25 @@ void checkFloatCPUTensor(std::string fn_name, Tensor t) {
 
 template <typename T>
 void checkQuantizedCPUTensor(std::string fn_name, Tensor t) {
-  AT_CHECK(t.is_quantized(),
+  TORCH_CHECK(t.is_quantized(),
            fn_name,
            "expects a quantized Tensor.");
-  AT_CHECK(t.scalar_type() == caffe2::TypeMeta::Make<T>(),
+  TORCH_CHECK(t.scalar_type() == caffe2::TypeMeta::Make<T>(),
            fn_name,
            "expects a ",
            caffe2::TypeMeta::Make<T>(),
            "Tensor");
-  AT_CHECK(t.device() == kCPU,
+  TORCH_CHECK(t.device() == kCPU,
            fn_name,
            "expects a CPU quantized Tensor");
 }
 
 template <typename T>
 void checkZeroPoint(std::string fn_name, int32_t zero_point) {
-  AT_CHECK(zero_point <= std::numeric_limits<T>::max(),
+  TORCH_CHECK(zero_point <= std::numeric_limits<T>::max(),
            fn_name,
            "zero_point is out of range.");
-  AT_CHECK(zero_point >= std::numeric_limits<T>::min(),
+  TORCH_CHECK(zero_point >= std::numeric_limits<T>::min(),
            fn_name,
            "zero_point is out of range.");
 }
@@ -60,7 +60,7 @@ T quantize_val(float scale, int32_t zero_point, float value) {
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
   int32_t qvalue;
   qvalue = fbgemm::Quantize<typename T::underlying>(value, zero_point, scale,
-                                                    /*result_precision=*/std::numeric_limits<typename T::underlying>::digits);
+                                                    /*result_precision=*/CHAR_BIT * sizeof(typename T::underlying));
   return static_cast<T>(qvalue);
 }
 
@@ -75,7 +75,7 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, float scale, int32_t zero
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale;
   qparams.zero_point = zero_point;
-  qparams.precision = std::numeric_limits<typename T::underlying>::digits;
+  qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
   fbgemm::Quantize<typename T::underlying>(/*src=*/rd,
                              /*dst=*/qd,
                              /*len=*/rtensor.numel(),
@@ -93,7 +93,7 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, float scale, int32_t ze
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = scale;
   qparams.zero_point = zero_point;
-  qparams.precision = std::numeric_limits<typename T::underlying>::digits;
+  qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
   float* rd = rtensor.data<float>();
   fbgemm::Dequantize<typename T::underlying>(/*src=*/qd,
                               /*dst=*/rd,
@@ -191,7 +191,7 @@ inline Tensor new_qtensor_cpu(
   auto* allocator = at::getCPUAllocator();
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
-  AT_CHECK(isQIntType(typeMetaToScalarType(dtype)),
+  TORCH_CHECK(isQIntType(typeMetaToScalarType(dtype)),
            "ScalarType is not supported in new_qtensor_cpu.");
   auto storage = c10::make_intrusive<StorageImpl>(
       dtype,
@@ -206,10 +206,10 @@ inline Tensor new_qtensor_cpu(
 }
 
 Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
-  AT_CHECK(
+  TORCH_CHECK(
       rtensor.scalar_type() == kFloat,
       "quantize only works on Float Tensor.");
-  AT_CHECK(
+  TORCH_CHECK(
       rtensor.device() == kCPU,
       "quantize only works for CPU backend right now.");
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
@@ -227,9 +227,9 @@ Tensor PerTensorAffineQuantizer::quantize(Tensor rtensor) {
 }
 
 Tensor PerTensorAffineQuantizer::dequantize(Tensor qtensor) {
-  AT_CHECK(qtensor.is_quantized(),
+  TORCH_CHECK(qtensor.is_quantized(),
            "dequantize is only supported in quantized Tensor.");
-  AT_CHECK(
+  TORCH_CHECK(
       qtensor.device() == kCPU,
       "dequantize only works for CPU backend right now.");
   Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));

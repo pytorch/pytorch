@@ -65,15 +65,10 @@ void batch_gather_op_cpu(const at::Tensor& data,
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::BatchGather",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("data"),
-                                    c10::Argument("indices"),
-                                    c10::Argument("output")}),
-        (std::vector<c10::Argument>{})),
-    c10::kernel<decltype(batch_gather_op_cpu), &batch_gather_op_cpu>(),
-    c10::dispatchKey(CPUTensorId()));
+    "_c10_experimental::BatchGather",
+    c10::RegisterOperators::options()
+      .kernel<decltype(batch_gather_op_cpu), &batch_gather_op_cpu>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 
