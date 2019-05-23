@@ -17,7 +17,7 @@ from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2, builtins, StringIO
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state, set_rng_seed, slowTest
+    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from common_nn import module_tests, new_module_tests, criterion_tests
 from textwrap import dedent
 from functools import wraps, reduce
@@ -82,25 +82,6 @@ RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
-
-
-if WINDOWS:
-    @contextmanager
-    def TemporaryFileName():
-        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
-        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
-        # close the file after creation and try to remove it manually
-        f = tempfile.NamedTemporaryFile(delete=False)
-        try:
-            f.close()
-            yield f.name
-        finally:
-            os.unlink(f.name)
-else:
-    @contextmanager  # noqa: T484
-    def TemporaryFileName():
-        with tempfile.NamedTemporaryFile() as f:
-            yield f.name
 
 
 def LSTMCellF(input, hx, cx, *params):
@@ -3409,6 +3390,7 @@ def foo(x):
         module = torch.jit.trace_module(n, inputs, True, True, check_inputs)
 
         module = torch.jit.trace(n.forward, example_forward_input)
+        module = torch.jit.trace(n.forward, example_forward_input, True, True, [example_forward_input])
         with self.assertRaisesRegex(AttributeError, "trace doesn't support compiling individual module's functions"):
             module = torch.jit.trace(n.weighted_kernel_sum, inputs)
 
@@ -12079,14 +12061,29 @@ a")
 
         self.checkScript(fn, ("abcde",))
 
-    def test_str_cmp(self):
-        def test(a, b):
+    def test_str_ops(self):
+        def test_str_is(s):
+            # type: (str) -> Tuple[bool, bool, bool, bool, bool, bool]
+            return s.isupper(), s.islower(), s.isdigit(), s.isspace(), \
+                s.isalnum(), s.isalpha()
+
+        def test_str_to(s):
+            # type: (str) -> Tuple[str, str]
+            return s.upper(), s.lower()
+
+        inputs = ["", "12a", "!B", "12", "a", "B", "aB", "$12", "B12", "AB ",
+                  "  \t", "  \n", "\na", "abc"]
+
+        for input in inputs:
+            self.checkScript(test_str_is, (input,))
+            self.checkScript(test_str_to, (input,))
+
+        def test_str_cmp(a, b):
             # type: (str, str) -> Tuple[bool, bool, bool, bool, bool, bool]
             return a != b, a == b, a < b, a > b, a <= b, a >= b
 
-        self.checkScript(test, ("1", "2"))
-        self.checkScript(test, ("2", "1"))
-        self.checkScript(test, ("1", "1"))
+        for i in range(len(inputs) - 1):
+            self.checkScript(test_str_cmp, (inputs[i], inputs[i + 1]))
 
     def test_ord(self):
         def fn(x):
