@@ -3,8 +3,10 @@ import copy
 import unittest
 
 import torch
+import torch.jit
 from torch.utils import mkldnn as mkldnn_utils
-from common_utils import TestCase, run_tests
+from common_utils import TestCase, run_tests, TemporaryFileName
+
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
 
@@ -88,7 +90,7 @@ class TestMkldnn(TestCase):
 
     def test_repr(self):
         self.assertTrue("layout=torch._mkldnn" in str(torch.randn((1, 2, 3, 4),
-                        dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
+                                                                  dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
 
     def test_conv2d(self):
         for groups in [1, 4]:
@@ -108,6 +110,8 @@ class TestMkldnn(TestCase):
                 self.assertEqual(
                     conv2d(x),
                     mkldnn_conv2d(x.to_mkldnn()).to_dense())
+
+                self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
 
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
@@ -172,6 +176,8 @@ class TestMkldnn(TestCase):
                 bn(x),
                 mkldnn_bn(x.to_mkldnn()).to_dense())
 
+            self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
+
     def test_add(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 100, (1,)).item()
@@ -231,11 +237,21 @@ class TestMkldnn(TestCase):
         x = torch.randn(3, in_features, dtype=torch.float32) * 10
 
         for bias in [True, False]:
-            linear = torch.nn.Linear(in_features, out_features).float()
+            linear = torch.nn.Linear(in_features, out_features, bias=bias).float()
             mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
             self.assertEqual(
                 linear(x),
                 mkldnn_linear(x.to_mkldnn()).to_dense())
+
+            self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
+
+    def _test_serialization(self, module, inputs):
+        with TemporaryFileName() as fname:
+            torch.jit.save(module, fname)
+            loaded = torch.jit.load(fname)
+            self.assertEqual(
+                module(*inputs).to_dense(),
+                loaded(*inputs).to_dense())
 
 
 if __name__ == '__main__':
