@@ -75,7 +75,8 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
 
   explicit ThreadPool(
       int pool_size,
-      int numa_node_id = -1);
+      int numa_node_id = -1,
+      std::function<void()> init_thread = nullptr);
 
   ~ThreadPool();
 
@@ -102,9 +103,6 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
   /// @brief Wait for queue to be empty
   void waitWorkComplete();
 
- protected:
-  virtual void init_thread() {}
-
  private:
   // @brief Entry point for pool threads.
   void main_loop(std::size_t index);
@@ -115,13 +113,10 @@ class C10_API TaskThreadPool : public c10::ThreadPool {
   explicit TaskThreadPool(
       std::size_t pool_size,
       int numa_node_id = -1)
-      : ThreadPool(pool_size, numa_node_id) {}
-
-  // TODO move this to ATen/core/thread_pool.h
-  void init_thread() override {
-    setThreadName("CaffeTaskThread");
-    NUMABind(numa_node_id_);
-  }
+      : ThreadPool(pool_size, numa_node_id, [numa_node_id](){
+        setThreadName("CaffeTaskThread");
+        NUMABind(numa_node_id);
+      }) {}
 };
 
 C10_DECLARE_SHARED_REGISTRY(
