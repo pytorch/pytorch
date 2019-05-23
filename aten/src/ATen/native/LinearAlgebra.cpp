@@ -5,6 +5,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/LegacyTHFunctionsCPU.h>
 #include <functional>
 #include <numeric>
 #include <vector>
@@ -138,79 +139,6 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
   return (S > S.max().mul_(tol)).sum();
 }
 
-static void check_1d(const Tensor& t, const char* arg, const char* fn) {
- TORCH_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
-}
-
-Tensor ger(const Tensor& self, const Tensor& vec2) {
-  check_1d(self, "self", "ger");
-  check_1d(vec2, "vec2", "ger");
-  return at::_ger(self, vec2);
-}
-
-Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
-  check_1d(self, "self", "ger");
-  check_1d(vec2, "vec2", "ger");
-  return at::_ger_out(result, self, vec2);
-}
-
-Tensor mm(const Tensor& self, const Tensor& mat2) {
-  if (self.is_sparse()) {
-    return at::zeros({}, mat2.options()).addmm(self, mat2, 0, 1);
-  }
-  return at::_mm(self, mat2);
-}
-
-Tensor& mm_out(Tensor& result, const Tensor& self, const Tensor& mat2) {
-  if (self.is_sparse()) {
-    return at::addmm_out(result, at::zeros({}, mat2.options()), self, mat2, 0, 1);
-  }
-  return at::_mm_out(result, self, mat2);
-}
-
-Tensor mv(const Tensor& self, const Tensor& vec) {
-  check_1d(vec, "vec", "mv");
-  return at::_mv(self, vec);
-}
-
-Tensor& mv_out(Tensor& result, const Tensor& self, const Tensor& vec) {
-  check_1d(vec, "vec", "mv");
-  return at::_mv_out(result, self, vec);
-}
-
-Tensor addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
-  return at::_addmv(self, mat, vec, beta, alpha);
-}
-
-Tensor& addmv_(Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
-  return at::_addmv_(self, mat, vec, beta, alpha);
-}
-
-Tensor& addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
-  return at::_addmv_out(result, self, mat, vec, beta, alpha);
-}
-
-Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  check_1d(vec1, "vec1", "addr");
-  check_1d(vec2, "vec2", "addr");
-  return at::_addr(self, vec1, vec2, beta, alpha);
-}
-
-Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  check_1d(vec1, "vec1", "addr");
-  check_1d(vec2, "vec2", "addr");
-  return at::_addr_(self, vec1, vec2, beta, alpha);
-}
-
-Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  check_1d(vec1, "vec1", "addr");
-  check_1d(vec2, "vec2", "addr");
-  return at::_addr_out(result, self, vec1, vec2, beta, alpha);
-}
-
 template <typename scalar_t, bool is_bmm>
 inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, Scalar beta_, Scalar alpha_) {
   int64_t bs = result.size(0);
@@ -319,7 +247,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     if (is_bmm_out) {
       for (int64_t b = 0; b < bs; b++) {
         auto r = self_or_result.select(0, b);
-        at::native::mm_out(r, batch1.select(0, b), batch2.select(0, b));
+        legacy::cpu::_th_mm_out(r, batch1.select(0, b), batch2.select(0, b));
       }
     } else {
       for (int64_t b = 0; b < bs; b++) {
@@ -357,12 +285,6 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
   Scalar beta(0.0);
   Scalar alpha(1.0);
   return bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
-}
-
-Tensor dot(const Tensor& self, const Tensor& tensor) {
-  check_1d(self, "self", "dot");
-  check_1d(tensor, "tensor", "dot");
-  return at::_dot(self, tensor);
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
@@ -403,12 +325,12 @@ Tensor matmul(
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::native::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
-    return has_out ? at::native::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
+    return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return has_out ? at::native::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
+    return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
                    : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
-    return has_out ? at::native::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
+    return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
     // its leading matrix dimension.

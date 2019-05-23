@@ -10,8 +10,8 @@ ${th_headers}
 ${extra_cuda_headers}
 
 namespace at {
-namespace legacy {
 namespace native {
+namespace legacy {
 namespace ${namespace} {
 
 namespace {

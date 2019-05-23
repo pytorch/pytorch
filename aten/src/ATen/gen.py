@@ -276,6 +276,7 @@ def generate_storage_type_and_tensor(backend, density, declarations):
     env['TypeID'] = 'TypeID::' + tag
     top_env['type_ids'].append(tag + ',')
 
+    env['legacy_th_headers'] = []
     if backend == 'CUDA':
         env['extra_cuda_headers'] = []
         env['extra_cuda_headers'].append('#include <ATen/DeviceGuard.h>')
@@ -334,16 +335,17 @@ def generate_storage_type_and_tensor(backend, density, declarations):
     if env['DeviceType'] == 'CUDA':
         fm = cuda_file_manager
 
+    if env['Backend'] == 'CPU' or env['Backend'] == 'CUDA':
+        env['namespace'] = env['Backend'].lower()
+        env['legacy_th_headers'].append('#include <ATen/LegacyTHFunctions' + env['Backend'] + ".h>")
+        fm.write('LegacyTHFunctions' + env['Backend'] + ".h", LEGACY_TH_FUNCTIONS_H, env)
+        fm.write('LegacyTHFunctions' + env['Backend'] + ".cpp", LEGACY_TH_FUNCTIONS_CPP, env)
+
     if density != 'Sparse':
         fm.write(env['Type'] + ".cpp", TYPE_DERIVED_CPP, env)
     else:
         fm.write(env['Type'] + ".cpp", SPARSE_TYPE_DERIVED_CPP, env)
     fm.write(env['Type'] + ".h", TYPE_DERIVED_H, env)
-
-    if env['Backend'] == 'CPU' or env['Backend'] == 'CUDA':
-        env['namespace'] = env['Backend'].lower()
-        fm.write('LegacyTHFunctions' + env['Backend'] + ".h", LEGACY_TH_FUNCTIONS_H, env)
-        fm.write('LegacyTHFunctions' + env['Backend'] + ".cpp", LEGACY_TH_FUNCTIONS_CPP, env)
 
     type_register = TYPE_REGISTER.substitute(backend=env['Backend'], type_name=env['Type'])
     if env['DeviceType'] == 'CPU':

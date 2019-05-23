@@ -170,7 +170,7 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     checkBackend(#op, {result}, Backend::CPU);                  \
     assert_no_internal_overlap(result, #op);                    \
     result.resize_(self.sizes());                               \
-    return at::legacy::cpu::_th_##op##_out(result, self);        \
+    return legacy::cpu::_th_##op##_out(result, self);        \
   }
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple

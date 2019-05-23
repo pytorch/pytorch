@@ -192,7 +192,7 @@ static void upsample_nearest3d_out_cuda_template(
 
   AT_CUDA_CHECK(cudaGetLastError());
 =======
-    return at::legacy::cuda::_thnn_upsample_nearest3d_forward_out(
+    return legacy::cuda::_thnn_upsample_nearest3d_forward_out(
         output, input, output_size);
 >>>>>>> Generate TH functions outside of Type
 }
@@ -283,7 +283,7 @@ Tensor upsample_nearest3d_cuda(const Tensor& input, IntArrayRef output_size) {
   upsample_nearest3d_out_cuda_template(output, input, output_size);
   return output;
 =======
-    return at::legacy::cuda::_thnn_upsample_nearest3d_forward(
+    return legacy::cuda::_thnn_upsample_nearest3d_forward(
         input, output_size);
 >>>>>>> Generate TH functions outside of Type
 }
@@ -298,7 +298,7 @@ Tensor& upsample_nearest3d_backward_out_cuda(
       grad_input, grad_output, output_size, input_size);
   return grad_input;
 =======
-    return at::legacy::cuda::_thnn_upsample_nearest3d_backward_out(
+    return legacy::cuda::_thnn_upsample_nearest3d_backward_out(
         grad_input, grad_output, output_size, input_size);
 >>>>>>> Generate TH functions outside of Type
 }
@@ -313,7 +313,7 @@ Tensor upsample_nearest3d_backward_cuda(
       grad_input, grad_output, output_size, input_size);
   return grad_input;
 =======
-    return at::legacy::cuda::_thnn_upsample_nearest3d_backward(
+    return legacy::cuda::_thnn_upsample_nearest3d_backward(
         grad_output, output_size, input_size);
 >>>>>>> Generate TH functions outside of Type
 }

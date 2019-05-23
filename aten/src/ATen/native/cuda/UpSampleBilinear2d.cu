@@ -296,7 +296,7 @@ Tensor& upsample_bilinear2d_out_cuda(
       output, input, output_size, align_corners);
   return output;
 =======
-    return at::legacy::cuda::_thnn_upsample_bilinear2d_forward_out(
+    return legacy::cuda::_thnn_upsample_bilinear2d_forward_out(
         output, input, output_size, align_corners);
 >>>>>>> Generate TH functions outside of Type
 }
@@ -311,7 +311,7 @@ Tensor upsample_bilinear2d_cuda(
       output, input, output_size, align_corners);
   return output;
 =======
-    return at::legacy::cuda::_thnn_upsample_bilinear2d_forward(
+    return legacy::cuda::_thnn_upsample_bilinear2d_forward(
         input, output_size, align_corners);
 >>>>>>> Generate TH functions outside of Type
 }
@@ -327,7 +327,7 @@ Tensor& upsample_bilinear2d_backward_out_cuda(
       grad_input, grad_output, output_size, input_size, align_corners);
   return grad_input;
 =======
-    return at::legacy::cuda::_thnn_upsample_bilinear2d_backward_out(
+    return legacy::cuda::_thnn_upsample_bilinear2d_backward_out(
         grad_input, grad_output, output_size, input_size, align_corners);
 >>>>>>> Generate TH functions outside of Type
 }
@@ -343,7 +343,7 @@ Tensor upsample_bilinear2d_backward_cuda(
       grad_input, grad_output, output_size, input_size, align_corners);
   return grad_input;
 =======
-    return at::legacy::cuda::_thnn_upsample_bilinear2d_backward(
+    return legacy::cuda::_thnn_upsample_bilinear2d_backward(
         grad_output, output_size, input_size, align_corners);
 >>>>>>> Generate TH functions outside of Type
 }

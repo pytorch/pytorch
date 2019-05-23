@@ -117,18 +117,8 @@ ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const
 TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
-    ${dispatch_scalar_type_declaration}
-    switch (dispatch_scalar_type) {
-        ${cases}
-            ${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${actuals});
-        break;
-        default:
-            AT_ERROR("${api_name} not supported on ${Type} for ", dispatch_scalar_type);
-    }
+    ${type_definition_body}
 }
-""")
-TYPE_DERIVED_DEFINITION_NATIVE_CASE = CodeTemplate("""\
-case ScalarType::${ScalarName}:
 """)
 TYPE_DERIVED_DEFINITION_NATIVE_MISSING = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${type_method_formals}) const {
@@ -1111,6 +1101,9 @@ def create_generic(top_env, declarations):
             generated_native_functions = []  # type: List[str]
             for key in sorted(type_method_dispatch.keys()):
                 value = type_method_dispatch[key]
+                # skip functions in different namespace, e.g. legacy::cpu
+                if "::" in value:
+                    continue
                 if value not in generated_native_functions:
                     option['native_type_method_dispatch'] = value
                     top_env['native_function_declarations'].append(
@@ -1596,10 +1589,9 @@ def create_derived(backend_type_env, declarations):
                         TYPE_DERIVED_DEFINITION_NATIVE_MISSING.substitute(env))
                 else:
                     option['native_type_method_dispatch'] = native_dispatch
-                    cases = []
-                    for scalar_type in option['backend_types'][backend]:
-                        cases.append(TYPE_DERIVED_DEFINITION_NATIVE_CASE.substitute(env, ScalarName=scalar_type))
-                    type_object_definitions.append(TYPE_DERIVED_DEFINITION_NATIVE.substitute(env, cases=cases))
+                    body = TYPE_DEFINITION_BODY_NATIVE.substitute(env)
+                    type_object_definitions.append(
+                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(env, type_definition_body=body))
 
     for declaration in declarations:
         for option in declaration['options']:
