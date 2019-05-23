@@ -12,10 +12,11 @@
     return __VA_ARGS__();                          \
   }
 
-#define AT_QINT_PRIVATE_CASE_TYPE(enum_type, type, underlying_type, ...) \
+#define AT_QINT_PRIVATE_CASE_TYPE(enum_type, type, underlying_enum, underlying_type, ...) \
   case enum_type: {                                                     \
-    using scalar_t C10_UNUSED = type;                                              \
-    using underlying_t C10_UNUSED = underlying_type;                               \
+    const auto& UNDERLYING_TYPE C10_UNUSED = underlying_enum;           \
+    using scalar_t C10_UNUSED = type;                                   \
+    using underlying_t C10_UNUSED = underlying_type;                    \
     return __VA_ARGS__();                                               \
   }
 
@@ -218,13 +219,14 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 
 #define AT_DISPATCH_QINT_TYPES(TYPE, NAME, ...)                         \
   [&] {                                                                 \
+    const auto& SCALAR_TYPE C10_UNUSED = TYPE;                          \
     switch (TYPE) {                                                     \
       AT_QINT_PRIVATE_CASE_TYPE(                                        \
-          at::ScalarType::QInt8, qint8, int8_t, __VA_ARGS__)            \
+          kQInt8, qint8, kChar, int8_t, __VA_ARGS__)                    \
       AT_QINT_PRIVATE_CASE_TYPE(                                        \
-          at::ScalarType::QUInt8, quint8, uint8_t, __VA_ARGS__)         \
+          kQUInt8, quint8, kByte, uint8_t, __VA_ARGS__)                 \
       AT_QINT_PRIVATE_CASE_TYPE(                                        \
-          at::ScalarType::QInt32, qint32, int, __VA_ARGS__)             \
+          kQInt32, qint32, kInt, int, __VA_ARGS__)                      \
       default:                                                          \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'"); \
     }                                                                   \
