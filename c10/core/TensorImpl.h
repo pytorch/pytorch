@@ -679,6 +679,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     strides_.resize(ndim, 0);
     refresh_numel();
     refresh_contiguous();
+    is_channels_last_contiguous_ = false;
   }
 
   /**
@@ -694,6 +695,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
+    is_channels_last_contiguous_ = false;
   }
 
   /**
@@ -707,6 +709,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
+    is_channels_last_contiguous_ = false;
   }
 
   /**
@@ -787,6 +790,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
     refresh_numel();
     refresh_contiguous();
+    is_channels_last_contiguous_ = false;
   }
 
   /**
@@ -885,6 +889,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       /*dest_impl=*/impl.get(),
       /*version_counter=*/version_counter,
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    impl->is_channels_last_contiguous_ = is_channels_last_contiguous_;
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;
@@ -1330,7 +1335,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             dim() == 4,
             "required rank 4 tensor to use channels_last format");
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
-        refresh_contiguous();
+        is_contiguous_ = false;
+        is_channels_last_contiguous_ = true;
         return;
       }
       case MemoryFormat::Preserve:
@@ -1516,6 +1522,7 @@ protected:
   // should pack this into a bitfield.
   TensorTypeId type_id_;
   bool is_contiguous_ = true;
+  bool is_channels_last_contiguous_ = false;
   bool is_wrapped_number_ = false;
 
   // NOTE [ Metadata Change for a Detached Tensor ]

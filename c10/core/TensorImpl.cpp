@@ -123,7 +123,7 @@ bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
   AT_ASSERT(compute_contiguous() == is_contiguous_);
 #endif
   if (memory_format == at::MemoryFormat::ChannelsLast) {
-      return dim() == 4 && strides() == get_channels_last_strides(sizes());
+      return is_channels_last_contiguous_;
   }
   return is_contiguous_;
 }
