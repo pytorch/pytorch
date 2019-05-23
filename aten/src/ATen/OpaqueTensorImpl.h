@@ -101,11 +101,10 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
    */
   void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
     AT_ASSERT(typeid(*(impl.get())) == typeid(OpaqueTensorImpl<OpaqueHandle>));
-    auto source_opaque_impl = static_cast<const OpaqueTensorImpl<OpaqueHandle>*>(impl.get());
-    auto self_opaque_impl = static_cast<OpaqueTensorImpl<OpaqueHandle>*>(this);
+    auto opaque_impl = static_cast<const OpaqueTensorImpl<OpaqueHandle>*>(impl.get());
     copy_tensor_data(
-      /*src_impl=*/source_opaque_impl,
-      /*dest_impl=*/self_opaque_impl,
+      /*src_impl=*/opaque_impl,
+      /*dest_impl=*/this,
       /*version_counter=*/version_counter(),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
   }

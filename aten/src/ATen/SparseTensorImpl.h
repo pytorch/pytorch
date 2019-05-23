@@ -207,11 +207,10 @@ public:
    */
   void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
     AT_ASSERT(typeid(*(impl.get())) == typeid(SparseTensorImpl));
-    auto source_sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
-    auto self_sparse_impl = static_cast<SparseTensorImpl*>(this);
+    auto sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
     copy_tensor_data(
-      /*src_impl=*/source_sparse_impl,
-      /*dest_impl=*/self_sparse_impl,
+      /*src_impl=*/sparse_impl,
+      /*dest_impl=*/this,
       /*version_counter=*/version_counter(),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
     refresh_numel();
