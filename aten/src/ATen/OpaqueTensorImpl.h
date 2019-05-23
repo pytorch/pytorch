@@ -98,6 +98,9 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
 
   /**
    * Shallow-copies data from another TensorImpl into this TensorImpl.
+   *
+   * For why this function doesn't check this TensorImpl's `allow_tensor_metadata_change_`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
    */
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
     AT_ASSERT(typeid(*(impl.get())) == typeid(OpaqueTensorImpl<OpaqueHandle>));

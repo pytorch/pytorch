@@ -865,6 +865,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // In `shallow_copy_and_detach()` and `copy_tensor_data()`, the passed-in `allow_tensor_metadata_change`
   // determines whether the TensorImpl shallow-copy allows changes to its metadata (e.g. sizes / strides /
   // storage / storage_offset). See NOTE [ Metadata Change for a Detached Tensor ] for details.
+  //
+  // In `shallow_copy_from()`, we don't check the destination TensorImpl's `allow_tensor_metadata_change_`,
+  // because `shallow_copy_from()` is used for implementing functions such as `var.set_data(tensor)`, which
+  // changes `var`'s tensor metadata and expects its `allow_tensor_metadata_change_` to be ignored.
 
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
@@ -888,6 +892,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   /**
    * Shallow-copies data from another TensorImpl into this TensorImpl.
+   *
+   * For why this function doesn't check this TensorImpl's `allow_tensor_metadata_change_`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
    */
   virtual void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
     copy_tensor_data(

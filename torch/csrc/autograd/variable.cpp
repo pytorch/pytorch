@@ -107,6 +107,11 @@ void Variable::set_data(const at::Tensor &new_data) {
   // Version counter is not shared when we replace a `Variable`'s tensor data
   // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
   // See NOTE [ Version Counter Sharing ] for details.
+  //
+  // `var.set_data(new_data)` always ignores `var`'s `allow_tensor_metadata_change_`, because
+  // users need this API as an escape hatch for changing a tensor's metadata regardless of its
+  // `allow_tensor_metadata_change_` value, and the users are responsible for ensuring this is
+  // the behavior they want.
   get()->shallow_copy_from(new_data.getIntrusivePtr());
 }
 
