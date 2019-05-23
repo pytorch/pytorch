@@ -2113,7 +2113,7 @@ class TestCuda(TestCase):
         torch.sum(x, 0)
 
     def test_sum_cpu_gpu_mismatch(self):
-        x = torch.randn(20, dtype=torch.float32, device='cuda')
+        x = torch.randn(20, dtype=torch.float32, device='cuda:0')
         y = torch.randn(1, dtype=torch.float32)
         with self.assertRaisesRegex(RuntimeError,
                                     'expected device cpu and dtype Float but got device cuda:0 and dtype Float'):

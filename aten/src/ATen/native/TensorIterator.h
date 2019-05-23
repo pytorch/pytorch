@@ -72,9 +72,12 @@ struct CAFFE2_API OperandInfo {
       device = t.device();
       dtype = t.scalar_type();
     }
+    validate();
   }
   OperandInfo(const Tensor& t, Device device, ScalarType dtype)
-    : tensor(t), device(device), dtype(dtype) {}
+    : tensor(t), device(device), dtype(dtype) {
+    validate();
+  }
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   DimVector stride_bytes;
@@ -103,6 +106,12 @@ struct CAFFE2_API OperandInfo {
   bool is_output = false;
 
   bool is_read_write = false;
+
+  void validate() {
+    TORCH_CHECK(
+        !tensor.defined() || tensor.layout() == kSparse,
+        "unsupported tensor layout: ", tensor.layout());
+  }
 };
 
 struct SplitUntil32Bit;
