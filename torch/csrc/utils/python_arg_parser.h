@@ -48,6 +48,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/QScheme.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/tensor/python_tensor.h>
@@ -71,7 +72,7 @@ namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STRING
+  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, QSCHEME, DEVICE, STRING
 };
 
 struct FunctionParameter;
@@ -136,6 +137,7 @@ struct PythonArgs {
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
   inline at::MemoryFormat toMemoryFormat(int i);
+  inline at::QScheme toQScheme(int i);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
@@ -395,6 +397,13 @@ inline at::MemoryFormat PythonArgs::toMemoryFormat(int i) {
   AT_CHECK(THPMemoryFormat_Check(args[i]), "memory_format arg must be an instance of the torch.memory_format");
   const auto memory_format = reinterpret_cast<THPMemoryFormat*>(args[i]);
   return memory_format->memory_format;
+}
+
+inline at::QScheme PythonArgs::toQScheme(int i) {
+  if (!args[i]) return at::kNoQuant;
+  AT_CHECK(THPQScheme_Check(args[i]), "qscheme arg must be an instance of the torch.qschems");
+  const auto qscheme = reinterpret_cast<THPQScheme*>(args[i]);
+  return qscheme->qscheme;
 }
 
 inline std::string PythonArgs::string(int i) {

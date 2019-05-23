@@ -2589,7 +2589,7 @@
   dispatch:
     QuantizedCPU: int_repr_quant
 
-- func: qscheme(Tensor self) -> int
+- func: qscheme(Tensor self) -> QScheme
   variants: function, method
   dispatch:
     QuantizedCPU: qscheme_quant

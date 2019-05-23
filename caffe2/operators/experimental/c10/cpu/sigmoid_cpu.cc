@@ -25,10 +25,11 @@ void sigmoid_op_cpu_impl(
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::Sigmoid",
-    c10::kernel<
+    c10::RegisterOperators::options()
+      .kernel<
         decltype(sigmoid_op_cpu_impl<float>),
-        &sigmoid_op_cpu_impl<float>>(),
-    c10::dispatchKey(CPUTensorId()));
+        &sigmoid_op_cpu_impl<float>>()
+      .dispatchKey(CPUTensorId()));
 
 } // namespace
 

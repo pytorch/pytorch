@@ -8,6 +8,7 @@
 
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/QScheme.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -56,6 +57,10 @@ inline PyObject* wrap(at::Tensor tensor) {
 
 inline PyObject* wrap(at::Scalar scalar) {
   return wrap(make_variable(scalar_to_tensor(scalar)));
+}
+
+inline PyObject* wrap(at::QScheme qscheme) {
+  return wrap(at::Scalar(static_cast<int>(qscheme)));
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor> tensors) {
