@@ -139,6 +139,10 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
   return (S > S.max().mul_(tol)).sum();
 }
 
+static void check_1d(const Tensor& t, const char* arg, const char* fn) {
+ TORCH_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
+}
+
 Tensor ger(const Tensor& self, const Tensor& vec2) {
   return at::legacy::th::_th_ger(self, vec2);
 }
@@ -182,14 +186,20 @@ Tensor& addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const T
 }
 
 Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
+  check_1d(vec1, "vec1", "addr");
+  check_1d(vec2, "vec2", "addr");
   return at::legacy::th::_th_addr(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
+  check_1d(vec1, "vec1", "addr");
+  check_1d(vec2, "vec2", "addr");
   return at::legacy::th::_th_addr_(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
+  check_1d(vec1, "vec1", "addr");
+  check_1d(vec2, "vec2", "addr");
   return at::legacy::th::_th_addr_out(result, self, vec1, vec2, beta, alpha);
 }
 
