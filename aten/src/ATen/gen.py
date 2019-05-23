@@ -292,7 +292,6 @@ def generate_storage_type_and_tensor(backend, density, declarations):
             env['extra_cuda_headers'].append('#include <ATen/hip/HIPDevice.h>')
             env['extra_cuda_headers'].append('#include <ATen/hip/HIPTypeDefault.h>')
             env['extra_cuda_headers'].append('#include <ATen/hip/HIPContext.h>')
-            env['allocator'] = 'at::hip::getCUDADeviceAllocator()'
         else:
             env['th_headers'] = [
                 '#include <THC/THC.h>',
@@ -305,11 +304,11 @@ def generate_storage_type_and_tensor(backend, density, declarations):
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDADevice.h>')
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDATypeDefault.h>')
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDAContext.h>')
-            env['allocator'] = 'at::cuda::getCUDADeviceAllocator()'
         env['state'] = ['globalContext().getTHCState()']
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
         env['Generator'] = 'CUDAGenerator'
+        env['allocator'] = 'at::cuda::getCUDADeviceAllocator()'
     else:
         env['th_headers'] = [
             '#include <TH/TH.h>',
