@@ -944,7 +944,7 @@ def _make_strong_submodule(field, module, parent):
 
 
 def _try_compile_fn(fn):
-    if _is_ignored_function(fn):
+    if _jit_internal.get_ignore_attribute(fn):
         # Don't do anything for @ignore'd functions
         return None
 
@@ -956,7 +956,7 @@ def _try_compile_fn(fn):
 
 
 def _get_method_stub(method):
-    if _is_ignored_function(method):
+    if _jit_internal.get_ignore_attribute(method):
         return None
     return [script_method(method, createResolutionCallbackFromClosure(method))]
 
@@ -1075,23 +1075,6 @@ def _try_get_weak_module(mod):
     if not isinstance(mod, Module):
         return None
     return _jit_internal.weak_modules.get(mod)
-
-
-def _is_ignored_function(fn):
-    if not callable(fn):
-        return False
-    if hasattr(fn, '__func__'):
-        fn = fn.__func__
-    return fn in _jit_internal.ignored_fns
-
-
-def _should_drop_on_export(fn):
-    if not callable(fn):
-        return False
-    if hasattr(fn, '__func__'):
-        fn = fn.__func__
-    print("Should drop? ", _jit_internal.ignored_fns[fn]["drop_on_export"])
-    return _jit_internal.ignored_fns[fn]["drop_on_export"]
 
 
 def _is_weak_type(cls):

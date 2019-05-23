@@ -181,7 +181,8 @@ def get_class_attribute_dict(fn, frames_up=2):
 def export(fn):
     """
     This decorator indicates that a method is used as an entry point into a
-    ScriptModule.
+    ScriptModule. `forward` implicitly is used as an entry point, so it does
+    not need this decorator.
 
     Methods are added to a ScriptModule as they are called in Python. If a
     method is never called, it will not be included in the ScriptModule when
@@ -189,18 +190,10 @@ def export(fn):
     even if it is not called from Python.
     """
     class_dict = get_class_attribute_dict(fn, frames_up=3)
-    if '__export__' not in class_dict:
-        class_dict['__export__'] = set()
-    class_dict['__export__'].add(fn.__name__)
+    if '__torchscript_export__' not in class_dict:
+        class_dict['__torchscript_export__'] = set()
+    class_dict['__torchscript_export__'].add(fn.__name__)
     return fn
-
-def _add_ignored_fn(fn, drop_on_export):
-    class_dict = get_class_attribute_dict(fn, frames_up=3)
-
-    # Add '__ignore__' to class attributes if it does not already exist
-    if '__ignore__' not in class_dict:
-        class_dict['__ignore__'] = {}
-    class_dict['__ignore__'][fn.__name__] = {"drop_on_export": drop_on_export}
 
 
 def ignore(drop_on_export=False):
@@ -221,16 +214,31 @@ def ignore(drop_on_export=False):
         #   @torch.jit.ignore
         #   def fn(...):
         fn = drop_on_export
-        _add_ignored_fn(fn, drop_on_export=False)
-        return drop_on_export
+        fn._torchscript_ignore = {"drop_on_export": False}
+        return fn
     elif isinstance(drop_on_export, bool):
         def decorator(fn):
-            _add_ignored_fn(fn, drop_on_export=drop_on_export)
+            fn._torchscript_ignore = {"drop_on_export": drop_on_export}
             return fn
         return decorator
     else:
         raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
                            "a function but got {}".format(drop_on_export))
+
+
+def should_drop_on_export(fn):
+    attr = get_ignore_attribute(fn)
+    if not attr:
+        return False
+    return attr["drop_on_export"]
+
+
+def get_ignore_attribute(fn):
+    if not callable(fn):
+        return False
+    if hasattr(fn, '__func__'):
+        fn = fn.__func__
+    return getattr(fn, '_torchscript_ignore', False)
 
 
 def _parameter_list(parameter_names_fn):

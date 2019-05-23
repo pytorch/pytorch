@@ -118,7 +118,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
 
   // Mark if function is ignored on export
   if (py::cast<bool>(
-          py::module::import("torch.jit").attr("_should_drop_on_export")(self))) {
+          py::module::import("torch._jit_internal").attr("should_drop_on_export")(self))) {
     auto python_op = static_cast<PythonOp*>(new_node);
     python_op->ignore_on_export = true;
   }
