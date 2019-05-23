@@ -12428,9 +12428,48 @@ a")
                                                                   multi_head_attn.add_zero_attn,
                                                                   multi_head_attn.dropout,
                                                                   multi_head_attn.out_proj.weight,
-                                                                  multi_head_attn.out_proj.bias, attn_mask=mask)[0]
+                                                                  multi_head_attn.out_proj.bias,
+                                                                  attn_mask=mask)[0]
         # print("rel. error: ")
         # print(jit_out / py_out - 1)
+        self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_scriptmodule_multi_head_attn_cuda(self):
+
+        class MyModule(torch.jit.ScriptModule):
+            def __init__(self, embed_dim, num_heads):
+                super(MyModule, self).__init__()
+                sample_inp = torch.randn(3, 2, embed_dim)
+                attention = nn.MultiheadAttention(embed_dim, num_heads)
+                attention.eval()
+
+                self.mod = torch.jit.trace(attention,
+                                           (sample_inp, sample_inp, sample_inp))
+
+            @torch.jit.script_method
+            def forward(self, q, k, v):
+                return self.mod(q, k, v)
+
+        embed_dim = 8
+        num_heads = 2
+        sl = 3
+        bs = 2
+        model = MyModule(embed_dim, num_heads).cuda()
+        q = torch.randn(sl, bs, embed_dim, device="cuda")
+        k = torch.randn(sl, bs, embed_dim, device="cuda")
+        v = torch.randn(sl, bs, embed_dim, device="cuda")
+
+        jit_out = model(q, k, v)[0]
+        py_out = torch.nn.functional.multi_head_attention_forward(q, k, v,
+                                                                  embed_dim, num_heads,
+                                                                  model.mod.in_proj_weight,
+                                                                  model.mod.in_proj_bias,
+                                                                  None, None, None, 0.0,
+                                                                  model.mod.out_proj.weight,
+                                                                  model.mod.out_proj.bias)[0]
+        # print(jit_out/py_out-1)
+        # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
         self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
 
     def test_list_python_op(self):
