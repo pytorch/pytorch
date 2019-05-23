@@ -248,6 +248,18 @@ class TestMkldnn(TestCase):
             self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
             self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
 
+    def test_sigmoid(self):
+        x = torch.randn(4, 5, dtype=torch.float32) * 10
+        mkldnn_x = x.to_mkldnn()
+        self.assertEqual(
+            torch.sigmoid(x),
+            torch.sigmoid(mkldnn_x).to_dense(),
+        )
+        # inplace
+        torch.sigmoid_(x)
+        torch.sigmoid_(mkldnn_x)
+        self.assertEqual(x, mkldnn_x.to_dense())
+
     def _test_serialization(self, module, inputs):
         with TemporaryFileName() as fname:
             torch.jit.save(module, fname)
