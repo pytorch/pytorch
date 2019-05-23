@@ -3409,6 +3409,7 @@ def foo(x):
         module = torch.jit.trace_module(n, inputs, True, True, check_inputs)
 
         module = torch.jit.trace(n.forward, example_forward_input)
+        module = torch.jit.trace(n.forward, example_forward_input, True, True, [example_forward_input])
         with self.assertRaisesRegex(AttributeError, "trace doesn't support compiling individual module's functions"):
             module = torch.jit.trace(n.weighted_kernel_sum, inputs)
 
