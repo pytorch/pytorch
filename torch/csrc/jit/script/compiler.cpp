@@ -616,11 +616,11 @@ struct to_ir {
     return {def.name().name(), "", std::move(arguments), std::move(returns)};
   }
 
-  std::vector<IValue> evaluateDefaults(
+  c10::impl::GenericList evaluateDefaults(
       const SourceRange& r,
       const std::vector<Expr>& default_types,
       const std::vector<Expr>& default_exprs) {
-    std::vector<IValue> default_values;
+    c10::impl::GenericList default_values = c10::impl::make_generic_list();
     if (default_exprs.empty())
       return default_values;
     // To evaluate the default expressions, we create a graph with no inputs,
@@ -652,7 +652,7 @@ struct to_ir {
     cu.define({def}, {resolver}, nullptr);
     Stack stack;
     cu.get_function("defaults").run(stack);
-    return stack.at(0).toTuple()->elements();
+    return std::move(std::move(stack.at(0)).toTuple()->elements());
   }
 
   std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {

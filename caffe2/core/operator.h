@@ -33,6 +33,8 @@
 #include <ATen/core/ivalue.h>
 #endif
 
+// TODO Use c10::ListPtr::extract() to move out values from newstyle_outputs_ instead of copying
+
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_overflow_exceptions);
 
@@ -60,7 +62,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   explicit OperatorBase(
       const c10::FunctionSchema& schema,
       std::vector<c10::IValue> inputs,
-      std::vector<at::Tensor> outputs);
+      c10::ListPtr<at::Tensor> outputs);
 #endif
 
   virtual ~OperatorBase() noexcept;
@@ -238,7 +240,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return BlobGetMutableTensor(outputs_.at(idx), type);
     }
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-    auto& output = newstyle_outputs_[idx];
+    auto output = newstyle_outputs_[idx];
     Tensor tensor = caffe2::Tensor(output);
     if (!tensor.defined() || tensor.GetDeviceType() != type) {
       // Fix tensor type
@@ -246,6 +248,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       output = at::Tensor(std::move(tensor.getIntrusivePtr()));
     }
     output_tensors_[idx] = caffe2::Tensor(output);
+    newstyle_outputs_.set(idx, std::move(output));
     return &output_tensors_[idx];
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
@@ -267,7 +270,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   void SetOutputTensor(int idx, Tensor tensor) {
     if (!isLegacyOperator()) {
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-      newstyle_outputs_[idx] = at::Tensor(tensor);
+      newstyle_outputs_.set(idx, at::Tensor(tensor));
 
       // also update the tensor in the hack
       output_tensors_[idx] = std::move(tensor);
@@ -296,13 +299,14 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return BlobGetMutableTensor(outputs_.at(idx), dims, options);
     }
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-    auto& output = newstyle_outputs_[idx];
+    auto output = newstyle_outputs_[idx];
     Tensor tensor =
         GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options);
     // assign it back in case it changed
     output = at::Tensor(std::move(tensor.getIntrusivePtr()));
 
     output_tensors_[idx] = caffe2::Tensor(output);
+    newstyle_outputs_.set(idx, std::move(output));
     return &output_tensors_[idx];
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
@@ -587,7 +591,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-  std::vector<at::Tensor> move_newstyle_outputs() && {
+  c10::ListPtr<at::Tensor> move_newstyle_outputs() && {
     return std::move(newstyle_outputs_);
   }
 #endif
@@ -607,7 +611,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
   std::unique_ptr<const c10::FunctionSchema> fn_schema_;
   vector<c10::IValue> newstyle_inputs_;
-  vector<at::Tensor> newstyle_outputs_;
+  c10::ListPtr<at::Tensor> newstyle_outputs_;
 #endif
   // HACK
   // We preserve the fact that Output() returns Tensor*
@@ -744,7 +748,7 @@ class Operator : public OperatorBase {
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
       std::vector<c10::IValue> inputs,
-      std::vector<at::Tensor> outputs)
+      c10::ListPtr<at::Tensor> outputs)
       : OperatorBase(fn_schema, std::move(inputs), std::move(outputs)) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.

@@ -23,6 +23,16 @@ namespace jit {
 
 namespace script {
 namespace {
+template<class T, class Functor>
+c10::ListPtr<T> fmap_(const std::vector<IValue>& vec, Functor&& func) {
+  c10::ListPtr<T> result = c10::make_list<T>();
+  result.reserve(vec.size());
+  for (const IValue& v : vec) {
+    result.push_back(std::forward<Functor>(func)(v));
+  }
+  return result;
+}
+
 struct SchemaParser {
   SchemaParser(const std::string& str)
       : L(str), type_parser(L, /*parse_complete_tensor_types*/ false) {}
@@ -185,11 +195,11 @@ struct SchemaParser {
       std::vector<IValue> vs) {
     switch (kind) {
       case TypeKind::FloatType:
-        return fmap(vs, [](IValue v) { return v.toDouble(); });
+        return fmap_<double>(vs, [](IValue v) { return v.toDouble(); });
       case TypeKind::IntType:
-        return fmap(vs, [](IValue v) { return v.toInt(); });
+        return fmap_<int64_t>(vs, [](IValue v) { return v.toInt(); });
       case TypeKind::BoolType:
-        return fmap(vs, [](IValue v) { return v.toBool(); });
+        return fmap_<bool>(vs, [](IValue v) { return v.toBool(); });
       default:
         throw ErrorReport(range)
             << "lists are only supported for float or int types.";

@@ -688,9 +688,9 @@ RegisterOperators reg(
            return [=](Stack& stack) {
              auto t = pop(stack).toTuple();
              const auto& elems = t->elements();
-             std::vector<IValue> output_elems;
+             c10::impl::GenericList output_elems = c10::impl::make_generic_list();
              for (int64_t i = beg_ind; i < end_ind; ++i) {
-               output_elems.emplace_back(elems.at(i));
+               output_elems.emplace_back(elems.get(i));
              }
              push(stack, Tuple::create(std::move(output_elems)));
              return 0;
@@ -708,7 +708,7 @@ RegisterOperators reg(
                  norm_index > static_cast<int64_t>(elems.size())) {
                throw std::out_of_range("Tuple list index out of range");
              }
-             stack.emplace_back(elems.at(norm_index));
+             stack.emplace_back(elems.get(norm_index));
              return 0;
            };
          }),
@@ -717,9 +717,11 @@ RegisterOperators reg(
          [](const Node* node) {
            size_t num_inputs = node->inputs().size();
            return [=](Stack& stack) {
-             std::vector<IValue> elems{
-                 std::make_move_iterator(stack.end() - num_inputs),
-                 std::make_move_iterator(stack.end())};
+             c10::impl::GenericList elems = c10::impl::make_generic_list();
+             elems.reserve(num_inputs);
+             for (auto iter = stack.end() - num_inputs; iter != stack.end(); ++iter) {
+               elems.push_back(std::move(*iter));
+             }
              drop(stack, num_inputs);
              push(stack, Tuple::create(std::move(elems)));
              return 0;
@@ -854,7 +856,7 @@ RegisterOperators reg(
            } else {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               std::vector<IValue> vals;
+               c10::impl::GenericList vals = c10::impl::make_generic_list();
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));
@@ -1098,13 +1100,23 @@ int stringSlice(Stack& stack) {
 
 // Equivalent to list.at(idx)
 template <typename TList> // something like Shared<IntList>
-typename TList::element_type::ElemType& getItem(TList& list, int64_t idx) {
+typename TList::element_type::ElemType getItem(TList& list, int64_t idx) {
   const int64_t list_size = list->elements().size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
   if (normalized_idx < 0 || normalized_idx >= list_size) {
     throw std::out_of_range("list index out of range");
   }
   return list->elements()[normalized_idx];
+}
+
+template <typename TList> // something like Shared<IntList>
+typename TList::element_type::ElemType setItem(TList& list, int64_t idx, TList::element_type::ElemType&& value) {
+  const int64_t list_size = list->elements().size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+  if (normalized_idx < 0 || normalized_idx >= list_size) {
+    throw std::out_of_range("list index out of range");
+  }
+  list->elements().set(normalized_idx, std::move(value));
 }
 
 // cannot return a reference to an element in a bool vector
@@ -1154,7 +1166,7 @@ int listPop(Stack& stack) {
     AT_ERROR("pop from empty list");
   }
 
-  push(stack, std::move(getItem(list, idx)));
+  push(stack, getItem(list, idx));
   elements.erase(elements.begin() + normalized_idx);
 
   return 0;
@@ -1573,7 +1585,7 @@ int listSetItem(Stack& stack) {
   TElement value;
 
   pop(stack, list, idx, value);
-  getItem(list, idx) = value;
+  setItem(list, idx, std::move(value));
 
   push(stack, list);
   return 0;
@@ -1615,7 +1627,7 @@ int dictLen(Stack& stack) {
 
 int dictKeys(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  std::vector<IValue> keys;
+  c10::impl::GenericList keys = c10::impl::make_generic_list();
   keys.reserve(dict->elements().size());
   for (auto item : dict->elements()) {
     keys.push_back(item.key());
@@ -1625,9 +1637,9 @@ int dictKeys(Stack& stack) {
 }
 
 template <typename Elem>
-std::vector<Elem> makeListForDictValues(
+c10::impl::GenericList makeListForDictValues(
     const c10::ivalue::GenericDict::IterationOrder& order) {
-  std::vector<Elem> values;
+  c10::impl::GenericList values = c10::impl::make_generic_list();
   values.reserve(order.size());
   for (auto item : order) {
     values.push_back(item.second.to<Elem>());

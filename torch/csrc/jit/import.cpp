@@ -80,16 +80,16 @@ class ScriptModuleDeserializer final {
 };
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
-    : reader_(filename.c_str()) {
+    : reader_(filename.c_str()), attribute_table_(c10::impl::make_generic_list()) {
   // TODO appropriate support for mmap, right now still use stream reader
 }
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(std::istream* is)
-    : reader_(is) {}
+    : reader_(is), attribute_table_(c10::impl::make_generic_list()) {}
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(
     std::unique_ptr<ReadAdapterInterface> rai)
-    : reader_(std::move(rai)) {}
+    : reader_(std::move(rai)), attribute_table_(c10::impl::make_generic_list()) {}
 
 void ScriptModuleDeserializer::deserialize(
     script::ModuleLookup module_lookup,

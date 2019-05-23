@@ -70,9 +70,32 @@ namespace detail {
     }
   };
   template<class T>
+  struct ivalue_to_arg_type<ListPtr<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> {
+    static ListPtr<T> call(IValue&& v) {
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported argument type: c10::List<T> and T is not one of the supported primitive types.");
+
+      return std::move(*std::move(v).to<intrusive_ptr<ivalue::List<T>>>()).elements();
+    }
+  };
+  template<class T>
+  struct ivalue_to_arg_type<ListPtr<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> {
+    static ListPtr<T> call(IValue&& v) {
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported argument type: c10::List<T> and T is not one of the supported primitive types.");
+
+      return impl::toTypedList<T>(std::move(*std::move(v).toGenericList()));
+    }
+  };
+  template<class T>
   struct ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> final {
     static std::vector<T> call(IValue&& v) {
-      return std::move(*std::move(v).to<intrusive_ptr<ivalue::List<T>>>()).elements();
+      auto list = std::move(v).to<intrusive_ptr<ivalue::List<T>>>();
+      std::vector<T> result;
+      result.reserve(list->elements().size());
+      // TODO move out of list (also check other list/dict places)
+      for (IValue elem : std::move(*list).elements()) {
+        result.push_back(ivalue_to_arg_type<T>::call(std::move(elem)));
+      }
+      return result;
     }
   };
   template<class T>
@@ -81,7 +104,8 @@ namespace detail {
       auto list = std::move(v).toGenericList();
       std::vector<T> result;
       result.reserve(list->elements().size());
-      for (auto&& elem : std::move(list)->elements()) {
+      // TODO move out of list (also check other list/dict places)
+      for (IValue elem : std::move(*list).elements()) {
         result.push_back(ivalue_to_arg_type<T>::call(std::move(elem)));
       }
       return result;
@@ -125,6 +149,44 @@ namespace detail {
       return ivalue_to_arg_type<T>::call(std::move(v));
     }
   };
+  template<class T>
+  struct legacy_ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> final {
+    static std::vector<T> call(IValue&& v) {
+      auto list = std::move(v).to<intrusive_ptr<ivalue::List<T>>>();
+      std::vector<T> result;
+      result.reserve(list->elements().size());
+      // TODO move out of list (also check other list/dict places)
+      for (IValue elem : std::move(*list).elements()) {
+        result.push_back(legacy_ivalue_to_arg_type<T>::call(std::move(elem)));
+      }
+      return result;
+    }
+  };
+  template<class T>
+  struct legacy_ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> final {
+    static std::vector<T> call(IValue&& v) {
+      auto list = std::move(v).toGenericList();
+      std::vector<T> result;
+      result.reserve(list->elements().size());
+      // TODO move out of list (also check other list/dict places)
+      for (IValue elem : std::move(*list).elements()) {
+        result.push_back(legacy_ivalue_to_arg_type<T>::call(std::move(elem)));
+      }
+      return result;
+    }
+  };
+  template<class Key, class Value>
+  struct legacy_ivalue_to_arg_type<std::unordered_map<Key, Value>> final {
+    static std::unordered_map<Key, Value> call(const IValue& v) {
+      auto dict = std::move(v).toGenericDict();
+      std::unordered_map<Key, Value> result;
+      result.reserve(dict->elements().size());
+      for (auto& element : dict->elements()) {
+        result.emplace(legacy_ivalue_to_arg_type<Key>::call(element.key()), legacy_ivalue_to_arg_type<Value>::call(element.value()));
+      }
+      return result;
+    }
+  };
 
   // TODO Make nesting types work with new style API, e.g. Dicts of lists, lists of lists, and so on
 
@@ -149,18 +211,38 @@ namespace detail {
     }
   };
   template<class T>
-  struct return_type_to_ivalue<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> {
-    static IValue call(std::vector<T>&& v) {
+  struct return_type_to_ivalue<c10::ListPtr<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> {
+    static IValue call(c10::ListPtr<T>&& v) {
       static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported return type: vector<T> and T is not one of the supported primitive types.");
       static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
       return IValue(std::move(v));
     }
   };
   template<class T>
+  struct return_type_to_ivalue<c10::ListPtr<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> {
+    static IValue call(c10::ListPtr<T>&& v) {
+      static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
+
+      return impl::toGenericList(std::move(v));
+    }
+  };
+  template<class T>
+  struct return_type_to_ivalue<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> {
+    static IValue call(std::vector<T>&& v) {
+      static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
+      c10::ListPtr<T> result = c10::make_list<T>();
+      result.reserve(v.size());
+      for (auto& elem : v) {
+        result.push_back(std::move(elem));
+      }
+      return result;
+    }
+  };
+  template<class T>
   struct return_type_to_ivalue<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> {
     static IValue call(std::vector<T>&& v) {
       static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
-      std::vector<IValue> result;
+      c10::impl::GenericListPtr result = c10::impl::make_generic_list();
       result.reserve(v.size());
       for (auto& elem : v) {
         result.push_back(return_type_to_ivalue<T>::call(std::move(elem)));
@@ -214,6 +296,41 @@ namespace detail {
     template<class T_>
     static IValue call(T_&& v) {
       return return_type_to_ivalue<T>::call(std::forward<T_>(v));
+    }
+  };
+  template<class T>
+  struct legacy_return_type_to_ivalue<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> {
+    static IValue call(std::vector<T>&& v) {
+      static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
+      c10::ListPtr<T> result = c10::make_list<T>();
+      result.reserve(v.size());
+      for (auto& elem : v) {
+        result.push_back(std::move(elem));
+      }
+      return result;
+    }
+  };
+  template<class T>
+  struct legacy_return_type_to_ivalue<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> {
+    static IValue call(std::vector<T>&& v) {
+      static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
+      c10::impl::GenericListPtr result = c10::impl::make_generic_list();
+      result.reserve(v.size());
+      for (auto& elem : v) {
+        result.push_back(legacy_return_type_to_ivalue<T>::call(std::move(elem)));
+      }
+      return result;
+    }
+  };
+  template<class Key, class Value>
+  struct legacy_return_type_to_ivalue<std::unordered_map<Key, Value>> final {
+    static IValue call(std::unordered_map<Key, Value>&& v) {
+      c10::impl::GenericDict dict;
+      dict.reserve(v.size());
+      for (auto& element : v) {
+        dict.insert(legacy_return_type_to_ivalue<Key>::call(Key{element.first}), legacy_return_type_to_ivalue<Value>::call(std::move(element.second)));
+      }
+      return dict;
     }
   };
 

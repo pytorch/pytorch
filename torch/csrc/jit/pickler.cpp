@@ -503,7 +503,7 @@ void Pickler::pushTuple(const IValue& ivalue) {
   pushMemoization(ivalue);
 }
 
-std::vector<IValue> Unpickler::parse_ivalue_list() {
+c10::impl::GenericListPtr Unpickler::parse_ivalue_list() {
   run();
   TORCH_CHECK(
       stack_.size() == 1,
@@ -513,9 +513,9 @@ std::vector<IValue> Unpickler::parse_ivalue_list() {
   auto value = stack_[0].ivalue();
   if (value.isGenericList()) {
     // TODO [unpickler refactor]
-    return value.toGenericListRef();
+    return std::move(std::move(value).toGenericList()->elements());
   }
-  return value.toTuple()->elements();
+  return std::move(std::move(value).toTuple()->elements());
 }
 
 double Unpickler::readFloat() {
@@ -592,11 +592,11 @@ OpCode Unpickler::readInstruction() {
           AT_ERROR("Unknown list specialization");
         }
       } else {
-        stack_.emplace_back(std::vector<IValue>());
+        stack_.emplace_back(c10::impl::make_generic_list());
       }
     } break;
     case OpCode::EMPTY_TUPLE: {
-      stack_.emplace_back(c10::ivalue::Tuple::create({}));
+      stack_.emplace_back(c10::ivalue::Tuple::create(c10::impl::make_generic_list()));
     } break;
     case OpCode::BINPUT: {
       size_t memo_id = read<uint8_t>();
@@ -657,7 +657,7 @@ OpCode Unpickler::readInstruction() {
     case OpCode::TUPLE: {
       size_t start = marks_.back();
       marks_.pop_back();
-      auto tuple = c10::ivalue::Tuple::create({});
+      auto tuple = c10::ivalue::Tuple::create(c10::impl::make_generic_list());
       tuple->elements().reserve(stack_.size() - start);
       auto start_it = stack_.begin() + start;
       for (auto it = start_it; it != stack_.end(); ++it) {
@@ -736,19 +736,19 @@ OpCode Unpickler::readInstruction() {
       switch (class_name) {
         case PicklerClass::TENSOR:
           stack_.emplace_back(
-              tensor_table_->at(data->elements().at(0).toInt()));
+              tensor_table_->at(data->elements().get(0).toInt()));
           break;
         case PicklerClass::INTLIST:
-          stack_.emplace_back(data->elements().at(0).toIntListRef());
+          stack_.emplace_back(data->elements().get(0).toIntListRef());
           break;
         case PicklerClass::TENSORLIST:
-          stack_.emplace_back(data->elements().at(0).toTensorListRef());
+          stack_.emplace_back(data->elements().get(0).toTensorListRef());
           break;
         case PicklerClass::DOUBLELIST:
-          stack_.emplace_back(data->elements().at(0).toDoubleListRef());
+          stack_.emplace_back(data->elements().get(0).toDoubleListRef());
           break;
         case PicklerClass::BOOLLIST:
-          stack_.emplace_back(data->elements().at(0).toBoolListRef());
+          stack_.emplace_back(data->elements().get(0).toBoolListRef());
           break;
         default:
           AT_ERROR("Unknown pickler class id");

@@ -4,6 +4,7 @@
 #include <c10/util/TypeTraits.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/ArrayRef.h>
 #include <vector>
 
 namespace at {
@@ -13,7 +14,7 @@ namespace c10 {
 struct IValue;
 template<class T> class ListPtr;
 template<class T> ListPtr<T> make_list();
-template<class T> ListPtr<T> make_list(std::initializer_list<T> values);
+template<class T> ListPtr<T> make_list(ArrayRef<T> values);
 
 namespace detail {
 template<class T> T list_element_to(const T& element);
@@ -156,7 +157,7 @@ private:
     bool,
     at::Tensor
   >;
-
+public: // TODO private
   using StorageT = guts::conditional_t<
     guts::typelist::contains<types_with_direct_list_implementation, T>::value,
     T, // The types listed in types_with_direct_list_implementation store the list as std::vector<T>
@@ -185,7 +186,7 @@ public:
   /**
    * Constructs a list with some initial values
    */
-  friend ListPtr make_list<T>(std::initializer_list<T>);
+  friend ListPtr make_list<T>(ArrayRef<T>);
 
   // please use make_list instead.
   ListPtr() = delete;
@@ -371,7 +372,7 @@ inline GenericListPtr make_generic_list() {
   return make_list<IValue>();
 }
 
-inline GenericListPtr make_generic_list(std::initializer_list<IValue> values) {
+inline GenericListPtr make_generic_list(ArrayRef<IValue> values) {
   return make_list<IValue>(values);
 }
 

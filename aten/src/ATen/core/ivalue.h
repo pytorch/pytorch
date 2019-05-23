@@ -13,6 +13,7 @@ struct Function;
 } // namespace torch
 namespace c10 {
 template<class Key, class Value> class Dict;
+template<class T> class ListPtr;
 struct IValue;
 namespace ivalue {
 struct Tuple;
@@ -208,18 +209,17 @@ struct CAFFE2_API IValue final {
 
   // IntList
   IValue(c10::intrusive_ptr<ivalue::IntList> v);
-  IValue(std::vector<int64_t> v);
-  IValue(at::ArrayRef<int64_t> v)
-  : IValue(v.vec()) {}
+  IValue(c10::ListPtr<int64_t> v);
+  IValue(at::ArrayRef<int64_t> v);
   bool isIntList() const { return Tag::IntList == tag; }
   c10::intrusive_ptr<ivalue::IntList> toIntList() &&;
   c10::intrusive_ptr<ivalue::IntList> toIntList() const &;
 
-  const std::vector<int64_t>& toIntListRef() const;
-  const std::vector<double>& toDoubleListRef() const;
-  const std::vector<bool>& toBoolListRef() const;
-  const std::vector<at::Tensor>& toTensorListRef() const;
-  const std::vector<IValue>& toGenericListRef() const;
+  const c10::ListPtr<int64_t>& toIntListRef() const;
+  const c10::ListPtr<double>& toDoubleListRef() const;
+  const c10::ListPtr<bool>& toBoolListRef() const;
+  const c10::ListPtr<at::Tensor>& toTensorListRef() const;
+  const c10::ListPtr<IValue>& toGenericListRef() const;
   const c10::Dict<IValue, IValue>& toGenericDictRef() const;
   const std::string& toStringRef() const;
 
@@ -233,31 +233,34 @@ struct CAFFE2_API IValue final {
 
   // DoubleList
   IValue(c10::intrusive_ptr<ivalue::DoubleList> v);
-  IValue(std::vector<double> v);
+  IValue(c10::ListPtr<double> v);
   bool isDoubleList() const { return Tag::DoubleList == tag; }
   c10::intrusive_ptr<ivalue::DoubleList> toDoubleList() &&;
   c10::intrusive_ptr<ivalue::DoubleList> toDoubleList() const &;
 
   // BoolList
   IValue(c10::intrusive_ptr<ivalue::BoolList> v);
-  IValue(std::vector<bool> v);
+  IValue(c10::ListPtr<bool> v);
   bool isBoolList() const { return Tag::BoolList == tag; }
   c10::intrusive_ptr<ivalue::BoolList> toBoolList() &&;
   c10::intrusive_ptr<ivalue::BoolList> toBoolList() const &;
 
   //TensorList
   IValue(c10::intrusive_ptr<ivalue::TensorList> v);
-  IValue(std::vector<at::Tensor> v);
+  IValue(c10::ListPtr<at::Tensor> v);
   bool isTensorList() const { return Tag::TensorList == tag; }
   c10::intrusive_ptr<ivalue::TensorList> toTensorList() &&;
   c10::intrusive_ptr<ivalue::TensorList> toTensorList() const &;
 
   //GenericList
   IValue(c10::intrusive_ptr<ivalue::GenericList> v);
-  IValue(std::vector<IValue> v);
+  IValue(c10::ListPtr<IValue> v);
   bool isGenericList() const { return Tag::GenericList == tag; }
   c10::intrusive_ptr<ivalue::GenericList> toGenericList() &&;
   c10::intrusive_ptr<ivalue::GenericList> toGenericList() const &;
+
+  template<class T>
+  IValue(c10::ListPtr<T> v);
 
   // GenericDict
   IValue(c10::intrusive_ptr<ivalue::GenericDict> v);
@@ -265,6 +268,9 @@ struct CAFFE2_API IValue final {
   bool isGenericDict() const { return Tag::GenericDict == tag; }
   c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() &&;
   c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() const &;
+
+  template<class Key, class Value>
+  IValue(c10::Dict<Key, Value> v);
 
   // ClassType
   IValue(c10::intrusive_ptr<ivalue::Object> v);

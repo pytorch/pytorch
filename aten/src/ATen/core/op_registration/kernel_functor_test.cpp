@@ -184,8 +184,8 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorOutput_wh
 }
 
 struct KernelWithTensorListOutput final : OperatorKernel {
-  std::vector<Tensor> operator()(const Tensor& input1, const Tensor& input2, const Tensor& input3) {
-    return {input1, input2, input3};
+  c10::ListPtr<Tensor> operator()(const Tensor& input1, const Tensor& input2, const Tensor& input3) {
+    return c10::make_list<Tensor>({input1, input2, input3});
   }
 };
 
@@ -205,8 +205,8 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListOutpu
 }
 
 struct KernelWithIntListOutput final : OperatorKernel {
-  std::vector<int64_t> operator()(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
-    return {input1, input2, input3};
+  c10::ListPtr<int64_t> operator()(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
+    return c10::make_list<int64_t>({input1, input2, input3});
   }
 };
 
@@ -226,14 +226,14 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListOutput_w
 }
 
 struct KernelWithMultipleOutputs final : OperatorKernel {
-  std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> operator()(Tensor) {
+  std::tuple<Tensor, int64_t, c10::ListPtr<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> operator()(Tensor) {
     Dict<string, Tensor> dict;
     dict.insert("first", dummyTensor(TensorType1()));
     dict.insert("second", dummyTensor(TensorType2()));
-    return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
+    return std::tuple<Tensor, int64_t, c10::ListPtr<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
       dummyTensor(TensorType2()),
       5,
-      {dummyTensor(TensorType1()), dummyTensor(TensorType2())},
+      c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}),
       c10::optional<int64_t>(c10::in_place, 0),
       dict
     );
@@ -397,7 +397,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntInput_withOu
 int64_t captured_input_list_size = 0;
 
 struct KernelWithIntListInputWithoutOutput final : OperatorKernel {
-  void operator()(Tensor, const std::vector<int64_t>& input1) {
+  void operator()(Tensor, const c10::ListPtr<int64_t>& input1) {
     captured_input_list_size = input1.size();
   }
 };
@@ -410,13 +410,13 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_wi
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), IntList::create({2, 4, 6}));
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), IntList::create(c10::make_list<int64_t>({2, 4, 6})));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(3, captured_input_list_size);
 }
 
 struct KernelWithIntListInputWithOutput final : OperatorKernel {
-  int64_t operator()(Tensor, const std::vector<int64_t>& input1) {
+  int64_t operator()(Tensor, const c10::ListPtr<int64_t>& input1) {
     return input1.size();
   }
 };
@@ -428,13 +428,13 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_wi
   auto op = c10::Dispatcher::singleton().findSchema("_test::int_list_input", "");
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), IntList::create({2, 4, 6}));
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), IntList::create(c10::make_list<int64_t>({2, 4, 6})));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(3, outputs[0].toInt());
 }
 
 struct KernelWithTensorListInputWithoutOutput final : OperatorKernel {
-  void operator()(const std::vector<Tensor>& input1) {
+  void operator()(const c10::ListPtr<Tensor>& input1) {
     captured_input_list_size = input1.size();
   }
 };
@@ -447,13 +447,13 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, TensorList::create({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, TensorList::create(c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())})));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
 
 struct KernelWithTensorListInputWithOutput final : OperatorKernel {
-  int64_t operator()(const std::vector<Tensor>& input1) {
+  int64_t operator()(const c10::ListPtr<Tensor>& input1) {
     return input1.size();
   }
 };
@@ -465,7 +465,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, TensorList::create({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, TensorList::create(c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())})));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
@@ -787,7 +787,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_
 }
 
 struct KernelForSchemaInference final : OperatorKernel {
-  std::tuple<int64_t, Tensor> operator()(Tensor arg1, int64_t arg2, const std::vector<Tensor>& arg3) {
+  std::tuple<int64_t, Tensor> operator()(Tensor arg1, int64_t arg2, const c10::ListPtr<Tensor>& arg3) {
     return {};
   }
 };

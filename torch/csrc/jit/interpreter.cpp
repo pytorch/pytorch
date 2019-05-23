@@ -726,8 +726,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       if (num_outputs == 1) {
         future->markCompleted(stack.back());
       } else {
-        future->markCompleted(
-            Tuple::create(jit::last(stack, num_outputs).vec()));
+        ArrayRef<IValue> outputs = jit::last(stack, num_outputs);
+        c10::impl::GenericListPtr tuple = c10::impl::make_generic_list();
+        tuple.reserve(outputs.size());
+        for (const IValue& iv : outputs) {
+          tuple.push_back(iv);
+        }
+        future->markCompleted(Tuple::create(tuple));
       }
     }
 

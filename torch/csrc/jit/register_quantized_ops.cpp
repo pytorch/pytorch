@@ -45,7 +45,7 @@ at::Tensor to_proxy(const caffe2::Tensor& t) {
 }
 
 c10::intrusive_ptr<c10::ivalue::Tuple> to_proxy(const Int8TensorCPU& t) {
-  return c10::ivalue::Tuple::create({to_proxy(t.t), t.scale, t.zero_point});
+  return c10::ivalue::Tuple::create(c10::impl::make_generic_list({to_proxy(t.t), t.scale, t.zero_point}));
 }
 
 // TODO: replace this with c10 registration when it's ready

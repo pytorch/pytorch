@@ -235,7 +235,7 @@ class Unpickler {
         tensor_table_(tensor_table),
         last_opcode_(OpCode::STOP) {}
 
-  std::vector<IValue> parse_ivalue_list();
+  c10::impl::GenericList parse_ivalue_list();
 
  private:
   // No arguments ensures that a template arugment must be specified
