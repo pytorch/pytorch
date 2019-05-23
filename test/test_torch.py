@@ -10994,7 +10994,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                     return_inverse=True, 
                     return_counts=True, 
                     dim=2)
-                
+
             # test consecutive version
             y = torch.tensor(
                 [[0, 1],
