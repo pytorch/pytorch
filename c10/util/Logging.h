@@ -257,32 +257,6 @@ BINARY_COMP_HELPER(LessEquals, <=)
 #define CAFFE_ENFORCE_GT_WITH_CALLER(x, y, ...) \
   CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
       Greater((x), (y)), #x " > " #y, __VA_ARGS__)
-
-/**
- * Very lightweight logging for the first time API usage. It's beneficial for
- * tracking of individual functionality usage in larger applications.
- *
- * In order to ensure light-weightness of logging, we utilize static variable
- * trick - LogAPIUsage will be invoked only once and further invocations will
- * just do an atomic check.
- *
- * Example:
- *   // Logs caller info with an arbitrary text event, if there is a usage.
- *   C10_LOG_API_USAGE_ONCE("my_api");
- */
-#define C10_LOG_API_USAGE_ONCE(...)             \
-  C10_UNUSED static bool C10_ANONYMOUS_VARIABLE(logFlag) = \
-      ::c10::detail::LogAPIUsageFakeReturn(__VA_ARGS__);
-
-// API usage logging capabilities
-C10_API void SetAPIUsageLogger(std::function<void(const std::string&)> logger);
-C10_API void LogAPIUsage(const std::string& context);
-
-namespace detail {
-// Return value is needed to do the static variable initialization trick
-C10_API bool LogAPIUsageFakeReturn(const std::string& context);
-}
-
 } // namespace c10
 
 #endif // C10_UTIL_LOGGING_H_
