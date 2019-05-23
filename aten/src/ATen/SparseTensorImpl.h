@@ -205,7 +205,7 @@ public:
   /**
    * Shallow-copies data from another TensorImpl into this TensorImpl.
    */
-  void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
+  void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
     AT_ASSERT(typeid(*(impl.get())) == typeid(SparseTensorImpl));
     auto sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
     copy_tensor_data(

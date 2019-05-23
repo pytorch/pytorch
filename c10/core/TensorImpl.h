@@ -889,7 +889,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Shallow-copies data from another TensorImpl into this TensorImpl.
    */
-  virtual void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) {
+  virtual void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
     copy_tensor_data(
       /*src_impl=*/impl.get(),
       /*dest_impl=*/this,
