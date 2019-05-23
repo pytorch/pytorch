@@ -68,7 +68,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
         acc_t val[WARP_BATCH];
         #pragma unroll
         for (int i = 0;i < WARP_BATCH;++i) {
-            val[i] = __shfl_xor_sync(FULL_MASK, max_value[i], offset, WARP_SIZE);
+            val[i] = WARP_SHFL_XOR(max_value[i], offset, WARP_SIZE, FULL_MASK);
         }
         #pragma unroll
         for (int i = 0;i < WARP_BATCH;++i) {
@@ -96,7 +96,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
         #pragma unroll
         for (int i = 0;i < WARP_BATCH;++i) {
-            sum[i] += __shfl_xor_sync(FULL_MASK, sum[i], offset, WARP_SIZE);
+            sum[i] += WARP_SHFL_XOR(sum[i], offset, WARP_SIZE, FULL_MASK);
         }
     }
 
@@ -268,7 +268,7 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
     for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
         #pragma unroll
         for (int i = 0;i < WARP_BATCH;++i) {
-            sum[i] += __shfl_xor_sync(FULL_MASK, sum[i], offset, WARP_SIZE);
+            sum[i] += WARP_SHFL_XOR(sum[i], offset, WARP_SIZE, FULL_MASK);
         }
     }
 
