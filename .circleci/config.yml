@@ -750,7 +750,11 @@ smoke_mac_test: &smoke_mac_test
         command: |
           set -ex
           source "/Users/distiller/project/env"
-          unbuffer ./builder/smoke_test.sh | ts
+          export "PATH=$workdir/miniconda/bin:$PATH"
+          # TODO unbuffer and ts this, but it breaks cause miniconda overwrites
+          # tclsh. But unbuffer and ts aren't that important so they're just
+          # disabled for now
+          ./builder/smoke_test.sh
 
 ##############################################################################
 # Job specifications job specs

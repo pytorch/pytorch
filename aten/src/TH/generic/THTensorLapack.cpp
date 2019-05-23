@@ -83,14 +83,14 @@ static THTensor *THTensor_(cloneColumnMajorNrows)(THTensor *self, THTensor *src,
   if (src->size(0) == nrows) {
     at::Tensor result_wrap = THTensor_wrap(result);
     at::Tensor src_wrap = THTensor_wrap(src);
-    at::_copy_same_type_(result_wrap, src_wrap);
+    at::native::copy_(result_wrap, src_wrap);
   }
   else
   {
     view = THTensor_(newNarrow)(result, 0, 0, src->size(0));
     at::Tensor view_wrap = THTensor_wrap(view);
     at::Tensor src_wrap = THTensor_wrap(src);
-    at::_copy_same_type_(view_wrap, src_wrap);
+    at::native::copy_(view_wrap, src_wrap);
     c10::raw::intrusive_ptr::decref(view);
   }
   return result;
@@ -432,7 +432,7 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
     THTensor_(resizeAs)(rv_, rvf_);
     at::Tensor rv__wrap = THTensor_wrap(rv_);
     at::Tensor rvf__wrap =  THTensor_wrap(rvf_);
-    at::_copy_same_type_(rv__wrap, rvf__wrap);
+    at::native::copy_(rv__wrap, rvf__wrap);
     c10::raw::intrusive_ptr::decref(rvf_);
   } else {
     THTensor_(zero)(ru_);
@@ -802,7 +802,7 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor
     THTensor_(resizeAs)(rb_, b);
     at::Tensor rb__wrap = THTensor_wrap(rb_);
     at::Tensor b_wrap = THTensor_wrap(b);
-    at::_copy_same_type_(rb__wrap, b_wrap);
+    at::native::copy_(rb__wrap, b_wrap);
   }
 
   int64_t num_batches = atf->size(0);

@@ -3031,6 +3031,15 @@ det() -> Tensor
 See :func:`torch.det`
 """)
 
+add_docstr_all('dequantize_linear',
+               r"""
+dequantize_linear(int_tensor, scale, zero_point) -> Tensor
+
+Dequantize an int Tensor that represents the underlying quantized data
+using affine quantization scheme with given scale and zero_point.
+returns a float Tensor.
+""")
+
 add_docstr_all('where',
                r"""
 where(condition, y) -> Tensor
@@ -3190,4 +3199,9 @@ Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 add_docstr_all('device',
                r"""
 Is the :class:`torch.device` where this Tensor is.
+""")
+
+add_docstr_all('ndim',
+               r"""
+Alias for :meth:`~Tensor.dim()`
 """)
