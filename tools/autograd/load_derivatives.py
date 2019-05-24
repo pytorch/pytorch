@@ -209,10 +209,10 @@ def process_definition(defn, declarations_by_signature, declarations_by_schema):
 
     canonical = canonical_declaration(declarations, defn_name)
     if 'grad_input_mask' in [a['name'] for a in canonical['arguments']]:
-            raise RuntimeError("Schema for {} has an argument named grad_input_mask, "
-                               "but this name would be shadowed by our codegen. "
-                               "Please use a different name in native_functions.yaml."
-                               .format(defn_name))
+        raise RuntimeError("Schema for {} has an argument named grad_input_mask, "
+                           "but this name would be shadowed by our codegen. "
+                           "Please use a different name in native_functions.yaml."
+                           .format(defn_name))
 
     derivatives, args_with_derivatives, non_differentiable_arg_names = set_up_derivatives(defn_name, defn, canonical)
     autograd_fn = None
