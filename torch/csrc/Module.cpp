@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <libshm.h>
 #include <TH/TH.h>
+#include <c10/util/Logging.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/dlpack.h>
@@ -565,6 +566,16 @@ static void warning_handler(
   }
 }
 
+// In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
+// Guaranteed to be invoked from Python under GIL, no locking on map needed
+static void LogAPIUsageOnceFromPython(const std::string& event) {
+  static std::unordered_set<std::string> seen;
+  if (!seen.count(event)) {
+    seen.insert(event);
+    c10::LogAPIUsage(event);
+  }
+}
+
 
 #ifdef _WIN32
 __declspec(dllexport)
@@ -572,6 +583,8 @@ __declspec(dllexport)
 PyObject* initModule() {
   HANDLE_TH_ERRORS
   at::init_num_threads();
+
+  C10_LOG_API_USAGE_ONCE("torch.python.import");
 
 #define ASSERT_TRUE(cmd) if (!(cmd)) return nullptr
 
@@ -675,7 +688,9 @@ PyObject* initModule() {
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
 
-  py::reinterpret_borrow<py::module>(module).def("_demangle", &c10::demangle);
+  auto py_module = py::reinterpret_borrow<py::module>(module);
+  py_module.def("_demangle", &c10::demangle);
+  py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
 
   // Set ATen warnings to issue Python warnings
   ::c10::Warning::set_warning_handler(&warning_handler);
