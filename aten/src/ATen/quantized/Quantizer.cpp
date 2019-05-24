@@ -134,13 +134,13 @@ T quantize_val(float scale, int32_t zero_point, float value) {
   // cases away from zero, and can be consistent with SIMD implementations for
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
-  int32_t qvalue;
+  int64_t qvalue;
   constexpr int32_t qmin = std::numeric_limits<typename T::underlying>::min();
   constexpr int32_t qmax = std::numeric_limits<typename T::underlying>::max();
   checkZeroPoint<typename T::underlying>("quantize_val", zero_point);
-  qvalue = static_cast<int32_t>(std::nearbyint(value / scale + zero_point));
-  qvalue = std::max(qvalue, qmin);
-  qvalue = std::min(qvalue, qmax);
+  qvalue = static_cast<int64_t>(std::nearbyint(value / scale + zero_point));
+  qvalue = std::max<int64_t>(qvalue, qmin);
+  qvalue = std::min<int64_t>(qvalue, qmax);
   return static_cast<T>(qvalue);
 }
 
