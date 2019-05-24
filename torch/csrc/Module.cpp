@@ -352,7 +352,7 @@ PyObject *THPModule_toDLPack(PyObject *_unused, PyObject *data)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPVariable_Check(data), "data must be a Tensor");
-  DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_UnpackData(data));
+  DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_Unpack(data));
   return PyCapsule_New(dlMTensor, "dltensor", DLPack_Capsule_Destructor);
   END_HANDLE_TH_ERRORS
 }

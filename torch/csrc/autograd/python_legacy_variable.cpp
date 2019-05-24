@@ -48,9 +48,9 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
     // by nn.Parameter() with no arguments.
     auto scalar_type = torch::tensors::get_default_scalar_type();
     auto var = at::empty({0}, torch::tensors::get_default_tensor_type().options(scalar_type));
-    tensor = static_cast<Variable&>(var).data();
+    tensor = static_cast<Variable&>(var).tensor_data();
   } else if (THPVariable_Check(data)) {
-    tensor = ((THPVariable*)data)->cdata.data();
+    tensor = ((THPVariable*)data)->cdata.tensor_data();
   } else {
     throw torch::TypeError("Variable data has to be a tensor, but got %s",
         Py_TYPE(data)->tp_name);
