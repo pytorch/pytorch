@@ -41,7 +41,7 @@ TEST_LARGE_TENSOR = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     TEST_MAGMA = torch.cuda.has_magma
-    TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 9e9
+    TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
 
 floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
                 torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
@@ -2455,6 +2455,14 @@ class TestCuda(TestCase):
 
     def test_advancedindex_big(self):
         _TestTorchMixin._test_advancedindex_big(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_huge_index(self):
+        src = torch.empty(15000000, 45, device='cuda', dtype=torch.long).random_(0, 2**22)
+        idx = torch.randperm(src.shape[0], device='cuda')
+        res = src[idx]
+        res_cpu = src.cpu()[idx.cpu()]
+        self.assertEqual(res.cpu(), res_cpu)
 
     def test_kthvalue(self):
         _TestTorchMixin._test_kthvalue(self, device='cuda')
