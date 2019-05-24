@@ -48,10 +48,6 @@ SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeM
   AT_ASSERT(values_.device() == device());
 }
 
-// yf225 TODO: is this ok to remove??
-// int64_t SparseTensorImpl::dim() const {
-//   return sparse_dim_ + dense_dim_;
-// }
 bool SparseTensorImpl::has_storage() const {
   return false;
 }

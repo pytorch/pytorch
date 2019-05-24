@@ -40,7 +40,6 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  // int64_t dim() const override;  // yf225 TODO: is this ok to remove??
   bool has_storage() const override;
 
   // WARNING: This function does NOT preserve invariants of sparse_dim/dense_dim with
