@@ -60,10 +60,13 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
 }
 
 IntArrayRef TensorImpl::sizes() const {
+  TORCH_CHECK(type_id_ != UndefinedTensorId(), type_id_, " does not have sizes");
   return sizes_;
 }
 
 IntArrayRef TensorImpl::strides() const {
+  TORCH_CHECK(type_id_ != UndefinedTensorId() && layout() == kStrided,
+    type_id_, " does not have strides");
   return strides_;
 }
 
@@ -93,20 +96,28 @@ void TensorImpl::release_resources() {
 }
 
 int64_t TensorImpl::dim() const {
+  TORCH_CHECK(type_id_ != UndefinedTensorId(), type_id_, " does not have dim");
   return sizes_.size();
 }
 
 int64_t TensorImpl::size(int64_t d) const {
+  TORCH_CHECK(type_id_ != UndefinedTensorId(), type_id_, " does not have size");
   d = at::maybe_wrap_dim(d, dim(), false);
   return sizes_[d];
 }
 
 int64_t TensorImpl::stride(int64_t d) const {
+  TORCH_CHECK(type_id_ != UndefinedTensorId() && layout() == kStrided, type_id_, " does not have stride");
   d = at::maybe_wrap_dim(d, dim(), false);
   return strides_[d];
 }
 
 TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
+  // We only allow this operation on dense tensors
+  if (!(has_storage() && layout() == kStrided)) {
+    TORCH_CHECK(condition_when_zero_dim == (dim() == 0),
+           type_id_, " does not support changing dimensionality via maybe_zero_dim");
+  }
   bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
   if (set_zero_dim) {
     resize_dim(0);
@@ -119,6 +130,7 @@ bool TensorImpl::has_storage() const {
 }
 
 bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
+  TORCH_CHECK(layout() == kStrided, type_id_, " does not have is_contiguous");
 #ifdef DEBUG
   AT_ASSERT(compute_contiguous() == is_contiguous_);
 #endif
@@ -139,6 +151,8 @@ bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 }
 
 const Storage& TensorImpl::storage() const {
+  TORCH_CHECK(type_id_ != UndefinedTensorId() && has_storage(),
+    type_id_, " does not have storage");
   return storage_;
 }
 

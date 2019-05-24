@@ -40,19 +40,8 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  IntArrayRef strides() const override;
-  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const override;
-  int64_t stride(int64_t d) const override;
-  void resize_dim(int64_t ndim) override;
-  void set_size(int64_t dim, int64_t new_size) override;
-  void set_stride(int64_t dim, int64_t new_stride) override;
-  void set_storage_offset(int64_t storage_offset) override;
-
-  int64_t dim() const override;
-  TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
+  // int64_t dim() const override;  // yf225 TODO: is this ok to remove??
   bool has_storage() const override;
-  const Storage& storage() const override;
-  int64_t storage_offset() const override;
 
   // WARNING: This function does NOT preserve invariants of sparse_dim/dense_dim with
   // respect to indices and values

@@ -337,19 +337,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return a reference to the sizes of this tensor.  This reference remains
    * valid as long as the tensor is live and not resized.
    */
-  virtual IntArrayRef sizes() const;
+  IntArrayRef sizes() const;
 
   /**
    * Return a reference to the strides of this tensor.  This reference remains
    * valid as long as the tensor is live and not restrided.
    */
-  virtual IntArrayRef strides() const;
+  IntArrayRef strides() const;
 
   /**
    * Return the number of dimensions of this tensor.  Note that 0-dimension
    * represents a Tensor that is a Scalar, e.g., one that has a single element.
    */
-  virtual int64_t dim() const;
+  int64_t dim() const;
 
   /**
    * True if this tensor has storage. See storage() for details.
@@ -364,7 +364,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Avoid using this method if possible; try to use only Tensor APIs to perform
    * operations.
    */
-  virtual const Storage& storage() const;
+  const Storage& storage() const;
 
   /**
    * The number of elements in a tensor.
@@ -374,7 +374,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * is no longer true; numel always accurately reports the product
    * of sizes of a tensor.
    */
-  virtual int64_t numel() const {
+  int64_t numel() const {
 #ifdef DEBUG
     TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
 #endif
@@ -388,7 +388,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * compute_contiguous() for the exact definition of whether or not
    * a tensor is contiguous or not.
    */
-  virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const;
+  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const;
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
@@ -472,7 +472,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * that correctly handle the 0-dim case, and is just dead code in this case.
    * In the glorious future, this function will be eliminated entirely.
    */
-  virtual TensorImpl* maybe_zero_dim(bool condition_when_zero_dim);
+  TensorImpl* maybe_zero_dim(bool condition_when_zero_dim);
 
   /**
    * True if a tensor was auto-wrapped from a C++ or Python number.
@@ -648,10 +648,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for example, an index into a tensor will have a non-zero storage_offset().
    *
    * WARNING: This is NOT computed in bytes.
-   *
-   * XXX: The only thing stopping this function from being virtual is Variable.
    */
-  virtual int64_t storage_offset() const {
+  int64_t storage_offset() const {
+    TORCH_CHECK(type_id_ != UndefinedTensorId() && has_storage(),
+      type_id_, " does not have storage_offset");
     return storage_offset_;
   }
 
@@ -673,7 +673,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * TODO: This should be jettisoned in favor of `set_sizes_and_strides`,
    * which is harder to misuse.
    */
-  virtual void resize_dim(int64_t ndim) {
+  void resize_dim(int64_t ndim) {
+    TORCH_CHECK(!is_sparse() && !is_mkldnn(), type_id_, " does not have resize_dim");
     TORCH_CHECK(allow_tensor_metadata_change(), "resize_dim is not allowed on Tensor created from .data or .detach()");
     sizes_.resize(ndim, 0);
     strides_.resize(ndim, 0);
@@ -689,7 +690,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * TODO: This should be jettisoned in favor of `set_sizes_and_strides`,
    * which is harder to misuse.
    */
-  virtual void set_size(int64_t dim, int64_t new_size) {
+  void set_size(int64_t dim, int64_t new_size) {
+    TORCH_CHECK(!is_sparse() && !is_mkldnn(), type_id_, " does not have set_size");
     TORCH_CHECK(allow_tensor_metadata_change(), "set_size is not allowed on Tensor created from .data or .detach()");
     sizes_.at(dim) = new_size;
     refresh_numel();
@@ -702,7 +704,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * TODO: This should be jettisoned in favor of `set_sizes_and_strides`,
    * which is harder to misuse.
    */
-  virtual void set_stride(int64_t dim, int64_t new_stride) {
+  void set_stride(int64_t dim, int64_t new_stride) {
+    TORCH_CHECK(layout() == kStrided, type_id_, " does not have set_stride");
     TORCH_CHECK(allow_tensor_metadata_change(), "set_stride is not allowed on Tensor created from .data or .detach()");
     strides_[dim] = new_stride;
     refresh_numel();
@@ -716,7 +719,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * location at the storage; the caller is responsible for checking this
    * (and resizing if necessary.)
    */
-  virtual void set_storage_offset(int64_t storage_offset) {
+  void set_storage_offset(int64_t storage_offset) {
+    TORCH_CHECK(has_storage(), type_id_, " does not have set_storage_offset");
     TORCH_CHECK(allow_tensor_metadata_change(), "set_storage_offset is not allowed on Tensor created from .data or .detach()");
     storage_offset_ = storage_offset;
   }
@@ -792,12 +796,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Return the size of a tensor at some dimension.
    */
-  virtual int64_t size(int64_t d) const;
+  int64_t size(int64_t d) const;
 
   /**
    * Return the stride of a tensor at some dimension.
    */
-  virtual int64_t stride(int64_t d) const;
+  int64_t stride(int64_t d) const;
 
   /**
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
@@ -810,7 +814,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
-  virtual void set_allow_tensor_metadata_change(bool value) {
+  void set_allow_tensor_metadata_change(bool value) {
     allow_tensor_metadata_change_ = value;
   }
 
@@ -818,7 +822,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
-  virtual bool allow_tensor_metadata_change() const {
+  bool allow_tensor_metadata_change() const {
     return allow_tensor_metadata_change_;
   }
 

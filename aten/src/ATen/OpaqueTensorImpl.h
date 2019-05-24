@@ -33,48 +33,8 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     opaque_handle_ = {};
   }
 
-  IntArrayRef strides() const override {
-    AT_ERROR("opaque tensors do not have strides");
-  }
-
-  bool is_contiguous(c10::MemoryFormat memory_format=c10::MemoryFormat::Any) const override {
-    AT_ERROR("opaque tensors do not have is_contiguous");
-  }
-
-  int64_t stride(int64_t d) const override {
-    AT_ERROR("opaque tensors do not have strides");
-  }
-
-  void resize_dim(int64_t ndim) override {
-    AT_ERROR("opaque tensors do not have resize_dim");
-  }
-
-  void set_size(int64_t dim, int64_t new_size) override {
-    AT_ERROR("opaque tensors do not have set_size");
-  }
-
-  void set_stride(int64_t dim, int64_t new_stride) override {
-    AT_ERROR("opaque tensors do not have set_stride");
-  }
-
-  void set_storage_offset(int64_t storage_offset) override {
-    AT_ERROR("opaque tensors do not have set_storage_offset");
-  }
-
-  TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override {
-      AT_ERROR("opaque tensors do not support maybe_zero_dim");
-  }
-
   bool has_storage() const override {
     return false;
-    }
-
-  const Storage& storage() const override{
-    AT_ERROR("opaque tensors do not have storage");
-  }
-
-  int64_t storage_offset() const override {
-    AT_ERROR("opaque tensors do not have storage");
   }
 
   /**
