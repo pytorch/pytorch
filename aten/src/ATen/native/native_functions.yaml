@@ -2552,7 +2552,7 @@
     QuantizedCPU: dequantize_quant
 
 - func: dequantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
-  variants: function, method
+  variants: function
   dispatch:
     CPU: dequantize_linear_cpu
 
