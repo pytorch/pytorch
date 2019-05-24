@@ -21,7 +21,7 @@ docker_config_defaults: &docker_config_defaults
 setup_linux_system_environment: &setup_linux_system_environment
   name: Set Up System Environment
   no_output_timeout: "1h"
-  command: ~/workspace/.circleci/scripts/setup_linux_system_environment.sh
+  command: .circleci/scripts/setup_linux_system_environment.sh
 
 install_doc_push_script: &install_doc_push_script
   name: Install the doc push script
@@ -137,7 +137,7 @@ install_doc_push_script: &install_doc_push_script
 setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment After Checkout
   no_output_timeout: "1h"
-  command: ~/workspace/.circleci/scripts/setup_ci_environment.sh
+  command: .circleci/scripts/setup_ci_environment.sh
 
 # Installs expect and moreutils so that we can call `unbuffer` and `ts`.
 # Also installs OpenMP

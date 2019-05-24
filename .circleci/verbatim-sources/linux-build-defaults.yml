@@ -10,10 +10,9 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
     image: ubuntu-1604:201903-01
   steps:
   - attach_workspace:
-      at: ~/workspace
+      at: ~/project
   - run:
       <<: *setup_linux_system_environment
-  - checkout
   - run:
       <<: *setup_ci_environment
   - run:
@@ -58,10 +57,9 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
     image: ubuntu-1604:201903-01
   steps:
   - attach_workspace:
-      at: ~/workspace
+      at: ~/project
   - run:
       <<: *setup_linux_system_environment
-  - checkout
   - run:
       <<: *setup_ci_environment
   - run:
@@ -96,10 +94,9 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
     image: ubuntu-1604:201903-01
   steps:
   - attach_workspace:
-      at: ~/workspace
+      at: ~/project
   - run:
       <<: *setup_linux_system_environment
-  - checkout
   - run:
       <<: *setup_ci_environment
   - run:
@@ -157,7 +154,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
     image: ubuntu-1604:201903-01
   steps:
   - attach_workspace:
-      at: ~/workspace
+      at: ~/project
   - run:
       <<: *setup_linux_system_environment
   - run:

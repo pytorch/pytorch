@@ -10,5 +10,5 @@
           working_directory: .circleci
       - persist_to_workspace:
           root: .
-          paths: .circleci/scripts
+          paths: *
 
