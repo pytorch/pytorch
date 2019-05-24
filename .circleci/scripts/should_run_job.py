@@ -1,5 +1,4 @@
 import argparse
-import subprocess
 import re
 import sys
 
@@ -45,7 +44,7 @@ default_set = [
     'pytorch-doc-push',
 ]
 
-# Assumes it's run in a valid Git checkout
+# Takes in commit message to analyze via stdin
 #
 # This script will query Git and attempt to determine if we should
 # run the current CI job under question
@@ -62,7 +61,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('build_environment')
 args = parser.parse_args()
 
-commit_msg = subprocess.check_output(("git", "log", "--format=%B", "-n", "1", "HEAD"), universal_newlines=True)
+commit_msg = sys.stdin.read()
 
 # Matches anything that looks like [foo ci] or [ci foo] or [foo test]
 # or [test foo]
