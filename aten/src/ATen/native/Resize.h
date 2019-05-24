@@ -10,7 +10,7 @@ namespace at { namespace native {
 // to benchmark than TH; I can't get gbenchmark to call fns from THTensor.cpp
 
 static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) {
-  if (new_size + self->storage_offset() > 0) {
+  if (new_size > 0) {
     if (!THTensor_getStoragePtr(self)) {
       THTensor_stealAndSetStoragePtr(self, THStorage_new(self->dtype()));
     }

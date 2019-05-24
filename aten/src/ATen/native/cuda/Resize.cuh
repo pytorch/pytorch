@@ -12,7 +12,7 @@ namespace at { namespace native {
 // to benchmark than THC; I can't get gbenchmark to call fns from THTensor.cpp
 
 static inline void maybe_resize_storage_cuda(TensorImpl* self, int64_t new_size) {
-  if (new_size + self->storage_offset() > 0) {
+  if (new_size > 0) {
     if (!THTensor_getStoragePtr(self)) {
       AT_ERROR("Tensor: invalid null storage");
     }
