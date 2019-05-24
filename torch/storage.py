@@ -87,8 +87,8 @@ class _StorageBase(object):
         """Casts this storage to bool type"""
         return self.type(type(self).__module__ + '.BoolStorage')
 
-    def qint8(self):
-        """Casts this storage to qint8 type"""
+    def quint8(self):
+        """Casts this storage to quint8 type"""
         raise Exception("cannot cast storage to qint8 type")
 
     def pin_memory(self):

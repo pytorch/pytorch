@@ -297,7 +297,6 @@ def _save(obj, f, pickle_module, pickle_protocol):
 
     serialized_storage_keys = sorted(serialized_storages.keys())
     pickle_module.dump(serialized_storage_keys, f, protocol=pickle_protocol)
-    # sys.stderr.write("keys:" + str(serialized_storage_keys) + "\n")
     f.flush()
     for key in serialized_storage_keys:
         serialized_storages[key]._write_file(f, _should_read_directly(f))
