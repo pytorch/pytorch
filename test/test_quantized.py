@@ -9,8 +9,8 @@ import torch.nn.functional as F
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from hypothesis_utils import qtensor, array_shapes
 
+from common_utils import qtensor, array_shapes
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests
 from common_utils import skipIfNotRegistered
 
@@ -130,6 +130,14 @@ graph(%x : (Tensor, float, int)):
   return (%1)
 """,
         )
+
+    def test_set_data_tensorimpl_type(self):
+        # Dense tensor has impl of type `TensorImpl`, while quantized tensor has impl
+        # of type `QTensorImpl`.
+        x = torch.randn(1, 2)
+        x_q = torch.ops.c10.quantize(torch.randn(1, 2))
+        with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
+            x.data = x_q
 
 
 class TestQuantizedOps(TestCase):
