@@ -155,8 +155,6 @@ class CAFFE2_API PTThreadPool : public c10::ThreadPool {
   explicit PTThreadPool(
       int pool_size,
       int numa_node_id = -1);
-
-  void init_thread() override;
 };
 
 // Sets number of threads used for inter-op parallelism
