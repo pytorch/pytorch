@@ -278,7 +278,7 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
   // advanced postion
   const auto fd_current_pos = lseek(fd, 0, SEEK_CUR);
   lseek(fd, fd_original_pos, SEEK_SET);
-  const auto seek_return = PyObject_CallMethod(file, "seek", "li", fd_current_pos, 0);
+  const auto seek_return = PyObject_CallMethod(file, "seek", "li", (long)fd_current_pos, 0);
   if (seek_return == nullptr) {
       return nullptr;
   }
