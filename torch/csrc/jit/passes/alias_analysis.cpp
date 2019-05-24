@@ -83,14 +83,7 @@ bool AliasDb::hasWriters(const Value* v) const {
   if (isWriteCacheStale_) {
     rebuildWriteCache();
   }
-
-  for (const auto loc : elementMap_.at(v)->getMemoryLocations()) {
-    if (writeCache_.count(loc)) {
-      return true;
-    }
-  }
-
-  return false;
+  return writeCache_.intersects(elementMap_.at(v)->getMemoryLocations());
 }
 
 void AliasDb::getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks) const {
@@ -166,16 +159,16 @@ void AliasDb::dump() const {
   std::cout << "\n===2. ALIAS DB===\n";
   for (const auto& ptrPair : elementMap_) {
     const auto element = ptrPair.second;
-    if (element->pointsTo.size() > 0) {
+    if (element->pointsTo.count() > 0) {
       std::cout << getElementName(element) << " points to: ";
-      for (const auto pointedTo : element->pointsTo) {
+      for (const auto pointedTo : convert(element->pointsTo)) {
         std::cout << getElementName(pointedTo) << ", ";
       }
       std::cout << "\n";
     }
-    if (element->contained_elements.size() > 0) {
+    if (element->contained_elements.count() > 0) {
       std::cout << getElementName(element) << " contains: ";
-      for (const auto contained : element->contained_elements) {
+      for (const auto contained : convert(element->contained_elements)) {
         std::cout << getElementName(contained) << ", ";
       }
       std::cout << "\n";
@@ -545,7 +538,7 @@ void AliasDb::analyzeWait(Node* node) {
     // write directly against the wildcard element. So find a wildcard value in
     // the graph to write to.
     const auto el = pr.second;
-    const auto& pointedFrom = el->pointedFrom;
+    const auto& pointedFrom = convert(el->pointedFrom);
     TORCH_INTERNAL_ASSERT(!pointedFrom.empty());
     const auto wildcardValue = (*pointedFrom.begin())->value;
     TORCH_INTERNAL_ASSERT(wildcardValue);
@@ -1154,9 +1147,7 @@ void AliasDb::rebuildWriteCache() const {
     const auto& writtenValues = pr.second;
 
     for (const auto value : writtenValues) {
-      for (const auto loc : elementMap_.at(value)->getMemoryLocations()) {
-        writeCache_.insert(loc);
-      }
+      writeCache_ |= elementMap_.at(value)->getMemoryLocations();
     }
   }
   isWriteCacheStale_ = false;

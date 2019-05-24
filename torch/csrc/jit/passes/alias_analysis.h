@@ -213,7 +213,7 @@ class AliasDb {
   // Map of nodes to the values that they write to
   std::unordered_map<Node*, ValueSet> writeIndex_;
   // Set of all memory locations that may have been written to.
-  mutable std::unordered_set<const Element*> writeCache_;
+  mutable MemoryLocations writeCache_;
   mutable bool isWriteCacheStale_ = true;
   void rebuildWriteCache() const;
 };

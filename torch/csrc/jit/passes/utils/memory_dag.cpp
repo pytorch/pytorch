@@ -3,10 +3,26 @@
 #include <torch/csrc/utils/memory.h>
 #include <algorithm>
 #include <queue>
+#include <iostream>
 
 namespace torch {
 namespace jit {
+ska::flat_hash_map<const Element*, int> comprMap;
+ska::flat_hash_map<int, const Element*> decomprMap;
+int cnt = 0;
 
+int getCompressed(const Element* x) {
+  if (comprMap.count(x)) {
+    return comprMap[x];
+  }
+  comprMap[x] = ++cnt;
+  decomprMap[cnt] = x;
+  return comprMap[x];
+}
+const Element * getDecompressed(int x) {
+  assert(decomprMap.count(x));
+  return decomprMap[x];
+}
 bool MemoryDAG::mayAlias(Element* a, Element* b) const {
   return mayAliasImpl(a, b);
 }
@@ -16,20 +32,9 @@ bool MemoryDAG::mayAlias(const Element* a, const Element* b) const {
 }
 
 bool MemoryDAG::memoryLocationOverlap(
-    const std::unordered_set<const Element*>& aMemLoc,
-    const std::unordered_set<const Element*>& bMemLoc) const {
-  // XXX: This could be more efficiently done as a bitwise AND on two bitfields
-  // that represent memory location membership. If these comparisons end up
-  // being a bottleneck, consider implementing it that way.
-  for (const auto aLoc : aMemLoc) {
-    for (const auto bLoc : bMemLoc) {
-      if (aLoc == bLoc) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+    const MemoryLocations & aMemLoc,
+    const MemoryLocations & bMemLoc) const {
+  return aMemLoc.intersects(bMemLoc);
 }
 
 bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
@@ -49,26 +54,27 @@ bool MemoryDAG::mayContainAlias(Element* a, Element* b) const {
 
 void collectAllContainedMemoryLocations(
     const Element* elem,
-    std::unordered_set<const Element*>& cont) {
+    MemoryLocations & cont) {
   // we have already recursed on this element
-  if (cont.count(elem)) {
+  int compIdx = getCompressed(elem);
+  if (cont.test(compIdx)) {
     return;
   }
 
-  cont.insert(elem);
+  cont.set(compIdx);
 
   for (const auto& mem_loc : elem->getMemoryLocations()) {
-    collectAllContainedMemoryLocations(mem_loc, cont);
+    collectAllContainedMemoryLocations(getDecompressed(mem_loc), cont);
   }
 
   for (const auto& contained : elem->contained_elements) {
-    collectAllContainedMemoryLocations(contained, cont);
+    collectAllContainedMemoryLocations(getDecompressed(contained), cont);
   }
 }
 
 bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
-  std::unordered_set<const Element*> all_a_mlocs;
-  std::unordered_set<const Element*> all_b_mlocs;
+  MemoryLocations  all_a_mlocs;
+  MemoryLocations  all_b_mlocs;
 
   collectAllContainedMemoryLocations(a, all_a_mlocs);
   collectAllContainedMemoryLocations(b, all_b_mlocs);
@@ -83,12 +89,12 @@ bool MemoryDAG::mayContainAlias(
     return false;
   }
 
-  std::unordered_set<const Element*> all_a_mlocs;
+  MemoryLocations  all_a_mlocs;
   for (const auto& elem : a) {
     collectAllContainedMemoryLocations(elem, all_a_mlocs);
   }
 
-  std::unordered_set<const Element*> all_b_mlocs;
+  MemoryLocations  all_b_mlocs;
   for (const auto& elem : b) {
     collectAllContainedMemoryLocations(elem, all_b_mlocs);
   }
@@ -98,12 +104,12 @@ bool MemoryDAG::mayContainAlias(
 
 // Make `v` point at `to`.
 void MemoryDAG::makePointerTo(Element* from, Element* to) {
-  from->pointsTo.insert(to);
-  to->pointedFrom.insert(from);
+  from->pointsTo.set(getCompressed(to));
+  to->pointedFrom.set(getCompressed(from));
 }
 
 void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
-  container->contained_elements.insert(elem);
+  container->contained_elements.set(getCompressed(elem));
 }
 
 // Give `v` a fresh alias (i.e. it does not point to any value)
@@ -116,17 +122,24 @@ Element* MemoryDAG::makeFreshValue(const Value* v) {
   return rawPtr;
 }
 
-std::unordered_set<const Element*> Element::getMemoryLocations() const {
+TORCH_API std::unordered_set<const Element*> convert(MemoryLocations bits) {
+  std::unordered_set<const Element*> res;
+  for (auto i: bits) {
+    res.insert(getDecompressed(i));
+  }
+  return res;
+}
+MemoryLocations Element::getMemoryLocations() const {
   if (!cachedMemoryLocations_.empty()) {
     return cachedMemoryLocations_;
   }
 
   // Do a BFS in the `points-to` direction, collecting all memory locations
-  std::unordered_set<const Element*> ret;
+  MemoryLocations  ret;
   this->bfs(
       [&](const Element* el) {
         if (el->pointsTo.empty()) {
-          ret.insert(el);
+          ret.set(getCompressed(el));
         }
       },
       BfsDirection::POINTS_TO);
@@ -140,29 +153,28 @@ std::unordered_set<const Element*> Element::getMemoryLocations() const {
 template <typename Fn>
 bool Element::bfs(Fn fn, BfsDirection dir) const {
   std::queue<const Element*> queue;
-  std::unordered_set<const Element*> seen;
-
+  MemoryLocations  seen;
   queue.push(this);
   while (!queue.empty()) {
     const auto el = queue.front();
     queue.pop();
-    seen.insert(el);
+    seen.set(getCompressed(el));
 
     fn(el);
 
     switch (dir) {
       case BfsDirection::POINTS_TO: {
         for (auto ptr : el->pointsTo) {
-          if (!seen.count(ptr)) {
-            queue.push(ptr);
+          if (!seen.test(ptr)) {
+            queue.push(getDecompressed(ptr));
           }
         }
       } break;
 
       case BfsDirection::POINTED_FROM: {
         for (auto ptr : el->pointedFrom) {
-          if (!seen.count(ptr)) {
-            queue.push(ptr);
+          if (!seen.test(ptr)) {
+            queue.push(getDecompressed(ptr));
           }
         }
       } break;

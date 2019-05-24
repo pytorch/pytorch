@@ -5,9 +5,12 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <c10/util/flat_hash_map.h>
+#include <c10/util/sparse_bitset.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+typedef llvm::SparseBitVector<64> MemoryLocations;
 namespace torch {
 namespace jit {
 
@@ -70,12 +73,12 @@ class TORCH_API MemoryDAG {
     }
 
     // Record all memory locations from group `a`
-    std::unordered_set<const Element*> memoryLocations;
+    MemoryLocations  memoryLocations;
     for (auto it = a.cbegin(); it != a.cend();) {
       const auto element = *it;
 
       for (const auto loc : element->getMemoryLocations()) {
-        memoryLocations.insert(loc);
+        memoryLocations.set(loc);
       }
 
       const auto cnt = a.count(*it);
@@ -86,10 +89,8 @@ class TORCH_API MemoryDAG {
     for (auto it = b.cbegin(); it != b.cend();) {
       const auto element = *it;
 
-      for (const auto loc : element->getMemoryLocations()) {
-        if (memoryLocations.count(loc)) {
-          return true;
-        }
+      if (memoryLocations.intersects(element->getMemoryLocations())) {
+        return true;
       }
 
       const auto cnt = b.count(*it);
@@ -101,8 +102,8 @@ class TORCH_API MemoryDAG {
 
  private:
   bool memoryLocationOverlap(
-      const std::unordered_set<const Element*>& a,
-      const std::unordered_set<const Element*>& b) const;
+      const MemoryLocations & a,
+      const MemoryLocations & b) const;
   bool mayAliasImpl(const Element* a, const Element* b) const;
   bool mayContainAliasImpl(const Element* contained, const Element* container)
       const;
@@ -116,6 +117,7 @@ enum class BfsDirection {
   POINTED_FROM,
 };
 
+std::unordered_set<const Element*> convert(MemoryLocations bits);
 // `Element` represents the vertex in the points-to graph. It represents
 // anything that could have an aliasing relationship, mostly IR `Value`s, but
 // also the "inside of a list", or wildcards.
@@ -126,18 +128,18 @@ struct Element {
 
   // All elements that this element *may* point to. It's possible to have
   // multiple elements that you might point to due to control flow/complex ops
-  std::unordered_set<Element*> pointsTo;
+  MemoryLocations  pointsTo;
   // Backreference for points-to.
-  std::unordered_set<Element*> pointedFrom;
+  MemoryLocations  pointedFrom;
 
-  std::unordered_set<Element*> contained_elements;
+  MemoryLocations  contained_elements;
 
   // Return the unique memory locations that `Element` might represent.
-  TORCH_API std::unordered_set<const Element*> getMemoryLocations() const;
+  TORCH_API MemoryLocations getMemoryLocations() const;
   // We do path compression to make repeated memory location queries faster.
   // An empty cache means it is invalidated (it can never be empty otherwise,
   // since every element must point to at least one memory location).
-  mutable std::unordered_set<const Element*> cachedMemoryLocations_;
+  mutable MemoryLocations  cachedMemoryLocations_;
 
   // Do a breadth-first search over the graph, starting at `this` and
   // traversing in the direction `dir`.`fn` will be run on each element.
