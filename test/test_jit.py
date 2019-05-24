@@ -12983,6 +12983,16 @@ a")
         y = torch.randn(3, 6)
         self.checkScript(split_two, [(x + y)])
 
+    def test_conv_error(self):
+        @torch.jit.script
+        def fn(x, y):
+            return F.conv2d(x, y)
+
+        try:
+            fn(torch.ones(2, 2), torch.ones(4, 4))
+        except RuntimeError as e:
+            self.assertFalse('frame' in str(e))
+
     def test_python_op_name(self):
         import random
 
