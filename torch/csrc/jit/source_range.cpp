@@ -44,8 +44,7 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
 
   if (source_->filename()) {
     auto col_offset = (int)start() -
-        (int)source_->offset_for_line(source_->lineno_for_offset(start())) +
-        source_->leading_whitespace_chars();
+        (int)source_->offset_for_line(source_->lineno_for_offset(start()));
     out << "at " << *source_->filename() << ":"
         << source_->source_lineno_for_offset(start()) << ":" << col_offset
         << "\n";

@@ -5,62 +5,12 @@ import ast
 import inspect
 import re
 import string
+from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import *
 
 # Borrowed from cPython implementation 
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411# 
-
-_whitespace_only_re = re.compile('^[ \t]+$', re.MULTILINE)
-_leading_whitespace_re = re.compile('(^[ \t]*)(?:[^ \t\n])', re.MULTILINE)
-
-def _dedent(text):
-    """Remove any common leading whitespace from every line in `text`.
-    This can be used to make triple-quoted strings line up with the left
-    edge of the display, while still presenting them in the source code
-    in indented form.
-    Note that tabs and spaces are both treated as whitespace, but they
-    are not equal: the lines "  hello" and "\\thello" are
-    considered to have no common leading whitespace.  (This behaviour is
-    new in Python 2.5; older versions of this module incorrectly
-    expanded tabs before searching for common leading whitespace.)
-    """
-    # Look for the longest leading string of spaces and tabs common to
-    # all lines.
-    margin = None
-    text = _whitespace_only_re.sub('', text)
-    indents = _leading_whitespace_re.findall(text)
-    for indent in indents:
-        if margin is None:
-            margin = indent
-
-        # Current line more deeply indented than previous winner:
-        # no change (previous winner is still on top).
-        elif indent.startswith(margin):
-            pass
-
-        # Current line consistent with and no deeper than previous winner:
-        # it's the new winner.
-        elif margin.startswith(indent):
-            margin = indent
-
-        # Find the largest common whitespace between current line and previous
-        # winner.
-        else:
-            for i, (x, y) in enumerate(zip(margin, indent)):
-                if x != y:
-                    margin = margin[:i]
-                    break
-
-    # sanity check (testing/debugging only)
-    if 0 and margin:
-        for line in text.split("\n"):
-            assert not line or line.startswith(margin), \
-                   "line = %r, margin = %r" % (line, margin)
-
-    if margin:
-        text = re.sub(r'(?m)^' + margin, '', text)
-    return text, len(margin) if margin else 0
 
 _reserved_prefix = '__jit'
 _reserved_names = {'print'}
@@ -197,20 +147,23 @@ def get_jit_class_def(cls, self_name):
                    self_name=self_name) for method in methods]
 
     sourcelines, file_lineno = inspect.getsourcelines(cls)
-    source, leading_whitespace_len = _dedent(''.join(sourcelines))
+    source = ''.join(sourcelines)
     filename = inspect.getsourcefile(cls)
-    py_ast = ast.parse(source)
+    py_ast = ast.parse(dedent(source))
+    leading_whitespace_len = len(source.split('\n', 1)) - len(source.split('\n', 1))
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
     return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 
 
 def get_jit_def(fn, self_name=None):
     sourcelines, file_lineno = inspect.getsourcelines(fn)
-    source, leading_whitespace_len = _dedent(''.join(sourcelines))
+    source = ''.join(sourcelines)
     filename = inspect.getsourcefile(fn)
-    py_ast = ast.parse(source)
+    dedent_src = dedent(source)
+    py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
+    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
     return build_def(ctx, py_ast.body[0], type_line, self_name)

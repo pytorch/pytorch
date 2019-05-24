@@ -22,17 +22,21 @@ struct SourceRangeFactory {
       : source_(std::make_shared<Source>(
             std::move(text),
             std::move(filename),
-            file_lineno,
-            leading_whitespace_chars)) {}
+            file_lineno)),
+        leading_whitespace_chars_(leading_whitespace_chars) {}
   SourceRange create(int line, int start_col, int end_col) {
     size_t start_byte_offset, end_byte_offset;
     std::tie(start_byte_offset, end_byte_offset) =
-        source_->line_col_to_byte_offs(line, start_col, end_col);
+        source_->line_col_to_byte_offs(
+            line,
+            start_col + leading_whitespace_chars_,
+            end_col + leading_whitespace_chars_);
     return SourceRange(source_, start_byte_offset, end_byte_offset);
   }
 
   std::shared_ptr<Source> source_;
   std::vector<size_t> line_len_prefix_sum_;
+  size_t leading_whitespace_chars_;
 };
 
 template <typename T>
