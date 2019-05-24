@@ -24,21 +24,17 @@ class QFCUnpackWeightInt8 final : public c10::OperatorKernel {
     int64_t K = static_cast<int64_t>(packB->numRows());
 
     float weight_scale_float = pack_ptr.w_scale;
-    int32_t weight_zero_point_int32 = pack_ptr.w_zp + 128;
-
-    std::vector<int8_t> weight_int8(K * N);
-    int8_t* weight_ptr_int8 = weight_int8.data();
+    int32_t weight_zero_point_int32 = pack_ptr.w_zp;
 
     auto weight_origin = _empty_affine_quantized(
         {N, K},
-        at::device(kCPU).dtype(kQUInt8),
+        at::device(kCPU).dtype(kQInt8),
         weight_scale_float,
         weight_zero_point_int32);
-    uint8_t* weight_ptr_uint8 =
-        reinterpret_cast<uint8_t*>(weight_origin.data<c10::quint8>());
+    int8_t* weight_ptr_int8 =
+        reinterpret_cast<int8_t*>(weight_origin.data<c10::qint8>());
 
     packB->unpack(weight_ptr_int8);
-    convert_int8_uint8(K, N, weight_ptr_int8, weight_ptr_uint8);
 
     return weight_origin;
   }
@@ -56,9 +52,8 @@ class QFCUnpackWeightInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_linear_unpack(Tensor W_prepack) -> Tensor W_origin",
-    c10::RegisterOperators::options()
-    .kernel<QFCUnpackWeightInt8>()
-    .dispatchKey(CPUTensorId()));
+    c10::RegisterOperators::options().kernel<QFCUnpackWeightInt8>().dispatchKey(
+        CPUTensorId()));
 
 } // namespace
 } // namespace native

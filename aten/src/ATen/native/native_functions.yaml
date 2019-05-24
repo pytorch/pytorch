@@ -221,9 +221,6 @@
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   variants: function, method
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: as_strided_tensorimpl
     CUDA: as_strided_tensorimpl
@@ -456,28 +453,8 @@
   variants: method
   device_guard: False
 
-- func: s_copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  dispatch:
-    CPU: _s_copy__cpu
-    CUDA: _s_copy__cuda
-    QuantizedCPU: _s_copy__quantized
-
-- func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  dispatch:
-    CUDA: _s_copy_from_cuda
-
-- func: _copy_same_type_(Tensor(a!) self, Tensor src) -> void
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  dispatch:
-    CPU: _copy_same_type__cpu
+- func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
+  dispatch: {}
 
 - func: cos(Tensor self) -> Tensor
   variants: function, method
@@ -696,9 +673,6 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
 - func: empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
@@ -711,9 +685,6 @@
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   variants: method
-  cpu_bool: True
-  cuda_bool: True
-  cpu_half: True
   device_guard: False
   dispatch:
     CPU: resize_cpu_
@@ -729,9 +700,6 @@
   device_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
@@ -1413,7 +1381,7 @@
 
 - func: poisson_nll_loss(Tensor input, Tensor target, bool log_input, bool full, float eps, int reduction) -> Tensor
   variants: function
-  
+
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1625,12 +1593,17 @@
 
 - func: sigmoid(Tensor self) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: sigmoid
+    CUDA: sigmoid
+    MkldnnCPU: mkldnn_sigmoid
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
     CPU: _sigmoid__cpu
     CUDA: _sigmoid__cuda
+    MkldnnCPU: mkldnn_sigmoid_
 
 - func: sigmoid(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2143,9 +2116,6 @@
 
 - func: clone(Tensor self) -> Tensor
   variants: function, method
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: clone
     CUDA: clone
@@ -2154,9 +2124,6 @@
     MkldnnCPU: mkldnn_clone
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
-  cpu_bool: True
-  cuda_bool: True
-  cpu_half: True
   variants: function, method
   dispatch:
     CPU: resize_as_
@@ -2181,9 +2148,6 @@
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   variants: method, function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: zero_
     CUDA: zero_
@@ -2538,14 +2502,12 @@
   variants: function, method
 
 - func: to_sparse(Tensor self, int sparse_dim) -> Tensor
-  cpu_half: True
   variants: method
   dispatch:
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
 
 - func: to_sparse(Tensor self) -> Tensor
-  cpu_half: True
   variants: method
   dispatch:
     CPU: dense_to_sparse
@@ -2574,6 +2536,11 @@
   dispatch:
     QuantizedCPU: dequantize_quant
 
+- func: dequantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: dequantize_linear_cpu
+
 - func: q_scale(Tensor self) -> Scalar
   variants: function, method
   dispatch:
@@ -2588,6 +2555,10 @@
   variants: function, method
   dispatch:
     QuantizedCPU: int_repr_quant
+
+- func: _per_tensor_affine_qtensor(Tensor self, float scale, int zero_point) -> Tensor
+  dispatch:
+    CPU: per_tensor_affine_qtensor_cpu
 
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
@@ -2620,12 +2591,7 @@
   variants: method
 
 # NB: Does NOT check precondition that numel == 1
-# WARNING: Use of cpu_half here is generally not supported; please
-# don't use it.
 - func: _local_scalar_dense(Tensor self) -> Scalar
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
@@ -2716,8 +2682,6 @@
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
-  cpu_bool: True
-  cuda_bool: True
   device_guard: False
 
 - func: masked_fill_(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
@@ -2739,9 +2703,6 @@
   variants: function, method
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
   variants: method
   device_guard: False
 
@@ -2959,12 +2920,27 @@
 
 - func: random_(Tensor(a!) self, int from, int to, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  cpu_bool: True
+  cuda_bool: True
+  dispatch:
+    CPU: clamped_random_cpu_
+    CUDA: clamped_random_cuda_
 
 - func: random_(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  cpu_bool: True
+  cuda_bool: True
+  dispatch:
+    CPU: capped_random_cpu_
+    CUDA: capped_random_cuda_
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  cpu_bool: True
+  cuda_bool: True
+  dispatch:
+    CPU: random_cpu_
+    CUDA: random_cuda_
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
@@ -3836,18 +3812,30 @@
     CUDA: fractional_max_pool3d_backward_cuda
 
 # Return: (Tensor output, Tensor indices)
-- func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+- func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: max_pool2d_with_indices_out_cpu
+    CUDA: max_pool2d_with_indices_out_cuda
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
   python_module: nn
+  dispatch:
+    CPU: max_pool2d_with_indices_cpu
+    CUDA: max_pool2d_with_indices_cuda
 
 - func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: max_pool2d_with_indices_backward_out_cpu
+    CUDA: max_pool2d_with_indices_backward_out_cuda
 
 - func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: max_pool2d_with_indices_backward_cpu
+    CUDA: max_pool2d_with_indices_backward_cuda
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))

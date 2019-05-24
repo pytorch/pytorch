@@ -662,25 +662,57 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
-@parse_args('v', 'is')
 def upsample_nearest2d(g, input, output_size):
-    height_scale = float(output_size[-2]) / input.type().sizes()[-2]
-    width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-    scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
-                                                    width_scale]))
+    output_size = sym_help._maybe_get_const(output_size, 'is')
+    if sym_help._is_value(output_size):
+        offset = 2
+        input_length = len(input.type().sizes())
+        offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
+        dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        divisor = g.op(
+            "Slice",
+            g.op("Shape", input),
+            axes_i=[0], 
+            ends_i=[input_length],
+            starts_i=[offset]
+        )
+        divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        scale_dims = g.op("Div", dividend, divisor)
+        scales = g.op("Concat", offsets, scale_dims, axis_i=0)
+    else:
+        height_scale = float(output_size[-2]) / input.type().sizes()[-2]
+        width_scale = float(output_size[-1]) / input.type().sizes()[-1]
+        scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale, width_scale]))
 
-    return g.op("Upsample", input, scales,
-                mode_s="nearest")
+    return g.op("Upsample", input, scales, mode_s="nearest")
 
 
-@parse_args('v', 'is', 'i')
 def upsample_bilinear2d(g, input, output_size, align_corners):
+    align_corners = sym_help._maybe_get_scalar(align_corners)
     if align_corners:
         return _unimplemented("upsample_bilinear2d", "align_corners == True")
-    height_scale = float(output_size[-2]) / input.type().sizes()[-2]
-    width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-    scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
-                                                    width_scale]))
+
+    output_size = sym_help._maybe_get_const(output_size, 'is')
+    if sym_help._is_value(output_size):
+        offset = 2
+        input_length = len(input.type().sizes())
+        offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
+        dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        divisor = g.op(
+            "Slice",
+            g.op("Shape", input),
+            axes_i=[0], 
+            ends_i=[input_length],
+            starts_i=[offset]
+        )
+        divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        scale_dims = g.op("Div", dividend, divisor)
+        scales = g.op("Concat", offsets, scale_dims, axis_i=0)
+    else:
+        height_scale = float(output_size[-2]) / input.type().sizes()[-2]
+        width_scale = float(output_size[-1]) / input.type().sizes()[-1]
+        scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
+                                                        width_scale]))
     return g.op("Upsample", input, scales,
                 mode_s="linear")
 
@@ -1540,6 +1572,24 @@ def argmin(g, input, dim, keepdim):
         dim = _parse_arg(dim, 'i')
         keepdim = _parse_arg(keepdim, 'i')
         return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def scatter(g, self, dim, index, src):
+    return g.op("Scatter", self, index, src, axis_i=dim)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def scatter_add(g, self, dim, index, src):
+    if self.type().kind() != "CompleteTensorType":
+        return _unimplemented("scatter_add", "input size not accesible")
+    dtype = self.type().scalarType()
+    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    dims = self.type().sizes()
+    to_add = torch.zeros(dims)
+    to_add = g.op("Constant", value_t=to_add)
+    to_add = scatter(g, to_add, dim, index, src)
+    return add(g, self, to_add)
 
 
 def log2(g, self):

@@ -121,7 +121,7 @@ static std::unique_ptr<TensorIterator> make_reduction(
   // check that result type and dtype match if provided
   for (const Tensor *t: {&result1, &result2}) {
     const Tensor& result = *t;
-    AT_CHECK(
+    TORCH_CHECK(
         !result.defined() || result.type().scalarType() == dtype,
         name, ": provided dtype must match dtype of result. Got ",
         toString(result.type().scalarType()),
@@ -648,10 +648,10 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
 
 static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            fname, " only support CPU and CUDA backend, got: ", toString(self.type().backend()));
-  AT_CHECK(at::isFloatingType(self.type().scalarType()), fname, " only support floating-point dtypes");
-  AT_CHECK(result1.type().scalarType() == result2.type().scalarType(),
+  TORCH_CHECK(at::isFloatingType(self.type().scalarType()), fname, " only support floating-point dtypes");
+  TORCH_CHECK(result1.type().scalarType() == result2.type().scalarType(),
            "provided by result1 dtype must match dtype of result2. Got ",
            toString(result1.type().scalarType()),
            " and ",
