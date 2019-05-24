@@ -243,7 +243,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.1.0a0'
+version = '1.2.0a0'
 sha = 'Unknown'
 
 try:
