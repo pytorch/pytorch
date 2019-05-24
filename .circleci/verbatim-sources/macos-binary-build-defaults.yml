@@ -7,11 +7,8 @@ binary_mac_build: &binary_mac_build
   macos:
     xcode: "9.0"
   steps:
-  # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
   - attach_workspace:
       at: ~/workspace
-  - run:
-      <<: *should_run_job
   - run:
       <<: *binary_checkout
   - run:
@@ -47,11 +44,8 @@ binary_mac_upload: &binary_mac_upload
   macos:
     xcode: "9.0"
   steps:
-  # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
   - attach_workspace:
       at: ~/workspace
-  - run:
-      <<: *should_run_job
   - run:
       <<: *binary_checkout
   - run:

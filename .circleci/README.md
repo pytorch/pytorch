@@ -1,23 +1,3 @@
-Structure of CI
-===============
-
-setup job:
-1. Does a git checkout
-2. Persists CircleCI scripts (everything in `.circleci`) into a workspace.  Why?
-   We don't always do a Git checkout on all subjobs, but we usually
-   still want to be able to call scripts one way or another in a subjob.
-   Persisting files this way lets us have access to them without doing a
-   checkout.  This workspace is conventionally mounted on `~/workspace`
-   (this is distinguished from `~/project`, which is the conventional
-   working directory that CircleCI will default to starting your jobs
-   in.)
-3. Write out the commit message to `.circleci/COMMIT_MSG`.  This is so
-   we can determine in subjobs if we should actually run the jobs or
-   not, even if there isn't a Git checkout.
-
-
-
-
 CircleCI configuration generator
 ================================
 

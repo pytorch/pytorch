@@ -4,11 +4,8 @@
 binary_linux_build: &binary_linux_build
   resource_class: 2xlarge+
   steps:
-  # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
   - attach_workspace:
       at: ~/workspace
-  - run:
-      <<: *should_run_job
   - run:
       <<: *binary_checkout
   - run:
@@ -57,14 +54,10 @@ binary_linux_test: &binary_linux_test
   machine:
     image: ubuntu-1604:201903-01
   steps:
-  # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
   - attach_workspace:
       at: ~/workspace
-  # TODO: We shouldn't attach the workspace multiple times
   - attach_workspace:
       at: /home/circleci/project
-  - run:
-      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
   - run:
@@ -84,11 +77,8 @@ binary_linux_upload: &binary_linux_upload
   machine:
     image: ubuntu-1604:201903-01
   steps:
-  # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
   - attach_workspace:
       at: ~/workspace
-  - run:
-      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
   - run:
