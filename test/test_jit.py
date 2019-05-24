@@ -11362,7 +11362,7 @@ a")
             raise 3 + 4
 
         # no control flow analysis yet
-        with self.assertRaisesRegex(RuntimeError, "undefined value a"):
+        with self.assertRaisesRegex(RuntimeError, "a is not defined in the false"):
             @torch.jit.script
             def foo():
                 if True:
