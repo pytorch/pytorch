@@ -49,6 +49,7 @@ Quantizer* quantizer(const Tensor& self) {
 
 Tensor int_repr_quant(const Tensor& self) {
   Tensor dst;
+  // TODO: replace with TensorIterator
   auto self_c = self.contiguous();
   AT_DISPATCH_QINT_TYPES(
       self.scalar_type(), "int_repr", [&]() {

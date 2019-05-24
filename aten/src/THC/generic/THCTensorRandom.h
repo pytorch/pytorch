@@ -17,9 +17,6 @@ THC_API void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor 
 
 #endif
 
-THC_API void THCTensor_(random)(struct THCState *state, THCTensor *self);
-THC_API void THCTensor_(clampedRandom)(struct THCState *state, THCTensor *self, int64_t min, int64_t max);
-THC_API void THCTensor_(cappedRandom)(struct THCState *state, THCTensor *self, int64_t max);
 THC_API void THCTensor_(geometric)(struct THCState *state, THCTensor *self, double p);
 
 #endif
