@@ -3240,8 +3240,7 @@ class TestNN(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     def test_multihead_attention(self):
-        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, src_lengths=None, 
-                                 attn_mask=None, add_zero_attn=False):
+        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, key_padding_mask=None):
             """ Numpy-based reference implementation of scaled dot attention
             for testing"""
 
@@ -3257,9 +3256,9 @@ class TestNN(NNTestCase):
                     for j in range(b2):
                         for m in range(s1):
                             for n in range(s2):
-                                if unseen_mask[m][n] == 0:
+                                if unseen_mask is not None and unseen_mask[m][n] == 0:
                                     QKT[i, j, m, n] = -np.inf
-                                if src_lengths is not None and n >= src_lengths[i]:
+                                if key_padding_mask is not None and key_padding_mask[i][n]:
                                     QKT[i, j, m, n] = -np.inf
 
             reference = _softmax(QKT)
@@ -3291,17 +3290,6 @@ class TestNN(NNTestCase):
                         e_x = np.exp(x_curr - np.amax(x_curr))
                         output[i, j, k, :] = e_x / np.sum(e_x)
             return output
-
-        def _generate_src_lengths(batch_size, seq_len):
-            src_lengths = np.array([random.randint(1, seq_len) for i in range(batch_size)])
-
-            # max source length has to equal seq_len, so randomly choose
-            # one example to have source length = seq_len
-            max_len_example_i = random.randint(0, batch_size - 1)
-            src_lengths[max_len_example_i] = seq_len
-
-            src_lengths_tensor = torch.from_numpy(src_lengths).int()
-            return src_lengths, src_lengths_tensor
 
         def _split_heads_ref(X, dims, nheads, d_head):
             X_split = np.reshape(X, dims[:2] + [nheads, d_head])
@@ -3357,12 +3345,12 @@ class TestNN(NNTestCase):
                     saved_v = np.random.rand(batch_sz * nheads, seq_len, d_head)
                     saved_v_tensor = torch.from_numpy(saved_v)
             
-                src_lengths = None
-                src_lengths_tensor = None
+                key_padding_mask = None
+                key_padding_mask_tensor = None
                 if add_key_padding_mask:
-                    src_lengths, src_lengths_tensor = _generate_src_lengths(
-                        batch_size=batch_sz, seq_len=seq_len
-                    )
+                    seq_mask = np.random.randint(0, 2, (1, seq_len))
+                    key_padding_mask = (np.repeat(seq_mask, batch_sz, axis=0) == 1)
+                    key_padding_mask_tensor = torch.from_numpy(key_padding_mask)
 
                 decoder_state = np.random.rand(batch_sz, d_model).astype(np.float64)
                 K = np.random.rand(*dims).astype(np.float64)
@@ -3392,14 +3380,7 @@ class TestNN(NNTestCase):
                 _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1)
                 _V = source_hid_tensor
                 _K = source_hid_tensor
-                src_len_mask = None
-                if src_lengths is not None and add_key_padding_mask:
-                    # [batch_size, 1, seq_len]
-                    src_len_mask_int = _create_src_lengths_mask(
-                        batch_size=_batch_size, src_lengths=src_lengths_tensor
-                    )
-                    src_len_mask = src_len_mask_int != 1
-
+ 
                 result, result_weight = torch.nn.functional.multi_head_attention_forward(
                     _Q, _K, _V,
                     d_model, nheads,
@@ -3408,7 +3389,7 @@ class TestNN(NNTestCase):
                     multihead_attn_module.bias_k, multihead_attn_module.bias_v,
                     multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
                     multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
-                    multihead_attn_module.training, src_len_mask, True, attn_mask_tensor,
+                    multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
                     saved_k=saved_k_tensor, saved_v=saved_v_tensor) 
 
                 result = result.squeeze(0).detach().numpy()
@@ -3420,7 +3401,10 @@ class TestNN(NNTestCase):
                 if add_bias_kv:
                     K_fc = np.concatenate((K_fc, np.repeat(bias_k, K_fc.shape[0], axis=0)), axis=1)
                     V_fc = np.concatenate((V_fc, np.repeat(bias_v, V_fc.shape[0], axis=0)), axis=1)
-                    attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
+                    if attn_mask is not None:
+                        attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
+                    if key_padding_mask is not None:
+                        key_padding_mask = np.concatenate((key_padding_mask, np.full((batch_sz, 1), False, dtype=bool)), axis=1)
                     dims[1] += 1
                 Q_split = _split_heads_ref(
                     Q_fc, [batch_sz, 1, d_model], nheads, d_head
@@ -3440,15 +3424,19 @@ class TestNN(NNTestCase):
                     dims[1] += 1
                     K_split = np.concatenate((K_split, np.zeros([K_split.shape[0], K_split.shape[1], 1, K_split.shape[3]])), axis=2)
                     V_split = np.concatenate((V_split, np.zeros([V_split.shape[0], V_split.shape[1], 1, V_split.shape[3]])), axis=2)
-                    attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
 
+                    if attn_mask is not None:
+                        attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
+
+                    if key_padding_mask is not None:
+                        key_padding_mask = np.concatenate((key_padding_mask, np.full((batch_sz, 1), False, dtype=bool)), axis=1)
                 attn_heads, ref_attn_weight = _scaled_dot_attn_ref(
                     Q=Q_split,
                     K=K_split,
                     V=V_split,
                     dims=Q_split.shape,
                     unseen_mask=attn_mask,
-                    src_lengths=src_lengths
+                    key_padding_mask=key_padding_mask 
                 )
                 combined_attn_heads = _combine_heads_ref(
                     X=attn_heads, dims=[batch_sz, 1], nheads=nheads, d_head=d_head
@@ -3481,8 +3469,15 @@ class TestNN(NNTestCase):
         def test_multihead_attn_saved_kv():
             _multihead_attn_test_helper(saved_kv=True)
 
-        def test_multihead_attn_all_arguments():
-            _multihead_attn_test_helper(add_bias_kv=True,
+        def test_multihead_attn_add_bias_kv_zero_attn():
+            _multihead_attn_test_helper(add_key_padding_mask=True, add_bias_kv=True,
+                                        add_zero_attn=True)
+
+        def test_multihead_attn_all_arguments1():
+            _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True, saved_kv=True)
+
+        def test_multihead_attn_all_arguments2():
+            _multihead_attn_test_helper(add_key_padding_mask=True, add_bias_kv=True,
                                         add_zero_attn=True, saved_kv=True)
 
         test_multihead_attn_add_zero_attn()  # Test MultiheadAttention with add_zero_attn
@@ -3490,7 +3485,10 @@ class TestNN(NNTestCase):
         test_multihead_attn_no_masking()   # Test MultiheadAttention without masking
         test_multihead_attn_key_padding_mask()  # Test MultiheadAttention with src lengths
         test_multihead_attn_saved_kv()  # Test MultiheadAttention with static kv.
-        test_multihead_attn_all_arguments()  # Test MultiheadAttention with all the argument.
+        test_multihead_attn_add_bias_kv_zero_attn() # Test MultiheadAttention with bias_kv and zero_attn.
+        test_multihead_attn_all_arguments1()  # Test MultiheadAttention with all the argument.
+        with self.assertRaisesRegex(AssertionError, "bias cannot be added to static key."):
+            test_multihead_attn_all_arguments2()  # Test MultiheadAttention with all the argument.
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)

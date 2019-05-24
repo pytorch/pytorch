@@ -3163,18 +3163,22 @@ def multi_head_attention_forward(query,                  # type: Tensor
     q *= scaling
 
     if bias_k is not None and bias_v is not None:
-        k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
-        v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
-        if attn_mask is not None:
-            attn_mask = torch.cat([attn_mask,
-                                  torch.zeros((attn_mask.size(0), 1),
-                                              dtype=attn_mask.dtype,
-                                              device=attn_mask.device)], dim=1)
-        if key_padding_mask is not None:
-            key_padding_mask = torch.cat(
-                [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
-                                               dtype=key_padding_mask.dtype,
-                                               device=key_padding_mask.device)], dim=1)
+        if saved_k is None and saved_v is None:
+            k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+            v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
+            if attn_mask is not None:
+                attn_mask = torch.cat([attn_mask,
+                                      torch.zeros((attn_mask.size(0), 1),
+                                                  dtype=attn_mask.dtype,
+                                                  device=attn_mask.device)], dim=1)
+            if key_padding_mask is not None:
+                key_padding_mask = torch.cat(
+                    [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
+                                                   dtype=key_padding_mask.dtype,
+                                                   device=key_padding_mask.device)], dim=1)
+        else:
+            assert saved_k is None, "bias cannot be added to static key."
+            assert saved_v is None, "bias cannot be added to static value."
     else:
         assert bias_k is None
         assert bias_v is None
