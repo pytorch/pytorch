@@ -124,8 +124,7 @@ def replicate(network, devices, detach=False):
                 # it works with pybind11
                 replica = _init_script_module()
 
-                attribute_names = set(entry[0] for entry in
-                        module._c._get_attributes())
+                attribute_names = set(entry[0] for entry in module._c._get_attributes())
 
                 keys = set(module.__dict__.keys()) - scriptmodule_skip_attr - attribute_names
                 for key in keys:
