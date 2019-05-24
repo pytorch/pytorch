@@ -1129,6 +1129,11 @@ const std::vector<std::string> functions = {
                 mask.bernoulli_(p1m)
                 res = mask * input / p1m
 
+            if not train:
+                p1m = 1.
+                res = input
+                mask = torch.ones_like(input)
+
             def backward(grad_output):
                 use_cuda = grad_output.is_cuda
                 if use_cuda:

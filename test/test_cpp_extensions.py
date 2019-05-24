@@ -670,7 +670,7 @@ class TestMSNPUTensor(common.TestCase):
         d = c.sum()
         self.assertEqual(msnpu_extension.get_test_int(), 2)
 
-        d.backward()
+        d.backward(torch.zeros(0, device='msnpu'))
         self.assertEqual(msnpu_extension.get_test_int(), 4)
 
 
