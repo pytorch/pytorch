@@ -11570,6 +11570,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(t2, t1)
         b = torch.randn(10)
         self.assertEqual(b, b.T)
+        scalar = torch.tensor(5)
+        self.assertEqual(scalar, scalar.T)
 
 # Functions to test negative dimension wrapping
 METHOD = 1
