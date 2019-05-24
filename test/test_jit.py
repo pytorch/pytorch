@@ -12440,12 +12440,13 @@ a")
         class MyModule(torch.jit.ScriptModule):
             def __init__(self, embed_dim, num_heads):
                 super(MyModule, self).__init__()
-                sample_inp = torch.randn(3, 2, embed_dim)
+                sample_q = torch.randn(3, 2, embed_dim)
+                sample_kv = torch.randn(3, 2, embed_dim)
                 attention = nn.MultiheadAttention(embed_dim, num_heads)
                 attention.eval()
 
                 self.mod = torch.jit.trace(attention,
-                                           (sample_inp, sample_inp, sample_inp))
+                                           (sample_q, sample_kv, sample_kv))
 
             @torch.jit.script_method
             def forward(self, q, k, v):
@@ -12457,11 +12458,10 @@ a")
         bs = 2
         model = MyModule(embed_dim, num_heads).cuda()
         q = torch.randn(sl, bs, embed_dim, device="cuda")
-        k = torch.randn(sl, bs, embed_dim, device="cuda")
-        v = torch.randn(sl, bs, embed_dim, device="cuda")
+        kv = torch.randn(sl, bs, embed_dim, device="cuda")
 
-        jit_out = model(q, k, v)[0]
-        py_out = torch.nn.functional.multi_head_attention_forward(q, k, v,
+        jit_out = model(q, kv, kv)[0]
+        py_out = torch.nn.functional.multi_head_attention_forward(q, kv, kv,
                                                                   embed_dim, num_heads,
                                                                   model.mod.in_proj_weight,
                                                                   model.mod.in_proj_bias,
