@@ -1319,8 +1319,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   virtual void update_strides_to_format(MemoryFormat memory_format) {
-    TORCH_CHECK(!is_variable()); // TODO: remove this when Variable and Tensor are
-                               // merged
     switch (memory_format) {
       case MemoryFormat::Any:
       case MemoryFormat::Contiguous: {
