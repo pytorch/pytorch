@@ -223,17 +223,20 @@ that are not explicitly written.
 
 The expression must be emitted within the conditional; assigning
 a ``None`` check to a variable and using it in the conditional will not refine types.
+An attribute like `self.x` will not be refined, but assigning `self.x` to a local
+variable first will work.
 
 
 Example::
 
-  @torch.jit.script
-  def optional_unwrap(x, y, z):
-    # type: (Optional[int], Optional[int], Optional[int]) -> int
+  @torch.jit.script_method
+  def optional_unwrap(self, x, y):
+    # type: (Optional[int], Optional[int]) -> int
     if x is None:
       x = 1
     x = x + 1
 
+    z = self.z
     if y is not None and z is not None:
       x = y + z
     return x
@@ -1105,8 +1108,8 @@ Q: I would like to trace module's method but I keep getting this error:
 ``RuntimeError: Cannot insert a Tensor that requires grad as a constant. Consider making it a parameter or input, or detaching the gradient``
 
     This error usually means that, the method you are tracing, uses module's parameters and
-    you are passing module's method instead of a module instance (e.g. ``my_module_instance.forward`` vs ``my_module_instance``). 
-      - Invoking ``trace`` with module's method captures module parameters (which may require gradients) as **constants**. 
+    you are passing module's method instead of a module instance (e.g. ``my_module_instance.forward`` vs ``my_module_instance``).
+      - Invoking ``trace`` with module's method captures module parameters (which may require gradients) as **constants**.
       - On the other hand, invoking ``trace`` with module's instance (e.g. ``my_module``) creates a new module and correctly copies parameters into the new module, so they can accumulate gradients if required.
     Given that ``trace`` treats ``my_module_instance.forward`` as a standalone function, it also means there is **not** currently a way to trace
     arbitrary methods in the module except for ``forward`` that use module's parameters.
@@ -1128,7 +1131,7 @@ Q: I would like to trace module's method but I keep getting this error:
         n = Net()
         inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
         module = torch.jit.trace_module(n, inputs)
-        
+
 
 Builtin Functions
 ~~~~~~~~~~~~~~~~~
