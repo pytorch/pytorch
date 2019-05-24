@@ -193,7 +193,6 @@ def process_definition(defn, declarations_by_signature, declarations_by_schema):
     if not schema_declaration:
         avail = [k.replace('aten::', '') for k, v in declarations_by_schema.items()
                  if k.replace('aten::', '').startswith(defn_name + '(') and len(v) > 0]
-        print(declarations_by_schema.keys())
         raise RuntimeError('could not find ATen declaration for schema: {} '
                            '.  Available signatures:\n{}'.format(specification, '\n'.join(avail)))
 
