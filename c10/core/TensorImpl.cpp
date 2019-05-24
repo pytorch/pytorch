@@ -48,12 +48,8 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
       data_type_(data_type),
       device_opt_(device_opt),
       type_id_(type_id) {
-  if (type_id != UndefinedTensorId()) {
-    AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
-              device_opt_.has_value());
-    // UndefinedTensorImpl is a singleton, so we skip logging it
-    C10_LOG_API_USAGE_ONCE("tensor.create");
-  }
+  AT_ASSERT(type_id == UndefinedTensorId() || data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
+            device_opt_.has_value());
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
   // Storages with default devices.
   strides_.push_back(1);
