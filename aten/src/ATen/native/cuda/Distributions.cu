@@ -505,17 +505,22 @@ void cauchy_kernel_cuda(TensorIterator& iter, double median_, double sigma_, Gen
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto median = static_cast<accscalar_t>(median_);
     auto sigma = static_cast<accscalar_t>(sigma_);
-    // define lambda for cauchy transformation
-    auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
-      return static_cast<scalar_t>(median + sigma * 
-              ::tan(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
-    };
     if (std::is_same<scalar_t, double>::value) {
+      // define lambda for cauchy transformation
+      auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(median + sigma * 
+                ::tan(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
+      };
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
         gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
         cauchy_func);
     } else {
+      // use __tanf fast approximation for peak bandwidth
+      auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(median + sigma * 
+                __tanf(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
+      };
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
         gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
@@ -529,16 +534,20 @@ void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* ge
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "exponential_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto lambda = static_cast<accscalar_t>(lambda_);
-    // define lambda for exponential transformation
-    auto exponential_func = [lambda] __device__ (accscalar_t rand) {
-      return static_cast<scalar_t>(static_cast<scalar_t>(-1.0) / lambda * ::log(rand));
-    };
     if (std::is_same<scalar_t, double>::value) {
+      // define lambda for exponential transformation
+      auto exponential_func = [lambda] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(static_cast<scalar_t>(-1.0) / lambda * ::log(rand));
+      };
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
         gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
         exponential_func);
     } else {
+      // use __logf fast approximation for peak bandwidth
+      auto exponential_func = [lambda] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(static_cast<scalar_t>(-1.0) / lambda * __logf(rand));
+      };
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
         gen,
         [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
@@ -553,24 +562,24 @@ void log_normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Gen
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto mean = static_cast<accscalar_t>(mean_);
     auto std = static_cast<accscalar_t>(std_);
-    // nothing to transform since utilizing curand_log_normal
-    auto dummy_func = [] __device__ (accscalar_t rand) {
-      return static_cast<scalar_t>(rand);
-    };
     if (std::is_same<scalar_t, double>::value) {
+      // define lambda for log_normal transformation
+      auto log_normal_func = [mean, std] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(::exp(rand * std + mean));
+      };
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
         gen,
-        [mean, std] __device__ (curandStatePhilox4_32_10_t* state) {
-          return curand_log_normal2_double(state, mean, std);
-        },
-        dummy_func);
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal2_double(state); },
+        log_normal_func);
     } else {
+      auto log_normal_func = [mean, std] __device__ (accscalar_t rand) {
+        // use __expf fast approximation for peak bandwidth
+        return static_cast<scalar_t>(__expf(rand * std + mean));
+      };
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
         gen,
-        [mean, std] __device__ (curandStatePhilox4_32_10_t* state) {
-          return curand_log_normal4(state, mean, std);
-        },
-        dummy_func);
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal4(state); },
+        log_normal_func);
     }
    });
 }
