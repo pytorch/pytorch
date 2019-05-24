@@ -1517,6 +1517,7 @@ int listSlice(Stack& stack) {
   int64_t end;
   int64_t step;
 
+  std::cout << "in listSlice\n";
   pop(stack, list, start, end, step);
   const int64_t list_size = list->elements().size();
 

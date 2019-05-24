@@ -2630,20 +2630,35 @@ struct to_ir {
       AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
     }
 
+
+
     args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0))));
     const auto has_end = slice.end().present();
     if (has_end) {
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
+
     if (input->type()->cast<TupleType>()) {
+
+      auto has_step = slice.step().present();
+
+      // TODO: add support for slicing tuples
+      if (has_step)
+      {
+        throw ErrorReport(loc) << "Unsupported operation: slicing tuples isn't supported";
+      }
+
       if (has_end) {
         return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2]);
       } else {
         return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
       }
     }
+
+
+    auto stride = emitExpr(Expr(slice.stepOr(1)));
     NamedValue step =
-        NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
+        NamedValue(loc, "step", stride);
     return emitBuiltinCall(
         loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }

@@ -830,6 +830,9 @@ struct SliceExpr : public Expr {
   Maybe<Expr> end() const {
     return Maybe<Expr>(subtree(1));
   }
+  Maybe<Expr> step() const {
+    return Maybe<Expr>(subtree(2));
+  }
   Expr startOr(int alternative) const {
     const auto startOption = start();
     return startOption.present() ? startOption.get() : createInt(alternative);
@@ -838,11 +841,16 @@ struct SliceExpr : public Expr {
     const auto endOption = end();
     return endOption.present() ? endOption.get() : createInt(alternative);
   }
+  Expr stepOr(int alternative) const {
+    const auto stepOption = step();
+    return stepOption.present() ? stepOption.get() : createInt(alternative);
+  }
   static SliceExpr create(
       const SourceRange& range,
       const Maybe<Expr>& start,
-      const Maybe<Expr>& end) {
-    return SliceExpr(Compound::create(TK_SLICE_EXPR, range, {start, end}));
+      const Maybe<Expr>& end,
+      const Maybe<Expr>& step) {
+    return SliceExpr(Compound::create(TK_SLICE_EXPR, range, {start, end, step}));
   }
 
  private:
