@@ -2651,7 +2651,6 @@ struct to_ir {
       }
     }
 
-
     auto stride = emitExpr(Expr(slice.stepOr(1)));
     NamedValue step =
         NamedValue(loc, "step", stride);
