@@ -3314,18 +3314,9 @@ class TestNN(NNTestCase):
             reference = np.reshape(X_transposed, dims[:2] + [nheads * d_head])
             return reference
 
-        def _fc(X, X_name, module, start=None, end=None):
-            X_fc_b = None
-            X_fc_w = None
-            for name, param in module.named_parameters():
-                if X_name + "weight" in name:
-                    if X_fc_w is not None:
-                        raise Exception("Duplicate FC name found")
-                    X_fc_w = param[start:end, :].detach().numpy()
-                elif X_name + "bias" in name:
-                    if X_fc_b is not None:
-                        raise Exception("Duplicate FC name found")
-                    X_fc_b = param[start:end].detach().numpy()
+        def _fc(X, X_weight, X_bias):
+            X_fc_b = X_bias.detach().numpy()
+            X_fc_w = X_weight.detach().numpy()
             return np.matmul(X, np.transpose(X_fc_w)) + X_fc_b
 
         def _create_src_lengths_mask(batch_size, src_lengths):
@@ -3352,7 +3343,8 @@ class TestNN(NNTestCase):
                 d_head = random.randint(3, 10)
                 nheads = random.randint(3, 10)
                 d_model = d_head * nheads
-                dims = [batch_sz, seq_len, d_model]
+                kv_dim = random.randint(5, 20)
+                dims = [batch_sz, seq_len, kv_dim]
 
                 src_lengths = None
                 src_lengths_tensor = None
@@ -3374,7 +3366,7 @@ class TestNN(NNTestCase):
                 decoder_state_tensor = torch.from_numpy(decoder_state).double()
                 source_hid_tensor = torch.from_numpy(K).double().transpose(0, 1)
 
-                multihead_attn_module = MultiheadAttention(d_model, nheads, 
+                multihead_attn_module = MultiheadAttention(d_model, nheads, kdim=kv_dim, vdim=kv_dim, 
                                                            add_bias_kv=add_bias_kv,
                                                            add_zero_attn=add_zero_attn)
 
@@ -3400,7 +3392,8 @@ class TestNN(NNTestCase):
                 result, result_weight = torch.nn.functional.multi_head_attention_forward(
                     _Q, _K, _V,
                     d_model, nheads,
-                    multihead_attn_module.in_proj_weight, multihead_attn_module.in_proj_bias,
+                    multihead_attn_module.q_proj_weight, multihead_attn_module.k_proj_weight,
+                    multihead_attn_module.v_proj_weight, multihead_attn_module.in_proj_bias,
                     multihead_attn_module.bias_k, multihead_attn_module.bias_v,
                     multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
                     multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
@@ -3408,11 +3401,9 @@ class TestNN(NNTestCase):
 
                 result = result.squeeze(0).detach().numpy()
 
-                Q_fc = _fc(Q, "in_proj_", multihead_attn_module, end=d_model)
-                K_fc = _fc(
-                    K, "in_proj_", multihead_attn_module, start=d_model, end=2 * d_model
-                )
-                V_fc = _fc(V, "in_proj_", multihead_attn_module, start=2 * d_model)
+                Q_fc = _fc(Q, multihead_attn_module.q_proj_weight, multihead_attn_module.in_proj_bias[:d_model])
+                K_fc = _fc(K, multihead_attn_module.k_proj_weight, multihead_attn_module.in_proj_bias[d_model:(d_model * 2)])
+                V_fc = _fc(V, multihead_attn_module.v_proj_weight, multihead_attn_module.in_proj_bias[(d_model * 2):])
 
                 if add_bias_kv:
                     K_fc = np.concatenate((K_fc, np.repeat(bias_k, K_fc.shape[0], axis=0)), axis=1)
@@ -3443,9 +3434,7 @@ class TestNN(NNTestCase):
                     X=attn_heads, dims=[batch_sz, 1], nheads=nheads, d_head=d_head
                 )
 
-                reference = _fc(
-                    combined_attn_heads, "out_proj.", multihead_attn_module
-                )
+                reference = _fc(combined_attn_heads, multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias)
                 reference = np.squeeze(reference, axis=1)
 
                 # result = reference

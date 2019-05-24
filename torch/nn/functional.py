@@ -3085,7 +3085,9 @@ def multi_head_attention_forward(query,                  # type: Tensor
                                  value,                  # type: Tensor
                                  embed_dim_to_check,     # type: int
                                  num_heads,              # type: int
-                                 in_proj_weight,         # type: Tensor
+                                 q_proj_weight,       # type: Tensor
+                                 k_proj_weight,          # type: Tensor
+                                 v_proj_weight,          # type: Tensor
                                  in_proj_bias,           # type: Tensor
                                  bias_k,                 # type: Optional[Tensor]
                                  bias_v,                 # type: Optional[Tensor]
@@ -3148,58 +3150,9 @@ def multi_head_attention_forward(query,                  # type: Tensor
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = head_dim ** -0.5
 
-    if qkv_same:
-        # self-attention
-        q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
-
-    elif kv_same:
-        # encoder-decoder attention
-        _b = in_proj_bias
-        _start = 0
-        _end = embed_dim
-        _w = in_proj_weight[_start:_end, :]
-        if _b is not None:
-            _b = _b[_start:_end]
-        q = linear(query, _w, _b)
-
-        if key is None:
-            assert value is None
-            k = None
-            v = None
-        else:
-
-            _b = in_proj_bias
-            _start = embed_dim
-            _end = None
-            _w = in_proj_weight[_start:, :]
-            if _b is not None:
-                _b = _b[_start:]
-            k, v = linear(key, _w, _b).chunk(2, dim=-1)
-
-    else:
-        _b = in_proj_bias
-        _start = 0
-        _end = embed_dim
-        _w = in_proj_weight[_start:_end, :]
-        if _b is not None:
-            _b = _b[_start:_end]
-        q = linear(query, _w, _b)
-
-        _b = in_proj_bias
-        _start = embed_dim
-        _end = embed_dim * 2
-        _w = in_proj_weight[_start:_end, :]
-        if _b is not None:
-            _b = _b[_start:_end]
-        k = linear(key, _w, _b)
-
-        _b = in_proj_bias
-        _start = embed_dim * 2
-        _end = None
-        _w = in_proj_weight[_start:, :]
-        if _b is not None:
-            _b = _b[_start:]
-        v = linear(value, _w, _b)
+    q = linear(query, q_proj_weight, in_proj_bias[0:embed_dim])
+    k = linear(key, k_proj_weight, in_proj_bias[embed_dim:(embed_dim * 2)])
+    v = linear(value, v_proj_weight, in_proj_bias[(embed_dim * 2):])
     q *= scaling
 
     if bias_k is not None and bias_v is not None:
