@@ -1000,7 +1000,7 @@ ALL_QINT_AND_NP_TYPES = (
     (torch.qint32, np.int32, 0),  # We enforce zero_point = 0 for this case.
 )
 
-"""Generates test cases for quantized tensors.
+"""Strategy for generating test cases for quantized tensors.
 The resulting tensor is in float32 format.
 
 Args:
