@@ -2113,15 +2113,15 @@ class TestCuda(TestCase):
         torch.sum(x, 0)
 
     def test_sum_cpu_gpu_mismatch(self):
-        x = torch.randn(20, dtype=torch.float32, device='cuda')
+        x = torch.randn(20, dtype=torch.float32, device='cuda:0')
         y = torch.randn(1, dtype=torch.float32)
         with self.assertRaisesRegex(RuntimeError,
-                                    'expected backend CPU and dtype Float but got backend CUDA and dtype Float'):
+                                    'expected device cpu and dtype Float but got device cuda:0 and dtype Float'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
         # makeing sure half to float promotion is also properly working.
         x = x.half()
         with self.assertRaisesRegex(RuntimeError,
-                                    'expected backend CPU and dtype Float but got backend CUDA and dtype Half'):
+                                    'expected device cpu and dtype Float but got device cuda:0 and dtype Half'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
 
     @skipIfRocm
