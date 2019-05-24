@@ -77,10 +77,12 @@ const THNVRTC& nvrtc() {
 }
 
 // We're using three CUDA APIs, so define a few helpers for error handling
+// Note: As of CUDA 10, nvrtc error code 7, NVRTC_ERROR_BULTIN_OPERATION_FAILURE, incorrectly produces the error string
+// "NVRTC unknown error."  
 static inline void nvrtcCheck(nvrtcResult result, const char* file, int line) {
   if (result != NVRTC_SUCCESS) {
     std::stringstream ss;
-    ss << file << ":" << line << ": " << nvrtc().nvrtcGetErrorString(result);
+    ss << file << ":" << line << ": " << nvrtc().nvrtcGetErrorString(result) << ", nvrtc error code: " << static_cast<int>(result);
     throw std::runtime_error(ss.str());
   }
 }
