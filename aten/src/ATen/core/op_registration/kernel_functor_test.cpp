@@ -14,8 +14,8 @@ using c10::guts::make_unique;
 using c10::ivalue::TensorList;
 using c10::ivalue::IntList;
 using c10::intrusive_ptr;
-using c10::ArrayRef;
-using c10::Dict;
+using c10::DictPtr;
+using c10::make_dict;
 using at::Tensor;
 using std::unique_ptr;
 using std::string;
@@ -227,11 +227,11 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListOutput_w
 }
 
 struct KernelWithMultipleOutputs final : OperatorKernel {
-  std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> operator()(Tensor) {
-    Dict<string, Tensor> dict;
+  std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>> operator()(Tensor) {
+    DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
     dict.insert("first", dummyTensor(TensorType1()));
     dict.insert("second", dummyTensor(TensorType2()));
-    return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
+    return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>>(
       dummyTensor(TensorType2()),
       5,
       {dummyTensor(TensorType1()), dummyTensor(TensorType2())},
@@ -398,7 +398,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntInput_withOu
 int64_t captured_input_list_size = 0;
 
 struct KernelWithIntListInputWithoutOutput final : OperatorKernel {
-  void operator()(Tensor, ArrayRef<int64_t> input1) {
+  void operator()(Tensor, const std::vector<int64_t>& input1) {
     captured_input_list_size = input1.size();
   }
 };
@@ -417,7 +417,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_wi
 }
 
 struct KernelWithIntListInputWithOutput final : OperatorKernel {
-  int64_t operator()(Tensor, ArrayRef<int64_t> input1) {
+  int64_t operator()(Tensor, const std::vector<int64_t>& input1) {
     return input1.size();
   }
 };
@@ -435,7 +435,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_wi
 }
 
 struct KernelWithTensorListInputWithoutOutput final : OperatorKernel {
-  void operator()(ArrayRef<Tensor> input1) {
+  void operator()(const std::vector<Tensor>& input1) {
     captured_input_list_size = input1.size();
   }
 };
@@ -454,7 +454,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
 }
 
 struct KernelWithTensorListInputWithOutput final : OperatorKernel {
-  int64_t operator()(ArrayRef<Tensor> input1) {
+  int64_t operator()(const std::vector<Tensor>& input1) {
     return input1.size();
   }
 };
@@ -474,7 +474,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
 int captured_dict_size = 0;
 
 struct KernelWithDictInputWithoutOutput final : OperatorKernel {
-  void operator()(Dict<string, Tensor> input1) {
+  void operator()(DictPtr<string, Tensor> input1) {
     captured_dict_size = input1.size();
   }
 };
@@ -487,7 +487,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_witho
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
-  Dict<string, Tensor> dict;
+  DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
   dict.insert("key1", dummyTensor(TensorType1()));
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
@@ -496,7 +496,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_witho
 }
 
 struct KernelWithDictInputWithOutput final : OperatorKernel {
-  string operator()(Dict<string, string> input1) {
+  string operator()(DictPtr<string, string> input1) {
     return input1.at("key2");
   }
 };
@@ -508,7 +508,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_withO
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
   ASSERT_TRUE(op.has_value());
 
-  Dict<string, string> dict;
+  DictPtr<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -517,7 +517,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_withO
 }
 
 struct KernelWithDictOutput final : OperatorKernel {
-  Dict<string, string> operator()(Dict<string, string> input) {
+  DictPtr<string, string> operator()(DictPtr<string, string> input) {
     return input;
   }
 };
@@ -529,7 +529,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictOutput_when
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
   ASSERT_TRUE(op.has_value());
 
-  Dict<string, string> dict;
+  DictPtr<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -788,7 +788,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_
 }
 
 struct KernelForSchemaInference final : OperatorKernel {
-  std::tuple<int64_t, Tensor> operator()(Tensor arg1, int64_t arg2, ArrayRef<Tensor> arg3) {
+  std::tuple<int64_t, Tensor> operator()(Tensor arg1, int64_t arg2, const std::vector<Tensor>& arg3) {
     return {};
   }
 };

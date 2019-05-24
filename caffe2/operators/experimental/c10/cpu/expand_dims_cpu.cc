@@ -14,12 +14,12 @@ class expand_dims_cpu final : public c10::OperatorKernel {
   void operator()(
       const at::Tensor& input_,
       const at::Tensor& output_,
-      ArrayRef<int64_t> dims) {
+      std::vector<int64_t> dims) {
     Tensor input(input_);
     Tensor output(output_);
 
     if (!initialized_) {
-      dims_ = dims.vec();
+      dims_ = std::move(dims);
       auto originalSize = dims_.size();
       CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
       std::sort(dims_.begin(), dims_.end());

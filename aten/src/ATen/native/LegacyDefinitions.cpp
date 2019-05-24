@@ -9,7 +9,7 @@ namespace at { namespace native {
 // Methods
 
 void* data_ptr(const Tensor & self) {
-  return self.unsafeGetTensorImpl()->slow_data();
+  return self.unsafeGetTensorImpl()->data();
 }
 
 Tensor & set_(Tensor& self, Storage source) {
@@ -237,15 +237,15 @@ Tensor & addcdiv_(Tensor& self, const Tensor & tensor1, const Tensor & tensor2, 
   return at::legacy::th::_th_addcdiv_(self, tensor1, tensor2, value);
 }
 
-Tensor & random_(Tensor& self, int64_t from, int64_t to, Generator * generator) {
+Tensor & clamped_random_cpu_(Tensor& self, int64_t from, int64_t to, Generator * generator) {
   return at::legacy::th::_th_random_(self, from, to, generator);
 }
 
-Tensor & random_(Tensor& self, int64_t to, Generator * generator) {
+Tensor & capped_random_cpu_(Tensor& self, int64_t to, Generator * generator) {
   return at::legacy::th::_th_random_(self, to, generator);
 }
 
-Tensor & random_(Tensor& self, Generator * generator) {
+Tensor & random_cpu_(Tensor& self, Generator * generator) {
   return at::legacy::th::_th_random_(self, generator);
 }
 
@@ -405,10 +405,10 @@ Tensor & masked_select_out(Tensor & result, const Tensor & self, const Tensor & 
 
 Tensor masked_select(const Tensor & self, const Tensor & mask) {
   if (mask.dtype() == at::ScalarType::Byte) {
-  return at::legacy::th::_th_masked_select(self, mask);
-} else {
-  return at::legacy::th::_th_masked_select_bool(self, mask);
-}
+    return at::legacy::th::_th_masked_select(self, mask);
+  } else {
+    return at::legacy::th::_th_masked_select_bool(self, mask);
+  }
 }
 
 Tensor & nonzero_out(Tensor & result, const Tensor & self) {

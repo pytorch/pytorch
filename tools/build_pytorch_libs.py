@@ -137,11 +137,10 @@ def run_cmake(version,
     if USE_NINJA:
         cmake_args.append('-GNinja')
     elif IS_WINDOWS:
+        cmake_args.append('-GVisual Studio 15 2017')
         if IS_64BIT:
-            cmake_args.append('-GVisual Studio 15 2017 Win64')
+            cmake_args.append('-Ax64')
             cmake_args.append('-Thost=x64')
-        else:
-            cmake_args.append('-GVisual Studio 15 2017')
     try:
         import numpy as np
         NUMPY_INCLUDE_DIR = np.get_include()
@@ -211,6 +210,7 @@ def run_cmake(version,
         USE_REDIS=os.getenv('USE_REDIS'),
         USE_GLOG=os.getenv('USE_GLOG'),
         USE_GFLAGS=os.getenv('USE_GFLAGS'),
+        USE_ASAN=check_env_flag('USE_ASAN'),
         WERROR=os.getenv('WERROR'))
 
     if os.getenv('_GLIBCXX_USE_CXX11_ABI'):
@@ -225,6 +225,10 @@ def run_cmake(version,
     mkldnn_threading = os.getenv('MKLDNN_THREADING')
     if mkldnn_threading:
         cmake_defines(cmake_args, MKLDNN_THREADING=mkldnn_threading)
+
+    parallel_backend = os.getenv('PARALLEL_BACKEND')
+    if parallel_backend:
+        cmake_defines(cmake_args, PARALLEL_BACKEND=parallel_backend)
 
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")

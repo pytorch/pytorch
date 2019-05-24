@@ -45,10 +45,10 @@ void filler_init(
 
 template <class Type, class Context>
 void given_tensor_fill_op_cpu_impl(
-    ArrayRef<at::Tensor> inputs,
+    std::vector<at::Tensor> inputs,
     const at::Tensor& output_,
-    ArrayRef<int64_t> shape,
-    ArrayRef<int64_t> extra_shape,
+    std::vector<int64_t> shape,
+    std::vector<int64_t> extra_shape,
     bool input_as_shape,
     const at::Tensor& values_) {
   Tensor output(output_);
@@ -70,10 +70,10 @@ void given_tensor_fill_op_cpu_impl(
 }
 
 void constant_fill_op_cpu_impl(
-    ArrayRef<at::Tensor> inputs,
+    std::vector<at::Tensor> inputs,
     const at::Tensor& output_,
-    ArrayRef<int64_t> shape,
-    ArrayRef<int64_t> extra_shape,
+    std::vector<int64_t> shape,
+    std::vector<int64_t> extra_shape,
     bool input_as_shape,
     int64_t dtype,
     c10::Scalar value) {
@@ -110,10 +110,10 @@ void constant_fill_op_cpu_impl(
 }
 
 void uniform_fill_op_cpu_impl(
-    ArrayRef<at::Tensor> inputs,
+    std::vector<at::Tensor> inputs,
     const at::Tensor& output_,
-    ArrayRef<int64_t> shape,
-    ArrayRef<int64_t> extra_shape,
+    std::vector<int64_t> shape,
+    std::vector<int64_t> extra_shape,
     bool input_as_shape,
     double min,
     double max) {
