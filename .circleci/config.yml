@@ -1009,7 +1009,7 @@ jobs:
           working_directory: .circleci
       - persist_to_workspace:
           root: .
-          paths: *
+          paths: .
 
   
   pytorch_short_perf_test_gpu:
