@@ -29,9 +29,7 @@ static inline bool isIntOrFloatUsedAsList(
 
 /// Returns true if `type` is a Tuple in which all the elements have the
 /// same type or if it's a subtype of `list_type_`.
-inline bool convertibleToList(
-    const TypePtr& type,
-    const TypePtr& list_type_) {
+inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   auto list_type = list_type_->cast<ListType>();
   if (!list_type) {
     return false;
@@ -119,7 +117,6 @@ Value* tryConvertToType(
 
   return value;
 }
-
 
 // Checks if `named_value` can be used as a value for `arg`. If `arg` is a
 // VarType, it will be added to the type_env through `matchTypeVariables` as
@@ -238,7 +235,7 @@ bool varargsCanBeUsedAsList(
     const Argument& arg) {
   // The arg must be the last one in the arg list that is not a kwarg
   bool is_last_argument = arg_index + 1 == schema.arguments().size() ||
-                          schema.arguments()[arg_index + 1].kwarg_only();
+      schema.arguments()[arg_index + 1].kwarg_only();
 
   // The formal must be a list
   bool argument_is_list = arg.type()->kind() == TypeKind::ListType;
@@ -286,8 +283,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
         auto value = args[used_args].value(graph);
         auto actual_type = value->type();
         // The actual cannot already be a list
-        auto is_iterable = actual_type->kind() == TypeKind::ListType || actual_type->kind() == TypeKind::TupleType;
-        if (!is_iterable &&
+        if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(actual_type, unwrapOptional(arg.type()))) {
           auto formal_type =
               unwrapOptional(arg.type())->expect<ListType>()->getElementType();
@@ -309,7 +305,8 @@ c10::optional<MatchedSchema> tryMatchSchema(
         }
       }
 
-      // Set actual_named_value to the argument and mark the arg position as used
+      // Set actual_named_value to the argument and mark the arg position as
+      // used
       actual_named_value = args[used_args];
       used_args++;
     } else if (auto kwarg_idx = findInputWithName(arg.name(), kwargs)) {
