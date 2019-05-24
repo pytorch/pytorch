@@ -7,11 +7,6 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
   macos:
     xcode: "9.0"
   steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
     - checkout
     - run:
         <<: *macos_brew_update

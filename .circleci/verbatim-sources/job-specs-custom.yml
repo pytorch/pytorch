@@ -1,3 +1,4 @@
+  
   pytorch_short_perf_test_gpu:
     environment:
       BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
@@ -8,11 +9,8 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - attach_workspace:
         at: ~/workspace
-    - run:
-        <<: *should_run_job
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -46,11 +44,8 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - attach_workspace:
         at: ~/workspace
-    - run:
-        <<: *should_run_job
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -93,21 +88,16 @@
           docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
 
   pytorch_macos_10_13_py3_build:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
     macos:
       xcode: "9.0"
     steps:
-      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - attach_workspace:
-          at: ~/workspace
-      - run:
-          <<: *should_run_job
       - checkout
       - run:
           <<: *macos_brew_update
       - run:
           name: Build
+          environment:
+            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
           no_output_timeout: "1h"
           command: |
             set -e
@@ -138,50 +128,44 @@
             - "*"
 
   pytorch_macos_10_13_py3_test:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
       xcode: "9.0"
     steps:
-      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      # This workspace also carries binaries from the build job
-      - attach_workspace:
-          at: ~/workspace
       - run:
-          <<: *should_run_job
+          name: Prepare workspace
+          command: |
+            sudo mkdir -p /Users/distiller/pytorch-ci-env
+            sudo chmod -R 777 /Users/distiller/pytorch-ci-env
+      - attach_workspace:
+          at: /Users/distiller/pytorch-ci-env
       - run:
           <<: *macos_brew_update
       - run:
           name: Test
+          environment:
+            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
           no_output_timeout: "1h"
           command: |
             set -e
             export IN_CIRCLECI=1
 
             # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
-            # TODO: I'm not sure why we can't just run our job in
-            # ~/workspace and call it a day
-            cp -a ~/workspace/. /Users/distiller/project
+            cp -a /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
 
   pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
     macos:
       xcode: "9.0"
     steps:
-      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - attach_workspace:
-          at: ~/workspace
-      - run:
-          <<: *should_run_job
       - checkout
       - run:
           <<: *macos_brew_update
       - run:
           name: Build
+          environment:
+            BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
           no_output_timeout: "1h"
           command: |
             set -e
@@ -217,3 +201,4 @@
             git submodule sync && git submodule update -q --init --recursive
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
+
