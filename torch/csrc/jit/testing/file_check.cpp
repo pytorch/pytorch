@@ -115,7 +115,8 @@ size_t assertFind(
     const std::string& sub,
     size_t start,
     const Check& check) {
-  return assertFind(SourceRange(source, start, source->text().size()), sub, check);
+  return assertFind(
+      SourceRange(source, start, source->text().size()), sub, check);
 }
 
 void assertNotFind(
@@ -189,9 +190,7 @@ struct FileCheckImpl {
   friend std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc);
 
  private:
-  bool parseSingleCheck(
-      std::shared_ptr<Source> source,
-      size_t* start) {
+  bool parseSingleCheck(std::shared_ptr<Source> source, size_t* start) {
     const static std::vector<std::pair<CheckType, std::string>> check_pairs = {
         {CHECK, ": "},
         {CHECK_NEXT, "-NEXT: "},
@@ -218,8 +217,8 @@ struct FileCheckImpl {
           exactly = true;
           end_check_string += exact.size();
         }
-        size_t end = assertFind(
-            SourceRange(source, end_check_string, end_line), ":");
+        size_t end =
+            assertFind(SourceRange(source, end_check_string, end_line), ":");
         count = std::stoll(
             source->text().substr(end_check_string, end - end_check_string));
         end_check_string = end + 2; // add ':' and the space
@@ -238,9 +237,7 @@ struct FileCheckImpl {
     return false;
   }
 
-  size_t findNextStart(
-      std::shared_ptr<Source> source,
-      size_t prev_end) {
+  size_t findNextStart(std::shared_ptr<Source> source, size_t prev_end) {
     size_t start = source->text().find("#", prev_end);
     if (start == std::string::npos) {
       return start;
@@ -333,8 +330,7 @@ struct FileCheckImpl {
 
     switch (check.type_) {
       case CHECK: {
-        start_range =
-            assertFind(source, check.search_str_, start_range, check);
+        start_range = assertFind(source, check.search_str_, start_range, check);
         end_range = start_range + check.search_str_.size();
       } break;
       case CHECK_SAME: {
@@ -345,8 +341,7 @@ struct FileCheckImpl {
       } break;
       case CHECK_NEXT: {
         auto line_end = assertFind(source, "\n", start_range, check);
-        auto pos =
-            assertFind(source, check.search_str_, line_end + 1, check);
+        auto pos = assertFind(source, check.search_str_, line_end + 1, check);
         assertNotFind(SourceRange(source, line_end + 1, pos), "\n", check);
         start_range = pos;
         end_range = pos + check.search_str_.size();

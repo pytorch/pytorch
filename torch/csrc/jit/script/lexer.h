@@ -496,7 +496,8 @@ struct Lexer {
             &length)) {
       expected(
           "a valid token",
-          Token((source->text())[start], SourceRange(source, start, start + 1)));
+          Token(
+              (source->text())[start], SourceRange(source, start, start + 1)));
     }
     auto t = Token(kind, SourceRange(source, start, start + length));
     pos = start + length;

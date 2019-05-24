@@ -16,17 +16,17 @@ namespace jit {
 //                       code segment started.
 struct Source {
   explicit Source(std::string text)
-    : text_(std::move(text)),
-      filename_(c10::nullopt) {
+      : text_(std::move(text)), filename_(c10::nullopt) {
     calc_line_start_offsets();
   }
 
-  Source(std::string text,
-         c10::optional<std::string> filename,
-         size_t starting_line_no)
-    : text_(std::move(text)),
-      filename_(std::move(filename)),
-      starting_line_no_(starting_line_no) {
+  Source(
+      std::string text,
+      c10::optional<std::string> filename,
+      size_t starting_line_no)
+      : text_(std::move(text)),
+        filename_(std::move(filename)),
+        starting_line_no_(starting_line_no) {
     calc_line_start_offsets();
   }
 
@@ -38,7 +38,11 @@ struct Source {
 
   // Calculate the line (within the code segment) on which `offset` resides.
   size_t lineno_for_offset(size_t offset) const {
-    return std::upper_bound(line_starting_offsets_.begin(), line_starting_offsets_.end(), offset) - line_starting_offsets_.begin() - 1;
+    return std::upper_bound(
+               line_starting_offsets_.begin(),
+               line_starting_offsets_.end(),
+               offset) -
+        line_starting_offsets_.begin() - 1;
   }
 
   // Calculate the line (within the original source file, if present) on which
@@ -52,7 +56,10 @@ struct Source {
     }
   }
 
-  std::tuple<size_t, size_t> line_col_to_byte_offs(int line, int start_col, int end_col) {
+  std::tuple<size_t, size_t> line_col_to_byte_offs(
+      int line,
+      int start_col,
+      int end_col) {
     // Python has a weird convention where col_offset points to the column
     // *before* the token starts.
     start_col++;
@@ -60,7 +67,8 @@ struct Source {
     // Also, lines are counted from 1.
     line--;
     auto line_start = line_starting_offsets_.at(line);
-    return std::make_tuple<size_t, size_t>(line_start + start_col, line_start + end_col);
+    return std::make_tuple<size_t, size_t>(
+        line_start + start_col, line_start + end_col);
   }
 
   const std::string& text() const {

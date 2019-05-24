@@ -15,11 +15,14 @@ namespace script {
 
 struct SourceRangeFactory {
   SourceRangeFactory(std::string text, std::string filename, size_t file_lineno)
-      : source_(std::make_shared<Source>(std::move(text), std::move(filename), file_lineno)) {
-  }
+      : source_(std::make_shared<Source>(
+            std::move(text),
+            std::move(filename),
+            file_lineno)) {}
   SourceRange create(int line, int start_col, int end_col) {
     size_t start_byte_offset, end_byte_offset;
-    std::tie(start_byte_offset, end_byte_offset) = source_->line_col_to_byte_offs(line, start_col, end_col);
+    std::tie(start_byte_offset, end_byte_offset) =
+        source_->line_col_to_byte_offs(line, start_col, end_col);
     return SourceRange(source_, start_byte_offset, end_byte_offset);
   }
 
