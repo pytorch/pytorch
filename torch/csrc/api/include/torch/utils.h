@@ -26,4 +26,10 @@ using at::get_num_threads;
 // Sets the number of threads to be used in parallel region.
 using at::set_num_threads;
 
+// Returns the number of threads used for inter-op parallelism.
+using at::get_num_interop_threads;
+
+// Sets the number of threads to be used for inter-op parallelism.
+using at::set_num_interop_threads;
+
 } // namespace torch

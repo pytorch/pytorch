@@ -106,8 +106,8 @@ class CAFFE2_API PyTorchStreamReader final {
 
   // return dataptr, size
   std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
-
   size_t getRecordOffset(const std::string& name);
+  bool hasFile(const std::string& name);
 
   ~PyTorchStreamReader();
 

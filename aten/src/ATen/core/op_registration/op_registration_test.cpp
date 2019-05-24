@@ -13,8 +13,6 @@
 
 using c10::RegisterOperators;
 using c10::OperatorKernel;
-using c10::kernel;
-using c10::dispatchKey;
 using c10::Dispatcher;
 using c10::IValue;
 using at::Tensor;
@@ -39,8 +37,8 @@ struct MockKernel final : OperatorKernel {
 private:
   bool* called_;
 };
-TEST(OperatorRegistrationTest, givenOpWithoutFallbackKernel_whenCallingOpWithWrongDispatchKey_thenFails) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
+TEST(OperatorRegistrationTest, whenCallingOpWithWrongDispatchKey_thenFails) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>().dispatchKey(TensorType1()));
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value());
@@ -49,110 +47,61 @@ TEST(OperatorRegistrationTest, givenOpWithoutFallbackKernel_whenCallingOpWithWro
   }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
 }
 
-TEST(OperatorRegistrationTest, givenOpWithFallbackKernelOutOfScope_whenCallingOpWithWrongDispatchKey_thenFails) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
-  {
-    auto inner_registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>());
-    // this registered a fallback kernel, but now that registration goes out of scope and deregisters it
-  }
+TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenCallingOp_thenCallsCatchallKernel) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called)); // note: no dispatch key means this is the catchall kernel
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value());
+  EXPECT_FALSE(called);
+  callOp(*op, dummyTensor(TensorType2()));
+  EXPECT_TRUE(called);
+}
+
+TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernel_thenFails) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called));
   expectThrows<c10::Error>([&] {
-    callOp(*op, dummyTensor(TensorType2()));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called).dispatchKey(TensorType1()));
+  }, "for an operator which already has a catch-all kernel registered");
 }
 
-TEST(OperatorRegistrationTest, givenOpWithOnlyFallbackKernel_whenCallingOp_thenCallsFallbackKernel) {
+TEST(OperatorRegistrationTest, givenOpWithDispatchedKernelOutOfScope_whenRegisteringCatchallKernelAndCallingOp_thenCallsCatchallKernel) {
   bool called = false;
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called)); // note: no dispatch key means this is the fallback kernel
-
-  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
-  ASSERT_TRUE(op.has_value());
-  EXPECT_FALSE(called);
-  callOp(*op, dummyTensor(TensorType2()));
-  EXPECT_TRUE(called);
-}
-
-TEST(OperatorRegistrationTest, givenOpWithOnlyFallbackKernelAndOtherKernelOutOfScope_whenCallingOp_thenCallsFallbackKernel) {
-  bool called = false;
-  bool other_called = false;
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called)); // note: no dispatch key means this is the fallback kernel
   {
-    auto inner_registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&other_called), dispatchKey(TensorType2()));
+    auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called).dispatchKey(TensorType1()));
   }
 
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called)); // note: no dispatch key means this is the catchall kernel
+
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value());
   EXPECT_FALSE(called);
   callOp(*op, dummyTensor(TensorType2()));
   EXPECT_TRUE(called);
-  EXPECT_FALSE(other_called);
 }
 
-TEST(OperatorRegistrationTest, givenOpWithFirstFallbackAndThenOtherKernel_whenCallingWithCorrectDispatchKey_thenCallsCorrectKernel) {
-  bool called_kernel = false;
-  bool called_fallback = false;
-  auto registrar = c10::RegisterOperators()
-    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_fallback)) // note: no dispatch key means this is the fallback kernel
-    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()));
+TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernel_thenFails) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called).dispatchKey(TensorType1()));
+  expectThrows<c10::Error>([&] {
+    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called)); // note: no dispatch key means this is the catchall kernel
+  }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys");
+}
+
+TEST(OperatorRegistrationTest, givenOpWithCatchallKernelOutOfScope_whenRegisteringDispatchedKernelAndCallingOp_thenCallsCatchallKernel) {
+  bool called = false;
+  {
+    auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called)); // note: no dispatch key means this is the catchall kernel
+  }
+
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called).dispatchKey(TensorType1()));
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value());
-  EXPECT_FALSE(called_kernel);
-  EXPECT_FALSE(called_fallback);
+  EXPECT_FALSE(called);
   callOp(*op, dummyTensor(TensorType1()));
-  EXPECT_TRUE(called_kernel);
-  EXPECT_FALSE(called_fallback);
-}
-
-TEST(OperatorRegistrationTest, givenOpWithFirstFallbackAndThenOtherKernel_whenCallingWithWrongDispatchKey_thenCallsFallbackKernel) {
-  bool called_kernel = false;
-  bool called_fallback = false;
-  auto registrar = c10::RegisterOperators()
-    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_fallback)) // note: no dispatch key means this is the fallback kernel
-    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()));
-
-  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
-  ASSERT_TRUE(op.has_value());
-  EXPECT_FALSE(called_kernel);
-  EXPECT_FALSE(called_fallback);
-  callOp(*op, dummyTensor(TensorType2()));
-  EXPECT_FALSE(called_kernel);
-  EXPECT_TRUE(called_fallback);
-}
-
-
-TEST(OperatorRegistrationTest, givenOpWithFirstOtherAndThenFallbackKernel_whenCallingWithCorrectDispatchKey_thenCallsCorrectKernel) {
-  bool called_kernel = false;
-  bool called_fallback = false;
-  auto registrar = c10::RegisterOperators()
-    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()))
-    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_fallback)); // note: no dispatch key means this is the fallback kernel
-
-  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
-  ASSERT_TRUE(op.has_value());
-  EXPECT_FALSE(called_kernel);
-  EXPECT_FALSE(called_fallback);
-  callOp(*op, dummyTensor(TensorType1()));
-  EXPECT_TRUE(called_kernel);
-  EXPECT_FALSE(called_fallback);
-}
-
-TEST(OperatorRegistrationTest, givenOpWithFirstOtherAndThenFallbackKernel_whenCallingWithWrongDispatchKey_thenCallsFallbackKernel) {
-  bool called_kernel = false;
-  bool called_fallback = false;
-  auto registrar = c10::RegisterOperators()
-    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()))
-    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_fallback)); // note: no dispatch key means this is the fallback kernel
-
-  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
-  ASSERT_TRUE(op.has_value());
-  EXPECT_FALSE(called_kernel);
-  EXPECT_FALSE(called_fallback);
-  callOp(*op, dummyTensor(TensorType2()));
-  EXPECT_FALSE(called_kernel);
-  EXPECT_TRUE(called_fallback);
+  EXPECT_TRUE(called);
 }
 
 TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegistering_thenOnlyRegistersSchema) {
@@ -178,7 +127,7 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterw
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
 
   bool called_kernel = false;
-  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel).dispatchKey(TensorType1()));
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -190,7 +139,7 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterw
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
 
   {
-    auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
+    auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>().dispatchKey(TensorType1()));
   }
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
@@ -201,32 +150,31 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterw
 }
 
 TEST(OperatorRegistrationTest, givenOpWithoutKernelsWithoutTensorInputs_whenRegistering_thenRegisters) {
-  // as long as we don't register non-fallback kernels, ops without tensor arguments are fine
-
+  // as long as we don't register non-catchall kernels, ops without tensor arguments are fine
   auto registrar = c10::RegisterOperators().op("_test::dummy() -> ()");
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value()); // assert schema is registered
 }
 
-TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenRegistering_thenShowsWarning) {
+TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenRegistering_thenShowsWarning) {
   auto registrar = c10::RegisterOperators()
-      .op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
+      .op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>().dispatchKey(TensorType1()));
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value()); // assert schema is registered
 
   testing::internal::CaptureStderr();
-  c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
+  c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>().dispatchKey(TensorType1()));
   std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_THAT(output, testing::HasSubstr("Registered a kernel that overwrote a previoulsy registered kernel with same dispatch key"));
+  EXPECT_THAT(output, testing::HasSubstr("that overwrote a previously registered kernel with the same dispatch key for the same operator"));
 }
 
-TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenCalled_thenCallsNewerKernel) {
+TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenCalled_thenCallsNewerKernel) {
   bool called_kernel1 = false;
   bool called_kernel2 = false;
-  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1), dispatchKey(TensorType1()));
-  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2), dispatchKey(TensorType1()));
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel1).dispatchKey(TensorType1()));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel2).dispatchKey(TensorType1()));
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -236,11 +184,24 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenCalled_thenCa
   EXPECT_TRUE(called_kernel2);
 }
 
-TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenCalled_thenCallsNewerKernel) {
+TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenCalled_thenShowsWarning) {
+  auto registrar = c10::RegisterOperators()
+      .op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>());
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  testing::internal::CaptureStderr();
+  c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>());
+  std::string output = testing::internal::GetCapturedStderr();
+  EXPECT_THAT(output, testing::HasSubstr("that overwrote a previously registered catch-all kernel for the same operator"));
+}
+
+TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenCalled_thenCallsNewerKernel) {
   bool called_kernel1 = false;
   bool called_kernel2 = false;
-  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1));
-  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2));
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel1));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel2));
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -250,11 +211,11 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenCalle
   EXPECT_TRUE(called_kernel2);
 }
 
-TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenNewerKernelDeletedAndOpCalled_thenCallsOlderKernel) {
+TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenNewerKernelDeletedAndOpCalled_thenCallsOlderKernel) {
   bool called_kernel1 = false;
   bool called_kernel2 = false;
-  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1), dispatchKey(TensorType1()));
-  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2), dispatchKey(TensorType1()));
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel1).dispatchKey(TensorType1()));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel2).dispatchKey(TensorType1()));
 
   registrar2 = c10::RegisterOperators(); // destruct the registrar
 
@@ -266,11 +227,11 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenNewerKernelDe
   EXPECT_FALSE(called_kernel2);
 }
 
-TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenNewerKernelDeletedAndOpCalled_thenCallsOlderKernel) {
+TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenNewerKernelDeletedAndOpCalled_thenCallsOlderKernel) {
   bool called_kernel1 = false;
   bool called_kernel2 = false;
-  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1));
-  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2));
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel1));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel2));
 
   registrar2 = c10::RegisterOperators(); // destruct the registrar
 
@@ -282,11 +243,11 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenNewer
   EXPECT_FALSE(called_kernel2);
 }
 
-TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenOlderKernelDeletedAndOpCalled_thenCallsNewerKernel) {
+TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenOlderKernelDeletedAndOpCalled_thenCallsNewerKernel) {
   bool called_kernel1 = false;
   bool called_kernel2 = false;
-  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1), dispatchKey(TensorType1()));
-  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2), dispatchKey(TensorType1()));
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel1).dispatchKey(TensorType1()));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel2).dispatchKey(TensorType1()));
 
   registrar1 = c10::RegisterOperators(); // destruct the registrar
 
@@ -298,11 +259,11 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenOlderKernelDe
   EXPECT_TRUE(called_kernel2);
 }
 
-TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenOlderKernelDeletedAndOpCalled_thenCallsNewerKernel) {
+TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenOlderKernelDeletedAndOpCalled_thenCallsNewerKernel) {
   bool called_kernel1 = false;
   bool called_kernel2 = false;
-  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1));
-  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2));
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel1));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel2));
 
   registrar1 = c10::RegisterOperators(); // destruct the registrar
 
@@ -314,12 +275,12 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenOlder
   EXPECT_TRUE(called_kernel2);
 }
 
-TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenOlderAndThenNewerKernelDeletedAndOpCalled_thenFails) {
+TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenOlderAndThenNewerKernelDeletedAndOpCalled_thenFails) {
   bool called_kernel1 = false;
   bool called_kernel2 = false;
   auto registrar0 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
-  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1), dispatchKey(TensorType1()));
-  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2), dispatchKey(TensorType1()));
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel1).dispatchKey(TensorType1()));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel2).dispatchKey(TensorType1()));
 
   registrar1 = c10::RegisterOperators(); // destruct the registrar
   registrar2 = c10::RegisterOperators(); // destruct the registrar
@@ -332,12 +293,12 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenOlderAndThenN
   }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
 }
 
-TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenOlderAndThenNewerKernelDeletedAndOpCalled_thenFails) {
+TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenOlderAndThenNewerKernelDeletedAndOpCalled_thenFails) {
   bool called_kernel1 = false;
   bool called_kernel2 = false;
   auto registrar0 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
-  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1));
-  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2));
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel1));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel2));
 
   registrar1 = c10::RegisterOperators(); // destruct the registrar
   registrar2 = c10::RegisterOperators(); // destruct the registrar
@@ -350,12 +311,12 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenOlder
   }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
 }
 
-TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenNewerAndThenOlderKernelDeletedAndOpCalled_thenFails) {
+TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenNewerAndThenOlderKernelDeletedAndOpCalled_thenFails) {
   bool called_kernel1 = false;
   bool called_kernel2 = false;
   auto registrar0 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
-  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1), dispatchKey(TensorType1()));
-  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2), dispatchKey(TensorType1()));
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel1).dispatchKey(TensorType1()));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel2).dispatchKey(TensorType1()));
 
   registrar2 = c10::RegisterOperators(); // destruct the registrar
   registrar1 = c10::RegisterOperators(); // destruct the registrar
@@ -368,12 +329,12 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameDispatchKey_whenNewerAndThenO
   }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
 }
 
-TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenNewerAndThenOlderKernelDeletedAndOpCalled_thenFails) {
+TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenNewerAndThenOlderKernelDeletedAndOpCalled_thenFails) {
   bool called_kernel1 = false;
   bool called_kernel2 = false;
   auto registrar0 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
-  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel1));
-  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel2));
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel1));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(&called_kernel2));
 
   registrar2 = c10::RegisterOperators(); // destruct the registrar
   registrar1 = c10::RegisterOperators(); // destruct the registrar
@@ -386,7 +347,23 @@ TEST(OperatorRegistrationTest, givenKernelsWithSameFallbackDispatchKey_whenNewer
   }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
 }
 
+TEST(OperatorRegistrationTest, whenTryingToRegisterWithMultipleKernels_thenFails) {
+  expectThrows<c10::Error>([&] {
+    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>().kernel<DummyKernel>());
+  }, "Cannot register multiple kernels in the same op() call");
+}
 
+TEST(OperatorRegistrationTest, whenTryingToRegisterWithMultipleDispatchKeys_thenFails) {
+  expectThrows<c10::Error>([&] {
+    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>().dispatchKey(TensorType1()).dispatchKey(TensorType2()));
+  }, "Cannot register multiple dispatch keys in the same op() call");
+}
+
+TEST(OperatorRegistrationTest, whenTryingToRegisterWithDispatchKeyWithoutKernel_thenFails) {
+  expectThrows<c10::Error>([&] {
+    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().dispatchKey(TensorType1()));
+  }, "Tried to register an operator with a dispatch key but without a kernel");
+}
 
 /**
  * This is used to check that a given type works correctly when passed as input
@@ -416,7 +393,7 @@ struct ArgTypeTestKernel final : OperatorKernel {
   }
 
   static void test(InputType input, std::function<void(const InputType&)> inputExpectation, OutputType output, std::function<void(const c10::Stack&)> outputExpectation, const std::string& schema) {
-    auto registry = c10::RegisterOperators().op("_test::my_op" + schema, kernel<ArgTypeTestKernel>(input, std::move(inputExpectation), std::move(output)));
+    auto registry = c10::RegisterOperators().op("_test::my_op" + schema, c10::RegisterOperators::options().kernel<ArgTypeTestKernel>(input, std::move(inputExpectation), std::move(output)));
     auto op = Dispatcher::singleton().findSchema("_test::my_op", "");
     ASSERT_TRUE(op.has_value()); // assert schema is registered
     auto actualOutput = callOp(*op, std::move(input));
@@ -551,43 +528,51 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
 
   // list types (with empty list)
-  testArgTypes<c10::ArrayRef<double>, std::vector<double>>::test(
-    c10::ArrayRef<double>(), [] (c10::ArrayRef<double> v) {EXPECT_EQ(0, v.size());},
+  testArgTypes<std::vector<double>>::test(
+    std::vector<double>(), [] (const std::vector<double>& v) {EXPECT_EQ(0, v.size());},
     std::vector<double>(), [] (const IValue& v) {EXPECT_EQ(0, v.toDoubleListRef().size());},
     "(float[] a) -> float[]");
-  testArgTypes<c10::ArrayRef<int64_t>, std::vector<int64_t>>::test(
-    c10::ArrayRef<int64_t>(), [] (c10::ArrayRef<int64_t> v) {EXPECT_EQ(0, v.size());},
+  testArgTypes<std::vector<int64_t>, std::vector<int64_t>>::test(
+    std::vector<int64_t>(), [] (const std::vector<int64_t>& v) {EXPECT_EQ(0, v.size());},
     std::vector<int64_t>(), [] (const IValue& v) {EXPECT_EQ(0, v.toIntListRef().size());},
     "(int[] a) -> int[]");
-  // TODO Converting std::vector<bool> to ArrayRef<bool> doesn't work, so we
-  //      need to find an alternative
-  // testArgTypes<c10::ArrayRef<bool>, std::vector<bool>>::test(
-  //   c10::ArrayRef<bool>(), [] (c10::ArrayRef<bool> v) {EXPECT_EQ(0, v.size());},
-  //   std::vector<bool>(), [] (const IValue& v) {EXPECT_EQ(0, v.toBoolListRef().size());},
-  //   "(bool[] a) -> bool[]");
-  // testArgTypes<c10::ArrayRef<bool>, std::vector<bool>>::test(
-  //   c10::ArrayRef<bool>(), [] (c10::ArrayRef<bool> v) {EXPECT_EQ(0, v.size());},
-  //   std::vector<bool>(), [] (const IValue& v) {EXPECT_EQ(0, v.toBoolListRef().size());},
-  //   "(bool[] a) -> bool[]");
-  // TODO We currently don't support str[] (i.e. string list) as type. Do we want to?
-  // testArgTypes<c10::ArrayRef<std::string>, std::vector<std::string>>::test(
-  //   c10::ArrayRef<std::string>(), [] (c10::ArrayRef<std::string> v) {EXPECT_EQ(0, v.size());},
-  //   std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toStringListRef().size());},
-  //   "(str[] a) -> str[]");
+  testArgTypes<std::vector<bool>>::test(
+    std::vector<bool>(), [] (const std::vector<bool>& v) {EXPECT_EQ(0, v.size());},
+    std::vector<bool>(), [] (const IValue& v) {EXPECT_EQ(0, v.toBoolListRef().size());},
+    "(bool[] a) -> bool[]");
+  testArgTypes<std::vector<std::string>>::test(
+    std::vector<std::string>(), [] (const std::vector<std::string>& v) {EXPECT_EQ(0, v.size());},
+    std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
+    "(str[] a) -> str[]");
+  testArgTypes<std::vector<Tensor>>::test(
+    std::vector<Tensor>({}), [] (const std::vector<Tensor>& v) {EXPECT_EQ(0, v.size());},
+    std::vector<Tensor>({}), [] (const IValue& v) {EXPECT_EQ(0, v.toTensorListRef().size());},
+    "(Tensor[] a) -> Tensor[]");
 
 
   // list types (with non-empty list)
-  testArgTypes<c10::ArrayRef<double>, std::vector<double>>::test(
-    c10::ArrayRef<double>({1.5, 2.5}), [] (c10::ArrayRef<double> v) {EXPECT_EQ(c10::ArrayRef<double>({1.5, 2.5}), v);},
+  testArgTypes<std::vector<double>>::test(
+    std::vector<double>({1.5, 2.5}), [] (const std::vector<double>& v) {EXPECT_EQ(std::vector<double>({1.5, 2.5}), v);},
     std::vector<double>({3.5, 4.5}), [] (const IValue& v) {EXPECT_EQ(std::vector<double>({3.5, 4.5}), v.toDoubleListRef());},
     "(float[] a) -> float[]");
-  testArgTypes<c10::ArrayRef<int64_t>, std::vector<int64_t>>::test(
-    c10::ArrayRef<int64_t>({1, 2}), [] (c10::ArrayRef<int64_t> v) {EXPECT_EQ(c10::ArrayRef<int64_t>({1, 2}), v);},
+  testArgTypes<std::vector<int64_t>>::test(
+    std::vector<int64_t>({1, 2}), [] (const std::vector<int64_t>& v) {EXPECT_EQ(std::vector<int64_t>({1, 2}), v);},
     std::vector<int64_t>({3, 4}), [] (const IValue& v) {EXPECT_EQ(std::vector<int64_t>({3, 4}), v.toIntListRef());},
     "(int[] a) -> int[]");
-  // TODO When fixing bool[] and str[] (see above), also add them here
-  testArgTypes<c10::ArrayRef<Tensor>, std::vector<Tensor>>::test(
-    c10::ArrayRef<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}), [] (c10::ArrayRef<Tensor> v) {
+  testArgTypes<std::vector<bool>>::test(
+    std::vector<bool>({true, false}), [] (const std::vector<bool>& v) {EXPECT_EQ(std::vector<bool>({true, false}), v);},
+    std::vector<bool>({true, false}), [] (const IValue& v) {EXPECT_EQ(std::vector<bool>({true, false}), v.toBoolListRef());},
+    "(bool[] a) -> bool[]");
+  testArgTypes<std::vector<std::string>>::test(
+    std::vector<std::string>({"first", "second"}), [] (const std::vector<std::string>& v) {EXPECT_EQ(std::vector<std::string>({"first", "second"}), v);},
+    std::vector<std::string>({"first", "second"}), [] (const IValue& v) {
+      EXPECT_EQ(2, v.toGenericListRef().size());
+      EXPECT_EQ("first", v.toGenericListRef()[0].toStringRef());
+      EXPECT_EQ("second", v.toGenericListRef()[1].toStringRef());
+    },
+    "(str[] a) -> str[]");
+  testArgTypes<std::vector<Tensor>>::test(
+    std::vector<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}), [] (const std::vector<Tensor>& v) {
       EXPECT_EQ(2, v.size());
       EXPECT_EQ(TensorType1(), v[0].type_id());
       EXPECT_EQ(TensorType2(), v[1].type_id());
@@ -600,53 +585,53 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(Tensor[] a) -> Tensor[]");
 
   // Test optional of list (with nullopt)
-  testArgTypes<c10::optional<c10::ArrayRef<int64_t>>, c10::optional<std::vector<int64_t>>>::test(
-    c10::optional<c10::ArrayRef<int64_t>>(c10::nullopt), [] (c10::optional<c10::ArrayRef<int64_t>> v) {EXPECT_FALSE(v.has_value());},
+  testArgTypes<c10::optional<std::vector<int64_t>>>::test(
+    c10::optional<std::vector<int64_t>>(c10::nullopt), [] (const c10::optional<std::vector<int64_t>>& v) {EXPECT_FALSE(v.has_value());},
     c10::optional<std::vector<int64_t>>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(int[]? a) -> int[]?");
 
   // Test optional of list (with empty list)
-  testArgTypes<c10::optional<c10::ArrayRef<int64_t>>, c10::optional<std::vector<int64_t>>>::test(
-    c10::optional<c10::ArrayRef<int64_t>>(c10::ArrayRef<int64_t>{}), [] (c10::optional<c10::ArrayRef<int64_t>> v) {EXPECT_EQ(0, v.value().size());},
+  testArgTypes<c10::optional<std::vector<int64_t>>>::test(
+    c10::optional<std::vector<int64_t>>(std::vector<int64_t>{}), [] (const c10::optional<std::vector<int64_t>>& v) {EXPECT_EQ(0, v.value().size());},
     c10::optional<std::vector<int64_t>>(std::vector<int64_t>{}), [] (const IValue& v) {EXPECT_EQ(0, v.toIntListRef().size());},
     "(int[]? a) -> int[]?");
 
   // Test optional of list (with values)
-  testArgTypes<c10::optional<c10::ArrayRef<int64_t>>, c10::optional<std::vector<int64_t>>>::test(
-    c10::optional<c10::ArrayRef<int64_t>>({1, 2}), [] (c10::optional<c10::ArrayRef<int64_t>> v) {EXPECT_EQ(c10::ArrayRef<int64_t>({1, 2}), v.value());},
+  testArgTypes<c10::optional<std::vector<int64_t>>>::test(
+    c10::optional<std::vector<int64_t>>({1, 2}), [] (const c10::optional<std::vector<int64_t>>& v) {EXPECT_EQ(std::vector<int64_t>({1, 2}), v.value());},
     c10::optional<std::vector<int64_t>>({3, 4}), [] (const IValue& v) {EXPECT_EQ(std::vector<int64_t>({3, 4}), v.toIntListRef());},
     "(int[]? a) -> int[]?");
 
   // TODO Do we want to support list of optional ?
 
   // dict types
-  c10::Dict<std::string, std::string> str_dict;
+  c10::DictPtr<std::string, std::string> str_dict = c10::make_dict<std::string, std::string>();
   str_dict.insert("key1", "value1");
   str_dict.insert("key2", "value2");
-  testArgTypes<c10::Dict<std::string, std::string>>::test(
-    str_dict, [] (c10::Dict<std::string, std::string> v) {
+  testArgTypes<c10::DictPtr<std::string, std::string>>::test(
+    str_dict, [] (c10::DictPtr<std::string, std::string> v) {
       EXPECT_EQ(2, v.size());
       EXPECT_EQ("value1", v.at("key1"));
       EXPECT_EQ("value2", v.at("key2"));
     },
     str_dict, [] (const IValue& v) {
-      c10::Dict<std::string, std::string> dict = c10::impl::toTypedDict<std::string, std::string>(std::move(v.toGenericDict()->elements()));
+      c10::DictPtr<std::string, std::string> dict = c10::impl::toTypedDict<std::string, std::string>(std::move(v.toGenericDict()->elements()));
       EXPECT_EQ(2, dict.size());
       EXPECT_EQ("value1", dict.at("key1"));
       EXPECT_EQ("value2", dict.at("key2"));
     },
     "(Dict(str, str) a) -> Dict(str, str)");
-  c10::Dict<int64_t, Tensor> tensor_dict;
+  c10::DictPtr<int64_t, Tensor> tensor_dict = c10::make_dict<int64_t, Tensor>();
   tensor_dict.insert(1, dummyTensor(TensorType1()));
   tensor_dict.insert(2, dummyTensor(TensorType2()));
-  testArgTypes<c10::Dict<int64_t, Tensor>>::test(
-    tensor_dict, [] (c10::Dict<int64_t, Tensor> v) {
+  testArgTypes<c10::DictPtr<int64_t, Tensor>>::test(
+    tensor_dict, [] (c10::DictPtr<int64_t, Tensor> v) {
       EXPECT_EQ(2, v.size());
       EXPECT_EQ(TensorType1(), v.at(1).type_id());
       EXPECT_EQ(TensorType2(), v.at(2).type_id());
     },
     tensor_dict, [] (const IValue& v) {
-      c10::Dict<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(std::move(v.toGenericDict()->elements()));
+      c10::DictPtr<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(std::move(v.toGenericDict()->elements()));
       EXPECT_EQ(2, dict.size());
       EXPECT_EQ(TensorType1(), dict.at(1).type_id());
       EXPECT_EQ(TensorType2(), dict.at(2).type_id());

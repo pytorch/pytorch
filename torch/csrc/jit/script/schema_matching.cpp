@@ -99,9 +99,7 @@ Value* tryConvertToType(
     if (concrete_type->isSubtypeOf(NumberType::get()) &&
         value->type()->isSubtypeOf(TensorType::get())) {
       auto n = graph.createImplicitTensorToNum(concrete_type, value);
-      value = graph.insertNode(n)
-                  ->setSourceRange(loc)
-                  ->output();
+      value = graph.insertNode(n)->setSourceRange(loc)->output();
     }
     if (value->type()->isSubtypeOf(StringType::get()) &&
         DeviceObjType::get()->isSubtypeOf(concrete_type)) {
@@ -134,8 +132,8 @@ Value* tryMatchArgument(
   const MatchTypeReturn matched_type =
       matchTypeVariables(arg.type(), value->type(), type_env);
   if (!matched_type.type) {
-    err() << "could not match type " << value->type()->str() << " to "
-          << arg.type()->str() << " in argument '" << arg.name()
+    err() << "could not match type " << value->type()->python_str() << " to "
+          << arg.type()->python_str() << " in argument '" << arg.name()
           << "': " << matched_type.errMsg << "\n"
           << named_value.locOr(loc);
     return nullptr;
@@ -145,9 +143,10 @@ Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
-    auto& ostream = err() << "expected a value of type " << concrete_type->str()
-                          << " for argument '" << arg.name() << "' but found "
-                          << value->type()->str() << "\n";
+    auto& ostream = err() << "expected a value of type "
+                          << concrete_type->python_str() << " for argument '"
+                          << arg.name() << "' but found "
+                          << value->type()->python_str() << "\n";
 
     if (auto v = value->type()->cast<ListType>()) {
       if (v->getElementType()->isSubtypeOf(TensorType::get())) {
