@@ -139,13 +139,13 @@ public:
   template<typename T>
   std::shared_ptr<T> expect() {
     auto r = cast<T>();
-    AT_CHECK(r, "Got unexpected type ", python_str());
+    AT_ASSERT(r);
     return r;
   }
   template<typename T>
   std::shared_ptr<const T> expect() const {
     auto r = cast<const T>();
-    AT_CHECK(r, "Got unexpected type ", python_str());
+    AT_ASSERT(r);
     return r;
   }
   virtual ~Type() = default;
@@ -492,15 +492,6 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
   static ProfiledTensorTypePtr create(c10::optional<at::ScalarType> scalar_type, c10::optional<Device> device,const VaryingShape& sizes, const VaryingStrides& strides, c10::optional<bool> requires_grad)
   {
       return ProfiledTensorTypePtr(new ProfiledTensorType(scalar_type, device, sizes, strides, requires_grad));
-  }
-
-  static ProfiledTensorTypePtr create(ProfiledTensorTypePtr pttp) {
-    return ProfiledTensorTypePtr(new ProfiledTensorType(
-        pttp->scalarType(),
-        pttp->device(),
-        pttp->sizes(),
-        pttp->strides(),
-        pttp->requiresGrad()));
   }
 
   const VaryingShape& sizes() const { return sizes_; }

@@ -32,17 +32,6 @@ static inline bool isIntOrFloatUsedAsList(
 inline bool convertibleToList(
     const TypePtr& type,
     const TypePtr& list_type_) {
-      std::unordered_map<std::string, TypePtr> empty_env;
-  return convertibleToList(
-      type, list_type_, empty_env);
-}
-
-/// Returns true if `type` is a Tuple in which all the elements have the
-/// same type or if it's a subtype of `list_type_`.
-inline bool convertibleToList(
-    const TypePtr& type,
-    const TypePtr& list_type_,
-    TypeEnv& type_env) {
   auto list_type = list_type_->cast<ListType>();
   if (!list_type) {
     return false;
@@ -55,9 +44,8 @@ inline bool convertibleToList(
         tuple->elements().begin(),
         tuple->elements().end(),
         [&](const TypePtr& t) {
-          const MatchTypeReturn matched_type =
-              matchTypeVariables(list_type->getElementType(), t, type_env);
-          return bool(matched_type.type);
+          // TODO: resolve VarType if necessary
+          return t->isSubtypeOf(list_type->getElementType());
         });
   }
   return false;
@@ -70,8 +58,7 @@ Value* tryConvertToType(
     Graph& graph,
     const TypePtr& concrete_type,
     Value* value,
-    bool allow_conversions,
-    TypeEnv& type_env) {
+    bool allow_conversions) {
   if (auto value_tuple = value->type()->cast<TupleType>()) {
     // Allow homogeneous tuples to be casted implicitly to lists of appropriate
     // types
@@ -79,18 +66,7 @@ Value* tryConvertToType(
       auto unpacked = createTupleUnpack(value);
       auto elem_type =
           unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
-      std::stringstream ss;
-      auto list_value = tryCreateList(
-          elem_type,
-          graph,
-          loc,
-          unpacked,
-          [](std::ostream&) {},
-          allow_conversions,
-          type_env);
-      AT_ASSERT(list_value);
-      value = list_value;
-      // value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+      value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
     }
 
     // inductively apply implicit conversions to tuples
@@ -168,10 +144,6 @@ Value* tryMatchArgument(
         graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
 
-  auto prev = value->type();
-  value = tryConvertToType(
-      loc, graph, arg.type(), value, allow_conversions, type_env);
-
   // Resolve VarType variables
   const MatchTypeReturn matched_type =
       matchTypeVariables(arg.type(), value->type(), type_env);
@@ -186,8 +158,7 @@ Value* tryMatchArgument(
 
   // Check if the value can be matched to the arg through any implicit
   // conversions
-  value = tryConvertToType(
-      loc, graph, concrete_type, value, allow_conversions, type_env);
+  value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
     auto& ostream = err() << "Expected a value of type "
@@ -255,17 +226,6 @@ Value* tryCreateList(
     list_elements.push_back(matched_value);
   }
 
-  if (elem_type->kind() == TypeKind::VarType) {
-    if (list_elements.size() == 0) {
-      // List didn't have any elements and elem_type was a vartype, so it
-      // couldn't be matched to anything
-      return nullptr;
-    }
-    return graph
-        .insertNode(
-            graph.createList(list_elements.at(0)->type(), list_elements))
-        ->output();
-  }
   return graph.insertNode(graph.createList(elem_type, list_elements))->output();
 }
 
@@ -312,7 +272,6 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-  bool print = schema.arguments().size() > 0 && schema.arguments().at(0).type()->kind() == TypeKind::ListType;
   for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
     const auto& arg = schema.arguments()[schema_i];
     c10::optional<NamedValue> actual_named_value;
