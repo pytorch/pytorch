@@ -8,11 +8,11 @@
 namespace torch {
 namespace jit {
 namespace {
-ska::flat_hash_map<const Element*, int> comprMap;
-ska::flat_hash_map<int, const Element*> decomprMap;
+ska::flat_hash_map<const Element*, unsigned> comprMap;
+ska::flat_hash_map<unsigned, const Element*> decomprMap;
 } // namespace
 
-int Element::toIndex(const Element* x) {
+unsigned Element::toIndex(const Element* x) {
   if (comprMap.count(x)) {
     return comprMap[x];
   }
@@ -21,7 +21,7 @@ int Element::toIndex(const Element* x) {
   return comprMap[x];
 }
 
-const Element* Element::toElement(int x) {
+const Element* Element::toElement(unsigned x) {
   auto res = decomprMap[x];
   TORCH_INTERNAL_ASSERT(res);
   return res;
@@ -54,7 +54,7 @@ void collectAllContainedMemoryLocations(
     const Element* elem,
     MemoryLocations& cont) {
   // we have already recursed on this element
-  int compIdx = Element::toIndex(elem);
+  unsigned compIdx = Element::toIndex(elem);
   if (cont.test_and_set(compIdx)) {
     return;
   }
@@ -133,7 +133,7 @@ const MemoryLocations& Element::getMemoryLocations() const {
 // Do a breadth-first search over the graph, starting at `this` and
 // traversing in the direction `dir`.`fn` will be run on each element.
 void Element::bfs(BfsDirection dir, MemoryLocations& res) const {
-  std::queue<int> queue;
+  std::queue<unsigned> queue;
   MemoryLocations seen;
   queue.push(Element::toIndex(this));
   while (!queue.empty()) {

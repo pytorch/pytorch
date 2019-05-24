@@ -98,8 +98,6 @@ class TORCH_API MemoryDAG {
   }
 
  private:
-  bool memoryLocationOverlap(const MemoryLocations& a, const MemoryLocations& b)
-      const;
   bool mayAliasImpl(const Element* a, const Element* b) const;
   bool mayContainAliasImpl(const Element* contained, const Element* container)
       const;
@@ -141,8 +139,8 @@ struct Element {
   void bfs(BfsDirection dir, MemoryLocations& res) const;
 
   // Converts to and from the compressed index representation
-  static int toIndex(const Element* x);
-  static const Element* toElement(int x);
+  static unsigned toIndex(const Element* x);
+  static const Element* toElement(unsigned x);
 };
 } // namespace jit
 } // namespace torch
