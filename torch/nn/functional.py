@@ -3085,7 +3085,7 @@ def multi_head_attention_forward(query,                  # type: Tensor
                                  value,                  # type: Tensor
                                  embed_dim_to_check,     # type: int
                                  num_heads,              # type: int
-                                 q_proj_weight,       # type: Tensor
+                                 q_proj_weight,          # type: Tensor
                                  k_proj_weight,          # type: Tensor
                                  v_proj_weight,          # type: Tensor
                                  in_proj_bias,           # type: Tensor
@@ -3098,7 +3098,9 @@ def multi_head_attention_forward(query,                  # type: Tensor
                                  training=True,          # type: bool
                                  key_padding_mask=None,  # type: Optional[Tensor]
                                  need_weights=True,      # type: bool
-                                 attn_mask=None          # type: Optional[Tensor]
+                                 attn_mask=None,         # type: Optional[Tensor]
+                                 saved_k=None,           # type: Optional[Tensor]
+                                 saved_v=None            # type: Optional[Tensor]
                                  ):
     # type: (...) -> Tuple[Tensor, Optional[Tensor]]
     r"""
@@ -3107,7 +3109,7 @@ def multi_head_attention_forward(query,                  # type: Tensor
             See "Attention Is All You Need" for more details.
         embed_dim_to_check: total dimension of the model.
         num_heads: parallel attention heads.
-        in_proj_weight, in_proj_bias: input projection weight and bias.
+        q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
         bias_k, bias_v: bias of the key and value sequences to be added at dim=0.
         add_zero_attn: add a new batch of zeros to the key and
                        value sequences at dim=1.
@@ -3118,6 +3120,7 @@ def multi_head_attention_forward(query,                  # type: Tensor
             be ignored by the attention.
         need_weights: output attn_output_weights.
         attn_mask: mask that prevents attention to certain positions.
+        saved_k, saved_v: static key and value used for attention operators.
 
 
     Shape:
@@ -3130,6 +3133,10 @@ def multi_head_attention_forward(query,                  # type: Tensor
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
         - attn_mask: :math:`(L, L)` where L is the target sequence length.
+        - saved_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length, 
+          N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
+        - saved_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length, 
+          N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
 
         Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
@@ -3177,6 +3184,16 @@ def multi_head_attention_forward(query,                  # type: Tensor
         k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
     if v is not None:
         v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+
+    if saved_k is not None:
+        assert saved_k.size(0) == bsz * num_heads 
+        assert saved_k.size(2) == head_dim
+        k = saved_k
+
+    if saved_v is not None:
+        assert saved_v.size(0) == bsz * num_heads 
+        assert saved_v.size(2) == head_dim
+        v = saved_v
 
     src_len = k.size(1)
 
