@@ -653,6 +653,16 @@ void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
   block()->remapTypes(type_map);
 }
 
+void Value::inferTypeFrom(const at::Tensor& output) {
+  if (output.is_mkldnn()) {
+    // mkldnn tensor as opaque tensor doesn't have strides, so we can
+    // not create a CompleteTensorType
+    setType(DimensionedTensorType::create(output));
+    return;
+  }
+  setType(CompleteTensorType::create(output));
+}
+
 bool Value::mustBeNone() const {
   return node_->mustBeNone();
 }
