@@ -281,7 +281,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
       // zeros(1)
       if (allow_conversions && varargsCanBeUsedAsList(schema, schema_i, arg)) {
         auto value = args[used_args].value(graph);
-        auto actual_type = value->type();
+        const auto& actual_type = value->type();
         // The actual cannot already be a list
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(actual_type, unwrapOptional(arg.type()))) {
