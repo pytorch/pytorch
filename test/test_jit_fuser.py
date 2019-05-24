@@ -292,7 +292,6 @@ class TestFuser(JitTestCase):
 
         a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
         s = torch.jit.script(func, (a,))
-        self.assertAllFused(s.graph_for(a,), except_for={'aten::div', 'prim::Constant'})
         c = s(a)
         c.sum().backward()
         graph = backward_graph(s)
