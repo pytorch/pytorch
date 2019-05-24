@@ -63,9 +63,8 @@ def qtensor(draw, shapes, dtypes=None, float_min=-1e6, float_max=1e6):
     else:
         zero_point = draw(st.integers(min_value=qmin, max_value=qmax))
     # Resolve scale
-    _max_scale = min(1e6, qmax - qmin)
-    _min_scale = max(1e-3, 1.0 / (qmax - qmin))
-    scale = draw(st.floats(min_value=_min_scale, max_value=_max_scale))
+    scale = draw(st.floats(min_value=np.finfo(np.float32).resolution,
+                           max_value=(np.finfo(np.float32).max)))
     # Resolve the tensor
     Xhy = draw(stnp.arrays(dtype=np.float32,
                            elements=st.floats(float_min, float_max),
