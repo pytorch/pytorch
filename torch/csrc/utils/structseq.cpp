@@ -62,7 +62,7 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
     size_t num_elements = Py_SIZE(obj);
 
     for (int i=0; i < num_elements; i++) {
-        PyObject *val, *repr;
+        PyObject *val;
         const char *cname, *crepr;
 
         cname = typ->tp_members[i].name;
@@ -77,13 +77,12 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
             return nullptr;
         }
 
-        repr = PyObject_Repr(val);
+        auto repr = THPObjectPtr(PyObject_Repr(val));
         if (repr == nullptr) {
             return nullptr;
         }
 
         crepr = PyUnicode_AsUTF8(repr);
-        Py_DECREF(repr);
         if (crepr == nullptr) {
             return nullptr;
         }
