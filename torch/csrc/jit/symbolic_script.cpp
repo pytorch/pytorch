@@ -466,16 +466,6 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_end, None
             return torch.lerp(self, end, weight), backward
 
-        def mul(self, other):
-            def backward(grad_output):
-                # self & other are used in backward. No need to pass in their size
-                # from forward pass
-                grad_self = (grad_output * other)._grad_sum_to_size(self.size())
-                grad_other = (grad_output * self)._grad_sum_to_size(other.size())
-                return grad_self, grad_other
-
-            return self * other, backward
-
         def reshape(self,
                     shape: List[int]):
             self_size = self.size()
@@ -698,21 +688,43 @@ const std::vector<std::string> functions = {
 
     )",
     R"(
-        def div(self, other):
+        def AD_sizes_if_not_equal_multi(t1, t2, res):
+            return torch._size_if_not_equal(t1.size(), res.size()), torch._size_if_not_equal(t2.size(), res.size())
+
+        def mul(self, other):
+            result = self * other
+            self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
+
             def backward(grad_output):
-                grad_self = (grad_output / other)._grad_sum_to_size(self.size())
-                grad_other = (-grad_output * self / (other * other))._grad_sum_to_size(other.size())
+                # self & other are used in backward. No need to pass in their size
+                # from forward pass
+                grad_self = (grad_output * other)._grad_sum_to_size(self_size)
+                grad_other = (grad_output * self)._grad_sum_to_size(other_size)
                 return grad_self, grad_other
 
-            return self / other, backward
+            return result, backward
+
+        def div(self, other):
+            result = self / other
+            self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
+
+            def backward(grad_output):
+                grad_self = (grad_output / other)._grad_sum_to_size(self_size)
+                grad_other = (-grad_output * self / (other * other))._grad_sum_to_size(other_size)
+                return grad_self, grad_other
+
+            return result, backward
 
         def max(self, other):
+            result = torch.max(self, other)
+            self_size, other_size = AD_sizes_if_not_equal_multi(self, other, result)
+
             def backward(grad_output):
-                grad_self = (grad_output * (self > other).type_as(grad_output))._grad_sum_to_size(self.size())
-                grad_other = (grad_output * (other > self).type_as(grad_output))._grad_sum_to_size(other.size())
+                grad_self = (grad_output * (self > other).type_as(grad_output))._grad_sum_to_size(self_size)
+                grad_other = (grad_output * (other > self).type_as(grad_output))._grad_sum_to_size(other_size)
                 return grad_self, grad_other
 
-            return torch.max(self, other), backward
+            return result, backward
 
         def min(self, other):
             def backward(grad_output):
@@ -948,12 +960,21 @@ const std::vector<std::string> functions = {
             return torch.trunc(self), backward
 
         def _grad_sum_to_size(self,
-                              size: List[int]):
-            self_size = self.size()
-            def backward(grad_output):
-                return grad_output.expand(self_size), None
+                              size: Optional[List[int]]):
+            if size is not None:
+                self_size = self.size()
+            else:
+                self_size = None
 
-            return torch._grad_sum_to_size(self, size), backward
+            result = torch._grad_sum_to_size(self, size)
+            def backward(grad_output):
+                if self_size is None:
+                    grad_input = grad_output
+                else:
+                    grad_input = grad_output.expand(self_size)
+                return grad_input, None
+
+            return result, backward
     )",
     R"(
         def AD_adaptive_avg_pool2d_backward(grad,
