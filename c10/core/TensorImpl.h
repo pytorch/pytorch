@@ -1335,7 +1335,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         return;
       }
       case MemoryFormat::Preserve:
-        AT_ERROR("unsupported memory format")
+        TORCH_CHECK(false, "unsupported memory format")
     }
   }
 
