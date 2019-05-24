@@ -13,7 +13,8 @@ using c10::guts::make_unique;
 using c10::ivalue::TensorList;
 using c10::ivalue::IntList;
 using c10::intrusive_ptr;
-using c10::Dict;
+using c10::DictPtr;
+using c10::make_dict;
 using at::Tensor;
 using std::string;
 using std::unique_ptr;
@@ -192,11 +193,11 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListOutput_wh
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
      .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))",
-       RegisterOperators::options().kernel([] (Tensor) -> std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> {
-         Dict<string, Tensor> dict;
+       RegisterOperators::options().kernel([] (Tensor) -> std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>> {
+         DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
          dict.insert("first", dummyTensor(TensorType1()));
          dict.insert("second", dummyTensor(TensorType2()));
-         return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
+         return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>>(
            dummyTensor(TensorType2()),
            5,
            {dummyTensor(TensorType1()), dummyTensor(TensorType2())},
@@ -404,7 +405,7 @@ int captured_dict_size = 0;
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", RegisterOperators::options().kernel([] (Dict<string, Tensor> input1) {
+      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", RegisterOperators::options().kernel([] (DictPtr<string, Tensor> input1) {
         captured_dict_size = input1.size();
       }));
 
@@ -412,7 +413,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithDictInput_withou
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
-  Dict<string, Tensor> dict;
+  DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
   dict.insert("key1", dummyTensor(TensorType1()));
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
@@ -422,14 +423,14 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithDictInput_withou
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::dict_input(Dict(str, str) input) -> str", RegisterOperators::options().kernel([] (Dict<string, string> input1) {
+      .op("_test::dict_input(Dict(str, str) input) -> str", RegisterOperators::options().kernel([] (DictPtr<string, string> input1) {
         return input1.at("key2");
       }));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
   ASSERT_TRUE(op.has_value());
 
-  Dict<string, string> dict;
+  DictPtr<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -439,14 +440,14 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithDictInput_withOu
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-    .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", RegisterOperators::options().kernel([] (Dict<string, string> input) {
+    .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", RegisterOperators::options().kernel([] (DictPtr<string, string> input) {
       return input;
     }));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
   ASSERT_TRUE(op.has_value());
 
-  Dict<string, string> dict;
+  DictPtr<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);

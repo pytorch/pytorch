@@ -21,7 +21,7 @@ public:
       if (dispatch_key.has_value()) {
         kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.opHandle(), *dispatch_key, kernel, std::move(cache_creator));
       } else {
-        kernel_registration_handle_ = Dispatcher::singleton().registerFallbackKernel(op_.opHandle(), kernel, std::move(cache_creator));
+        kernel_registration_handle_ = Dispatcher::singleton().registerCatchallKernel(op_.opHandle(), kernel, std::move(cache_creator));
       }
     }
   }
