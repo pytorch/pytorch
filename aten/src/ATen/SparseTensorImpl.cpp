@@ -48,9 +48,6 @@ SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeM
   AT_ASSERT(values_.device() == device());
 }
 
-bool SparseTensorImpl::has_storage() const {
-  return false;
-}
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
   TORCH_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe is not allowed on Tensor created from .data or .detach()");
   AT_ASSERT(!indices.is_variable() && !values.is_variable());  // They should be plain tensors!  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged

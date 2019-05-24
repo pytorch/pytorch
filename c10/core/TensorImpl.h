@@ -354,7 +354,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * True if this tensor has storage. See storage() for details.
    */
-  virtual bool has_storage() const;
+  bool has_storage() const;
 
   /**
    * Return the underlying storage of a Tensor.  Multiple tensors may share

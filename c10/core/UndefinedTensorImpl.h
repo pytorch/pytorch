@@ -17,7 +17,6 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
 #endif
     return &_singleton;
   }
-  bool has_storage() const override;
 private:
   UndefinedTensorImpl();
   static UndefinedTensorImpl _singleton;

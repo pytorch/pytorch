@@ -40,8 +40,6 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  bool has_storage() const override;
-
   // WARNING: This function does NOT preserve invariants of sparse_dim/dense_dim with
   // respect to indices and values
   void raw_resize_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {

@@ -126,7 +126,8 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
 }
 
 bool TensorImpl::has_storage() const {
-  return storage_;
+  TORCH_CHECK(type_id_ != UndefinedTensorId(), type_id_, " does not have has_storage");
+  return !is_sparse() && !is_mkldnn() && storage_;
 }
 
 bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {

@@ -33,10 +33,6 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     opaque_handle_ = {};
   }
 
-  bool has_storage() const override {
-    return false;
-  }
-
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *

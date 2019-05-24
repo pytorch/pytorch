@@ -8,10 +8,6 @@ UndefinedTensorImpl::UndefinedTensorImpl()
 : TensorImpl(UndefinedTensorId(), caffe2::TypeMeta(), c10::nullopt) {
 }
 
-bool UndefinedTensorImpl::has_storage() const {
-  AT_ERROR("has_storage() called on undefined Tensor");
-}
-
 UndefinedTensorImpl UndefinedTensorImpl::_singleton;
 
 }
