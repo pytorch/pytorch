@@ -2630,18 +2630,14 @@ struct to_ir {
       AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
     }
 
-
-
     args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0))));
     const auto has_end = slice.end().present();
     if (has_end) {
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
-
     if (input->type()->cast<TupleType>()) {
 
       auto has_step = slice.step().present();
-
       // TODO: add support for slicing tuples
       if (has_step)
       {
