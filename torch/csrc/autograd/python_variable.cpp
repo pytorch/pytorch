@@ -163,12 +163,7 @@ PyObject *THPVariable_get_T(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
-  int64_t n = var.dim();
-  DimVector transpose_dims;
-  for (int64_t i = n - 1; i >= 0; --i) {
-    transpose_dims.push_back(i);
-  }
-  return THPVariable_Wrap(var.permute(transpose_dims));
+  return THPVariable_Wrap(var.T());
   END_HANDLE_TH_ERRORS
 }
 
