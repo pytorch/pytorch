@@ -109,7 +109,7 @@ struct CAFFE2_API OperandInfo {
 
   void validate() {
     TORCH_CHECK(
-        !tensor.defined() || tensor.layout() == kSparse,
+        !tensor.defined() || tensor.layout() == kStrided,
         "unsupported tensor layout: ", tensor.layout());
   }
 };
