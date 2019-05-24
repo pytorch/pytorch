@@ -1280,7 +1280,7 @@ struct getTypePtr_<std::unordered_map<K, V>> final {
   }
 };
 template <class K, class V>
-struct getTypePtr_<c10::Dict<K, V>> final {
+struct getTypePtr_<c10::DictPtr<K, V>> final {
   static TypePtr call() {
     static auto type =
         DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
