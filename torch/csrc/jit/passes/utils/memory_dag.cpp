@@ -55,9 +55,10 @@ void collectAllContainedMemoryLocations(
     MemoryLocations& cont) {
   // we have already recursed on this element
   unsigned compIdx = Element::toIndex(elem);
-  if (cont.test_and_set(compIdx)) {
+  if (cont.test(compIdx)) {
     return;
   }
+  cont.set(compIdx);
 
   for (const auto& mem_loc : elem->getMemoryLocations()) {
     collectAllContainedMemoryLocations(Element::toElement(mem_loc), cont);
