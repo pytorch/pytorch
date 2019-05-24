@@ -64,7 +64,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
         "Cannot input a tensor of dimension other than 0 as a scalar argument");
   }
   if (toInt &&
-      !isIntegralType(autograd::as_variable_ref(t).data().scalar_type())) {
+      !isIntegralType(t.scalar_type())) {
     std::stringstream ss;
     ss << "Cannot input a tensor of type " << t.scalar_type()
        << " as an integral argument";
@@ -875,7 +875,7 @@ RegisterOperators reg(
                  "DictConstruct must have an even number of inputs");
            }
            return [=](Stack& stack) {
-             c10::impl::GenericDict vals;
+             c10::impl::GenericDictPtr vals = c10::impl::make_generic_dict();
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
