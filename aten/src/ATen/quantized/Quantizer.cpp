@@ -134,13 +134,13 @@ T quantize_val(float scale, int32_t zero_point, float value) {
   // cases away from zero, and can be consistent with SIMD implementations for
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
-  int32_t qvalue;
+  int64_t qvalue;
   constexpr int32_t qmin = std::numeric_limits<typename T::underlying>::min();
   constexpr int32_t qmax = std::numeric_limits<typename T::underlying>::max();
   checkZeroPoint<typename T::underlying>("quantize_val", zero_point);
-  qvalue = static_cast<int32_t>(std::nearbyint(value / scale + zero_point));
-  qvalue = std::max(qvalue, qmin);
-  qvalue = std::min(qvalue, qmax);
+  qvalue = static_cast<int64_t>(std::nearbyint(value / scale + zero_point));
+  qvalue = std::max<int64_t>(qvalue, qmin);
+  qvalue = std::min<int64_t>(qvalue, qmax);
   return static_cast<T>(qvalue);
 }
 
@@ -191,7 +191,7 @@ Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
                                           Tensor qtensor,
                                           std::vector<float> scales,
                                           std::vector<int32_t> zero_points,
-                                          std::vector<int64_t> axis) {
+                                          IntArrayRef axis) {
   auto fn_name = "quantize_tensor_per_channel_affine";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
@@ -223,7 +223,7 @@ Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
                                             Tensor rtensor,
                                             std::vector<float> scales,
                                             std::vector<int32_t> zero_points,
-                                            std::vector<int64_t> axis) {
+                                            IntArrayRef axis) {
   auto fn_name = "dequantize_tensor_per_channel_affine";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
@@ -264,7 +264,7 @@ QuantizerPtr make_per_tensor_affine_quantizer(
 QuantizerPtr make_per_channel_affine_quantizer(
     std::vector<float> scales,
     std::vector<int32_t> zero_points,
-    std::vector<int64_t> axis,
+    IntArrayRef axis,
     ScalarType scalar_type) {
   return c10::make_intrusive<PerChannelAffineQuantizer>(scalar_type,
                                                         scales, zero_points, axis);

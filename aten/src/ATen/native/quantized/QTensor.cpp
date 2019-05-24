@@ -15,20 +15,20 @@ Tensor quantize_linear_cpu(
 
 Tensor quantize_linear_per_channel_cpu(
     const Tensor& self, const Tensor& scales, const Tensor& zero_points,
-    const Tensor& axis, ScalarType dtype) {
+    IntArrayRef axis, ScalarType dtype) {
   TORCH_CHECK(scales.dim() == 1, "scale tensor must have dimension 1");
-  TORCH_CHECK(zero_points.dim() == 1, "zero_points tensor must have dimension 1");
+  TORCH_CHECK(zero_points.dim() == 1,
+              "zero_points tensor must have dimension 1");
   TORCH_CHECK(scales.numel() == zero_points.numel(),
               "number of elements in scales and zero_points must match");
-  TORCH_CHECK(axis.dim() == 1, "axis tensor must have dimension 1");
+  TORCH_CHECK(axis.size() == 1, "axis tensor must have size 1");
   float* scales_data = scales.data<float>();
   int32_t* zero_points_data = zero_points.data<int32_t>();
-  int64_t* axis_data = axis.data<int64_t>();
   std::vector<float> scale_vals(scales_data, scales_data + scales.numel());
-  std::vector<int32_t> zero_point_vals(zero_points_data, zero_points_data + zero_points.numel());
-  std::vector<int64_t> axis_vals(axis_data, axis_data + axis.numel());
+  std::vector<int32_t> zero_point_vals(
+      zero_points_data, zero_points_data + zero_points.numel());
   auto quantizer = make_per_channel_affine_quantizer(
-      scale_vals, zero_point_vals, axis_vals, dtype);
+      scale_vals, zero_point_vals, axis, dtype);
   return quantizer->quantize(self);
 }
 
@@ -78,6 +78,18 @@ Tensor int_repr_quant(const Tensor& self) {
         if (self.numel() > 0) {
           memcpy(dst_data, self_data, self.nbytes());
         }});
+  return dst;
+}
+
+Tensor per_tensor_affine_qtensor_cpu(const Tensor& self, double scale, int64_t zero_point) {
+  Tensor dst = at::_empty_affine_quantized(self.sizes(), self.options().dtype(toQIntType(self.scalar_type())), scale, zero_point);
+  AT_DISPATCH_QINT_TYPES(dst.scalar_type(), "per_tensor_affine_qtensor", [&]() {
+    underlying_t* self_data = self.data<underlying_t>();
+    underlying_t* dst_data = reinterpret_cast<underlying_t *>(dst.data<scalar_t>());
+    if (self.numel() > 0) {
+      memcpy(dst_data, self_data, self.numel());
+    }
+  });
   return dst;
 }
 

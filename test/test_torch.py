@@ -2798,8 +2798,16 @@ class _TestTorchMixin(object):
         zero_point = 10
         val = 100
         numel = 10
-        q = torch._empty_affine_quantized(numel, dtype=torch.quint8, scale=scale, zero_point=zero_point)
-        # TODO: check dequantized values?
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        self.assertEqual(scale, q.q_scale())
+        self.assertEqual(zero_point, q.q_zero_point())
+
+        # create Tensor from uint8_t Tensor, scale and zero_point
+        int_tensor = torch.randint(0, 100, size=(10,), dtype=torch.uint8)
+        q = torch._per_tensor_affine_qtensor(int_tensor, scale, zero_point)
+        self.assertEqual(int_tensor, q.int_repr())
+        self.assertEqual(scale, q.q_scale())
+        self.assertEqual(zero_point, q.q_zero_point())
 
     def test_qtensor_dtypes(self):
         r = np.random.rand(3, 2) * 2 - 4
@@ -2827,7 +2835,8 @@ class _TestTorchMixin(object):
         r = torch.from_numpy(r).float()
         scales = torch.tensor([2.0, 3.0]).float()
         zero_points = torch.tensor([5, 10]).int()
-        axis = torch.tensor([1]).long()
+        axis = [1]
+
         def quantize_c(data, scales, zero_points):
             res = torch.empty((3, 2))
             quant_min, quant_max = 0, 255
@@ -2835,7 +2844,7 @@ class _TestTorchMixin(object):
                 for j in range(2):
                     res[i][j] = np.clip(np.round(data[i][j] / scales[j]) + zero_points[j], quant_min, quant_max)
             return res
-        qr = r.quantize_linear_per_channel(scales, zero_points, axis, torch.quint8)
+        qr = torch.quantize_linear_per_channel(r, scales, zero_points, axis, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2/ np.min(scales.numpy())))
