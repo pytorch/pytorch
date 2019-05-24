@@ -171,7 +171,6 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
       <<: *setup_linux_system_environment
   - run:
       <<: *should_run_job
-  - checkout
   - run:
       <<: *setup_ci_environment
   - run:
