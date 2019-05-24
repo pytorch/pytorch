@@ -19,7 +19,8 @@ from test_torch import _TestTorchMixin
 from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, \
+    load_tests, slowTest
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -2456,6 +2457,7 @@ class TestCuda(TestCase):
     def test_advancedindex_big(self):
         _TestTorchMixin._test_advancedindex_big(self, lambda t: t.cuda())
 
+    @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_huge_index(self):
         src = torch.empty(15000000, 45, device='cuda', dtype=torch.long).random_(0, 2**22)
