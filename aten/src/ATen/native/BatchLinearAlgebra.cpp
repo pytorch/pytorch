@@ -10,7 +10,6 @@
 #include <TH/TH.h>  // for USE_LAPACK
 
 #include <vector>
-#include <iostream>
 
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
@@ -697,8 +696,9 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
 
   int info;
   // Run once, first to get the optimum work size.
-  // Since we deal with batches of matrices with same dimensions, doing this outside saves
-  // batch_size - 1 calls to geqrf
+  // Since we deal with batches of matrices with the same dimensions, doing this outside
+  // the loop saves (batch_size - 1) workspace queries which would provide the same result
+  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   scalar_t wkopt;
   lapackGeqrf<scalar_t>(m, n, self_data, m, tau_data, &wkopt, lwork, &info);
@@ -733,8 +733,9 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
 
   int info;
   // Run once, first to get the optimum work size.
-  // Since we deal with batches of matrices with same dimensions, doing this outside saves
-  // batch_size - 1 calls to orgqr
+  // Since we deal with batches of matrices with the same dimensions, doing this outside
+  // the loop saves (batch_size - 1) workspace queries which would provide the same result
+  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   scalar_t wkopt;
   lapackOrgqr<scalar_t>(m, n_columns, k, self_data, m, tau_data, &wkopt, lwork, &info);
@@ -802,9 +803,9 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
     singleCheckErrors(infos[0], "qr_cpu");
   }
 
-  // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
   R = q_working_copy.slice(-2, 0, n_columns_q).slice(-1, 0, n).triu();
 
+  // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "qr_cpu", [&]{
     apply_orgqr<scalar_t>(q_working_copy, tau_working_copy, m, n_columns_q, std::min(m, n), infos);
   });
