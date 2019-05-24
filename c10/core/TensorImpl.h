@@ -391,7 +391,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const;
 
   bool is_sparse() const {
-    // NB: This method is not virtual and avoid dispatches for performance reasons.
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
@@ -399,7 +398,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_quantized() const {
-    // NB: This method is not virtual and avoid dispatches for performance reasons.
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
@@ -407,7 +405,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_cuda() const {
-    // NB: This method is not virtual and avoid dispatches for performance reasons.
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
@@ -415,7 +412,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_hip() const {
-    // NB: This method is not virtual and avoid dispatches for performance reasons.
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
@@ -445,7 +441,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   Layout layout() const {
-    // NB: This method is not virtual and avoid dispatches for perf.
     if (is_sparse()) {
       return kSparse;
     } else if (is_mkldnn()) {
