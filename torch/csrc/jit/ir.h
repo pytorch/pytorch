@@ -162,9 +162,7 @@ struct Value {
 
  public:
   Value* setType(TypePtr type);
-  void inferTypeFrom(const at::Tensor& output) {
-    setType(CompleteTensorType::create(output));
-  }
+  TORCH_API void inferTypeFrom(const at::Tensor& output);
   const TypePtr& type() const {
     AT_ASSERT(type_ != nullptr);
     return type_;
