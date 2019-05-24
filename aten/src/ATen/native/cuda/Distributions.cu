@@ -120,6 +120,22 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
   }
 }
 
+/**
+ * distribution_nullary_kernel is analogous to gpu_nullary_kernel in
+ * ATen/native/cuda/Loops.cuh. Like gpu_nullary_kernel, it uses
+ * TensorIterator to launch a kernel. However, the differences are
+ *   - it launches a grid-stride loop based kernel. The kernel is not
+ *     generic like elementwise_kernel in Loops.cuh and is specialized
+ *     for the distribution kernels here.
+ *   - For big size tensors, we can launch multiple kernels recursively
+ *     (i.e. if (!iter.can_use_32bit_indexing())) and hence, the philox
+ *     offset calculation is done in this function.
+ *
+ * FIXME: Can we specialize elementwise_kernel and launch_kernel in Loops.cuh
+ * to have grid-stride loop kernel and then use that to launch our distribution
+ * kernels? Note that we need a grid-stride loop kernel because, we found by testing
+ * that it achieves peak effective bandwidth.
+ */
 template<typename scalar_t, 
          typename accscalar_t,
          int unroll_factor,
@@ -550,13 +566,13 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generato
 Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
   auto mean_tensor = at::full({1}, mean, output.options());
-  output = mean_tensor.addcmul_(output, std);
+  at::native::addcmul_out(output, mean_tensor, output, std, 1);
   return output;
 }
 
 Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
-  output = mean.addcmul(output, std);
+  at::native::addcmul_out(output, mean, output, std, 1);
   return output; 
 }
 
