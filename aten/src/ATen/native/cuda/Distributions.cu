@@ -120,6 +120,22 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
   }
 }
 
+/**
+ * distribution_nullary_kernel is analogous to gpu_nullary_kernel in
+ * ATen/native/cuda/Loops.cuh. Like gpu_nullary_kernel, it uses
+ * TensorIterator to launch a kernel. However, the differences are
+ *   - it launches a grid-stride loop based kernel. The kernel is not
+ *     generic like elementwise_kernel in Loops.cuh and is specialized
+ *     for the distribution kernels here.
+ *   - For big size tensors, we can launch multiple kernels recursively
+ *     (i.e. if (!iter.can_use_32bit_indexing())) and hence, the philox
+ *     offset calculation is done in this function.
+ *
+ * FIXME: Can we specialize elementwise_kernel and launch_kernel in Loops.cuh
+ * to have grid-stride loop kernel and then use that to launch our distribution
+ * kernels? Note that we need a grid-stride loop kernel because, we found by testing
+ * that it achieves peak effective bandwidth.
+ */
 template<typename scalar_t, 
          typename accscalar_t,
          int unroll_factor,
@@ -537,7 +553,15 @@ void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* ge
     if (std::is_same<scalar_t, double>::value) {
       // define lambda for exponential transformation
       auto exponential_func = [lambda] __device__ (accscalar_t rand) {
-        return static_cast<scalar_t>(static_cast<scalar_t>(-1.0) / lambda * ::log(rand));
+        accscalar_t sample;
+        // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
+        // Hence, squash the 1 to just below 1.
+        if(rand == static_cast<accscalar_t>(1.0)) {
+          sample = ::log(std::nextafter(1.0, 0.0));
+        } else {
+          sample = ::log(rand);
+        }
+        return static_cast<scalar_t>(static_cast<accscalar_t>(-1.0) / lambda * sample);
       };
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
         gen,
@@ -546,7 +570,13 @@ void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* ge
     } else {
       // use __logf fast approximation for peak bandwidth
       auto exponential_func = [lambda] __device__ (accscalar_t rand) {
-        return static_cast<scalar_t>(static_cast<scalar_t>(-1.0) / lambda * __logf(rand));
+        accscalar_t sample;
+        if(rand == static_cast<accscalar_t>(1.0)) {
+          sample = __logf(std::nextafter(1.0f, 0.0f));
+        } else {
+          sample = __logf(rand);
+        }
+        return static_cast<scalar_t>(static_cast<accscalar_t>(-1.0) / lambda * sample);
       };
       distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
         gen,
@@ -635,13 +665,13 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generato
 Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
   auto mean_tensor = at::full({1}, mean, output.options());
-  output = mean_tensor.addcmul_(output, std);
+  at::native::addcmul_out(output, mean_tensor, output, std, 1);
   return output;
 }
 
 Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
-  output = mean.addcmul(output, std);
+  at::native::addcmul_out(output, mean, output, std, 1);
   return output; 
 }
 
