@@ -684,7 +684,8 @@ std::tuple<Tensor&, Tensor&> triangular_solve_out(Tensor& result, Tensor& clone_
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_geqrf(Tensor& self, Tensor& tau, std::vector<int64_t>& infos) {
+static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
+                        std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("qr: LAPACK library not found in compilation");
 #else
@@ -693,11 +694,8 @@ static void apply_geqrf(Tensor& self, Tensor& tau, std::vector<int64_t>& infos) 
   auto self_matrix_stride = matrixStride(self);
   auto tau_stride = tau.size(-1);
   auto batch_size = batchCount(self);
-  auto m = self.size(-2);
-  auto n = self.size(-1);
 
   int info;
-
   // Run once, first to get the optimum work size.
   // Since we deal with batches of matrices with same dimensions, doing this outside saves
   // batch_size - 1 calls to geqrf
@@ -722,7 +720,8 @@ static void apply_geqrf(Tensor& self, Tensor& tau, std::vector<int64_t>& infos) 
 }
 
 template<typename scalar_t>
-static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns, std::vector<int64_t>& infos) {
+static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_columns,
+                        int64_t k, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("qr: LAPACK library not found in compilation");
 #else
@@ -731,12 +730,8 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t n_columns, std:
   auto self_matrix_stride = matrixStride(self);
   auto tau_stride = tau.size(-1);
   auto batch_size = batchCount(self);
-  auto m = self.size(-2);
-  auto n = self.size(-1);
-  auto k = std::min(m, n);
 
   int info;
-
   // Run once, first to get the optimum work size.
   // Since we deal with batches of matrices with same dimensions, doing this outside saves
   // batch_size - 1 calls to orgqr
@@ -765,11 +760,10 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   int64_t m = self.size(-2), n = self.size(-1);
 
   // Setup inputs for apply_geqrf
-  auto self_working_copy = cloneBatchedColumnMajor(self);
   auto self_sizes = self.sizes().vec();
   self_sizes.pop_back();
   self_sizes[self.dim() - 2] = std::min(m, n);
-  auto tau_working_copy = at::zeros(self_sizes, self.options());
+  auto tau_working_copy = at::empty(self_sizes, self.options());
   Tensor q_working_copy;
 
   // Setup input geometry for apply_orgqr
@@ -782,22 +776,25 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   if (self.numel() == 0) {
     // Fix the number of columns of q appropriately
     q_sizes[self.dim() - 1] = n_columns_q;
-    q_working_copy = at::empty(q_sizes, self.options());
+    q_working_copy = at::eye(q_sizes[self.dim() - 2], q_sizes[self.dim() - 1], self.options());
+    q_working_copy = q_working_copy.expand_as(q_working_copy);
 
     // We repurpose the same q_sizes for R
     // Fix the number of rows and columns of q_working_copy appropriately
     q_sizes[self.dim() - 1] = n;
     q_sizes[self.dim() - 2] = n_columns_q;
     R = at::empty(q_sizes, self.options());
-    return std::make_tuple(at::empty(q_sizes, self.options()),
-                           at::empty(q_sizes, self.options()));
+    return std::make_tuple(q_working_copy, R);
   }
 
   // First perform GEQRF for R and TAU (the elementary reflectors)
   // We will need to generate R from the upper triangular matrix from the
   // matrix input to GEQRF.
+  q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
+  q_working_copy.narrow(-1, 0, n).copy_(self);
+
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "qr_cpu", [&]{
-    apply_geqrf<scalar_t>(self_working_copy, tau_working_copy, infos);
+    apply_geqrf<scalar_t>(q_working_copy, tau_working_copy, m, n, infos);
   });
   if (self.dim() > 2) {
     batchCheckErrors(infos, "qr_cpu");
@@ -806,13 +803,10 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   }
 
   // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
-  q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
-  q_working_copy.narrow(-1, 0, n).copy_(self_working_copy);
-
-  R = self_working_copy.narrow_copy(-2, 0, n_columns_q).triu_();
+  R = q_working_copy.slice(-2, 0, n_columns_q).slice(-1, 0, n).triu();
 
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "qr_cpu", [&]{
-    apply_orgqr<scalar_t>(q_working_copy, tau_working_copy, n_columns_q, infos);
+    apply_orgqr<scalar_t>(q_working_copy, tau_working_copy, m, n_columns_q, std::min(m, n), infos);
   });
   if (self.dim() > 2) {
     batchCheckErrors(infos, "qr_cpu");

@@ -5166,10 +5166,8 @@ class _TestTorchMixin(object):
 
         tensor_dims_list = [(3, 5), (5, 5), (5, 3),  # Single matrix
                             (7, 3, 5), (7, 5, 5), (7, 5, 3),  # 3-dim Tensors
-                            (7, 5, 3, 5), (7, 5, 5, 5), (7, 5, 5, 3)  # 4-dim Tensors
-                           ]
+                            (7, 5, 3, 5), (7, 5, 5, 5), (7, 5, 5, 3)]  # 4-dim Tensors
         for tensor_dims, some in product(tensor_dims_list, [True, False]):
-            print("TD: {}\tSOME: {}".format(tensor_dims, some))
             run_test(tensor_dims, some)
 
     @skipIfNoLapack
@@ -8325,8 +8323,15 @@ class _TestTorchMixin(object):
             evalues, evectors = fn(torch.symeig, (0, 0), True)
             self.assertEqual([(0,), (0, 0)], [evalues.shape, evectors.shape])
 
-            # qr, gels
-            self.assertRaises(RuntimeError, lambda: torch.qr(torch.randn(0, 0)))
+            # qr
+            q, r = fn(torch.qr, (3, 0), True)
+            self.assertEqual([(3, 0), (0, 0)], [q.shape, r.shape])
+            q, r = fn(torch.qr, (0, 3), True)
+            self.assertEqual([(0, 0), (0, 3)], [q.shape, r.shape])
+            q, r = fn(torch.qr, (3, 0), False)
+            self.assertEqual([(3, 3), (3, 0)], [q.shape, r.shape])
+
+            # gels
             self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0, 0), torch.randn(0, 0)))
             self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0,), torch.randn(0, 0)))
 

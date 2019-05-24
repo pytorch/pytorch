@@ -1006,7 +1006,8 @@ std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, bool some) {
   if (self.numel() == 0) {
     // Fix the number of columns of q_working_copy appropriately
     q_sizes[self.dim() - 1] = n_columns_q;
-    q_working_copy = at::empty(q_sizes, self.options());
+    q_working_copy = at::eye(q_sizes[self.dim() - 2], q_sizes[self.dim() - 1], self.options());
+    q_working_copy = q_working_copy.expand_as(q_working_copy);
 
     // We repurpose the same q_sizes for r_working_copy
     // Fix the number of rows and columns of q_working_copy appropriately
