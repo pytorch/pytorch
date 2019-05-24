@@ -161,15 +161,15 @@ void AliasDb::dump() const {
     const auto element = ptrPair.second;
     if (element->pointsTo.count() > 0) {
       std::cout << getElementName(element) << " points to: ";
-      for (const auto pointedTo : convert(element->pointsTo)) {
-        std::cout << getElementName(pointedTo) << ", ";
+      for (const auto pointedTo : element->pointsTo) {
+        std::cout << getElementName(Element::toElement(pointedTo)) << ", ";
       }
       std::cout << "\n";
     }
     if (element->contained_elements.count() > 0) {
       std::cout << getElementName(element) << " contains: ";
-      for (const auto contained : convert(element->contained_elements)) {
-        std::cout << getElementName(contained) << ", ";
+      for (const auto contained : element->contained_elements) {
+        std::cout << getElementName(Element::toElement(contained)) << ", ";
       }
       std::cout << "\n";
     }
@@ -538,9 +538,9 @@ void AliasDb::analyzeWait(Node* node) {
     // write directly against the wildcard element. So find a wildcard value in
     // the graph to write to.
     const auto el = pr.second;
-    const auto& pointedFrom = convert(el->pointedFrom);
+    const auto& pointedFrom = el->pointedFrom;
     TORCH_INTERNAL_ASSERT(!pointedFrom.empty());
-    const auto wildcardValue = (*pointedFrom.begin())->value;
+    const auto wildcardValue = Element::toElement(*pointedFrom.begin())->value;
     TORCH_INTERNAL_ASSERT(wildcardValue);
     registerWrite(wildcardValue, node);
   }

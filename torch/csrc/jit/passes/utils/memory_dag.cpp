@@ -7,10 +7,12 @@
 
 namespace torch {
 namespace jit {
+namespace {
 ska::flat_hash_map<const Element*, int> comprMap;
 ska::flat_hash_map<int, const Element*> decomprMap;
+} // namespace
 
-int getCompressed(const Element* x) {
+int Element::toIndex(const Element* x) {
   if (comprMap.count(x)) {
     return comprMap[x];
   }
@@ -18,11 +20,13 @@ int getCompressed(const Element* x) {
   decomprMap[comprMap.size()] = x;
   return comprMap[x];
 }
-const Element* getDecompressed(int x) {
+
+const Element* Element::toElement(int x) {
   auto res = decomprMap[x];
-  AT_ASSERT(res);
+  TORCH_INTERNAL_ASSERT(res);
   return res;
 }
+
 bool MemoryDAG::mayAlias(Element* a, Element* b) const {
   return mayAliasImpl(a, b);
 }
@@ -31,17 +35,11 @@ bool MemoryDAG::mayAlias(const Element* a, const Element* b) const {
   return mayAliasImpl(a, b);
 }
 
-bool MemoryDAG::memoryLocationOverlap(
-    const MemoryLocations& aMemLoc,
-    const MemoryLocations& bMemLoc) const {
-  return aMemLoc.intersects(bMemLoc);
-}
-
 bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
   const auto aMemLoc = a->getMemoryLocations();
   const auto bMemLoc = b->getMemoryLocations();
 
-  return memoryLocationOverlap(aMemLoc, bMemLoc);
+  return aMemLoc.intersects(bMemLoc);
 }
 
 bool MemoryDAG::mayContainAlias(const Element* a, const Element* b) const {
@@ -56,17 +54,17 @@ void collectAllContainedMemoryLocations(
     const Element* elem,
     MemoryLocations& cont) {
   // we have already recursed on this element
-  int compIdx = getCompressed(elem);
+  int compIdx = Element::toIndex(elem);
   if (cont.test_and_set(compIdx)) {
     return;
   }
 
   for (const auto& mem_loc : elem->getMemoryLocations()) {
-    collectAllContainedMemoryLocations(getDecompressed(mem_loc), cont);
+    collectAllContainedMemoryLocations(Element::toElement(mem_loc), cont);
   }
 
   for (const auto& contained : elem->contained_elements) {
-    collectAllContainedMemoryLocations(getDecompressed(contained), cont);
+    collectAllContainedMemoryLocations(Element::toElement(contained), cont);
   }
 }
 
@@ -77,7 +75,7 @@ bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
   collectAllContainedMemoryLocations(a, all_a_mlocs);
   collectAllContainedMemoryLocations(b, all_b_mlocs);
 
-  return memoryLocationOverlap(all_a_mlocs, all_b_mlocs);
+  return all_a_mlocs.intersects(all_b_mlocs);
 }
 
 bool MemoryDAG::mayContainAlias(
@@ -97,17 +95,17 @@ bool MemoryDAG::mayContainAlias(
     collectAllContainedMemoryLocations(elem, all_b_mlocs);
   }
 
-  return memoryLocationOverlap(all_a_mlocs, all_b_mlocs);
+  return all_a_mlocs.intersects(all_b_mlocs);
 }
 
 // Make `v` point at `to`.
 void MemoryDAG::makePointerTo(Element* from, Element* to) {
-  from->pointsTo.set(getCompressed(to));
-  to->pointedFrom.set(getCompressed(from));
+  from->pointsTo.set(Element::toIndex(to));
+  to->pointedFrom.set(Element::toIndex(from));
 }
 
 void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
-  container->contained_elements.set(getCompressed(elem));
+  container->contained_elements.set(Element::toIndex(elem));
 }
 
 // Give `v` a fresh alias (i.e. it does not point to any value)
@@ -120,13 +118,6 @@ Element* MemoryDAG::makeFreshValue(const Value* v) {
   return rawPtr;
 }
 
-TORCH_API std::unordered_set<const Element*> convert(MemoryLocations bits) {
-  std::unordered_set<const Element*> res;
-  for (auto i : bits) {
-    res.insert(getDecompressed(i));
-  }
-  return res;
-}
 const MemoryLocations& Element::getMemoryLocations() const {
   if (!cachedMemoryLocations_.empty()) {
     return cachedMemoryLocations_;
@@ -144,12 +135,12 @@ const MemoryLocations& Element::getMemoryLocations() const {
 void Element::bfs(BfsDirection dir, MemoryLocations& res) const {
   std::queue<int> queue;
   MemoryLocations seen;
-  queue.push(getCompressed(this));
+  queue.push(Element::toIndex(this));
   while (!queue.empty()) {
     const auto el = queue.front();
     queue.pop();
     seen.set(el);
-    auto decompEl = getDecompressed(el);
+    auto decompEl = Element::toElement(el);
     if (decompEl->pointsTo.empty()) {
       res.set(el);
     }

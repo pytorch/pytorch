@@ -9,6 +9,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+// Uses a compressed index representation for faster comparisons
 typedef llvm::SparseBitVector<128> MemoryLocations;
 namespace torch {
 namespace jit {
@@ -85,8 +86,9 @@ class TORCH_API MemoryDAG {
     // If any of group `b`s memory locations overlap, return true.
     for (auto it = b.cbegin(); it != b.cend();) {
       const auto element = *it;
-
-      memoryLocations |= element->getMemoryLocations();
+      if (memoryLocations.intersects(element->getMemoryLocations())) {
+        return true;
+      }
 
       const auto cnt = b.count(*it);
       std::advance(it, cnt);
@@ -111,7 +113,6 @@ enum class BfsDirection {
   POINTED_FROM,
 };
 
-std::unordered_set<const Element*> convert(MemoryLocations bits);
 // `Element` represents the vertex in the points-to graph. It represents
 // anything that could have an aliasing relationship, mostly IR `Value`s, but
 // also the "inside of a list", or wildcards.
@@ -138,6 +139,10 @@ struct Element {
   // Do a breadth-first search over the graph, starting at `this` and
   // traversing in the direction `dir`.`fn` will be run on each element.
   void bfs(BfsDirection dir, MemoryLocations& res) const;
+
+  // Converts to and from the compressed index representation
+  static int toIndex(const Element* x);
+  static const Element* toElement(int x);
 };
 } // namespace jit
 } // namespace torch
