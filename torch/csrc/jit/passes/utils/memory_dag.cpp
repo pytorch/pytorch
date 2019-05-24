@@ -1,9 +1,9 @@
 #include "memory_dag.h"
 
+#include <c10/util/flat_hash_map.h>
 #include <torch/csrc/utils/memory.h>
 #include <algorithm>
 #include <queue>
-#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -18,9 +18,10 @@ int getCompressed(const Element* x) {
   decomprMap[comprMap.size()] = x;
   return comprMap[x];
 }
-const Element * getDecompressed(int x) {
-  assert(decomprMap.count(x));
-  return decomprMap[x];
+const Element* getDecompressed(int x) {
+  auto res = decomprMap[x];
+  AT_ASSERT(res);
+  return res;
 }
 bool MemoryDAG::mayAlias(Element* a, Element* b) const {
   return mayAliasImpl(a, b);
@@ -31,8 +32,8 @@ bool MemoryDAG::mayAlias(const Element* a, const Element* b) const {
 }
 
 bool MemoryDAG::memoryLocationOverlap(
-    const MemoryLocations & aMemLoc,
-    const MemoryLocations & bMemLoc) const {
+    const MemoryLocations& aMemLoc,
+    const MemoryLocations& bMemLoc) const {
   return aMemLoc.intersects(bMemLoc);
 }
 
@@ -53,14 +54,12 @@ bool MemoryDAG::mayContainAlias(Element* a, Element* b) const {
 
 void collectAllContainedMemoryLocations(
     const Element* elem,
-    MemoryLocations & cont) {
+    MemoryLocations& cont) {
   // we have already recursed on this element
   int compIdx = getCompressed(elem);
-  if (cont.test(compIdx)) {
+  if (cont.test_and_set(compIdx)) {
     return;
   }
-
-  cont.set(compIdx);
 
   for (const auto& mem_loc : elem->getMemoryLocations()) {
     collectAllContainedMemoryLocations(getDecompressed(mem_loc), cont);
@@ -72,8 +71,8 @@ void collectAllContainedMemoryLocations(
 }
 
 bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
-  MemoryLocations  all_a_mlocs;
-  MemoryLocations  all_b_mlocs;
+  MemoryLocations all_a_mlocs;
+  MemoryLocations all_b_mlocs;
 
   collectAllContainedMemoryLocations(a, all_a_mlocs);
   collectAllContainedMemoryLocations(b, all_b_mlocs);
@@ -88,12 +87,12 @@ bool MemoryDAG::mayContainAlias(
     return false;
   }
 
-  MemoryLocations  all_a_mlocs;
+  MemoryLocations all_a_mlocs;
   for (const auto& elem : a) {
     collectAllContainedMemoryLocations(elem, all_a_mlocs);
   }
 
-  MemoryLocations  all_b_mlocs;
+  MemoryLocations all_b_mlocs;
   for (const auto& elem : b) {
     collectAllContainedMemoryLocations(elem, all_b_mlocs);
   }
@@ -123,7 +122,7 @@ Element* MemoryDAG::makeFreshValue(const Value* v) {
 
 TORCH_API std::unordered_set<const Element*> convert(MemoryLocations bits) {
   std::unordered_set<const Element*> res;
-  for (auto i: bits) {
+  for (auto i : bits) {
     res.insert(getDecompressed(i));
   }
   return res;
@@ -134,51 +133,45 @@ const MemoryLocations& Element::getMemoryLocations() const {
   }
 
   // Do a BFS in the `points-to` direction, collecting all memory locations
-  MemoryLocations  ret;
-  this->bfs(
-      [&](const Element* el) {
-        if (el->pointsTo.empty()) {
-          ret.set(getCompressed(el));
-        }
-      },
-      BfsDirection::POINTS_TO);
+  MemoryLocations ret;
+  this->bfs(BfsDirection::POINTS_TO, ret);
   cachedMemoryLocations_ = ret;
-  return ret;
+  return cachedMemoryLocations_;
 }
 
 // Do a breadth-first search over the graph, starting at `this` and
 // traversing in the direction `dir`.`fn` will be run on each element.
-template <typename Fn>
-bool Element::bfs(Fn fn, BfsDirection dir) const {
-  std::queue<const Element*> queue;
-  MemoryLocations  seen;
-  queue.push(this);
+void Element::bfs(BfsDirection dir, MemoryLocations& res) const {
+  std::queue<int> queue;
+  MemoryLocations seen;
+  queue.push(getCompressed(this));
   while (!queue.empty()) {
     const auto el = queue.front();
     queue.pop();
-    seen.set(getCompressed(el));
-
-    fn(el);
+    seen.set(el);
+    auto decompEl = getDecompressed(el);
+    if (decompEl->pointsTo.empty()) {
+      res.set(el);
+    }
 
     switch (dir) {
       case BfsDirection::POINTS_TO: {
-        for (auto ptr : el->pointsTo) {
+        for (auto ptr : decompEl->pointsTo) {
           if (!seen.test(ptr)) {
-            queue.push(getDecompressed(ptr));
+            queue.push(ptr);
           }
         }
       } break;
 
       case BfsDirection::POINTED_FROM: {
-        for (auto ptr : el->pointedFrom) {
+        for (auto ptr : decompEl->pointedFrom) {
           if (!seen.test(ptr)) {
-            queue.push(getDecompressed(ptr));
+            queue.push(ptr);
           }
         }
       } break;
     }
   }
-  return false;
 }
 } // namespace jit
 } // namespace torch
