@@ -115,7 +115,7 @@ int64_t TensorImpl::stride(int64_t d) const {
 TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   // We only allow this operation on dense tensors
   if (!(has_storage() && layout() == kStrided)) {
-    TORCH_CHECK(condition_when_zero_dim == (dim() == 0),
+    TORCH_INTERNAL_ASSERT(condition_when_zero_dim == (dim() == 0),
            type_id_, " does not support changing dimensionality via maybe_zero_dim");
   }
   bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
