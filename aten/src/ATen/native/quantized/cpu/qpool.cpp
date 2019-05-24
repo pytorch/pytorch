@@ -141,12 +141,8 @@ Tensor q_maxpool_2d(Tensor qx,                  // Input Tensor (Quantized)
     qx.options().dtype(toQIntType(qx.scalar_type())),
     qx.q_scale().toDouble(),
     qx.q_zero_point().toLong());
-  Q* qxd;
-  if (qx.is_contiguous()) {
-    qxd = qx.data<Q>();
-  } else {
-    qxd = qx.contiguous().data<Q>();
-  }
+  auto qx_contig = qx.contiguous();
+  auto qxd = qx_contig.data<Q>();
   auto qyd = qy.data<Q>();
   std::vector<int64_t> index;
   index.resize(qy.numel());
