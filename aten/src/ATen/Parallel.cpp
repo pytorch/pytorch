@@ -137,12 +137,10 @@ std::string get_parallel_info() {
 PTThreadPool::PTThreadPool(
     int pool_size,
     int numa_node_id)
-    : c10::ThreadPool(pool_size, numa_node_id) {}
-
-void PTThreadPool::init_thread() {
-  c10::setThreadName("PTThreadPool");
-  at::init_num_threads();
-}
+    : c10::ThreadPool(pool_size, numa_node_id, [](){
+      c10::setThreadName("PTThreadPool");
+      at::init_num_threads();
+    }) {}
 
 C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, create_c10_threadpool);
 
