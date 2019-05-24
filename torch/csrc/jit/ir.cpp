@@ -219,6 +219,16 @@ std::ostream& Node::print(
     std::ostream& out,
     size_t level,
     std::vector<const Node*>* groups) const {
+  auto& source = sourceRange().source();
+  if (source->filename()) {
+    auto col_offset = (int)sourceRange().start() -
+        (int)source->offset_for_line(
+            source->lineno_for_offset(sourceRange().start()));
+    indent(out, level) << "# " << *source->filename() << ":"
+                       << source->source_lineno_for_offset(
+                              sourceRange().start())
+                       << ":" << col_offset << "\n";
+  }
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";

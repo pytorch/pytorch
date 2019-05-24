@@ -23,10 +23,12 @@ struct Source {
   Source(
       std::string text,
       c10::optional<std::string> filename,
-      size_t starting_line_no)
+      size_t starting_line_no,
+      size_t leading_whitespace_chars)
       : text_(std::move(text)),
         filename_(std::move(filename)),
-        starting_line_no_(starting_line_no) {
+        starting_line_no_(starting_line_no),
+        leading_whitespace_chars_(leading_whitespace_chars) {
     calc_line_start_offsets();
   }
 
@@ -83,6 +85,10 @@ struct Source {
     return starting_line_no_;
   }
 
+  size_t leading_whitespace_chars() const {
+    return leading_whitespace_chars_;
+  }
+
  private:
   void calc_line_start_offsets() {
     size_t pos = 0;
@@ -93,8 +99,9 @@ struct Source {
   }
   std::string text_;
   c10::optional<std::string> filename_;
-  // If filename_ is not present, starting_line_no_ is don't care.
+  // If filename_ is not present, these two fields are don't care
   size_t starting_line_no_;
+  size_t leading_whitespace_chars_;
   // Starting offsets for lines into the source. e.g. line 0 starts at
   // line_starting_offsets_[0], etc.
   std::vector<size_t> line_starting_offsets_;

@@ -14,11 +14,16 @@ namespace jit {
 namespace script {
 
 struct SourceRangeFactory {
-  SourceRangeFactory(std::string text, std::string filename, size_t file_lineno)
+  SourceRangeFactory(
+      std::string text,
+      std::string filename,
+      size_t file_lineno,
+      size_t leading_whitespace_chars)
       : source_(std::make_shared<Source>(
             std::move(text),
             std::move(filename),
-            file_lineno)) {}
+            file_lineno,
+            leading_whitespace_chars)) {}
   SourceRange create(int line, int start_col, int end_col) {
     size_t start_byte_offset, end_byte_offset;
     std::tie(start_byte_offset, end_byte_offset) =
@@ -58,7 +63,7 @@ void initTreeViewBindings(PyObject* module) {
       .def_property_readonly("start", &SourceRange::start)
       .def_property_readonly("end", &SourceRange::end);
   py::class_<SourceRangeFactory>(m, "SourceRangeFactory")
-      .def(py::init<std::string&&, std::string&&, size_t>())
+      .def(py::init<std::string&&, std::string&&, size_t, size_t>())
       .def("make_range", &SourceRangeFactory::create)
       .def(
           "make_raw_range",

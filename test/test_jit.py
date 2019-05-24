@@ -3672,7 +3672,7 @@ def foo(x):
             return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}".format(lineno + 1)):
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:20".format(lineno + 1)):
             scripted = torch.jit.script(foobar)
 
     def test_tensor_shape(self):
