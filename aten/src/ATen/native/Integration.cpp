@@ -20,9 +20,7 @@ static Tensor do_trapz(const Tensor& y, const Tensor& dx, int64_t dim) {
 // special case for scalar dx, to move the multiplication out of the
 // loop
 static Tensor do_trapz(const Tensor& y, double dx, int64_t dim) {
-    Tensor left = y.slice(dim, 0, -1);
-    Tensor right = y.slice(dim, 1);
-    return (left + right).sum(dim) * (dx/2);
+    return (y * dx) - y.slice(dim, 0, 1) - y.slice(dim, -1);
 }
 
 }
