@@ -144,7 +144,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
           // See NOTE [ Version Counter in comm.*_coalesced ]
           AT_ASSERT(t.is_variable());
           Variable var = t;
-          device_outputs.push_back(make_variable(var.data(), false));
+          device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
     } else {
@@ -157,7 +157,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
           // See NOTE [ Version Counter in comm.*_coalesced ]
           AT_ASSERT(t.is_variable());
           Variable var = t;
-          device_outputs.push_back(make_variable(var.data(), false));
+          device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
     }

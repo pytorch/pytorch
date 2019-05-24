@@ -395,7 +395,7 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
         "Can't call numpy() on Variable that requires grad. "
         "Use var.detach().numpy() instead.");
   }
-  return torch::utils::tensor_to_numpy(self_.data());
+  return torch::utils::tensor_to_numpy(self_.tensor_data());
   END_HANDLE_TH_ERRORS
 }
 
@@ -614,7 +614,7 @@ static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
   HANDLE_TH_ERRORS
   jit::tracer::warn("Converting a tensor to a Python list", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return torch::utils::tensor_to_list(self_.data());
+  return torch::utils::tensor_to_list(self_);
   END_HANDLE_TH_ERRORS
 }
 

@@ -93,7 +93,7 @@ variable_list grad(
 }
 
 void testADFormulas() {
-  const auto unwrap = [](const Variable& v) { return v.data(); };
+  const auto cast = [](const Variable& v) { return static_cast<at::Tensor>(v); };
 
   using VL = variable_list;
   const var_meta_list binary_pointwise = {{2, 3, 4, 5}, {2, 3, 4, 5}};
@@ -155,15 +155,15 @@ void testADFormulas() {
     auto grad_spec = differentiate(graph);
     LowerGradOf(*grad_spec.df);
     // Get outputs from the interpreter
-    auto tensors_in = fmap(vars_in, unwrap);
-    auto tensor_grads_in = fmap(var_grads_in, unwrap);
+    auto tensors_in = fmap(vars_in, cast);
+    auto tensor_grads_in = fmap(var_grads_in, cast);
     tensor_list tensors_out, tensor_grads_out;
     std::tie(tensors_out, tensor_grads_out) =
         runGradient(grad_spec, tensors_in, tensor_grads_in);
 
     // Compare results
-    auto expected_tensors_out = fmap(vars_out, unwrap);
-    auto expected_tensor_grads_out = fmap(var_grads_out, unwrap);
+    auto expected_tensors_out = fmap(vars_out, cast);
+    auto expected_tensor_grads_out = fmap(var_grads_out, cast);
     assertAllClose(tensors_out, expected_tensors_out);
     assertAllClose(tensor_grads_out, expected_tensor_grads_out);
   }
