@@ -3667,6 +3667,14 @@ def foo(x):
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
 
+    def test_file_line_error(self):
+        def foobar(x):
+            return torch.blargh(xyz)
+
+        _, lineno = inspect.getsourcelines(foobar)
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}".format(lineno + 1)):
+            scripted = torch.jit.script(foobar)
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 

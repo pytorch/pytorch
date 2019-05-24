@@ -142,27 +142,31 @@ def get_jit_class_def(cls, self_name):
     method_defs = [get_jit_def(method[1],
                    self_name=self_name) for method in methods]
 
-    source = dedent(inspect.getsource(cls))
+    sourcelines, file_lineno = inspect.getsourcelines(cls)
+    source = dedent(''.join(sourcelines))
+    filename = inspect.getsourcefile(cls)
     py_ast = ast.parse(source)
-    ctx = SourceContext(source, False)
+    ctx = SourceContext(source, filename, file_lineno, False)
     return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 
 
 def get_jit_def(fn, self_name=None):
-    source = dedent(inspect.getsource(fn))
+    sourcelines, file_lineno = inspect.getsourcelines(fn)
+    source = dedent(''.join(sourcelines))
+    filename = inspect.getsourcefile(fn)
     py_ast = ast.parse(source)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
     type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, _uses_true_division(fn))
+    ctx = SourceContext(source, filename, file_lineno, _uses_true_division(fn))
     return build_def(ctx, py_ast.body[0], type_line, self_name)
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
 # about the function-to-be-compiled.
 class SourceContext(SourceRangeFactory):
-    def __init__(self, source, uses_true_division=True):
-        super(SourceContext, self).__init__(source)
+    def __init__(self, source, filename, file_lineno, uses_true_division=True):
+        super(SourceContext, self).__init__(source, filename, file_lineno)
         self.uses_true_division = uses_true_division
 
 
