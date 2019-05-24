@@ -9,14 +9,13 @@ namespace torch {
 namespace jit {
 ska::flat_hash_map<const Element*, int> comprMap;
 ska::flat_hash_map<int, const Element*> decomprMap;
-int cnt = 0;
 
 int getCompressed(const Element* x) {
   if (comprMap.count(x)) {
     return comprMap[x];
   }
-  comprMap[x] = ++cnt;
-  decomprMap[cnt] = x;
+  comprMap[x] = comprMap.size() + 1;
+  decomprMap[comprMap.size()] = x;
   return comprMap[x];
 }
 const Element * getDecompressed(int x) {
@@ -129,7 +128,7 @@ TORCH_API std::unordered_set<const Element*> convert(MemoryLocations bits) {
   }
   return res;
 }
-MemoryLocations Element::getMemoryLocations() const {
+const MemoryLocations& Element::getMemoryLocations() const {
   if (!cachedMemoryLocations_.empty()) {
     return cachedMemoryLocations_;
   }
@@ -143,7 +142,6 @@ MemoryLocations Element::getMemoryLocations() const {
         }
       },
       BfsDirection::POINTS_TO);
-
   cachedMemoryLocations_ = ret;
   return ret;
 }

@@ -7,10 +7,12 @@
 #include <vector>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/sparse_bitset.h>
+// #include <c10/util/dense_bitset.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-typedef llvm::SparseBitVector<64> MemoryLocations;
+typedef llvm::SparseBitVector<128> MemoryLocations;
+// typedef llvm::BitVector MemoryLocations;
 namespace torch {
 namespace jit {
 
@@ -77,9 +79,7 @@ class TORCH_API MemoryDAG {
     for (auto it = a.cbegin(); it != a.cend();) {
       const auto element = *it;
 
-      for (const auto loc : element->getMemoryLocations()) {
-        memoryLocations.set(loc);
-      }
+      memoryLocations |= element->getMemoryLocations();
 
       const auto cnt = a.count(*it);
       std::advance(it, cnt);
@@ -89,9 +89,7 @@ class TORCH_API MemoryDAG {
     for (auto it = b.cbegin(); it != b.cend();) {
       const auto element = *it;
 
-      if (memoryLocations.intersects(element->getMemoryLocations())) {
-        return true;
-      }
+      memoryLocations |= element->getMemoryLocations();
 
       const auto cnt = b.count(*it);
       std::advance(it, cnt);
@@ -135,7 +133,7 @@ struct Element {
   MemoryLocations  contained_elements;
 
   // Return the unique memory locations that `Element` might represent.
-  TORCH_API MemoryLocations getMemoryLocations() const;
+  TORCH_API const MemoryLocations& getMemoryLocations() const;
   // We do path compression to make repeated memory location queries faster.
   // An empty cache means it is invalidated (it can never be empty otherwise,
   // since every element must point to at least one memory location).
