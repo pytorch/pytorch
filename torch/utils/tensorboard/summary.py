@@ -378,7 +378,7 @@ def custom_scalars(layout):
         categories.append(layout_pb2.Category(title=k, chart=charts))
 
     layout = layout_pb2.Layout(category=categories)
-    PluginData = [SummaryMetadata.PluginData(plugin_name='custom_scalars')]
+    PluginData = SummaryMetadata.PluginData(plugin_name='custom_scalars')
     smd = SummaryMetadata(plugin_data=PluginData)
     tensor = TensorProto(dtype='DT_STRING',
                          string_val=[layout.SerializeToString()],
