@@ -68,13 +68,13 @@ template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
 template <typename scalar_t>
 void index_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  if (iter.numel()*iter.element_size(/*arg=*/0) < std::numeric_limits<uint32_t>::max()) {
+  if (iter.can_use_32bit_indexing()) {
       uint32_t numel = iter.numel(); //dummy argument for template deduction
       gpu_index_kernel(iter, index_size, index_stride, numel, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
         *(scalar_t*)out_data = *(scalar_t*)(in_data + offset);
       });
   } else {
-      int64_t numel = iter.numel(); //dummy argument for template deduction, also, signed because it is still large enough, and compiler can generatemarginally more efficient code with signed
+      int64_t numel = iter.numel(); //dummy argument for template deduction, also, signed because it is still large enough, and compiler can generate marginally more efficient code with signed
       gpu_index_kernel(iter, index_size, index_stride, numel, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
         *(scalar_t*)out_data = *(scalar_t*)(in_data + offset);
       });
@@ -84,13 +84,13 @@ void index_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef
 
 template <typename scalar_t>
 void index_put_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  if (iter.numel()*iter.element_size(/*arg=*/0) < std::numeric_limits<uint32_t>::max()) {
+  if (iter.can_use_32bit_indexing()) {
       uint32_t numel = iter.numel(); //dummy argument for template deduction
       gpu_index_kernel(iter, index_size, index_stride, numel, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
         *(scalar_t*)(out_data + offset) = *(scalar_t*)in_data;
       });
   } else {
-      int64_t numel = iter.numel(); //dummy argument for template deduction, also, signed because it is still large enough, and compiler can generatemarginally more efficient code with signed
+      int64_t numel = iter.numel(); //dummy argument for template deduction, also, signed because it is still large enough, and compiler can generate marginally more efficient code with signed
       gpu_index_kernel(iter, index_size, index_stride, numel, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
         *(scalar_t*)(out_data + offset) = *(scalar_t*)in_data;
       });
