@@ -8,18 +8,18 @@
 
 namespace at { namespace native {
 
-template <int N>
-static OffsetCalculator<N> index_make_offset_calculator(const TensorIterator& iter) {
+template <int N, typename IndexType>
+static OffsetCalculator<N, IndexType> index_make_offset_calculator(const TensorIterator& iter) {
   AT_ASSERT(N <= iter.ntensors());
   std::array<const int64_t*, N> strides;
   for (int i = 0; i < N; i++) {
     strides[i] = iter.strides(i).data();
   }
-  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
+  return OffsetCalculator<N, IndexType>(iter.ndim(), iter.shape().data(), strides.data());
 }
 
-template <typename func_t>
-void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
+template <typename func_t, typename IndexType>
+void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, IndexType numel, const func_t& f) {
   int num_indices = index_size.size();
   AT_ASSERT(num_indices == index_stride.size());
   AT_ASSERT(num_indices == iter.ntensors() - 2);
@@ -40,7 +40,7 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   char* out_ptr = (char*)iter.data_ptr(0);
   char* in_ptr = (char*)iter.data_ptr(1);
 
-  auto offset_calc = index_make_offset_calculator<3>(iter);
+  auto offset_calc = index_make_offset_calculator<3, IndexType>(iter);
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
     auto offsets = offset_calc.get(idx);
     char* out_data = out_ptr + offsets[0];
@@ -68,16 +68,33 @@ template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
 template <typename scalar_t>
 void index_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
-    *(scalar_t*)out_data = *(scalar_t*)(in_data + offset);
-  });
+  if (iter.numel()*iter.element_size(/*arg=*/0) < std::numeric_limits<uint32_t>::max()) {
+      uint32_t numel = iter.numel(); //dummy argument for template deduction
+      gpu_index_kernel(iter, index_size, index_stride, numel, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
+        *(scalar_t*)out_data = *(scalar_t*)(in_data + offset);
+      });
+  } else {
+      int64_t numel = iter.numel(); //dummy argument for template deduction, also, signed because it is still large enough, and compiler can generatemarginally more efficient code with signed
+      gpu_index_kernel(iter, index_size, index_stride, numel, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
+        *(scalar_t*)out_data = *(scalar_t*)(in_data + offset);
+      });
+  }
+
 }
 
 template <typename scalar_t>
 void index_put_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
-    *(scalar_t*)(out_data + offset) = *(scalar_t*)in_data;
-  });
+  if (iter.numel()*iter.element_size(/*arg=*/0) < std::numeric_limits<uint32_t>::max()) {
+      uint32_t numel = iter.numel(); //dummy argument for template deduction
+      gpu_index_kernel(iter, index_size, index_stride, numel, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
+        *(scalar_t*)(out_data + offset) = *(scalar_t*)in_data;
+      });
+  } else {
+      int64_t numel = iter.numel(); //dummy argument for template deduction, also, signed because it is still large enough, and compiler can generatemarginally more efficient code with signed
+      gpu_index_kernel(iter, index_size, index_stride, numel, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
+        *(scalar_t*)(out_data + offset) = *(scalar_t*)in_data;
+      });
+  }
 }
 
 static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
