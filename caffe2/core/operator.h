@@ -331,6 +331,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   Tensor* OutputTensorAlias(int idx, const Tensor& src) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "OutputTensorAlias(idx, src) not (yet) supported for operators exported to c10.");
     return BlobSetTensor(OutputBlob(idx),
                   src.Alias());
   }
@@ -354,6 +357,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // note this does not check if the two Blobs points to the same Tensor, or if
   // the Tensor pointers point to the same TensorImpl, or if the Storages alias
   inline bool IsInputOutputAlias(int i, int j) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "IsInputOutputAlias(i, j) not (yet) supported for operators exported to c10.");
     return inputs_.at(i) == outputs_.at(j);
   }
 
@@ -397,8 +403,18 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
 #endif
   }
-  inline const vector<const Blob*>& Inputs() const { return inputs_; }
-  inline const vector<Blob*>& Outputs() { return outputs_; }
+  inline const vector<const Blob*>& Inputs() const {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "Inputs() not supported for operators exported to c10.");
+    return inputs_;
+  }
+  inline const vector<Blob*>& Outputs() {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "Outputs() not supported for operators exported to c10.");
+    return outputs_;
+  }
   vector<TensorShape> InputTensorShapes() const;
 
   virtual void WaitEvent(const Event& ev, int /*stream_id */ = -1) {
@@ -467,6 +483,10 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   virtual void AddRelatedBlobInfo(EnforceNotMet* err) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "AddRelatedBlobInfo(err) not supported for operators exported to c10.");
+
     if (!has_debug_def()) {
       return;
     }
