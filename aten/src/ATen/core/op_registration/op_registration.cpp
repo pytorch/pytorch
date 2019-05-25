@@ -40,7 +40,7 @@ private:
 
 void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNameStr, Options&& options) {
   #if defined(CAFFE2_IS_XPLAT_BUILD)
-    throw std::logic_error("We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
+    throw std::logic_error("Tried to register operator " + schemaOrNameStr + ". We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
   #else
     either<OperatorName, FunctionSchema> schemaOrName = torch::jit::parseSchemaOrName(schemaOrNameStr);
     if (schemaOrName.is_right()) {
@@ -48,38 +48,99 @@ void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNam
       checkSchemaAndRegisterOp_(std::move(schemaOrName).right(), std::move(options));
     } else {
       // schema wasn't explicitly specified. Take the inferred schema for registering the op.
-      AT_ASSERTM(nullptr != options.config.inferred_function_schema.get(), "Cannot infer schema from this kernel function. Please explicitly specify the operator schema.");
+
+      FunctionSchema inferred_schema = inferSchemaFromKernels_(schemaOrNameStr, options);
       OperatorName name = std::move(schemaOrName).left();
-      FunctionSchema inferredSchema(
+      FunctionSchema inferred_schema_with_name(
         std::move(name.name),
         std::move(name.overload_name),
-        options.config.inferred_function_schema->arguments(),
-        options.config.inferred_function_schema->returns(),
-        options.config.inferred_function_schema->is_vararg(),
-        options.config.inferred_function_schema->is_varret()
+        inferred_schema.arguments(),
+        inferred_schema.returns(),
+        inferred_schema.is_vararg(),
+        inferred_schema.is_varret()
       );
-      registerOp_(std::move(inferredSchema), std::move(options));
+
+      checkNoDuplicateKernels_(inferred_schema_with_name, options);
+
+      // Register all kernels with the schema we inferred
+      registerOp_(std::move(inferred_schema_with_name), std::move(options));
     }
   #endif
 }
 
-void RegisterOperators::checkSchemaAndRegisterOp_(FunctionSchema&& schema, Options&& options) {
-  if (options.config.inferred_function_schema.get() != nullptr) {
-    assertSchemasHaveSameSignature(*options.config.inferred_function_schema, schema);
+c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const std::string& opNameStr, const RegisterOperators::Options& options) {
+  AT_ASSERTM(options.kernels.size() > 0, "Cannot infer operator schema in registration of operator ", opNameStr, " because there is no kernel specified.");
+
+  c10::optional<FunctionSchema> inferred_schema = c10::nullopt;
+  for (const auto& kernel : options.kernels) {
+    if (nullptr != kernel.inferred_function_schema.get()) {
+      if (inferred_schema.has_value()) {
+        c10::optional<std::string> schema_difference = findSchemaDifferences(*inferred_schema, *kernel.inferred_function_schema);
+        if (schema_difference.has_value()) {
+          AT_ERROR("In operator registration: Tried to register kernels for same operator that infer a different function schema: [", toString(*inferred_schema), "] ",
+                   "doesn't match [", toString(*kernel.inferred_function_schema), "]. ",
+                   *schema_difference);
+        }
+      } else {
+        inferred_schema = *kernel.inferred_function_schema;
+      }
+    }
   }
+  AT_ASSERTM(inferred_schema.has_value(), "Cannot infer operator schema for this kind of kernel in registration of operator ", opNameStr,". Please explicitly specify the operator schema or specify at least one kernel for which we can infer the schema.");
+
+  return *inferred_schema;
+}
+
+void RegisterOperators::checkSchemaAndRegisterOp_(FunctionSchema schema, Options&& options) {
+  for (auto& kernel : options.kernels) {
+    if (nullptr != kernel.inferred_function_schema.get()) {
+      c10::optional<std::string> schema_difference = findSchemaDifferences(schema, *kernel.inferred_function_schema);
+      if (schema_difference.has_value()) {
+        AT_ERROR("In operator registration: Specified function schema [", toString(schema), "] ",
+                 "doesn't match inferred function schema [", toString(*kernel.inferred_function_schema), "]. ",
+                 *schema_difference);
+      }
+    }
+  }
+
+  checkNoDuplicateKernels_(schema, options);
 
   registerOp_(std::move(schema), std::move(options));
 }
 
+void RegisterOperators::checkNoDuplicateKernels_(const FunctionSchema& schema, const Options& options) {
+  std::unordered_set<TensorTypeId> dispatch_keys;
+  bool has_catchall_kernel = false;
+
+  for (const auto& kernel : options.kernels) {
+    if (kernel.dispatch_key.has_value()) {
+      AT_CHECK(0 == dispatch_keys.count(*kernel.dispatch_key), "In operator registration: Tried to register multiple kernels with same dispatch key " + detail::dispatch_key_to_string(*kernel.dispatch_key) + " for operator schema " + toString(schema));
+      dispatch_keys.insert(*kernel.dispatch_key);
+    } else {
+      AT_CHECK(!has_catchall_kernel, "In operator registration: Tried to register multiple catch-all kernels for operator schema " + toString(schema));
+      has_catchall_kernel = true;
+    }
+  }
+}
+
 void RegisterOperators::registerOp_(FunctionSchema&& schema, Options&& options) {
-  TORCH_CHECK(!options.config.dispatch_key.has_value() || options.config.kernel_func != nullptr,
-    "Tried to register an operator with a dispatch key but without a kernel. "
-    "Please either specify a kernel or omit the dispatch key to only register the schema.");
+  if (0 == options.kernels.size()) {
+    registerSchemaOnly_(std::move(schema));
+  } else {
+    for (auto& kernel : options.kernels) {
+      registerSchemaAndKernel_(schema, std::move(kernel));
+    }
+  }
+}
 
-  // if kernel_func is set, so must be cache_creator_func, the API shouldn't allow anything else.
-  AT_ASSERT((options.config.kernel_func != nullptr) == static_cast<bool>(options.config.cache_creator_func));
+void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel) {
+  AT_ASSERTM(kernel.kernel_func != nullptr && static_cast<bool>(kernel.cache_creator_func), "Kernel must be set");
 
-  registrars_.emplace_back(std::move(schema), options.config.dispatch_key, options.config.kernel_func, std::move(options.config.cache_creator_func));
+  registrars_.emplace_back(std::move(schema), kernel.dispatch_key, kernel.kernel_func, std::move(kernel.cache_creator_func));
+}
+
+void RegisterOperators::registerSchemaOnly_(FunctionSchema&& schema) {
+  registrars_.emplace_back(std::move(schema), c10::nullopt, nullptr, nullptr);
 }
 
 RegisterOperators::RegisterOperators() = default;

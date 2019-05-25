@@ -7329,6 +7329,14 @@ class _TestTorchMixin(object):
         self._test_advancedindex_big(self, lambda x: x)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_empty_storage_view(self):
+        # we should be able to "modify" slices of a 0-element
+        # array without an error being raised due to
+        # trying to resize its storage
+        t = torch.from_numpy(np.empty((0, 4)))
+        t[:, 1::2] *= 1
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):
             npt = tensor.numpy()
