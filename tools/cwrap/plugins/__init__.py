@@ -420,7 +420,6 @@ class CWrapPlugin(object):
         return template
 
 
-from .NNExtension import NNExtension  # noqa: F401
 from .NullableArguments import NullableArguments  # noqa: F401
 from .OptionalArguments import OptionalArguments  # noqa: F401
 from .ArgcountChecker import ArgcountChecker  # noqa: F401

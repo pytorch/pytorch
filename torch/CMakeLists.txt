@@ -39,7 +39,6 @@ set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
 
 set(TORCH_PYTHON_SRCS
-    ${GENERATED_THNN_CXX}
     ${GENERATED_CXX_PYTHON}
     ${TORCH_SRC_DIR}/csrc/CudaIPCTypes.cpp
     ${TORCH_SRC_DIR}/csrc/DataLoader.cpp
@@ -161,7 +160,6 @@ if (USE_CUDA)
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
-      ${GENERATED_THNN_CXX_CUDA}
       )
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
 
@@ -209,7 +207,6 @@ if (USE_ROCM)
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
-      ${GENERATED_THNN_CXX_CUDA}
       )
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES caffe2_hip_library)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS
@@ -269,7 +266,6 @@ add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
 add_dependencies(torch_python generate-torch-sources)
 set_source_files_properties(
-    ${GENERATED_THNN_SOURCES}
     ${GENERATED_CXX_PYTHON}
     PROPERTIES GENERATED TRUE
     )
