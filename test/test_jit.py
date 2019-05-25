@@ -1467,9 +1467,9 @@ graph(%x : Tensor,
 
             @torch.jit.script_method
             def forward(self, x):
-                x = x.quantize_linear(1.0, 0, torch.uint8)
+                x = x.quantize_linear(1.0, 0, torch.quint8)
                 x = x.int_repr()
-                x = torch._dequantize_linear(x, 1.0, 0, torch.uint8)
+                x = torch._dequantize_linear(x, 1.0, 0, torch.float)
                 x = self.conv1(x)
                 return x
 
@@ -12982,6 +12982,16 @@ a")
         x = torch.randn(3, 6)
         y = torch.randn(3, 6)
         self.checkScript(split_two, [(x + y)])
+
+    def test_conv_error(self):
+        @torch.jit.script
+        def fn(x, y):
+            return F.conv2d(x, y)
+
+        try:
+            fn(torch.ones(2, 2), torch.ones(4, 4))
+        except RuntimeError as e:
+            self.assertFalse('frame' in str(e))
 
     def test_python_op_name(self):
         import random
