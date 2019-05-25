@@ -355,7 +355,6 @@ elseif(CUDA_VERSION VERSION_EQUAL   9.2)
       "  export CUDAHOSTCXX='C:\\Program Files (x86)\\Microsoft Visual Studio"
       "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.12.25827\\bin\\HostX64\\x64\\cl.exe'\n")
   endif()
-endif()
 elseif(CUDA_VERSION VERSION_EQUAL   10.0)
   if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
       NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.20 AND
