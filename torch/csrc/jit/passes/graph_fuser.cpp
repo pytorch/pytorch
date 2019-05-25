@@ -813,6 +813,10 @@ struct GraphFuser {
     // The output of producer_for_chunk_node could have been used in some
     // aten::size operators, so we need to clean those up as well (we simply
     // broadcast all its tensor inputs).
+    // We need to insert these early in the graph, i.e. immediately after
+    // the producer_for_chunk_node as we will have the _size_if_not_same
+    // that may be before the bchunk.
+    WithInsertPoint guard2(producer_for_chunk_node);
     auto size_calc_uses = producer_for_chunk_node->output()->uses();
     if (!size_calc_uses.empty()) {
       auto tensor_inputs = filter(

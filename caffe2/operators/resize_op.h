@@ -1,8 +1,10 @@
-
 #pragma once
 
+#include "caffe2/core/c10_operator.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+
+C10_DECLARE_CAFFE2_OPERATOR(ResizeNearest);
 
 namespace caffe2 {
 
