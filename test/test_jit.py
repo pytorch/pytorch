@@ -7926,6 +7926,26 @@ a")
         o2 = m.forward2(i)
         self.assertEqual(o2, v)
 
+    def test_script_sequential_orderdict(self):
+        from collections import OrderedDict
+
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['mods']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.mods = nn.Sequential(OrderedDict([
+                    ("conv", nn.Conv2d(1, 20, 5)),
+                    ("relu", nn.ReLU())
+                ]))
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.mods(input)
+
+        m = M()
+        self.assertTrue('mods.conv.weight' in m.state_dict().keys())
+
     def test_script_sequential_multi_output_fail(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
