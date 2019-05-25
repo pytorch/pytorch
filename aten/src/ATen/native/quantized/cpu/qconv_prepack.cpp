@@ -68,8 +68,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_conv_prepack",
-    c10::RegisterOperators::options().kernel<QConvPackWeightInt8>().dispatchKey(
-        QuantizedCPUTensorId()));
+    c10::RegisterOperators::options().kernel<QConvPackWeightInt8>(QuantizedCPUTensorId()));
 
 } // namespace
 } // namespace native
