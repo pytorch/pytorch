@@ -40,17 +40,10 @@
 //
 //    using BadType C10_DEPRECATED_USING = int;
 
-// technically [[deprecated]] syntax is from c++14 standard, but it works in
-// many compilers.
-#if defined(__has_cpp_attribute)
-#if __has_cpp_attribute(deprecated)
-# define C10_DEPRECATED_USING [[deprecated]]
-#endif
-#endif
-
 #if !defined(C10_DEPRECATED_USING) && defined(_MSC_VER)
 #if defined(__CUDACC__)
-// [[deprecated]] doesn't work on nvcc on Windows;
+// [[deprecated]] doesn't work on nvcc on Windows,
+// even if compiler says __has_cpp_attribute(deprecated) is true;
 // you get the error:
 //
 //    error: attribute does not apply to any entity
@@ -58,9 +51,17 @@
 // So we just turn the macro off in this case.
 # define C10_DEPRECATED_USING
 #else
-// [[deprecated]] does work in windows without nvcc, though msc doesn't support
+// [[deprecated]] does work in windows without nvcc, though earlier msc doesn't support
 // `__has_cpp_attribute`.
 # define C10_DEPRECATED_USING [[deprecated]]
+#endif
+#endif
+
+// technically [[deprecated]] syntax is from c++14 standard, but it works in
+// many compilers.
+#if !defined(C10_DEPRECATED_USING) && defined(__has_cpp_attribute)
+#if __has_cpp_attribute(deprecated)
+#define C10_DEPRECATED_USING [[deprecated]]
 #endif
 #endif
 
