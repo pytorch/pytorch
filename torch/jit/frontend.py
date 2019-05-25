@@ -3,7 +3,6 @@ import torch
 import sys
 import ast
 import inspect
-import re
 import string
 from textwrap import dedent
 from torch._six import PY2

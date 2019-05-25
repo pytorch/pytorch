@@ -111,7 +111,7 @@ size_t assertFind(
 }
 
 size_t assertFind(
-    std::shared_ptr<Source> source,
+    const std::shared_ptr<Source>& source,
     const std::string& sub,
     size_t start,
     const Check& check) {
@@ -190,7 +190,7 @@ struct FileCheckImpl {
   friend std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc);
 
  private:
-  bool parseSingleCheck(std::shared_ptr<Source> source, size_t* start) {
+  bool parseSingleCheck(const std::shared_ptr<Source>& source, size_t* start) {
     const static std::vector<std::pair<CheckType, std::string>> check_pairs = {
         {CHECK, ": "},
         {CHECK_NEXT, "-NEXT: "},
@@ -209,7 +209,7 @@ struct FileCheckImpl {
       size_t end_check_string = suffix_pos + check_suffix.size();
       CheckType type = check_pair.first;
       c10::optional<size_t> count = c10::nullopt;
-      auto end_line = source->text().find("\n", end_check_string);
+      auto end_line = source->text().find('\n', end_check_string);
       bool exactly = false;
       if (type == CHECK_COUNT) {
         const std::string exact = "EXACTLY-";
@@ -237,8 +237,8 @@ struct FileCheckImpl {
     return false;
   }
 
-  size_t findNextStart(std::shared_ptr<Source> source, size_t prev_end) {
-    size_t start = source->text().find("#", prev_end);
+  size_t findNextStart(const std::shared_ptr<Source>& source, size_t prev_end) {
+    size_t start = source->text().find('#', prev_end);
     if (start == std::string::npos) {
       return start;
     }
@@ -260,7 +260,7 @@ struct FileCheckImpl {
     }
   }
 
-  void parseStrings(std::shared_ptr<Source> source) {
+  void parseStrings(const std::shared_ptr<Source>& source) {
     size_t start = 0;
     start = findNextStart(source, 0);
     while (start != std::string::npos) {
@@ -279,7 +279,7 @@ struct FileCheckImpl {
 
   void doCheckNot(
       const std::vector<Check>& nots,
-      std::shared_ptr<Source> source,
+      const std::shared_ptr<Source>& source,
       const SourceRange& prev,
       const SourceRange& next) {
     auto start = prev.end(); // inclusive
@@ -295,7 +295,7 @@ struct FileCheckImpl {
 
   SourceRange matchDagGroup(
       const std::vector<Check>& group,
-      std::shared_ptr<Source> source,
+      const std::shared_ptr<Source>& source,
       const SourceRange& prev) {
     size_t group_beg = std::string::npos;
     size_t group_end = 0;
@@ -313,7 +313,7 @@ struct FileCheckImpl {
 
   SourceRange matchGroup(
       const std::vector<Check>& group,
-      std::shared_ptr<Source> source,
+      const std::shared_ptr<Source>& source,
       const SourceRange& prev) {
     AT_ASSERT(group.size() != 0);
     CheckType type = group[0].type_;
@@ -368,7 +368,7 @@ struct FileCheckImpl {
     return SourceRange(source, start_range, end_range);
   }
 
-  void doChecks(std::shared_ptr<Source> source) {
+  void doChecks(const std::shared_ptr<Source>& source) {
     SourceRange prev(source, 0, 0);
     for (size_t i = 0; i < groups.size(); i++) {
       const auto& curr_group = groups[i];
