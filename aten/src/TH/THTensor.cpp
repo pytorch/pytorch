@@ -164,8 +164,7 @@ void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   // Caffe2 also has uninitialized dtype states, which we disallow here
   AT_ASSERT(tensor->storage().dtype() == storage->dtype());
 
-  // We used to allow this, but this breaks device caching,
-  // see Note [We regret making Variable hold a Tensor]
+  // We used to allow this, but this breaks device caching.
   // Let's put an actual error message for this one.
   TORCH_CHECK(tensor->storage().device() == storage->device(),
             "Attempted to set the storage of a tensor on device \"", tensor->storage().device(),
