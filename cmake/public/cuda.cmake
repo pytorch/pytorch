@@ -340,8 +340,8 @@ if ((CUDA_VERSION VERSION_EQUAL   9.0) OR
           ">= 19.12. (a.k.a Visual Studio 2017 Update 5, VS 15.5) "
           "Please upgrade to CUDA >= 9.2 or set the following environment "
           "variable to use another version (for example): \n"
-          "  export CUDAHOSTCXX='C:\\Program Files (x86)\\Microsoft Visual Studio"
-          "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.11.25503\\bin\\HostX64\\x64\\cl.exe'\n")
+          "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
+          "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.11.25503\\bin\\HostX64\\x64\\cl.exe\"\n")
   endif()
 elseif(CUDA_VERSION VERSION_EQUAL   9.2)
   if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
@@ -352,8 +352,8 @@ elseif(CUDA_VERSION VERSION_EQUAL   9.2)
       ">= 19.13. (a.k.a Visual Studio 2017 Update 7, VS 15.7) "
       "Please upgrade to CUDA >= 10.0 or set the following environment "
       "variable to use another version (for example): \n"
-      "  export CUDAHOSTCXX='C:\\Program Files (x86)\\Microsoft Visual Studio"
-      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.12.25827\\bin\\HostX64\\x64\\cl.exe'\n")
+      "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
+      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.12.25827\\bin\\HostX64\\x64\\cl.exe\"\n")
   endif()
 elseif(CUDA_VERSION VERSION_EQUAL   10.0)
   if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
@@ -364,8 +364,8 @@ elseif(CUDA_VERSION VERSION_EQUAL   10.0)
       ">= 19.20. (a.k.a Visual Studio 2019, VS 16.0) "
       "Please upgrade to CUDA >= 10.1 or set the following environment "
       "variable to use another version (for example): \n"
-      "  export CUDAHOSTCXX='C:\\Program Files (x86)\\Microsoft Visual Studio"
-      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.16.27023\\bin\\HostX64\\x64\\cl.exe'\n")
+      "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
+      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.16.27023\\bin\\HostX64\\x64\\cl.exe\"\n")
   endif()
 endif()
 
