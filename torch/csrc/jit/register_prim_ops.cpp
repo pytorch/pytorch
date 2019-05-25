@@ -24,6 +24,7 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
+#include <cctype>
 #include <algorithm>
 #include <cmath>
 #include <exception>
@@ -63,7 +64,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
         "Cannot input a tensor of dimension other than 0 as a scalar argument");
   }
   if (toInt &&
-      !isIntegralType(autograd::as_variable_ref(t).data().scalar_type())) {
+      !isIntegralType(t.scalar_type())) {
     std::stringstream ss;
     ss << "Cannot input a tensor of type " << t.scalar_type()
        << " as an integral argument";
@@ -654,12 +655,30 @@ RegisterOperators reg(
            };
          }),
      Operator(
-         "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)",
+         "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
          [](Stack& stack) {
-           at::Tensor self;
-           Shared<IntList> desired_sizes;
-           pop(stack, self, desired_sizes);
-           push(stack, at::sum_to(std::move(self), desired_sizes->elements()));
+           IValue self, size;
+           pop(stack, self, size);
+           if (size.isNone()) {
+             push(stack, self);
+           } else {
+             push(
+                 stack,
+                 at::sum_to(self.toTensor(), size.toIntList()->elements()));
+           }
+           return 0;
+         }),
+     Operator(
+         "aten::_size_if_not_equal(int[] self_size, int[] other_size) -> int[]?",
+         [](Stack& stack) {
+           IValue self_size, other_size;
+           pop(stack, self_size, other_size);
+           const auto s = self_size.toIntList()->elements();
+           if (s == other_size.toIntList()->elements()) {
+             push(stack, IValue());
+           } else {
+             push(stack, s);
+           }
            return 0;
          }),
      Operator(
@@ -874,7 +893,7 @@ RegisterOperators reg(
                  "DictConstruct must have an even number of inputs");
            }
            return [=](Stack& stack) {
-             c10::impl::GenericDict vals;
+             c10::impl::GenericDictPtr vals = c10::impl::make_generic_dict();
              for (size_t i = 0; i < num_inputs; i += 2) {
                auto val = pop(stack);
                auto key = pop(stack);
@@ -1913,6 +1932,70 @@ RegisterOperators reg2({
     Operator(
         "aten::slice(str string, int start, int end=9223372036854775807, int step=1) -> str",
         stringSlice),
+
+// python string is methods return false if empty
+#define DEFINE_STRING_IS_OP(op_name, char_op)                      \
+  Operator(#op_name "(str self) -> bool", [](Stack& stack) {       \
+    auto string = pop(stack).toStringRef();                        \
+    push(                                                          \
+        stack,                                                     \
+        string.size() != 0 &&                                      \
+            std::all_of(string.begin(), string.end(), [](char c) { \
+              return char_op(c);                                   \
+            }));                                                   \
+    return 0;                                                      \
+  })
+
+    // upper and lower require there to be at least one alpha character,
+    // and ignore all other characters
+    Operator(
+        "aten::isupper(str self) -> bool",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          bool found_alpha = false;
+          bool is_upper = true;
+          for (size_t i = 0; i < string.size() && is_upper; ++i) {
+            char c = string[i];
+            found_alpha |= std::isalpha(c);
+            is_upper &= (!std::isalpha(c) || std::isupper(c));
+          }
+          push(stack, found_alpha && is_upper);
+          return 0;
+        }),
+    Operator(
+        "aten::islower(str self) -> bool",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          bool found_alpha = false;
+          bool is_lower = true;
+          for (size_t i = 0; i < string.size() && is_lower; ++i) {
+            char c = string[i];
+            found_alpha |= std::isalpha(c);
+            is_lower &= (!std::isalpha(c) || std::islower(c));
+          }
+          push(stack, found_alpha && is_lower);
+          return 0;
+        }),
+
+    DEFINE_STRING_IS_OP(aten::isdigit, std::isdigit),
+    DEFINE_STRING_IS_OP(aten::isspace, std::isspace),
+    DEFINE_STRING_IS_OP(aten::isalnum, std::isalnum),
+    DEFINE_STRING_IS_OP(aten::isalpha, std::isalpha),
+
+#define DEFINE_STRING_CHAR_MAP_OP(op_name, char_op)         \
+  Operator(#op_name "(str self) -> str", [](Stack& stack) { \
+    auto string = pop(stack).toStringRef();                 \
+    std::stringstream ss;                                   \
+    for (char c : string) {                                 \
+      ss << static_cast<char>(char_op(c));                  \
+    }                                                       \
+    push(stack, ss.str());                                  \
+    return 0;                                               \
+  })
+
+    DEFINE_STRING_CHAR_MAP_OP(aten::upper, std::toupper),
+    DEFINE_STRING_CHAR_MAP_OP(aten::lower, std::tolower),
+
     Operator(
         "prim::StringIndex(str string, int index) -> str",
         [](Stack& stack) {

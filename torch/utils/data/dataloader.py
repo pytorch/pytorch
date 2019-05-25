@@ -142,6 +142,7 @@ class DataLoader(object):
                  batch_sampler=None, num_workers=0, collate_fn=default_collate,
                  pin_memory=False, drop_last=False, timeout=0,
                  worker_init_fn=None):
+        torch._C._log_api_usage_once("python.data_loader")
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers

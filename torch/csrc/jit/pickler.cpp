@@ -667,7 +667,7 @@ OpCode Unpickler::readInstruction() {
       stack_.emplace_back(IValue(tuple));
     } break;
     case OpCode::EMPTY_DICT:
-      stack_.emplace_back(c10::impl::GenericDict());
+      stack_.emplace_back(c10::impl::make_generic_dict());
       break;
     case OpCode::APPENDS: {
       readList();

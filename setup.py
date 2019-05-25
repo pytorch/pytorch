@@ -149,6 +149,11 @@
 #   LIBRARY_PATH
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
+#
+#   PARALLEL_BACKEND
+#     parallel backend to use for intra- and inter-op parallelism
+#     possible values:
+#       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
 
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, find_packages
@@ -238,7 +243,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.1.0a0'
+version = '1.2.0a0'
 sha = 'Unknown'
 
 try:
