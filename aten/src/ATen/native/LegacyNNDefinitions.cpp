@@ -33,7 +33,7 @@ Tensor nll_loss2d(const Tensor & self, const Tensor & target, const Tensor & wei
 
 Tensor & log_sigmoid_out(Tensor & output, const Tensor & self) {
   Tensor buffer = at::empty({0}, self.options());
-  return std::get<0>(legacy::cpu::_thnn_log_sigmoid_forward_out(output, buffer, self));
+  return std::get<0>(at::log_sigmoid_forward_out(output, buffer, self));
 }
 
 Tensor log_sigmoid(const Tensor & self) {

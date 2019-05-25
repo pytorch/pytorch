@@ -9,7 +9,7 @@ namespace at { namespace native {
 // Methods
 
 void* data_ptr(const Tensor & self) {
-  return self.unsafeGetTensorImpl()->slow_data();
+  return self.unsafeGetTensorImpl()->data();
 }
 
 Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, Scalar value) {
