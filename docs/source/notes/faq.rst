@@ -64,7 +64,7 @@ earlier, you should ``del intermediate`` when you are done with it.
 
 **Don't run RNNs on sequences that are too large.**
 The amount of memory required to backpropagate through an RNN scales
-linearly with the length of the RNN; thus, you will run out of memory
+linearly with the length of the RNN input; thus, you will run out of memory
 if you try to feed an RNN a sequence that is too long.
 
 The technical term for this phenomenon is `backpropagation through time

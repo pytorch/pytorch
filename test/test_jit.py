@@ -17,7 +17,7 @@ from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2, builtins, StringIO
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state, set_rng_seed, slowTest
+    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from common_nn import module_tests, new_module_tests, criterion_tests
 from textwrap import dedent
 from functools import wraps, reduce
@@ -82,25 +82,6 @@ RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
-
-
-if WINDOWS:
-    @contextmanager
-    def TemporaryFileName():
-        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
-        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
-        # close the file after creation and try to remove it manually
-        f = tempfile.NamedTemporaryFile(delete=False)
-        try:
-            f.close()
-            yield f.name
-        finally:
-            os.unlink(f.name)
-else:
-    @contextmanager  # noqa: T484
-    def TemporaryFileName():
-        with tempfile.NamedTemporaryFile() as f:
-            yield f.name
 
 
 def LSTMCellF(input, hx, cx, *params):
@@ -217,6 +198,15 @@ def get_grad_executor(plan_state, diff_graph_idx=None):
             raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
     grad_executors = list(plan_state.code.grad_executor_states())
     return grad_executors[diff_graph_idx or 0]
+
+
+def all_backward_graphs(script_module, diff_graph_idx=None):
+    # Note: for Python 2 the order seems to be unstable
+    ge_state = script_module.get_debug_state()
+    fwd_plan = get_execution_plan(ge_state)
+    grad_executor_state = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx)
+    bwd_plans = list(grad_executor_state.execution_plans.values())
+    return [p.graph.copy() for p in bwd_plans]
 
 
 def backward_graph(script_module, diff_graph_idx=None):
@@ -1456,15 +1446,60 @@ graph(%x : Tensor,
         # to insert quant-dequant nodes for quantizable tensors. The type analysis
         # happens as part of this jit pass
         torch._C._jit_pass_constant_propagation(scriptModule.graph)
-        torch._C._jit_pass_insert_quantdequant_for_param(scriptModule._c,
-                                                         "forward",
-                                                         "weight",
-                                                         getQParamFunc)
+        torch._C._jit_pass_insert_quantdequant_for_weight_bias(scriptModule._c,
+                                                               "forward",
+                                                               "weight",
+                                                               getQParamFunc)
 
         # We expect to see quant-dequant node before conv node for weight.
         FileCheck().check("quantize_linear").check_next("int_repr") \
                    .check_next("dequantize_linear") \
                    .check("conv2d").run(str(scriptModule.graph))
+
+    def test_insert_quantdequant_for_bias(self):
+        # Inserting quant-dequant nodes for bias requires scale info present for
+        # activation and weight so q-dq pass done first for these inputs.
+
+        class testModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(testModule, self).__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1, 1).float()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = x.quantize_linear(1.0, 0, torch.uint8)
+                x = x.int_repr()
+                x = x.dequantize_linear(1.0, 0, torch.uint8)
+                x = self.conv1(x)
+                return x
+
+        def getQParamFuncW(value):
+            return 'per_tensor_quant', 0.5, 1
+
+        def getQParamFunc(input_scale, weight_scale):
+            scale = 1 / input_scale / weight_scale
+            zero_point = 0
+            return 'per_tensor_quant', scale, zero_point
+
+        scriptModule = testModule()
+
+        torch._C._jit_pass_constant_propagation(scriptModule.graph)
+        torch._C._jit_pass_insert_quantdequant_for_weight_bias(scriptModule._c,
+                                                               "forward",
+                                                               "weight",
+                                                               getQParamFuncW)
+        torch._C._jit_pass_insert_quantdequant_for_weight_bias(scriptModule._c,
+                                                               "forward",
+                                                               "bias",
+                                                               getQParamFunc)
+        # We expect to see 3 pairs of quant-dequant nodes.
+
+        FileCheck().check("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear").check("quantize_linear") \
+                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check("quantize_linear").check_next("int_repr") \
+                   .check_next("dequantize_linear").check("conv2d") \
+                   .run(str(scriptModule.graph))
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -3364,6 +3399,7 @@ def foo(x):
         module = torch.jit.trace_module(n, inputs, True, True, check_inputs)
 
         module = torch.jit.trace(n.forward, example_forward_input)
+        module = torch.jit.trace(n.forward, example_forward_input, True, True, [example_forward_input])
         with self.assertRaisesRegex(AttributeError, "trace doesn't support compiling individual module's functions"):
             module = torch.jit.trace(n.weighted_kernel_sum, inputs)
 
@@ -3818,12 +3854,17 @@ a")
         def func2(a, b, c, d):
             return c + a ** b ** d
 
+        def func3(a, b):
+            # type: (int, float) -> float
+            return a ** b
+
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
         c = torch.rand(1, requires_grad=True)
         d = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
         self.checkScript(func2, (a, b, c, d), optimize=True)
+        self.checkScript(func3, (4, -0.5), optimize=True)
 
     @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
     def test_pow_scalar_backward_cuda(self):
@@ -6795,6 +6836,80 @@ a")
                 # type: (Optional[int]) -> bool
                 return isinstance(x, int)
 
+    def test_dropout_eval(self):
+        class ScriptedConv2d(torch.jit.ScriptModule):
+            def __init__(self, in_channels, out_channels, **kwargs):
+                super(ScriptedConv2d, self).__init__()
+                self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+                self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+                x = self.bn(x)
+                return F.relu(x, inplace=True)
+
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.Conv2d_1a_3x3 = ScriptedConv2d(3, 32, kernel_size=3, stride=2)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = self.Conv2d_1a_3x3(x)
+                return x
+                return F.dropout(x, training=self.training)
+
+        class EagerConv2d(torch.nn.Module):
+            def __init__(self, in_channels, out_channels, **kwargs):
+                super(EagerConv2d, self).__init__()
+                self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+                self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+                x = self.bn(x)
+                return F.relu(x, inplace=True)
+
+        class EagerMod(torch.nn.Module):
+            def __init__(self):
+                super(EagerMod, self).__init__()
+                self.Conv2d_1a_3x3 = EagerConv2d(3, 32, kernel_size=3, stride=2)
+
+            def forward(self, x):
+                x = self.Conv2d_1a_3x3(x)
+                return x
+                return F.dropout(x, training=self.training)
+
+        script_input = torch.rand(4, 3, 299, 299)
+        eager_input = script_input.clone()
+
+        with freeze_rng_state():
+            script_mod = ScriptMod()
+            script_mod.eval()
+            script_output = script_mod(script_input)
+
+        with freeze_rng_state():
+            eager_mod = EagerMod()
+            eager_mod.eval()
+            eager_output = eager_mod(eager_input)
+
+        self.assertEqual(script_output, eager_output)
+
+        with freeze_rng_state():
+            script_mod = ScriptMod()
+            script_mod.train()
+            script_output = script_mod(script_input)
+
+        with freeze_rng_state():
+            eager_mod = EagerMod()
+            eager_mod.train()
+            eager_output = eager_mod(eager_input)
+
+        self.assertEqual(script_output, eager_output)
+
     def test_python_call(self):
         def pyfunc(a):
             return a * 3.0
@@ -7810,6 +7925,26 @@ a")
 
         o2 = m.forward2(i)
         self.assertEqual(o2, v)
+
+    def test_script_sequential_orderdict(self):
+        from collections import OrderedDict
+
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['mods']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.mods = nn.Sequential(OrderedDict([
+                    ("conv", nn.Conv2d(1, 20, 5)),
+                    ("relu", nn.ReLU())
+                ]))
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.mods(input)
+
+        m = M()
+        self.assertTrue('mods.conv.weight' in m.state_dict().keys())
 
     def test_script_sequential_multi_output_fail(self):
         class Sub(torch.jit.ScriptModule):
@@ -12029,14 +12164,29 @@ a")
 
         self.checkScript(fn, ("abcde",))
 
-    def test_str_cmp(self):
-        def test(a, b):
+    def test_str_ops(self):
+        def test_str_is(s):
+            # type: (str) -> Tuple[bool, bool, bool, bool, bool, bool]
+            return s.isupper(), s.islower(), s.isdigit(), s.isspace(), \
+                s.isalnum(), s.isalpha()
+
+        def test_str_to(s):
+            # type: (str) -> Tuple[str, str]
+            return s.upper(), s.lower()
+
+        inputs = ["", "12a", "!B", "12", "a", "B", "aB", "$12", "B12", "AB ",
+                  "  \t", "  \n", "\na", "abc"]
+
+        for input in inputs:
+            self.checkScript(test_str_is, (input,))
+            self.checkScript(test_str_to, (input,))
+
+        def test_str_cmp(a, b):
             # type: (str, str) -> Tuple[bool, bool, bool, bool, bool, bool]
             return a != b, a == b, a < b, a > b, a <= b, a >= b
 
-        self.checkScript(test, ("1", "2"))
-        self.checkScript(test, ("2", "1"))
-        self.checkScript(test, ("1", "1"))
+        for i in range(len(inputs) - 1):
+            self.checkScript(test_str_cmp, (inputs[i], inputs[i + 1]))
 
     def test_ord(self):
         def fn(x):
@@ -12852,6 +13002,16 @@ a")
         x = torch.randn(3, 6)
         y = torch.randn(3, 6)
         self.checkScript(split_two, [(x + y)])
+
+    def test_conv_error(self):
+        @torch.jit.script
+        def fn(x, y):
+            return F.conv2d(x, y)
+
+        try:
+            fn(torch.ones(2, 2), torch.ones(4, 4))
+        except RuntimeError as e:
+            self.assertFalse('frame' in str(e))
 
     def test_python_op_name(self):
         import random

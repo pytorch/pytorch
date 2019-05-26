@@ -47,6 +47,11 @@ static inline bool is_unary_contiguous_s1(const int64_t* strides) {
          strides[1] == 0;
 }
 
+template <typename traits>
+static inline bool is_nullary_contiguous(const int64_t* strides) {
+  return strides[0] == sizeof(typename traits::result_type);
+}
+
 // result is
 static inline bool is_reduction(char** data, const int64_t* strides) {
   return strides[0] == 0 &&
@@ -92,6 +97,77 @@ static inline bool is_reduction(char** data, const int64_t* strides) {
   char* out_ptr = data[0]; \
   const char* in1_ptr = data[1]; \
   const char* in2_ptr = data[2];
+
+#define NULLARY_LOOP_HEADER(func_t, data, strides) \
+  using traits = nullary_function_traits<func_t>; \
+  using arg0_t = typename traits::result_type; \
+  char* out_ptr = data[0]; \
+  int64_t s0 = strides[0];
+
+ #define NULLARY_VEC_HEADER(func_t) \
+  using traits = nullary_function_traits<func_t>; \
+  using scalar_t = typename traits::result_type; \
+  using Vec = Vec256<scalar_t>;
+
+ #define NULLARY_VEC_LOOP_HEADER(func_t, data) \
+  NULLARY_VEC_HEADER(func_t) \
+  char* out_ptr = data[0];
+
+
+// Basic loop fill operation (zero inputs, one output). May be auto-vectorized
+// by the compiler.
+template <typename func_t>
+static inline void nullary_loop(char** data, const int64_t* strides, int64_t i, int64_t n, func_t op) {
+  NULLARY_LOOP_HEADER(func_t, data, strides)
+  for (; i < n; i++) {
+    arg0_t out = op();
+    *(arg0_t*)(out_ptr + i * s0) = out;
+  }
+}
+
+ // computes out = op()
+template <typename func_t, typename vec_func_t>
+static inline void vectorized_nullary_loop(char** data, int64_t n, func_t op, vec_func_t vop) {
+  NULLARY_VEC_LOOP_HEADER(func_t, data)
+  int64_t i = 0;
+  for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
+    auto out1 = vop();
+    auto out2 = vop();
+    out1.store(out_ptr + i * sizeof(scalar_t));
+    out2.store(out_ptr + (i + Vec::size()) * sizeof(scalar_t));
+  }
+  int64_t strides[] = { sizeof(scalar_t) };
+  nullary_loop(data, strides, i, n, op);
+}
+
+template <typename func_t>
+void nullary_kernel(TensorIterator& iter, func_t op) {
+  AT_ASSERT(iter.ntensors() > 0)
+  using traits = nullary_function_traits<func_t>;
+
+   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
+    // Specializations to encourage auto-vectorization (trick from Numpy's loops.c.src)
+    if (is_nullary_contiguous<traits>(strides)) {
+      nullary_loop(data, strides, 0, n, op);
+    } else {
+      nullary_loop(data, strides, 0, n, op);
+    }
+  });
+}
+
+ template <typename func_t, typename vec_func_t>
+void nullary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
+  AT_ASSERT(iter.ntensors() > 0)
+  using traits = nullary_function_traits<func_t>;
+
+   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
+    if (is_nullary_contiguous<traits>(strides)) {
+      vectorized_nullary_loop(data, n, op, vop);
+    } else {
+      nullary_loop(data, strides, 0, n, op);
+    }
+  });
+}
 
 // Basic loop unary operation (one input, one output). May be auto-vectorized
 // by the compiler.

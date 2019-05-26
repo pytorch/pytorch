@@ -13,8 +13,8 @@ Tensor& quantized_copy_(Tensor& self, const Tensor& src) {
       "Quantized copy only works with contiguous Tensors");
   TORCH_CHECK(self.sizes().equals(src.sizes()),
       "Quantized copy only works with Tensors with the same shape");
-  float* src_data = src.data<float>();
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "Copy", [&]() {
+    float* src_data = src.data<float>();
     scalar_t* self_data = self.data<scalar_t>();
     for (int i = 0; i < self.numel(); ++i) {
       self_data[i] = quantize_val<scalar_t>(

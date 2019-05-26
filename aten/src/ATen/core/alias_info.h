@@ -22,11 +22,6 @@ class AliasInfo {
     static const Symbol wc = Symbol::fromQualString("alias::*");
     return wc;
   }
-  static AliasInfo createWildcard() {
-    AliasInfo ret;
-    ret.addBeforeSet(wildcardSet());
-    return ret;
-  }
 
   void setIsWrite(bool isWrite) {
     isWrite_ = isWrite;
@@ -57,8 +52,12 @@ class AliasInfo {
     return *beforeSets_.begin();
   }
 
-  bool isWildcard() const {
+  bool isWildcardBefore() const {
     return beforeSets_.count(wildcardSet()) != 0;
+  }
+
+  bool isWildcardAfter() const {
+    return afterSets_.count(wildcardSet()) != 0;
   }
 
   // the alias info for the contained types of the type
