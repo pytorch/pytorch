@@ -148,8 +148,28 @@ static PyObject *THPSize_numel(THPSize *self)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject *THPSize_reduce(THPSize *self)
+{
+  HANDLE_TH_ERRORS
+  PyObject *ret = PyTuple_New(2);
+  auto module = THPObjectPtr(PyImport_ImportModule("torch"));
+  PyObject* obj = PyObject_GetAttrString(module, "Size");
+  PyTuple_SET_ITEM(ret, 0, obj);
+  PyObject* args = PyTuple_New(1);
+  PyObject* t = PyTuple_New(PyTuple_Size((PyObject*)self));
+  for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
+    PyTuple_SET_ITEM(t, i, PyTuple_GET_ITEM(self, i));
+  }
+
+  PyTuple_SET_ITEM(args, 0, t);
+  PyTuple_SET_ITEM(ret, 1, args);
+  return ret;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyMethodDef THPSize_methods[] = {
   {"numel",       (PyCFunction)THPSize_numel,       METH_NOARGS,  nullptr},
+  {"__reduce__",  (PyCFunction)THPSize_reduce,      METH_NOARGS,  nullptr},
   {nullptr}
 };
 
