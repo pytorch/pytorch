@@ -16,7 +16,7 @@ from .._jit_internal import weak_script, List
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
-conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
+conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 1D convolution over an input signal composed of several input
 planes.
@@ -37,7 +37,6 @@ Args:
       a one-element tuple `(dW,)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
       the number of groups. Default: 1
-    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -47,7 +46,7 @@ Examples::
 """)
 
 conv2d = _add_docstr(torch.conv2d, r"""
-conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
+conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 2D convolution over an input image composed of several input
 planes.
@@ -68,7 +67,6 @@ Args:
       a tuple `(dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
       number of groups. Default: 1
-    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -79,7 +77,7 @@ Examples::
 """)  # noqa: E501
 
 conv3d = _add_docstr(torch.conv3d, r"""
-conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
+conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 3D convolution over an input image composed of several input
 planes.
@@ -100,7 +98,6 @@ Args:
       a tuple `(dT, dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
       the number of groups. Default: 1
-    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
