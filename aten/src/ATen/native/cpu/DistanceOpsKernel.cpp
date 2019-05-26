@@ -45,17 +45,59 @@ struct Dist {
       vec256::minimum(vec256::maximum(Vec(-1), val.floor()), Vec(0));
   }
 
+  static inline Vec abs(Vec val) {
+    return val.abs();
+  }
+
+  static inline scalar_t abs(scalar_t val) {
+    return std::abs(val);
+  }
+
+  static inline Vec ceil(Vec val) {
+    return val.ceil();
+  }
+
+  static inline scalar_t ceil(scalar_t val) {
+    return std::ceil(val);
+  }
+
+  static inline Vec min(Vec val, scalar_t other) {
+    return vec256::minimum(val, Vec(other));
+  }
+
+  static inline scalar_t min(scalar_t val, scalar_t other) {
+    return std::min(val, other);
+  }
+
+  static inline Vec max(Vec val, Vec other) {
+    return vec256::maximum(val, other);
+  }
+
+  static inline scalar_t max(scalar_t val, scalar_t other) {
+    return std::max(val, other);
+  }
+
+  static inline Vec pow(Vec val, Vec p) {
+    return val.pow(p);
+  }
+
+  static inline scalar_t pow(scalar_t val, scalar_t p) {
+    return std::pow(val, p);
+  }
+
   // Zero norm
+  template<typename data_t>
   struct zdist_calc {
-    static inline Vec map(const Vec& diff, const Vec& p) { return vec256::minimum(diff.abs().ceil(), Vec(1)); }
-    static inline Vec red(const Vec& agg, const Vec& up) { return agg + up; }
+    static inline data_t map(const data_t& diff, const data_t& p) { return min(ceil(abs(diff)), 1); }
+    static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
   };
 
   // One norm
+  template<typename data_t>
   struct odist_calc {
-    static inline Vec map(const Vec& diff, const Vec& p) { return diff; }
-    static inline Vec red(const Vec& agg, const Vec& up) { return agg + up; }
+    static inline data_t map(const data_t& diff, const data_t& p) { return diff; }
+    static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
     static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff); }
   };
@@ -66,26 +108,29 @@ struct Dist {
   };
 
   // Two norm
+  template<typename data_t>
   struct tdist_calc {
     // TODO This can probably use fused add multiply to get better perf
-    static inline Vec map(const Vec& diff, const Vec& p) { return diff * diff; }
-    static inline Vec red(const Vec& agg, const Vec& up) { return agg + up; }
+    static inline data_t map(const data_t& diff, const data_t& p) { return diff * diff; }
+    static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return std::sqrt(agg); }
     static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return dist == 0.0 ? Vec(0) : Vec(grad) * diff / Vec(dist); }
   };
 
   // General p norm
+  template<typename data_t>
   struct pdist_calc {
-    static inline Vec map(const Vec& diff, const Vec& p) { return diff.pow(p); }
-    static inline Vec red(const Vec& agg, const Vec& up) { return agg + up; }
+    static inline data_t map(const data_t& diff, const data_t& p) { return pow(diff, p); }
+    static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return std::pow(agg, 1.0 / p); }
     static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return dist == 0.0 ? Vec(0) : diff * diff.abs().pow(p - Vec(2)) * Vec(grad) / Vec(dist).pow(p - Vec(1)); }
   };
 
   // Info norm
+  template<typename data_t>
   struct idist_calc {
-    static inline Vec map(const Vec& diff, const Vec& p) { return diff; }
-    static inline Vec red(const Vec& agg, const Vec& up) { return vec256::maximum(agg, up); }
+    static inline data_t map(const data_t& diff, const data_t& p) { return diff; }
+    static inline data_t red(const data_t& agg, const data_t& up) { return max(agg, up); }
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
     // TODO This backward pass uses a very complext expression to compute (diff
     // == dist) that could be much faster if using SSE instructions.
@@ -136,15 +181,15 @@ struct Dist {
   // Assumes self is nonempty, contiguous, and 2D
   static void apply_pdist(Tensor& result, const Tensor& self, const scalar_t p) {
     if (p == 0.0) {
-      run_parallel_pdist<zdist_calc>(result, self, p);
+      run_parallel_pdist<zdist_calc<Vec>>(result, self, p);
     } else if (p == 1.0) {
-      run_parallel_pdist<odist_calc>(result, self, p);
+      run_parallel_pdist<odist_calc<Vec>>(result, self, p);
     } else if (p == 2.0) {
-      run_parallel_pdist<tdist_calc>(result, self, p);
+      run_parallel_pdist<tdist_calc<Vec>>(result, self, p);
     } else if (std::isinf(p)) {
-      run_parallel_pdist<idist_calc>(result, self, p);
+      run_parallel_pdist<idist_calc<Vec>>(result, self, p);
     } else {
-      run_parallel_pdist<pdist_calc>(result, self, p);
+      run_parallel_pdist<pdist_calc<Vec>>(result, self, p);
     }
   }
 
@@ -160,38 +205,47 @@ struct Dist {
     int64_t total = r1 * r2;
 
     parallel_for(0, total, internal::GRAIN_SIZE / (16 * m), [=](int64_t start, int64_t end) {
-      const Vec pvec(p);
       scalar_t * res = res_start + start;
       const scalar_t * const res_end = res_start + end;
 
-      int64_t k = start;
+      int64_t i = start / r2;
+      int64_t j = start % r2;
+      i = i * m;
+      j = j * m;
+      int64_t size = r2 * m;
       while (res != res_end) {
-        int64_t i = k / r2;
-        int64_t j = k % r2;
-        const scalar_t * self_i = t1_start + i * m;
-        const scalar_t * self_j = t2_start + j * m;
+        const scalar_t * self_i = t1_start + i;
+        const scalar_t * self_j = t2_start + j;
 
-        *res = F::finish(vec256::map2_reduce_all<scalar_t>(
-                [&pvec](Vec a, Vec b) { return F::map((a - b).abs(), pvec); },
-                F::red, self_i, self_j, m), p);
+        scalar_t agg = 0;
+        for (int x = 0; x < m; x++) {
+          scalar_t a = *(self_i + x);
+          scalar_t b = *(self_j + x);
+          agg = F::red(agg, F::map(std::abs(a-b), p));
+        }
+        *res = F::finish(agg, p);
 
         res += 1;
-        k++;
+        j += m;
+        if (j == size) {
+          j = 0;
+          i += m;
+        }
       }
     });
   }
 
   static void apply_cdist(Tensor& result, const Tensor& x1, const Tensor& x2, const scalar_t p) {
     if (p == 0.0) {
-      run_parallel_cdist<zdist_calc>(result, x1, x2, p);
+      run_parallel_cdist<zdist_calc<scalar_t>>(result, x1, x2, p);
     } else if (p == 1.0) {
-      run_parallel_cdist<odist_calc>(result, x1, x2, p);
+      run_parallel_cdist<odist_calc<scalar_t>>(result, x1, x2, p);
     } else if (p == 2.0) {
-      run_parallel_cdist<tdist_calc>(result, x1, x2, p);
+      run_parallel_cdist<tdist_calc<scalar_t>>(result, x1, x2, p);
     } else if (std::isinf(p)) {
-      run_parallel_cdist<idist_calc>(result, x1, x2, p);
+      run_parallel_cdist<idist_calc<scalar_t>>(result, x1, x2, p);
     } else {
-      run_parallel_cdist<pdist_calc>(result, x1, x2, p);
+      run_parallel_cdist<pdist_calc<scalar_t>>(result, x1, x2, p);
     }
   }
 
@@ -255,15 +309,15 @@ struct Dist {
     result.fill_(0);
     if (p == 0.0) {
     } else if (p == 1.0) {
-      run_backward_parallel_pdist<odist_calc>(result, grad, self, p, dist);
+      run_backward_parallel_pdist<odist_calc<Vec>>(result, grad, self, p, dist);
     } else if (p < 2.0) {
       run_backward_parallel_pdist<lttdist_calc>(result, grad, self, p, dist);
     } else if (p == 2.0) {
-      run_backward_parallel_pdist<tdist_calc>(result, grad, self, p, dist);
+      run_backward_parallel_pdist<tdist_calc<Vec>>(result, grad, self, p, dist);
     } else if (std::isinf(p)) {
-      run_backward_parallel_pdist<idist_calc>(result, grad, self, p, dist);
+      run_backward_parallel_pdist<idist_calc<Vec>>(result, grad, self, p, dist);
     } else {
-      run_backward_parallel_pdist<pdist_calc>(result, grad, self, p, dist);
+      run_backward_parallel_pdist<pdist_calc<Vec>>(result, grad, self, p, dist);
     }
   }
 
@@ -271,15 +325,15 @@ struct Dist {
     result.fill_(0);
     if (p == 0.0) {
     } else if (p == 1.0) {
-      run_backward_parallel_cdist<odist_calc>(result, grad, x1, x2, p, dist);
+      run_backward_parallel_cdist<odist_calc<Vec>>(result, grad, x1, x2, p, dist);
     } else if (p < 2.0) {
       run_backward_parallel_cdist<lttdist_calc>(result, grad, x1, x2, p, dist);
     } else if (p == 2.0) {
-      run_backward_parallel_cdist<tdist_calc>(result, grad, x1, x2, p, dist);
+      run_backward_parallel_cdist<tdist_calc<Vec>>(result, grad, x1, x2, p, dist);
     } else if (std::isinf(p)) {
-      run_backward_parallel_cdist<idist_calc>(result, grad, x1, x2, p, dist);
+      run_backward_parallel_cdist<idist_calc<Vec>>(result, grad, x1, x2, p, dist);
     } else {
-      run_backward_parallel_cdist<pdist_calc>(result, grad, x1, x2, p, dist);
+      run_backward_parallel_cdist<pdist_calc<Vec>>(result, grad, x1, x2, p, dist);
     }
   }
 

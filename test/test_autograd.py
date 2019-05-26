@@ -203,6 +203,32 @@ class TestAutograd(TestCase):
         x_grad, x_grad_clone = compute_grad(create_graph=True)
         self.assertEqual(x_grad, x_grad_clone)
 
+    def test_accumulate_grad_tensor_reference(self):
+        def _test_grad_tensor(params_grad_tensor, backward_grad_tensor, should_preserve_reference):
+            params = torch.tensor([1.5, 1.5]).requires_grad_()
+            params.grad = params_grad_tensor
+            grad_saved = params.grad
+            params.backward(backward_grad_tensor)
+            self.assertEqual(id(grad_saved) == id(params.grad), should_preserve_reference)
+
+        # Accumulate dense gradient to sparse gradient will change the `params.grad` reference
+        _test_grad_tensor(
+            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+            torch.tensor([1.5, 1.5]),
+            False)
+
+        # Accumulate dense gradient to dense gradient will preserve the `params.grad` reference
+        _test_grad_tensor(
+            torch.tensor([1.5, 1.5]),
+            torch.tensor([1.5, 1.5]),
+            True)
+
+        # Accumulate sparse gradient to sparse gradient will preserve the `params.grad` reference
+        _test_grad_tensor(
+            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+            True)
+
     def test_slogdet_sign(self):
         a = torch.randn(3, 3, requires_grad=True)
         s, logdet = a.slogdet()
@@ -3051,6 +3077,21 @@ class TestAutograd(TestCase):
         # because they share the version counter
         xz.add_(1)
         self.assertTrue(x._version == xz._version)
+
+    def test_set_data_tensorimpl_type(self):
+        # Dense tensor has impl of type `TensorImpl`, while sparse tensor has impl
+        # of type `SparseTensorImpl`.
+        x = torch.randn(1, 2)
+        x_s = torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1]))
+        with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
+            x.data = x_s
+
+    def test_set_data_preserve_pyobj(self):
+        a = torch.randn(1, 2)
+        b = torch.randn(1, 2)
+        b_id_saved = id(b)
+        b.data = a
+        self.assertTrue(b_id_saved == id(b))
 
 
 def index_variable(shape, max_indices):
