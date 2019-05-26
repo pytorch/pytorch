@@ -2262,16 +2262,16 @@ def _ssim(input, target, max_val, size, channel, kernel):
     c1 = (0.01 * max_val) ** 2
     c2 = (0.03 * max_val) ** 2
 
-    mu1 = conv2d(input, kernel, padding=size // 2, groups=channel)
-    mu2 = conv2d(target, kernel, padding=size // 2, groups=channel)
+    mu1 = conv2d(input, kernel,  groups=channel)
+    mu2 = conv2d(target, kernel, groups=channel)
 
     mu1_sq = mu1 ** 2
     mu2_sq = mu2 ** 2
     mu1_mu2 = mu1 * mu2
 
-    sigma1_sq = conv2d(input * input, kernel, padding=size // 2, groups=channel) - mu1_sq
-    sigma2_sq = conv2d(target * target, kernel, padding=size // 2, groups=channel) - mu2_sq
-    sigma12 = conv2d(input * target, kernel, padding=size // 2, groups=channel) - mu1_mu2
+    sigma1_sq = conv2d(input * input, kernel, groups=channel) - mu1_sq
+    sigma2_sq = conv2d(target * target, kernel, groups=channel) - mu2_sq
+    sigma12 = conv2d(input * target, kernel, groups=channel) - mu1_mu2
 
     v1 = 2 * sigma12 + c2
     v2 = sigma1_sq + sigma2_sq + c2
@@ -2320,7 +2320,7 @@ def ms_ssim_loss(input, target, max_val, filter_size=11, size_average=None, redu
 
     dim = input.dim()
     if dim != 4:
-        raise ValueError('Expected 4 dimensions (got {})'.format(dim))
+        raise ValueError('Expected 4 dimensions (got {}) from input'.format(dim))
 
     if input.size() != target.size():
         raise ValueError('Expected input size ({}) to match target size ({}).'
@@ -2333,8 +2333,8 @@ def ms_ssim_loss(input, target, max_val, filter_size=11, size_average=None, redu
     kernel = _fspecial_gaussian(filter_size, channel)
 
     weights = torch.tensor([0.0448, 0.2856, 0.3001, 0.2363, 0.1333])
+    weights = weights.unsqueeze(-1).unsqueeze(-1)
     levels = weights.size(0)
-
     mssim = []
     mcs = []
     for _ in range(levels):
@@ -2349,7 +2349,6 @@ def ms_ssim_loss(input, target, max_val, filter_size=11, size_average=None, redu
 
     mssim = torch.stack(mssim)
     mcs = torch.stack(mcs)
-
     p1 = mcs ** weights
     p2 = mssim ** weights
 
