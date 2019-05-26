@@ -200,6 +200,15 @@ def get_grad_executor(plan_state, diff_graph_idx=None):
     return grad_executors[diff_graph_idx or 0]
 
 
+def all_backward_graphs(script_module, diff_graph_idx=None):
+    # Note: for Python 2 the order seems to be unstable
+    ge_state = script_module.get_debug_state()
+    fwd_plan = get_execution_plan(ge_state)
+    grad_executor_state = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx)
+    bwd_plans = list(grad_executor_state.execution_plans.values())
+    return [p.graph.copy() for p in bwd_plans]
+
+
 def backward_graph(script_module, diff_graph_idx=None):
     ge_state = script_module.get_debug_state()
     fwd_plan = get_execution_plan(ge_state)
@@ -6827,6 +6836,80 @@ a")
                 # type: (Optional[int]) -> bool
                 return isinstance(x, int)
 
+    def test_dropout_eval(self):
+        class ScriptedConv2d(torch.jit.ScriptModule):
+            def __init__(self, in_channels, out_channels, **kwargs):
+                super(ScriptedConv2d, self).__init__()
+                self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+                self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+                x = self.bn(x)
+                return F.relu(x, inplace=True)
+
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.Conv2d_1a_3x3 = ScriptedConv2d(3, 32, kernel_size=3, stride=2)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = self.Conv2d_1a_3x3(x)
+                return x
+                return F.dropout(x, training=self.training)
+
+        class EagerConv2d(torch.nn.Module):
+            def __init__(self, in_channels, out_channels, **kwargs):
+                super(EagerConv2d, self).__init__()
+                self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+                self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+                x = self.bn(x)
+                return F.relu(x, inplace=True)
+
+        class EagerMod(torch.nn.Module):
+            def __init__(self):
+                super(EagerMod, self).__init__()
+                self.Conv2d_1a_3x3 = EagerConv2d(3, 32, kernel_size=3, stride=2)
+
+            def forward(self, x):
+                x = self.Conv2d_1a_3x3(x)
+                return x
+                return F.dropout(x, training=self.training)
+
+        script_input = torch.rand(4, 3, 299, 299)
+        eager_input = script_input.clone()
+
+        with freeze_rng_state():
+            script_mod = ScriptMod()
+            script_mod.eval()
+            script_output = script_mod(script_input)
+
+        with freeze_rng_state():
+            eager_mod = EagerMod()
+            eager_mod.eval()
+            eager_output = eager_mod(eager_input)
+
+        self.assertEqual(script_output, eager_output)
+
+        with freeze_rng_state():
+            script_mod = ScriptMod()
+            script_mod.train()
+            script_output = script_mod(script_input)
+
+        with freeze_rng_state():
+            eager_mod = EagerMod()
+            eager_mod.train()
+            eager_output = eager_mod(eager_input)
+
+        self.assertEqual(script_output, eager_output)
+
     def test_python_call(self):
         def pyfunc(a):
             return a * 3.0
@@ -7842,6 +7925,26 @@ a")
 
         o2 = m.forward2(i)
         self.assertEqual(o2, v)
+
+    def test_script_sequential_orderdict(self):
+        from collections import OrderedDict
+
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['mods']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.mods = nn.Sequential(OrderedDict([
+                    ("conv", nn.Conv2d(1, 20, 5)),
+                    ("relu", nn.ReLU())
+                ]))
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.mods(input)
+
+        m = M()
+        self.assertTrue('mods.conv.weight' in m.state_dict().keys())
 
     def test_script_sequential_multi_output_fail(self):
         class Sub(torch.jit.ScriptModule):
@@ -12899,6 +13002,16 @@ a")
         x = torch.randn(3, 6)
         y = torch.randn(3, 6)
         self.checkScript(split_two, [(x + y)])
+
+    def test_conv_error(self):
+        @torch.jit.script
+        def fn(x, y):
+            return F.conv2d(x, y)
+
+        try:
+            fn(torch.ones(2, 2), torch.ones(4, 4))
+        except RuntimeError as e:
+            self.assertFalse('frame' in str(e))
 
     def test_python_op_name(self):
         import random

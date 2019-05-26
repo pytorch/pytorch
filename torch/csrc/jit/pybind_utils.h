@@ -115,7 +115,7 @@ inline TypedIValue toTypedIValue(py::handle input) {
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
-    c10::impl::GenericDict elems;
+    c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
 
     size_t len = py::len(dict);
     if (!len) {
@@ -205,7 +205,7 @@ inline IValue createGenericDict(
     py::handle obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
-  c10::impl::GenericDict elems;
+  c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
   elems.reserve(py::len(obj));
   for (auto key : obj) {
     elems.insert(
