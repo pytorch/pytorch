@@ -2,6 +2,7 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/ExpandUtils.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/Parallel.h>
@@ -50,6 +51,10 @@ extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, 
 // syev
 extern "C" void dsyev_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *info);
 extern "C" void ssyev_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *info);
+
+// getrs
+extern "C" void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
+extern "C" void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
 #endif
 
 namespace at {
@@ -100,6 +105,11 @@ void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scala
 template<class scalar_t>
 void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t *w, scalar_t *work, int lwork, int *info) {
   AT_ERROR("symeig only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void lapackLuSolve(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info) {
+  AT_ERROR("lu_solve only takes float or double Tensors");
 }
 
 #ifdef USE_LAPACK
@@ -173,6 +183,14 @@ template<> void lapackSymeig<double>(char jobz, char uplo, int n, double *a, int
 
 template<> void lapackSymeig<float>(char jobz, char uplo, int n, float *a, int lda, float *w, float *work, int lwork, int *info) {
   ssyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
+}
+
+template<> void lapackLuSolve<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
+  dgetrs_("N", &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+}
+
+template<> void lapackLuSolve<float>(int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
+  sgetrs_("N", &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 #endif
 
@@ -931,6 +949,92 @@ std::tuple<Tensor&, Tensor&> symeig_out(Tensor& vals, Tensor& vecs, const Tensor
   vals.resize_as_(vals_tmp).copy_(vals_tmp);
   vecs.resize_as_(vecs_tmp).copy_(vecs_tmp);
   return std::tuple<Tensor&, Tensor&>(vals, vecs);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template<typename scalar_t>
+static void apply_lu_solve(Tensor& b, const Tensor& lu, const Tensor& pivots, std::vector<int64_t>& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("lu_solve: LAPACK library not found in compilation");
+#else
+  auto b_data = b.data<scalar_t>();
+  auto lu_data = lu.data<scalar_t>();
+  auto pivots_data = pivots.data<int>();
+  auto b_stride = matrixStride(b);
+  auto lu_stride = matrixStride(lu);
+  auto pivots_stride = pivots.size(-1);
+  auto batch_size = batchCount(b);
+
+  auto n = lu.size(-2);
+  auto nrhs = b.size(-1);
+
+  int info;
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* b_working_ptr = &b_data[i * b_stride];
+    scalar_t* lu_working_ptr = &lu_data[i * lu_stride];
+    int* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    lapackLuSolve<scalar_t>(n, nrhs, lu_working_ptr, n, pivots_working_ptr,
+                            b_working_ptr, n, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+Tensor _lu_solve_helper_cpu(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  auto LU_data_working_copy = cloneBatchedColumnMajor(LU_data);
+  auto LU_pivots_working_copy = LU_pivots.is_contiguous() ? LU_pivots : LU_pivots.contiguous();
+  std::vector<int64_t> infos(batchCount(self), 0);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cpu", [&]{
+    apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, infos);
+  });
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "lu_solve_cpu");
+  } else {
+    singleCheckErrors(infos[0], "lu_solve_cpu");
+  }
+  return self_working_copy;
+}
+
+// Supports arbitrary batch dimensions for self and A
+Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
+  TORCH_CHECK(self.dim() >= 2,
+              "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  TORCH_CHECK(LU_data.dim() >= 2,
+              "LU_data should have at least 2 dimensions, but has ", LU_data.dim(), " dimensions instead");
+  TORCH_CHECK(LU_pivots.size(-1) == LU_data.size(-1),
+              "number of pivots per batch should be same as the dimension of the matrix");
+  TORCH_CHECK(LU_pivots.dtype() == at::kInt,
+              "LU_pivots should be a Tensor of scalar type Int");
+
+  // We check whether the batch dimensions of LU_pivots match the batch dimensions of LU_data
+  // e.g.: LU_pivots.sizes() = 4 x 3 x 2, LU_data.sizes() = 4 x 3 x 2 x 2 is a pair of correct inputs
+  // e.g.: LU_pivots.sizes() = 4 x 3 x 2, LU_data.sizes() = 12 x 2 x 2 is a pair of incorrect inputs
+  IntArrayRef pivots_sizes(LU_pivots.sizes().data(), LU_pivots.ndimension() - 1);
+  IntArrayRef lu_sizes(LU_data.sizes().data(), LU_data.ndimension() - 2);
+  TORCH_CHECK(pivots_sizes == lu_sizes,
+              "batch dimensions of LU_pivots doesn't match batch dimensions of LU_data");
+
+  Tensor self_broadcasted, LU_data_broadcasted;
+  std::tie(self_broadcasted, LU_data_broadcasted) = _linear_solve_broadcast_args(self, LU_data);
+
+  // Now, we need to broadcast pivots too for the batch dimensions to match
+  IntArrayRef new_lu_sizes(LU_data_broadcasted.sizes().data(), LU_data_broadcasted.ndimension() - 2);
+  std::vector<int64_t> new_pivots_sizes = infer_size(new_lu_sizes, pivots_sizes);
+  new_pivots_sizes.push_back(LU_data.size(-1));
+  Tensor LU_pivots_broadcasted = LU_pivots.expand(new_pivots_sizes);
+
+  return at::_lu_solve_helper(self_broadcasted, LU_data_broadcasted, LU_pivots_broadcasted);
+}
+
+Tensor& lu_solve_out(Tensor& result, const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
+  Tensor result_tmp = at::lu_solve(self, LU_data, LU_pivots);
+  result.resize_as_(result_tmp).copy_(result_tmp);
+  return result;
 }
 
 }}  // namespace at::native

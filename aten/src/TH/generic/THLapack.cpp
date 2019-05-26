@@ -9,8 +9,6 @@ TH_EXTERNC void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, do
 TH_EXTERNC void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
 TH_EXTERNC void dgesdd_(char *jobz, int *m, int *n, double *a, int *lda, double *s, double *u, int *ldu, double *vt, int *ldvt, double *work, int *lwork, int *iwork, int *info);
 TH_EXTERNC void sgesdd_(char *jobz, int *m, int *n, float *a, int *lda, float *s, float *u, int *ldu, float *vt, int *ldvt, float *work, int *lwork, int *iwork, int *info);
-TH_EXTERNC void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
-TH_EXTERNC void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
 TH_EXTERNC void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
 TH_EXTERNC void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
 TH_EXTERNC void sgeqrf_(int *m, int *n, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
@@ -65,19 +63,6 @@ void THLapack_(gesdd)(char jobz, int m, int n, scalar_t *a, int lda, scalar_t *s
 #endif
 #else
   THError("gesdd : Lapack library not found in compile time\n");
-#endif
-}
-
-void THLapack_(getrs)(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
-#else
-  sgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
-#endif
-#else
-  THError("getrs : Lapack library not found in compile time\n");
 #endif
 }
 
