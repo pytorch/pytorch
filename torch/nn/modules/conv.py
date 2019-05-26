@@ -483,18 +483,6 @@ class _ConvTransposeMixin(object):
                      'bias', 'padding_mode']
 
     @weak_script_method
-    def forward(self, input, output_size=None):
-        # type(Tensor, Optional[List[int]]) -> Tensor
-        output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
-        func = self._backend.ConvNd(
-            self.stride, self.padding, self.dilation, self.transposed,
-            output_padding, self.groups)
-        if self.bias is None:
-            return func(input, self.weight)
-        else:
-            return func(input, self.weight, self.bias)
-
-    @weak_script_method
     def _output_padding(self, input, output_size, stride, padding, kernel_size):
         # type: (Tensor, Optional[List[int]], List[int], List[int], List[int]) -> List[int]
         if output_size is None:
