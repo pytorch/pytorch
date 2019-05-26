@@ -20,10 +20,12 @@ import contextlib
 import socket
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from functools import wraps
 from itertools import product
 from copy import deepcopy
 from numbers import Number
+import tempfile
 
 import __main__
 import errno
@@ -65,6 +67,24 @@ IS_PPC = platform.machine() == "ppc64le"
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
 IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', 0))
+
+if IS_WINDOWS:
+    @contextmanager
+    def TemporaryFileName():
+        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
+        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
+        # close the file after creation and try to remove it manually
+        f = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            f.close()
+            yield f.name
+        finally:
+            os.unlink(f.name)
+else:
+    @contextmanager  # noqa: T484
+    def TemporaryFileName():
+        with tempfile.NamedTemporaryFile() as f:
+            yield f.name
 
 
 def _check_module_exists(name):
