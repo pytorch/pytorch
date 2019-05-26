@@ -23,8 +23,8 @@ class _BatchNorm(Module):
         self.num_features = num_features
         self.eps = eps
         self.momentum = momentum
-        self.affine = affine
-        self.track_running_stats = track_running_stats
+        self._affine = affine
+        self._track_running_stats = track_running_stats
         if self.affine:
             self.weight = Parameter(torch.Tensor(num_features))
             self.bias = Parameter(torch.Tensor(num_features))
@@ -40,6 +40,16 @@ class _BatchNorm(Module):
             self.register_parameter('running_var', None)
             self.register_parameter('num_batches_tracked', None)
         self.reset_parameters()
+
+    @property
+    def affine(self):
+        # This option is read-only.
+        return self._affine
+
+    @property
+    def track_running_stats(self):
+        # This option is read-only.
+        return self._track_running_stats
 
     def reset_running_stats(self):
         if self.track_running_stats:
@@ -83,8 +93,8 @@ class _BatchNorm(Module):
             exponential_average_factor, self.eps)
 
     def extra_repr(self):
-        return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
-               'track_running_stats={track_running_stats}'.format(**self.__dict__)
+        return '{num_features}, eps={eps}, momentum={momentum}, affine={_affine}, ' \
+               'track_running_stats={_track_running_stats}'.format(**self.__dict__)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
