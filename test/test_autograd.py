@@ -1581,7 +1581,7 @@ class TestAutograd(TestCase):
             input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
                               if vary_lengths or i == 0 else input_length) for i in range(batch_size)]
             target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
-                               if vary_lengths or i == 0 else target_length) for i in range(batch_size)]
+                               if vary_lengths else target_length) for i in range(batch_size)]
 
             def ctc_after_softmax(x):
                 x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
