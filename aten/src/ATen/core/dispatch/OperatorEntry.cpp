@@ -20,7 +20,8 @@ namespace {
 OperatorEntry::OperatorEntry(FunctionSchema&& schema)
 : schema_(std::move(schema))
 , dispatchTable_(schema_)
-, kernels_(make_left<ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>, std::list<DispatchTableEntry>>()) {}
+, kernels_(make_left<ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>, std::list<DispatchTableEntry>>()) {
+}
 
 void OperatorEntry::prepareForDeregistration() {
   return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {

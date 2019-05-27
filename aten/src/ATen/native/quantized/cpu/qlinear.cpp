@@ -155,12 +155,10 @@ static auto registry =
     c10::RegisterOperators()
         .op("quantized::fbgemm_linear(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             c10::RegisterOperators::options()
-              .kernel<QFCInt8<false>>()
-              .dispatchKey(QuantizedCPUTensorId()))
+              .kernel<QFCInt8<false>>(QuantizedCPUTensorId()))
         .op("quantized::fbgemm_linear_relu(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             c10::RegisterOperators::options()
-              .kernel<QFCInt8<true>>()
-              .dispatchKey(QuantizedCPUTensorId()));
+              .kernel<QFCInt8<true>>(QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at
