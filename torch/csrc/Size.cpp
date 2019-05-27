@@ -151,19 +151,16 @@ static PyObject *THPSize_numel(THPSize *self)
 static PyObject *THPSize_reduce(THPSize *self)
 {
   HANDLE_TH_ERRORS
-  PyObject *ret = PyTuple_New(2);
+  auto ret = THPObjectPtr{PyTuple_New(2)};
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   PyObject* obj = PyObject_GetAttrString(module, "Size");
-  PyTuple_SET_ITEM(ret, 0, obj);
-  PyObject* args = PyTuple_New(1);
+  PyTuple_SET_ITEM(ret.get(), 0, obj);
   PyObject* t = PyTuple_New(PyTuple_Size((PyObject*)self));
   for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
     PyTuple_SET_ITEM(t, i, PyTuple_GET_ITEM(self, i));
   }
-
-  PyTuple_SET_ITEM(args, 0, t);
-  PyTuple_SET_ITEM(ret, 1, args);
-  return ret;
+  PyTuple_SET_ITEM(ret.get(), 1, Py_BuildValue("(O)", t));
+  return ret.release();
   END_HANDLE_TH_ERRORS
 }
 
