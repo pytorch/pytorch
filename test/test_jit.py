@@ -5634,8 +5634,8 @@ a")
 
     def test_divmod(self):
         def func(a, b):
-            #type: (int, int) -> (int, int)
-            return divmod(x, y)
+            # type: (int, int) -> Tuple[int, int]
+            return divmod(a, b)
 
         self.checkScript(func, (1024, 10,))
 

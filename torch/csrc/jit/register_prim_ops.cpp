@@ -2189,11 +2189,11 @@ RegisterOperators reg2({
         "prim::divmod(int x, int y) -> (int, int)",
         [](Stack& stack) {
           int64_t a,b;
-          div_t divresult;
+          lldiv_t divresult = {};
           pop(stack, a, b);
-          divresult = div(a,b);
-          push(stack, divresult.quot);
-          push(stack, divresult.rem);
+          divresult = lldiv(a,b);
+          push(stack, static_cast<int64_t>(divresult.quot), \
+            static_cast<int64_t>(divresult.rem));
           return 0;
         }),
 
